@@ -20,7 +20,36 @@ import { canMutateHasuraResource, canQueryHasuraResource } from './resourcePermi
 
 type AnyObject = Record<string, any>;
 
-const HASURA_URL = (import.meta as any).env.VITE_HASURA_GRAPHQL_URL as string;
+const HASURA_NOT_CONFIGURED_ERROR = {
+  message: 'Legacy Hasura GraphQL URL is not configured',
+  statusCode: 503,
+};
+
+function normalizeHasuraUrl(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function getConfiguredHasuraUrl(): string | null {
+  return (
+    normalizeHasuraUrl((import.meta as any).env?.VITE_HASURA_GRAPHQL_URL) ??
+    normalizeHasuraUrl(
+      (globalThis as { process?: { env?: Record<string, unknown> } }).process?.env
+        ?.VITE_HASURA_GRAPHQL_URL,
+    )
+  );
+}
+
+function hasHasuraUrl(): boolean {
+  return getConfiguredHasuraUrl() !== null;
+}
+
+function getHasuraUrl(): string {
+  const hasuraUrl = getConfiguredHasuraUrl();
+  if (!hasuraUrl) {
+    throw HASURA_NOT_CONFIGURED_ERROR;
+  }
+  return hasuraUrl;
+}
 
 const ID_COLUMNS: Record<string, string> = {
   orders_view: "order_id",
@@ -967,7 +996,8 @@ const parsePostgresError = (message: string): string => {
 };
 
 const gqlRequest = async (query: string, variables?: AnyObject): Promise<any> => {
-  const res = await fetch(HASURA_URL, {
+  const hasuraUrl = getHasuraUrl();
+  const res = await fetch(hasuraUrl, {
     method: "POST",
     headers: await headers(),
     body: JSON.stringify(variables ? { query, variables } : { query }),
@@ -1723,7 +1753,7 @@ const fieldsFor = (resource: string) => {
 
 export const dataProvider = (_apiUrl: string) => {
   return {
-    getApiUrl: () => HASURA_URL,
+    getApiUrl: () => getConfiguredHasuraUrl() ?? '',
 
     getList: async ({ resource, pagination, sorters, filters }: AnyObject) => {
       const backendOrdersList = await getBackendOrdersListIfEnabled(
@@ -1739,6 +1769,10 @@ export const dataProvider = (_apiUrl: string) => {
       const backendUsersList = await getBackendUsersListIfEnabled(resource, pagination, filters);
       if (backendUsersList) {
         return backendUsersList;
+      }
+
+      if (!hasHasuraUrl()) {
+        return { data: [], total: 0 };
       }
 
       if (!hasHasuraReadAccess(resource)) {
@@ -1816,6 +1850,10 @@ export const dataProvider = (_apiUrl: string) => {
         return backendUser;
       }
 
+      if (!hasHasuraUrl()) {
+        return { data: null };
+      }
+
       if (!hasHasuraReadAccess(resource)) {
         return { data: null };
       }
@@ -1851,6 +1889,7 @@ export const dataProvider = (_apiUrl: string) => {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
       assertHasuraWriteAccess(resource);
+      getHasuraUrl();
       const selection = fieldsFor(resource);
       const idCol = ID_COLUMNS[resource] ?? "id";
 
@@ -1937,6 +1976,7 @@ export const dataProvider = (_apiUrl: string) => {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
       assertHasuraWriteAccess(resource);
+      getHasuraUrl();
       const idCol = ID_COLUMNS[resource] ?? "id";
       // Do not send id, audit fields, or timestamps in _set
       // Audit fields (created_by, edited_by) are auto-managed by Hasura permissions via column presets
@@ -1991,6 +2031,7 @@ export const dataProvider = (_apiUrl: string) => {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
       assertHasuraWriteAccess(resource);
+      getHasuraUrl();
       const idCol = ID_COLUMNS[resource] ?? "id";
       const query = `
         mutation {
@@ -2012,6 +2053,10 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       if (!hasHasuraReadAccess(resource)) {
+        return { data: [] };
+      }
+
+      if (!hasHasuraUrl()) {
         return { data: [] };
       }
 

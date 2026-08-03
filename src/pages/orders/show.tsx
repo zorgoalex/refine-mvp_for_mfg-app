@@ -3,7 +3,7 @@ import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
@@ -235,12 +235,17 @@ const areDetailProductionStatusMapsEqual = (
   return true;
 };
 
-const OrderDetailProductionStatusTag: React.FC<{
+const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatusTag({
+  statusId,
+  name,
+  statusesById,
+  loading,
+}: {
   statusId?: number | null;
   name?: string | null;
   statusesById: Map<number, DetailProductionStatusMeta>;
   loading: boolean;
-}> = ({ statusId, name, statusesById, loading }) => {
+}) {
   if (statusId === null || statusId === undefined) {
     return <span style={ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE}>Не назначен</span>;
   }
@@ -267,7 +272,92 @@ const OrderDetailProductionStatusTag: React.FC<{
       {text}
     </span>
   );
+});
+
+const OrderShowDetailHeaderCell = (props: any) => (
+  <th
+    {...props}
+    style={{ ...props.style, padding: '2px 4px', fontSize: '70%', textAlign: 'center' }}
+  />
+);
+
+const OrderShowDetailBodyCell = forwardRef<
+  HTMLTableCellElement,
+  React.TdHTMLAttributes<HTMLTableCellElement>
+>(({ onMouseEnter: _onMouseEnter, onMouseLeave: _onMouseLeave, style, ...props }, ref) => (
+  <td ref={ref} {...props} style={{ ...style, padding: '2px 4px', fontSize: '80%' }} />
+));
+OrderShowDetailBodyCell.displayName = 'OrderShowDetailBodyCell';
+
+const ORDER_SHOW_DETAIL_TABLE_COMPONENTS = {
+  header: { cell: OrderShowDetailHeaderCell },
+  body: { cell: OrderShowDetailBodyCell },
 };
+
+type OrderShowColumnRenderer = (value: any, row: any, index: number) => React.ReactNode;
+
+interface OrderShowColumnRuntime {
+  renderByKey: Map<React.Key, OrderShowColumnRenderer | undefined>;
+  onCellByKey: Map<React.Key, ((row: any, index: number) => any) | undefined>;
+  shouldUpdateByKey: Map<React.Key, ((row: any, previousRow: any) => boolean) | undefined>;
+}
+
+function useStableOrderShowColumns(columns: ColumnsType<any>): ColumnsType<any> {
+  const runtimeRef = useRef<OrderShowColumnRuntime | null>(null);
+  if (!runtimeRef.current) {
+    runtimeRef.current = {
+      renderByKey: new Map(),
+      onCellByKey: new Map(),
+      shouldUpdateByKey: new Map(),
+    };
+  }
+  const runtime = runtimeRef.current;
+  runtime.renderByKey = new Map(columns.map((column: any) => [column.key, column.render]));
+  runtime.onCellByKey = new Map(columns.map((column: any) => [column.key, column.onCell]));
+  runtime.shouldUpdateByKey = new Map(columns.map((column: any) => [
+    column.key,
+    column.shouldCellUpdate,
+  ]));
+
+  const structureKey = columns.map((column: any) => [
+    String(column.key ?? ''),
+    String(column.dataIndex ?? ''),
+    String(column.width ?? ''),
+    String(column.fixed ?? ''),
+    String(column.align ?? ''),
+  ].join(':')).join('|');
+
+  return useMemo(() => columns.map((column: any) => {
+    const key = column.key ?? String(column.dataIndex);
+    return {
+      ...column,
+      render: (value: any, row: any, index: number) =>
+        runtime.renderByKey.get(key)?.(value, row, index) ?? value,
+      onCell: (row: any, index: number) => runtime.onCellByKey.get(key)?.(row, index) ?? {},
+      shouldCellUpdate: (row: any, previousRow: any) =>
+        runtime.shouldUpdateByKey.get(key)?.(row, previousRow) ?? row !== previousRow,
+    };
+  }), [runtime, structureKey]);
+}
+
+interface MemoizedOrderShowTableProps extends React.ComponentProps<typeof Table> {
+  renderVersion: string;
+}
+
+const MemoizedOrderShowTable = memo(
+  ({ renderVersion: _renderVersion, ...props }: MemoizedOrderShowTableProps) => (
+    <Table {...props} />
+  ),
+  (previous, current) => (
+    previous.renderVersion === current.renderVersion
+    && previous.dataSource === current.dataSource
+    && previous.columns === current.columns
+    && previous.components === current.components
+    && previous.className === current.className
+    && previous.sticky?.offsetHeader === current.sticky?.offsetHeader
+  ),
+);
+MemoizedOrderShowTable.displayName = 'MemoizedOrderShowTable';
 
 function createProjectMoveIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -703,8 +793,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     isOperational && activeInfoPanel === 'cut' ? 'order-show-page--cut-active' : '',
     isOperational && activeInfoPanel === 'additional' ? 'order-show-page--additional-active' : '',
     orderShowStickyEnabled ? 'order-show-page--sticky-enabled' : '',
-    orderShowSummaryStuck ? 'order-show-page--summary-stuck' : '',
-  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, orderShowStickyEnabled, orderShowSummaryStuck]);
+  ].filter(Boolean).join(' '), [activeInfoPanel, isOperational, orderShowStickyEnabled]);
   const orderShowDetailTableSticky = useMemo(() => (
     orderShowStickyEnabled && orderShowTableHeaderTop > 0
       ? { offsetHeader: orderShowTableHeaderTop }
@@ -822,11 +911,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   })();
 
   // Создаем lookup maps для быстрого поиска
-  const millingTypesMap = new Map(
-    (millingTypesData?.data || []).map((item: any) => [item.milling_type_id, item.milling_type_name])
+  const millingTypesMap = useMemo(
+    () => new Map(
+      (millingTypesData?.data || []).map((item: any) => [item.milling_type_id, item.milling_type_name]),
+    ),
+    [millingTypesData],
   );
-  const edgeTypesMap = new Map(
-    (edgeTypesData?.data || []).map((item: any) => [item.edge_type_id, item.edge_type_name])
+  const edgeTypesMap = useMemo(
+    () => new Map(
+      (edgeTypesData?.data || []).map((item: any) => [item.edge_type_id, item.edge_type_name]),
+    ),
+    [edgeTypesData],
   );
   const filmsMap = useMemo(
     () => new Map<number, string>(
@@ -834,8 +929,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     ),
     [filmsData],
   );
-  const materialsMap = new Map(
-    (materialsData?.data || []).map((item: any) => [item.material_id, item.material_name])
+  const materialsMap = useMemo(
+    () => new Map(
+      (materialsData?.data || []).map((item: any) => [item.material_id, item.material_name]),
+    ),
+    [materialsData],
   );
   const productionStatusesById = useMemo(() => {
     const map = new Map<number, DetailProductionStatusMeta>();
@@ -1586,9 +1684,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     () =>
       visibleDetailColumns.map((column, index) => {
         const originalRender = column.render;
+        const originalShouldCellUpdate = column.shouldCellUpdate;
         const dataIndex = typeof column.dataIndex === 'string' ? column.dataIndex : null;
+        const isLiveStatusColumn = column.key === 'production_status_id';
         return {
           ...column,
+          shouldCellUpdate: (row: any, previousRow: any) => {
+            if (originalShouldCellUpdate) return originalShouldCellUpdate(row, previousRow);
+            // Status values live outside the row record. Other cells can skip
+            // unrelated parent updates such as sticky-header state changes.
+            return isLiveStatusColumn || row !== previousRow;
+          },
           onCell: (row: any) => {
             if (row?.kind !== 'separator') return {};
             return { colSpan: index === 0 ? visibleDetailColumns.length : 0 };
@@ -1611,6 +1717,28 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       }),
     [renderGroupedSummaryValue, visibleDetailColumns],
   );
+  const stableRenderedDetailColumns = useStableOrderShowColumns(renderedDetailColumns);
+  const orderShowDetailTableRenderVersion = [
+    [...currentDetailProductionStatusById.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([detailId, statusId]) => `${detailId}:${statusId ?? ''}`)
+      .join(','),
+    [...productionStatusesById.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([statusId, meta]) => `${statusId}:${meta.name}:${meta.color ?? ''}`)
+      .join(','),
+    productionStatusesLoading ? 'status-loading' : 'status-ready',
+    cutSelectMode ? `cut:${cutSelectedDetailIds.join(',')}` : 'view',
+    highlightDetail ?? '',
+    canEditOrderContent ? 'editable' : 'readonly',
+    millingTypesMap.size,
+    edgeTypesMap.size,
+    filmsMap.size,
+    materialsMap.size,
+    resolvedNameByDetailId.size,
+    JSON.stringify([...cutJobByDetailId.entries()]),
+    JSON.stringify([...bathCutJobByDetailId.entries()]),
+  ].join('|');
 
   const deletedOrderRestoreHandler = deletedOrder
     ? makeRestoreHandler({
@@ -2048,7 +2176,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               )}
             />
           ) : null}
-          <div ref={orderShowSummaryTabsRef} className="order-show-summary-tabs-sticky">
+          <div
+            ref={orderShowSummaryTabsRef}
+            className={`order-show-summary-tabs-sticky${orderShowSummaryStuck ? ' order-show-summary-tabs-sticky--stuck' : ''}`}
+          >
             <OrderShowHeader
               record={record}
               details={details}
@@ -2572,7 +2703,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 onSelectionChange={setCutSelectedDetailIds} />
             ) : (
             <TableTopScroll className="order-show-details-table-wrap">
-            <Table
+            <MemoizedOrderShowTable
+              renderVersion={orderShowDetailTableRenderVersion}
               className={`${groupingActive ? 'details-grouped ' : ''}order-show-details-table`}
               dataSource={groupedDataSource as any}
               rowKey={(row: any) =>
@@ -2636,15 +2768,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       : 'pointer',
                 },
               })}
-              components={{
-                header: {
-                  cell: (props: any) => <th {...props} style={{ ...props.style, padding: '2px 4px', fontSize: '70%', textAlign: 'center' }} />
-                },
-                body: {
-                  cell: (props: any) => <td {...props} style={{ ...props.style, padding: '2px 4px', fontSize: '80%' }} />
-                }
-              }}
-              columns={renderedDetailColumns}
+              components={ORDER_SHOW_DETAIL_TABLE_COMPONENTS}
+              columns={stableRenderedDetailColumns}
               summary={() => {
                 const totalCount = details.length;
                 const totalQuantity = details.reduce((sum, d) => sum + (d.quantity || 0), 0);

@@ -5,7 +5,7 @@
 // Проблема: race condition между внутренним состоянием InputNumber и Form.Item
 // Решение: используем useRef для синхронного хранения значений полей
 
-import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext } from 'react';
+import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext, useSyncExternalStore } from 'react';
 import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox, notification } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
@@ -179,6 +179,27 @@ const ORDER_DETAIL_TOTAL_COLUMN_WIDTHS = {
   detailCost: 150,
 } as const;
 
+const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
+  'height',
+  'width',
+  'quantity',
+  'milling_type_id',
+  'edge_type_id',
+  'sheet_material_type_id',
+  'note',
+  'doweling',
+  'milling_cost_per_sqm',
+  'detail_cost',
+  'film_id',
+  'priority',
+  'production_status_id',
+  'basis_project',
+  'basis_product',
+  'basis_data',
+  'basis_designation',
+  'detail_name',
+]);
+
 const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
   display: 'block',
   width: 'max-content',
@@ -189,6 +210,233 @@ const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
   fontVariantNumeric: 'tabular-nums',
   letterSpacing: 0,
 };
+
+const OrderDetailBodyCell = React.forwardRef<
+  HTMLTableCellElement,
+  React.TdHTMLAttributes<HTMLTableCellElement>
+>(({ onMouseEnter: _onMouseEnter, onMouseLeave: _onMouseLeave, ...props }, ref) => (
+  <td ref={ref} {...props} />
+));
+OrderDetailBodyCell.displayName = 'OrderDetailBodyCell';
+
+type OrderDetailCellRenderer = (value: any, row: any, index: number) => React.ReactNode;
+
+interface OrderDetailCellRuntime {
+  renderByKey: Map<React.Key, OrderDetailCellRenderer | undefined>;
+  onCellByKey: Map<React.Key, ((row: any, index: number) => any) | undefined>;
+  sorterByKey: Map<React.Key, ((left: any, right: any) => number) | undefined>;
+  rowVersions: Map<string, number>;
+  listenersByRow: Map<string, Set<() => void>>;
+  cellVersions: Map<string, number>;
+  listenersByCell: Map<string, Set<() => void>>;
+  editingKey: React.Key | null;
+  editingField: React.Key | null;
+  subscribeRow: (rowKey: React.Key, listener: () => void) => () => void;
+  subscribeCell: (
+    rowKey: React.Key,
+    columnKey: React.Key,
+    listener: () => void,
+  ) => () => void;
+  notifyRowState: (rowKey: React.Key | null) => void;
+  notifyCell: (rowKey: React.Key | null, columnKey: React.Key | null) => void;
+  notifyRow: (rowKey: React.Key | null) => void;
+}
+
+function createOrderDetailCellRuntime(): OrderDetailCellRuntime {
+  const cellKey = (rowKey: React.Key, columnKey: React.Key) =>
+    `${String(rowKey)}\u0000${String(columnKey)}`;
+  const runtime: OrderDetailCellRuntime = {
+    renderByKey: new Map(),
+    onCellByKey: new Map(),
+    sorterByKey: new Map(),
+    rowVersions: new Map(),
+    listenersByRow: new Map(),
+    cellVersions: new Map(),
+    listenersByCell: new Map(),
+    editingKey: null,
+    editingField: null,
+    subscribeRow: (rowKey, listener) => {
+      const normalizedRowKey = String(rowKey);
+      const listeners = runtime.listenersByRow.get(normalizedRowKey) ?? new Set<() => void>();
+      listeners.add(listener);
+      runtime.listenersByRow.set(normalizedRowKey, listeners);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) runtime.listenersByRow.delete(normalizedRowKey);
+      };
+    },
+    subscribeCell: (rowKey, columnKey, listener) => {
+      const normalizedCellKey = cellKey(rowKey, columnKey);
+      const listeners = runtime.listenersByCell.get(normalizedCellKey) ?? new Set<() => void>();
+      listeners.add(listener);
+      runtime.listenersByCell.set(normalizedCellKey, listeners);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) runtime.listenersByCell.delete(normalizedCellKey);
+      };
+    },
+    notifyRowState: (rowKey) => {
+      if (rowKey === null) return;
+      const normalizedRowKey = String(rowKey);
+      runtime.rowVersions.set(
+        normalizedRowKey,
+        (runtime.rowVersions.get(normalizedRowKey) ?? 0) + 1,
+      );
+      runtime.listenersByRow.get(normalizedRowKey)?.forEach((listener) => listener());
+    },
+    notifyCell: (rowKey, columnKey) => {
+      if (rowKey === null || columnKey === null) return;
+      const normalizedCellKey = cellKey(rowKey, columnKey);
+      runtime.cellVersions.set(
+        normalizedCellKey,
+        (runtime.cellVersions.get(normalizedCellKey) ?? 0) + 1,
+      );
+      runtime.listenersByCell.get(normalizedCellKey)?.forEach((listener) => listener());
+    },
+    notifyRow: (rowKey) => {
+      if (rowKey === null) return;
+      runtime.notifyRowState(rowKey);
+      const prefix = `${String(rowKey)}\u0000`;
+      runtime.listenersByCell.forEach((_listeners, normalizedCellKey) => {
+        if (!normalizedCellKey.startsWith(prefix)) return;
+        const columnKey = normalizedCellKey.slice(prefix.length);
+        runtime.notifyCell(rowKey, columnKey);
+      });
+    },
+  };
+  return runtime;
+}
+
+const OrderDetailCellRuntimeContext = React.createContext<OrderDetailCellRuntime | null>(null);
+
+const LiveOrderDetailCell: React.FC<{
+  columnKey: React.Key;
+  value: any;
+  row: any;
+  index: number;
+}> = React.memo(({ columnKey, value, row, index }) => {
+  const runtime = useContext(OrderDetailCellRuntimeContext);
+  const detail = row?.kind === 'detail' ? row.detail : row;
+  const rowKey = String(detail?.temp_id ?? detail?.detail_id ?? row?.key ?? index);
+  const normalizedCellKey = `${rowKey}\u0000${String(columnKey)}`;
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      runtime?.subscribeCell(rowKey, columnKey, listener) ?? (() => undefined),
+    [columnKey, rowKey, runtime],
+  );
+  const getSnapshot = useCallback(
+    () => runtime?.cellVersions.get(normalizedCellKey) ?? 0,
+    [normalizedCellKey, runtime],
+  );
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return <>{runtime?.renderByKey.get(columnKey)?.(value, row, index) ?? value}</>;
+});
+LiveOrderDetailCell.displayName = 'LiveOrderDetailCell';
+
+const OrderDetailBodyRow = React.forwardRef<
+  HTMLTableRowElement,
+  React.HTMLAttributes<HTMLTableRowElement> & { 'data-row-key'?: React.Key }
+>(({ className, ...props }, ref) => {
+  const runtime = useContext(OrderDetailCellRuntimeContext);
+  const rowKey = String(props['data-row-key'] ?? '');
+  const subscribe = useCallback(
+    (listener: () => void) => runtime?.subscribeRow(rowKey, listener) ?? (() => undefined),
+    [rowKey, runtime],
+  );
+  const getSnapshot = useCallback(
+    () => runtime?.rowVersions.get(rowKey) ?? 0,
+    [rowKey, runtime],
+  );
+  useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const editing = runtime?.editingKey !== null
+    && String(runtime?.editingKey) === rowKey;
+  const rowClassName = [
+    className,
+    editing ? 'order-detail-row-editing dg-editing' : '',
+  ].filter(Boolean).join(' ');
+  return <tr ref={ref} className={rowClassName} {...props} />;
+});
+OrderDetailBodyRow.displayName = 'OrderDetailBodyRow';
+
+const ORDER_DETAIL_TABLE_COMPONENTS = {
+  body: { cell: OrderDetailBodyCell, row: OrderDetailBodyRow },
+} as const;
+
+interface MemoizedOrderDetailTableProps extends React.ComponentProps<typeof Table> {
+  renderVersion: string;
+}
+
+const MemoizedOrderDetailTable = React.memo(
+  ({ renderVersion: _renderVersion, ...props }: MemoizedOrderDetailTableProps) => (
+    <Table {...props} />
+  ),
+  (previous, current) => (
+    previous.renderVersion === current.renderVersion
+    && previous.dataSource === current.dataSource
+    && previous.columns === current.columns
+    && previous.rowSelection === current.rowSelection
+    && previous.components === current.components
+    && previous.className === current.className
+    && previous.scroll?.x === current.scroll?.x
+    && previous.scroll?.y === current.scroll?.y
+  ),
+);
+MemoizedOrderDetailTable.displayName = 'MemoizedOrderDetailTable';
+
+function useStableOrderDetailColumns(
+  columns: ColumnsType<any>,
+  runtime: OrderDetailCellRuntime,
+): ColumnsType<any> {
+  runtime.renderByKey = new Map(columns.map((column: any) => [
+    column.key ?? String(column.dataIndex),
+    column.render,
+  ]));
+  runtime.onCellByKey = new Map(columns.map((column: any) => [
+    column.key ?? String(column.dataIndex),
+    column.onCell,
+  ]));
+  runtime.sorterByKey = new Map(columns.map((column: any) => [
+    column.key ?? String(column.dataIndex),
+    typeof column.sorter === 'function' ? column.sorter : undefined,
+  ]));
+
+  const structureKey = columns.map((column: any) => [
+    String(column.key ?? ''),
+    String(column.dataIndex ?? ''),
+    String(column.width ?? ''),
+    String(column.fixed ?? ''),
+    String(column.align ?? ''),
+    String(column.sortOrder ?? ''),
+    column.sorter ? 'sorter' : '',
+    column.shouldCellUpdate ? 'guarded' : '',
+  ].join(':')).join('|');
+
+  return useMemo(() => columns.map((column: any) => {
+    const key = column.key ?? String(column.dataIndex);
+    return {
+      ...column,
+      render: (value: any, row: any, index: number) => (
+        <LiveOrderDetailCell columnKey={key} value={value} row={row} index={index} />
+      ),
+      onCell: (row: any, index: number) => {
+        const currentProps = runtime.onCellByKey.get(key)?.(row, index) ?? {};
+        return {
+          ...currentProps,
+          onClick: (event: React.MouseEvent<HTMLElement>) => {
+            runtime.onCellByKey.get(key)?.(row, index)?.onClick?.(event);
+          },
+        };
+      },
+      ...(typeof column.sorter === 'function'
+        ? {
+            sorter: (left: any, right: any) =>
+              runtime.sorterByKey.get(key)?.(left, right) ?? 0,
+          }
+        : {}),
+      shouldCellUpdate: (row: any, previousRow: any) => row !== previousRow,
+    };
+  }), [runtime, structureKey]);
+}
 
 const FitSummaryText: React.FC<{
   children: React.ReactNode;
@@ -255,6 +503,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // Ref for table scroll container (for auto-scroll)
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
+  const scrollToEditingRowRef = useRef(false);
 
   // Find actual scroll container (.ant-table-body) after mount
   useEffect(() => {
@@ -320,6 +569,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
+  const [editingField, setEditingField] = useState<React.Key | null>(null);
   const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
   const [isSumEditable, setIsSumEditable] = useState(false);
   const [sumContextMenu, setSumContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -337,6 +587,30 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     record: OrderDetail;
   } | null>(null);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
+  const isEditingField = (record: OrderDetail, field: React.Key) =>
+    isEditing(record) && editingField === field;
+  function getDisplayedField<K extends keyof OrderDetail>(record: OrderDetail, field: K): OrderDetail[K] {
+    return isEditing(record) ? form.getFieldValue(field) : record[field];
+  }
+  const cellRuntimeRef = useRef<OrderDetailCellRuntime | null>(null);
+  if (!cellRuntimeRef.current) cellRuntimeRef.current = createOrderDetailCellRuntime();
+  const cellRuntime = cellRuntimeRef.current;
+  useLayoutEffect(() => {
+    const previousEditingKey = cellRuntime.editingKey;
+    const previousEditingField = cellRuntime.editingField;
+    cellRuntime.editingKey = editingKey;
+    cellRuntime.editingField = editingField;
+    cellRuntime.notifyCell(previousEditingKey, previousEditingField);
+    cellRuntime.notifyRowState(previousEditingKey);
+    if (editingKey !== previousEditingKey || editingField !== previousEditingField) {
+      cellRuntime.notifyCell(editingKey, editingField);
+      if (editingKey !== previousEditingKey) cellRuntime.notifyRowState(editingKey);
+    }
+  }, [cellRuntime, editingField, editingKey]);
+
+  useLayoutEffect(() => {
+    cellRuntime.notifyCell(editingKey, 'detail_cost');
+  }, [cellRuntime, editingKey, isSumEditable]);
 
   const showInlineValidationErrors = useCallback((record: OrderDetail, error: unknown) => {
     const rowKey = record.temp_id ?? record.detail_id ?? record.detail_number;
@@ -354,6 +628,25 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       duration: 0,
     });
   }, []);
+
+  const validateInlineForm = useCallback(async (): Promise<Record<string, any>> => {
+    await form.validateFields();
+    const values = form.getFieldsValue(true);
+    const errors: string[] = [];
+    if (!(Number(values.height) > 0)) errors.push('Укажите высоту детали');
+    if (!(Number(values.width) > 0)) errors.push('Укажите ширину детали');
+    if (!(Number(values.quantity) >= 1)) errors.push('Укажите количество деталей');
+    if (!(Number(values.milling_type_id) > 0)) errors.push('Укажите тип фрезеровки');
+    if (!(Number(values.edge_type_id) > 0)) errors.push('Укажите тип кромки');
+    if (!(Number(values.sheet_material_type_id) > 0)) errors.push('Укажите материал');
+    if (!(Number(values.milling_cost_per_sqm) > 0)) errors.push('Укажите цену за кв.м.');
+    if (!(Number(values.detail_cost) > 0)) errors.push('Укажите сумму детали');
+    if (!(Number(values.priority) >= 1)) errors.push('Укажите приоритет');
+    if (errors.length > 0) {
+      throw { errorFields: [{ errors }] };
+    }
+    return values;
+  }, [form]);
 
   // ============================================================================
   // FIX: useRef для синхронного хранения значений полей
@@ -459,6 +752,22 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const resolvedProductionStatusSelectProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
     : productionStatusSelectProps;
+  const referenceCellVersion = [
+    orderFormData.isLoading ? 'loading' : 'ready',
+    sheetMaterials.options.length,
+    resolvedMillingTypeSelectProps.options?.length ?? 0,
+    resolvedEdgeTypeSelectProps.options?.length ?? 0,
+    resolvedFilmSelectProps.options?.length ?? 0,
+    resolvedProductionStatusSelectProps.options?.length ?? 0,
+    cutJobByDetailId?.size ?? 0,
+    bathCutJobByDetailId?.size ?? 0,
+  ].join(':');
+  const previousReferenceCellVersionRef = useRef(referenceCellVersion);
+  useLayoutEffect(() => {
+    if (previousReferenceCellVersionRef.current === referenceCellVersion) return;
+    previousReferenceCellVersionRef.current = referenceCellVersion;
+    sortedDetails.forEach((detail) => cellRuntime.notifyRow(getRowKey(detail)));
+  }, [cellRuntime, getRowKey, referenceCellVersion, sortedDetails]);
 
   // Validate against the selected sheet's actual dimensions. Read dimensions from
   // the synchronous ref so a fast click after typing cannot validate stale values.
@@ -498,8 +807,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   // FIX: Обновлённая функция recalcSum с использованием useRef
   // ============================================================================
   const recalcSum = useCallback((changedField?: keyof FieldValues, newValue?: number | null) => {
-    console.log('[OrderDetailTable] recalcSum - isSumEditable:', isSumEditable, '(changed:', changedField, '=', newValue, ')');
-
     // Only auto-calculate if sum is not in manual edit mode
     if (!isSumEditable) {
       // FIX: Обновляем ref синхронно
@@ -510,12 +817,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       // FIX: Читаем значения из ref
       const area = fieldValuesRef.current.area;
       const pricePerSqm = fieldValuesRef.current.milling_cost_per_sqm;
-      console.log('[OrderDetailTable] recalcSum - area:', area, 'pricePerSqm:', pricePerSqm);
 
       if (area && pricePerSqm && area > 0 && pricePerSqm > 0) {
         const sum = area * pricePerSqm;
         const roundedSum = Number(sum.toFixed(2));
-        console.log('[OrderDetailTable] recalcSum - calculated sum:', sum, 'rounded:', roundedSum);
 
         // FIX: Сохраняем в ref
         fieldValuesRef.current.detail_cost = roundedSum;
@@ -523,14 +828,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         // FIX: Отложенное обновление формы
         queueMicrotask(() => {
           form.setFieldsValue({ detail_cost: roundedSum });
+          cellRuntime.notifyCell(editingKey, 'detail_cost');
         });
-      } else {
-        console.log('[OrderDetailTable] recalcSum - skipped (invalid area or price)');
       }
-    } else {
-      console.log('[OrderDetailTable] recalcSum - skipped (manual edit mode)');
     }
-  }, [form, isSumEditable]);
+  }, [cellRuntime, editingKey, form, isSumEditable]);
 
   // ============================================================================
   // FIX: Обновлённая функция recalcArea с использованием useRef
@@ -547,16 +849,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const width = fieldValuesRef.current.width;
     const quantity = fieldValuesRef.current.quantity;
 
-    console.log('[OrderDetailTable] recalcArea - height:', height, 'width:', width, 'quantity:', quantity, '(changed:', changedField, '=', newValue, ')');
-
     if (height && width && quantity && height > 0 && width > 0 && quantity > 0) {
       // Calculate area using INTEGER MATH to avoid floating point errors
       // height and width are in mm (integers), so we calculate in mm² first
       // Example: 550mm * 200mm * 2 = 220000 mm²
       // Then: round((220000 / 1_000_000) * 100) / 100 = 0.22 m²
-      const areaMm2 = height * width * quantity;
       const area = calculateOrderDetailArea(height, width, quantity);
-      console.log('[OrderDetailTable] recalcArea - calculated area:', area, '(areaMm2:', areaMm2, ')');
 
       // FIX: Сохраняем area в ref
       fieldValuesRef.current.area = area;
@@ -565,24 +863,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       // Это позволяет InputNumber завершить свой цикл обновления
       queueMicrotask(() => {
         form.setFieldsValue({ area });
+        cellRuntime.notifyCell(editingKey, 'area');
       });
 
       // Pass calculated area to recalcSum to avoid reading stale value
       recalcSum('area', area);
-    } else {
-      console.log('[OrderDetailTable] recalcArea - skipped (height, width or quantity missing)');
     }
 
     // Validate dimensions against material limits
     validateDimensions();
-  }, [form, validateDimensions, recalcSum]);
+  }, [cellRuntime, editingKey, form, validateDimensions, recalcSum]);
 
-  const startEdit = (record: OrderDetail) => {
-    console.log('[OrderDetailTable] startEdit - detail:', record);
+  const startEdit = (record: OrderDetail, scrollToRow = false) => {
     if (!groupingActive) {
       setCurrentPage(pageContainingOrderDetail(paginatedDetails, record, pageSize));
     }
+    scrollToEditingRowRef.current = scrollToRow;
     setEditingKey(record.temp_id || record.detail_id || null);
+    setEditingField('height');
     setCurrentFilmId(record.film_id ?? null);
     setDimensionValidationError(null);
     // Each edit session starts with the sum field locked; unlocking it is an
@@ -624,14 +922,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       detail_name: record.detail_name ?? '',
     });
 
-    // Trigger auto-calculation if area and price are already set
-    // Use setTimeout to ensure form values are set before calculation
-    setTimeout(() => {
-      if (record.area && record.milling_cost_per_sqm && !record.detail_cost) {
-        console.log('[OrderDetailTable] startEdit - triggering recalcSum for existing area and price');
-        recalcSum();
-      }
-    }, 0);
+    // recalcSum reads fieldValuesRef, initialized above, so no deferred timer is needed.
+    if (record.area && record.milling_cost_per_sqm && !record.detail_cost) {
+      recalcSum();
+    }
   };
 
   // Save current editing row and return success status
@@ -645,13 +939,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // Recompute on save; state may lag behind the latest InputNumber event.
     const currentDimensionError = validateDimensions();
     if (currentDimensionError) {
-      console.log('[OrderDetailTable] saveCurrentRow - dimension validation failed');
       showDimensionValidationError(record, currentDimensionError);
       return false;
     }
 
     try {
-      const values = await form.validateFields();
+      const values = await validateInlineForm();
       const tempId = record.temp_id || record.detail_id!;
       updateDetail(tempId, values);
       if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
@@ -660,7 +953,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       cancelEdit();
       return true;
     } catch (error) {
-      console.log('[OrderDetailTable] saveCurrentRow - validation failed:', error);
       showInlineValidationErrors(record, error);
       return false;
     }
@@ -690,14 +982,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   // Expose methods via ref for external calls (e.g., quick add)
   useImperativeHandle(ref, () => ({
-    startEditRow: startEdit,
+    startEditRow: (detail) => startEdit(detail, true),
     isEditing: () => editingKey !== null,
     saveCurrentAndStartNew: async (newDetail: OrderDetail) => {
       const saved = await saveCurrentRow();
       if (saved) {
         // Start editing the new detail after a short delay
         setTimeout(() => {
-          startEdit(newDetail);
+          startEdit(newDetail, true);
         }, 50);
       }
       return saved;
@@ -715,6 +1007,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     }
     setInlineInvalidDetailKey(null);
     setEditingKey(null);
+    setEditingField(null);
     setCurrentFilmId(null);
     setDimensionValidationError(null);
     setIsSumEditable(false);
@@ -749,16 +1042,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // Recompute on save; state may lag behind the latest InputNumber event.
     const currentDimensionError = validateDimensions();
     if (currentDimensionError) {
-      console.error('[OrderDetailTable] saveEdit - dimension validation failed:', currentDimensionError);
       showDimensionValidationError(record, currentDimensionError);
       return;
     }
 
     try {
-      const values = await form.validateFields();
-      console.log('[OrderDetailTable] saveEdit - form values:', values);
-      console.log('[OrderDetailTable] saveEdit - area:', values.area, 'price:', values.milling_cost_per_sqm, 'cost:', values.detail_cost);
-
+      const values = await validateInlineForm();
       const tempId = record.temp_id || record.detail_id!;
       updateDetail(tempId, values);
       if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
@@ -823,15 +1112,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ),
       dataIndex: 'height',
       key: 'height',
-      width: 54,
+      width: 96,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.height || 0) - (b.height || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        if (!isEditing(d)) {
-          const num = Number(d.height);
+        if (!isEditingField(d, 'height')) {
+          const num = Number(getDisplayedField(d, 'height'));
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
@@ -845,9 +1134,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             ]}
           >
             <CurrencyInput
-              autoFocus
               controls={false}
-              style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedHeight) }}
+              style={{ width: '100%', ...getRequiredFieldStyle(watchedHeight) }}
               min={0.01}
               precision={2}
               emptyWhenUnset
@@ -868,15 +1156,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ),
       dataIndex: 'width',
       key: 'width',
-      width: 54,
+      width: 96,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.width || 0) - (b.width || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        if (!isEditing(d)) {
-          const num = Number(d.width);
+        if (!isEditingField(d, 'width')) {
+          const num = Number(getDisplayedField(d, 'width'));
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
@@ -891,7 +1179,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <CurrencyInput
               controls={false}
-              style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
+              style={{ width: '100%', ...getRequiredFieldStyle(watchedWidth) }}
               min={0.01}
               precision={2}
               emptyWhenUnset
@@ -913,7 +1201,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'quantity') ? (
           <Form.Item
             name="quantity"
             help={null}
@@ -925,7 +1213,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <InputNumber
               controls={false}
-              style={{ width: '100%', minWidth: '70px' }}
+              style={{ width: '100%' }}
               min={1}
               precision={0}
               onChange={handleQuantityChange}
@@ -933,7 +1221,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          formatNumber(d.quantity, 0)
+          formatNumber(getDisplayedField(d, 'quantity'), 0)
         );
       },
     },
@@ -954,12 +1242,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'area') ? (
           <Form.Item name="area" style={{ margin: 0, padding: '0 4px' }}>
-            <InputNumber style={{ width: '100%', minWidth: '85px' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber style={{ width: '100%' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          formatNumber(d.area, 2) + ' м²'
+          formatNumber(getDisplayedField(d, 'area'), 2) + ' м²'
         );
       },
     },
@@ -967,14 +1255,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Фрезеровка</div>,
       dataIndex: 'milling_type_id',
       key: 'milling_type_id',
-      width: 85,
+      width: 170,
       align: 'center',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.milling_type_id || 0) - (b.milling_type_id || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'milling_type_id') ? (
           <Form.Item name="milling_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               {...resolvedMillingTypeSelectProps}
@@ -982,12 +1270,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 150, textAlign: 'left', ...getRequiredFieldStyle(watchedMillingTypeId) }}
+              style={{ width: '100%', textAlign: 'left', ...getRequiredFieldStyle(watchedMillingTypeId) }}
             />
           </Form.Item>
         ) : (
           <MillingTypeCell
-            millingTypeId={d.milling_type_id}
+            millingTypeId={getDisplayedField(d, 'milling_type_id')}
             namesById={millingNameById}
             loading={referencesLoading}
           />
@@ -998,13 +1286,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Обкат</span></div>,
       dataIndex: 'edge_type_id',
       key: 'edge_type_id',
-      width: 52,
+      width: 130,
       align: 'center',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'edge_type_id') ? (
           <Form.Item name="edge_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               {...resolvedEdgeTypeSelectProps}
@@ -1012,12 +1300,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 120, textAlign: 'left', ...getRequiredFieldStyle(watchedEdgeTypeId) }}
+              style={{ width: '100%', textAlign: 'left', ...getRequiredFieldStyle(watchedEdgeTypeId) }}
             />
           </Form.Item>
         ) : (
           <EdgeTypeCell
-            edgeTypeId={d.edge_type_id}
+            edgeTypeId={getDisplayedField(d, 'edge_type_id')}
             namesById={edgeNameById}
             loading={referencesLoading}
           />
@@ -1028,7 +1316,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Материал</div>,
       dataIndex: 'sheet_material_type_id',
       key: 'sheet_material_type_id',
-      width: 120,
+      width: 180,
       align: 'center' as const,
       sorter: (a: OrderDetail, b: OrderDetail) => {
         const nameA = sheetMaterials.byId.get(a.sheet_material_type_id ?? 0)?.label ?? '';
@@ -1039,7 +1327,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'sheet_material_type_id') ? (
           <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options).filter(o => o.isActive !== false || o.value === watchedSheetId), watchedSheetId)}
@@ -1053,12 +1341,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               optionFilterProp="label"
               dropdownMatchSelectWidth={false}
               onChange={(value) => queueMicrotask(() => validateDimensions(value))}
-              style={{ minWidth: 160, textAlign: 'left' }}
+              style={{ width: '100%', textAlign: 'left' }}
             />
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>
-            {d.sheet_material_type_id ? (sheetMaterials.byId.get(d.sheet_material_type_id)?.label ?? '') : ''}
+            {getDisplayedField(d, 'sheet_material_type_id')
+              ? (sheetMaterials.byId.get(getDisplayedField(d, 'sheet_material_type_id')!)?.label ?? '')
+              : ''}
           </span>
         );
       },
@@ -1067,17 +1357,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Примечание</div>,
       dataIndex: 'note',
       key: 'note',
-      width: 100,
+      width: 160,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'note') ? (
           <Form.Item name="note" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Примечание" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{d.note || ''}</span>
+          <span style={{ fontSize: '90%' }}>{getDisplayedField(d, 'note') || ''}</span>
         );
       },
     },
@@ -1085,18 +1375,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Прис.</div>,
       dataIndex: 'doweling',
       key: 'doweling',
-      width: 52,
+      width: 64,
       align: 'center',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'doweling') ? (
           <Form.Item name="doweling" valuePropName="checked" style={{ margin: 0, padding: '0 4px' }}>
             <Checkbox />
           </Form.Item>
         ) : (
-          d.doweling ? <CheckOutlined style={{ color: '#1890ff' }} /> : null
+          getDisplayedField(d, 'doweling') ? <CheckOutlined style={{ color: '#1890ff' }} /> : null
         );
       },
     },
@@ -1104,13 +1394,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Цена за кв.м.</div>,
       dataIndex: 'milling_cost_per_sqm',
       key: 'milling_cost_per_sqm',
-      width: 100,
+      width: 140,
       align: 'right',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'milling_cost_per_sqm') ? (
           <Form.Item
             name="milling_cost_per_sqm"
             help={null}
@@ -1122,7 +1412,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <InputNumber
               controls={false}
-              style={{ width: '100%', minWidth: '90px' }}
+              style={{ width: '100%' }}
               precision={2}
               min={0.01}
               formatter={currencySmartFormatter}
@@ -1133,7 +1423,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-            {d.milling_cost_per_sqm !== null && d.milling_cost_per_sqm !== undefined ? formatNumber(d.milling_cost_per_sqm, 2) : '—'}
+            {getDisplayedField(d, 'milling_cost_per_sqm') !== null
+              && getDisplayedField(d, 'milling_cost_per_sqm') !== undefined
+              ? formatNumber(getDisplayedField(d, 'milling_cost_per_sqm'), 2)
+              : '—'}
           </span>
         );
       },
@@ -1149,7 +1442,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        if (isEditing(d)) {
+        if (isEditingField(d, 'detail_cost')) {
           return (
             <Form.Item
               name="detail_cost"
@@ -1162,7 +1455,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             >
               <InputNumber
                 controls={false}
-                style={{ width: '100%', minWidth: '90px' }}
+                style={{ width: '100%' }}
                 precision={2}
                 min={0.01}
                 formatter={currencySmartFormatter}
@@ -1180,9 +1473,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             </Form.Item>
           );
         }
-        const value = d.detail_cost;
+        const value = getDisplayedField(d, 'detail_cost');
         const hasValue = value !== null && value !== undefined;
-        const manualOverride = isCostManuallyEdited(d);
+        const manualOverride = isCostManuallyEdited({
+          ...d,
+          area: getDisplayedField(d, 'area'),
+          milling_cost_per_sqm: getDisplayedField(d, 'milling_cost_per_sqm'),
+          detail_cost: value,
+        });
         const color = !hasValue
           ? '#d32029'
           : manualOverride
@@ -1206,13 +1504,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пленка</div>,
       dataIndex: 'film_id',
       key: 'film_id',
-      width: 120,
+      width: 220,
       sorter: (a: OrderDetail, b: OrderDetail) => (a.film_id || 0) - (b.film_id || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'film_id') ? (
           <Form.Item name="film_id" style={{ margin: 0, padding: '0 4px' }}>
             <Select
               {...resolvedFilmSelectProps}
@@ -1221,7 +1519,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 200, textAlign: 'left' }}
+              style={{ width: '100%', textAlign: 'left' }}
               onKeyDown={(e) => {
                 if (e.key === 'Tab' && !e.shiftKey) {
                   handleTabOnLastField(e, d);
@@ -1248,9 +1546,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ fontSize: '11px' }}>
-            {d.film_id ? (
+            {getDisplayedField(d, 'film_id') ? (
               <FilmCell
-                filmId={d.film_id}
+                filmId={getDisplayedField(d, 'film_id')!}
                 namesById={filmNameById}
                 loading={referencesLoading}
               />
@@ -1297,17 +1595,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пр-т</div>,
       dataIndex: 'priority',
       key: 'priority',
-      width: 35,
+      width: 72,
       align: 'center',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'priority') ? (
           <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
               controls={false}
-              style={{ width: '100%', minWidth: '60px' }}
+              style={{ width: '100%' }}
               min={1}
               max={999}
               tabIndex={-1}
@@ -1316,7 +1614,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           </Form.Item>
         ) : (
           <span style={{ fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-            {formatNumber(d.priority, 0)}
+            {formatNumber(getDisplayedField(d, 'priority'), 0)}
           </span>
         );
       },
@@ -1331,7 +1629,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'production_status_id') ? (
           <Form.Item name="production_status_id" style={{ margin: 0, padding: '0 4px' }}>
             <Select
               {...resolvedProductionStatusSelectProps}
@@ -1340,14 +1638,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
-              style={{ minWidth: 150, textAlign: 'left' }}
+              style={{ width: '100%', textAlign: 'left' }}
               tabIndex={-1}
             />
           </Form.Item>
         ) : (
-          d.production_status_id ? (
+          getDisplayedField(d, 'production_status_id') ? (
             <ProductionStatusCell
-              statusId={d.production_status_id}
+              statusId={getDisplayedField(d, 'production_status_id')!}
               namesById={productionStatusNameById}
               loading={referencesLoading}
             />
@@ -1359,17 +1657,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис проект</div>,
       dataIndex: 'basis_project',
       key: 'basis_project',
-      width: 120,
+      width: 140,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'basis_project') ? (
           <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{d.basis_project || ''}</span>
+          <span style={{ fontSize: '90%' }}>{getDisplayedField(d, 'basis_project') || ''}</span>
         );
       },
     },
@@ -1377,17 +1675,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. изделия</div>,
       dataIndex: 'basis_product',
       key: 'basis_product',
-      width: 120,
+      width: 160,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'basis_product') ? (
           <Form.Item name="basis_product" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Обозн. изделия" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{d.basis_product || ''}</span>
+          <span style={{ fontSize: '90%' }}>{getDisplayedField(d, 'basis_product') || ''}</span>
         );
       },
     },
@@ -1395,17 +1693,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис данные</div>,
       dataIndex: 'basis_data',
       key: 'basis_data',
-      width: 160,
+      width: 180,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'basis_data') ? (
           <Form.Item name="basis_data" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Номер/Обозначение/Наименование" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{d.basis_data || ''}</span>
+          <span style={{ fontSize: '90%' }}>{getDisplayedField(d, 'basis_data') || ''}</span>
         );
       },
     },
@@ -1413,17 +1711,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис обозн. детали</div>,
       dataIndex: 'basis_designation',
       key: 'basis_designation',
-      width: 90,
+      width: 140,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'basis_designation') ? (
           <Form.Item name="basis_designation" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Обозн." onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{d.basis_designation || ''}</span>
+          <span style={{ fontSize: '90%' }}>{getDisplayedField(d, 'basis_designation') || ''}</span>
         );
       },
     },
@@ -1435,12 +1733,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ),
       dataIndex: 'detail_name',
       key: 'detail_name',
-      width: 100,
+      width: 160,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
-        return isEditing(d) ? (
+        return isEditingField(d, 'detail_name') ? (
           <Form.Item name="detail_name" style={{ margin: 0, padding: '0 4px' }}>
             <Input
               placeholder="Название детали"
@@ -1449,14 +1747,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          d.detail_name || '—'
+          getDisplayedField(d, 'detail_name') || '—'
         );
       },
     },
     {
       title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Действия</span></div>,
       key: 'actions',
-      width: 40,
+      width: 56,
       fixed: 'right',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
@@ -1495,6 +1793,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const visibleColumns = useMemo(
     () => applyOrderDetailColumnSettings(columns, columnSettings),
     [columns, columnSettings],
+  );
+  const tableScrollWidth = visibleColumns.reduce(
+    (total, column) => total + (typeof column.width === 'number' ? column.width : 0),
+    onSelectChange ? 24 : 0,
   );
 
   const renderGroupedSummaryValue = (row: any, key: string): React.ReactNode => {
@@ -1542,24 +1844,69 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     sortOrder: col.key === activeSorter.key ? activeSorter.order : null,
   }));
 
-  const activeColumn = controlledColumns.find((column: any) => column.key === activeSorter.key) as any;
-  const activeCompare =
-    typeof activeColumn?.sorter === 'function'
-      ? activeColumn.sorter
-      : typeof activeColumn?.sorter?.compare === 'function'
-        ? activeColumn.sorter.compare
-        : undefined;
-  const paginatedDetails = sortOrderDetailsForPagination(
-    sortedDetails,
-    activeCompare,
-    activeSorter.order,
+  const activeSheetMaterialNames = activeSorter.key === 'sheet_material_type_id'
+    ? sheetMaterials.byId
+    : null;
+  const activeCompare = useMemo<((left: OrderDetail, right: OrderDetail) => number) | undefined>(
+    () => {
+      switch (activeSorter.key) {
+        case 'detail_number':
+          return (left, right) => left.detail_number - right.detail_number;
+        case 'height':
+          return (left, right) => (left.height || 0) - (right.height || 0);
+        case 'width':
+          return (left, right) => (left.width || 0) - (right.width || 0);
+        case 'quantity':
+          return (left, right) => (left.quantity || 0) - (right.quantity || 0);
+        case 'area':
+          return (left, right) => (left.area || 0) - (right.area || 0);
+        case 'milling_type_id':
+          return (left, right) => (left.milling_type_id || 0) - (right.milling_type_id || 0);
+        case 'sheet_material_type_id':
+          return (left, right) => {
+            const leftName = activeSheetMaterialNames?.get(left.sheet_material_type_id ?? 0)?.label ?? '';
+            const rightName = activeSheetMaterialNames?.get(right.sheet_material_type_id ?? 0)?.label ?? '';
+            return leftName.localeCompare(rightName, 'ru');
+          };
+        case 'detail_cost':
+          return (left, right) => (left.detail_cost || 0) - (right.detail_cost || 0);
+        case 'film_id':
+          return (left, right) => (left.film_id || 0) - (right.film_id || 0);
+        default:
+          return undefined;
+      }
+    },
+    [activeSheetMaterialNames, activeSorter.key],
+  );
+  const paginatedDetails = useMemo(
+    () => sortOrderDetailsForPagination(sortedDetails, activeCompare, activeSorter.order),
+    [activeCompare, activeSorter.order, sortedDetails],
   );
 
   const summaryAwareColumns = controlledColumns.map((column: any) => {
     const originalRender = column.render;
+    const originalOnCell = column.onCell;
     const key = String(column.key ?? '');
     return {
       ...column,
+      onCell: (row: any, index: number) => {
+        const cellProps = originalOnCell?.(row, index) ?? {};
+        const detail = asDetail(row);
+        if (
+          !detail
+          || !isEditing(detail)
+          || !ORDER_DETAIL_EDITABLE_CELL_KEYS.has(column.key)
+        ) {
+          return cellProps;
+        }
+        return {
+          ...cellProps,
+          onClick: (event: React.MouseEvent<HTMLElement>) => {
+            cellProps.onClick?.(event);
+            if (!event.defaultPrevented) setEditingField(column.key);
+          },
+        };
+      },
       render: (value: any, row: any, index: number) =>
         row?.kind === 'summary'
           ? renderGroupedSummaryValue(row, key)
@@ -1573,8 +1920,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     ? summaryAwareColumns.map((col: any) => {
         const { sorter, defaultSortOrder, sortOrder, ...rest } = col;
         return rest;
-      })
+    })
     : summaryAwareColumns;
+  const stableRenderedColumns = useStableOrderDetailColumns(renderedColumns, cellRuntime);
 
   useEffect(() => {
     if (groupingActive) return;
@@ -1630,21 +1978,35 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   useEffect(() => {
     if (editingKey == null || groupingActive) return;
+    let focusFrame = 0;
     const frame = requestAnimationFrame(() => {
       const row = tableContainerRef.current?.querySelector<HTMLElement>(
         `[data-row-key="${String(editingKey)}"]`,
       );
-      row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      row?.querySelector<HTMLElement>('input, textarea, [role="combobox"]')?.focus();
+      if (scrollToEditingRowRef.current) {
+        row?.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
+        scrollToEditingRowRef.current = false;
+      }
+      focusFrame = requestAnimationFrame(() => {
+        row?.querySelector<HTMLElement>('input, textarea, [role="combobox"]')
+          ?.focus({ preventScroll: true });
+      });
     });
-    return () => cancelAnimationFrame(frame);
-  }, [currentPage, editingKey, groupingActive]);
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(focusFrame);
+    };
+  }, [currentPage, editingField, editingKey, groupingActive]);
 
-  const rowSelection = onSelectChange
+  const onSelectChangeRef = useRef(onSelectChange);
+  onSelectChangeRef.current = onSelectChange;
+  const rowSelection = useMemo(() => onSelectChangeRef.current
     ? {
         selectedRowKeys,
         onChange: (keys: React.Key[]) =>
-          onSelectChange(keys.filter((k) => typeof k !== 'string' || !k.startsWith('__'))),
+          onSelectChangeRef.current?.(
+            keys.filter((k) => typeof k !== 'string' || !k.startsWith('__')),
+          ),
         columnWidth: 24,
         getCheckboxProps: (row: any) =>
           row?.kind === 'separator' || row?.kind === 'summary'
@@ -1660,12 +2022,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             <Checkbox
               checked={state === 'checked'}
               indeterminate={state === 'indeterminate'}
-              onChange={() => onSelectChange?.(toggleGroupSelection(selectedRowKeys, row.selectionKeys))}
+              onChange={() => onSelectChangeRef.current?.(
+                toggleGroupSelection(selectedRowKeys, row.selectionKeys),
+              )}
             />
           );
         },
       }
-    : undefined;
+    : undefined, [cutSelectable, selectedRowKeys]);
 
   const closeRowContextMenu = useCallback(() => {
     setRowContextMenu(null);
@@ -2181,9 +2545,22 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const handleFilmCreated = (filmId: number) => {
     // Set the newly created film in the current editing row
     form.setFieldsValue({ film_id: filmId });
+    cellRuntime.notifyCell(editingKey, 'film_id');
     // Refetch film options to include the new film
     filmQueryResult.refetch();
   };
+
+  const tableRenderVersion = [
+    groupingActive ? 'grouped' : 'flat',
+    currentPage,
+    pageSize,
+    dragSelection.isDragging ? 'dragging' : 'idle',
+    dragSelection.pendingKeys.map(String).join(','),
+    highlightedRowKey ?? '',
+    inlineInvalidDetailKey ?? '',
+    [...invalidDetailKeys].map(String).sort().join(','),
+    validationScrollTargetKey ?? '',
+  ].join('|');
 
   return (
     <>
@@ -2205,10 +2582,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         />
       </OrderDetailsToolbar>
       <TableTopScroll>
-      <Table<any>
+      <OrderDetailCellRuntimeContext.Provider value={cellRuntime}>
+      <MemoizedOrderDetailTable
+        renderVersion={tableRenderVersion}
         className={`order-details-table${groupingActive ? ' details-grouped' : ''}`}
         dataSource={tableRows as any}
-        columns={renderedColumns}
+        columns={stableRenderedColumns}
+        components={ORDER_DETAIL_TABLE_COMPONENTS}
         rowKey={(row: any) => {
           if (row?.kind === 'separator' || row?.kind === 'summary') return row.key;
           const d = row?.kind === 'detail' ? row.detail : row;
@@ -2243,7 +2623,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             setActiveSorter({ key: 'detail_number', order: 'ascend' });
           }
         }}
-        scroll={{ x: 'max-content', y: 500 }}
+        tableLayout="fixed"
+        scroll={{ x: tableScrollWidth, y: 500 }}
         size="small"
         bordered
         rowClassName={(row: any) => {
@@ -2254,13 +2635,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           if (!groupingActive) {
             const classes: string[] = [];
             if (dragSelection.isInPendingSelection(rowKey)) classes.push('drag-selection-pending');
+            if (highlightedRowKey !== null && rowKey === highlightedRowKey) {
+              classes.push('order-detail-row-highlight');
+            }
             if (isValidationInvalid(record)) classes.push('order-detail-validation-error');
             return classes.join(' ');
           }
           const groupIndex = row?.kind === 'detail' ? row.groupIndex : 0;
           const classes = [`detail-group-tint-${groupIndex % GROUP_TINT_COUNT}`];
-          if (isEditing(record)) classes.push('dg-editing');
-          else if (dragSelection.isInPendingSelection(rowKey)) classes.push('dg-pending');
+          if (dragSelection.isInPendingSelection(rowKey)) classes.push('dg-pending');
           else if (highlightedRowKey !== null && rowKey === highlightedRowKey) classes.push('dg-highlight');
           if (isValidationInvalid(record)) classes.push('order-detail-validation-error');
           return classes.join(' ');
@@ -2307,7 +2690,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             </Table.Summary.Row>
           </Table.Summary>
         )}
-        onRow={(row: any, index) => {
+        onRow={(row: any) => {
           if (row?.kind === 'separator' || row?.kind === 'summary') {
             return { style: { cursor: 'default', userSelect: 'none' as const } };
           }
@@ -2315,30 +2698,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           const rowKey = record.temp_id || record.detail_id || 0;
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
           const isCurrentlyEditing = isEditing(record);
-          const isPendingSelection = dragSelection.isInPendingSelection(rowKey);
           const isValidationError = isValidationInvalid(record);
 
           return {
             ref: isHighlighted ? highlightedRowRef : undefined,
             'aria-invalid': isValidationError || undefined,
             title: isValidationError ? `Позиция №${record.detail_number ?? ''} содержит ошибки` : undefined,
-            style: {
-              backgroundColor: isCurrentlyEditing
-                ? 'var(--app-highlight)' // Warm yellow for editing row
-                : isPendingSelection
-                ? 'var(--app-selection-bg)' // Light blue for pending drag selection
-                : isHighlighted
-                ? 'var(--app-selection-bg)' // Light blue for highlighted row
-                : (index! % 2 === 0 ? 'var(--app-surface)' : 'var(--app-surface-muted)'),
-              boxShadow: isCurrentlyEditing ? '0 4px 12px rgba(0, 0, 0, 0.15)' : 'none',
-              outline: isValidationError ? '2px solid #ff4d4f' : undefined,
-              outlineOffset: isValidationError ? '-2px' : undefined,
-              transform: isCurrentlyEditing ? 'scale(1.01)' : 'scale(1)',
-              position: isCurrentlyEditing ? 'relative' as const : 'relative' as const,
-              zIndex: isCurrentlyEditing ? 10 : 1,
-              transition: 'background-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease',
-              border: isCurrentlyEditing ? '2px solid #faad14' : 'none',
-            },
             // Drag selection handlers
             onMouseDown: (e) => {
               // Only start drag if not editing and not clicking interactive elements
@@ -2360,6 +2725,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             };
           }}
         />
+      </OrderDetailCellRuntimeContext.Provider>
       </TableTopScroll>
 
         <Dropdown

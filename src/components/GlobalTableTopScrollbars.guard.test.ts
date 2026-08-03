@@ -14,7 +14,8 @@ describe('global table top scrollbars', () => {
 
   it('shows the extra bar only for real horizontal overflow', () => {
     expect(controller).toContain('scroller.scrollWidth > scroller.clientWidth + 1');
-    expect(controller).toContain('top.hidden = !hasOverflow');
+    expect(controller).toContain('const nextHidden = !hasOverflow');
+    expect(controller).toContain('if (top.hidden !== nextHidden) top.hidden = nextHidden');
   });
 
   it('covers both application layouts without duplicating existing wrappers', () => {
@@ -22,5 +23,11 @@ describe('global table top scrollbars', () => {
     expect(read('./workspace/WorkspaceLayout.tsx')).toContain('<GlobalTableTopScrollbars />');
     expect(read('./TableTopScroll.tsx')).toContain('data-table-top-scroll-managed="true"');
     expect(controller).toContain("table.closest('[data-table-top-scroll-managed=\"true\"]')");
+  });
+
+  it('ignores non-table DOM mutations before remeasuring table scrollbars', () => {
+    expect(controller).toContain('const hasTableMutation');
+    expect(controller).toContain('new MutationObserver((mutations)');
+    expect(controller).toContain('if (hasTableMutation(mutations)) scheduleSync();');
   });
 });

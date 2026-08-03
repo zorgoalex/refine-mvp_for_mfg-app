@@ -4,6 +4,11 @@ export const findTableHorizontalScroller = (root: ParentNode): HTMLElement | nul
   (root.querySelector('.ant-table-body') as HTMLElement | null) ??
   (root.querySelector('.ant-table-content') as HTMLElement | null);
 
+interface TableTopScrollState {
+  scrollWidth: number;
+  visible: boolean;
+}
+
 /**
  * Wraps a horizontally-scrollable Ant Design `<Table>` and renders a SECOND
  * horizontal scrollbar pinned to the TOP of the table, kept in sync with the
@@ -25,8 +30,10 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
 }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
-  const [scrollWidth, setScrollWidth] = useState(0);
-  const [visible, setVisible] = useState(false);
+  const [scrollState, setScrollState] = useState<TableTopScrollState>({
+    scrollWidth: 0,
+    visible: false,
+  });
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -38,26 +45,32 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
     let scroller: HTMLElement | null = null;
     let syncingTop = false;
     let syncingScroller = false;
+    let frame = 0;
+    let resizeObserver: ResizeObserver | null = null;
 
     const measure = () => {
-      const s = findScroller();
-      if (!s) return;
-      setScrollWidth(s.scrollWidth);
-      setVisible(s.scrollWidth > s.clientWidth + 1);
+      if (!scroller) return;
+      const nextScrollWidth = scroller.scrollWidth;
+      const nextVisible = nextScrollWidth > scroller.clientWidth + 1;
+      setScrollState((current) =>
+        current.scrollWidth === nextScrollWidth && current.visible === nextVisible
+          ? current
+          : { scrollWidth: nextScrollWidth, visible: nextVisible },
+      );
     };
 
     const onTopScroll = () => {
       if (syncingScroller) return;
-      const s = findScroller();
+      const s = scroller;
       if (!s) return;
       syncingTop = true;
-      s.scrollLeft = top.scrollLeft;
+      if (s.scrollLeft !== top.scrollLeft) s.scrollLeft = top.scrollLeft;
       syncingTop = false;
     };
     const onScrollerScroll = () => {
-      if (syncingTop) return;
+      if (!scroller || syncingTop) return;
       syncingScroller = true;
-      top.scrollLeft = (findScroller()?.scrollLeft) ?? 0;
+      if (top.scrollLeft !== scroller.scrollLeft) top.scrollLeft = scroller.scrollLeft;
       syncingScroller = false;
     };
 
@@ -65,26 +78,34 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
       const s = findScroller();
       if (s && s !== scroller) {
         scroller?.removeEventListener('scroll', onScrollerScroll);
+        if (scroller && resizeObserver) resizeObserver.unobserve(scroller);
         scroller = s;
         scroller.addEventListener('scroll', onScrollerScroll, { passive: true });
+        resizeObserver?.observe(scroller);
       }
       measure();
     };
 
+    const scheduleAttach = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(attach);
+    };
+
     top.addEventListener('scroll', onTopScroll, { passive: true });
+
+    resizeObserver = new ResizeObserver(scheduleAttach);
+    resizeObserver.observe(wrap);
     attach();
 
-    const ro = new ResizeObserver(() => attach());
-    if (scroller) ro.observe(scroller);
-    ro.observe(wrap);
     // Column/data changes swap inner nodes — re-resolve the scroller + width.
-    const mo = new MutationObserver(() => attach());
+    const mo = new MutationObserver(scheduleAttach);
     mo.observe(wrap, { childList: true, subtree: true });
 
     return () => {
+      window.cancelAnimationFrame(frame);
       top.removeEventListener('scroll', onTopScroll);
       scroller?.removeEventListener('scroll', onScrollerScroll);
-      ro.disconnect();
+      resizeObserver?.disconnect();
       mo.disconnect();
     };
   }, []);
@@ -98,10 +119,10 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
           overflowX: 'auto',
           overflowY: 'hidden',
           // Keep layout stable but hide the bar when there is nothing to scroll.
-          height: visible ? undefined : 0,
+          height: scrollState.visible ? undefined : 0,
         }}
       >
-        <div style={{ width: scrollWidth, height: 1 }} />
+        <div style={{ width: scrollState.scrollWidth, height: 1 }} />
       </div>
       {children}
     </div>

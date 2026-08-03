@@ -13,6 +13,24 @@ const findHorizontalScroller = (table: HTMLElement): HTMLElement | null => {
   return candidates.find((node) => node.scrollWidth > node.clientWidth + 1) ?? candidates[0] ?? null;
 };
 
+const isTableRelatedNode = (node: Node): boolean => {
+  if (!(node instanceof Element)) return false;
+  return (
+    node.matches(TABLE_SELECTOR) ||
+    Boolean(node.closest(TABLE_SELECTOR)) ||
+    Boolean(node.querySelector(TABLE_SELECTOR))
+  );
+};
+
+const hasTableMutation = (mutations: MutationRecord[]): boolean =>
+  mutations.some((mutation) => {
+    if (isTableRelatedNode(mutation.target)) return true;
+    return (
+      Array.from(mutation.addedNodes).some(isTableRelatedNode) ||
+      Array.from(mutation.removedNodes).some(isTableRelatedNode)
+    );
+  });
+
 const attachTopScrollbar = (table: HTMLElement): TableController | null => {
   if (table.closest('[data-table-top-scroll-managed="true"]')) return null;
 
@@ -56,9 +74,15 @@ const attachTopScrollbar = (table: HTMLElement): TableController | null => {
     }
 
     const hasOverflow = Boolean(scroller && scroller.scrollWidth > scroller.clientWidth + 1);
-    top.hidden = !hasOverflow;
-    spacer.style.width = hasOverflow ? `${scroller?.scrollWidth ?? 0}px` : '0';
-    if (hasOverflow && scroller) top.scrollLeft = scroller.scrollLeft;
+    const nextHidden = !hasOverflow;
+    if (top.hidden !== nextHidden) top.hidden = nextHidden;
+
+    const nextSpacerWidth = hasOverflow ? `${scroller?.scrollWidth ?? 0}px` : '0';
+    if (spacer.style.width !== nextSpacerWidth) spacer.style.width = nextSpacerWidth;
+
+    if (hasOverflow && scroller && top.scrollLeft !== scroller.scrollLeft) {
+      top.scrollLeft = scroller.scrollLeft;
+    }
   };
 
   resizeObserver = new ResizeObserver(measure);
@@ -107,7 +131,9 @@ export const GlobalTableTopScrollbars = () => {
       frame = window.requestAnimationFrame(syncTables);
     };
 
-    const mutationObserver = new MutationObserver(scheduleSync);
+    const mutationObserver = new MutationObserver((mutations) => {
+      if (hasTableMutation(mutations)) scheduleSync();
+    });
     mutationObserver.observe(document.body, { childList: true, subtree: true });
     const resizeObserver = new ResizeObserver(scheduleSync);
     resizeObserver.observe(document.documentElement);

@@ -101,12 +101,18 @@ describe('order save validation presentation', () => {
       new URL('../pages/orders/components/tables/OrderDetailTable.tsx', import.meta.url),
       'utf8',
     );
+    const appCss = readFileSync(
+      new URL('../styles/app.css', import.meta.url),
+      'utf8',
+    );
 
     expect(orderFormSource).toContain('<OrderSaveValidationContext.Provider value={saveValidation}>');
     expect(orderFormSource).toContain("setActiveTab('details')");
     expect(tableSource).toContain('isValidationInvalid(record)');
     expect(tableSource).toContain("'aria-invalid': isValidationError || undefined");
-    expect(tableSource).toContain("outline: isValidationError ? '2px solid #ff4d4f'");
+    expect(tableSource).toContain("classes.push('order-detail-validation-error')");
+    expect(appCss).toContain('tr.order-detail-validation-error > td');
+    expect(appCss).toContain('inset 0 2px 0 #ff4d4f');
     expect(tableSource).toContain('pageContainingOrderDetail(paginatedDetails, firstInvalidDetail, pageSize)');
   });
 

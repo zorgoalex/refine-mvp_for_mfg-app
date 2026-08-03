@@ -4,6 +4,8 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 
+const DRAG_ACTIVATION_DISTANCE_PX = 5;
+
 export interface UseDragSelectionOptions<T> {
   /** Array of items (rows) */
   items: T[];
@@ -59,6 +61,11 @@ export function useDragSelection<T>({
   const startIndexRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
   const pendingKeysRef = useRef<React.Key[]>([]);
+  const pendingDragRef = useRef<{
+    startIndex: number;
+    startX: number;
+    startY: number;
+  } | null>(null);
 
   // Auto-scroll
   const autoScrollRef = useRef<number | null>(null);
@@ -107,12 +114,15 @@ export function useDragSelection<T>({
 
     if (index === dragStartIndex) {
       setEndIndex(index);
+      pendingKeysRef.current = [];
       setPendingKeys([]);
       return;
     }
 
     setEndIndex(index);
-    setPendingKeys(calculatePendingKeys(dragStartIndex, index));
+    const nextPendingKeys = calculatePendingKeys(dragStartIndex, index);
+    pendingKeysRef.current = nextPendingKeys;
+    setPendingKeys(nextPendingKeys);
   }, [calculatePendingKeys, startIndex]);
 
   const updatePendingFromPoint = useCallback((x: number, y: number) => {
@@ -185,17 +195,41 @@ export function useDragSelection<T>({
     };
   }, [isDragging, performAutoScroll]);
 
-  // Global mouse move/up handlers
+  // Keep the initial mouse down outside React state. A normal click or double
+  // click must not rerender the table; drag state starts only after real motion.
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
+      const pendingDrag = pendingDragRef.current;
+      if (!pendingDrag) return;
+
       lastMouseXRef.current = e.clientX;
       lastMouseYRef.current = e.clientY;
+
+      if (!isDraggingRef.current) {
+        const distance = Math.hypot(
+          e.clientX - pendingDrag.startX,
+          e.clientY - pendingDrag.startY,
+        );
+        if (distance < DRAG_ACTIVATION_DISTANCE_PX) return;
+
+        isDraggingRef.current = true;
+        startIndexRef.current = pendingDrag.startIndex;
+        pendingKeysRef.current = [];
+        setIsDragging(true);
+        setStartIndex(pendingDrag.startIndex);
+        setEndIndex(pendingDrag.startIndex);
+        setPendingKeys([]);
+      }
+
       updatePendingFromPoint(e.clientX, e.clientY);
     };
 
     const handleGlobalMouseUp = () => {
-      if (isDragging) {
+      if (!pendingDragRef.current) return;
+      pendingDragRef.current = null;
+
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
         setIsDragging(false);
         if (pendingKeysRef.current.length === 0) {
           setStartIndex(null);
@@ -203,19 +237,19 @@ export function useDragSelection<T>({
           startIndexRef.current = null;
         }
         // Keep non-empty pending selection until confirmation/cancel.
+      } else {
+        startIndexRef.current = null;
       }
     };
 
-    if (isDragging) {
-      document.addEventListener('mousemove', handleGlobalMouseMove);
-      document.addEventListener('mouseup', handleGlobalMouseUp);
-    }
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    document.addEventListener('mouseup', handleGlobalMouseUp);
 
     return () => {
       document.removeEventListener('mousemove', handleGlobalMouseMove);
       document.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [isDragging, updatePendingFromPoint]);
+  }, [updatePendingFromPoint]);
 
   // Handle mouse down on row - start drag
   const handleMouseDown = useCallback((rowKey: React.Key, event: React.MouseEvent) => {
@@ -241,16 +275,13 @@ export function useDragSelection<T>({
 
     event.preventDefault();
 
-    setIsDragging(true);
-    setStartIndex(index);
-    startIndexRef.current = index;
-    setEndIndex(index);
+    pendingDragRef.current = {
+      startIndex: index,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
     lastMouseXRef.current = event.clientX;
     lastMouseYRef.current = event.clientY;
-
-    // Do not create a one-row pending selection on mouse down. Double-click
-    // starts with two mouse downs and must not look like drag selection.
-    setPendingKeys([]);
   }, []);
 
   // Handle mouse enter on row - extend selection
@@ -292,6 +323,8 @@ export function useDragSelection<T>({
     setStartIndex(null);
     setEndIndex(null);
     startIndexRef.current = null;
+    pendingDragRef.current = null;
+    isDraggingRef.current = false;
     setIsDragging(false);
   }, []);
 

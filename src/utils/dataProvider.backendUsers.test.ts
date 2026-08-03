@@ -226,6 +226,13 @@ describe('dataProvider users rollback routing', () => {
   });
 
   it('falls back to legacy GraphQL users read when backend users flag is disabled', async () => {
+    const { authSession } = await import('../api/authSession');
+    authSession.setUser({
+      id: '7',
+      username: 'admin',
+      role: 'admin',
+      permissions: ['users.view'],
+    });
     const { dataProvider } = await import('./dataProvider');
 
     const result = await dataProvider('').getList({

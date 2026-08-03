@@ -39,7 +39,7 @@ describe('OrderShow sticky detail header guards', () => {
   });
 
   it('pins the stack below workspace tabs and keeps table headers below the sticky toolbar', () => {
-    const stickyStackStart = showSource.indexOf('className="order-show-summary-tabs-sticky"');
+    const stickyStackStart = showSource.indexOf('ref={orderShowSummaryTabsRef}');
     const toolbarRender = showSource.indexOf('{orderShowDetailsToolbar}', stickyStackStart);
     const infoPanelRender = showSource.indexOf('{activeInfoPanel &&', stickyStackStart);
     const detailsSection = showSource.indexOf('className="order-show-details-section"', stickyStackStart);
@@ -67,5 +67,30 @@ describe('OrderShow sticky detail header guards', () => {
     expect(appCss).not.toMatch(/\.order-show-details-table \.ant-table-thead > tr > th[\s\S]*position:\s*sticky/);
     expect(appCss).not.toContain('order-show-page--table-header-ready');
     expect(appCss).not.toMatch(/\.order-show-page--sticky-enabled \.order-show-details-table \.ant-table-thead > tr > th[\s\S]*position:\s*sticky/);
+  });
+
+  it('keeps detail cell component identities stable across sticky state changes', () => {
+    expect(showSource).toContain('const ORDER_SHOW_DETAIL_TABLE_COMPONENTS = {');
+    expect(showSource).toContain('components={ORDER_SHOW_DETAIL_TABLE_COMPONENTS}');
+    expect(showSource).not.toContain('components={{\n                header:');
+    expect(showSource).toContain('shouldCellUpdate: (row: any, previousRow: any) => {');
+  });
+
+  it('does not reconcile the full detail table when only sticky summary state changes', () => {
+    expect(showSource).toContain('function useStableOrderShowColumns');
+    expect(showSource).toContain('const MemoizedOrderShowTable = memo(');
+    expect(showSource).toContain('<MemoizedOrderShowTable');
+    expect(showSource).toContain('renderVersion={orderShowDetailTableRenderVersion}');
+    expect(showSource).toContain('columns={stableRenderedDetailColumns}');
+    expect(showSource).toContain("order-show-summary-tabs-sticky--stuck");
+    expect(showSource).not.toContain("order-show-page--summary-stuck");
+    expect(appCss).toContain('.order-show-summary-tabs-sticky--stuck');
+  });
+
+  it('uses CSS row hover without Ant Table per-cell mouse handlers', () => {
+    expect(showSource).toContain('const OrderShowDetailBodyCell = forwardRef<');
+    expect(showSource).toContain('onMouseEnter: _onMouseEnter');
+    expect(showSource).toContain('onMouseLeave: _onMouseLeave');
+    expect(showSource).toContain('body: { cell: OrderShowDetailBodyCell }');
   });
 });

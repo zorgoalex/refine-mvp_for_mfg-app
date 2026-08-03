@@ -21,11 +21,11 @@ describe('OrderDetailTable reference cells', () => {
     expect(cellBlock).not.toMatch(/useOne\s*\(/);
   });
 
-  it('keeps narrow numeric columns readable at the right scroll edge', () => {
-    expect(source).toContain("key: 'doweling',\n      width: 52");
-    expect(source).toContain("key: 'milling_cost_per_sqm',\n      width: 100");
+  it('keeps fixed numeric columns readable at the right scroll edge', () => {
+    expect(source).toContain("key: 'doweling',\n      width: 64");
+    expect(source).toContain("key: 'milling_cost_per_sqm',\n      width: 140");
     expect(source).toContain("fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums'");
-    expect(source).toContain("scroll={{ x: 'max-content', y: 500 }}");
+    expect(source).toContain('scroll={{ x: tableScrollWidth, y: 500 }}');
   });
 
   it('keeps the detail production status column compact in the order card table', () => {
