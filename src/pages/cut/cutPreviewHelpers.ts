@@ -113,6 +113,36 @@ export function sheetAxisOriginKey(userId: string, cutJobId: number): string {
   return `cut:sheet-axis-origin:${userId}:${cutJobId}`;
 }
 
+export function sheetAxisOriginPolicyKey(userId: string, cutJobId: number): string {
+  return `cut:sheet-axis-origin-policy:${userId}:${cutJobId}`;
+}
+
+export function loadNonVacuumSheetAxisOrigin(
+  userId: string,
+  cutJobId: number,
+): CutAxisOrigin | null {
+  try {
+    const stored = localStorage.getItem(sheetAxisOriginPolicyKey(userId, cutJobId));
+    if (stored === 'v1:top-left') return 'top-left';
+    if (stored === 'v1:bottom-left') return 'bottom-left';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveNonVacuumSheetAxisOrigin(
+  userId: string,
+  cutJobId: number,
+  axisOrigin: CutAxisOrigin,
+): void {
+  try {
+    localStorage.setItem(sheetAxisOriginPolicyKey(userId, cutJobId), `v1:${axisOrigin}`);
+  } catch {
+    // ignore storage failures
+  }
+}
+
 export function parseStoredAxisOrigin(raw: string | null): CutAxisOrigin {
   return raw === 'top-left' || raw === 'tl' || raw === 'raw' ? 'top-left' : 'bottom-left';
 }

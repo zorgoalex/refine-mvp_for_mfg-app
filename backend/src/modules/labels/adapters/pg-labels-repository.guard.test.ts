@@ -4,6 +4,10 @@ import type { DatabaseService } from '../../../database/database.service';
 import { buildOrderLabelsArchiveFilename, PgLabelsRepository } from './pg-labels-repository';
 
 const source = readFileSync(new URL('./pg-labels-repository.ts', import.meta.url), 'utf8');
+const cutMapMigration = readFileSync(
+  new URL('../../../../db/migrations/081_label_cut_maps.sql', import.meta.url),
+  'utf8',
+);
 
 describe('PgLabelsRepository structural guards', () => {
   it('requires row version when updating existing order label data', () => {
@@ -46,6 +50,11 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toContain('cpp.params->>\'layout_mode\'');
     expect(source).toContain('AS is_vacuum');
     expect(source).toContain('isVacuum: row.is_vacuum === true');
+  });
+
+  it('projects label cut-map thumbnails from the immutable top-left render view', () => {
+    expect(cutMapMigration).toContain("r0:raw:top-left:labels-off");
+    expect(source).toContain('s.base_svg');
   });
 
   it('exposes detail cut and bath calculation numbers for source selection in order labels', () => {

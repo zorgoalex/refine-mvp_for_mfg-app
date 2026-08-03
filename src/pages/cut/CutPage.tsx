@@ -51,8 +51,25 @@ import { ApiError } from '../../api/httpClient';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfileHelpers';
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
-import { applyCutProfileSelection, isVacuumTableProfile } from './cutVacuumProfile';
-import { buildSheetPieceOverlays, cutPdfPreviewBlockReason, loadSheetOrientationPortrait, saveSheetOrientationPortrait, loadSheetOriginTopLeft, loadSheetAxisOrigin, saveSheetAxisOrigin, selectVariantSheets, shouldShowCutStaleBadge } from './cutPreviewHelpers';
+import {
+  applyCutProfileSelection,
+  isVacuumTableProfile,
+  resolveCutJobLayoutKind,
+  resolveSheetAxisOriginForJob,
+} from './cutVacuumProfile';
+import {
+  buildSheetPieceOverlays,
+  cutPdfPreviewBlockReason,
+  loadNonVacuumSheetAxisOrigin,
+  loadSheetAxisOrigin,
+  loadSheetOrientationPortrait,
+  loadSheetOriginTopLeft,
+  saveNonVacuumSheetAxisOrigin,
+  saveSheetAxisOrigin,
+  saveSheetOrientationPortrait,
+  selectVariantSheets,
+  shouldShowCutStaleBadge,
+} from './cutPreviewHelpers';
 import { TableTopScroll } from '../../components/TableTopScroll';
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { SheetPreview } from './SheetPreview';
@@ -709,6 +726,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const isHistoricalResult = selectedResult !== null && isFrozenResultSelection;
   const pdfTemplateIsRequestOnly = isHistoricalResult || job?.status === 'archived';
   const [profiles, setProfiles] = useState<CutParamProfile[]>([]);
+  const rawJobCalculatedEngine = job?.groups.find(
+    (group) => group.summary?.engine_used,
+  )?.summary?.engine_used;
+  const jobCalculatedEngine = typeof rawJobCalculatedEngine === 'string'
+    ? rawJobCalculatedEngine
+    : undefined;
   // Per-user, per-job sheet preview orientation, persisted in localStorage.
   // Vacuum-table jobs default to landscape; other profiles default to portrait.
   // Landscape rotates the render server-side (labels stay upright).
@@ -717,7 +740,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // (default) the dense cluster sits at the view's top-left (transpose); when
   // false it keeps the legacy 90° CW top-right. Persisted in localStorage.
   const [sheetOriginTopLeft, setSheetOriginTopLeft] = useState(true);
-  const [sheetAxisOrigin, setSheetAxisOrigin] = useState<CutAxisOrigin>('bottom-left');
+  const [sheetAxisOrigin, setSheetAxisOrigin] = useState<CutAxisOrigin>('top-left');
   const [eligible, setEligible] = useState<EligibleDetailDto[] | null>(null);
   const [noSheetSpecCount, setNoSheetSpecCount] = useState(0);
   const [selected, setSelected] = useState<number[]>([]);
@@ -767,9 +790,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     });
   }, []);
 
-  // Load this user's saved orientation + origin for the opened job. An explicit
-  // saved choice wins; otherwise vacuum-table defaults to landscape and all
-  // other profiles default to portrait.
+  // Load this user's saved orientation + origin for the opened job. Vacuum-table
+  // jobs retain their axis preference. Every non-vacuum job migrates to top-left
+  // once, including old jobs; an explicit choice made afterwards is retained.
   useEffect(() => {
     if (!job) return;
     const uid = authSession.getUser()?.id ?? 'anon';
@@ -779,8 +802,28 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       !isVacuumTableProfile(job.paramProfileId, profiles),
     ));
     setSheetOriginTopLeft(loadSheetOriginTopLeft(uid, job.cutJobId));
-    setSheetAxisOrigin(loadSheetAxisOrigin(uid, job.cutJobId));
-  }, [job?.cutJobId, job?.paramProfileId, profiles]);
+    const savedNonVacuumAxisOrigin = loadNonVacuumSheetAxisOrigin(uid, job.cutJobId);
+    const nextAxisOrigin = resolveSheetAxisOriginForJob(
+      job.paramProfileId,
+      profiles,
+      loadSheetAxisOrigin(uid, job.cutJobId),
+      jobCalculatedEngine,
+      savedNonVacuumAxisOrigin,
+      isHistoricalResult,
+    );
+    setSheetAxisOrigin(nextAxisOrigin);
+    if (
+      savedNonVacuumAxisOrigin === null
+      && resolveCutJobLayoutKind(
+        job.paramProfileId,
+        profiles,
+        jobCalculatedEngine,
+        isHistoricalResult,
+      ) === 'non-vacuum'
+    ) {
+      saveNonVacuumSheetAxisOrigin(uid, job.cutJobId, nextAxisOrigin);
+    }
+  }, [isHistoricalResult, job?.cutJobId, job?.paramProfileId, jobCalculatedEngine, profiles]);
 
   useEffect(() => {
     if (!job) {
@@ -818,11 +861,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       setSheetAxisOrigin(axisOrigin);
       if (job) {
         const uid = authSession.getUser()?.id ?? 'anon';
-        saveSheetAxisOrigin(uid, job.cutJobId, axisOrigin);
+        const layoutKind = resolveCutJobLayoutKind(
+          job.paramProfileId,
+          profiles,
+          jobCalculatedEngine,
+          isHistoricalResult,
+        );
+        if (layoutKind === 'non-vacuum') {
+          saveNonVacuumSheetAxisOrigin(uid, job.cutJobId, axisOrigin);
+        } else {
+          saveSheetAxisOrigin(uid, job.cutJobId, axisOrigin);
+        }
       }
       resetSheetViews();
     },
-    [job, resetSheetViews],
+    [isHistoricalResult, job, jobCalculatedEngine, profiles, resetSheetViews],
   );
 
   useEffect(() => {

@@ -5,6 +5,9 @@ import {
   applyCutProfileSelection,
   firstBathSheetMaterialId,
   isVacuumTableProfile,
+  isVacuumTableJob,
+  resolveCutJobLayoutKind,
+  resolveSheetAxisOriginForJob,
 } from './cutVacuumProfile';
 
 const profile = (id: number, layoutMode: string): CutParamProfile => ({
@@ -52,6 +55,46 @@ describe('vacuum profile defaults', () => {
     expect(isVacuumTableProfile(4, profiles)).toBe(true);
     expect(isVacuumTableProfile(5, profiles)).toBe(false);
     expect(isVacuumTableProfile(null, profiles)).toBe(false);
+  });
+
+  it('opens every non-vacuum profile top-left and preserves the saved vacuum origin', () => {
+    const profiles = [profile(4, 'vacuum_table'), profile(5, 'guillotine')];
+
+    expect(resolveSheetAxisOriginForJob(5, profiles, 'bottom-left')).toBe('top-left');
+    expect(resolveSheetAxisOriginForJob(null, profiles, 'bottom-left')).toBe('top-left');
+    expect(resolveSheetAxisOriginForJob(4, profiles, 'bottom-left')).toBe('bottom-left');
+    expect(resolveSheetAxisOriginForJob(4, profiles, 'top-left')).toBe('top-left');
+  });
+
+  it('uses the calculated engine for frozen results when the profile catalog changed', () => {
+    const profiles = [profile(4, 'vacuum_table'), profile(5, 'guillotine')];
+
+    expect(resolveSheetAxisOriginForJob(5, profiles, 'bottom-left', 'vacuum_table', null, true))
+      .toBe('bottom-left');
+    expect(resolveSheetAxisOriginForJob(4, profiles, 'bottom-left', 'guillotine', null, true))
+      .toBe('top-left');
+    expect(isVacuumTableJob(5, profiles, 'vacuum_table', true)).toBe(true);
+  });
+
+  it('uses the current profile for live jobs with groups from an older calculation', () => {
+    const profiles = [profile(4, 'vacuum_table'), profile(5, 'guillotine')];
+
+    expect(resolveSheetAxisOriginForJob(5, profiles, 'bottom-left', 'vacuum_table'))
+      .toBe('top-left');
+    expect(resolveSheetAxisOriginForJob(4, profiles, 'bottom-left', 'guillotine'))
+      .toBe('bottom-left');
+  });
+
+  it('preserves a later explicit user choice after applying the non-vacuum default once', () => {
+    const profiles = [profile(5, 'guillotine')];
+
+    expect(resolveSheetAxisOriginForJob(5, profiles, 'bottom-left', 'guillotine', 'bottom-left'))
+      .toBe('bottom-left');
+  });
+
+  it('does not classify a profile until its catalog row or calculated engine is available', () => {
+    expect(resolveCutJobLayoutKind(4, [], undefined)).toBe('unknown');
+    expect(resolveSheetAxisOriginForJob(4, [], 'bottom-left')).toBe('bottom-left');
   });
 
   it('chooses the first list item whose trimmed name starts with «ванна»', () => {

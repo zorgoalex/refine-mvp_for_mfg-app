@@ -376,12 +376,21 @@ describe('CutPage source guards', () => {
     expect(source).toContain('viewEpochRef.current !== epoch');
   });
 
-  it('axis-origin radio: defaults bottom-left, resets previews, and threads the option everywhere', () => {
+  it('axis-origin radio: opens non-vacuum jobs top-left, resets previews, and threads the option everywhere', () => {
     const toggle = source.slice(source.indexOf('const changeSheetAxisOrigin'));
     const body = toggle.slice(0, toggle.indexOf('],'));
     expect(body).toContain('saveSheetAxisOrigin');
+    expect(body).toContain("layoutKind === 'non-vacuum'");
+    expect(body).toContain('saveNonVacuumSheetAxisOrigin');
     expect(body).toContain('resetSheetViews()');
-    expect(source).toContain("useState<CutAxisOrigin>('bottom-left')");
+    expect(source).toContain("useState<CutAxisOrigin>('top-left')");
+    expect(source).toContain('resolveSheetAxisOriginForJob(');
+    expect(source).toContain('loadSheetAxisOrigin(uid, job.cutJobId)');
+    expect(source).toContain('group.summary?.engine_used');
+    expect(source).toContain("typeof rawJobCalculatedEngine === 'string'");
+    expect(source).toContain('isHistoricalResult,');
+    expect(source).toContain('loadNonVacuumSheetAxisOrigin(uid, job.cutJobId)');
+    expect(source).toContain('saveNonVacuumSheetAxisOrigin(uid, job.cutJobId, nextAxisOrigin)');
     expect(source).toContain('<Radio.Button value="bottom-left" aria-label="Точка отсчёта слева снизу">');
     expect(source).toContain('<Radio.Button value="top-left" aria-label="Точка отсчёта слева сверху">');
     expect(source).toContain('<SheetOriginIcon axisOrigin="bottom-left" />');

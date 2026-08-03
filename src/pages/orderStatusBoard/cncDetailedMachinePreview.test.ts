@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cutApi } from '../../api/cutApi';
 import type { CutResultDto } from '../../api/types/cutApi.types';
 import type { CncDetailedMachineSource } from './cncDetailedMachine';
 import {
@@ -11,9 +12,34 @@ import {
   loadCncDetailedMachineSvgPreview,
   type CncDetailedMachinePreviewDependencies,
 } from './cncDetailedMachinePreview';
+import { NON_VACUUM_SHEET_AXIS_ORIGIN } from '../cut/cutVacuumProfile';
 
 describe('CNC detailed machine preview cache', () => {
   beforeEach(() => clearCncDetailedMachinePreviewCaches());
+  afterEach(() => vi.restoreAllMocks());
+
+  it('requests imported non-vacuum machine sheets with a top-left origin', async () => {
+    vi.spyOn(cutApi, 'getResult').mockResolvedValue(result(35, 3));
+    const fetchSheetSvg = vi.spyOn(cutApi, 'fetchSheetSvg').mockResolvedValue(
+      new Blob(['<svg/>'], { type: 'image/svg+xml' }),
+    );
+
+    await loadCncDetailedMachineSvgPreview(source(35, 3), 7001);
+
+    expect(NON_VACUUM_SHEET_AXIS_ORIGIN).toBe('top-left');
+    expect(fetchSheetSvg).toHaveBeenCalledWith(
+      35,
+      350,
+      0,
+      false,
+      undefined,
+      'result-35-3',
+      false,
+      'top-left',
+      3,
+      true,
+    );
+  });
 
   it('reuses the same result and SVG sheet when switching detail A → B → A', async () => {
     const dependencies = previewDependencies();

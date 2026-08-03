@@ -6,6 +6,7 @@ import {
   type CncDetailedMachineSource,
   type CncMachineResultSheet,
 } from './cncDetailedMachine';
+import { NON_VACUUM_SHEET_AXIS_ORIGIN } from '../cut/cutVacuumProfile';
 
 export const CNC_MACHINE_RESULT_CACHE_LIMIT = 32;
 export const CNC_MACHINE_SVG_CACHE_LIMIT = 128;
@@ -90,7 +91,7 @@ const defaultDependencies: CncDetailedMachinePreviewDependencies = {
       undefined,
       renderToken,
       false,
-      'bottom-left',
+      NON_VACUUM_SHEET_AXIS_ORIGIN,
       resultNo,
       true,
     )

@@ -149,7 +149,7 @@ export const cutApi = {
     variant?: 'auto' | 'manual' | 'active',
     renderToken?: string,
     originTopLeft = true,
-    axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
+    axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     resultNo?: number,
     pieceMetadata = false,
   ): Promise<Blob> {
@@ -180,7 +180,7 @@ export const cutApi = {
     variant?: 'auto' | 'manual' | 'active',
     renderToken?: string,
     originTopLeft = true,
-    axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
+    axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     resultNo?: number,
     pieceMetadata = false,
   ): Promise<Blob> {
@@ -210,7 +210,7 @@ export const cutApi = {
     renderToken?: string,
     originTopLeft = true,
     pdfTemplate?: string,
-    axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left',
+    axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     resultNo?: number,
   ): Promise<CutPdfResult> {
     const path = resultNo === undefined
@@ -233,7 +233,7 @@ export const cutApi = {
    * Whole-job PDF. Current-job exports are freshly rendered by the backend each
    * time; 202 is still accepted for older/result paths that may answer pending.
    */
-  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string, axisOrigin: 'top-left' | 'bottom-left' = 'bottom-left', resultNo?: number): Promise<CutPdfResult> {
+  fetchJobPdf(cutJobId: number, landscape = false, renderToken?: string, originTopLeft = true, pdfTemplate?: string, axisOrigin: 'top-left' | 'bottom-left' = 'top-left', resultNo?: number): Promise<CutPdfResult> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.jobPdf(validateCutJobId(cutJobId))
       : apiRoutes.cutJobs.resultJobPdf(validateCutJobId(cutJobId), validateCutJobId(resultNo));

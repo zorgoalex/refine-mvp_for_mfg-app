@@ -1,6 +1,9 @@
 import type { CutParamProfile } from '../../api/cutConfigApi';
 import type { CutJobDto, CutSheetTypeOption } from '../../api/types/cutApi.types';
 
+export const NON_VACUUM_SHEET_AXIS_ORIGIN = 'top-left' as const;
+export type CutJobLayoutKind = 'vacuum' | 'non-vacuum' | 'unknown';
+
 export function isVacuumTableProfile(
   profileId: number | null,
   profiles: CutParamProfile[],
@@ -10,6 +13,58 @@ export function isVacuumTableProfile(
       profile.cutParamProfileId === profileId
       && profile.params?.layout_mode === 'vacuum_table',
   );
+}
+
+export function isVacuumTableJob(
+  profileId: number | null,
+  profiles: CutParamProfile[],
+  calculatedEngine?: string | null,
+  preferCalculatedEngine = false,
+): boolean {
+  return resolveCutJobLayoutKind(
+    profileId,
+    profiles,
+    calculatedEngine,
+    preferCalculatedEngine,
+  ) === 'vacuum';
+}
+
+export function resolveCutJobLayoutKind(
+  profileId: number | null,
+  profiles: CutParamProfile[],
+  calculatedEngine?: string | null,
+  preferCalculatedEngine = false,
+): CutJobLayoutKind {
+  if (preferCalculatedEngine && calculatedEngine !== undefined && calculatedEngine !== null) {
+    return calculatedEngine === 'vacuum_table' ? 'vacuum' : 'non-vacuum';
+  }
+  if (profileId === null) return 'non-vacuum';
+  const profile = profiles.find((candidate) => candidate.cutParamProfileId === profileId);
+  if (profile) {
+    return profile.params?.layout_mode === 'vacuum_table' ? 'vacuum' : 'non-vacuum';
+  }
+  if (calculatedEngine !== undefined && calculatedEngine !== null) {
+    return calculatedEngine === 'vacuum_table' ? 'vacuum' : 'non-vacuum';
+  }
+  return 'unknown';
+}
+
+export function resolveSheetAxisOriginForJob(
+  profileId: number | null,
+  profiles: CutParamProfile[],
+  savedAxisOrigin: 'top-left' | 'bottom-left',
+  calculatedEngine?: string | null,
+  nonVacuumAxisOrigin: 'top-left' | 'bottom-left' | null = null,
+  preferCalculatedEngine = false,
+): 'top-left' | 'bottom-left' {
+  const layoutKind = resolveCutJobLayoutKind(
+    profileId,
+    profiles,
+    calculatedEngine,
+    preferCalculatedEngine,
+  );
+  if (layoutKind !== 'non-vacuum') return savedAxisOrigin;
+  return nonVacuumAxisOrigin ?? NON_VACUUM_SHEET_AXIS_ORIGIN;
 }
 
 export function firstBathSheetMaterialId(options: CutSheetTypeOption[]): number | null {

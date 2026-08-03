@@ -92,14 +92,14 @@ describe('cutApi', () => {
     // origin defaults to top-left (transpose); emitted explicitly so the RAW half
     // is never silently dead and browser cache keys differ.
     expect(svgUrl).toContain('origin=tl');
-    expect(svgUrl).toContain('axisOrigin=bottom-left');
+    expect(svgUrl).toContain('axisOrigin=top-left');
     // PNG always includes labels=off (no baked labels; HTML overlay is the sole label source)
     const pngUrl = fetchMock.mock.calls[1][0] as string;
     expect(pngUrl).toContain('/api/v1/cut-jobs/42/groups/100/sheets/0.png');
     expect(pngUrl).toContain('preset=thumb');
     expect(pngUrl).toContain('labels=off');
     expect(pngUrl).toContain('origin=tl');
-    expect(pngUrl).toContain('axisOrigin=bottom-left');
+    expect(pngUrl).toContain('axisOrigin=top-left');
   });
 
   it('reads result history and uses frozen render routes', async () => {
@@ -162,7 +162,7 @@ describe('cutApi', () => {
 
     for (const call of fetchMock.mock.calls) {
       expect(call[0] as string).toContain('origin=tl');
-      expect(call[0] as string).toContain('axisOrigin=bottom-left');
+      expect(call[0] as string).toContain('axisOrigin=top-left');
     }
   });
 

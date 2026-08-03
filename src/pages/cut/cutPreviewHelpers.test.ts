@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildCutPieceTooltipRows,
   buildSheetPieceOverlays,
@@ -14,6 +14,9 @@ import {
   sheetOrientationKey,
   sheetOriginKey,
   sheetAxisOriginKey,
+  sheetAxisOriginPolicyKey,
+  loadNonVacuumSheetAxisOrigin,
+  saveNonVacuumSheetAxisOrigin,
 } from './cutPreviewHelpers';
 import type { CutGroupDto, CutJobItemDto, SheetPlacements } from '../../api/types/cutApi.types';
 
@@ -57,6 +60,8 @@ const baseGroup: CutGroupDto = {
 };
 
 describe('cutPreviewHelpers', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   describe('frozen result PDF policy', () => {
     it('never blocks a saved version because the live job is stale or dirty', () => {
       expect(cutPdfPreviewBlockReason({
@@ -168,6 +173,20 @@ describe('cutPreviewHelpers', () => {
     it('uses a distinct per-user per-job key', () => {
       expect(sheetAxisOriginKey('78', 175)).toBe('cut:sheet-axis-origin:78:175');
       expect(sheetAxisOriginKey('78', 175)).not.toBe(sheetOriginKey('78', 175));
+      expect(sheetAxisOriginPolicyKey('78', 175)).toBe('cut:sheet-axis-origin-policy:78:175');
+    });
+
+    it('stores the post-migration non-vacuum choice separately from the vacuum preference', () => {
+      const values = new Map<string, string>();
+      vi.stubGlobal('localStorage', {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+      });
+
+      expect(loadNonVacuumSheetAxisOrigin('78', 175)).toBeNull();
+      saveNonVacuumSheetAxisOrigin('78', 175, 'top-left');
+      expect(loadNonVacuumSheetAxisOrigin('78', 175)).toBe('top-left');
+      expect(values.get(sheetAxisOriginKey('78', 175))).toBeUndefined();
     });
   });
 
