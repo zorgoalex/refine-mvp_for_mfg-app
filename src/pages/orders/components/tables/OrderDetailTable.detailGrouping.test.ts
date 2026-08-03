@@ -86,7 +86,9 @@ describe('edit-form detail grouping', () => {
     expect(tab).toContain('bathCutJobByDetailId={cutColumnEnabled ? cutJobMaps.bathCutJobByDetailId : undefined}');
     expect(table).toContain("key: 'cut_job'");
     expect(table).toContain("key: 'bath_cut_job'");
+    expect(table).toContain('const ORDER_DETAIL_TABLE_CUT_JOB_COLUMN_WIDTH = 180');
+    expect(table).toContain('const ORDER_DETAIL_TABLE_CUT_JOB_NAME_FONT_SIZE = 7.7');
+    expect(table).toContain('nameFontSize={ORDER_DETAIL_TABLE_CUT_JOB_NAME_FONT_SIZE}');
     expect(table).toContain('cutJobDeepLink(ref)');
-    expect(table).toContain('<CutJobVersionLines job={ref} />');
   });
 });

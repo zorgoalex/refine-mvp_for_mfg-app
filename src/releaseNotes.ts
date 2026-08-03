@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-03",
+    title: "Редактирование заказа: шире колонки раскроя",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В таблице деталей формы редактирования заказа колонки «Раскрой» и «Расчет ванны» стали на 20% шире, а названия заданий на раскрой выводятся уменьшенным шрифтом.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-02",
     title: "Карточка заказа: компактная колонка статуса деталей",
     services: ["ERP"],

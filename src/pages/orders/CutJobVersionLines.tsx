@@ -29,17 +29,20 @@ const nameStyle: CSSProperties = {
 export function CutJobVersionLines({
   job,
   nameSuffix = null,
+  nameFontSize,
 }: {
   job: CutJobVersionLinesJob;
   nameSuffix?: ReactNode;
+  nameFontSize?: number;
 }) {
   const name = job.name.trim();
+  const resolvedNameStyle = nameFontSize == null ? nameStyle : { ...nameStyle, fontSize: nameFontSize };
 
   return (
     <span style={containerStyle}>
       <span style={versionStyle}>{cutJobVersionLabel(job)}</span>
       {name ? (
-        <span style={nameStyle}>
+        <span style={resolvedNameStyle}>
           {name}
           {nameSuffix}
         </span>

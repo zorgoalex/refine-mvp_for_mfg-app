@@ -37,6 +37,8 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(versionLinesSource).toContain('cutJobVersionLabel(job)');
     expect(versionLinesSource).toContain("fontVariantNumeric: 'tabular-nums'");
     expect(versionLinesSource).toContain("overflowWrap: 'anywhere'");
+    expect(versionLinesSource).toContain('nameFontSize?: number');
+    expect(versionLinesSource).toContain('nameFontSize == null ? nameStyle : { ...nameStyle, fontSize: nameFontSize }');
   });
 
   it('renders embedded cut screen as a top order info tab', () => {

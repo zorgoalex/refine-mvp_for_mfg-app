@@ -1562,14 +1562,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           {
             title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Раскрой</div>,
             key: 'cut_job',
-            width: 150,
+            width: ORDER_DETAIL_TABLE_CUT_JOB_COLUMN_WIDTH,
             onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
             render: (_: any, row: any) => {
               const d = asDetail(row);
               if (!d?.detail_id) return null;
               const ref = cutJobByDetailId.get(d.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} nameFontSize={ORDER_DETAIL_TABLE_CUT_JOB_NAME_FONT_SIZE} /></Link>;
             },
           },
         ]
@@ -1579,14 +1579,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           {
             title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Расчет ванны</div>,
             key: 'bath_cut_job',
-            width: 150,
+            width: ORDER_DETAIL_TABLE_CUT_JOB_COLUMN_WIDTH,
             onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
             render: (_: any, row: any) => {
               const d = asDetail(row);
               if (!d?.detail_id) return null;
               const ref = bathCutJobByDetailId.get(d.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} nameFontSize={ORDER_DETAIL_TABLE_CUT_JOB_NAME_FONT_SIZE} /></Link>;
             },
           },
         ]
@@ -2900,3 +2900,6 @@ const ORDER_DETAIL_TABLE_STATUS_EMPTY_BADGE_STYLE: React.CSSProperties = {
   background: 'var(--app-surface)',
   color: 'var(--app-text-muted)',
 };
+
+const ORDER_DETAIL_TABLE_CUT_JOB_COLUMN_WIDTH = 180;
+const ORDER_DETAIL_TABLE_CUT_JOB_NAME_FONT_SIZE = 7.7;
