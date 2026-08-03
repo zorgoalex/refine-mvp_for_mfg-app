@@ -119,6 +119,27 @@ describe('label row builder', () => {
     });
   });
 
+  it('exposes split regular and vacuum cut result version numbers as detail fields', () => {
+    const [row] = buildLabelRows({
+      orderName: 'ERP-548',
+      today: '2026-08-03',
+      template: { customFieldSchema: {} },
+      details: [
+        detail({
+          detailFields: {
+            cut_result_version_no: 3,
+            bath_cut_result_version_no: 7,
+          },
+        }),
+      ],
+    });
+
+    expect(row.values).toMatchObject({
+      'detail.cut_result_version_no': 3,
+      'detail.bath_cut_result_version_no': 7,
+    });
+  });
+
   it('uses per-detail order fields when one label batch contains details from multiple orders', () => {
     const rows = buildLabelRows({
       orderName: null,

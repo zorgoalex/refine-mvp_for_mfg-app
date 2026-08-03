@@ -14,6 +14,7 @@ describe('LabelsConfigTab wiring', () => {
   it('reads and writes only through labelsApi backend endpoints', () => {
     expect(tabSrc).toMatch(/labelsApi\.listTemplates/);
     expect(tabSrc).toMatch(/labelsApi\.listFields/);
+    expect(tabSrc).not.toMatch(/setFields\(\s*LABEL_FIELD_CATALOG/);
     expect(tabSrc).toMatch(/labelsApi\.createTemplate/);
     expect(tabSrc).toMatch(/labelsApi\.updateTemplate/);
     expect(tabSrc).not.toMatch(/dataProvider|gql`|mutation\s/);
