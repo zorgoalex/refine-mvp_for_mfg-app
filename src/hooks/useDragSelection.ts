@@ -32,8 +32,6 @@ export interface UseDragSelectionReturn {
   hasPendingSelection: boolean;
   /** Start drag from a row */
   handleMouseDown: (rowKey: React.Key, event: React.MouseEvent) => void;
-  /** Continue drag over a row */
-  handleMouseEnter: (rowKey: React.Key) => void;
   /** Confirm pending selection */
   confirmSelection: () => void;
   /** Cancel pending selection */
@@ -284,13 +282,6 @@ export function useDragSelection<T>({
     lastMouseYRef.current = event.clientY;
   }, []);
 
-  // Handle mouse enter on row - extend selection
-  const handleMouseEnter = useCallback((rowKey: React.Key) => {
-    const index = keyToIndexMap.current.get(rowKey);
-    if (index === undefined) return;
-    updatePendingToIndex(index);
-  }, [updatePendingToIndex]);
-
   // Confirm pending selection - merge with existing
   const confirmSelection = useCallback(() => {
     if (pendingKeys.length === 0) return;
@@ -353,7 +344,6 @@ export function useDragSelection<T>({
     pendingKeys,
     hasPendingSelection: pendingKeys.length > 0,
     handleMouseDown,
-    handleMouseEnter,
     confirmSelection,
     cancelSelection,
     isInPendingSelection,

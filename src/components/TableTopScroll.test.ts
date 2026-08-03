@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { findTableHorizontalScroller } from './TableTopScroll';
+import { findTableHorizontalScroller, isPrimarilyVerticalWheel } from './TableTopScroll';
 
 const source = readFileSync(new URL('./TableTopScroll.tsx', import.meta.url), 'utf8');
 
@@ -28,10 +28,19 @@ describe('findTableHorizontalScroller', () => {
   });
 });
 
+describe('isPrimarilyVerticalWheel', () => {
+  it('distinguishes vertical wheel input from horizontal scrolling', () => {
+    expect(isPrimarilyVerticalWheel({ deltaX: 0, deltaY: 120 })).toBe(true);
+    expect(isPrimarilyVerticalWheel({ deltaX: 80, deltaY: 10 })).toBe(false);
+    expect(isPrimarilyVerticalWheel({ deltaX: 20, deltaY: 20 })).toBe(false);
+  });
+});
+
 describe('TableTopScroll performance guards', () => {
   it('uses the cached table scroller during scroll synchronization', () => {
     expect(source).toContain('const s = scroller');
-    expect(source).toContain('top.scrollLeft !== scroller.scrollLeft');
+    expect(source).toContain('const scrollLeft = scroller.scrollLeft;');
+    expect(source).toContain('top.scrollLeft !== scrollLeft');
     expect(source).not.toContain('findScroller()?.scrollLeft');
   });
 
@@ -39,5 +48,17 @@ describe('TableTopScroll performance guards', () => {
     expect(source).toContain('requestAnimationFrame(attach)');
     expect(source).toContain('new ResizeObserver(scheduleAttach)');
     expect(source).toContain('new MutationObserver(scheduleAttach)');
+  });
+
+  it('blocks rc-table scroll handlers before reading horizontal layout', () => {
+    const captureStart = source.indexOf('const onManagedScrollCapture');
+    const stopPropagation = source.indexOf('event.stopPropagation()', captureStart);
+    const verticalReturn = source.indexOf('verticalWheelScrollUntil) return', captureStart);
+    const horizontalSync = source.indexOf('onScrollerScroll()', captureStart);
+
+    expect(captureStart).toBeGreaterThan(-1);
+    expect(stopPropagation).toBeGreaterThan(captureStart);
+    expect(verticalReturn).toBeGreaterThan(stopPropagation);
+    expect(horizontalSync).toBeGreaterThan(verticalReturn);
   });
 });

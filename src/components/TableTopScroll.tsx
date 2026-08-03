@@ -9,6 +9,18 @@ interface TableTopScrollState {
   visible: boolean;
 }
 
+interface TableTopScrollProps {
+  children: React.ReactNode;
+  className?: string;
+  manageAntTableScroll?: boolean;
+}
+
+const VERTICAL_WHEEL_SCROLL_QUIET_MS = 160;
+
+export const isPrimarilyVerticalWheel = (
+  event: Pick<WheelEvent, 'deltaX' | 'deltaY'>,
+): boolean => Math.abs(event.deltaY) > Math.abs(event.deltaX);
+
 /**
  * Wraps a horizontally-scrollable Ant Design `<Table>` and renders a SECOND
  * horizontal scrollbar pinned to the TOP of the table, kept in sync with the
@@ -24,9 +36,10 @@ interface TableTopScrollState {
  * table's scrollWidth drives `scrollLeft` both ways. A ResizeObserver +
  * MutationObserver keep the spacer width correct as columns/rows/data change.
  */
-export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: string }> = ({
+export const TableTopScroll: React.FC<TableTopScrollProps> = ({
   children,
   className,
+  manageAntTableScroll = false,
 }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
@@ -47,6 +60,8 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
     let syncingScroller = false;
     let frame = 0;
     let resizeObserver: ResizeObserver | null = null;
+    let headerScroller: HTMLElement | null = null;
+    let verticalWheelScrollUntil = 0;
 
     const measure = () => {
       if (!scroller) return;
@@ -70,8 +85,36 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
     const onScrollerScroll = () => {
       if (!scroller || syncingTop) return;
       syncingScroller = true;
-      if (top.scrollLeft !== scroller.scrollLeft) top.scrollLeft = scroller.scrollLeft;
+      const scrollLeft = scroller.scrollLeft;
+      if (top.scrollLeft !== scrollLeft) top.scrollLeft = scrollLeft;
+      if (manageAntTableScroll && headerScroller && headerScroller.scrollLeft !== scrollLeft) {
+        headerScroller.scrollLeft = scrollLeft;
+      }
       syncingScroller = false;
+    };
+
+    const onManagedWheelCapture = (event: WheelEvent) => {
+      if (
+        !scroller
+        || !(event.target instanceof Node)
+        || (event.target !== scroller && !scroller.contains(event.target))
+        || !isPrimarilyVerticalWheel(event)
+      ) return;
+      verticalWheelScrollUntil = performance.now() + VERTICAL_WHEEL_SCROLL_QUIET_MS;
+    };
+
+    const onManagedScrollCapture = (event: Event) => {
+      if (event.target === headerScroller) {
+        event.stopPropagation();
+        return;
+      }
+      if (event.target !== scroller) return;
+
+      // rc-table reads layout and toggles ping classes here. On wide edit tables
+      // that invalidates every cell and can block the main thread for seconds.
+      event.stopPropagation();
+      if (performance.now() <= verticalWheelScrollUntil) return;
+      onScrollerScroll();
     };
 
     const attach = () => {
@@ -80,9 +123,12 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
         scroller?.removeEventListener('scroll', onScrollerScroll);
         if (scroller && resizeObserver) resizeObserver.unobserve(scroller);
         scroller = s;
-        scroller.addEventListener('scroll', onScrollerScroll, { passive: true });
+        if (!manageAntTableScroll) {
+          scroller.addEventListener('scroll', onScrollerScroll, { passive: true });
+        }
         resizeObserver?.observe(scroller);
       }
+      headerScroller = wrap.querySelector('.ant-table-header');
       measure();
     };
 
@@ -92,6 +138,10 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
     };
 
     top.addEventListener('scroll', onTopScroll, { passive: true });
+    if (manageAntTableScroll) {
+      wrap.addEventListener('wheel', onManagedWheelCapture, { capture: true, passive: true });
+      wrap.addEventListener('scroll', onManagedScrollCapture, { capture: true, passive: true });
+    }
 
     resizeObserver = new ResizeObserver(scheduleAttach);
     resizeObserver.observe(wrap);
@@ -104,11 +154,13 @@ export const TableTopScroll: React.FC<{ children: React.ReactNode; className?: s
     return () => {
       window.cancelAnimationFrame(frame);
       top.removeEventListener('scroll', onTopScroll);
+      wrap.removeEventListener('wheel', onManagedWheelCapture, true);
+      wrap.removeEventListener('scroll', onManagedScrollCapture, true);
       scroller?.removeEventListener('scroll', onScrollerScroll);
       resizeObserver?.disconnect();
       mo.disconnect();
     };
-  }, []);
+  }, [manageAntTableScroll]);
 
   return (
     <div ref={wrapRef} className={className} data-table-top-scroll-managed="true">

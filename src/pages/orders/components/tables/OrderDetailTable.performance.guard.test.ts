@@ -91,5 +91,10 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('onMouseEnter: _onMouseEnter');
     expect(source).toContain('onMouseLeave: _onMouseLeave');
     expect(source).toContain('components={ORDER_DETAIL_TABLE_COMPONENTS}');
+    expect(source).not.toContain('dragSelection.handleMouseEnter');
+  });
+
+  it('isolates edit-table scrolling from rc-table ping updates', () => {
+    expect(source).toContain('<TableTopScroll manageAntTableScroll>');
   });
 });

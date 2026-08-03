@@ -10,7 +10,7 @@ const source = readFileSync(
 describe('useDragSelection interaction performance guards', () => {
   it('does not enter React drag state on an ordinary mouse down', () => {
     const handlerStart = source.indexOf('const handleMouseDown = useCallback');
-    const handlerEnd = source.indexOf('// Handle mouse enter on row', handlerStart);
+    const handlerEnd = source.indexOf('// Confirm pending selection', handlerStart);
     const handler = source.slice(handlerStart, handlerEnd);
 
     expect(handler).toContain('pendingDragRef.current = {');
@@ -22,5 +22,10 @@ describe('useDragSelection interaction performance guards', () => {
     expect(source).toContain('const DRAG_ACTIVATION_DISTANCE_PX = 5;');
     expect(source).toContain('if (distance < DRAG_ACTIVATION_DISTANCE_PX) return;');
     expect(source).toContain('setIsDragging(true);');
+  });
+
+  it('uses the global pointer lookup instead of per-row mouse-enter handlers', () => {
+    expect(source).toContain('updatePendingFromPoint(e.clientX, e.clientY);');
+    expect(source).not.toContain('handleMouseEnter');
   });
 });

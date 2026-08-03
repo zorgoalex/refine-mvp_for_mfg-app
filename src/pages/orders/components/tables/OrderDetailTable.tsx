@@ -2581,7 +2581,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           onChange={saveColumnSettings}
         />
       </OrderDetailsToolbar>
-      <TableTopScroll>
+      <TableTopScroll manageAntTableScroll>
       <OrderDetailCellRuntimeContext.Provider value={cellRuntime}>
       <MemoizedOrderDetailTable
         renderVersion={tableRenderVersion}
@@ -2710,11 +2710,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               if (!isCurrentlyEditing) {
                 dragSelection.handleMouseDown(rowKey, e);
               }
-             },
-             onMouseEnter: () => {
-               if (dragSelection.isDragging) {
-                 dragSelection.handleMouseEnter(rowKey);
-               }
              },
              onDoubleClick: () => startEdit(record),
              onContextMenu: (e) => {
