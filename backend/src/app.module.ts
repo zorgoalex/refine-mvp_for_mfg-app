@@ -19,6 +19,7 @@ import { CutModule } from './modules/cut/cut.module';
 import { LabelsModule } from './modules/labels/labels.module';
 import { SheetMaterialsModule } from './modules/sheet-materials/sheet-materials.module';
 import { OrdersModule } from './modules/orders/orders.module';
+import { OrderRealtimeModule } from './modules/order-realtime/order-realtime.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ProductionActionsModule } from './modules/production-actions/production-actions.module';
 import { ProjectsModule } from './modules/projects/projects.module';
@@ -54,6 +55,7 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
     NotificationsEngineModule,
     StatusAutomationModule,
     HealthModule,
+    OrderRealtimeModule,
     OrdersModule,
     PaymentsModule,
     ProductionActionsModule,

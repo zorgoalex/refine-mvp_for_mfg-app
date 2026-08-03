@@ -14,9 +14,9 @@ describe('cut detail column', () => {
     expect(show).toContain('pollIntervalMs: ORDER_DETAIL_STATUS_REFRESH_MS');
     expect(show).toContain("column.key === 'cut_job'");
     expect(show).toContain("column.key === 'bath_cut_job'");
-    expect(show).toContain('return isLiveExternalColumn || row !== previousRow');
-    expect(show).toContain('const liveExternalCellRenderVersion = buildOrderDetailLiveCellRenderVersion({');
-    expect(show).toContain('useStableOrderShowColumns(\n    renderedDetailColumns,\n    liveExternalCellRenderVersion,');
+    expect(show).toContain('return row?.[liveVersionKey] !== previousRow?.[liveVersionKey]');
+    expect(show).toContain('const orderShowDetailsDataSource = useMemo(() => {');
+    expect(show).toContain("useStableOrderShowColumns(\n    renderedDetailColumns,\n    'order-show-live-cells-v2',");
     expect(show).toContain('}), [runtime, runtimeVersion, structureKey]);');
 
     const hook = readFileSync('src/pages/orders/useCutDetailLastReady.ts', 'utf8');

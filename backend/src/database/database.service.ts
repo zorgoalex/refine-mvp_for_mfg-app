@@ -109,6 +109,11 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
     }
   }
 
+  async connectDedicated(label = 'Database dedicated connect'): Promise<PoolClient> {
+    const pool = this.requirePool();
+    return withTimeout(pool.connect(), this.queryTimeoutMs, label);
+  }
+
   /**
    * Runs a handler while one dedicated PostgreSQL session owns a global
    * advisory lock. No transaction is held across the handler.

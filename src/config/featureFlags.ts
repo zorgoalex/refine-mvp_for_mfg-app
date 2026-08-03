@@ -19,6 +19,7 @@ export interface FrontendFeatureFlags {
   labels: boolean;
   statusAutomation: boolean;
   orderStatusBoard: boolean;
+  orderRealtime: boolean;
   cncTelegram: boolean;
   pdfImportLayoutPatterns: boolean;
   // Variant B: gates reads that depend on migration 034 Hasura schema
@@ -59,6 +60,7 @@ export type RuntimeFeatureFlagSource = Partial<{
   labels: string | boolean;
   statusAutomation: string | boolean;
   orderStatusBoard: string | boolean;
+  orderRealtime: string | boolean;
   cncTelegram: string | boolean;
   pdfImportLayoutPatterns: string | boolean;
   sheetMaterialsReads: string | boolean;
@@ -104,6 +106,7 @@ export function getFeatureFlags(
     labels: readBooleanFlag(env.VITE_USE_BACKEND_LABELS, false),
     statusAutomation: readBooleanFlag(env.VITE_STATUS_AUTOMATION, false),
     orderStatusBoard: readBooleanFlag(env.VITE_ORDER_STATUS_BOARD, false),
+    orderRealtime: readBooleanFlag(env.VITE_ORDER_REALTIME, false),
     cncTelegram: readBooleanFlag(env.VITE_USE_BACKEND_CNC_TELEGRAM, false),
     pdfImportLayoutPatterns: readBooleanFlag(env.VITE_PDF_IMPORT_LAYOUT_PATTERNS, false),
     sheetMaterialsReads: readBooleanFlag(env.VITE_SHEET_MATERIALS_READS, false),
@@ -162,6 +165,8 @@ export function mergeRuntimeFeatureFlags(
       readOptionalBooleanFlag(runtimeFeatures.statusAutomation) ?? fallback.statusAutomation,
     orderStatusBoard:
       readOptionalBooleanFlag(runtimeFeatures.orderStatusBoard) ?? fallback.orderStatusBoard,
+    orderRealtime:
+      readOptionalBooleanFlag(runtimeFeatures.orderRealtime) ?? fallback.orderRealtime,
     cncTelegram:
       readOptionalBooleanFlag(runtimeFeatures.cncTelegram) ?? fallback.cncTelegram,
     pdfImportLayoutPatterns:
@@ -197,6 +202,8 @@ function enforceFrontendFeatureDependencies(flags: FrontendFeatureFlags): Fronte
       flags.useBackendDeadlines && flags.useBackendAuth && flags.useBackendOrdersRead,
     bazisCut: flags.bazisCut && flags.useBackendCut,
     orderStatusBoard: flags.orderStatusBoard && flags.useBackendOrdersRead,
+    orderRealtime:
+      flags.orderRealtime && flags.useBackendAuth && flags.useBackendOrdersRead,
     cncTelegram:
       flags.cncTelegram && flags.orderStatusBoard && flags.useBackendOrdersRead,
     workosAuth: flags.workosAuth && flags.useBackendAuth,

@@ -48,7 +48,9 @@ export class AccessTokenMiddleware implements NestMiddleware {
     }
 
     try {
-      request.user = this.verifier.verifyAccessToken(token);
+      const context = this.verifier.verifyAccessTokenContext(token);
+      request.user = context.user;
+      request.accessTokenExpiresAt = context.expiresAt;
     } catch (error) {
       if (isCookieAuthenticatedPost(request)) {
         next();

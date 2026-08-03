@@ -85,6 +85,9 @@ export async function refreshAuthSession(): Promise<RefreshResponse> {
         if (authSession.getAccessTokenVersion() !== sessionVersionAtStart) {
           throw refreshSupersededError();
         }
+        if (error instanceof ApiError && error.status === 401) {
+          authSession.expire();
+        }
         throw error;
       })
       .finally(() => {
@@ -126,25 +129,8 @@ async function refreshAccessToken(): Promise<string | null> {
 async function request<T>(
   path: string,
   options: RequestOptions = {},
-  retryOnUnauthorized = true,
 ): Promise<T> {
-  const requestAccessToken = await getRequestAccessToken(options);
-  const response = await fetch(buildApiUrl(path), buildRequestInit(options, requestAccessToken));
-
-  if (response.status === 401 && retryOnUnauthorized && !options.skipAuthRefresh) {
-    const currentAccessToken = authSession.getAccessToken();
-    if (currentAccessToken && currentAccessToken !== requestAccessToken) {
-      return request<T>(path, options, false);
-    }
-
-    const newAccessToken = await refreshAccessToken();
-
-    if (newAccessToken) {
-      return request<T>(path, options, false);
-    }
-
-    authSession.expire();
-  }
+  const response = await rawRequest(path, options);
 
   if (!response.ok) {
     const body = (await readJsonBody(response)) as BackendErrorBody | null;
@@ -162,28 +148,11 @@ async function request<T>(
 async function download(
   path: string,
   options: RequestOptions = {},
-  retryOnUnauthorized = true,
 ): Promise<{ blob: Blob; fileName: string | null; status: number }> {
-  const requestAccessToken = await getRequestAccessToken(options);
-  const response = await fetch(
-    buildApiUrl(path),
-    buildRequestInit({ ...options, method: options.method ?? 'GET' }, requestAccessToken),
-  );
-
-  if (response.status === 401 && retryOnUnauthorized && !options.skipAuthRefresh) {
-    const currentAccessToken = authSession.getAccessToken();
-    if (currentAccessToken && currentAccessToken !== requestAccessToken) {
-      return download(path, options, false);
-    }
-
-    const newAccessToken = await refreshAccessToken();
-
-    if (newAccessToken) {
-      return download(path, options, false);
-    }
-
-    authSession.expire();
-  }
+  const response = await rawRequest(path, {
+    ...options,
+    method: options.method ?? 'GET',
+  });
 
   if (!response.ok) {
     const body = (await readJsonBody(response)) as BackendErrorBody | null;
@@ -195,6 +164,32 @@ async function download(
     fileName: parseContentDispositionFileName(response.headers.get('Content-Disposition')),
     status: response.status,
   };
+}
+
+async function rawRequest(
+  path: string,
+  options: RequestOptions = {},
+  retryOnUnauthorized = true,
+): Promise<Response> {
+  const requestAccessToken = await getRequestAccessToken(options);
+  const response = await fetch(buildApiUrl(path), buildRequestInit(options, requestAccessToken));
+
+  if (response.status !== 401 || !retryOnUnauthorized || options.skipAuthRefresh) {
+    return response;
+  }
+
+  const currentAccessToken = authSession.getAccessToken();
+  if (currentAccessToken && currentAccessToken !== requestAccessToken) {
+    return rawRequest(path, options, false);
+  }
+
+  const newAccessToken = await refreshAccessToken();
+  if (newAccessToken) {
+    return rawRequest(path, options, false);
+  }
+
+  authSession.expire();
+  return response;
 }
 
 async function getRequestAccessToken(options: RequestOptions): Promise<string | null> {
@@ -217,19 +212,24 @@ async function getRequestAccessToken(options: RequestOptions): Promise<string | 
   }
 }
 
-function isJwtExpired(token: string): boolean {
+export function getJwtExpirationTime(token: string): number | null {
   const payloadPart = token.split('.')[1];
-  if (!payloadPart) return false;
+  if (!payloadPart) return null;
 
   try {
     const normalized = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
     const padding = '='.repeat((4 - (normalized.length % 4)) % 4);
     const payload = JSON.parse(atob(`${normalized}${padding}`)) as { exp?: unknown };
-    return typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now();
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
   } catch {
-    // Preserve support for opaque/non-JWT tokens; backend 401 retry remains the fallback.
-    return false;
+    return null;
   }
+}
+
+function isJwtExpired(token: string): boolean {
+  const expiresAt = getJwtExpirationTime(token);
+  // Preserve support for opaque/non-JWT tokens; backend 401 retry remains the fallback.
+  return expiresAt !== null && expiresAt <= Date.now();
 }
 
 function buildRequestInit(options: RequestOptions, token = authSession.getAccessToken()): RequestInit {
@@ -304,6 +304,7 @@ function trimTrailingSlash(value: string): string {
 export const httpClient = {
   request,
   download,
+  raw: rawRequest,
 
   get: <T>(path: string, options?: RequestOptions) =>
     request<T>(path, { ...options, method: 'GET' }),

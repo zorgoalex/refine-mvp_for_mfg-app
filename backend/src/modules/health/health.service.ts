@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { BackendEnv } from '../../config/env.validation';
 import { DatabaseService } from '../../database/database.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
+import { OrderRealtimeStreamService } from '../order-realtime/application/order-realtime-stream.service';
 import {
   createLiveHealthResponse,
   createReadyHealthResponse,
@@ -19,6 +20,9 @@ export class HealthService {
     private readonly database: DatabaseService,
     @Inject(RateLimitService)
     private readonly rateLimits: RateLimitService,
+    @Optional()
+    @Inject(OrderRealtimeStreamService)
+    private readonly orderRealtime?: OrderRealtimeStreamService,
   ) {}
 
   live(): LiveHealthResponse {
@@ -34,6 +38,7 @@ export class HealthService {
       database: await this.databaseCheck(),
       redis: await this.redisCheck(),
       config: await this.configCheck(),
+      ...(this.orderRealtime ? { realtime: this.orderRealtime.healthCheck() } : {}),
     });
   }
 

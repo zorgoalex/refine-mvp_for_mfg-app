@@ -52,6 +52,24 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('BACKEND_STATUS_AUTOMATION=false');
   });
 
+  it('passes order realtime gates with safe defaults', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const localCompose = readTemplate('backend/docker-compose.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+
+    for (const key of [
+      'BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT',
+      'BACKEND_ENABLE_ORDER_REALTIME_WRITES',
+      'BACKEND_ENABLE_ORDER_REALTIME_STREAM',
+    ]) {
+      expect(compose).toContain(`${key}: \${${key}:-false}`);
+      expect(localCompose).toContain(`${key}: \${${key}:-false}`);
+      expect(envExample).toContain(`${key}=false`);
+    }
+    expect(envExample).toContain('RUNTIME_CONFIG_ORDER_REALTIME=true');
+    expect(envExample).toContain('order_realtime.rollout');
+  });
+
   it('passes CNC Telegram feature gate with safe defaults', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
     const localCompose = readTemplate('backend/docker-compose.yml');

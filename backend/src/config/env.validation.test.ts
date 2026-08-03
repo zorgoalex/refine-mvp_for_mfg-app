@@ -186,6 +186,28 @@ describe('backend env validation', () => {
     ).toThrow(/DATABASE_QUERY_TIMEOUT_MS/);
   });
 
+  it('keeps order realtime fail-closed and enforces static flag dependencies', () => {
+    expect(validateEnv({})).toMatchObject({
+      BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT: false,
+      BACKEND_ENABLE_ORDER_REALTIME_WRITES: false,
+      BACKEND_ENABLE_ORDER_REALTIME_STREAM: false,
+    });
+
+    expect(() =>
+      validateEnv({
+        BACKEND_ENABLE_ORDER_REALTIME_STREAM: 'true',
+      }),
+    ).toThrow(/Order realtime features require/);
+
+    expect(() =>
+      validateEnv({
+        DATABASE_URL: 'postgres://erp_user:erp_password@localhost:5432/erp',
+        BACKEND_ENABLE_ORDERS: 'true',
+        BACKEND_ENABLE_ORDER_REALTIME_STREAM: 'true',
+      }),
+    ).toThrow(/requires live snapshot and realtime writes/);
+  });
+
   it('requires DB and auth secrets when backend auth is enabled', () => {
     expect(() =>
       validateEnv({
