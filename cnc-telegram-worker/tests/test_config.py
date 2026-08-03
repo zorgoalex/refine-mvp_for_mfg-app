@@ -27,6 +27,18 @@ class WorkerConfigTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "ERP_STACK_ENV=prod"):
             config.require_worker_enabled()
 
+    def test_reader_runs_without_chat_write_permission_on_test_stack(self) -> None:
+        with patch.dict(os.environ, {
+            "ERP_STACK_ENV": "test",
+            "CNC_TELEGRAM_WORKER_ROLE": "reader",
+            "CNC_TELEGRAM_ALLOW_NON_PROD_WRITER": "false",
+        }, clear=True):
+            config = WorkerConfig.from_env()
+
+        self.assertTrue(config.enabled)
+        self.assertFalse(config.can_write_chat)
+        config.require_worker_enabled()
+
     def test_writer_runs_on_prod_stack(self) -> None:
         with patch.dict(os.environ, {
             "ERP_STACK_ENV": "prod",
@@ -35,11 +47,12 @@ class WorkerConfigTest(unittest.TestCase):
             config = WorkerConfig.from_env()
 
         self.assertTrue(config.enabled)
+        self.assertTrue(config.can_write_chat)
         config.require_worker_enabled()
 
     def test_invalid_worker_role_is_rejected(self) -> None:
         with patch.dict(os.environ, {
-            "CNC_TELEGRAM_WORKER_ROLE": "reader",
+            "CNC_TELEGRAM_WORKER_ROLE": "observer",
         }, clear=True):
             with self.assertRaisesRegex(RuntimeError, "CNC_TELEGRAM_WORKER_ROLE"):
                 WorkerConfig.from_env()

@@ -17,7 +17,7 @@ from .cleanup import cleanup_temp_dir
 from .config import WorkerConfig
 from .erp_client import BackendAuth, ErpClient
 from .gcode import extract_order_names, parse_gcode_text
-from .ocr import OcrResult, run_ocr_command
+from .ocr import OcrResult
 from .packet import (
     GcodeMeta,
     ImageMeta,
@@ -54,12 +54,18 @@ CUTTING_SEQUENCE_REPLY_TEXT = "Раскрой №{number}"
 
 
 @dataclass(frozen=True)
-class ImageGroup:
-    image_message: Any
+class SvgGroup:
+    vector_message: Any
+    image_message: Any | None
     comments: list[str]
     cutting_sequence_no: int | None
     gcode_message: Any | None
-    vector_message: Any | None
+
+    @property
+    def source_message(self) -> Any:
+        # Preserve legacy packet keys for SVGs previously anchored to an image.
+        # Standalone and additional SVGs use their own Telegram message id.
+        return self.image_message or self.vector_message
 
 
 class CncTelegramWorker:
@@ -139,10 +145,10 @@ class CncTelegramWorker:
             self.config.business_timezone,
             self.config.max_messages_per_scan,
         )
-        groups = group_image_messages(messages)
+        groups = group_svg_messages(messages)
         groups = apply_known_cutting_sequence_state(groups, chat_id, self.state)
         missing_sequence_ids = {
-            int(group.image_message.id)
+            int(group.source_message.id)
             for group in groups
             if group.cutting_sequence_no is None
         }
@@ -156,15 +162,17 @@ class CncTelegramWorker:
         for group in groups:
             await self.process_group(client, entity, group, chat_id, workday)
 
-    async def process_group(self, client: Any, entity: Any, group: ImageGroup, chat_id: str, workday: date) -> None:
-        external_key = external_packet_key(chat_id, int(group.image_message.id))
+    async def process_group(self, client: Any, entity: Any, group: SvgGroup, chat_id: str, workday: date) -> None:
+        source_message = group.source_message
+        external_key = external_packet_key(chat_id, int(source_message.id))
         cutting_sequence_no = group.cutting_sequence_no
         sequence_from_telegram = cutting_sequence_no is not None
         if cutting_sequence_no is not None:
             self.state.assign_cutting_sequence_number(external_key, existing_number=cutting_sequence_no)
             self.state.mark_cutting_sequence_replied(external_key)
         pending_sequence_reply = (
-            self.state.cutting_sequence_number(external_key) is not None
+            self.config.can_write_chat
+            and self.state.cutting_sequence_number(external_key) is not None
             and not self.state.cutting_sequence_replied(external_key)
         )
 
@@ -184,19 +192,33 @@ class CncTelegramWorker:
             print(f"skip source unchanged {external_key}", flush=True)
             return
 
-        run_dir = self.config.temp_dir / f"{chat_id.strip('-')}-{group.image_message.id}"
+        run_dir = self.config.temp_dir / f"{chat_id.strip('-')}-{source_message.id}"
         run_dir.mkdir(parents=True, exist_ok=True)
-        image_path: Path | None = None
         gcode_meta: GcodeMeta | None = None
-        vector_items: list[dict[str, Any]] = []
-        cut_layout: dict[str, Any] | None = None
         try:
-            image_path = await download_media(group.image_message, run_dir, "sheet")
-            if image_path is None:
-                print(f"skip message {group.image_message.id}: image download returned no path", flush=True)
+            vector_path = await download_media(group.vector_message, run_dir, "vector")
+            if vector_path is None:
+                print(f"skip SVG message {group.vector_message.id}: download returned no path", flush=True)
                 return
+            parsed_layout = parse_svg_cut_layout(vector_path)
+            cut_layout = layout_to_dict(parsed_layout)
+            if cut_layout["status"] != "valid":
+                reasons = "; ".join(cut_layout.get("reasons") or ["invalid SVG layout"])
+                print(f"skip SVG message {group.vector_message.id}: {reasons}", flush=True)
+                return
+            vector_items = cut_layout["items"]
+
             thumbs_up = group_has_thumbs_up(group)
-            sheet_image = persist_sheet_image(self.config.media_dir, chat_id, int(group.image_message.id), image_path)
+            sheet_image: dict[str, Any] | None = None
+            if group.image_message is not None:
+                image_path = await download_media(group.image_message, run_dir, "sheet")
+                if image_path is not None:
+                    sheet_image = persist_sheet_image(
+                        self.config.media_dir,
+                        chat_id,
+                        int(source_message.id),
+                        image_path,
+                    )
             if group.gcode_message is not None:
                 gcode_path = await download_media(group.gcode_message, run_dir, "program")
                 if gcode_path is not None:
@@ -207,28 +229,25 @@ class CncTelegramWorker:
                         text=gcode_text,
                         analysis=parse_gcode_text(gcode_text, filename),
                     )
-            if group.vector_message is not None:
-                vector_path = await download_media(group.vector_message, run_dir, "vector")
-                if vector_path is not None:
-                    parsed_layout = parse_svg_cut_layout(vector_path)
-                    cut_layout = layout_to_dict(parsed_layout)
-                    vector_items = cut_layout["items"] if cut_layout["status"] == "valid" else []
-
-            ocr = OcrResult() if vector_items else await run_ocr_command(self.config.ocr_command, image_path)
+            comments = list(group.comments)
+            if source_message is not group.vector_message:
+                vector_caption = message_text(group.vector_message)
+                if vector_caption and vector_caption not in comments:
+                    comments.insert(0, vector_caption)
             image = ImageMeta(
                 chat_id=chat_id,
-                message_id=int(group.image_message.id),
-                thread_id=message_thread_id(group.image_message),
-                message_date=message_datetime(group.image_message),
-                edited_at=message_edited_datetime(group.image_message),
-                text=message_text(group.image_message),
+                message_id=int(source_message.id),
+                thread_id=message_thread_id(source_message),
+                message_date=message_datetime(source_message),
+                edited_at=message_edited_datetime(source_message),
+                text=message_text(source_message),
                 thumbs_up=thumbs_up,
             )
             packet = build_structured_packet(
                 image=image,
                 workday=workday,
-                comments=group.comments,
-                ocr=ocr,
+                comments=comments,
+                ocr=OcrResult(),
                 gcode=gcode_meta,
                 cutting_sequence_no=cutting_sequence_no,
                 vector_items=vector_items,
@@ -266,8 +285,12 @@ class CncTelegramWorker:
             )
             if isinstance(response_sequence_no, int) and not isinstance(response_sequence_no, bool) and response_sequence_no > 0:
                 self.state.assign_cutting_sequence_number(external_key, existing_number=response_sequence_no)
-                if cutting_sequence_no is None and not self.state.cutting_sequence_replied(external_key):
-                    await send_cutting_sequence_reply(client, entity, group.image_message, response_sequence_no)
+                if (
+                    self.config.can_write_chat
+                    and cutting_sequence_no is None
+                    and not self.state.cutting_sequence_replied(external_key)
+                ):
+                    await send_cutting_sequence_reply(client, entity, source_message, response_sequence_no)
                     self.state.mark_cutting_sequence_replied(external_key)
             self.state.mark_posted(
                 packet["externalPacketKey"],
@@ -290,36 +313,62 @@ async def login_telegram_session(config: WorkerConfig) -> None:
     print(f"Telethon session ready: {config.telegram_session_path}")
 
 
-def group_image_messages(messages: list[Any]) -> list[ImageGroup]:
+def group_svg_messages(messages: list[Any]) -> list[SvgGroup]:
     image_messages = [message for message in messages if is_image_message(message)]
     gcode_messages = [message for message in messages if is_gcode_message(message)]
-    vector_messages = [message for message in messages if is_vector_message(message)]
-    groups: list[ImageGroup] = []
+    svg_messages = [
+        message
+        for message in messages
+        if is_vector_message(message) and Path(message_filename(message) or "").suffix.lower() == ".svg"
+    ]
+
+    # Preserve the old image->SVG pairing for one SVG per image. This keeps the
+    # existing external packet key stable during backfill. Any additional or
+    # standalone SVG has no image anchor and therefore gets its own message id.
+    legacy_context_by_svg_id: dict[int, list[tuple[Any, list[str]]]] = {}
     for index, image_message in enumerate(image_messages):
         previous_image_id = image_messages[index - 1].id if index > 0 else None
         next_image_id = image_messages[index + 1].id if index + 1 < len(image_messages) else None
         comments = nearby_comments(messages, image_message, next_image_id)
-        cutting_sequence_no = cutting_sequence_reply_number(messages, image_message)
+        vector_message = select_vector_message(
+            svg_messages,
+            image_message,
+            comments,
+            previous_image_id,
+            next_image_id,
+        )
+        if vector_message is not None:
+            legacy_context_by_svg_id.setdefault(int(vector_message.id), []).append((image_message, comments))
+
+    groups: list[SvgGroup] = []
+    for index, vector_message in enumerate(svg_messages):
+        previous_svg_id = svg_messages[index - 1].id if index > 0 else None
+        next_svg_id = svg_messages[index + 1].id if index + 1 < len(svg_messages) else None
+        vector_comments = nearby_comments(messages, vector_message, next_svg_id)
+        legacy_context = min(
+            legacy_context_by_svg_id.get(int(vector_message.id), []),
+            key=lambda item: abs(int(item[0].id) - int(vector_message.id)),
+            default=None,
+        )
+        image_message = legacy_context[0] if legacy_context is not None else None
+        comments = list(dict.fromkeys([
+            *(legacy_context[1] if legacy_context is not None else []),
+            *vector_comments,
+        ]))
+        source_message = image_message or vector_message
         gcode_message = select_gcode_message(
             gcode_messages,
-            image_message,
+            vector_message,
             comments,
-            previous_image_id,
-            next_image_id,
+            previous_svg_id,
+            next_svg_id,
         )
-        vector_message = select_vector_message(
-            vector_messages,
-            image_message,
-            comments,
-            previous_image_id,
-            next_image_id,
-        )
-        groups.append(ImageGroup(
+        groups.append(SvgGroup(
+            vector_message=vector_message,
             image_message=image_message,
             comments=comments,
-            cutting_sequence_no=cutting_sequence_no,
+            cutting_sequence_no=cutting_sequence_reply_number(messages, source_message),
             gcode_message=gcode_message,
-            vector_message=vector_message,
         ))
     return groups
 
@@ -427,7 +476,7 @@ def select_attachment_message(
     return None
 
 
-def group_has_thumbs_up(group: ImageGroup) -> bool:
+def group_has_thumbs_up(group: SvgGroup) -> bool:
     return any(
         has_thumbs_up(message)
         for message in (group.image_message, group.gcode_message, group.vector_message)
@@ -436,7 +485,7 @@ def group_has_thumbs_up(group: ImageGroup) -> bool:
 
 
 def group_source_fingerprint(
-    group: ImageGroup,
+    group: SvgGroup,
     chat_id: str,
     workday: date,
     parser_version: str,
@@ -444,24 +493,25 @@ def group_source_fingerprint(
     cutting_sequence_no: int | None = None,
 ) -> str:
     payload = {
-        "version": 4,
+        "version": 5,
         "chatId": chat_id,
         "workday": workday.isoformat(),
         "parserVersion": parser_version,
         "ocrEngine": ocr_engine,
         "cuttingSequenceNo": cutting_sequence_no if cutting_sequence_no is not None and cutting_sequence_no > 0 else None,
-        "image": message_identity(group.image_message, include_reactions=True),
+        "source": message_identity(group.source_message, include_reactions=True),
+        "image": (
+            message_identity(group.image_message, include_reactions=True)
+            if group.image_message is not None
+            else None
+        ),
         "comments": group.comments,
         "gcode": (
             message_identity(group.gcode_message, include_reactions=True)
             if group.gcode_message is not None
             else None
         ),
-        "vector": (
-            message_identity(group.vector_message, include_reactions=True)
-            if group.vector_message is not None
-            else None
-        ),
+        "vector": message_identity(group.vector_message, include_reactions=True),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
@@ -499,36 +549,36 @@ def cutting_sequence_reply_number(messages: list[Any], image_message: Any) -> in
 async def collect_cutting_sequence_reply_search_index(
     client: Any,
     entity: Any,
-    image_message_ids: set[int],
+    source_message_ids: set[int],
 ) -> dict[int, int]:
-    if not image_message_ids:
+    if not source_message_ids:
         return {}
-    candidates_by_image: dict[int, list[tuple[datetime, int, int]]] = {}
+    candidates_by_source: dict[int, list[tuple[datetime, int, int]]] = {}
     async for message in client.iter_messages(entity, search="Раскрой", limit=1000):
         reply_to = message_reply_to_id(message)
-        if reply_to not in image_message_ids:
+        if reply_to not in source_message_ids:
             continue
         number = parse_cutting_sequence_reply(message_text(message))
         if number is not None:
-            candidates_by_image.setdefault(reply_to, []).append((
+            candidates_by_source.setdefault(reply_to, []).append((
                 message_datetime(message),
                 int(message.id),
                 number,
             ))
     return {
-        image_id: min(candidates, key=lambda item: (item[0], item[1]))[2]
-        for image_id, candidates in candidates_by_image.items()
+        source_id: min(candidates, key=lambda item: (item[0], item[1]))[2]
+        for source_id, candidates in candidates_by_source.items()
     }
 
 
 def apply_cutting_sequence_reply_index(
-    groups: list[ImageGroup],
+    groups: list[SvgGroup],
     sequence_index: dict[int, int],
-) -> list[ImageGroup]:
+) -> list[SvgGroup]:
     if not sequence_index:
         return groups
     return [
-        replace(group, cutting_sequence_no=sequence_index.get(int(group.image_message.id), group.cutting_sequence_no))
+        replace(group, cutting_sequence_no=sequence_index.get(int(group.source_message.id), group.cutting_sequence_no))
         if group.cutting_sequence_no is None
         else group
         for group in groups
@@ -536,16 +586,16 @@ def apply_cutting_sequence_reply_index(
 
 
 def apply_known_cutting_sequence_state(
-    groups: list[ImageGroup],
+    groups: list[SvgGroup],
     chat_id: str,
     state: StateStore,
-) -> list[ImageGroup]:
-    updated: list[ImageGroup] = []
+) -> list[SvgGroup]:
+    updated: list[SvgGroup] = []
     for group in groups:
         if group.cutting_sequence_no is not None:
             updated.append(group)
             continue
-        external_key = external_packet_key(chat_id, int(group.image_message.id))
+        external_key = external_packet_key(chat_id, int(group.source_message.id))
         if not state.cutting_sequence_replied(external_key):
             updated.append(group)
             continue

@@ -1,8 +1,8 @@
 # CNC Telegram Worker
 
-Telethon worker for CNC cutting sheets. It reads Telegram history/live polling,
-downloads screenshots and G-code files into local temp storage, runs optional
-OCR, posts only structured JSON to ERP, then removes local media files.
+Telethon worker for CNC cutting sheets. Each valid SVG message becomes one ERP
+cut job/sheet. Screenshots and G-code files are optional context and never create
+a job without a valid SVG.
 
 Raw screenshots, G-code text and OCR raw text are never sent to the ERP backend.
 
@@ -33,6 +33,22 @@ ERP_WORKER_PASSWORD=...
 ```
 
 `ERP_BEARER_TOKEN` can replace `ERP_WORKER_LOGIN/PASSWORD`.
+
+Telegram access mode is explicit:
+
+```env
+# Test: read/download/parse and write ERP data, but never send chat messages.
+ERP_STACK_ENV=test
+CNC_TELEGRAM_WORKER_ROLE=reader
+CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=false
+
+# Production: read plus cutting sequence replies.
+# ERP_STACK_ENV=prod
+# CNC_TELEGRAM_WORKER_ROLE=writer
+```
+
+Roles: `disabled`, `reader`, `writer`. Non-production `writer` remains blocked
+unless `CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true` is deliberately set.
 
 `CNC_OCR_COMMAND` defaults to the internal RapidOCR service command:
 

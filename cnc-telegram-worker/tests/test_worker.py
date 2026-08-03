@@ -16,17 +16,27 @@ from cnc_telegram_worker.telegram_source import is_image_message, is_vector_mess
 from cnc_telegram_worker.packet import external_packet_key
 from cnc_telegram_worker.state import StateStore
 from cnc_telegram_worker.worker import (
-    ImageGroup,
+    CncTelegramWorker,
+    SvgGroup,
     apply_cutting_sequence_reply_index,
     apply_known_cutting_sequence_state,
     collect_cutting_sequence_reply_search_index,
     cutting_sequence_reply_number,
     group_has_thumbs_up,
-    group_image_messages,
+    group_svg_messages,
     group_source_fingerprint,
     is_cutting_sequence_reply_text,
     parse_cutting_sequence_reply,
 )
+
+
+VALID_SVG = """
+<svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 10000 5000">
+  <rect id="_1234_PartContour" width="2000" height="1000">
+    <metadata><odm name="Comments" value="1234#7#X@200*100@"/></metadata>
+  </rect>
+</svg>
+"""
 
 
 class FakeFile:
@@ -56,6 +66,7 @@ class FakeMessage:
         mime_type: str | None = None,
         thumbs_up: bool = False,
         reply_to: int | None = None,
+        media_content: str | None = None,
     ) -> None:
         self.id = message_id
         self.date = datetime(2026, 7, 24, 5, 0, tzinfo=timezone.utc)
@@ -68,12 +79,20 @@ class FakeMessage:
             if thumbs_up
             else None
         )
+        self.media_content = media_content
+
+    async def download_media(self, *, file: str) -> str | None:
+        if self.media_content is None:
+            return None
+        Path(file).write_text(self.media_content, encoding="utf-8")
+        return file
 
 
 class FakeTelegramClient:
     def __init__(self, messages: list[FakeMessage]) -> None:
         self.messages = messages
         self.iter_messages_calls: list[dict[str, object]] = []
+        self.sent_messages: list[dict[str, object]] = []
 
     def iter_messages(self, entity: object, **kwargs: object):
         self.iter_messages_calls.append(kwargs)
@@ -83,15 +102,27 @@ class FakeTelegramClient:
         for message in self.messages:
             yield message
 
+    async def send_message(self, entity: object, text: str, *, reply_to: int) -> None:
+        self.sent_messages.append({"entity": entity, "text": text, "reply_to": reply_to})
+
+
+class FakeErpClient:
+    def __init__(self) -> None:
+        self.packets: list[dict[str, object]] = []
+
+    async def ingest_packet(self, packet: dict[str, object], idempotency_key: str) -> dict[str, object]:
+        self.packets.append(packet)
+        return {"applied": True, "packet": {"cuttingSequenceNo": 12}}
+
 
 class WorkerFingerprintTest(unittest.TestCase):
     def test_group_source_fingerprint_tracks_parser_and_comments(self) -> None:
-        group = ImageGroup(
+        group = SvgGroup(
+            vector_message=FakeMessage(12, filename="2689.svg"),
             image_message=FakeMessage(10, text="2689"),
             comments=["2689 весь"],
             cutting_sequence_no=None,
             gcode_message=FakeMessage(11, filename="CNC#1_2689.TXT"),
-            vector_message=FakeMessage(12, filename="2689.svg"),
         )
 
         first = group_source_fingerprint(group, "-100123", date(2026, 7, 24), "parser-v1", "ocr-a")
@@ -103,12 +134,12 @@ class WorkerFingerprintTest(unittest.TestCase):
             first,
             group_source_fingerprint(group, "-100123", date(2026, 7, 24), "parser-v2", "ocr-a"),
         )
-        changed_comment = ImageGroup(
+        changed_comment = SvgGroup(
+            vector_message=group.vector_message,
             image_message=group.image_message,
             comments=["2689 весь", "ХДФ"],
             cutting_sequence_no=None,
             gcode_message=group.gcode_message,
-            vector_message=group.vector_message,
         )
         self.assertNotEqual(
             first,
@@ -126,11 +157,50 @@ class WorkerFingerprintTest(unittest.TestCase):
         gcode = FakeMessage(31, filename="CNC#1_2689.TXT")
         vector = FakeMessage(32, filename="2689.svg", mime_type="image/svg+xml")
 
-        groups = group_image_messages([image, gcode, vector])
+        groups = group_svg_messages([image, gcode, vector])
 
         self.assertEqual(len(groups), 1)
+        self.assertIs(groups[0].source_message, image)
+        self.assertIs(groups[0].image_message, image)
         self.assertIs(groups[0].gcode_message, gcode)
         self.assertIs(groups[0].vector_message, vector)
+
+    def test_standalone_svg_creates_group_without_image(self) -> None:
+        gcode = FakeMessage(70, filename="CNC#1_2700.TXT")
+        vector = FakeMessage(71, filename="CNC#1_2700.svg", mime_type="image/svg+xml")
+
+        groups = group_svg_messages([gcode, vector])
+
+        self.assertEqual(len(groups), 1)
+        self.assertIs(groups[0].source_message, vector)
+        self.assertIsNone(groups[0].image_message)
+        self.assertIs(groups[0].gcode_message, gcode)
+
+    def test_image_without_svg_does_not_create_group(self) -> None:
+        image = FakeMessage(80, filename="sheet.jpg", mime_type="image/jpeg")
+        gcode = FakeMessage(81, filename="CNC#1_2700.TXT")
+
+        self.assertEqual(group_svg_messages([image, gcode]), [])
+
+    def test_each_svg_creates_separate_group(self) -> None:
+        image = FakeMessage(90, text="2700", filename="sheet.jpg", mime_type="image/jpeg")
+        gcode = FakeMessage(91, filename="CNC#1_2700.TXT")
+        first_svg = FakeMessage(92, filename="CNC#1_2700-a.svg", mime_type="image/svg+xml")
+        second_svg = FakeMessage(93, filename="CNC#1_2700-b.svg", mime_type="image/svg+xml")
+
+        groups = group_svg_messages([image, gcode, first_svg, second_svg])
+
+        self.assertEqual(len(groups), 2)
+        self.assertIs(groups[0].vector_message, first_svg)
+        self.assertIs(groups[0].source_message, image)
+        self.assertIs(groups[1].vector_message, second_svg)
+        self.assertIs(groups[1].source_message, second_svg)
+
+    def test_dxf_and_screenshot_do_not_create_group(self) -> None:
+        image = FakeMessage(95, filename="sheet.jpg", mime_type="image/jpeg")
+        dxf = FakeMessage(96, filename="sheet.dxf")
+
+        self.assertEqual(group_svg_messages([image, dxf]), [])
 
     def test_groups_file_attachments_with_previous_image_block(self) -> None:
         first_gcode = FakeMessage(10611, filename="CNC#1_2718.TXT")
@@ -140,7 +210,7 @@ class WorkerFingerprintTest(unittest.TestCase):
         second_vector = FakeMessage(10615, filename="CNC#2_2718.svg", mime_type="image/svg+xml")
         second_image = FakeMessage(10616, text="2718", mime_type="image/jpeg")
 
-        groups = group_image_messages([
+        groups = group_svg_messages([
             first_gcode,
             first_vector,
             first_image,
@@ -158,19 +228,19 @@ class WorkerFingerprintTest(unittest.TestCase):
     def test_group_thumbs_up_uses_attachment_reactions(self) -> None:
         image = FakeMessage(40, text="2718", mime_type="image/jpeg")
         gcode = FakeMessage(41, filename="CNC#2_2718.TXT", thumbs_up=True)
-        group = ImageGroup(
+        group = SvgGroup(
+            vector_message=FakeMessage(42, filename="CNC#2_2718.svg"),
             image_message=image,
             comments=[],
             cutting_sequence_no=None,
             gcode_message=gcode,
-            vector_message=None,
         )
-        without_reaction = ImageGroup(
+        without_reaction = SvgGroup(
+            vector_message=group.vector_message,
             image_message=image,
             comments=[],
             cutting_sequence_no=None,
             gcode_message=FakeMessage(41, filename="CNC#2_2718.TXT"),
-            vector_message=None,
         )
 
         self.assertTrue(group_has_thumbs_up(group))
@@ -184,7 +254,9 @@ class WorkerFingerprintTest(unittest.TestCase):
         reply = FakeMessage(51, text="Раскрой №7", reply_to=50)
         comment = FakeMessage(52, text="2700 весь")
 
-        groups = group_image_messages([image, reply, comment])
+        vector = FakeMessage(53, filename="2700.svg", mime_type="image/svg+xml")
+
+        groups = group_svg_messages([image, reply, comment, vector])
 
         self.assertEqual(parse_cutting_sequence_reply("Раскрой №7"), 7)
         self.assertTrue(is_cutting_sequence_reply_text("Раскрой №7"))
@@ -205,7 +277,12 @@ class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
         ])
 
         index = await collect_cutting_sequence_reply_search_index(client, object(), {100, 200})
-        groups = apply_cutting_sequence_reply_index(group_image_messages([image_a, image_b]), index)
+        vector_a = FakeMessage(101, filename="2700.svg", mime_type="image/svg+xml")
+        vector_b = FakeMessage(201, filename="2718.svg", mime_type="image/svg+xml")
+        groups = apply_cutting_sequence_reply_index(
+            group_svg_messages([image_a, vector_a, image_b, vector_b]),
+            index,
+        )
 
         self.assertEqual(index, {100: 7, 200: 8})
         self.assertEqual(groups[0].cutting_sequence_no, 7)
@@ -218,7 +295,9 @@ class WorkerCuttingSequenceStateTest(unittest.TestCase):
     def test_applies_known_replied_cutting_sequence_before_telegram_search(self) -> None:
         image_a = FakeMessage(100, text="2700", mime_type="image/jpeg")
         image_b = FakeMessage(200, text="2718", mime_type="image/jpeg")
-        groups = group_image_messages([image_a, image_b])
+        vector_a = FakeMessage(101, filename="2700.svg", mime_type="image/svg+xml")
+        vector_b = FakeMessage(201, filename="2718.svg", mime_type="image/svg+xml")
+        groups = group_svg_messages([image_a, vector_a, image_b, vector_b])
         chat_id = "-100123"
 
         with tempfile.TemporaryDirectory() as temp:
@@ -233,6 +312,127 @@ class WorkerCuttingSequenceStateTest(unittest.TestCase):
 
         self.assertEqual(updated[0].cutting_sequence_no, 7)
         self.assertIsNone(updated[1].cutting_sequence_no)
+
+
+class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
+    async def test_invalid_svg_does_not_post_packet(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp))
+            group = SvgGroup(
+                vector_message=FakeMessage(
+                    300,
+                    filename="invalid.svg",
+                    mime_type="image/svg+xml",
+                    media_content="<svg></svg>",
+                ),
+                image_message=None,
+                comments=[],
+                cutting_sequence_no=None,
+                gcode_message=None,
+            )
+
+            await worker.process_group(FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24))
+
+            self.assertEqual(worker.erp.packets, [])
+
+    async def test_valid_standalone_svg_posts_one_packet_keyed_by_svg(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp))
+            vector = FakeMessage(
+                301,
+                filename="CNC#1_1234.svg",
+                mime_type="image/svg+xml",
+                media_content=VALID_SVG,
+            )
+            group = SvgGroup(
+                vector_message=vector,
+                image_message=None,
+                comments=[],
+                cutting_sequence_no=None,
+                gcode_message=None,
+            )
+
+            client = FakeTelegramClient([])
+            await worker.process_group(client, object(), group, "-100123", date(2026, 7, 24))
+            await worker.process_group(client, object(), group, "-100123", date(2026, 7, 24))
+
+            self.assertEqual(len(worker.erp.packets), 1)
+            packet = worker.erp.packets[0]
+            self.assertEqual(packet["externalPacketKey"], "telegram:-100123:301")
+            self.assertEqual(packet["cutLayout"]["status"], "valid")
+            self.assertEqual(client.sent_messages, [])
+            self.assertFalse(worker.state.cutting_sequence_replied("telegram:-100123:301"))
+
+    async def test_each_valid_svg_posts_separate_packet(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp))
+            vectors = [
+                FakeMessage(
+                    message_id,
+                    filename=f"CNC#1_1234-{message_id}.svg",
+                    mime_type="image/svg+xml",
+                    media_content=VALID_SVG,
+                )
+                for message_id in (310, 311)
+            ]
+
+            for group in group_svg_messages(vectors):
+                await worker.process_group(
+                    FakeTelegramClient([]),
+                    object(),
+                    group,
+                    "-100123",
+                    date(2026, 7, 24),
+                )
+
+            self.assertEqual(
+                [packet["externalPacketKey"] for packet in worker.erp.packets],
+                ["telegram:-100123:310", "telegram:-100123:311"],
+            )
+
+    async def test_writer_posts_cutting_sequence_reply(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp), can_write_chat=True)
+            vector = FakeMessage(
+                320,
+                filename="CNC#1_1234.svg",
+                mime_type="image/svg+xml",
+                media_content=VALID_SVG,
+            )
+            group = SvgGroup(
+                vector_message=vector,
+                image_message=None,
+                comments=[],
+                cutting_sequence_no=None,
+                gcode_message=None,
+            )
+            client = FakeTelegramClient([])
+            entity = object()
+
+            await worker.process_group(client, entity, group, "-100123", date(2026, 7, 24))
+
+            self.assertEqual(
+                client.sent_messages,
+                [{"entity": entity, "text": "Раскрой №12", "reply_to": 320}],
+            )
+            self.assertTrue(worker.state.cutting_sequence_replied("telegram:-100123:320"))
+
+
+def make_worker(temp_dir: Path, *, can_write_chat: bool = False) -> CncTelegramWorker:
+    worker = object.__new__(CncTelegramWorker)
+    worker.config = types.SimpleNamespace(
+        can_write_chat=can_write_chat,
+        resend_unchanged=False,
+        parser_version="test-svg-v1",
+        ocr_engine="none",
+        temp_dir=temp_dir / "tmp",
+        media_dir=temp_dir / "media",
+        default_machine="",
+        default_material="МДФ 16мм",
+    )
+    worker.state = StateStore(temp_dir / "state.json")
+    worker.erp = FakeErpClient()
+    return worker
 
 
 if __name__ == "__main__":

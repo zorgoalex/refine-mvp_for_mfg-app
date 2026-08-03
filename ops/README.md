@@ -75,7 +75,7 @@ Rules:
   `ops/templates/env.vps.example`.
 - Keep real values only in the VPS `.env`.
 - Set `ERP_STACK_ENV=test|prod` explicitly. Test deploys load
-  `docker-compose.test.yml` and keep `CNC_TELEGRAM_WORKER_ROLE=disabled`;
+  `docker-compose.test.yml` and use `CNC_TELEGRAM_WORKER_ROLE=reader`;
   prod deploys load `docker-compose.prod.yml` and may run
   `CNC_TELEGRAM_WORKER_ROLE=writer`.
 - If the live VPS Compose file needs a machine-local path or bind override, keep
@@ -198,7 +198,8 @@ deploy run.
 For one shared CNC Telegram chat, keep exactly one writer. Prod `.env`:
 `ERP_STACK_ENV=prod`, `COMPOSE_PROFILES=cnc-telegram`,
 `BACKEND_ENABLE_CNC_TELEGRAM=true`, `CNC_TELEGRAM_WORKER_ROLE=writer`.
-Test `.env`: `ERP_STACK_ENV=test`, `CNC_TELEGRAM_WORKER_ROLE=disabled`.
+Test `.env`: `ERP_STACK_ENV=test`, `CNC_TELEGRAM_WORKER_ROLE=reader`.
+Reader downloads and parses Telegram files, but never sends chat messages.
 
 ## gen-secrets.sh, ensure-build-repos.sh, up-all.sh provision
 
