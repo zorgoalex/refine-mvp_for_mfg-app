@@ -39,6 +39,17 @@ describe('bazis panels grouping UI guards', () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
   });
 
+  it('значения колонки Обозначение переносятся по словам без ellipsis', () => {
+    const designationColumnStart = panelsTab.indexOf("title: 'Обозначение'");
+    const productColumnStart = panelsTab.indexOf("title: 'Изделие'", designationColumnStart);
+    const designationColumn = panelsTab.slice(designationColumnStart, productColumnStart);
+
+    expect(designationColumn).toContain("className: 'bazis-panel-cell-sm bazis-panel-designation-cell'");
+    expect(designationColumn).not.toContain('ellipsis: true');
+    expect(panelsCss).toMatch(/td\.bazis-panel-designation-cell\s*\{[\s\S]*?white-space:\s*normal/);
+    expect(panelsCss).toMatch(/td\.bazis-panel-designation-cell\s*\{[\s\S]*?overflow-wrap:\s*break-word/);
+  });
+
   it('один корень Изделие заполняет Базис-заказ, несколько — только Базис проект', () => {
     expect(panelsTab).toContain('resolveBazisDocumentColumns');
     expect(panelsTab).toContain('rootProductCount');
