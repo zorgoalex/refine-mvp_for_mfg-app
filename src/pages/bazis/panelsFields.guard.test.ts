@@ -37,8 +37,8 @@ describe('PanelsTab derived/notes columns', () => {
     expect(panelsTab).toContain('shouldApplyNotesResponse');
   });
 
-  it('summary row spans all 16 columns after the 3 new ones', () => {
-    expect(panelsTab).toContain('[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]');
+  it('summary row spans all 17 columns after the new Bazis project column', () => {
+    expect(panelsTab).toContain('[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]');
     expect(panelsTab).not.toContain('[5, 6, 7, 8, 9, 10, 11, 12].map');
   });
 });

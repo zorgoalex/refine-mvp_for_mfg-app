@@ -8,13 +8,18 @@ import {
   panelFilterPredicate,
   PANEL_FILTER_EMPTY,
   PANEL_FILTER_NONE,
+  resolveBazisDocumentColumns,
   summarizePanelGroups,
   summarizeVisibleRows,
 } from './panelGrouping';
 
 let nextId = 1;
 
-function panel(overrides: Partial<BazisTreeNode & { pathTitle: string; productName: string | null }> = {}) {
+function panel(overrides: Partial<BazisTreeNode & {
+  pathTitle: string;
+  productName: string | null;
+  bazisProjectNo: string | null;
+}> = {}) {
   const bazisNodeId = overrides.bazisNodeId ?? nextId++;
   return {
     bazisNodeId,
@@ -41,6 +46,7 @@ function panel(overrides: Partial<BazisTreeNode & { pathTitle: string; productNa
     orderIds: [],
     pathTitle: 'Шкаф',
     productName: null,
+    bazisProjectNo: null,
     ...overrides,
   };
 }
@@ -116,17 +122,38 @@ describe('groupPanelRows', () => {
     expect(groups[0].orders.map((o) => o.orderId)).toEqual([5, 7]);
   });
 
-  it('собирает уникальные обозначения, изделия и номера Базис-заказов группы', () => {
+  it('собирает уникальные обозначения, изделия, Базис-проекты и Базис-заказы группы', () => {
     const rows = [
-      panel({ designation: 'Деталь 10', productName: 'Шкаф А', productOrderNo: 'BZ-100' }),
-      panel({ designation: 'Деталь 10 ', productName: 'Шкаф А ', productOrderNo: 'BZ-100 ' }),
-      panel({ designation: 'Деталь 11', productName: 'Шкаф Б', productOrderNo: 'BZ-101' }),
-      panel({ designation: null, productName: null, productOrderNo: null }),
+      panel({ designation: 'Деталь 10', productName: 'Шкаф А', bazisProjectNo: 'BP-7', productOrderNo: 'BZ-100' }),
+      panel({ designation: 'Деталь 10 ', productName: 'Шкаф А ', bazisProjectNo: 'BP-7 ', productOrderNo: 'BZ-100 ' }),
+      panel({ designation: 'Деталь 11', productName: 'Шкаф Б', bazisProjectNo: 'BP-8', productOrderNo: 'BZ-101' }),
+      panel({ designation: null, productName: null, bazisProjectNo: null, productOrderNo: null }),
     ];
     const groups = groupPanelRows(rows);
     expect(groups[0].designations).toEqual(['Деталь 10', 'Деталь 11']);
     expect(groups[0].productNames).toEqual(['Шкаф А', 'Шкаф Б']);
+    expect(groups[0].projectNos).toEqual(['BP-7', 'BP-8']);
     expect(groups[0].orderNos).toEqual(['BZ-100', 'BZ-101']);
+  });
+
+  it('раскладывает номер XML по Базис-заказу для одного Изделия и по Базис проекту для нескольких', () => {
+    expect(resolveBazisDocumentColumns({
+      rootProductCount: 1,
+      productOrderNo: ' BZ-100 ',
+      revisionBazisOrderNo: ' BP-7 ',
+    })).toEqual({ bazisProjectNo: null, productOrderNo: 'BZ-100' });
+
+    expect(resolveBazisDocumentColumns({
+      rootProductCount: 1,
+      productOrderNo: null,
+      revisionBazisOrderNo: ' BP-7 ',
+    })).toEqual({ bazisProjectNo: null, productOrderNo: 'BP-7' });
+
+    expect(resolveBazisDocumentColumns({
+      rootProductCount: 2,
+      productOrderNo: ' BZ-100 ',
+      revisionBazisOrderNo: ' BP-7 ',
+    })).toEqual({ bazisProjectNo: 'BP-7', productOrderNo: null });
   });
 
   it('сохраняет порядок первого появления группы и панелей внутри группы', () => {
