@@ -128,7 +128,7 @@ async function request<T>(
   options: RequestOptions = {},
   retryOnUnauthorized = true,
 ): Promise<T> {
-  const requestAccessToken = authSession.getAccessToken();
+  const requestAccessToken = await getRequestAccessToken(options);
   const response = await fetch(buildApiUrl(path), buildRequestInit(options, requestAccessToken));
 
   if (response.status === 401 && retryOnUnauthorized && !options.skipAuthRefresh) {
@@ -164,7 +164,7 @@ async function download(
   options: RequestOptions = {},
   retryOnUnauthorized = true,
 ): Promise<{ blob: Blob; fileName: string | null; status: number }> {
-  const requestAccessToken = authSession.getAccessToken();
+  const requestAccessToken = await getRequestAccessToken(options);
   const response = await fetch(
     buildApiUrl(path),
     buildRequestInit({ ...options, method: options.method ?? 'GET' }, requestAccessToken),
@@ -195,6 +195,41 @@ async function download(
     fileName: parseContentDispositionFileName(response.headers.get('Content-Disposition')),
     status: response.status,
   };
+}
+
+async function getRequestAccessToken(options: RequestOptions): Promise<string | null> {
+  const accessToken = authSession.getAccessToken();
+  if (
+    !accessToken
+    || options.skipAuthRefresh
+    || !isJwtExpired(accessToken)
+  ) {
+    return accessToken;
+  }
+
+  try {
+    return (await refreshAuthSession()).accessToken;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      authSession.expire();
+    }
+    throw error;
+  }
+}
+
+function isJwtExpired(token: string): boolean {
+  const payloadPart = token.split('.')[1];
+  if (!payloadPart) return false;
+
+  try {
+    const normalized = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    const padding = '='.repeat((4 - (normalized.length % 4)) % 4);
+    const payload = JSON.parse(atob(`${normalized}${padding}`)) as { exp?: unknown };
+    return typeof payload.exp === 'number' && payload.exp * 1000 <= Date.now();
+  } catch {
+    // Preserve support for opaque/non-JWT tokens; backend 401 retry remains the fallback.
+    return false;
+  }
 }
 
 function buildRequestInit(options: RequestOptions, token = authSession.getAccessToken()): RequestInit {

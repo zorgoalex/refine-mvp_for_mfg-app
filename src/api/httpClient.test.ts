@@ -95,6 +95,44 @@ describe('httpClient', () => {
     ]);
   });
 
+  it('refreshes an expired JWT before sending the backend request', async () => {
+    const expiredToken = jwtWithExpiry(Math.floor(Date.now() / 1000) - 60);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/refresh') {
+        return jsonResponse(200, {
+          accessToken: 'new-token',
+          user: { id: '1', username: 'admin', role: 'superadmin' },
+        });
+      }
+
+      expect((init?.headers as Headers).get('Authorization')).toBe('Bearer new-token');
+      return jsonResponse(200, { ok: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    authSession.setAccessToken(expiredToken);
+
+    await expect(httpClient.get('/api/v1/orders/form-data')).resolves.toEqual({ ok: true });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/auth/refresh',
+      '/api/v1/orders/form-data',
+    ]);
+  });
+
+  it('uses a still-valid JWT without making availability depend on refresh', async () => {
+    const validToken = jwtWithExpiry(Math.floor(Date.now() / 1000) + 10);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('/api/v1/orders/form-data');
+      expect((init?.headers as Headers).get('Authorization')).toBe(`Bearer ${validToken}`);
+      return jsonResponse(200, { ok: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    authSession.setAccessToken(validToken);
+
+    await expect(httpClient.get('/api/v1/orders/form-data')).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('clears session and throws ApiError when refresh fails', async () => {
     const expiredListener = vi.fn();
     const unsubscribeExpired = authSession.subscribeExpired(expiredListener);
@@ -329,4 +367,9 @@ function jsonResponse(status: number, body: unknown, statusText = 'OK'): Respons
     statusText,
     headers: jsonHeaders,
   });
+}
+
+function jwtWithExpiry(exp: number): string {
+  const payload = Buffer.from(JSON.stringify({ exp })).toString('base64url');
+  return `header.${payload}.signature`;
 }
