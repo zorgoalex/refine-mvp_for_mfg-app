@@ -329,7 +329,8 @@ const LiveOrderDetailCell: React.FC<{
     [normalizedCellKey, runtime],
   );
   useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  return <>{runtime?.renderByKey.get(columnKey)?.(value, row, index) ?? value}</>;
+  const renderer = runtime?.renderByKey.get(columnKey);
+  return <>{renderer ? renderer(value, row, index) : value}</>;
 });
 LiveOrderDetailCell.displayName = 'LiveOrderDetailCell';
 

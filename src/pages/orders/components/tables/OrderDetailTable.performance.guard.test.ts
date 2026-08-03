@@ -104,4 +104,10 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('window.setTimeout(() => setTableRowsReady(true), 0);');
     expect(source).toContain('dataSource={mountedTableRows as any}');
   });
+
+  it('preserves intentional null results from cell renderers', () => {
+    expect(source).toContain('const renderer = runtime?.renderByKey.get(columnKey);');
+    expect(source).toContain('renderer ? renderer(value, row, index) : value');
+    expect(source).not.toContain('?.(value, row, index) ?? value');
+  });
 });
