@@ -1649,7 +1649,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = bathCutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
+              return (
+                <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'block', maxWidth: '100%', minWidth: 0 }}>
+                  <CutJobVersionLines job={ref} nameFontSize="0.86em" nameEllipsis />
+                </Link>
+              );
             },
           },
         ]

@@ -26,23 +26,39 @@ const nameStyle: CSSProperties = {
   overflowWrap: 'anywhere',
 };
 
+const nameEllipsisStyle: CSSProperties = {
+  display: 'block',
+  maxWidth: '100%',
+  overflow: 'hidden',
+  overflowWrap: 'normal',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  width: '100%',
+};
+
 export function CutJobVersionLines({
   job,
   nameSuffix = null,
   nameFontSize,
+  nameEllipsis = false,
 }: {
   job: CutJobVersionLinesJob;
   nameSuffix?: ReactNode;
-  nameFontSize?: number;
+  nameFontSize?: CSSProperties['fontSize'];
+  nameEllipsis?: boolean;
 }) {
   const name = job.name.trim();
-  const resolvedNameStyle = nameFontSize == null ? nameStyle : { ...nameStyle, fontSize: nameFontSize };
+  const resolvedContainerStyle = nameEllipsis ? { ...containerStyle, width: '100%', minWidth: 0 } : containerStyle;
+  const resolvedNameStyle: CSSProperties = nameEllipsis
+    ? { ...nameStyle, ...nameEllipsisStyle }
+    : { ...nameStyle };
+  if (nameFontSize != null) resolvedNameStyle.fontSize = nameFontSize;
 
   return (
-    <span style={containerStyle}>
+    <span style={resolvedContainerStyle}>
       <span style={versionStyle}>{cutJobVersionLabel(job)}</span>
       {name ? (
-        <span style={resolvedNameStyle}>
+        <span style={resolvedNameStyle} title={nameEllipsis ? name : undefined}>
           {name}
           {nameSuffix}
         </span>

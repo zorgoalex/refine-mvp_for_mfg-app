@@ -30,6 +30,7 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain('cncOrderCuttingSequences');
     expect(source).toContain("title: 'Расчет ванны'");
     expect(source).toContain("key: 'bath_cut_job'");
+    expect(source).toContain('<CutJobVersionLines job={ref} nameFontSize="0.86em" nameEllipsis />');
     expect(source).toContain('versionRef ? cutJobDeepLink(versionRef) : cutJobDeepLink(j.cutJobId)');
     expect(source).toContain('<CutJobVersionLines job={ref} />');
     expect(source).toContain('<CutJobVersionLines job={versionRef}');
@@ -39,8 +40,11 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(versionLinesSource).toContain('cutJobVersionLabel(job)');
     expect(versionLinesSource).toContain("fontVariantNumeric: 'tabular-nums'");
     expect(versionLinesSource).toContain("overflowWrap: 'anywhere'");
-    expect(versionLinesSource).toContain('nameFontSize?: number');
-    expect(versionLinesSource).toContain('nameFontSize == null ? nameStyle : { ...nameStyle, fontSize: nameFontSize }');
+    expect(versionLinesSource).toContain("nameFontSize?: CSSProperties['fontSize']");
+    expect(versionLinesSource).toContain('if (nameFontSize != null) resolvedNameStyle.fontSize = nameFontSize');
+    expect(versionLinesSource).toContain("textOverflow: 'ellipsis'");
+    expect(versionLinesSource).toContain("whiteSpace: 'nowrap'");
+    expect(versionLinesSource).toContain('nameEllipsis?: boolean');
   });
 
   it('renders embedded cut screen as a top order info tab', () => {
