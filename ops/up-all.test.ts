@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, resolve } from 'node:path';
 
 const script = resolve(__dirname, 'up-all.sh');
 const source = readFileSync(script, 'utf8');
@@ -12,6 +13,40 @@ const cncWorkerSource = readFileSync(resolve(__dirname, 'cnc-telegram-worker.sh'
 const composeSource = readFileSync(resolve(__dirname, 'templates/docker-compose.vps.yml'), 'utf8');
 function run(args: string[]) {
   return execFileSync('bash', [script, ...args], { encoding: 'utf8' });
+}
+
+function runCncWorker(
+  role: string,
+  stackEnv = 'test',
+  allowNonProdWriter = 'false',
+  args = ['up'],
+) {
+  const tempDir = mkdtempSync(resolve(tmpdir(), 'cnc-worker-test-'));
+  const fakeBinDir = resolve(tempDir, 'bin');
+  const envFile = resolve(tempDir, '.env');
+  const fakeDocker = resolve(fakeBinDir, 'docker');
+  mkdirSync(fakeBinDir);
+  writeFileSync(envFile, [
+    `ERP_STACK_ENV=${stackEnv}`,
+    `CNC_TELEGRAM_WORKER_ROLE=${role}`,
+    `CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=${allowNonProdWriter}`,
+    'COMPOSE_PROJECT_NAME=erp_test',
+  ].join('\n'));
+  writeFileSync(fakeDocker, '#!/usr/bin/env bash\nprintf \'docker %s\\n\' "$*"\n');
+  chmodSync(fakeDocker, 0o755);
+  try {
+    return spawnSync('bash', [resolve(__dirname, 'cnc-telegram-worker.sh'), ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ENV_FILE: envFile,
+        VPS_FILE: resolve(__dirname, 'templates/docker-compose.vps.yml'),
+        PATH: `${fakeBinDir}${delimiter}${process.env.PATH ?? ''}`,
+      },
+    });
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 describe('up-all.sh provision', () => {
@@ -86,9 +121,42 @@ describe('up-all.sh provision', () => {
   it('requires an explicit stack env and blocks non-prod Telegram writers', () => {
     expect(checkEnvSource).toContain('require_var ERP_STACK_ENV');
     expect(checkEnvSource).toMatch(/ERP_STACK_ENV must be one of: test, prod, dev/);
-    expect(checkEnvSource).toMatch(/CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, writer/);
+    expect(checkEnvSource).toMatch(/CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, reader, writer/);
     expect(checkEnvSource).toMatch(/CNC_TELEGRAM_WORKER_ROLE=writer requires ERP_STACK_ENV=prod/);
     expect(cncWorkerSource).toMatch(/stack_env" == "prod"[\s\S]*role="writer"/);
+    expect(cncWorkerSource).toMatch(/reader\)[\s\S]*writer\)/);
     expect(cncWorkerSource).toMatch(/refusing Telegram writer on ERP_STACK_ENV=\$stack_env/);
+  });
+
+  it('runs Telegram reader backfill without chat-writer override', () => {
+    const result = runCncWorker('reader', 'test', 'false', ['backfill', '3']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/cnc-telegram-worker once --days 3/);
+  });
+
+  it('keeps disabled Telegram worker stopped without invoking Compose', () => {
+    const result = runCncWorker('disabled');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toMatch(/CNC Telegram worker is disabled/);
+  });
+
+  it('rejects non-prod Telegram writer and invalid roles', () => {
+    const writer = runCncWorker('writer');
+    const invalid = runCncWorker('observer');
+
+    expect(writer.status).toBe(1);
+    expect(writer.stderr).toMatch(/refusing Telegram writer on ERP_STACK_ENV=test/);
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toMatch(/must be one of: disabled, reader, writer/);
+  });
+
+  it('allows Telegram writer on prod', () => {
+    const result = runCncWorker('writer', 'prod');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/cnc-telegram-worker/);
   });
 });

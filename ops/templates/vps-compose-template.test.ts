@@ -86,7 +86,7 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).toContain('profiles: ["cnc-telegram"]');
     expect(compose).toContain('context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:-./repo_erp/cnc-telegram-worker}');
     expect(compose).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
-    expect(compose).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-disabled}');
+    expect(compose).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}');
     expect(compose).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: ${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}');
     expect(compose).toContain('TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}');
     expect(compose).toContain('ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}');
@@ -106,13 +106,13 @@ describe('VPS compose backend runtime flags', () => {
     expect(overlay).toContain('cnc-telegram-worker:');
     expect(overlay).toContain('profiles: ["cnc-telegram"]');
     expect(overlay).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
-    expect(overlay).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-disabled}');
+    expect(overlay).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}');
     expect(overlay).toContain('cnc-telegram-worker-data:/data');
     expect(envExample).toContain('ERP_STACK_ENV=test');
     expect(envExample).toContain('COMPOSE_PROFILES=');
     expect(envExample).toContain('# COMPOSE_PROFILES=cnc-telegram');
     expect(envExample).toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT=./repo_erp/cnc-telegram-worker');
-    expect(envExample).toContain('CNC_TELEGRAM_WORKER_ROLE=disabled');
+    expect(envExample).toContain('CNC_TELEGRAM_WORKER_ROLE=reader');
     expect(envExample).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=false');
     expect(envExample).toContain('CNC_POLL_INTERVAL_SECONDS=60');
     expect(envExample).toContain('CNC_OCR_ENGINE=rapidocr-ppocrv5-eslav');
@@ -126,8 +126,9 @@ describe('VPS compose backend runtime flags', () => {
     const prodOverlay = readTemplate('ops/templates/docker-compose.prod.yml');
 
     expect(testOverlay).toContain('ERP_STACK_ENV: test');
-    expect(testOverlay).toContain('CNC_TELEGRAM_WORKER_ROLE: disabled');
+    expect(testOverlay).toContain('CNC_TELEGRAM_WORKER_ROLE: reader');
     expect(testOverlay).toContain('CNC_BACKFILL_ON_START: "false"');
+    expect(testOverlay).not.toContain('restart: "no"');
     expect(prodOverlay).toContain('ERP_STACK_ENV: prod');
     expect(prodOverlay).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-writer}');
     expect(prodOverlay).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: "false"');

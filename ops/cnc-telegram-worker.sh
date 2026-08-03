@@ -62,13 +62,22 @@ preflight_worker_role() {
   allow="$(env_value CNC_TELEGRAM_ALLOW_NON_PROD_WRITER)"
   allow="${allow:-false}"
 
-  if [[ "$role" != "writer" ]]; then
-    err "CNC Telegram worker is disabled (ERP_STACK_ENV=$stack_env, CNC_TELEGRAM_WORKER_ROLE=$role)"
-    return 1
-  fi
-  if [[ "$stack_env" != "prod" && "$allow" != "true" ]]; then
-    die "refusing Telegram writer on ERP_STACK_ENV=$stack_env; set ERP_STACK_ENV=prod or CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true for a deliberate one-off run"
-  fi
+  case "$role" in
+    disabled)
+      err "CNC Telegram worker is disabled (ERP_STACK_ENV=$stack_env, CNC_TELEGRAM_WORKER_ROLE=$role)"
+      return 1
+      ;;
+    reader)
+      ;;
+    writer)
+      if [[ "$stack_env" != "prod" && "$allow" != "true" ]]; then
+        die "refusing Telegram writer on ERP_STACK_ENV=$stack_env; set ERP_STACK_ENV=prod or CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true for a deliberate one-off run"
+      fi
+      ;;
+    *)
+      die "CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, reader, writer"
+      ;;
+  esac
 }
 
 prepare_compose_file_args() {

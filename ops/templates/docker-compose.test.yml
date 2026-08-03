@@ -4,9 +4,8 @@ services:
       ERP_STACK_ENV: test
 
   cnc-telegram-worker:
-    restart: "no"
     environment:
       ERP_STACK_ENV: test
-      CNC_TELEGRAM_WORKER_ROLE: disabled
+      CNC_TELEGRAM_WORKER_ROLE: reader
       CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: "false"
       CNC_BACKFILL_ON_START: "false"

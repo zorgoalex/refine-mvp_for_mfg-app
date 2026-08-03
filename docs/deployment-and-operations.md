@@ -83,7 +83,8 @@ docker compose \
 
 Prod worker для рабочего Telegram-чата включается profile `cnc-telegram`.
 Для общего Telegram-чата допускается только один writer. Test stack должен
-оставаться `CNC_TELEGRAM_WORKER_ROLE=disabled`; prod stack должен явно иметь
+иметь `CNC_TELEGRAM_WORKER_ROLE=reader`: читать и парсить файлы, но не писать в чат.
+Prod stack должен явно иметь
 `ERP_STACK_ENV=prod` и `CNC_TELEGRAM_WORKER_ROLE=writer`.
 
 Обычный deploy/up поднимет prod writer автоматически, если в VPS `.env` есть:

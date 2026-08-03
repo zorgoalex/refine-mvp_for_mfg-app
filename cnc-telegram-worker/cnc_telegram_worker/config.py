@@ -6,7 +6,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 
-WORKER_ROLES = {"disabled", "writer"}
+WORKER_ROLES = {"disabled", "reader", "writer"}
 
 
 @dataclass(frozen=True)
@@ -85,6 +85,10 @@ class WorkerConfig:
 
     @property
     def enabled(self) -> bool:
+        return self.worker_role in {"reader", "writer"}
+
+    @property
+    def can_write_chat(self) -> bool:
         return self.worker_role == "writer"
 
     def require_worker_enabled(self) -> None:
@@ -93,7 +97,7 @@ class WorkerConfig:
                 f"CNC Telegram worker is disabled (ERP_STACK_ENV={self.stack_env}, "
                 f"CNC_TELEGRAM_WORKER_ROLE={self.worker_role})",
             )
-        if self.stack_env != "prod" and not self.allow_non_prod_writer:
+        if self.can_write_chat and self.stack_env != "prod" and not self.allow_non_prod_writer:
             raise RuntimeError(
                 "CNC Telegram writer is allowed only with ERP_STACK_ENV=prod; "
                 "set CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true only for a deliberate one-off run",

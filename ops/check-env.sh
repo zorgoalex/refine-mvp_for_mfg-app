@@ -158,8 +158,8 @@ if csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram"; then
     require_var ERP_WORKER_PASSWORD
   fi
   case "${CNC_TELEGRAM_WORKER_ROLE:-disabled}" in
-    disabled|writer) ;;
-    *) mark_error "CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, writer" ;;
+    disabled|reader|writer) ;;
+    *) mark_error "CNC_TELEGRAM_WORKER_ROLE must be one of: disabled, reader, writer" ;;
   esac
   if [[ "${CNC_TELEGRAM_WORKER_ROLE:-disabled}" == "writer" \
       && "${ERP_STACK_ENV:-test}" != "prod" \
