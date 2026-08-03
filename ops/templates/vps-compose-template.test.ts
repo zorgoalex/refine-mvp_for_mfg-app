@@ -128,6 +128,7 @@ describe('VPS compose backend runtime flags', () => {
     expect(testOverlay).toContain('ERP_STACK_ENV: test');
     expect(testOverlay).toContain('CNC_TELEGRAM_WORKER_ROLE: reader');
     expect(testOverlay).toContain('CNC_BACKFILL_ON_START: "false"');
+    expect(testOverlay).not.toContain('restart: "no"');
     expect(prodOverlay).toContain('ERP_STACK_ENV: prod');
     expect(prodOverlay).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-writer}');
     expect(prodOverlay).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: "false"');

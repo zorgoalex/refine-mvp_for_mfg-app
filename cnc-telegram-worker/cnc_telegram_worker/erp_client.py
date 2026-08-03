@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+
+
+INGEST_MAX_ATTEMPTS = 3
+INGEST_RETRY_BASE_SECONDS = 0.5
 
 
 @dataclass
@@ -28,13 +33,23 @@ class ErpClient:
             "Authorization": await self._authorization_header(),
         }
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(f"{self.api_url}/cnc-telegram/ingest", json=packet, headers=headers)
-            if response.status_code == 401 and not self.auth.bearer_token:
-                self._access_token = ""
-                headers["Authorization"] = await self._authorization_header(force=True)
+            for attempt in range(INGEST_MAX_ATTEMPTS):
                 response = await client.post(f"{self.api_url}/cnc-telegram/ingest", json=packet, headers=headers)
-            response.raise_for_status()
-            return response.json()
+                if response.status_code == 401 and not self.auth.bearer_token:
+                    self._access_token = ""
+                    headers["Authorization"] = await self._authorization_header(force=True)
+                    response = await client.post(f"{self.api_url}/cnc-telegram/ingest", json=packet, headers=headers)
+                if response.status_code < 500 or attempt + 1 >= INGEST_MAX_ATTEMPTS:
+                    response.raise_for_status()
+                    return response.json()
+                delay_seconds = INGEST_RETRY_BASE_SECONDS * (2 ** attempt)
+                print(
+                    f"ERP ingest returned {response.status_code}; "
+                    f"retry {attempt + 2}/{INGEST_MAX_ATTEMPTS} in {delay_seconds:g}s",
+                    flush=True,
+                )
+                await asyncio.sleep(delay_seconds)
+        raise RuntimeError("ERP ingest retry loop finished without a response")
 
     async def _authorization_header(self, force: bool = False) -> str:
         if self.auth.bearer_token:
