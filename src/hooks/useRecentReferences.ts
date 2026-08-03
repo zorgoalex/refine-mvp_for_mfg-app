@@ -180,16 +180,16 @@ function enqueuePromotion(
 function refreshPreferences(userId: string, requestFollowUp = false): Promise<void> {
   return refreshCoordinator.run(
     userId,
-    () => loadPreferences(userId),
+    () => loadPreferences(userId, requestFollowUp),
     requestFollowUp,
   );
 }
 
-async function loadPreferences(userId: string): Promise<void> {
+async function loadPreferences(userId: string, force = false): Promise<void> {
   if (getCurrentUserId() !== userId) return;
   const revision = revisionsByUser.get(userId) ?? 0;
   const hadPendingPromotion = requestQueues.has(userId);
-  await profileApi.getPreferences()
+  await profileApi.getPreferences({ force })
     .then((response) => {
       if (!shouldApplyLoadedRecentResponse(
         userId,

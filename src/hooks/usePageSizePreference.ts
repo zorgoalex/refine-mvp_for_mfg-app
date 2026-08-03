@@ -136,7 +136,7 @@ function loadPreferences(userId: string, force = false): Promise<void> {
   if (pending) return pending;
 
   const revision = revisionsByUser.get(userId) ?? 0;
-  const request = profileApi.getPreferences()
+  const request = profileApi.getPreferences({ force })
     .then((response) => {
       if (getCurrentUserId() !== userId || response.preferences.pageSizePreferences === undefined) return;
       const server = normalizePageSizePreferences(response.preferences.pageSizePreferences);
