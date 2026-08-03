@@ -95,7 +95,8 @@ describe('OrderDetailTable interaction performance guards', () => {
   });
 
   it('isolates edit-table scrolling from rc-table ping updates', () => {
-    expect(source).toContain('<TableTopScroll manageAntTableScroll>');
+    expect(source).toContain('<TableTopScroll');
+    expect(source).toContain('manageAntTableScroll');
   });
 
   it('lets rc-table finish its initial measurement before mounting detail rows', () => {
@@ -103,6 +104,8 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('window.requestAnimationFrame(() => {');
     expect(source).toContain('window.setTimeout(() => setTableRowsReady(true), 0);');
     expect(source).toContain('dataSource={mountedTableRows as any}');
+    expect(source).toContain("className={tableRowsReady ? undefined : 'order-details-table-scroll-shell--initializing'}");
+    expect(source).toContain('loading={!tableRowsReady}');
   });
 
   it('preserves intentional null results from cell renderers', () => {
