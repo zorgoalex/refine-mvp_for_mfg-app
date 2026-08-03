@@ -22,6 +22,76 @@ export function buildCutJobLinkMaps(
   return { cutJobByDetailId, bathCutJobByDetailId };
 }
 
+export function buildCutJobLinkMapsFromDetails(
+  details: readonly unknown[],
+): {
+  cutJobByDetailId: Map<number, CutDetailLastReadyJobRef>;
+  bathCutJobByDetailId: Map<number, CutDetailLastReadyJobRef>;
+} {
+  const cutJobByDetailId = new Map<number, CutDetailLastReadyJobRef>();
+  const bathCutJobByDetailId = new Map<number, CutDetailLastReadyJobRef>();
+  for (const detail of details) {
+    if (!detail || typeof detail !== 'object') continue;
+    const row = detail as Record<string, unknown>;
+    const detailId = normalizePositiveInteger(row.detail_id ?? row.detailId ?? row.id);
+    if (detailId == null) continue;
+    const cutJob = normalizeCutJobRef(row.cut_job ?? row.cutJob);
+    const bathCutJob = normalizeCutJobRef(row.bath_cut_job ?? row.bathCutJob);
+    if (cutJob) cutJobByDetailId.set(detailId, cutJob);
+    if (bathCutJob) bathCutJobByDetailId.set(detailId, bathCutJob);
+  }
+  return { cutJobByDetailId, bathCutJobByDetailId };
+}
+
+export function mergeCutJobLinkMaps(
+  base: {
+    cutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+    bathCutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+  },
+  override: {
+    cutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+    bathCutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+  },
+): {
+  cutJobByDetailId: Map<number, CutDetailLastReadyJobRef>;
+  bathCutJobByDetailId: Map<number, CutDetailLastReadyJobRef>;
+} {
+  const cutJobByDetailId = new Map(base.cutJobByDetailId);
+  const bathCutJobByDetailId = new Map(base.bathCutJobByDetailId);
+  for (const [detailId, ref] of override.cutJobByDetailId) cutJobByDetailId.set(detailId, ref);
+  for (const [detailId, ref] of override.bathCutJobByDetailId) bathCutJobByDetailId.set(detailId, ref);
+  return { cutJobByDetailId, bathCutJobByDetailId };
+}
+
+function normalizeCutJobRef(value: unknown): CutDetailLastReadyJobRef | null {
+  if (!value || typeof value !== 'object') return null;
+  const ref = value as Record<string, unknown>;
+  const cutJobId = normalizePositiveInteger(ref.cutJobId);
+  const resultNo = normalizePositiveInteger(ref.resultNo);
+  if (cutJobId == null || resultNo == null) return null;
+  const rawCutNumber = typeof ref.cutNumber === 'string' ? ref.cutNumber.trim() : '';
+  return {
+    cutJobId,
+    resultNo,
+    cutNumber: rawCutNumber || `${cutJobId}-${resultNo}`,
+    name: typeof ref.name === 'string' && ref.name.trim() ? ref.name : `Раскрой ${cutJobId}`,
+    paramProfileId: normalizeNullableInteger(ref.paramProfileId),
+    profileName: typeof ref.profileName === 'string' ? ref.profileName : null,
+    profileIsActive: typeof ref.profileIsActive === 'boolean' ? ref.profileIsActive : null,
+  };
+}
+
+function normalizePositiveInteger(value: unknown): number | null {
+  const numberValue = Number(value);
+  return Number.isInteger(numberValue) && numberValue > 0 ? numberValue : null;
+}
+
+function normalizeNullableInteger(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const numberValue = Number(value);
+  return Number.isInteger(numberValue) ? numberValue : null;
+}
+
 /** Deep-link to the cut page opened on a specific job/result. */
 export function cutJobDeepLink(cutJobId: number, resultNo?: number | null): string;
 export function cutJobDeepLink(ref: Pick<CutDetailLastReadyJobRef, 'cutJobId' | 'resultNo'>): string;

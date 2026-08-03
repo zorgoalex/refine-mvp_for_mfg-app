@@ -153,6 +153,18 @@ interface OrderDetailRow extends QueryResultRow {
   link_cad_file: string | null;
   link_pdf_file: string | null;
   ref_key_1c: string | null;
+  cut_job_id: string | number | null;
+  cut_result_no: string | number | null;
+  cut_job_name: string | null;
+  cut_job_param_profile_id: string | number | null;
+  cut_job_profile_name: string | null;
+  cut_job_profile_is_active: boolean | null;
+  bath_cut_job_id: string | number | null;
+  bath_cut_result_no: string | number | null;
+  bath_cut_job_name: string | null;
+  bath_cut_job_param_profile_id: string | number | null;
+  bath_cut_job_profile_name: string | null;
+  bath_cut_job_profile_is_active: boolean | null;
 }
 
 interface OrderPaymentRow extends QueryResultRow {
@@ -627,11 +639,67 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     // needs no sheet_materials.view; sheet_material_type_id carried for FE hydration.
     const details = await this.database.query<OrderDetailRow>(
       `
+      WITH cut_candidates AS (
+        SELECT cji.order_detail_id,
+               cj.cut_job_id,
+               cj.name,
+               cr.result_no,
+               cj.param_profile_id,
+               cpp.name AS profile_name,
+               cpp.is_active AS profile_is_active,
+               COALESCE(
+                 cj.last_calc_params->>'layout_mode',
+                 cpp.params->>'layout_mode',
+                 cj.params->>'layout_mode'
+               ) = 'vacuum_table' AS is_vacuum
+        FROM cut_job_item cji
+        JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+        JOIN cut_result cr
+          ON cr.cut_result_id = cj.current_cut_result_id
+         AND cr.cut_job_id = cj.cut_job_id
+        LEFT JOIN cut_result_archive_state archived
+          ON archived.cut_job_id = cr.cut_job_id
+         AND archived.result_no = cr.result_no
+        LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
+        WHERE cji.order_id = $1
+          AND cji.is_active = true
+          AND cj.status = 'ready'
+          AND cj.last_calc_basis IS NOT NULL
+          AND archived.cut_job_id IS NULL
+      ),
+      ranked_cut AS (
+        SELECT *,
+               row_number() OVER (
+                 PARTITION BY order_detail_id, is_vacuum
+                 ORDER BY cut_job_id DESC
+               ) AS rn
+        FROM cut_candidates
+      )
       SELECT od.*,
-             ${detailSheetName}
+             ${detailSheetName},
+             regular.cut_job_id AS cut_job_id,
+             regular.result_no AS cut_result_no,
+             regular.name AS cut_job_name,
+             regular.param_profile_id AS cut_job_param_profile_id,
+             regular.profile_name AS cut_job_profile_name,
+             regular.profile_is_active AS cut_job_profile_is_active,
+             bath.cut_job_id AS bath_cut_job_id,
+             bath.result_no AS bath_cut_result_no,
+             bath.name AS bath_cut_job_name,
+             bath.param_profile_id AS bath_cut_job_param_profile_id,
+             bath.profile_name AS bath_cut_job_profile_name,
+             bath.profile_is_active AS bath_cut_job_profile_is_active
       FROM order_details od
       ${detailMaterialJoin}
       ${detailSheetJoin}
+      LEFT JOIN ranked_cut regular
+        ON regular.order_detail_id = od.detail_id
+       AND regular.is_vacuum = false
+       AND regular.rn = 1
+      LEFT JOIN ranked_cut bath
+        ON bath.order_detail_id = od.detail_id
+       AND bath.is_vacuum = true
+       AND bath.rn = 1
       WHERE od.order_id = $1 AND od.delete_flag = false
       ORDER BY od.detail_number ASC, od.detail_id ASC
       `,
@@ -1266,6 +1334,24 @@ function mapDetail(row: OrderDetailRow) {
     linkCadFile: row.link_cad_file,
     linkPdfFile: row.link_pdf_file,
     refKey1c: row.ref_key_1c,
+    cutJob: mapDetailCutJob(row, 'cut'),
+    bathCutJob: mapDetailCutJob(row, 'bath'),
+  };
+}
+
+function mapDetailCutJob(row: OrderDetailRow, kind: 'cut' | 'bath') {
+  const cutJobId = toNullableNumber(kind === 'cut' ? row.cut_job_id : row.bath_cut_job_id);
+  const resultNo = toNullableNumber(kind === 'cut' ? row.cut_result_no : row.bath_cut_result_no);
+  if (cutJobId == null || resultNo == null) return null;
+  const name = kind === 'cut' ? row.cut_job_name : row.bath_cut_job_name;
+  return {
+    cutJobId,
+    resultNo,
+    cutNumber: `${cutJobId}-${resultNo}`,
+    name: name ?? `Раскрой ${cutJobId}`,
+    paramProfileId: toNullableNumber(kind === 'cut' ? row.cut_job_param_profile_id : row.bath_cut_job_param_profile_id),
+    profileName: kind === 'cut' ? row.cut_job_profile_name : row.bath_cut_job_profile_name,
+    profileIsActive: kind === 'cut' ? row.cut_job_profile_is_active : row.bath_cut_job_profile_is_active,
   };
 }
 

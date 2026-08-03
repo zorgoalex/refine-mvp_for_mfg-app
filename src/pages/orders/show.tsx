@@ -42,7 +42,12 @@ import type { CncTelegramOrderCuttingSequence } from "../../api/types/cncTelegra
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
 import { CutJobVersionLines } from "./CutJobVersionLines";
-import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
+import {
+  buildCutJobLinkMapsFromDetails,
+  cutJobDeepLink,
+  cutJobProfileLabel,
+  mergeCutJobLinkMaps,
+} from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
@@ -1017,11 +1022,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         .filter((id: unknown): id is number => Number.isInteger(id) && (id as number) > 0),
     [details],
   );
-  const cutJobMaps = useCutDetailLastReady({
+  const embeddedCutJobMaps = useMemo(() => buildCutJobLinkMapsFromDetails(details), [details]);
+  const fetchedCutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
     detailIds: cutDetailIds,
     orderId: record?.order_id,
   });
+  const cutJobMaps = useMemo(
+    () => fetchedCutJobMaps.loaded ? fetchedCutJobMaps : mergeCutJobLinkMaps(embeddedCutJobMaps, fetchedCutJobMaps),
+    [embeddedCutJobMaps, fetchedCutJobMaps],
+  );
   const { cutJobByDetailId, bathCutJobByDetailId } = cutJobMaps;
   const latestReadyCutRefByJobId = useMemo(() => {
     const map = new Map<number, CutDetailLastReadyJobRef>();

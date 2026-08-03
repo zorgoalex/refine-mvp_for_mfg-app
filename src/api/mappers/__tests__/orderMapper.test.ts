@@ -111,6 +111,22 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
     expect((values.header as any).material_name_resolved).toBe('МДФ 16мм');
     expect((values.details[0] as any).material_name_resolved).toBe('МДФ 16мм');
   });
+
+  it('carries embedded cut refs onto legacy details for order-card columns', () => {
+    const dtoWithCutRefs: OrderDto = {
+      ...dto,
+      details: [
+        {
+          ...(dto.details[0] as any),
+          cutJob: { cutJobId: 41, resultNo: 2, cutNumber: '41-2', name: 'Раскрой заказа', paramProfileId: null, profileName: null, profileIsActive: null },
+          bathCutJob: { cutJobId: 42, resultNo: 3, cutNumber: '42-3', name: 'Ванна заказа', paramProfileId: 7, profileName: 'Вакуум', profileIsActive: true },
+        } as any,
+      ],
+    } as any;
+    const values = mapOrderDtoToFormValues(dtoWithCutRefs);
+    expect((values.details[0] as any).cut_job?.cutJobId).toBe(41);
+    expect((values.details[0] as any).bath_cut_job?.name).toBe('Ванна заказа');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { buildCutJobByDetailId, buildCutJobLinkMaps, cutJobDeepLink, cutJobProfileLabel, cutJobVersionLabel } from './cutColumnHelpers';
+import {
+  buildCutJobByDetailId,
+  buildCutJobLinkMaps,
+  buildCutJobLinkMapsFromDetails,
+  cutJobDeepLink,
+  cutJobProfileLabel,
+  cutJobVersionLabel,
+  mergeCutJobLinkMaps,
+} from './cutColumnHelpers';
 
 describe('cutColumnHelpers', () => {
   it('buildCutJobByDetailId maps each detail to its ref', () => {
@@ -30,6 +38,48 @@ describe('cutColumnHelpers', () => {
     ]);
     expect(maps.cutJobByDetailId.get(1)?.name).toBe('Regular');
     expect(maps.bathCutJobByDetailId.get(1)?.name).toBe('Bath');
+  });
+
+  it('buildCutJobLinkMapsFromDetails reads embedded order-detail refs', () => {
+    const maps = buildCutJobLinkMapsFromDetails([
+      {
+        detail_id: 11,
+        cut_job: { cutJobId: 41, resultNo: 2, cutNumber: '41-2', name: 'Раскрой заказа' },
+        bath_cut_job: {
+          cutJobId: 42,
+          resultNo: 3,
+          cutNumber: '42-3',
+          name: 'Ванна заказа',
+          paramProfileId: '7',
+          profileName: 'Вакуум',
+          profileIsActive: true,
+        },
+      },
+    ]);
+    expect(maps.cutJobByDetailId.get(11)).toMatchObject({ cutJobId: 41, resultNo: 2, name: 'Раскрой заказа' });
+    expect(maps.bathCutJobByDetailId.get(11)).toMatchObject({
+      cutJobId: 42,
+      resultNo: 3,
+      name: 'Ванна заказа',
+      paramProfileId: 7,
+    });
+  });
+
+  it('mergeCutJobLinkMaps lets live refs override embedded snapshot refs', () => {
+    const embedded = buildCutJobLinkMapsFromDetails([
+      {
+        detail_id: 11,
+        cut_job: { cutJobId: 41, resultNo: 2, cutNumber: '41-2', name: 'Snapshot' },
+      },
+    ]);
+    const live = buildCutJobLinkMaps([
+      {
+        orderDetailId: 11,
+        cutJob: { cutJobId: 43, resultNo: 4, cutNumber: '43-4', name: 'Live', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: null,
+      },
+    ]);
+    expect(mergeCutJobLinkMaps(embedded, live).cutJobByDetailId.get(11)?.name).toBe('Live');
   });
 
   it('cutJobDeepLink builds the /cut?job= path', () => {

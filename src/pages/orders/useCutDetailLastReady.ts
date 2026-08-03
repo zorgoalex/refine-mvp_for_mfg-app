@@ -16,11 +16,13 @@ interface UseCutDetailLastReadyArgs {
 export interface CutDetailLastReadyMaps {
   cutJobByDetailId: Map<number, CutDetailLastReadyJobRef>;
   bathCutJobByDetailId: Map<number, CutDetailLastReadyJobRef>;
+  loaded: boolean;
 }
 
 const EMPTY_CUT_DETAIL_LAST_READY_MAPS: CutDetailLastReadyMaps = {
   cutJobByDetailId: new Map(),
   bathCutJobByDetailId: new Map(),
+  loaded: false,
 };
 
 export function useCutDetailLastReady({
@@ -43,12 +45,19 @@ export function useCutDetailLastReady({
 
   const refresh = useCallback(async (ids: readonly number[] = detailIdsRef.current) => {
     if (!enabled || ids.length === 0) {
-      setCutJobMaps(EMPTY_CUT_DETAIL_LAST_READY_MAPS);
+      setCutJobMaps({
+        cutJobByDetailId: new Map(),
+        bathCutJobByDetailId: new Map(),
+        loaded: true,
+      });
       return;
     }
     try {
       const res = await cutApi.listDetailLastReady([...ids]);
-      setCutJobMaps(buildCutJobLinkMaps(res.details));
+      setCutJobMaps({
+        ...buildCutJobLinkMaps(res.details),
+        loaded: true,
+      });
     } catch {
       setCutJobMaps(EMPTY_CUT_DETAIL_LAST_READY_MAPS);
     }

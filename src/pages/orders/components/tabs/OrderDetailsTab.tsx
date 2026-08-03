@@ -36,6 +36,7 @@ import { useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { OrderToolbarLabel } from '../OrderDetailsToolbar';
 import { useCutDetailLastReady } from '../../useCutDetailLastReady';
+import { buildCutJobLinkMapsFromDetails, mergeCutJobLinkMaps } from '../../cutColumnHelpers';
 import { OrderDetailTransferModal } from '../OrderDetailTransferModal';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 import type { TransferOrderDetailsResponse } from '../../../../api/types/orderApi.types';
@@ -183,11 +184,16 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const transferDisabledReason = getTransferRowsDisabledReason(selectedRowKeys);
   const transferDisabled = !!transferDisabledReason;
   const transferTooltip = transferDisabledReason ?? `Перенести детали (${transferDetailIds.length})`;
-  const cutJobMaps = useCutDetailLastReady({
+  const embeddedCutJobMaps = useMemo(() => buildCutJobLinkMapsFromDetails(details), [details]);
+  const fetchedCutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
     detailIds: persistedDetailIds,
     orderId: header?.order_id,
   });
+  const cutJobMaps = useMemo(
+    () => fetchedCutJobMaps.loaded ? fetchedCutJobMaps : mergeCutJobLinkMaps(embeddedCutJobMaps, fetchedCutJobMaps),
+    [embeddedCutJobMaps, fetchedCutJobMaps],
+  );
   const sheetNameById = useMemo(
     () => new Map(orderFormData.references.sheetMaterialTypes.map((option) => [option.value, option.label])),
     [orderFormData.references.sheetMaterialTypes],

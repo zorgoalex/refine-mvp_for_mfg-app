@@ -2,6 +2,7 @@
 // Based on PostgreSQL schema v11.6
 
 import type { EntityGroupLink } from '../api/types/groupApi.types';
+import type { CutDetailLastReadyJobRef } from '../api/types/cutApi.types';
 
 // ============================================================================
 // ORDERS (Header)
@@ -139,6 +140,8 @@ export interface OrderDetail {
   link_cutting_image_file?: string | null;
   link_cad_file?: string | null;
   link_pdf_file?: string | null;
+  cut_job?: CutDetailLastReadyJobRef | null;
+  bath_cut_job?: CutDetailLastReadyJobRef | null;
 
   // Management
   delete_flag?: boolean;

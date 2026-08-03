@@ -528,6 +528,8 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     link_cad_file: detail.linkCadFile ?? null,
     link_pdf_file: detail.linkPdfFile ?? null,
     ref_key_1c: detail.refKey1c ?? null,
+    cut_job: detail.cutJob ?? null,
+    bath_cut_job: detail.bathCutJob ?? null,
   }));
 }
 

@@ -2,6 +2,7 @@ export type DateOnlyString = string;
 export type IsoDateTimeString = string;
 
 import type { EntityGroupLink } from './groupApi.types';
+import type { CutDetailLastReadyJobRef } from './cutApi.types';
 
 export interface SaveOrderDto {
   header: SaveOrderHeaderDto;
@@ -585,6 +586,8 @@ export interface OrderDetailDto {
   linkCadFile?: string | null;
   linkPdfFile?: string | null;
   refKey1c?: string | null;
+  cutJob?: CutDetailLastReadyJobRef | null;
+  bathCutJob?: CutDetailLastReadyJobRef | null;
 }
 
 export interface PaymentDto {

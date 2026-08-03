@@ -225,6 +225,20 @@ const saveOrderDowelingLinkSwaggerSchema = {
   },
 } as const;
 
+const orderDetailCutJobRefSwaggerSchema = {
+  type: 'object',
+  required: ['cutJobId', 'resultNo', 'cutNumber', 'name', 'paramProfileId', 'profileName', 'profileIsActive'],
+  properties: {
+    cutJobId: { type: 'integer' },
+    resultNo: { type: 'integer' },
+    cutNumber: { type: 'string' },
+    name: { type: 'string' },
+    paramProfileId: nullableIntegerSwaggerSchema,
+    profileName: nullableStringSwaggerSchema,
+    profileIsActive: { type: 'boolean', nullable: true },
+  },
+} as const;
+
 // Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
 export const orderDetailResponseSwaggerSchema = {
   type: 'object',
@@ -291,6 +305,8 @@ export const orderDetailResponseSwaggerSchema = {
     linkCadFile: nullableStringSwaggerSchema,
     linkPdfFile: nullableStringSwaggerSchema,
     refKey1c: nullableStringSwaggerSchema,
+    cutJob: { ...orderDetailCutJobRefSwaggerSchema, nullable: true },
+    bathCutJob: { ...orderDetailCutJobRefSwaggerSchema, nullable: true },
   },
 } as const;
 

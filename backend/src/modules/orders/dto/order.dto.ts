@@ -168,7 +168,19 @@ export type OrderDetailDto = CalculatedOrderDetailDto & {
   orderId: number;
   // SP3: server-resolved COALESCE(sheet,material) display name (no sheet_materials.view needed).
   materialName?: string | null;
+  cutJob?: OrderDetailCutJobRefDto | null;
+  bathCutJob?: OrderDetailCutJobRefDto | null;
 };
+
+export interface OrderDetailCutJobRefDto {
+  cutJobId: number;
+  resultNo: number;
+  cutNumber: string;
+  name: string;
+  paramProfileId: number | null;
+  profileName: string | null;
+  profileIsActive: boolean | null;
+}
 
 export type OrderPaymentDto = NormalizedSaveOrderPaymentDto & {
   id: number;
