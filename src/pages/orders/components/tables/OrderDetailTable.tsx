@@ -48,6 +48,7 @@ import {
 } from '../../../../hooks/orderSaveValidation';
 import {
   findOrderDetailInlineEditor,
+  finishOrderDetailInlineTab,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
@@ -614,13 +615,21 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     cellRuntime.notifyRowState(previousEditingKey);
     if (editingKey !== previousEditingKey || editingField !== previousEditingField) {
       cellRuntime.notifyCell(editingKey, editingField);
-      if (editingKey !== previousEditingKey) cellRuntime.notifyRowState(editingKey);
+      if (editingKey !== previousEditingKey) {
+        cellRuntime.notifyCell(previousEditingKey, 'actions');
+        cellRuntime.notifyCell(editingKey, 'actions');
+        cellRuntime.notifyRowState(editingKey);
+      }
     }
   }, [cellRuntime, editingField, editingKey]);
 
   useLayoutEffect(() => {
     cellRuntime.notifyCell(editingKey, 'detail_cost');
   }, [cellRuntime, editingKey, isSumEditable]);
+
+  useLayoutEffect(() => {
+    cellRuntime.notifyCell(editingKey, 'actions');
+  }, [cellRuntime, dimensionValidationError, editingKey]);
 
   const showInlineValidationErrors = useCallback((record: OrderDetail, error: unknown) => {
     const rowKey = record.temp_id ?? record.detail_id ?? record.detail_number;
@@ -970,17 +979,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   // Save on Tab past the last inline-entry field and optionally add a new row.
   const finishInlineEditOnTab = async (record: OrderDetail) => {
-    const saved = await saveCurrentRow();
-    if (saved) {
-      const recordKey = record.temp_id || record.detail_id;
-      const lastDetail = sortedDetails[sortedDetails.length - 1];
-      const lastKey = lastDetail?.temp_id || lastDetail?.detail_id;
-      const isLastRow = recordKey === lastKey;
-
-      if (isLastRow && onQuickAdd) {
-        onQuickAdd();
-      }
-    }
+    const recordKey = record.temp_id || record.detail_id;
+    const lastDetail = sortedDetails[sortedDetails.length - 1];
+    const lastKey = lastDetail?.temp_id || lastDetail?.detail_id;
+    await finishOrderDetailInlineTab({
+      saveCurrentRow,
+      isLastRow: recordKey === lastKey,
+      onQuickAdd,
+    });
   };
 
   // Expose methods via ref for external calls (e.g., quick add)

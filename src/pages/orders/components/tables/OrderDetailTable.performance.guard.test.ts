@@ -17,6 +17,8 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('runtime.listenersByCell.get(normalizedCellKey)?.forEach');
     expect(source).toContain('cellRuntime.notifyCell(previousEditingKey, previousEditingField)');
     expect(source).toContain('cellRuntime.notifyRowState(previousEditingKey)');
+    expect(source).toContain("cellRuntime.notifyCell(previousEditingKey, 'actions')");
+    expect(source).toContain("cellRuntime.notifyCell(editingKey, 'actions')");
     expect(source).toContain('shouldCellUpdate: (row: any, previousRow: any) => row !== previousRow');
   });
 
@@ -93,6 +95,7 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('onKeyDownCapture={handleInlineEditorKeyDown}');
     expect(source).toContain('nextOrderDetailInlineTabField(');
     expect(source).toContain('void finishInlineEditOnTab(record);');
+    expect(source).toContain('await finishOrderDetailInlineTab({');
     expect(source).toContain('const validateInlineForm = useCallback');
   });
 

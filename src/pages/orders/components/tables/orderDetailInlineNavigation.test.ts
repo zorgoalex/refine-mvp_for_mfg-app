@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   findOrderDetailInlineEditor,
+  finishOrderDetailInlineTab,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
@@ -51,5 +52,34 @@ describe('order detail inline Tab navigation', () => {
     expect(editingCellQuery).toHaveBeenCalledWith('input, textarea, [role="combobox"]');
     expect(editor).toBe(activeEditor);
     expect(editor).not.toBe(selectionCheckbox);
+  });
+
+  it('saves and adds a new row after Tab on the final field', async () => {
+    const saveCurrentRow = vi.fn().mockResolvedValue(true);
+    const onQuickAdd = vi.fn();
+    const fields = ['height', 'width', 'film_id'];
+
+    expect(nextOrderDetailInlineTabField(fields, 'film_id', false)).toBeNull();
+    await finishOrderDetailInlineTab({ saveCurrentRow, isLastRow: true, onQuickAdd });
+
+    expect(saveCurrentRow).toHaveBeenCalledTimes(1);
+    expect(onQuickAdd).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not add a row when save fails or the edited row is not last', async () => {
+    const onQuickAdd = vi.fn();
+
+    await finishOrderDetailInlineTab({
+      saveCurrentRow: vi.fn().mockResolvedValue(false),
+      isLastRow: true,
+      onQuickAdd,
+    });
+    await finishOrderDetailInlineTab({
+      saveCurrentRow: vi.fn().mockResolvedValue(true),
+      isLastRow: false,
+      onQuickAdd,
+    });
+
+    expect(onQuickAdd).not.toHaveBeenCalled();
   });
 });

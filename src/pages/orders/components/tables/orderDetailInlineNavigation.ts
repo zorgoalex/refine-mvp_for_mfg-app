@@ -51,3 +51,19 @@ export function findOrderDetailInlineEditor(
     'input, textarea, [role="combobox"]',
   ) ?? null;
 }
+
+interface FinishOrderDetailInlineTabOptions {
+  saveCurrentRow: () => Promise<boolean>;
+  isLastRow: boolean;
+  onQuickAdd?: () => void;
+}
+
+export async function finishOrderDetailInlineTab({
+  saveCurrentRow,
+  isLastRow,
+  onQuickAdd,
+}: FinishOrderDetailInlineTabOptions): Promise<boolean> {
+  const saved = await saveCurrentRow();
+  if (saved && isLastRow) onQuickAdd?.();
+  return saved;
+}
