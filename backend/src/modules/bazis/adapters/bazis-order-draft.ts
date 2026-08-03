@@ -135,8 +135,10 @@ export function buildDraftDetails(
       bazisNodeId: panel.bazisNodeId,
       clientKey: clientKeyForNode(panel.bazisNodeId),
       detailName: panel.name,
-      height: panel.lengthMm ?? 0,
-      width: panel.widthMm ?? 0,
+      // Защита для старых ревизий во время rolling deploy: даже до backfill
+      // ERP-детали получают те же целые размеры, что и новые XML-импорты.
+      height: Math.round(panel.lengthMm ?? 0),
+      width: Math.round(panel.widthMm ?? 0),
       quantity: panel.cumulativeQuantity ?? 0,
       sheetMaterialTypeId:
         sheetMapping?.target_kind === 'sheet'

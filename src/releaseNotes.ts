@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-03",
+    title: "Базис: целые размеры панелей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Дробные длина и ширина панелей Базис округляются до целых миллиметров: меньше 0,5 — вниз, от 0,5 — вверх.",
+      "То же правило применено к ранее импортированным Базис-проектам и при создании ERP-деталей из них.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-03",
     title: "Раскрой: точка отсчёта невакуумных листов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

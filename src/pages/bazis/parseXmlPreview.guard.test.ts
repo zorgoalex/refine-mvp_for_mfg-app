@@ -43,6 +43,17 @@ describe('parseXmlPreview panel dimensions', () => {
     });
   });
 
+  it('rounds preview dimensions down below .5 and up from .5', () => {
+    expect(swapImportedBazisPanelDimensions(580.49, 452.49)).toEqual({
+      heightMm: 452,
+      widthMm: 580,
+    });
+    expect(swapImportedBazisPanelDimensions(580.5, 452.5)).toEqual({
+      heightMm: 453,
+      widthMm: 581,
+    });
+  });
+
   it('uses the swapped dimensions in panel preview titles', () => {
     expect(source).toContain(
       'swapImportedBazisPanelDimensions(sourceHeight, sourceWidth)',

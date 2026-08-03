@@ -786,6 +786,13 @@ probe_file() {
                      "$(q_idx idx_cnc_telegram_packets_svg_cut_job)" \
                      "$(q_idx idx_cnc_telegram_packets_cut_layout_valid)" ;;
     094_user_preferences_sidebar_menu_order*) probe_all "$(q_col user_preferences sidebar_menu_order)" ;;
+    095_bazis_panel_dimensions_rounding*) probe_all "SELECT EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE conname = 'chk_bazis_panel_dimensions_integer'
+                           AND conrelid = 'bazis_nodes'::regclass
+                           AND convalidated
+                      );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -796,7 +803,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

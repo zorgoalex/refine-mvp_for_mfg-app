@@ -42,9 +42,13 @@ export function swapImportedBazisPanelDimensions(
   sourceWidthMm: number | null,
 ): { heightMm: number | null; widthMm: number | null } {
   return {
-    heightMm: sourceWidthMm,
-    widthMm: sourceHeightMm,
+    heightMm: roundPanelDimensionMm(sourceWidthMm),
+    widthMm: roundPanelDimensionMm(sourceHeightMm),
   };
+}
+
+function roundPanelDimensionMm(value: number | null): number | null {
+  return value == null ? null : Math.round(value);
 }
 
 export function parseXmlPreview(xmlText: string): XmlPreviewResult {
@@ -207,5 +211,5 @@ function numberOfChild(parent: Element, tag: string): number | null {
   const text = textOfChild(parent, tag);
   if (text == null) return null;
   const value = Number(text.replace(',', '.'));
-  return Number.isFinite(value) ? Math.round(value) : null;
+  return Number.isFinite(value) ? value : null;
 }

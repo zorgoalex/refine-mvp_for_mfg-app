@@ -141,6 +141,12 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
     return Number.isFinite(num) ? num : null;
   };
 
+  // Габариты панелей в ERP храним в целых миллиметрах. Размеры физически
+  // положительные, поэтому Math.round даёт требуемое правило half-up:
+  // дробная часть < 0.5 — вниз, >= 0.5 — вверх.
+  const roundPanelDimensionMm = (value: number | null): number | null =>
+    value == null ? null : Math.round(value);
+
   const toText = (value: unknown): string | null => {
     if (value === null || value === undefined) {
       return null;
@@ -277,8 +283,8 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
       // В ERP высота детали хранится в lengthMm. Для импортируемых панелей
       // оси Базиса разворачиваем: исходная ширина становится высотой ERP,
       // исходная высота — шириной ERP. Размеры контейнеров/фурнитуры не меняем.
-      lengthMm: swapPanelDimensions ? sourceWidthMm : sourceHeightMm,
-      widthMm: swapPanelDimensions ? sourceHeightMm : sourceWidthMm,
+      lengthMm: swapPanelDimensions ? roundPanelDimensionMm(sourceWidthMm) : sourceHeightMm,
+      widthMm: swapPanelDimensions ? roundPanelDimensionMm(sourceHeightMm) : sourceWidthMm,
       heightMm: toNumber(element['Высота']),
       thicknessMm: toNumber(element['ОбщаяТолщина']) ?? toNumber(element['Толщина']),
       price: toNumber(element['Цена']),

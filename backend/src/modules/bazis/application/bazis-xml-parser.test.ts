@@ -98,6 +98,39 @@ describe('parseBazisXml', () => {
     });
   });
 
+  it('rounds imported panel dimensions down below .5 and up from .5', () => {
+    const xml = `<Проект Версия="1"><Изделие><Наименование>Тест</Наименование><СписокЭлементов>
+      <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Вниз</Наименование>
+        <Длина_готовой_детали>580.49</Длина_готовой_детали>
+        <Ширина_готовой_детали>452,49</Ширина_готовой_детали>
+      </Объект>
+      <Объект><ТипОбъекта>Панель</ТипОбъекта><Наименование>Вверх</Наименование>
+        <Длина>580.5</Длина><Ширина>452,50</Ширина>
+      </Объект>
+      <Объект><ТипОбъекта>Фурнитура</ТипОбъекта><Наименование>Не панель</Наименование>
+        <Длина>30.5</Длина><Ширина>10.49</Ширина>
+      </Объект>
+    </СписокЭлементов></Изделие></Проект>`;
+
+    const parsed = parseBazisXml(xml);
+    const roundedDown = parsed.nodes.find((node) => node.name === 'Вниз');
+    const roundedUp = parsed.nodes.find((node) => node.name === 'Вверх');
+    const hardware = parsed.nodes.find((node) => node.name === 'Не панель');
+
+    expect({ lengthMm: roundedDown?.lengthMm, widthMm: roundedDown?.widthMm }).toEqual({
+      lengthMm: 452,
+      widthMm: 580,
+    });
+    expect({ lengthMm: roundedUp?.lengthMm, widthMm: roundedUp?.widthMm }).toEqual({
+      lengthMm: 453,
+      widthMm: 581,
+    });
+    expect({ lengthMm: hardware?.lengthMm, widthMm: hardware?.widthMm }).toEqual({
+      lengthMm: 30.5,
+      widthMm: 10.49,
+    });
+  });
+
   it('keeps holes/edges/facings inside raw', () => {
     const parsed = parseBazisXml(fixture);
     const withHoles = parsed.nodes.find(
