@@ -37,8 +37,15 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toContain("cpp.params->>'layout_mode'");
     expect(source).toContain("= 'vacuum_table' AS is_vacuum");
     expect(source).toContain('PARTITION BY (is_vacuum IS TRUE)');
-    expect(source).toContain('FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_result_no');
-    expect(source).toContain('FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_result_no');
+    expect(source).toContain("cut_job_id::text || '-' || result_no::text");
+    expect(source).toContain('FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number');
+    expect(source).toContain('FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number');
+  });
+
+  it('exposes cut-map vacuum profile metadata for non-vacuum default selection', () => {
+    expect(source).toContain('cpp.params->>\'layout_mode\'');
+    expect(source).toContain('AS is_vacuum');
+    expect(source).toContain('isVacuum: row.is_vacuum === true');
   });
 
   it('persists field catalog snapshots for label and QR templates', () => {

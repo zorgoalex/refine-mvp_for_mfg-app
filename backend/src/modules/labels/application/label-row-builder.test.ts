@@ -127,16 +127,16 @@ describe('label row builder', () => {
       details: [
         detail({
           detailFields: {
-            cut_result_version_no: 3,
-            bath_cut_result_version_no: 7,
+            cut_result_version_no: '45-1',
+            bath_cut_result_version_no: '28-2',
           },
         }),
       ],
     });
 
     expect(row.values).toMatchObject({
-      'detail.cut_result_version_no': 3,
-      'detail.bath_cut_result_version_no': 7,
+      'detail.cut_result_version_no': '45-1',
+      'detail.bath_cut_result_version_no': '28-2',
     });
   });
 

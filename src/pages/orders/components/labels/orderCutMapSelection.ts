@@ -39,17 +39,45 @@ export function buildDefaultOrderCutMapSelection(rows: OrderCutMapLabelRow[]): O
   for (const detailRows of byDetail.values()) {
     const first = detailRows[0];
     if (!first) continue;
-    const candidates = first.options.map((option) => `${option.cutResultId}:${option.variant}`);
-    const completeCandidate = candidates.find((candidate) => detailRows.every((row) => (
-      row.options.some((option) => `${option.cutResultId}:${option.variant}` === candidate)
+    const candidates = [...new Set(first.options.map(cutMapOptionCandidateKey))];
+    const completeCandidates = candidates.filter((candidate) => detailRows.every((row) => (
+      row.options.some((option) => cutMapOptionCandidateKey(option) === candidate)
     )));
+    const completeCandidate = pickDefaultCutMapCandidate(completeCandidates, detailRows);
     if (!completeCandidate) continue;
     for (const row of detailRows) {
-      const option = row.options.find((item) => `${item.cutResultId}:${item.variant}` === completeCandidate);
+      const option = row.options.find((item) => cutMapOptionCandidateKey(item) === completeCandidate);
       if (option) selected[row.key] = option.cutResultPlacementId;
     }
   }
   return selected;
+}
+
+function pickDefaultCutMapCandidate(
+  candidates: string[],
+  rows: OrderCutMapLabelRow[],
+): string | undefined {
+  return candidates.find((candidate) => everyCandidateOption(candidate, rows, (option) => (
+    option.isCurrent && option.isVacuum !== true
+  )))
+    ?? candidates.find((candidate) => everyCandidateOption(candidate, rows, (option) => option.isVacuum !== true))
+    ?? candidates.find((candidate) => everyCandidateOption(candidate, rows, (option) => option.isCurrent))
+    ?? candidates[0];
+}
+
+function everyCandidateOption(
+  candidate: string,
+  rows: OrderCutMapLabelRow[],
+  predicate: (option: LabelCutMapOption) => boolean,
+): boolean {
+  return rows.every((row) => {
+    const option = row.options.find((item) => cutMapOptionCandidateKey(item) === candidate);
+    return option !== undefined && predicate(option);
+  });
+}
+
+function cutMapOptionCandidateKey(option: LabelCutMapOption): string {
+  return `${option.cutResultId}:${option.variant}`;
 }
 
 export function buildOrderCutMapSelections(

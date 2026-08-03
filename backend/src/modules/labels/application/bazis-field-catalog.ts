@@ -200,7 +200,7 @@ export const COMPUTED_DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = [
     source: 'dynamic',
     sourceColumn: null,
     label: '№ версии раскроя (обычные профили)',
-    type: 'number',
+    type: 'string',
     category: 'Деталь',
   },
   {
@@ -208,7 +208,7 @@ export const COMPUTED_DETAIL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = [
     source: 'dynamic',
     sourceColumn: null,
     label: '№ версии раскроя (вакуумный стол)',
-    type: 'number',
+    type: 'string',
     category: 'Деталь',
   },
 ];
@@ -329,8 +329,8 @@ export function buildRuntimeLabelFieldCatalog(
 ): LabelFieldCatalogItem[] {
   return uniqueCatalogItems([
     ...BAZIS_FIELD_CATALOG,
-    ...buildDetailFieldCatalog(detailColumns),
     ...COMPUTED_DETAIL_FIELD_CATALOG,
+    ...buildDetailFieldCatalog(detailColumns),
     ...ORDER_FIELD_CATALOG,
     ...DYNAMIC_LABEL_FIELDS,
   ]);
@@ -347,8 +347,8 @@ export const ORDER_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = Object.entr
 
 export const LABEL_FIELD_CATALOG: readonly LabelFieldCatalogItem[] = uniqueCatalogItems([
   ...BAZIS_FIELD_CATALOG,
-  ...DETAIL_FIELD_CATALOG,
   ...COMPUTED_DETAIL_FIELD_CATALOG,
+  ...DETAIL_FIELD_CATALOG,
   ...ORDER_FIELD_CATALOG,
   ...DYNAMIC_LABEL_FIELDS,
 ]);

@@ -156,8 +156,8 @@ LEFT JOIN LATERAL (
     FROM candidates
   )
   SELECT
-    max(result_no) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_result_no,
-    max(result_no) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_result_no
+    max(cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number,
+    max(cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number
   FROM ranked
 ) cut_version_fields ON true
 `;
@@ -165,8 +165,8 @@ LEFT JOIN LATERAL (
 const DETAIL_FIELDS_JSON_SQL = `(
   row_to_json(od)::jsonb
   || jsonb_build_object(
-    '${DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD}', cut_version_fields.regular_result_no,
-    '${DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD}', cut_version_fields.vacuum_result_no
+    '${DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD}', cut_version_fields.regular_cut_number,
+    '${DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD}', cut_version_fields.vacuum_cut_number
   )
 ) AS detail_fields`;
 
@@ -200,6 +200,7 @@ interface CutMapOptionRow extends QueryResultRow {
   created_at: Date | string | null;
   is_current: boolean | null;
   is_archived: boolean | null;
+  is_vacuum: boolean | null;
   dimensions_match: boolean | null;
 }
 
@@ -1057,6 +1058,11 @@ export class PgLabelsRepository implements LabelsPort {
               COALESCE(r.snapshot_job ->> 'name', 'Раскрой ' || maps.cut_job_id::text) AS cut_job_name,
               (current_result.result_no = r.result_no) AS is_current,
               (j.status = 'archived' OR archive.archived_at IS NOT NULL) AS is_archived,
+              COALESCE(
+                j.last_calc_params->>'layout_mode',
+                cpp.params->>'layout_mode',
+                j.params->>'layout_mode'
+              ) = 'vacuum_table' AS is_vacuum,
               CASE WHEN maps.cut_result_placement_id IS NULL THEN NULL ELSE
                 EXISTS (
                   SELECT 1
@@ -1085,6 +1091,7 @@ export class PgLabelsRepository implements LabelsPort {
          ON r.cut_result_id = maps.cut_result_id
         AND r.snapshot_digest = maps.snapshot_digest
        LEFT JOIN cut_job j ON j.cut_job_id = maps.cut_job_id
+       LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = j.param_profile_id
        LEFT JOIN cut_result current_result
          ON current_result.cut_result_id = j.current_cut_result_id
        LEFT JOIN cut_result_archive_state archive
@@ -1145,6 +1152,7 @@ export class PgLabelsRepository implements LabelsPort {
           createdAt: toIsoString(row.created_at),
           isCurrent: row.is_current === true,
           isArchived: row.is_archived === true,
+          isVacuum: row.is_vacuum === true,
           dimensionsMatch: row.dimensions_match === true,
         });
       }

@@ -149,6 +149,7 @@ export interface LabelCutMapOptionDto {
   createdAt: string;
   isCurrent: boolean;
   isArchived: boolean;
+  isVacuum: boolean;
   dimensionsMatch: boolean;
 }
 

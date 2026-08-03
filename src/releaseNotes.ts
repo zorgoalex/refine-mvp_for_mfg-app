@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-03",
+    title: "Бирки: полный номер версии раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Поля версии раскроя в шаблонах бирок показывают полный номер вида «задание-версия», а шаблоны с миниатюрой раскроя по умолчанию выбирают текущий невакуумный раскрой.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-03",
     title: "Базис XML: разделение проекта и заказа",
     services: ["ERP"],
     repositories: ["repo_erp"],

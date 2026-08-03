@@ -72,6 +72,25 @@ describe('order cut-map selection', () => {
     expect(rows[0]?.options.map((item) => item.cutNumber)).toEqual(['50-9']);
     expect(buildDefaultOrderCutMapSelection(rows)).toEqual({ '11:1': 402 });
   });
+
+  it('prefers the current non-vacuum cut result over vacuum and stale candidates', () => {
+    const rows = buildOrderCutMapLabelRows({
+      ...data,
+      details: [{
+        ...data.details[0],
+        options: [
+          { ...option(501, 1, 20, '28-2', true), isCurrent: true, isVacuum: true },
+          { ...option(502, 2, 20, '28-2', true), isCurrent: true, isVacuum: true },
+          { ...option(601, 1, 21, '45-1', true), isCurrent: true, isVacuum: false },
+          { ...option(602, 2, 21, '45-1', true), isCurrent: true, isVacuum: false },
+          { ...option(701, 1, 22, '40-9', true), isCurrent: false, isVacuum: false },
+          { ...option(702, 2, 22, '40-9', true), isCurrent: false, isVacuum: false },
+        ],
+      }],
+    });
+
+    expect(buildDefaultOrderCutMapSelection(rows)).toEqual({ '11:1': 601, '11:2': 602 });
+  });
 });
 
 function option(
@@ -97,6 +116,7 @@ function option(
     createdAt: '2026-07-21T00:00:00.000Z',
     isCurrent: true,
     isArchived: false,
+    isVacuum: false,
     dimensionsMatch,
   };
 }

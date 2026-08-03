@@ -60,7 +60,7 @@ describe('Bazis label field catalog', () => {
         source: 'dynamic',
         sourceColumn: null,
         label: '№ версии раскроя (обычные профили)',
-        type: 'number',
+        type: 'string',
         category: 'Деталь',
       }),
       expect.objectContaining({
@@ -68,7 +68,7 @@ describe('Bazis label field catalog', () => {
         source: 'dynamic',
         sourceColumn: null,
         label: '№ версии раскроя (вакуумный стол)',
-        type: 'number',
+        type: 'string',
         category: 'Деталь',
       }),
     ]);
@@ -80,8 +80,8 @@ describe('Bazis label field catalog', () => {
     const ids = catalog.map((field) => field.id);
     expect(catalog).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'detail.future_detail_code', label: 'Future detail code' }),
-      expect.objectContaining({ id: 'detail.cut_result_version_no', type: 'number' }),
-      expect.objectContaining({ id: 'detail.bath_cut_result_version_no', type: 'number' }),
+      expect.objectContaining({ id: 'detail.cut_result_version_no', type: 'string' }),
+      expect.objectContaining({ id: 'detail.bath_cut_result_version_no', type: 'string' }),
     ]));
     expect(new Set(ids).size).toBe(ids.length);
     expect(isSupportedFieldBinding('detail.cut_result_version_no')).toBe(true);
