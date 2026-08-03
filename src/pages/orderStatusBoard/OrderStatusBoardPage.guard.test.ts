@@ -527,7 +527,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("baths_laminated: 'Закатаны/выданы'");
     expect(page).toContain('...terminalColumns');
     expect(page).toContain('cncMuted={mutedOrderIds.has(card.orderId)}');
-    expect(css).toContain('.cnc-today-column--terminal');
+    expect(css).toMatch(
+      /\.status-board-column\.cnc-today-column--terminal\s*\{[^}]*background: #f2f3f5;/s,
+    );
     expect(css).toContain('.cnc-terminal-card--muted');
     expect(settings).toContain('checked={viewState.hideEmpty}');
     expect(settings).toContain('Скрыть пустые');

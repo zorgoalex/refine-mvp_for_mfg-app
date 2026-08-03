@@ -751,7 +751,7 @@
   background: #f9f0ff;
 }
 
-.cnc-today-column--terminal {
+.status-board-column.cnc-today-column--terminal {
   --status-color: #8c8c8c;
   background: #f2f3f5;
 }
