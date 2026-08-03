@@ -79,11 +79,13 @@ describe('cut detail column', () => {
     expect(show).toContain('const ORDER_DETAIL_SHOW_QUANTITY_COLUMN_WIDTH = 42.525');
     expect(show).toContain('const ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH = 45.9');
     expect(show).toContain('const ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH = 96');
+    expect(show).toContain('const ORDER_DETAIL_SHOW_DETAIL_COST_COLUMN_WIDTH = 81.25');
     expect(show).toContain('const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 96');
     expect(show).toContain('width: ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH');
     expect(show).toContain('width: ORDER_DETAIL_SHOW_QUANTITY_COLUMN_WIDTH');
     expect(show).toContain('width: ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH');
     expect(show).toContain('width: ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH');
+    expect(show).toContain('width: ORDER_DETAIL_SHOW_DETAIL_COST_COLUMN_WIDTH');
     expect(show).toContain('width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH');
   });
 

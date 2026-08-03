@@ -109,6 +109,7 @@ const ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH = 48.6;
 const ORDER_DETAIL_SHOW_QUANTITY_COLUMN_WIDTH = 42.525;
 const ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH = 45.9;
 const ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH = 96;
+const ORDER_DETAIL_SHOW_DETAIL_COST_COLUMN_WIDTH = 81.25;
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 96;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 const ORDER_DETAIL_STATUS_REFRESH_MS = 15_000;
@@ -1623,7 +1624,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       title: 'Сумма',
       dataIndex: 'detail_cost',
       key: 'detail_cost',
-      width: 65,
+      width: ORDER_DETAIL_SHOW_DETAIL_COST_COLUMN_WIDTH,
       align: 'right',
       render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
     },
