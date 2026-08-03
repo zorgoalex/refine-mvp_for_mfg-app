@@ -934,8 +934,7 @@ html {
   background-color: var(--app-surface-muted, #e6ebf2) !important;
   font-weight: bold;
 }
-/* Row-state highlights must win over group tint (placed AFTER tint rules). */
-.details-grouped .ant-table-tbody > tr.dg-editing > td { background-color: var(--app-highlight) !important; }
+/* Selection states must win over group tint (placed AFTER tint rules). */
 .details-grouped .ant-table-tbody > tr.dg-pending > td { background-color: var(--app-selection-bg) !important; }
 .details-grouped .ant-table-tbody > tr.dg-highlight > td { background-color: var(--app-selection-bg) !important; }
 
@@ -953,24 +952,23 @@ html {
 
 .order-details-table .ant-table-tbody > tr.order-detail-row-editing > td,
 .order-details-table .ant-table-tbody > tr.order-detail-row-editing:hover > td {
-  background-color: var(--app-highlight) !important;
   box-shadow:
-    inset 0 2px 0 #faad14,
-    inset 0 -2px 0 #faad14 !important;
+    inset 0 2px 0 var(--app-selection-border),
+    inset 0 -2px 0 var(--app-selection-border) !important;
 }
 
 .order-details-table .ant-table-tbody > tr.order-detail-row-editing > td:first-child {
   box-shadow:
-    inset 2px 0 0 #faad14,
-    inset 0 2px 0 #faad14,
-    inset 0 -2px 0 #faad14 !important;
+    inset 2px 0 0 var(--app-selection-border),
+    inset 0 2px 0 var(--app-selection-border),
+    inset 0 -2px 0 var(--app-selection-border) !important;
 }
 
 .order-details-table .ant-table-tbody > tr.order-detail-row-editing > td:last-child {
   box-shadow:
-    inset -2px 0 0 #faad14,
-    inset 0 2px 0 #faad14,
-    inset 0 -2px 0 #faad14 !important;
+    inset -2px 0 0 var(--app-selection-border),
+    inset 0 2px 0 var(--app-selection-border),
+    inset 0 -2px 0 var(--app-selection-border) !important;
 }
 /* Pin group tint + separator on hover (the global hover rules at app.css ~213
    use !important and would otherwise wash out group boundaries on hover). */

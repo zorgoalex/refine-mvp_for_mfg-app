@@ -83,7 +83,25 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain("isEditing(record) && editingField === field");
     expect(source).toContain('ORDER_DETAIL_EDITABLE_CELL_KEYS.has(column.key)');
     expect(source).toContain('setEditingField(column.key)');
+    expect(source).toContain('onKeyDownCapture={handleInlineEditorKeyDown}');
+    expect(source).toContain('nextOrderDetailInlineTabField(');
+    expect(source).toContain('void finishInlineEditOnTab(record);');
     expect(source).toContain('const validateInlineForm = useCallback');
+  });
+
+  it('frames the editing row without replacing its normal background', () => {
+    const styleStart = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr.order-detail-row-editing > td,',
+    );
+    const styleEnd = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr.order-detail-row-editing > td:first-child',
+      styleStart,
+    );
+    const editingRowStyles = appStyles.slice(styleStart, styleEnd);
+
+    expect(editingRowStyles).toContain('var(--app-selection-border)');
+    expect(editingRowStyles).not.toContain('background-color');
+    expect(appStyles).not.toContain('tr.dg-editing > td { background-color: var(--app-highlight)');
   });
 
   it('uses CSS row hover without rc-table cell hover mutations', () => {

@@ -46,6 +46,10 @@ import {
   OrderSaveValidationContext,
   orderValidationDetailKey,
 } from '../../../../hooks/orderSaveValidation';
+import {
+  nextOrderDetailInlineTabField,
+  orderDetailInlineTabFields,
+} from './orderDetailInlineNavigation';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -573,6 +577,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
   const [editingField, setEditingField] = useState<React.Key | null>(null);
+  const inlineTabFieldsRef = useRef<string[]>(['height']);
   const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
   const [isSumEditable, setIsSumEditable] = useState(false);
   const [sumContextMenu, setSumContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -883,7 +888,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     }
     scrollToEditingRowRef.current = scrollToRow;
     setEditingKey(record.temp_id || record.detail_id || null);
-    setEditingField('height');
+    setEditingField(inlineTabFieldsRef.current[0] ?? 'height');
     setCurrentFilmId(record.film_id ?? null);
     setDimensionValidationError(null);
     // Each edit session starts with the sum field locked; unlocking it is an
@@ -961,24 +966,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     }
   };
 
-  // Handle Tab on last field - save and optionally add new row
-  const handleTabOnLastField = async (e: React.KeyboardEvent, record: OrderDetail) => {
-    if (e.key === 'Tab' && !e.shiftKey) {
-      e.preventDefault();
+  // Save on Tab past the last inline-entry field and optionally add a new row.
+  const finishInlineEditOnTab = async (record: OrderDetail) => {
+    const saved = await saveCurrentRow();
+    if (saved) {
+      const recordKey = record.temp_id || record.detail_id;
+      const lastDetail = sortedDetails[sortedDetails.length - 1];
+      const lastKey = lastDetail?.temp_id || lastDetail?.detail_id;
+      const isLastRow = recordKey === lastKey;
 
-      // Save current row
-      const saved = await saveCurrentRow();
-      if (saved) {
-        // Check if current row is the last one in the list
-        const recordKey = record.temp_id || record.detail_id;
-        const lastDetail = sortedDetails[sortedDetails.length - 1];
-        const lastKey = lastDetail?.temp_id || lastDetail?.detail_id;
-        const isLastRow = recordKey === lastKey;
-
-        // Only add new row if current row is the last one
-        if (isLastRow && onQuickAdd) {
-          onQuickAdd();
-        }
+      if (isLastRow && onQuickAdd) {
+        onQuickAdd();
       }
     }
   };
@@ -1523,11 +1521,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
               style={{ width: '100%', textAlign: 'left' }}
-              onKeyDown={(e) => {
-                if (e.key === 'Tab' && !e.shiftKey) {
-                  handleTabOnLastField(e, d);
-                }
-              }}
               dropdownRender={(menu) => (
                 <>
                   {menu}
@@ -1797,6 +1790,53 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     () => applyOrderDetailColumnSettings(columns, columnSettings),
     [columns, columnSettings],
   );
+  const inlineTabFields = orderDetailInlineTabFields(
+    visibleColumns.map((column) => String(column.key ?? column.dataIndex ?? '')),
+    { detailCostEditable: isSumEditable },
+  );
+  inlineTabFieldsRef.current = inlineTabFields;
+  const handleInlineEditorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.key !== 'Tab'
+      || event.altKey
+      || event.ctrlKey
+      || event.metaKey
+      || editingKey === null
+      || editingField === null
+    ) {
+      return;
+    }
+
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const editingRow = target.closest<HTMLTableRowElement>('tr[data-row-key]');
+    if (!editingRow || editingRow.dataset.rowKey !== String(editingKey)) return;
+
+    const currentField = String(editingField);
+    const nextField = nextOrderDetailInlineTabField(
+      inlineTabFields,
+      currentField,
+      event.shiftKey,
+    );
+    if (nextField) {
+      event.preventDefault();
+      setEditingField(nextField);
+      return;
+    }
+
+    // Shift+Tab on the first field keeps native navigation out of the row.
+    if (
+      event.shiftKey
+      || inlineTabFields[inlineTabFields.length - 1] !== currentField
+    ) return;
+
+    const record = details.find((detail) =>
+      (detail.temp_id || detail.detail_id) === editingKey,
+    );
+    if (!record) return;
+    event.preventDefault();
+    void finishInlineEditOnTab(record);
+  };
   const tableScrollWidth = visibleColumns.reduce(
     (total, column) => total + (typeof column.width === 'number' ? column.width : 0),
     onSelectChange ? 24 : 0,
@@ -2584,6 +2624,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         ref={tableContainerRef}
         className={dragSelection.isDragging ? 'drag-selection-active' : ''}
         style={{ position: 'relative' }}
+        onKeyDownCapture={handleInlineEditorKeyDown}
       >
       <OrderDetailsToolbar>
         {toolbarActions}
