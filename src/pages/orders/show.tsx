@@ -105,7 +105,11 @@ const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: strin
   { key: 'additional', label: 'Дополнительная информация', color: 'var(--app-text-muted)' },
 ];
 
-const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 120;
+const ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH = 48.6;
+const ORDER_DETAIL_SHOW_QUANTITY_COLUMN_WIDTH = 42.525;
+const ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH = 45.9;
+const ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH = 96;
+const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 96;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 const ORDER_DETAIL_STATUS_REFRESH_MS = 15_000;
 
@@ -200,15 +204,18 @@ const ORDER_DETAIL_STATUS_BADGE_STYLE: CSSProperties = {
   boxSizing: 'border-box',
   minHeight: 18,
   lineHeight: 1.1,
-  padding: '1px 3px',
+  padding: '1px 2px',
   border: '1px solid #91caff',
   borderRadius: 4,
   background: '#e6f4ff',
   color: '#0958d9',
   fontSize: 10,
   textAlign: 'center',
-  whiteSpace: 'normal',
-  overflowWrap: 'anywhere',
+  whiteSpace: 'nowrap',
+  overflowWrap: 'normal',
+  wordBreak: 'normal',
+  overflow: 'hidden',
+  letterSpacing: 0,
   verticalAlign: 'middle',
 };
 
@@ -218,6 +225,31 @@ const ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE: CSSProperties = {
   background: 'var(--app-surface)',
   color: 'var(--app-text-muted)',
 };
+
+const ORDER_DETAIL_STATUS_TEXT_WIDTH_PX = 56;
+const ORDER_DETAIL_STATUS_FONT_MAX_PX = 10;
+const ORDER_DETAIL_STATUS_FONT_MIN_PX = 3.8;
+const ORDER_DETAIL_STATUS_AVG_CHAR_WIDTH_EM = 0.52;
+
+const fitOrderDetailStatusFontSize = (text: string): number => {
+  const charCount = Math.max(Array.from(text.trim() || ' ').length, 1);
+  const fitted = ORDER_DETAIL_STATUS_TEXT_WIDTH_PX / (charCount * ORDER_DETAIL_STATUS_AVG_CHAR_WIDTH_EM);
+  const bounded = Math.max(
+    ORDER_DETAIL_STATUS_FONT_MIN_PX,
+    Math.min(ORDER_DETAIL_STATUS_FONT_MAX_PX, fitted),
+  );
+  return Math.floor(bounded * 10) / 10;
+};
+
+const getOrderDetailStatusBadgeStyle = (
+  text: string,
+  baseStyle: CSSProperties,
+  statusColor?: string | null,
+): CSSProperties => ({
+  ...baseStyle,
+  fontSize: fitOrderDetailStatusFontSize(text),
+  ...(statusColor ? { borderColor: statusColor, color: statusColor } : null),
+});
 
 type DetailProductionStatusSnapshot = {
   detailId: number;
@@ -253,7 +285,12 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
   loading: boolean;
 }) {
   if (statusId === null || statusId === undefined) {
-    return <span style={ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE}>Не назначен</span>;
+    const text = 'Не назначен';
+    return (
+      <span title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_EMPTY_BADGE_STYLE)}>
+        {text}
+      </span>
+    );
   }
 
   const statusMeta = statusesById.get(statusId);
@@ -261,7 +298,12 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
   const label = directName || statusMeta?.name || '';
 
   if (!label && loading) {
-    return <span style={ORDER_DETAIL_STATUS_BADGE_STYLE}>...</span>;
+    const text = '...';
+    return (
+      <span title={text} style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_BADGE_STYLE)}>
+        {text}
+      </span>
+    );
   }
 
   const text = label || `ID: ${statusId}`;
@@ -270,10 +312,7 @@ const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatus
   return (
     <span
       title={text}
-      style={{
-        ...ORDER_DETAIL_STATUS_BADGE_STYLE,
-        ...(statusColor ? { borderColor: statusColor, color: statusColor } : null),
-      }}
+      style={getOrderDetailStatusBadgeStyle(text, ORDER_DETAIL_STATUS_BADGE_STYLE, statusColor)}
     >
       {text}
     </span>
@@ -1511,28 +1550,28 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       title: 'Высота',
       dataIndex: 'height',
       key: 'height',
-      width: 54,
+      width: ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH,
       align: 'center',
     },
     {
       title: 'Ширина',
       dataIndex: 'width',
       key: 'width',
-      width: 54,
+      width: ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH,
       align: 'center',
     },
     {
       title: 'Кол-во',
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 47.25,
+      width: ORDER_DETAIL_SHOW_QUANTITY_COLUMN_WIDTH,
       align: 'center',
     },
     {
       title: 'м²',
       dataIndex: 'area',
       key: 'area',
-      width: 54,
+      width: ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH,
       align: 'center',
       render: (value) => value ? value.toFixed(2) : '0.00',
     },
@@ -1545,7 +1584,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     {
       title: 'Обкат',
       key: 'edge_type',
-      width: 51,
+      width: ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH,
       render: (_, detail) => {
         const edgeTypeName = edgeTypesMap.get(detail.edge_type_id) || '—';
         return <span style={{ fontSize: '0.86em' }}>{edgeTypeName}</span>;
@@ -1565,7 +1604,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       title: 'Пр-е',
       dataIndex: 'note',
       key: 'note',
-      width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
+      width: ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH,
       render: (value) => (
         <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
           {value || ''}

@@ -66,8 +66,25 @@ describe('cut detail column', () => {
     expect(statusColumn).toContain('width: 60');
     expect(statusColumn).toContain("align: 'center'");
     expect(show).toContain('const ORDER_DETAIL_STATUS_BADGE_STYLE');
-    expect(show).toContain('fontSize: 10');
-    expect(show).toContain("overflowWrap: 'anywhere'");
+    expect(show).toContain('fitOrderDetailStatusFontSize');
+    expect(show).toContain('getOrderDetailStatusBadgeStyle');
+    expect(show).toContain("whiteSpace: 'nowrap'");
+    expect(show).toContain("overflowWrap: 'normal'");
+    expect(show).toContain("wordBreak: 'normal'");
+  });
+
+  it('keeps requested order show detail columns compact', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    expect(show).toContain('const ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH = 48.6');
+    expect(show).toContain('const ORDER_DETAIL_SHOW_QUANTITY_COLUMN_WIDTH = 42.525');
+    expect(show).toContain('const ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH = 45.9');
+    expect(show).toContain('const ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH = 96');
+    expect(show).toContain('const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 96');
+    expect(show).toContain('width: ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH');
+    expect(show).toContain('width: ORDER_DETAIL_SHOW_QUANTITY_COLUMN_WIDTH');
+    expect(show).toContain('width: ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH');
+    expect(show).toContain('width: ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH');
+    expect(show).toContain('width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH');
   });
 
   it('summary row aligns with the selection column and the trailing Раскрой column', () => {
