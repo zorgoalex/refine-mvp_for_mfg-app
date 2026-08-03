@@ -44,6 +44,7 @@ import type { ProjectDto } from "../../api/projectsApi";
 import { CutJobVersionLines } from "./CutJobVersionLines";
 import {
   buildCutJobLinkMapsFromDetails,
+  buildOrderDetailLiveCellRenderVersion,
   cutJobDeepLink,
   cutJobProfileLabel,
   mergeCutJobLinkMaps,
@@ -307,7 +308,10 @@ interface OrderShowColumnRuntime {
   shouldUpdateByKey: Map<React.Key, ((row: any, previousRow: any) => boolean) | undefined>;
 }
 
-function useStableOrderShowColumns(columns: ColumnsType<any>): ColumnsType<any> {
+function useStableOrderShowColumns(
+  columns: ColumnsType<any>,
+  runtimeVersion: string,
+): ColumnsType<any> {
   const runtimeRef = useRef<OrderShowColumnRuntime | null>(null);
   if (!runtimeRef.current) {
     runtimeRef.current = {
@@ -342,7 +346,7 @@ function useStableOrderShowColumns(columns: ColumnsType<any>): ColumnsType<any> 
       shouldCellUpdate: (row: any, previousRow: any) =>
         runtime.shouldUpdateByKey.get(key)?.(row, previousRow) ?? row !== previousRow,
     };
-  }), [runtime, structureKey]);
+  }), [runtime, runtimeVersion, structureKey]);
 }
 
 interface MemoizedOrderShowTableProps extends React.ComponentProps<typeof Table> {
@@ -1730,17 +1734,19 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       }),
     [renderGroupedSummaryValue, visibleDetailColumns],
   );
-  const stableRenderedDetailColumns = useStableOrderShowColumns(renderedDetailColumns);
+  const liveExternalCellRenderVersion = buildOrderDetailLiveCellRenderVersion({
+    currentDetailProductionStatusById,
+    productionStatusesById,
+    productionStatusesLoading,
+    cutJobByDetailId,
+    bathCutJobByDetailId,
+  });
+  const stableRenderedDetailColumns = useStableOrderShowColumns(
+    renderedDetailColumns,
+    liveExternalCellRenderVersion,
+  );
   const orderShowDetailTableRenderVersion = [
-    [...currentDetailProductionStatusById.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([detailId, statusId]) => `${detailId}:${statusId ?? ''}`)
-      .join(','),
-    [...productionStatusesById.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([statusId, meta]) => `${statusId}:${meta.name}:${meta.color ?? ''}`)
-      .join(','),
-    productionStatusesLoading ? 'status-loading' : 'status-ready',
+    liveExternalCellRenderVersion,
     cutSelectMode ? `cut:${cutSelectedDetailIds.join(',')}` : 'view',
     highlightDetail ?? '',
     canEditOrderContent ? 'editable' : 'readonly',
@@ -1749,8 +1755,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     filmsMap.size,
     materialsMap.size,
     resolvedNameByDetailId.size,
-    JSON.stringify([...cutJobByDetailId.entries()]),
-    JSON.stringify([...bathCutJobByDetailId.entries()]),
   ].join('|');
 
   const deletedOrderRestoreHandler = deletedOrder

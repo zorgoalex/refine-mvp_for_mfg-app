@@ -129,6 +129,30 @@ function areCutJobRefMapsEqual(
   return true;
 }
 
+export function buildOrderDetailLiveCellRenderVersion(input: {
+  currentDetailProductionStatusById: ReadonlyMap<number, number | null>;
+  productionStatusesById: ReadonlyMap<number, { name: string; color?: string | null }>;
+  productionStatusesLoading: boolean;
+  cutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+  bathCutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+}): string {
+  const sortedEntries = <T>(map: ReadonlyMap<number, T>) => (
+    [...map.entries()].sort(([left], [right]) => left - right)
+  );
+
+  return [
+    sortedEntries(input.currentDetailProductionStatusById)
+      .map(([detailId, statusId]) => `${detailId}:${statusId ?? ''}`)
+      .join(','),
+    sortedEntries(input.productionStatusesById)
+      .map(([statusId, meta]) => `${statusId}:${meta.name}:${meta.color ?? ''}`)
+      .join(','),
+    input.productionStatusesLoading ? 'status-loading' : 'status-ready',
+    JSON.stringify(sortedEntries(input.cutJobByDetailId)),
+    JSON.stringify(sortedEntries(input.bathCutJobByDetailId)),
+  ].join('|');
+}
+
 /** Deep-link to the cut page opened on a specific job/result. */
 export function cutJobDeepLink(cutJobId: number, resultNo?: number | null): string;
 export function cutJobDeepLink(ref: Pick<CutDetailLastReadyJobRef, 'cutJobId' | 'resultNo'>): string;

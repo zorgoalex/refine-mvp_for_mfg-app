@@ -4,6 +4,7 @@ import {
   buildCutJobByDetailId,
   buildCutJobLinkMaps,
   buildCutJobLinkMapsFromDetails,
+  buildOrderDetailLiveCellRenderVersion,
   cutJobDeepLink,
   cutJobProfileLabel,
   cutJobVersionLabel,
@@ -108,6 +109,55 @@ describe('cutColumnHelpers', () => {
 
     expect(areCutJobLinkMapsEqual(first, unchanged)).toBe(true);
     expect(areCutJobLinkMapsEqual(first, changed)).toBe(false);
+  });
+
+  it('versions every external source used by live order-detail cells', () => {
+    const cutRef = {
+      cutJobId: 9,
+      resultNo: 2,
+      cutNumber: '9-2',
+      name: 'Regular',
+      paramProfileId: null,
+      profileName: null,
+      profileIsActive: null,
+    };
+    const bathRef = { ...cutRef, cutJobId: 10, cutNumber: '10-2', name: 'Bath' };
+    const input = {
+      currentDetailProductionStatusById: new Map([[1, 4]]),
+      productionStatusesById: new Map([[4, { name: 'В работе', color: '#1677ff' }]]),
+      productionStatusesLoading: false,
+      cutJobByDetailId: new Map([[1, cutRef]]),
+      bathCutJobByDetailId: new Map([[1, bathRef]]),
+    };
+    const version = buildOrderDetailLiveCellRenderVersion(input);
+
+    expect(buildOrderDetailLiveCellRenderVersion({
+      ...input,
+      currentDetailProductionStatusById: new Map([[1, 4]]),
+      productionStatusesById: new Map([[4, { name: 'В работе', color: '#1677ff' }]]),
+      cutJobByDetailId: new Map([[1, { ...cutRef }]]),
+      bathCutJobByDetailId: new Map([[1, { ...bathRef }]]),
+    })).toBe(version);
+    expect(buildOrderDetailLiveCellRenderVersion({
+      ...input,
+      currentDetailProductionStatusById: new Map([[1, 5]]),
+    })).not.toBe(version);
+    expect(buildOrderDetailLiveCellRenderVersion({
+      ...input,
+      productionStatusesById: new Map([[4, { name: 'Готово', color: '#52c41a' }]]),
+    })).not.toBe(version);
+    expect(buildOrderDetailLiveCellRenderVersion({
+      ...input,
+      productionStatusesLoading: true,
+    })).not.toBe(version);
+    expect(buildOrderDetailLiveCellRenderVersion({
+      ...input,
+      cutJobByDetailId: new Map([[1, { ...cutRef, resultNo: 3, cutNumber: '9-3' }]]),
+    })).not.toBe(version);
+    expect(buildOrderDetailLiveCellRenderVersion({
+      ...input,
+      bathCutJobByDetailId: new Map([[1, { ...bathRef, resultNo: 3, cutNumber: '10-3' }]]),
+    })).not.toBe(version);
   });
 
   it('cutJobDeepLink builds the /cut?job= path', () => {

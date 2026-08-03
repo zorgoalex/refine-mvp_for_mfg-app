@@ -15,6 +15,9 @@ describe('cut detail column', () => {
     expect(show).toContain("column.key === 'cut_job'");
     expect(show).toContain("column.key === 'bath_cut_job'");
     expect(show).toContain('return isLiveExternalColumn || row !== previousRow');
+    expect(show).toContain('const liveExternalCellRenderVersion = buildOrderDetailLiveCellRenderVersion({');
+    expect(show).toContain('useStableOrderShowColumns(\n    renderedDetailColumns,\n    liveExternalCellRenderVersion,');
+    expect(show).toContain('}), [runtime, runtimeVersion, structureKey]);');
 
     const hook = readFileSync('src/pages/orders/useCutDetailLastReady.ts', 'utf8');
     expect(hook).toContain('window.setInterval(refreshWhenVisible, pollIntervalMs)');
