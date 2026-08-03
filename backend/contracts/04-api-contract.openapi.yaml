@@ -14180,6 +14180,7 @@ components:
         - pastPlannedDate
         - orderStatusId
         - orderStatusName
+        - orderStatusIssuedOrLater
         - productionStatusId
         - productionStatusName
         - productionStatusFromDetailsEnabled
@@ -14223,6 +14224,8 @@ components:
           format: int64
         orderStatusName:
           type: string
+        orderStatusIssuedOrLater:
+          type: boolean
         productionStatusId:
           type: integer
           format: int64

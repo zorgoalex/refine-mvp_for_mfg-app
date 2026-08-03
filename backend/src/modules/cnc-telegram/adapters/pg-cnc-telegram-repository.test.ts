@@ -195,6 +195,8 @@ describe('PgCncTelegramRepository', () => {
       ['completed', 'Выполнено', 1],
       ['baths', 'Ванны', 0],
       ['baths_ready', 'Готовы к закатке', 0],
+      ['completed_laminated', 'Распиленные файлы', 0],
+      ['baths_laminated', 'Закатаны/выданы', 0],
     ]);
     expect(queries[0]).toContain('LEFT JOIN cut_result svg_result');
     expect(queries[0]).toContain('svg_result.result_no AS svg_cut_result_no');
@@ -203,6 +205,60 @@ describe('PgCncTelegramRepository', () => {
       svgCutResultId: 54,
       svgCutResultNo: 3,
     });
+  });
+
+  it('archives a completed machine file only when every matched detail is laminated or later', async () => {
+    const database = {
+      query: vi.fn(async (text: string) => {
+        if (/latest_vacuum_results/i.test(text)) return { rows: [] };
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000031',
+                packet_item_id: '00000000-0000-0000-0000-000000000041',
+                laminated_or_later: true,
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000032',
+                packet_item_id: '00000000-0000-0000-0000-000000000042',
+                laminated_or_later: true,
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000032',
+                packet_item_id: '00000000-0000-0000-0000-000000000043',
+                source_item_key: '2689:32:497x477',
+                detail_number: 32,
+                match_detail_id: 3102,
+                laminated_or_later: false,
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000033',
+                packet_item_id: '00000000-0000-0000-0000-000000000044',
+                match_status: 'conflict',
+                laminated_or_later: true,
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000034',
+                packet_item_id: '00000000-0000-0000-0000-000000000045',
+                match_status: 'needs_review',
+                laminated_or_later: true,
+              }),
+            ],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+
+    expect(result.columns.find((column) => column.key === 'completed')?.packets)
+      .toHaveLength(3);
+    expect(result.columns.find((column) => column.key === 'completed_laminated')?.packets)
+      .toMatchObject([{ packetId: '00000000-0000-0000-0000-000000000031' }]);
+    expect(database.query.mock.calls[0]?.[0]).toContain("i.match_status = 'matched'");
   });
 
   it('lists stored machine-file cutting sequence numbers for an order card', async () => {
@@ -443,6 +499,8 @@ describe('PgCncTelegramRepository', () => {
       ['completed', 0],
       ['baths', 1],
       ['baths_ready', 1],
+      ['completed_laminated', 0],
+      ['baths_laminated', 0],
     ]);
     expect(result.columns[2]?.baths[0]).toMatchObject({
       cutJobId: 31,
@@ -460,6 +518,34 @@ describe('PgCncTelegramRepository', () => {
         { cutGroupId: 100, sheetIndex: 1, sheetNumber: 2 },
       ],
     });
+  });
+
+  it('archives a ready bath only when every detail is laminated or later', async () => {
+    const database = {
+      query: vi.fn(async (text: string) => {
+        if (/latest_vacuum_results/i.test(text)) {
+          return {
+            rows: [
+              bathPlacementRow({ laminated_or_later: true }),
+              bathPlacementRow({
+                order_detail_id: 3102,
+                detail_number: 32,
+                laminated_or_later: true,
+              }),
+            ],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) return { rows: [] };
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+
+    expect(result.columns.find((column) => column.key === 'baths_ready')?.baths).toEqual([]);
+    expect(result.columns.find((column) => column.key === 'baths_laminated')?.baths)
+      .toMatchObject([{ cutJobId: 30, ready: true }]);
   });
 
   it('keeps sheet image metadata when updating a completed packet', async () => {
@@ -1613,7 +1699,7 @@ describe('PgCncTelegramRepository', () => {
     const queries = await runAutoCutIngest({ settingRows: [] });
 
     expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(true);
-    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /FROM production_statuses\s+WHERE/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -1624,7 +1710,7 @@ describe('PgCncTelegramRepository', () => {
   ])('rejects inactive or malformed auto-cut setting %#', async (settingRow) => {
     const queries = await runAutoCutIngest({ settingRows: [settingRow] });
 
-    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /FROM production_statuses\s+WHERE/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -1683,7 +1769,7 @@ describe('PgCncTelegramRepository', () => {
   it('stops auto-cut status changes when the target production status is unavailable', async () => {
     const queries = await runAutoCutIngest({ statusRows: [] });
 
-    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(true);
+    expect(queries.some((query) => /FROM production_statuses\s+WHERE/i.test(query.text))).toBe(true);
     expect(queries.some((query) =>
       /pg_advisory_xact_lock/i.test(query.text)
       && query.params[0] === 'status_automation.cnc_mark_cut_details',
@@ -1701,7 +1787,9 @@ describe('PgCncTelegramRepository', () => {
       }],
     });
 
-    const targetStatusQuery = queries.find((query) => /FROM production_statuses/i.test(query.text));
+    const targetStatusQuery = queries.find((query) =>
+      /FROM production_statuses\s+WHERE/i.test(query.text),
+    );
     expect(targetStatusQuery?.text).toContain('FOR SHARE');
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(true);
   });
@@ -1710,7 +1798,7 @@ describe('PgCncTelegramRepository', () => {
     const queries = await runAutoCutIngest({ currentItemMatched: false });
 
     expect(queries.some((query) => /FROM app_settings/i.test(query.text))).toBe(true);
-    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /FROM production_statuses\s+WHERE/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
 
@@ -1853,7 +1941,7 @@ describe('PgCncTelegramRepository', () => {
     });
     expect(queries.some((query) => /pg_advisory_xact_lock/i.test(query.text))).toBe(true);
     expect(queries.some((query) => /INSERT INTO app_settings/i.test(query.text))).toBe(true);
-    expect(queries.some((query) => /FROM production_statuses/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /FROM production_statuses\s+WHERE/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /COUNT\(DISTINCT packet.packet_id\)/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /UPDATE order_details/i.test(query.text))).toBe(false);
   });
@@ -2087,6 +2175,7 @@ function packetRowBase() {
     match_detail_id: 3101,
     match_status: 'matched',
     review_note: null,
+    laminated_or_later: false,
   };
 }
 
@@ -2389,6 +2478,7 @@ function bathPlacementRow(overrides: Record<string, unknown> = {}) {
     width_mm: 497,
     height_mm: 477,
     completed_quantity: 2,
+    laminated_or_later: false,
     cut_group_id: 100,
     variant: 'auto',
     sheet_index: 0,

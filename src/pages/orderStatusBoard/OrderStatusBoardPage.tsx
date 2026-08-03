@@ -121,6 +121,7 @@ import {
 import { StatusBoardColumnSettingsButton } from './StatusBoardColumnSettings';
 import {
   CNC_STATUS_BOARD_COLUMN_DEFINITIONS,
+  CNC_TERMINAL_COLUMN_DEFINITIONS,
   STATUS_BOARD_COLUMN_PREFERENCE_KEYS,
   STATUS_BOARD_LABELS,
   filterVisibleStatusBoardColumns,
@@ -283,6 +284,7 @@ export const OrderStatusBoardPage: React.FC = () => {
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
     useState(true);
+  const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false);
   const [activeCncDetailedBathId, setActiveCncDetailedBathId] =
     useState<string | null>(null);
   const [activeCncDetailedDetail, setActiveCncDetailedDetail] =
@@ -796,24 +798,38 @@ export const OrderStatusBoardPage: React.FC = () => {
     ),
     [cncFilteredColumns, cncOrderStatusCards, cncHiddenProductionStatusIds],
   );
-  const cncOrderCards = useMemo(
-    () => cncOrderStatusCards.filter((card) =>
-      !isCncOrderHiddenFromMdfBoard(card, cncHiddenProductionStatusIds),
+  const cncShownDataColumns = useMemo(
+    () => cncActiveColumns.filter((column) =>
+      cncTerminalColumnsVisible || !isCncTerminalColumnKey(column.key),
     ),
-    [cncOrderStatusCards, cncHiddenProductionStatusIds],
+    [cncActiveColumns, cncTerminalColumnsVisible],
+  );
+  const cncMutedOrderIds = useMemo(
+    () => new Set(
+      cncOrderStatusCards
+        .filter((card) => isCncOrderHiddenFromMdfBoard(card, cncHiddenProductionStatusIds))
+        .map((card) => card.orderId),
+    ),
+    [cncHiddenProductionStatusIds, cncOrderStatusCards],
+  );
+  const cncOrderCards = useMemo(
+    () => cncTerminalColumnsVisible
+      ? cncOrderStatusCards
+      : cncOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId)),
+    [cncMutedOrderIds, cncOrderStatusCards, cncTerminalColumnsVisible],
   );
   const cncRelationContext = useMemo(
     () =>
       cncRelationsEnabled
-        ? buildCncRelationContext(cncActiveColumns, cncOrderCards, activeCncRelation)
+        ? buildCncRelationContext(cncShownDataColumns, cncOrderCards, activeCncRelation)
         : null,
-    [activeCncRelation, cncActiveColumns, cncOrderCards, cncRelationsEnabled],
+    [activeCncRelation, cncOrderCards, cncRelationsEnabled, cncShownDataColumns],
   );
   const cncDetailedContext = useMemo(
     () =>
       cncDetailedEnabled
         ? buildCncDetailedContext(
-            cncActiveColumns,
+            cncShownDataColumns,
             activeCncDetailedBathId,
             activeCncDetailedDetail,
           )
@@ -822,16 +838,18 @@ export const OrderStatusBoardPage: React.FC = () => {
       activeCncDetailedBathId,
       activeCncDetailedDetail,
       cncDetailedEnabled,
-      cncActiveColumns,
+      cncShownDataColumns,
     ],
   );
   const cncVisibleColumns = useMemo(
     () =>
       filterVisibleStatusBoardColumns(
-        cncActiveColumns,
+        cncShownDataColumns,
         cncColumnPreferences.settings.hidden,
-      ).filter((column) => !viewState.hideEmpty || column.total > 0),
-    [cncActiveColumns, cncColumnPreferences.settings.hidden, viewState.hideEmpty],
+      ).filter((column) =>
+        isCncTerminalColumnKey(column.key) || !viewState.hideEmpty || column.total > 0,
+      ),
+    [cncColumnPreferences.settings.hidden, cncShownDataColumns, viewState.hideEmpty],
   );
   const cncDetailedWorkspaceActive = cncDetailedEnabled && cncDetailedContext !== null;
   const cncOrdersColumnVisible =
@@ -1042,6 +1060,14 @@ export const OrderStatusBoardPage: React.FC = () => {
         />
         Подробный
       </label>
+      <div className="status-board-settings__terminal-toggle">
+        <Checkbox
+          checked={cncTerminalColumnsVisible}
+          onChange={(event) => setCncTerminalColumnsVisible(event.target.checked)}
+        >
+          Закатан/выдан
+        </Checkbox>
+      </div>
     </section>
   );
 
@@ -1481,8 +1507,9 @@ export const OrderStatusBoardPage: React.FC = () => {
               />
             ) : (
               <CncTelegramTodayColumns
-                columns={cncDetailedWorkspaceActive ? cncActiveColumns : cncVisibleColumns}
+                columns={cncDetailedWorkspaceActive ? cncShownDataColumns : cncVisibleColumns}
                 orderCards={cncOrderCards}
+                mutedOrderIds={cncMutedOrderIds}
                 orderStatusColumns={cncOrderBoardColumns}
                 orderCardsLoading={cncOrderBoardLoading}
                 relationContext={cncRelationContext}
@@ -1567,6 +1594,7 @@ const StatusBoardToolbarIconToggle: React.FC<{
 interface CncTelegramTodayColumnsProps {
   columns: CncTelegramTodayColumn[];
   orderCards: OrderStatusBoardCard[];
+  mutedOrderIds: ReadonlySet<number>;
   orderStatusColumns: OrderStatusBoardColumn[];
   orderCardsLoading: boolean;
   relationContext: CncRelationContext | null;
@@ -1601,6 +1629,7 @@ interface CncTelegramTodayDisplayColumn {
 const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   columns,
   orderCards,
+  mutedOrderIds,
   orderStatusColumns,
   orderCardsLoading,
   relationContext,
@@ -1637,7 +1666,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
   const displayColumns = useMemo(
     () => {
-      const machineAndBathColumns = detailedBathActive
+      const primaryColumns = detailedBathActive
         ? CNC_STATUS_BOARD_COLUMN_DEFINITIONS
             .filter((definition) => definition.key !== 'orders')
             .map((definition) => columns.find((column) => column.key === definition.key) ?? ({
@@ -1647,9 +1676,18 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               packets: [],
               baths: [],
             }))
-        : columns;
+        : CNC_STATUS_BOARD_COLUMN_DEFINITIONS
+            .filter((definition) => definition.key !== 'orders')
+            .flatMap((definition) => {
+              const column = columns.find((candidate) => candidate.key === definition.key);
+              return column ? [column] : [];
+            });
+      const terminalColumns = CNC_TERMINAL_COLUMN_DEFINITIONS.flatMap((definition) => {
+        const column = columns.find((candidate) => candidate.key === definition.key);
+        return column ? [column] : [];
+      });
       return [
-        ...machineAndBathColumns,
+        ...primaryColumns,
         ...(showOrdersColumn
           ? [
               {
@@ -1662,6 +1700,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               },
             ]
           : []),
+        ...terminalColumns,
       ];
     },
     [columns, detailedBathActive, orderCards, showOrdersColumn],
@@ -1690,12 +1729,14 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         style={
           {
             '--status-board-cnc-column-count': displayColumns.length,
+            '--status-board-cnc-side-column-count': Math.max(0, displayColumns.length - 4),
           } as React.CSSProperties
         }
       >
       {displayColumns.map((column, columnIndex) => {
-        const bathColumn = column.key === 'baths' || column.key === 'baths_ready';
+        const bathColumn = isCncBathColumnKey(column.key);
         const orderColumn = column.key === 'orders';
+        const terminalColumn = isCncTerminalColumnKey(column.key);
         const columnClassNames = [`cnc-today-column--${column.key}`];
         const title = cncColumnDisplayTitle(column);
         const totals = buildCncColumnTotals(column, relationContext, detailedContext);
@@ -1722,7 +1763,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         const columnDetailed = !detailedBathActive && detailedEnabled && bathColumn && bathSourceCards.some(
           (bath) => bath.bathCardId === detailedContext?.activeBathId,
         );
-        const columnCovered = detailedBathActive && !orderColumn;
+        const columnCovered = detailedBathActive && columnIndex < 4;
 
         return (
           <article
@@ -1731,6 +1772,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               'status-board-column cnc-today-column',
               ...columnClassNames,
               columnDetailed ? 'cnc-today-column--detailed' : '',
+              terminalColumn ? 'cnc-today-column--terminal' : '',
               columnCovered ? 'cnc-today-column--detailed-covered' : '',
             ].filter(Boolean).join(' ')}
             style={{ gridColumn: columnIndex + 1, gridRow: 1 }}
@@ -1806,6 +1848,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         displayMode="standard"
                         actionsVisible={false}
                         cncOrderCard
+                        cncMuted={mutedOrderIds.has(card.orderId)}
                         cncSummaryOnly={summaryOnly}
                         displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
@@ -1842,7 +1885,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       detailed,
                     );
                     const detailedPlacement: CncDetailedBathPlacement =
-                      column.key === 'baths_ready' ? 'left' : 'right';
+                      isCncReadyBathColumnKey(column.key) ? 'left' : 'right';
                     const selectedDetailId =
                       detailedContext?.activeDetail?.bathId === bath.bathCardId
                         ? detailedContext.activeDetail.detailId
@@ -1860,7 +1903,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         detailedPlacement={detailedPlacement}
                         summaryOnly={summaryOnly}
                         displayToggleVisible={cardDisplayMode === 'compact'}
-                        showReadyIcon={column.key === 'baths_ready'}
+                        showReadyIcon={isCncReadyBathColumnKey(column.key)}
                         selectedDetailId={selectedDetailId}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         onSelect={() => {
@@ -2307,7 +2350,7 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
   const printColumns: CncPrintColumn[] = columns.map((column) => {
     const cards: CncPrintCard[] = column.key === 'orders'
       ? (column.orderCards ?? []).map((order) => ({ kind: 'order', order }))
-      : column.key === 'baths' || column.key === 'baths_ready'
+      : isCncBathColumnKey(column.key)
         ? column.baths.map((bath) => ({ kind: 'bath', bath }))
         : column.packets.map((packet) => ({ kind: 'packet', packet }));
     return {
@@ -3861,6 +3904,7 @@ interface StatusBoardCardViewProps {
   displayMode: StatusBoardCardDisplayMode;
   actionsVisible?: boolean;
   cncOrderCard?: boolean;
+  cncMuted?: boolean;
   cncSummaryOnly?: boolean;
   displayToggleVisible?: boolean;
   onToggleDisplay?: () => void;
@@ -3885,6 +3929,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   displayMode,
   actionsVisible = true,
   cncOrderCard = false,
+  cncMuted = false,
   cncSummaryOnly = false,
   displayToggleVisible = false,
   onToggleDisplay,
@@ -3989,6 +4034,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           'status-board-card',
           `status-board-card--${displayMode}`,
           cncOrderCard ? 'cnc-order-card' : '',
+          cncMuted ? 'cnc-terminal-card--muted' : '',
           cncSummaryOnly ? 'cnc-order-card--summary-only' : '',
           isDragging ? 'status-board-card--dragging' : '',
           pending ? 'status-board-card--pending' : '',
@@ -4346,6 +4392,7 @@ function formatCncSize(width: number | null, height: number | null): string {
 
 function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): string {
   if (columnKey === 'orders') return '#722ed1';
+  if (isCncTerminalColumnKey(columnKey)) return '#8c8c8c';
   if (columnKey === 'completed' || columnKey === 'baths_ready') return '#389e0d';
   if (columnKey === 'baths') return '#cf1322';
   return '#1677ff';
@@ -4358,6 +4405,8 @@ function cncColumnDisplayTitle(column: CncTelegramTodayDisplayColumn): string {
     baths: 'Карты ванн',
     baths_ready: 'Готовы к закатке',
     orders: 'Заказы',
+    completed_laminated: 'Распиленные файлы',
+    baths_laminated: 'Закатаны/выданы',
   };
   return titles[column.key] ?? column.title;
 }
@@ -4400,7 +4449,7 @@ function buildCncColumnTotals(
       );
   }
   const items: CncColumnTotalItem[] =
-    column.key === 'baths' || column.key === 'baths_ready'
+    isCncBathColumnKey(column.key)
       ? column.baths
         .filter((bath) =>
           !relationContext || getCncBathRelationState(bath, relationContext) !== 'dimmed',
@@ -4422,6 +4471,26 @@ function buildCncColumnTotals(
     },
     { details: 0, areaM2: 0 },
   );
+}
+
+function isCncBathColumnKey(
+  columnKey: CncTelegramTodayDisplayColumnKey,
+): boolean {
+  return columnKey === 'baths'
+    || columnKey === 'baths_ready'
+    || columnKey === 'baths_laminated';
+}
+
+function isCncReadyBathColumnKey(
+  columnKey: CncTelegramTodayDisplayColumnKey,
+): boolean {
+  return columnKey === 'baths_ready' || columnKey === 'baths_laminated';
+}
+
+function isCncTerminalColumnKey(
+  columnKey: CncTelegramTodayDisplayColumnKey,
+): boolean {
+  return columnKey === 'completed_laminated' || columnKey === 'baths_laminated';
 }
 
 function cncItemAreaM2(item: CncColumnTotalItem, quantity: number): number {

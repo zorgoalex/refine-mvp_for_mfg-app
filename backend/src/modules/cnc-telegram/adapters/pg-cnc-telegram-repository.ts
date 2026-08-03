@@ -108,6 +108,7 @@ interface PacketJoinedRow extends QueryResultRow {
   match_detail_id: string | number | null;
   match_status: CncTelegramMatchStatus | null;
   review_note: string | null;
+  laminated_or_later: boolean | null;
 }
 
 interface PacketReplayRow extends QueryResultRow {
@@ -201,6 +202,7 @@ interface BathJoinedRow extends QueryResultRow {
   width_mm: string | number | null;
   height_mm: string | number | null;
   completed_quantity: string | number | null;
+  laminated_or_later: boolean | null;
   cut_group_id: string | number;
   variant: 'auto' | 'manual';
   sheet_index: string | number;
@@ -604,7 +606,15 @@ function packetSelectSql(whereSql: string): string {
       i.match_order_id,
       i.match_detail_id,
       i.match_status,
-      i.review_note
+      i.review_note,
+      CASE
+        WHEN i.match_status = 'matched'
+          AND matched_detail.detail_id IS NOT NULL
+          AND detail_status.sort_order IS NOT NULL
+          AND laminated_status.sort_order IS NOT NULL
+          THEN detail_status.sort_order >= laminated_status.sort_order
+        ELSE false
+      END AS laminated_or_later
     FROM cnc_telegram_packets p
     LEFT JOIN cut_result svg_result
       ON svg_result.cut_job_id = p.svg_cut_job_id
@@ -622,6 +632,22 @@ function packetSelectSql(whereSql: string): string {
     ) item_order
       ON item_order.order_key = lower(trim(i.order_name))
     LEFT JOIN orders matched_order ON matched_order.order_id = i.match_order_id
+    LEFT JOIN order_details matched_detail
+      ON matched_detail.detail_id = i.match_detail_id
+     AND matched_detail.delete_flag = false
+    LEFT JOIN production_statuses detail_status
+      ON detail_status.production_status_id = matched_detail.production_status_id
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'laminated'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'закатан'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ) laminated_status ON true
     WHERE ${whereSql}
     ORDER BY p.updated_at DESC, p.packet_id, i.order_name ASC NULLS LAST, i.detail_number ASC NULLS LAST
   `;
@@ -3055,7 +3081,18 @@ async function loadBathCards(
 ): Promise<CncTelegramBathCardDto[]> {
   const result = await database.query<BathJoinedRow>(
     `
-    WITH packet_items AS (
+    WITH laminated_status_threshold AS (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'laminated'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'закатан'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ),
+    packet_items AS (
       SELECT
         p.completion_status,
         p.thumbs_up,
@@ -3270,6 +3307,12 @@ async function loadBathCards(
       COALESCE(od.width, placement.detail_width_mm) AS width_mm,
       COALESCE(od.height, placement.detail_height_mm) AS height_mm,
       COALESCE(target.completed_quantity, 0) AS completed_quantity,
+      CASE
+        WHEN detail_status.sort_order IS NOT NULL
+          AND laminated_status.sort_order IS NOT NULL
+          THEN detail_status.sort_order >= laminated_status.sort_order
+        ELSE false
+      END AS laminated_or_later,
       sheet.cut_group_id,
       sheet.variant,
       sheet.sheet_index,
@@ -3288,6 +3331,9 @@ async function loadBathCards(
     LEFT JOIN order_details od
       ON od.detail_id = placement.order_detail_id
      AND od.delete_flag = false
+    LEFT JOIN production_statuses detail_status
+      ON detail_status.production_status_id = od.production_status_id
+    CROSS JOIN laminated_status_threshold laminated_status
     LEFT JOIN target_details target
       ON target.order_id = placement.order_id
      AND target.detail_id = placement.order_detail_id
@@ -3324,7 +3370,11 @@ function buildTodayColumns(
   });
 
   const pendingBaths = baths.filter((bath) => !bath.ready);
-  const readyBaths = baths.filter((bath) => bath.ready);
+  const readyBaths = baths.filter((bath) => bath.ready && !allItemsLaminatedOrLater(bath.items));
+  const laminatedBaths = baths.filter((bath) => bath.ready && allItemsLaminatedOrLater(bath.items));
+  const laminatedPackets = packets.filter(
+    (packet) => packetColumnKey(packet) === 'completed_laminated',
+  );
   return [
     ...packetColumns,
     {
@@ -3341,7 +3391,27 @@ function buildTodayColumns(
       packets: [],
       baths: readyBaths,
     },
+    {
+      key: 'completed_laminated',
+      title: 'Распиленные файлы',
+      total: laminatedPackets.length,
+      packets: laminatedPackets,
+      baths: [],
+    },
+    {
+      key: 'baths_laminated',
+      title: 'Закатаны/выданы',
+      total: laminatedBaths.length,
+      packets: [],
+      baths: laminatedBaths,
+    },
   ];
+}
+
+function allItemsLaminatedOrLater(
+  items: ReadonlyArray<{ laminatedOrLater: boolean }>,
+): boolean {
+  return items.length > 0 && items.every((item) => item.laminatedOrLater);
 }
 
 function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
@@ -3416,6 +3486,7 @@ function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
         quantity: 0,
         completedQuantity: Math.max(0, toNumber(row.completed_quantity)),
         ready: false,
+        laminatedOrLater: row.laminated_or_later === true,
       };
       accumulator.itemsByKey.set(itemKey, item);
       accumulator.orderIds.add(orderId);
@@ -3469,8 +3540,12 @@ function compareBathSheets(left: CncTelegramBathSheetDto, right: CncTelegramBath
   return left.sheetNumber - right.sheetNumber || left.cutGroupId - right.cutGroupId;
 }
 
-function packetColumnKey(packet: CncTelegramPacketDto): 'parsed' | 'completed' {
-  if (packet.completionStatus === 'completed' || packet.thumbsUp) return 'completed';
+function packetColumnKey(
+  packet: CncTelegramPacketDto,
+): 'parsed' | 'completed' | 'completed_laminated' {
+  if (packet.completionStatus === 'completed' || packet.thumbsUp) {
+    return allItemsLaminatedOrLater(packet.items) ? 'completed_laminated' : 'completed';
+  }
   return 'parsed';
 }
 
@@ -3555,6 +3630,8 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         matchDetailId: toNullableNumber(row.match_detail_id),
         matchStatus: row.match_status ?? 'unmatched',
         reviewNote: row.review_note,
+        laminatedOrLater:
+          row.match_status === 'matched' && row.laminated_or_later === true,
       };
       packet.items.push(item);
       packet.itemCount += 1;

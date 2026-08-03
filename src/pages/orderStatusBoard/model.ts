@@ -24,7 +24,6 @@ const MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES = new Set(
   DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES,
 );
 const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set([
-  'готов к выдаче',
   'выдан',
   'завершен',
   'завершён',
@@ -203,7 +202,7 @@ export function filterCncTodayColumnsByOrders(
     const packets = (column.packets ?? []).filter((packet) =>
       packet.items.some((item) => orderKeys.has(normalizeCncOrderKey(item.orderName))),
     );
-    const total = column.key === 'baths' || column.key === 'baths_ready'
+    const total = isCncBathColumnKey(column.key)
       ? baths.length
       : packets.length;
     return { ...column, baths, packets, total };
@@ -215,7 +214,11 @@ export function filterCncBathColumnsByMachineOrderMatches(
 ): CncTelegramTodayColumn[] {
   const machineOrderKeys = new Set<string>();
   for (const column of columns) {
-    if (column.key !== 'parsed' && column.key !== 'completed') continue;
+    if (
+      column.key !== 'parsed'
+      && column.key !== 'completed'
+      && column.key !== 'completed_laminated'
+    ) continue;
     for (const packet of column.packets ?? []) {
       for (const item of packet.items) {
         const key = normalizeCncOrderKey(item.orderName);
@@ -225,7 +228,7 @@ export function filterCncBathColumnsByMachineOrderMatches(
   }
 
   return columns.map((column) => {
-    if (column.key !== 'baths' && column.key !== 'baths_ready') return column;
+    if (!isCncBathColumnKey(column.key)) return column;
     const baths = (column.baths ?? []).filter((bath) =>
       bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
     );
@@ -244,6 +247,7 @@ export function isCncOrderHiddenFromMdfBoard(
     : MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES.has(productionStatusName);
   return (
     hiddenByProductionStatus
+    || card.orderStatusIssuedOrLater === true
     || MDF_HIDDEN_ORDER_STATUS_NAMES.has(orderStatusName)
   );
 }
@@ -281,7 +285,7 @@ export function filterCncBathColumnsByOrderStatuses(
   if (hiddenOrderIds.size === 0) return columns;
 
   return columns.map((column) => {
-    if (column.key !== 'baths' && column.key !== 'baths_ready') return column;
+    if (column.key !== 'baths') return column;
     const baths = (column.baths ?? []).filter((bath) => {
       const orderIds = new Set(
         bath.items
@@ -293,6 +297,10 @@ export function filterCncBathColumnsByOrderStatuses(
     });
     return { ...column, baths, total: baths.length };
   });
+}
+
+function isCncBathColumnKey(key: CncTelegramTodayColumn['key']): boolean {
+  return key === 'baths' || key === 'baths_ready' || key === 'baths_laminated';
 }
 
 export function collectCncOrderIds(columns: CncTelegramTodayColumn[]): number[] {

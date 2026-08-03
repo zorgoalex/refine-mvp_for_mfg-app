@@ -51,6 +51,7 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(database.queries[0]?.text).toContain('ROW_NUMBER() OVER');
     expect(database.queries[0]?.text).toContain('assigned_ow.delete_flag = false');
     expect(database.queries[0]?.text).toContain('ranked.row_number <=');
+    expect(database.queries[0]?.text).toContain('issued_order_status.sort_order');
     expect(database.queries[0]?.params).toContain(3);
   });
 
@@ -112,6 +113,33 @@ describe('PgOrderStatusBoardRepository', () => {
       statusCode: 422,
     });
     expect(firstDatabase.queries).toHaveLength(1);
+  });
+
+  it('exposes the issued-or-later threshold independently of the status name', async () => {
+    const database = fakeDatabase([
+      boardRow(null, null),
+      {
+        ...boardRow(101, null),
+        order_status_name: 'Архивный пользовательский',
+        order_status_issued_or_later: true,
+      },
+    ]);
+
+    const result = await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: worker(),
+      query: {
+        board: 'production',
+        column: 'unassigned',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+      },
+    });
+
+    expect(result.columns[0]?.cards[0]).toMatchObject({
+      orderStatusName: 'Архивный пользовательский',
+      orderStatusIssuedOrLater: true,
+    });
   });
 
   it.each([
@@ -536,6 +564,7 @@ function boardRow(orderId: number | null, plannedCompletionDate: string | null) 
     past_planned_date: false,
     order_status_id: orderId === null ? null : 1,
     order_status_name: orderId === null ? null : 'Новый',
+    order_status_issued_or_later: false,
     production_status_id: null,
     production_status_name: null,
     production_status_from_details_enabled: true,

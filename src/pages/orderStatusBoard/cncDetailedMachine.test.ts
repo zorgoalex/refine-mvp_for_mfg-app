@@ -331,6 +331,7 @@ function packetItem(overrides: Partial<CncTelegramPacketItem> = {}): CncTelegram
     matchDetailId: 7001,
     matchStatus: 'matched',
     reviewNote: null,
+    laminatedOrLater: false,
     ...overrides,
   };
 }
@@ -403,6 +404,7 @@ function bath(): CncTelegramBathCard {
       quantity: 1,
       completedQuantity: 0,
       ready: false,
+      laminatedOrLater: false,
     }],
     sheets: [],
   };

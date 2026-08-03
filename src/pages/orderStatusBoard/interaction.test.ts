@@ -189,6 +189,7 @@ function card(
     pastPlannedDate: false,
     orderStatusId: 1,
     orderStatusName: 'Новый',
+    orderStatusIssuedOrLater: false,
     productionStatusId: 2,
     productionStatusName: 'Раскрой',
     productionStatusFromDetailsEnabled: false,

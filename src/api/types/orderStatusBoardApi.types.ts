@@ -34,6 +34,7 @@ export interface OrderStatusBoardCard {
   pastPlannedDate: boolean;
   orderStatusId: number;
   orderStatusName: string;
+  orderStatusIssuedOrLater: boolean;
   productionStatusId: number | null;
   productionStatusName: string | null;
   productionStatusFromDetailsEnabled: boolean;

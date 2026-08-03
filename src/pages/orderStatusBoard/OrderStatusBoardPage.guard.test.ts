@@ -182,8 +182,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('border-radius: 50%');
   });
 
-  it('hides the red bath readiness check in «Карты ванн» and keeps it in the ready column', () => {
-    expect(page).toContain("showReadyIcon={column.key === 'baths_ready'}");
+  it('hides the red bath readiness check in «Карты ванн» and keeps it in ready columns', () => {
+    expect(page).toContain('showReadyIcon={isCncReadyBathColumnKey(column.key)}');
     expect(page).toContain('!summaryOnly && showReadyIcon && (');
     expect(page).toContain('<CheckCircleFilled');
   });
@@ -315,7 +315,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
     expect(page).toContain('resolveMdfBoardHiddenProductionStatusIds(');
     expect(page).toContain('cncHiddenProductionStatusIds');
-    expect(page).toContain('!isCncOrderHiddenFromMdfBoard(card, cncHiddenProductionStatusIds)');
+    expect(page).toContain('cncOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId))');
   });
 
   it('keeps visible MDF columns fluid and switches narrow boards to order numbers only', () => {
@@ -379,7 +379,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('if (!cncRelationsEnabled) setActiveCncRelation(null)');
     expect(page).toContain('cncRelationTargetEquals(current, target) ? null : target');
     expect(page).toContain('cncRelationsEnabled');
-    expect(page).toContain('? buildCncRelationContext(cncActiveColumns, cncOrderCards, activeCncRelation)');
+    expect(page).toContain('? buildCncRelationContext(cncShownDataColumns, cncOrderCards, activeCncRelation)');
     expect(page).toContain("key: 'orders' as const");
     expect(page).toContain("orders: 'Заказы'");
     expect(page).toContain('orderStatusBoardApi.get({');
@@ -475,9 +475,8 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('forces the fifth orders column compact and half-width in detailed mode', () => {
     expect(page).toContain('const summaryOnly = detailedBathActive || isCncCardSummaryOnly(');
     expect(page).toContain("displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}");
-    expect(css).toMatch(
-      /\.status-board-columns--cnc-detailed\s*\{[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\) minmax\(0, 0\.5fr\);/s,
-    );
+    expect(css).toContain('repeat(var(--status-board-cnc-side-column-count, 1), minmax(0, 0.5fr))');
+    expect(page).toContain("'--status-board-cnc-side-column-count': Math.max(0, displayColumns.length - 4)");
     expect(css).toContain('.status-board-columns--cnc-detailed .cnc-today-column--orders');
     expect(css).toContain('.cnc-order-card--summary-only');
   });
@@ -488,7 +487,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today');
     expect(page).toContain('filterVisibleStatusBoardColumns(');
     expect(page).toContain('showOrdersColumn={cncDetailedWorkspaceActive || cncOrdersColumnVisible}');
-    expect(page).toContain('columns={cncDetailedWorkspaceActive ? cncActiveColumns : cncVisibleColumns}');
+    expect(page).toContain('columns={cncDetailedWorkspaceActive ? cncShownDataColumns : cncVisibleColumns}');
     expect(page).toContain('const cncHasVisibleColumns = cncDetailedWorkspaceActive');
     expect(columnVisibility).toContain("order: 'statusBoardOrder'");
     expect(columnVisibility).toContain("production: 'statusBoardProduction'");
@@ -521,6 +520,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Ванны с файлами');
     expect(page).toContain('checked={cncBathsRequireMachineFiles}');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)');
+    expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
+    expect(settings).toContain('checked={cncTerminalColumnsVisible}');
+    expect(settings).toContain('Закатан/выдан');
+    expect(page).toContain("completed_laminated: 'Распиленные файлы'");
+    expect(page).toContain("baths_laminated: 'Закатаны/выданы'");
+    expect(page).toContain('...terminalColumns');
+    expect(page).toContain('cncMuted={mutedOrderIds.has(card.orderId)}');
+    expect(css).toContain('.cnc-today-column--terminal');
+    expect(css).toContain('.cnc-terminal-card--muted');
     expect(settings).toContain('checked={viewState.hideEmpty}');
     expect(settings).toContain('Скрыть пустые');
     expect(cncToolbar).not.toContain('Вчера');

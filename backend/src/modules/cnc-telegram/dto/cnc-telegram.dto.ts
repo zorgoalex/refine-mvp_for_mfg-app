@@ -29,6 +29,7 @@ export interface CncTelegramPacketItemDto {
   matchDetailId: number | null;
   matchStatus: CncTelegramMatchStatus;
   reviewNote: string | null;
+  laminatedOrLater: boolean;
 }
 
 export interface CncTelegramCutLayoutItemDto {
@@ -110,6 +111,7 @@ export interface CncTelegramBathItemDto {
   quantity: number;
   completedQuantity: number;
   ready: boolean;
+  laminatedOrLater: boolean;
 }
 
 export interface CncTelegramBathSheetDto {
@@ -139,7 +141,13 @@ export interface CncTelegramBathCardDto {
 }
 
 export interface CncTelegramTodayColumnDto {
-  key: 'parsed' | 'completed' | 'baths' | 'baths_ready';
+  key:
+    | 'parsed'
+    | 'completed'
+    | 'baths'
+    | 'baths_ready'
+    | 'completed_laminated'
+    | 'baths_laminated';
   title: string;
   total: number;
   packets: CncTelegramPacketDto[];

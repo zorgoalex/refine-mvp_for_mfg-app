@@ -280,12 +280,21 @@ describe('order status board model', () => {
         productionStatusName,
       })).toBe(true);
     }
-    for (const orderStatusName of ['Готов к выдаче', 'Выдан', 'Завершен', 'Завершён']) {
+    for (const orderStatusName of ['Выдан', 'Завершен', 'Завершён']) {
       expect(isCncOrderHiddenFromMdfBoard({
         ...card(2700),
         orderStatusName,
       })).toBe(true);
     }
+    expect(isCncOrderHiddenFromMdfBoard({
+      ...card(2700),
+      orderStatusName: 'Готов к выдаче',
+    })).toBe(false);
+    expect(isCncOrderHiddenFromMdfBoard({
+      ...card(2700),
+      orderStatusName: 'Архивный пользовательский',
+      orderStatusIssuedOrLater: true,
+    })).toBe(true);
     expect(isCncOrderHiddenFromMdfBoard({
       ...card(2700),
       productionStatusName: 'Закатка',
@@ -360,11 +369,25 @@ describe('order status board model', () => {
           cncBath('status-missing', ['3000'], [3000]),
         ],
       },
+      {
+        key: 'baths_ready',
+        title: 'Готовы к закатке',
+        total: 1,
+        packets: [],
+        baths: [cncBath('ready-inconsistent', ['2700'], [2700])],
+      },
+      {
+        key: 'baths_laminated',
+        title: 'Закатаны/выданы',
+        total: 1,
+        packets: [],
+        baths: [cncBath('archived', ['2700'], [2700])],
+      },
     ] as CncTelegramTodayColumn[];
     const cards = [
       { ...card(2700), productionStatusId: 10, productionStatusName: 'Закатан' },
       { ...card(2706), productionStatusId: 9, productionStatusName: 'К закатке' },
-      { ...card(2712), orderStatusName: 'Готов к выдаче' },
+      { ...card(2712), orderStatusName: 'Выдан' },
     ];
 
     const filtered = filterCncBathColumnsByOrderStatuses(columns, cards, new Set([10]));
@@ -374,6 +397,8 @@ describe('order status board model', () => {
       'status-missing',
     ]);
     expect(filtered[0]?.total).toBe(2);
+    expect(filtered[1]?.baths.map((bath) => bath.bathCardId)).toEqual(['ready-inconsistent']);
+    expect(filtered[2]?.baths.map((bath) => bath.bathCardId)).toEqual(['archived']);
   });
 
   it('drops impossible dates from a hand-edited shared URL', () => {
@@ -460,6 +485,7 @@ function card(orderId: number): OrderStatusBoardCard {
     pastPlannedDate: false,
     orderStatusId: 1,
     orderStatusName: 'Новый',
+    orderStatusIssuedOrLater: false,
     productionStatusId: null,
     productionStatusName: null,
     productionStatusFromDetailsEnabled: true,

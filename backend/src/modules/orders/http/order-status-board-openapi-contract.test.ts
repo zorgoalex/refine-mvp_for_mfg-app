@@ -44,6 +44,8 @@ describe('order status board OpenAPI contract', () => {
     expect(response).toContain('- canChangeOrderStatus');
     expect(response).toContain('- canChangeProductionStatus');
     expect(response).toContain('- financialsVisible');
+    expect(response).toContain('- orderStatusIssuedOrLater');
+    expect(response).toContain('        orderStatusIssuedOrLater:\n          type: boolean');
 
     for (const field of ['finalAmount', 'paidAmount', 'debtAmount']) {
       const block = sectionBetween(

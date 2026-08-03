@@ -53,6 +53,7 @@ interface BoardRow extends QueryResultRow {
   past_planned_date: boolean | null;
   order_status_id: string | number | null;
   order_status_name: string | null;
+  order_status_issued_or_later: boolean | null;
   production_status_id: string | number | null;
   production_status_name: string | null;
   production_status_from_details_enabled: boolean | null;
@@ -203,6 +204,13 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
         (ranked.planned_completion_date < CURRENT_DATE) AS past_planned_date,
         o.order_status_id,
         os.order_status_name,
+        CASE
+          WHEN os.sort_order IS NOT NULL
+            AND issued_order_status.sort_order IS NOT NULL
+            THEN os.sort_order >= issued_order_status.sort_order
+          ELSE LOWER(BTRIM(COALESCE(os.order_status_name, '')))
+            IN ('выдан', 'завершен', 'завершён')
+        END AS order_status_issued_or_later,
         o.production_status_id,
         prod_s.production_status_name,
         o.production_status_from_details_enabled,
@@ -228,6 +236,11 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
       LEFT JOIN projects mp ON mp.project_id = o.project_id
       LEFT JOIN clients c ON c.client_id = o.client_id
       LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
+      LEFT JOIN LATERAL (
+        SELECT MIN(issued.sort_order) AS sort_order
+        FROM order_statuses issued
+        WHERE LOWER(BTRIM(issued.order_status_name)) = 'выдан'
+      ) issued_order_status ON true
       LEFT JOIN production_statuses prod_s
         ON prod_s.production_status_id = o.production_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
@@ -554,6 +567,7 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
     pastPlannedDate: row.past_planned_date === true,
     orderStatusId: toNumber(row.order_status_id),
     orderStatusName: row.order_status_name ?? '',
+    orderStatusIssuedOrLater: row.order_status_issued_or_later === true,
     productionStatusId: toNullableNumber(row.production_status_id),
     productionStatusName: row.production_status_name,
     productionStatusFromDetailsEnabled:

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CNC_STATUS_BOARD_COLUMN_DEFINITIONS,
+  CNC_TERMINAL_COLUMN_DEFINITIONS,
   STATUS_BOARD_COLUMN_PREFERENCE_KEYS,
   filterVisibleStatusBoardColumns,
 } from './statusBoardColumnVisibility';
@@ -13,6 +14,13 @@ describe('status board column visibility', () => {
       production: 'statusBoardProduction',
       cnc_today: 'statusBoardCnc',
     });
+  });
+
+  it('keeps terminal MDF columns behind the dedicated visibility toggle', () => {
+    expect(CNC_TERMINAL_COLUMN_DEFINITIONS).toEqual([
+      { key: 'completed_laminated', label: 'Распиленные файлы' },
+      { key: 'baths_laminated', label: 'Закатаны/выданы' },
+    ]);
   });
 
   it('includes all five MDF board columns', () => {

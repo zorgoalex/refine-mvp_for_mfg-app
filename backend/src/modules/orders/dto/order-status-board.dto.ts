@@ -20,6 +20,7 @@ export interface OrderStatusBoardCardDto {
   pastPlannedDate: boolean;
   orderStatusId: number;
   orderStatusName: string;
+  orderStatusIssuedOrLater: boolean;
   productionStatusId: number | null;
   productionStatusName: string | null;
   productionStatusFromDetailsEnabled: boolean;
@@ -53,4 +54,3 @@ export interface OrderStatusBoardResponseDto {
   financialsVisible: boolean;
   columns: OrderStatusBoardColumnDto[];
 }
-
