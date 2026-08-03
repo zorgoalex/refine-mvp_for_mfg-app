@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-03",
+    title: "Базис XML: разделение проекта и заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В списке элементов Базис-проекта появилась отдельная колонка «Базис проект».",
+      "XML с одним узлом «Изделие» показывает номер в колонке «Базис-заказ», а XML с несколькими изделиями — только в колонке «Базис проект».",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-02",
     title: "Левое меню: личный порядок пунктов",
     services: ["ERP"],

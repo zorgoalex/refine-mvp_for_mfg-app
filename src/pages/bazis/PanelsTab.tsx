@@ -36,6 +36,7 @@ import {
   panelComparators,
   panelFilterPredicate,
   PANEL_FILTER_NONE,
+  resolveBazisDocumentColumns,
   summarizeVisibleRows,
   type PanelFilterField,
   type PanelFilterOption,
@@ -220,6 +221,10 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
     return notesEpochRef.current;
   }, [nodes, revisionId]);
   const fallbackBazisOrderNo = normalizeText(bazisOrderNo);
+  const rootProductCount = useMemo(
+    () => nodes.filter((node) => node.parentNodeId === null && node.nodeKind === 'product').length,
+    [nodes],
+  );
 
   const allPanels = useMemo<PanelLike[]>(
     () =>
@@ -229,6 +234,11 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           const ancestors = ancestorsOf(node.bazisNodeId);
           const rootAncestor = ancestors.at(-1) ?? null;
           const refreshedOrders = refreshedOrdersByNodeId?.get(node.bazisNodeId);
+          const documentColumns = resolveBazisDocumentColumns({
+            rootProductCount,
+            productOrderNo: rootAncestor?.productOrderNo,
+            revisionBazisOrderNo: fallbackBazisOrderNo,
+          });
           return {
             ...node,
             orders: refreshedOrders ?? node.orders,
@@ -238,10 +248,11 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             hasDrilling: node.hasDrilling ?? false,
             pathTitle: nodePathTitle(ancestors),
             productName: normalizeText(rootAncestor?.name),
-            productOrderNo: normalizeText(rootAncestor?.productOrderNo) ?? fallbackBazisOrderNo,
+            bazisProjectNo: documentColumns.bazisProjectNo,
+            productOrderNo: documentColumns.productOrderNo,
           };
         }),
-    [ancestorsOf, fallbackBazisOrderNo, nodes, notesByNodeId, refreshedOrdersByNodeId],
+    [ancestorsOf, fallbackBazisOrderNo, nodes, notesByNodeId, refreshedOrdersByNodeId, rootProductCount],
   );
 
   const panels = useMemo(() => {
@@ -255,6 +266,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       panel.materialName,
       panel.pathTitle,
       panel.productName,
+      panel.bazisProjectNo,
+      panel.productOrderNo,
       formatSize(panel),
     ].some((value) => String(value ?? '').toLocaleLowerCase('ru-RU').includes(query)));
   }, [allPanels, searchQuery]);
@@ -505,6 +518,14 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           row.rowType === 'group' ? row.productNames.join(', ') || '—' : row.productName || '—',
       },
       {
+        title: 'Базис проект',
+        key: 'bazisProjectNo',
+        width: 84,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.projectNos.join(', ') || '—' : row.bazisProjectNo || '—',
+      },
+      {
         title: 'Базис-заказ',
         key: 'productOrderNo',
         width: 76,
@@ -632,6 +653,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       'quantity',
       'areaM2',
       'material',
+      'bazisProjectNo',
+      'productOrderNo',
       'edgeCount',
       'hasDrilling',
       'orders',
@@ -799,7 +822,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
                     {totals.totalAreaM2 != null ? `${formatAreaM2(totals.totalAreaM2)} м\u00B2` : '—'}
                   </span>
                 </Table.Summary.Cell>
-                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((cellIndex) => (
+                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((cellIndex) => (
                   <Table.Summary.Cell key={cellIndex} index={cellIndex} />
                 ))}
               </Table.Summary.Row>

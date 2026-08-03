@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
  * (groupPanelRows), группы разворачиваются как Excel-группировки, вложенные
  * панели рендерятся детьми таблицы со сдвигом. Порядок колонок:
  * № → Размеры → Кол-во → Материал → Наименование → Обозначение → Изделие
- * → Базис-заказ → остальные.
+ * → Базис проект → Базис-заказ → остальные.
  */
 const panelsTab = readFileSync(new URL('./PanelsTab.tsx', import.meta.url), 'utf8');
 const viewPage = readFileSync(new URL('./BazisProjectViewPage.tsx', import.meta.url), 'utf8');
@@ -22,7 +22,7 @@ describe('bazis panels grouping UI guards', () => {
     expect(panelsTab).toContain('expandable');
   });
 
-  it('колонки идут в порядке №, Размеры, Кол-во, Материал, Наименование, Обозначение, Изделие, Базис-заказ', () => {
+  it('колонки идут в порядке №, Размеры, Кол-во, Материал, Наименование, Обозначение, Изделие, Базис проект, Базис-заказ', () => {
     const order = [
       "title: '№'",
       "title: 'Размеры, мм'",
@@ -31,11 +31,18 @@ describe('bazis panels grouping UI guards', () => {
       "title: 'Наименование'",
       "title: 'Обозначение'",
       "title: 'Изделие'",
+      "title: 'Базис проект'",
       "title: 'Базис-заказ'",
     ];
     const positions = order.map((needle) => panelsTab.indexOf(needle));
     expect(positions.every((pos) => pos >= 0)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it('один корень Изделие заполняет Базис-заказ, несколько — только Базис проект', () => {
+    expect(panelsTab).toContain('resolveBazisDocumentColumns');
+    expect(panelsTab).toContain('rootProductCount');
+    expect(panelsTab).toContain('bazisProjectNo');
   });
 
   it('групповая строка показывает порядковый номер позиции, дети — нет', () => {
