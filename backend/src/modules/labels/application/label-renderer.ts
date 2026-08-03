@@ -197,19 +197,36 @@ function extractSafeCutSheetBody(svg: string): string | null {
   const match = /^\s*<svg\b[^>]*>([\s\S]*)<\/svg>\s*$/.exec(svg);
   if (!match) return null;
   const source = match[1];
-  const rectangles: string[] = [];
-  const tagPattern = /<rect\b([^>]*)\/>/gi;
+  const elements: string[] = [];
+  const tagPattern = /<rect\b([^>]*)\/>|<line\b([^>]*)\/>|<g\b([^>]*)>|<\/g>|<text\b([^>]*)>([\s\S]*?)<\/text>/gi;
   let cursor = 0;
   for (const tag of source.matchAll(tagPattern)) {
     const index = tag.index ?? -1;
     if (index < cursor || source.slice(cursor, index).trim()) return null;
-    const attributes = parseSafeRectAttributes(tag[1] ?? '');
-    if (!attributes) return null;
-    rectangles.push(`<rect${attributes}/>`);
+    const token = tag[0];
+    if (/^<rect\b/i.test(token)) {
+      const attributes = parseSafeRectAttributes(tag[1] ?? '');
+      if (!attributes) return null;
+      elements.push(`<rect${attributes}/>`);
+    } else if (/^<line\b/i.test(token)) {
+      const attributes = parseSafeLineAttributes(tag[2] ?? '');
+      if (!attributes) return null;
+      elements.push(`<line${attributes}/>`);
+    } else if (/^<g\b/i.test(token)) {
+      if (!hasSafeIgnoredAttributes(tag[3] ?? '')) return null;
+    } else if (/^<\/g>/i.test(token)) {
+      // Group wrappers from frozen cut-map SVGs only carry metadata. They are
+      // stripped after validating their attributes.
+    } else {
+      const attributes = parseSafeTextAttributes(tag[4] ?? '');
+      const text = tag[5] ?? '';
+      if (!attributes || /[<>]/.test(text)) return null;
+      elements.push(`<text${attributes}>${escapeXml(text.trim())}</text>`);
+    }
     cursor = index + tag[0].length;
   }
   if (source.slice(cursor).trim()) return null;
-  return rectangles.join('');
+  return elements.join('');
 }
 
 function thickenCutSheetDetailStrokes(body: string): string {
@@ -226,8 +243,72 @@ const CUT_SHEET_NUMERIC_ATTRIBUTES = new Set([
   'x', 'y', 'width', 'height', 'rx', 'ry', 'opacity', 'fill-opacity', 'stroke-opacity', 'stroke-width',
 ]);
 const CUT_SHEET_COLOR_ATTRIBUTES = new Set(['fill', 'stroke']);
+const CUT_SHEET_LINE_NUMERIC_ATTRIBUTES = new Set(['x1', 'y1', 'x2', 'y2', 'stroke-opacity', 'stroke-width']);
+const CUT_SHEET_TEXT_NUMERIC_ATTRIBUTES = new Set(['x', 'y', 'font-size', 'font-weight', 'stroke-width']);
+const CUT_SHEET_TEXT_ENUM_ATTRIBUTES: Readonly<Record<string, ReadonlySet<string>>> = {
+  'dominant-baseline': new Set(['middle', 'central', 'alphabetic', 'hanging']),
+  'paint-order': new Set(['stroke', 'fill', 'markers', 'stroke fill', 'stroke fill markers']),
+  'pointer-events': new Set(['none']),
+  'text-anchor': new Set(['start', 'middle', 'end']),
+};
 
 function parseSafeRectAttributes(source: string): string | null {
+  return parseSafeAttributes(source, (name, value) => {
+    if (CUT_SHEET_NUMERIC_ATTRIBUTES.has(name)) {
+      return isSafeNumber(value) ? value : null;
+    }
+    if (CUT_SHEET_COLOR_ATTRIBUTES.has(name)) {
+      return isSafeColor(value) ? value : null;
+    }
+    return null;
+  });
+}
+
+function parseSafeLineAttributes(source: string): string | null {
+  return parseSafeAttributes(source, (name, value) => {
+    if (CUT_SHEET_LINE_NUMERIC_ATTRIBUTES.has(name)) {
+      return isSafeNumber(value) ? value : null;
+    }
+    if (CUT_SHEET_COLOR_ATTRIBUTES.has(name)) {
+      return isSafeColor(value) ? value : null;
+    }
+    if (name === 'stroke-dasharray') {
+      return /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:[ ,]+-?(?:\d+(?:\.\d+)?|\.\d+))*$/.test(value) ? value : null;
+    }
+    if (name === 'pointer-events') return value === 'none' ? value : null;
+    if (isIgnoredCutMapMetadataAttribute(name, value)) return undefined;
+    return null;
+  });
+}
+
+function parseSafeTextAttributes(source: string): string | null {
+  const parsed = parseSafeAttributes(source, (name, value) => {
+    if (CUT_SHEET_TEXT_NUMERIC_ATTRIBUTES.has(name)) {
+      return isSafeNumber(value) ? value : null;
+    }
+    if (CUT_SHEET_COLOR_ATTRIBUTES.has(name)) {
+      return isSafeColor(value) ? value : null;
+    }
+    const allowed = CUT_SHEET_TEXT_ENUM_ATTRIBUTES[name];
+    if (allowed) return allowed.has(value) ? value : null;
+    if (name === 'font-family') return isSafeFontFamily(value) ? undefined : null;
+    if (name === 'style') return value === 'font-variant-numeric:tabular-nums' ? undefined : null;
+    if (isIgnoredCutMapMetadataAttribute(name, value)) return undefined;
+    return null;
+  });
+  return parsed === null ? null : `${parsed} font-family="DejaVu Sans, Arial, sans-serif"`;
+}
+
+function hasSafeIgnoredAttributes(source: string): boolean {
+  return parseSafeAttributes(source, (name, value) => (
+    isIgnoredCutMapMetadataAttribute(name, value) ? undefined : null
+  )) !== null;
+}
+
+function parseSafeAttributes(
+  source: string,
+  readValue: (name: string, value: string) => string | null | undefined,
+): string | null {
   const attributes: string[] = [];
   const seen = new Set<string>();
   const pattern = /\s+([A-Za-z][A-Za-z0-9-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
@@ -238,19 +319,31 @@ function parseSafeRectAttributes(source: string): string | null {
     const name = (match[1] ?? '').toLowerCase();
     const value = match[2] ?? match[3] ?? '';
     if (seen.has(name)) return null;
-    if (CUT_SHEET_NUMERIC_ATTRIBUTES.has(name)) {
-      if (!/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value) || !Number.isFinite(Number(value))) return null;
-    } else if (CUT_SHEET_COLOR_ATTRIBUTES.has(name)) {
-      if (!/^(?:#[0-9a-f]{3,8}|none|transparent|white|black)$/i.test(value)) return null;
-    } else {
-      return null;
-    }
+    const safeValue = readValue(name, value);
+    if (safeValue === null) return null;
     seen.add(name);
-    attributes.push(` ${name}="${value}"`);
+    if (safeValue !== undefined) attributes.push(` ${name}="${safeValue}"`);
     cursor = index + match[0].length;
   }
   if (source.slice(cursor).trim()) return null;
   return attributes.join('');
+}
+
+function isSafeNumber(value: string): boolean {
+  return /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value) && Number.isFinite(Number(value));
+}
+
+function isSafeColor(value: string): boolean {
+  return /^(?:#[0-9a-f]{3,8}|none|transparent|white|black)$/i.test(value);
+}
+
+function isSafeFontFamily(value: string): boolean {
+  return /^[A-Za-z0-9 ,._-]+$/.test(value);
+}
+
+function isIgnoredCutMapMetadataAttribute(name: string, value: string): boolean {
+  if (name === 'class') return /^[A-Za-z0-9 _:-]+$/.test(value);
+  return name.startsWith('data-') && /^[A-Za-z0-9А-Яа-яЁё .:_-]+$/.test(value);
 }
 
 function renderQrElement(

@@ -83,6 +83,72 @@ describe('label renderer', () => {
     ]))).toThrow(/Invalid frozen cut-map asset/);
   });
 
+  it('accepts frozen cut maps with safe piece groups and bath guide labels', () => {
+    const base = template();
+    base.rendererCapabilities = ['if_else_v1', 'typography_v1', 'cut_map_v1'];
+    base.elements = [{
+      labelTemplateElementId: 10,
+      elementKey: 'cut-map',
+      kind: 'cut_map',
+      sourceField: null,
+      staticText: null,
+      xMm: 5,
+      yMm: 7,
+      widthMm: 42,
+      heightMm: 18,
+      rotationDeg: 0,
+      zIndex: 0,
+      style: {
+        cutMap: {
+          version: 1,
+          fit: 'contain',
+          highlightFill: '#ffd666',
+          highlightStroke: '#d4380d',
+        },
+      },
+      condition: {},
+    }];
+    const mapped: LabelRow = {
+      ...row({}),
+      cutMap: {
+        cutResultPlacementId: 77,
+        cutResultSheetMapId: 344,
+        cutResultId: 4,
+        cutJobId: 12,
+        cutNumber: '12-3',
+        cutJobName: 'Ванна',
+        variant: 'auto',
+        sheetIndex: 8,
+        sheetNumber: 2,
+        sheetWidthMm: 1050,
+        sheetHeightMm: 2800,
+        xMm: 0,
+        yMm: 0,
+        widthMm: 550,
+        heightMm: 830,
+      },
+    };
+
+    const svg = renderSvgPages(base, [mapped], new Map([
+      [344, [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1050 2800">',
+        '<rect x="0" y="0" width="1050" height="2800" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>',
+        '<g class="cut-sheet-piece" data-item-id="det-62196" data-piece-instance="1" data-piece-cx="275" data-piece-cy="415" data-detail-id="62196">',
+        '<rect x="0" y="0" width="550" height="830" fill="#d7e9ff" stroke="#1f2d3d" stroke-width="2"/>',
+        '</g>',
+        '<line class="cut-bath-meter-guide" data-offset-mm="800" x1="0" y1="800" x2="1050" y2="800" stroke="#536273" stroke-opacity="0.28" stroke-width="3" stroke-dasharray="18 14" pointer-events="none"/>',
+        '<text class="cut-bath-meter-guide-label" data-offset-mm="800" x="14.7" y="785.3" fill="#ff6a00" font-family="Liberation Sans, sans-serif" font-size="21" font-weight="700" text-anchor="start" dominant-baseline="middle" stroke="#ffffff" stroke-width="3.36" paint-order="stroke" pointer-events="none" style="font-variant-numeric:tabular-nums">800мм</text>',
+        '</svg>',
+      ].join('')],
+    ])).pages[0];
+
+    expect(svg).toContain('stroke-dasharray="18 14"');
+    expect(svg).toContain('font-family="DejaVu Sans, Arial, sans-serif">800мм</text>');
+    expect(svg).toContain('fill="#d7e9ff" stroke="#1f2d3d" stroke-width="4"');
+    expect(svg).not.toContain('class="cut-sheet-piece"');
+    expect(svg).not.toContain('data-offset-mm');
+  });
+
   it('aligns text values inside their template box with center as the default', () => {
     const base = template();
     base.elements = [
