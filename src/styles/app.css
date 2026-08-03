@@ -604,6 +604,7 @@ html {
   z-index: -1;
   width: max-content;
   min-width: 0;
+  contain: layout style;
   visibility: hidden;
   pointer-events: none;
 }

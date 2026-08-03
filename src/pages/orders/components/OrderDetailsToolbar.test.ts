@@ -18,4 +18,13 @@ describe('order details adaptive toolbar', () => {
     expect(source).toContain("clone.setAttribute('inert', '')");
     expect(source).toContain("querySelectorAll('[id]')");
   });
+
+  it('does not force synchronous layout during the React commit', () => {
+    const source = readFileSync(new URL('./OrderDetailsToolbar.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('content.scrollWidth');
+    expect(source).toContain('entry.contentRect.width');
+    expect(source).not.toContain('useLayoutEffect');
+    expect(source).not.toContain('document.body.appendChild');
+    expect(source).not.toContain('getBoundingClientRect');
+  });
 });
