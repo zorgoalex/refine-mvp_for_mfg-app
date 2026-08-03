@@ -1027,6 +1027,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     enabled: cutColumnEnabled,
     detailIds: cutDetailIds,
     orderId: record?.order_id,
+    pollIntervalMs: ORDER_DETAIL_STATUS_REFRESH_MS,
   });
   const cutJobMaps = useMemo(
     () => fetchedCutJobMaps.loaded ? fetchedCutJobMaps : mergeCutJobLinkMaps(embeddedCutJobMaps, fetchedCutJobMaps),
