@@ -22,6 +22,43 @@ export function buildCutJobLinkMaps(
   return { cutJobByDetailId, bathCutJobByDetailId };
 }
 
+export function areCutJobLinkMapsEqual(
+  left: {
+    cutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+    bathCutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+  },
+  right: {
+    cutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+    bathCutJobByDetailId: ReadonlyMap<number, CutDetailLastReadyJobRef>;
+  },
+): boolean {
+  return areCutJobRefMapsEqual(left.cutJobByDetailId, right.cutJobByDetailId)
+    && areCutJobRefMapsEqual(left.bathCutJobByDetailId, right.bathCutJobByDetailId);
+}
+
+function areCutJobRefMapsEqual(
+  left: ReadonlyMap<number, CutDetailLastReadyJobRef>,
+  right: ReadonlyMap<number, CutDetailLastReadyJobRef>,
+): boolean {
+  if (left.size !== right.size) return false;
+  for (const [detailId, leftRef] of left.entries()) {
+    const rightRef = right.get(detailId);
+    if (
+      !rightRef
+      || leftRef.cutJobId !== rightRef.cutJobId
+      || leftRef.resultNo !== rightRef.resultNo
+      || leftRef.cutNumber !== rightRef.cutNumber
+      || leftRef.name !== rightRef.name
+      || leftRef.paramProfileId !== rightRef.paramProfileId
+      || leftRef.profileName !== rightRef.profileName
+      || leftRef.profileIsActive !== rightRef.profileIsActive
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /** Deep-link to the cut page opened on a specific job/result. */
 export function cutJobDeepLink(cutJobId: number, resultNo?: number | null): string;
 export function cutJobDeepLink(ref: Pick<CutDetailLastReadyJobRef, 'cutJobId' | 'resultNo'>): string;

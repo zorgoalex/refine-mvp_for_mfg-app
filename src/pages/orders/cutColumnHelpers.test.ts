@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCutJobByDetailId, buildCutJobLinkMaps, cutJobDeepLink, cutJobProfileLabel, cutJobVersionLabel } from './cutColumnHelpers';
+import { areCutJobLinkMapsEqual, buildCutJobByDetailId, buildCutJobLinkMaps, cutJobDeepLink, cutJobProfileLabel, cutJobVersionLabel } from './cutColumnHelpers';
 
 describe('cutColumnHelpers', () => {
   it('buildCutJobByDetailId maps each detail to its ref', () => {
@@ -30,6 +30,33 @@ describe('cutColumnHelpers', () => {
     ]);
     expect(maps.cutJobByDetailId.get(1)?.name).toBe('Regular');
     expect(maps.bathCutJobByDetailId.get(1)?.name).toBe('Bath');
+  });
+
+  it('detects unchanged and changed live cut version snapshots', () => {
+    const first = buildCutJobLinkMaps([
+      {
+        orderDetailId: 1,
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: '10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+      },
+    ]);
+    const unchanged = buildCutJobLinkMaps([
+      {
+        orderDetailId: 1,
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: '10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+      },
+    ]);
+    const changed = buildCutJobLinkMaps([
+      {
+        orderDetailId: 1,
+        cutJob: { cutJobId: 9, resultNo: 4, cutNumber: '9-4', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: '10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+      },
+    ]);
+
+    expect(areCutJobLinkMapsEqual(first, unchanged)).toBe(true);
+    expect(areCutJobLinkMapsEqual(first, changed)).toBe(false);
   });
 
   it('cutJobDeepLink builds the /cut?job= path', () => {

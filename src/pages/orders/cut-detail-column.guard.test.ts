@@ -11,6 +11,12 @@ describe('cut detail column', () => {
     expect(show).toContain("title: 'Расчет ванны'");
     expect(show).toContain('bathCutJobByDetailId');
     expect(show).toContain('<CutJobVersionLines job={ref} />');
+    expect(show).toContain('pollIntervalMs: ORDER_DETAIL_STATUS_REFRESH_MS');
+
+    const hook = readFileSync('src/pages/orders/useCutDetailLastReady.ts', 'utf8');
+    expect(hook).toContain('window.setInterval(refreshWhenVisible, pollIntervalMs)');
+    expect(hook).toContain('areCutJobLinkMapsEqual(current, nextMaps) ? current : nextMaps');
+    expect(hook).toContain('Keep last ready versions visible; focus/event/poll can recover.');
   });
 
   it('details table is horizontally scrollable with a synced top scrollbar', () => {
