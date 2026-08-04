@@ -5,6 +5,7 @@ const tabSrc = readFileSync(new URL('./LabelsConfigTab.tsx', import.meta.url), '
 const indexSrc = readFileSync(new URL('../index.tsx', import.meta.url), 'utf8');
 const apiSrc = readFileSync(new URL('../../../api/labelsApi.ts', import.meta.url), 'utf8');
 const expressionEditorSrc = readFileSync(new URL('./CustomFieldExpressionEditor.tsx', import.meta.url), 'utf8');
+const cutMapFlipControlsSrc = readFileSync(new URL('./LabelCutMapFlipControls.tsx', import.meta.url), 'utf8');
 
 describe('LabelsConfigTab wiring', () => {
   it('is registered only behind labels runtime flag and labels.view permission', () => {
@@ -223,6 +224,20 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/getLabelTextAlign/);
     expect(tabSrc).toMatch(/textAlign === 'center'/);
     expect(tabSrc).toMatch(/align=\{textAlign\}/);
+  });
+
+  it('exposes horizontal and vertical cut-map mirroring in the table and canvas context menu', () => {
+    expect(tabSrc).toMatch(/Отражение миниатюры/);
+    expect(cutMapFlipControlsSrc).toMatch(/data-label-cut-map-flip="horizontal"/);
+    expect(cutMapFlipControlsSrc).toMatch(/data-label-cut-map-flip="vertical"/);
+    expect(cutMapFlipControlsSrc).toMatch(/aria-pressed=\{cutMapStyle\.flipHorizontal\}/);
+    expect(cutMapFlipControlsSrc).toMatch(/aria-pressed=\{cutMapStyle\.flipVertical\}/);
+    expect(tabSrc).toMatch(/toggleLabelCutMapFlip/);
+    expect(tabSrc).toMatch(/labelCutMapPreviewTransform/);
+    expect(tabSrc).toMatch(/scaleX=\{previewTransform\.scaleX\}/);
+    expect(tabSrc).toMatch(/scaleY=\{previewTransform\.scaleY\}/);
+    expect(tabSrc).toMatch(/rendererCapabilities\.includes\('cut_map_flip_v1'\)/);
+    expect(tabSrc).toMatch(/cutMapFlipEnabled=\{cutMapFlipRendererReady\}/);
   });
 
   it('treats QR as a first-class free-overlap element (no conflict system at all)', () => {

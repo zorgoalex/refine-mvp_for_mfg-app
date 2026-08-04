@@ -34,12 +34,12 @@ export interface LabelTemplateDto {
   defaultExportFormats: LabelExportFormat[];
   customFieldSchema: Record<string, unknown>;
   fieldCatalogSnapshot: LabelFieldCatalogSnapshot;
-  rendererCapabilities: Array<'if_else_v1' | 'typography_v1' | 'cut_map_v1' | 'custom_expression_v1'>;
+  rendererCapabilities: Array<'if_else_v1' | 'typography_v1' | 'cut_map_v1' | 'cut_map_flip_v1' | 'custom_expression_v1'>;
   elements: LabelTemplateElementDto[];
 }
 
 export interface LabelRendererCapabilitiesDto {
-  rendererCapabilities: Array<'if_else_v1' | 'typography_v1' | 'cut_map_v1' | 'custom_expression_v1'>;
+  rendererCapabilities: Array<'if_else_v1' | 'typography_v1' | 'cut_map_v1' | 'cut_map_flip_v1' | 'custom_expression_v1'>;
 }
 
 export type LabelFieldCatalogSnapshot = Record<string, {

@@ -30,6 +30,8 @@ import {
   qrSideOf,
   qrTemplateOf,
 } from './labelQrHelpers';
+import { LabelCutMapFlipControls } from './LabelCutMapFlipControls';
+import { labelCutMapPreviewTransform, readLabelCutMapStyle, toggleLabelCutMapFlip } from './labelCutMapStyle';
 import { collectDuplicateQrNames, qrDraftFromElement, qrElementFromLibrary, rowsToTemplate, sanitizeQrText, templateToRows, uniqueQrName, type QrRow } from './labelQrLibrary';
 import {
   customFieldRowsFromSchema,
@@ -348,6 +350,10 @@ export const LabelsConfigTab: React.FC = () => {
   );
   const cutMapRendererReady = useMemo(
     () => rendererCapabilities.includes('cut_map_v1'),
+    [rendererCapabilities],
+  );
+  const cutMapFlipRendererReady = useMemo(
+    () => rendererCapabilities.includes('cut_map_flip_v1'),
     [rendererCapabilities],
   );
   const customExpressionRendererReady = useMemo(
@@ -744,6 +750,7 @@ export const LabelsConfigTab: React.FC = () => {
                 fit: 'contain',
                 highlightFill: '#ffd666',
                 highlightStroke: '#d4380d',
+                ...(cutMapFlipRendererReady ? { flipHorizontal: false, flipVertical: false } : {}),
               },
             }
           : kind === 'qr'
@@ -987,6 +994,13 @@ export const LabelsConfigTab: React.FC = () => {
     )));
   };
 
+  const toggleCutMapFlip = (index: number, axis: 'horizontal' | 'vertical') => {
+    setEditorElements((current) => current.map((element, currentIndex) => {
+      if (currentIndex !== index || element.kind !== 'cut_map') return element;
+      return toggleLabelCutMapFlip(element, axis);
+    }));
+  };
+
   const openElementCondition = (element: LabelTemplateElement) => {
     if (element.kind !== 'text' || !advancedRendererReady) return;
     const current = readLabelIfElseCondition(element.condition);
@@ -1026,6 +1040,7 @@ export const LabelsConfigTab: React.FC = () => {
               fit: 'contain',
               highlightFill: '#ffd666',
               highlightStroke: '#d4380d',
+              ...(cutMapFlipRendererReady ? { flipHorizontal: false, flipVertical: false } : {}),
             },
           }
         : kind === 'qr'
@@ -1815,6 +1830,22 @@ export const LabelsConfigTab: React.FC = () => {
                 },
               },
               {
+                title: 'Отражение',
+                width: 112,
+                render: (_, element, index) => {
+                  if (element.kind !== 'cut_map' || !cutMapFlipRendererReady) return null;
+                  const cutMapStyle = readLabelCutMapStyle(element);
+                  return (
+                    <LabelCutMapFlipControls
+                      cutMapStyle={cutMapStyle}
+                      disabled={!canManage || saving}
+                      variant="icons"
+                      onToggle={(axis) => toggleCutMapFlip(index, axis)}
+                    />
+                  );
+                },
+              },
+              {
                 title: 'Имя QR',
                 width: 140,
                 render: (_, element, index) => (
@@ -1965,6 +1996,7 @@ export const LabelsConfigTab: React.FC = () => {
                 selectedElementKeys={selectedElementKeys}
                 canDrag={canManage && !saving}
                 advancedFeaturesEnabled={advancedRendererReady}
+                cutMapFlipEnabled={cutMapFlipRendererReady}
                 initialZoom={layoutGeometry.initialZoom}
                 fitToContainer={layoutGeometry.fitPreviewToColumn}
                 keepConditionallyHiddenTextVisible
@@ -2622,6 +2654,7 @@ function LabelTemplatePreview({
   selectedElementKeys,
   canDrag,
   advancedFeaturesEnabled = true,
+  cutMapFlipEnabled = false,
   onSelectElement,
   onMoveElement,
   onChangeElement,
@@ -2654,6 +2687,7 @@ function LabelTemplatePreview({
   selectedElementKeys?: string[];
   canDrag?: boolean;
   advancedFeaturesEnabled?: boolean;
+  cutMapFlipEnabled?: boolean;
   onSelectElement?: (elementKey: string, additive: boolean) => void;
   onMoveElement?: (elementKey: string, xMm: number, yMm: number) => void;
   onChangeElement?: (elementKey: string, patch: Partial<LabelTemplateElement>) => void;
@@ -2749,6 +2783,9 @@ function LabelTemplatePreview({
   const contextBounds = contextElements.length > 0 ? labelElementsBounds(contextElements) : null;
   const contextHasGroup = contextElements.some((element) => Boolean(readLabelEditorMeta(element).groupId));
   const contextTextElement = contextElements.find((element) => element.kind === 'text') ?? null;
+  const contextCutMapElement = cutMapFlipEnabled && contextElements.length === 1 && contextElements[0].kind === 'cut_map'
+    ? contextElements[0]
+    : null;
   const contextAllLocked = contextElements.length > 0 && contextElements.every(isLabelElementLocked);
   const pointFromEvent = (event: Pick<React.MouseEvent<Element> | React.DragEvent<Element>, 'clientX' | 'clientY'>) => {
     const container = stageRef.current?.container();
@@ -3070,6 +3107,15 @@ function LabelTemplatePreview({
       elementKey: element.elementKey,
       patch: { style: withLabelTypography(element, patch).style },
     })));
+  };
+
+  const patchContextCutMapFlip = (axis: 'horizontal' | 'vertical') => {
+    if (!contextCutMapElement || isLabelElementLocked(contextCutMapElement)) return;
+    const updated = toggleLabelCutMapFlip(contextCutMapElement, axis);
+    commitGeometry([{
+      elementKey: contextCutMapElement.elementKey,
+      patch: { style: updated.style },
+    }]);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -3485,6 +3531,19 @@ function LabelTemplatePreview({
                     />
                   </Tooltip>
                 </Space.Compact>
+              </div>
+            )}
+            {contextCutMapElement && (
+              <div style={{ padding: '4px 4px 6px' }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 4, fontSize: 12 }}>
+                  Отражение миниатюры
+                </Text>
+                <LabelCutMapFlipControls
+                  cutMapStyle={readLabelCutMapStyle(contextCutMapElement)}
+                  disabled={isLabelElementLocked(contextCutMapElement)}
+                  variant="words"
+                  onToggle={patchContextCutMapFlip}
+                />
               </div>
             )}
             <Button
@@ -3996,33 +4055,42 @@ function renderKonvaPreviewElement({
   if (element.kind === 'cut_map') {
     const innerWidth = Math.max(w, 2);
     const innerHeight = Math.max(h, 2);
+    const cutMapStyle = readLabelCutMapStyle(element);
+    const previewTransform = labelCutMapPreviewTransform(cutMapStyle, innerWidth, innerHeight);
     return (
       <React.Fragment key={key}>
         <KonvaGroup {...common} width={innerWidth} height={innerHeight}>
-          <KonvaRect
-            x={0}
-            y={0}
-            width={innerWidth}
-            height={innerHeight}
-            fill="#f7f9fb"
-            stroke="#5b6b7a"
-            strokeWidth={0.35}
-          />
-          <KonvaRect x={innerWidth * 0.05} y={innerHeight * 0.08} width={innerWidth * 0.42} height={innerHeight * 0.36} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
-          <KonvaRect x={innerWidth * 0.5} y={innerHeight * 0.08} width={innerWidth * 0.45} height={innerHeight * 0.2} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
-          <KonvaRect x={innerWidth * 0.5} y={innerHeight * 0.31} width={innerWidth * 0.22} height={innerHeight * 0.58} fill="#ffd666" stroke="#d4380d" strokeWidth={0.55} listening={false} />
-          <KonvaRect x={innerWidth * 0.75} y={innerHeight * 0.31} width={innerWidth * 0.2} height={innerHeight * 0.58} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
-          <KonvaText
-            x={innerWidth * 0.05}
-            y={innerHeight * 0.56}
-            width={innerWidth * 0.4}
-            text="Лист раскроя"
-            fontFamily="Arial"
-            fontSize={Math.max(1.8, Math.min(innerWidth, innerHeight) * 0.12)}
-            fill="#5b6b7a"
-            align="center"
-            listening={false}
-          />
+          <KonvaGroup
+            x={previewTransform.x}
+            y={previewTransform.y}
+            scaleX={previewTransform.scaleX}
+            scaleY={previewTransform.scaleY}
+          >
+            <KonvaRect
+              x={0}
+              y={0}
+              width={innerWidth}
+              height={innerHeight}
+              fill="#f7f9fb"
+              stroke="#5b6b7a"
+              strokeWidth={0.35}
+            />
+            <KonvaRect x={innerWidth * 0.05} y={innerHeight * 0.08} width={innerWidth * 0.42} height={innerHeight * 0.36} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
+            <KonvaRect x={innerWidth * 0.5} y={innerHeight * 0.08} width={innerWidth * 0.45} height={innerHeight * 0.2} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
+            <KonvaRect x={innerWidth * 0.5} y={innerHeight * 0.31} width={innerWidth * 0.22} height={innerHeight * 0.58} fill="#ffd666" stroke="#d4380d" strokeWidth={0.55} listening={false} />
+            <KonvaRect x={innerWidth * 0.75} y={innerHeight * 0.31} width={innerWidth * 0.2} height={innerHeight * 0.58} fill="#e5ebf0" stroke="#8c9aa7" strokeWidth={0.2} listening={false} />
+            <KonvaText
+              x={innerWidth * 0.05}
+              y={innerHeight * 0.56}
+              width={innerWidth * 0.4}
+              text="Лист раскроя"
+              fontFamily="Arial"
+              fontSize={Math.max(1.8, Math.min(innerWidth, innerHeight) * 0.12)}
+              fill="#5b6b7a"
+              align="center"
+              listening={false}
+            />
+          </KonvaGroup>
         </KonvaGroup>
         {selectionBox}
         {allBoundsBox}

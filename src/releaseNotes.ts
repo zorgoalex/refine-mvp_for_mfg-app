@@ -42,6 +42,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   },
   {
     version: APP_VERSION,
+    date: "2026-08-04",
+    title: "Бирки: отражение миниатюры раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В редакторе шаблона бирки миниатюру карты раскроя можно независимо отразить по горизонтали и вертикали — из таблицы элементов или контекстного меню канваса.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-03",
     title: "Базис: целые размеры панелей",
     services: ["ERP"],
