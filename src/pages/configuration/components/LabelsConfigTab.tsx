@@ -4,6 +4,7 @@ import { AlignCenterOutlined, AlignLeftOutlined, AlignRightOutlined, CopyOutline
 import type Konva from 'konva';
 import { Group as KonvaGroup, Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { labelsApi } from '../../../api/labelsApi';
+import { notifyLabelTemplateChanged } from '../../../api/labelTemplateEvents';
 import { ApiError } from '../../../api/apiError';
 import { authSession } from '../../../api/authSession';
 import type {
@@ -668,6 +669,7 @@ export const LabelsConfigTab: React.FC = () => {
         saved = await labelsApi.createTemplate(payload);
         message.success('Шаблон создан');
       }
+      notifyLabelTemplateChanged(saved);
       await load();
       // Keep the just-saved template open in the editor (mirrors saveTemplateAs).
       // Resetting to the blank new-template scaffold here read as "switched to
@@ -710,6 +712,7 @@ export const LabelsConfigTab: React.FC = () => {
       const values = await form.validateFields();
       const created = await labelsApi.createTemplate(buildTemplatePayload(values, name));
       message.success('Копия шаблона создана');
+      notifyLabelTemplateChanged(created);
       setSaveAsOpen(false);
       setSaveAsName('');
       await load();

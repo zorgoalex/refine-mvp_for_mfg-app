@@ -5,6 +5,8 @@ const formSrc = readFileSync(new URL('../OrderForm.tsx', import.meta.url), 'utf8
 const showSrc = readFileSync(new URL('../../show.tsx', import.meta.url), 'utf8');
 const dataEditorSrc = readFileSync(new URL('./OrderLabelDataEditor.tsx', import.meta.url), 'utf8');
 const generateSrc = readFileSync(new URL('./OrderLabelGenerateAction.tsx', import.meta.url), 'utf8');
+const configSrc = readFileSync(new URL('../../../configuration/components/LabelsConfigTab.tsx', import.meta.url), 'utf8');
+const templateEventsSrc = readFileSync(new URL('../../../../api/labelTemplateEvents.ts', import.meta.url), 'utf8');
 const latestSrc = readFileSync(new URL('./OrderLatestLabelsPreview.tsx', import.meta.url), 'utf8');
 const previewFrameSrc = readFileSync(new URL('./LabelSvgPreviewFrame.tsx', import.meta.url), 'utf8');
 const pagesViewerSrc = readFileSync(new URL('./OrderLabelPagesViewer.tsx', import.meta.url), 'utf8');
@@ -118,6 +120,17 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).toMatch(/previewDetailId/);
     expect(generateSrc).toMatch(/useBasisFields/);
     expect(generateSrc).not.toMatch(/setPreview\(null\);\s*\n\s*}\s*}\s*options/s);
+  });
+
+  it('reloads an open generation modal when a label template is saved', () => {
+    expect(configSrc).toMatch(/notifyLabelTemplateChanged\(saved\)/);
+    expect(configSrc).toMatch(/notifyLabelTemplateChanged\(created\)/);
+    expect(generateSrc).toMatch(/subscribeLabelTemplateChanged/);
+    expect(generateSrc).toMatch(/previewRequestRef\.current \+= 1/);
+    expect(generateSrc).toMatch(/window\.addEventListener\('focus', onFocus\)/);
+    expect(templateEventsSrc).toMatch(/CustomEvent/);
+    expect(templateEventsSrc).toMatch(/localStorage\.setItem/);
+    expect(templateEventsSrc).toMatch(/BroadcastChannel/);
   });
 
   it('clears the previous template SVG before loading a fresh preview', () => {
