@@ -36,11 +36,11 @@ export function buildBazisCutXls(details: readonly BazisCutSetDetailDto[]): Buff
 }
 
 export function bazisCutFieldsToRow(
-  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string },
+  detail: BazisCutDetailFields & { sourceBazisProjectName?: string },
 ): unknown[] {
   return [
       detail.cutEnabled ? 'Да' : 'Нет', detail.materialType, safeText(detail.materialName),
-      safeText(detail.materialArticle), detail.thicknessMm, safeText(detail.sourceBazisOrderNo ?? ''),
+      safeText(detail.materialArticle), detail.thicknessMm, safeText(detail.sourceBazisProjectName ?? ''),
       safeText(detail.position), buildBazisCutQrCode(detail),
       safeText(detail.partName), detail.finishedLengthMm, detail.finishedWidthMm,
       detail.cutLengthMm, detail.cutWidthMm, detail.quantity, safeText(detail.orientation),
@@ -55,9 +55,9 @@ export function bazisCutFieldsToRow(
 }
 
 export function buildBazisCutQrCode(
-  detail: BazisCutDetailFields & { sourceBazisOrderNo?: string },
+  detail: BazisCutDetailFields & { sourceBazisProjectName?: string },
 ): string {
-  return `${detail.sourceBazisOrderNo?.trim() ?? ''}${detail.position.trim()}`;
+  return `${detail.sourceBazisProjectName?.trim() ?? ''}${detail.position.trim()}`;
 }
 
 function safeText(value: string): string {

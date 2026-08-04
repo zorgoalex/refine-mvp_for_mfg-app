@@ -2,7 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { LabelTemplateElementInput } from './labels.types';
 import { assertRenderableCustomFieldSchema } from './label-custom-field-expression';
 
-export const LABEL_RENDERER_CAPABILITIES = ['if_else_v1', 'typography_v1', 'cut_map_v1', 'custom_expression_v1'] as const;
+export const LABEL_RENDERER_CAPABILITIES = ['if_else_v1', 'typography_v1', 'cut_map_v1', 'cut_map_flip_v1', 'custom_expression_v1'] as const;
 export type LabelRendererCapability = (typeof LABEL_RENDERER_CAPABILITIES)[number];
 
 type ConditionOperator = 'exists' | 'not_empty' | 'equals' | 'not_equals';
@@ -32,6 +32,8 @@ export interface CutMapStyleV1 {
   fit: 'contain';
   highlightFill: string;
   highlightStroke: string;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
 }
 
 export function assertAdvancedElementShape(element: LabelTemplateElementInput, elementIndex: number): void {
@@ -183,14 +185,22 @@ export function readEditorMetadataV1(style: Record<string, unknown>): {
 
 export function readCutMapStyleV1(style: Record<string, unknown>): CutMapStyleV1 | null {
   const value = style.cutMap;
-  if (!isRecord(value) || !exactKeys(value, ['version', 'fit', 'highlightFill', 'highlightStroke'])) return null;
+  if (!isRecord(value) || !exactKeys(
+    value,
+    ['version', 'fit', 'highlightFill', 'highlightStroke'],
+    ['flipHorizontal', 'flipVertical'],
+  )) return null;
   if (value.version !== 1 || value.fit !== 'contain') return null;
   if (!isHexColor(value.highlightFill) || !isHexColor(value.highlightStroke)) return null;
+  if (value.flipHorizontal !== undefined && typeof value.flipHorizontal !== 'boolean') return null;
+  if (value.flipVertical !== undefined && typeof value.flipVertical !== 'boolean') return null;
   return {
     version: 1,
     fit: 'contain',
     highlightFill: value.highlightFill,
     highlightStroke: value.highlightStroke,
+    flipHorizontal: value.flipHorizontal === true,
+    flipVertical: value.flipVertical === true,
   };
 }
 

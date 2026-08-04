@@ -793,6 +793,18 @@ probe_file() {
                            AND conrelid = 'bazis_nodes'::regclass
                            AND convalidated
                       );" ;;
+    096_bazis_cut_document_fields*) probe_all "SELECT
+                       col_description('bazis_cut_set_details'::regclass,
+                         (SELECT attnum FROM pg_attribute
+                          WHERE attrelid='bazis_cut_set_details'::regclass
+                            AND attname='source_bazis_project_name'))
+                         LIKE 'bazis-cut-document-fields-v2:%';" \
+                     "SELECT
+                       col_description('bazis_cut_set_details'::regclass,
+                         (SELECT attnum FROM pg_attribute
+                          WHERE attrelid='bazis_cut_set_details'::regclass
+                            AND attname='position'))
+                         LIKE 'bazis-cut-document-fields-v2:%';" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -803,7 +815,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

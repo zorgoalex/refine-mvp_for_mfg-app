@@ -13,16 +13,55 @@ const user: CurrentUser = {
 afterEach(() => vi.restoreAllMocks());
 
 describe('PgBazisCutRepository security and event contract', () => {
-  it('maps the ERP detail Basis project and product to separate frozen labels', () => {
-    expect(resolveBazisDetailLabels(' 1319 ', ' Кухня ')).toEqual({
-      sourceBazisProjectName: '1319',
-      sourceBazisOrderNo: '1319',
+  it('maps a multi-product Basis revision to Basis project fields', () => {
+    expect(resolveBazisDetailLabels({
+      rootProductCount: 2,
+      productOrderNo: ' BZ-100 ',
+      revisionBazisOrderNo: ' BP-7 ',
+      detailBazisProject: 'legacy',
+      detailBazisProduct: ' Кухня ',
+    })).toEqual({
+      sourceBazisProjectName: 'BP-7',
+      sourceBazisOrderNo: '',
       sourceBazisProductName: 'Кухня',
     });
-    expect(resolveBazisDetailLabels(null, '')).toEqual({
+  });
+
+  it('maps a single-product Basis revision to Basis order fields', () => {
+    expect(resolveBazisDetailLabels({
+      rootProductCount: 1,
+      productOrderNo: ' BZ-100 ',
+      revisionBazisOrderNo: ' BP-7 ',
+      detailBazisProject: 'legacy',
+      detailBazisProduct: ' Шкаф ',
+    })).toEqual({
       sourceBazisProjectName: '',
-      sourceBazisOrderNo: '',
-      sourceBazisProductName: '',
+      sourceBazisOrderNo: 'BZ-100',
+      sourceBazisProductName: 'Шкаф',
+    });
+  });
+
+  it('treats an unlinked ERP Basis number as a Basis order', () => {
+    expect(resolveBazisDetailLabels({
+      rootProductCount: null,
+      productOrderNo: null,
+      revisionBazisOrderNo: null,
+      detailBazisProject: ' 1319 ',
+      detailBazisProduct: '',
+    })).toEqual({
+      sourceBazisProjectName: '', sourceBazisOrderNo: '1319', sourceBazisProductName: '',
+    });
+  });
+
+  it('does not revive a legacy ERP number when the matched Basis revision has no document number', () => {
+    expect(resolveBazisDetailLabels({
+      rootProductCount: 1,
+      productOrderNo: null,
+      revisionBazisOrderNo: null,
+      detailBazisProject: 'legacy',
+      detailBazisProduct: 'Кухня',
+    })).toEqual({
+      sourceBazisProjectName: '', sourceBazisOrderNo: '', sourceBazisProductName: 'Кухня',
     });
   });
 

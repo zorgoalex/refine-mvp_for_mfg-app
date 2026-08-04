@@ -1,7 +1,7 @@
 // Main Order Form Component
 // Master-Detail form with Tabs for child entities
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Tooltip, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
@@ -329,7 +329,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     projectClientRef.current = normalizedClientId;
   }, [mode, normalizedClientId, header.project_id, updateHeaderField]);
 
-  const loadProjectOptions = async (search = '') => {
+  const loadProjectOptions = useCallback(async (search = '') => {
     if (!featureFlags.projects || !normalizedClientId) {
       setProjectOptions([]);
       return;
@@ -365,7 +365,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         setProjectsLoading(false);
       }
     }
-  };
+  }, [normalizedClientId]);
 
   useEffect(() => {
     if (!featureFlags.projects || mode !== 'create' || !normalizedClientId) {
@@ -373,7 +373,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     }
 
     void loadProjectOptions();
-  }, [mode, normalizedClientId]);
+  }, [mode, normalizedClientId, loadProjectOptions]);
 
   // React to deep-link/sub-tab jumps into an already-open order tab.
   useEffect(() => {
@@ -1290,13 +1290,64 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
   const headerTabItems = useMemo(
     () => {
+      const projectCode = header.project_code?.trim() || null;
+      const projectLink =
+        header.project_id && projectCode ? `/projects/show/${header.project_id}` : null;
+      const projectField =
+        !featureFlags.projects ? null : mode === 'create' ? (
+          <Form.Item
+            label={(
+              <Space size={4}>
+                <span>Проект</span>
+                <Tooltip title="Пусто — проект создастся автоматически (МП-N)">
+                  <span style={{ cursor: 'help', color: 'var(--app-text-muted)' }}>?</span>
+                </Tooltip>
+              </Space>
+            )}
+            name={['header', 'project_id']}
+            extra={bazisDraftProjectLocked ? 'Проект Базис-проекта' : undefined}
+          >
+            <Select
+              allowClear={!bazisDraftProjectLocked}
+              showSearch
+              filterOption={false}
+              disabled={!normalizedClientId || bazisDraftProjectLocked}
+              loading={projectsLoading}
+              placeholder="Новый проект (авто)"
+              value={header.project_id ?? undefined}
+              onChange={(value) => updateHeaderField('project_id', value ?? undefined)}
+              onSearch={(value) => {
+                void loadProjectOptions(value);
+              }}
+              onFocus={() => {
+                void loadProjectOptions();
+              }}
+              options={projectOptions}
+              notFoundContent={
+                normalizedClientId
+                  ? projectsLoading
+                    ? 'Загрузка проектов...'
+                    : 'Проекты не найдены'
+                  : 'Сначала выберите клиента'
+              }
+            />
+          </Form.Item>
+        ) : projectCode ? (
+          <Form.Item label="Проект">
+            {projectLink ? <Link to={projectLink}>{projectCode}</Link> : <span>{projectCode}</span>}
+          </Form.Item>
+        ) : null;
+
       const items = [
       {
         key: 'basic',
         label: isOperational ? 'Обзор' : 'Основная информация',
         children: (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <OrderBasicInfo clientLocked={bazisDraftClientLocked} />
+            <OrderBasicInfo
+              clientLocked={bazisDraftClientLocked}
+              projectField={projectField}
+            />
             <OrderNotesSection />
           </Space>
         ),
@@ -1391,7 +1442,26 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         .map((key) => items.find((item) => item.key === key))
         .filter((item): item is (typeof items)[number] => Boolean(item));
     },
-    [mode, header.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked, isOperational, isSaving, saveValidation]
+    [
+      mode,
+      header.order_id,
+      header.project_code,
+      header.project_id,
+      orderId,
+      labelsEnabled,
+      isDirty,
+      cutTabEnabled,
+      bazisDraftClientLocked,
+      bazisDraftProjectLocked,
+      isOperational,
+      isSaving,
+      saveValidation,
+      normalizedClientId,
+      projectsLoading,
+      projectOptions,
+      loadProjectOptions,
+      updateHeaderField,
+    ]
   );
 
   const enabledTabKeys = useMemo(
@@ -1483,57 +1553,6 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     mode === 'create'
       ? `Создание заказа${orderName ? ` «${orderName}»` : ''}`
       : `Редактирование заказа${orderName ? ` «${orderName}»` : ''}`;
-  const projectCode = header.project_code?.trim() || null;
-  const projectLink =
-    header.project_id && projectCode ? `/projects/show/${header.project_id}` : null;
-  const projectField =
-    !featureFlags.projects ? null : mode === 'create' ? (
-      <Card size="small" title="Проект">
-        <Form layout="vertical">
-          <Form.Item
-            label={(
-              <Space size={4}>
-                <span>Проект</span>
-                <Tooltip title="Пусто — проект создастся автоматически (МП-N)">
-                  <span style={{ cursor: 'help', color: 'var(--app-text-muted)' }}>?</span>
-                </Tooltip>
-              </Space>
-            )}
-            name={['header', 'project_id']}
-            extra={bazisDraftProjectLocked ? 'Проект Базис-проекта' : undefined}
-          >
-            <Select
-              allowClear={!bazisDraftProjectLocked}
-              showSearch
-              filterOption={false}
-              disabled={!normalizedClientId || bazisDraftProjectLocked}
-              loading={projectsLoading}
-              placeholder="Новый проект (авто)"
-              value={header.project_id ?? undefined}
-              onChange={(value) => updateHeaderField('project_id', value ?? undefined)}
-              onSearch={(value) => {
-                void loadProjectOptions(value);
-              }}
-              onFocus={() => {
-                void loadProjectOptions();
-              }}
-              options={projectOptions}
-              notFoundContent={
-                normalizedClientId
-                  ? projectsLoading
-                    ? 'Загрузка проектов...'
-                    : 'Проекты не найдены'
-                  : 'Сначала выберите клиента'
-              }
-            />
-          </Form.Item>
-        </Form>
-      </Card>
-    ) : projectCode ? (
-      <Card size="small" title="Проект">
-        {projectLink ? <Link to={projectLink}>{projectCode}</Link> : <span>{projectCode}</span>}
-      </Card>
-    ) : null;
 
   if (isOperational) {
     return (
@@ -1681,7 +1700,6 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     >
       {/* Read-only header with order summary (both create and edit modes) */}
       <OrderHeaderSummary />
-      {projectField}
 
       {/* Editable tabs */}
       <Tabs

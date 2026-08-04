@@ -134,17 +134,22 @@ describe('label template DTO advanced element contract', () => {
             fit: 'contain',
             highlightFill: '#ffd666',
             highlightStroke: '#d4380d',
+            flipHorizontal: true,
+            flipVertical: false,
           },
         },
       }],
     });
     expect(parsed.elements[0]).toMatchObject({ kind: 'cut_map', widthMm: 45, heightMm: 22 });
+    expect(parsed.elements[0].style?.cutMap).toMatchObject({ flipHorizontal: true, flipVertical: false });
   });
 
   it.each([
     { version: 2, fit: 'contain', highlightFill: '#ffd666', highlightStroke: '#d4380d' },
     { version: 1, fit: 'stretch', highlightFill: '#ffd666', highlightStroke: '#d4380d' },
     { version: 1, fit: 'contain', highlightFill: 'yellow', highlightStroke: '#d4380d' },
+    { version: 1, fit: 'contain', highlightFill: '#ffd666', highlightStroke: '#d4380d', flipHorizontal: 'yes' },
+    { version: 1, fit: 'contain', highlightFill: '#ffd666', highlightStroke: '#d4380d', mirrorX: true },
   ])('rejects malformed cut-map style: %j', (cutMap) => {
     expect(() => createLabelTemplateSchema.parse({
       ...base,
