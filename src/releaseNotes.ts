@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-04",
+    title: "Создание заказа из Базис-проекта: компактная информация о проекте",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Информация о проекте перенесена из отдельного блока под сводкой заказа во вкладку «Основная информация».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-04",
     title: "Базис-проекты: панели без группировки по умолчанию",
     services: ["ERP"],
     repositories: ["repo_erp"],
