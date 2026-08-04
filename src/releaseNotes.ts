@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-04",
+    title: "Базис-проекты: фрезеровка и плёнка в списке панелей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке панелей после колонки «Присадка» отображаются значения пользовательских свойств «Фрезировка» и «Пленка».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-04",
     title: "Базис-проекты: прямой экспорт выбранных панелей в XLS",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

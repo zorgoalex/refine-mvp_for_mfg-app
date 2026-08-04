@@ -40,6 +40,10 @@ export interface PanelGroupRow {
   uniformEdgeCount: number | null;
   /** Присадка по вхождениям: у всех / ни у одной / смешанно. */
   drillingState: 'all' | 'none' | 'mixed';
+  /** Уникальные непустые значения пользовательского свойства «Фрезировка». */
+  millingNames: string[];
+  /** Уникальные непустые значения пользовательского свойства «Пленка». */
+  filmNames: string[];
   children: PanelLike[];
 }
 
@@ -128,6 +132,8 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         orders: [],
         uniformEdgeCount: null,
         drillingState: 'none',
+        millingNames: [],
+        filmNames: [],
         children: [],
       };
       groups.set(key, group);
@@ -150,6 +156,8 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
     pushUniqueText(group.productNames, panel.productName);
     pushUniqueText(group.projectNos, panel.bazisProjectNo);
     pushUniqueText(group.orderNos, panel.productOrderNo);
+    pushUniqueText(group.millingNames, panel.millingName);
+    pushUniqueText(group.filmNames, panel.filmName);
 
     for (const order of panel.orders) {
       if (!group.orders.some((existing) => existing.orderId === order.orderId)) {

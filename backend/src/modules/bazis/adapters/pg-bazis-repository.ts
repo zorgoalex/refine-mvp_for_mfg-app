@@ -103,6 +103,8 @@ const HAS_DRILLING_SQL = `(
 
 // Общий SELECT-фрагмент для ОБОИХ tree-запросов (getTreeChildren + listAllTreeNodes).
 const TREE_NODE_EXTRA_SELECT = `n.notes,
+             n.raw_json->'ПользовательскиеСвойства' AS user_properties,
+             n.raw_json->'Свойство' AS legacy_user_properties,
              ${EDGE_COUNT_SQL} AS edge_count,
              ${HAS_DRILLING_SQL} AS has_drilling`;
 
@@ -165,6 +167,8 @@ interface TreeNodeRow {
   thickness_mm: number | string | null;
   main_material_name: string | null;
   notes: string | null;
+  user_properties: unknown;
+  legacy_user_properties: unknown;
   edge_count: number | string;
   has_drilling: boolean;
   linked_orders: Array<{ orderId: number | string; orderName: string | null; orderDeleted?: boolean | null }> | null;
@@ -2932,6 +2936,12 @@ function parseNumeric(value: string | null | undefined): number | null {
 }
 
 function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
+  const rawUserProperties = row.user_properties == null && row.legacy_user_properties == null
+    ? null
+    : {
+        ПользовательскиеСвойства: row.user_properties,
+        Свойство: row.legacy_user_properties,
+      };
   return {
     bazisNodeId: Number(row.bazis_node_id),
     parentNodeId: nullableNumber(row.parent_node_id),
@@ -2951,6 +2961,8 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     mainMaterialName: row.main_material_name,
     edgeCount: Number(row.edge_count),
     hasDrilling: Boolean(row.has_drilling),
+    millingName: panelCustomMillingName(rawUserProperties),
+    filmName: panelCustomFilmName(rawUserProperties),
     notes: row.notes,
     childrenCount: Number(row.children_count),
     orders: (row.linked_orders ?? [])

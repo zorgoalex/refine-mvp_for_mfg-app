@@ -3373,6 +3373,14 @@ paths:
                     hasDrilling:
                       type: boolean
                       description: Присадка — у узла есть отверстия в raw_json, derived read-only
+                    millingName:
+                      type: string
+                      nullable: true
+                      description: Пользовательское свойство панели «Фрезировка»/«Фрезеровка»
+                    filmName:
+                      type: string
+                      nullable: true
+                      description: Пользовательское свойство панели «Пленка»/«Плёнка»
                     notes:
                       type: string
                       nullable: true

@@ -67,6 +67,10 @@ export interface BazisTreeNodeDto {
   edgeCount: number;
   /** Присадка: у узла есть отверстия в raw_json. Derived, read-only. */
   hasDrilling: boolean;
+  /** Пользовательское свойство панели «Фрезировка»/«Фрезеровка». */
+  millingName: string | null;
+  /** Пользовательское свойство панели «Пленка»/«Плёнка». */
+  filmName: string | null;
   /** Примечание оператора (migration 064). */
   notes: string | null;
   childrenCount: number;

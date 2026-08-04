@@ -90,6 +90,10 @@ export interface BazisTreeNode {
   edgeCount: number;
   /** Присадка: есть отверстия (derived, read-only). Коэрсить `?? false`. */
   hasDrilling: boolean;
+  /** Пользовательское свойство «Фрезировка»/«Фрезеровка». Коэрсить `?? null`. */
+  millingName?: string | null;
+  /** Пользовательское свойство «Пленка»/«Плёнка». Коэрсить `?? null`. */
+  filmName?: string | null;
   /** Примечание оператора. Коэрсить `?? null`. */
   notes: string | null;
   childrenCount: number;

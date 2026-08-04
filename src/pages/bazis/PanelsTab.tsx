@@ -255,6 +255,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             notes: notesByNodeId?.has(node.bazisNodeId) ? notesByNodeId.get(node.bazisNodeId) ?? null : node.notes ?? null,
             edgeCount: node.edgeCount ?? 0,
             hasDrilling: node.hasDrilling ?? false,
+            millingName: normalizeText(node.millingName),
+            filmName: normalizeText(node.filmName),
             pathTitle: nodePathTitle(ancestors),
             productName: normalizeText(rootAncestor?.name),
             bazisProjectNo: documentColumns.bazisProjectNo,
@@ -277,6 +279,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       panel.productName,
       panel.bazisProjectNo,
       panel.productOrderNo,
+      panel.millingName,
+      panel.filmName,
       formatSize(panel),
     ].some((value) => String(value ?? '').toLocaleLowerCase('ru-RU').includes(query)));
   }, [allPanels, searchQuery]);
@@ -491,7 +495,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         title: 'Наименование',
         key: 'name',
         // Fixed width: без неё это flex-колонка, и после добавления
-        // Кромка/Присадка/Примечания остаток ширины схлопывался в ноль —
+        // Кромка/Присадка/Фрезеровка/Плёнка/Примечания остаток ширины схлопывался в ноль —
         // колонка «исчезала» на обычных экранах. Узкая, содержимое
         // переносится по словам (без ellipsis).
         width: 65,
@@ -591,6 +595,22 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         },
       },
       {
+        title: 'Фрезеровка',
+        key: 'millingName',
+        width: 110,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.millingNames.join(', ') || '—' : row.millingName || '—',
+      },
+      {
+        title: 'Плёнка',
+        key: 'filmName',
+        width: 120,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.filmNames.join(', ') || '—' : row.filmName || '—',
+      },
+      {
         title: 'Примечания',
         key: 'notes',
         width: 200,
@@ -665,6 +685,8 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       'productOrderNo',
       'edgeCount',
       'hasDrilling',
+      'millingName',
+      'filmName',
       'orders',
       'path',
       'actions',
@@ -833,7 +855,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
                     {totals.totalAreaM2 != null ? `${formatAreaM2(totals.totalAreaM2)} м\u00B2` : '—'}
                   </span>
                 </Table.Summary.Cell>
-                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((cellIndex) => (
+                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map((cellIndex) => (
                   <Table.Summary.Cell key={cellIndex} index={cellIndex} />
                 ))}
               </Table.Summary.Row>

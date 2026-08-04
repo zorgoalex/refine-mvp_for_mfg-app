@@ -5,16 +5,25 @@ const panelsTab = readFileSync(new URL('./PanelsTab.tsx', import.meta.url), 'utf
 const notesCell = readFileSync(new URL('./PanelNotesCell.tsx', import.meta.url), 'utf8');
 
 describe('PanelsTab derived/notes columns', () => {
-  it('renders Кромка/Присадка/Примечания columns', () => {
+  it('renders Кромка/Присадка/Фрезеровка/Плёнка/Примечания columns in order', () => {
     expect(panelsTab).toContain("title: 'Кромка'");
     expect(panelsTab).toContain("title: 'Присадка'");
+    expect(panelsTab).toContain("title: 'Фрезеровка'");
+    expect(panelsTab).toContain("title: 'Плёнка'");
     expect(panelsTab).toContain("title: 'Примечания'");
     expect(panelsTab).toContain('PanelNotesCell');
+    const drillingIndex = panelsTab.indexOf("title: 'Присадка'");
+    const millingIndex = panelsTab.indexOf("title: 'Фрезеровка'");
+    const filmIndex = panelsTab.indexOf("title: 'Плёнка'");
+    expect(millingIndex).toBeGreaterThan(drillingIndex);
+    expect(filmIndex).toBeGreaterThan(millingIndex);
   });
 
   it('coerces rollout fields defensively', () => {
     expect(panelsTab).toContain('node.edgeCount ?? 0');
     expect(panelsTab).toContain('node.hasDrilling ?? false');
+    expect(panelsTab).toContain('normalizeText(node.millingName)');
+    expect(panelsTab).toContain('normalizeText(node.filmName)');
     expect(panelsTab).toContain('node.notes ?? null');
   });
 
@@ -37,8 +46,8 @@ describe('PanelsTab derived/notes columns', () => {
     expect(panelsTab).toContain('shouldApplyNotesResponse');
   });
 
-  it('summary row spans all 17 columns after the new Bazis project column', () => {
-    expect(panelsTab).toContain('[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]');
+  it('summary row spans all 19 columns after the new user-property columns', () => {
+    expect(panelsTab).toContain('[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]');
     expect(panelsTab).not.toContain('[5, 6, 7, 8, 9, 10, 11, 12].map');
   });
 });

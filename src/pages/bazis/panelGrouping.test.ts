@@ -40,6 +40,8 @@ function panel(overrides: Partial<BazisTreeNode & {
     mainMaterialName: 'ЛДСП Белый',
     edgeCount: 0,
     hasDrilling: false,
+    millingName: null,
+    filmName: null,
     notes: null,
     childrenCount: 0,
     orders: [],
@@ -134,6 +136,16 @@ describe('groupPanelRows', () => {
     expect(groups[0].productNames).toEqual(['Шкаф А', 'Шкаф Б']);
     expect(groups[0].projectNos).toEqual(['BP-7', 'BP-8']);
     expect(groups[0].orderNos).toEqual(['BZ-100', 'BZ-101']);
+  });
+
+  it('собирает уникальные значения фрезеровки и плёнки группы', () => {
+    const groups = groupPanelRows([
+      panel({ millingName: 'Модерн', filmName: 'Белый глянец' }),
+      panel({ millingName: 'Модерн ', filmName: 'Белый глянец ' }),
+      panel({ millingName: 'Классика', filmName: null }),
+    ]);
+    expect(groups[0].millingNames).toEqual(['Модерн', 'Классика']);
+    expect(groups[0].filmNames).toEqual(['Белый глянец']);
   });
 
   it('раскладывает номер XML по Базис-заказу для одного Изделия и по Базис проекту для нескольких', () => {
