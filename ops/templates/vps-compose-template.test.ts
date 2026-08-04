@@ -66,10 +66,28 @@ describe('VPS compose backend runtime flags', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
     const overlay = readTemplate('ops/templates/docker-compose.cnc-telegram-worker.yml');
     const envExample = readTemplate('ops/templates/env.vps.example');
+    const workerScript = readTemplate('ops/cnc-telegram-worker.sh');
+    const glmModelInitSegment = compose.slice(
+      compose.indexOf('  glm-ocr-model-init:'),
+      compose.indexOf('  glm-ocr-llama:'),
+    );
+    const glmLlamaSegment = compose.slice(
+      compose.indexOf('  glm-ocr-llama:'),
+      compose.indexOf('  glm-ocr-runner:'),
+    );
+    const glmRunnerSegment = compose.slice(
+      compose.indexOf('  glm-ocr-runner:'),
+      compose.indexOf('  cnc-telegram-worker:'),
+    );
     const workerSegment = compose.slice(
       compose.indexOf('  cnc-telegram-worker:'),
       compose.indexOf('  cad-service:'),
     );
+    const overlayGlmSegment = overlay.slice(
+      overlay.indexOf('  glm-ocr-model-init:'),
+      overlay.indexOf('  cnc-telegram-worker:'),
+    );
+    const overlayWorkerSegment = overlay.slice(overlay.indexOf('  cnc-telegram-worker:'));
 
     expect(compose).toContain('glm-ocr-model-init:');
     expect(compose).toContain('image: ${GLM_OCR_MODEL_INIT_IMAGE:-curlimages/curl:8.10.1}');
@@ -82,15 +100,20 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).toContain('glm-ocr-runner:');
     expect(compose).toContain('context: ${GLM_OCR_RUNNER_BUILD_CONTEXT:-./repo_erp/glm-ocr-runner}');
     expect(compose).toContain('LLAMA_SERVER_URL: ${LLAMA_SERVER_URL:-http://glm-ocr-llama:8080}');
+    expect(glmModelInitSegment).toContain('profiles: ["cnc-telegram-glm"]');
+    expect(glmLlamaSegment).toContain('profiles: ["cnc-telegram-glm"]');
+    expect(glmRunnerSegment).toContain('profiles: ["cnc-telegram-glm"]');
     expect(compose).toContain('cnc-telegram-worker:');
-    expect(compose).toContain('profiles: ["cnc-telegram"]');
+    expect(workerSegment).toContain('profiles: ["cnc-telegram"]');
     expect(compose).toContain('context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:-./repo_erp/cnc-telegram-worker}');
     expect(compose).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
     expect(compose).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}');
     expect(compose).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: ${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}');
     expect(compose).toContain('TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}');
     expect(compose).toContain('ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}');
+    expect(compose).toContain('CNC_ENABLE_GLM_OCR: ${CNC_ENABLE_GLM_OCR:-false}');
     expect(compose).toContain('CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.rapid_ocr_client --image {image}}');
+    expect(compose).toContain('CNC_OCR_COMMAND_TIMEOUT_SECONDS: ${CNC_OCR_COMMAND_TIMEOUT_SECONDS:-180}');
     expect(compose).toContain('GLM_OCR_RUNNER_URL: ${GLM_OCR_RUNNER_URL:-http://glm-ocr-runner:8001/ocr}');
     expect(compose).toContain('CNC_TEMP_TTL_HOURS: ${CNC_TEMP_TTL_HOURS:-24}');
     expect(compose).toContain('CNC_POLL_INTERVAL_SECONDS: ${CNC_POLL_INTERVAL_SECONDS:-60}');
@@ -104,7 +127,9 @@ describe('VPS compose backend runtime flags', () => {
     expect(overlay).toContain('glm-ocr-llama:');
     expect(overlay).toContain('glm-ocr-runner:');
     expect(overlay).toContain('cnc-telegram-worker:');
-    expect(overlay).toContain('profiles: ["cnc-telegram"]');
+    expect(overlayGlmSegment).toContain('profiles: !override ["cnc-telegram-glm"]');
+    expect(overlayGlmSegment).not.toContain('profiles: !override ["cnc-telegram"]');
+    expect(overlayWorkerSegment).toContain('profiles: !override ["cnc-telegram"]');
     expect(overlay).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
     expect(overlay).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}');
     expect(overlay).toContain('cnc-telegram-worker-data:/data');
@@ -116,9 +141,32 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=false');
     expect(envExample).toContain('CNC_POLL_INTERVAL_SECONDS=60');
     expect(envExample).toContain('CNC_OCR_ENGINE=rapidocr-ppocrv5-eslav');
+    expect(envExample).toContain('COMPOSE_PROFILES=cnc-telegram,cnc-telegram-glm');
+    expect(envExample).toContain('CNC_OCR_ENGINE=glm-ocr-0.9b-q8');
+    expect(envExample).toContain(
+      'CNC_OCR_COMMAND="python -m cnc_telegram_worker.rapid_ocr_client --image {image}"',
+    );
+    expect(envExample).toContain('CNC_ENABLE_GLM_OCR=false');
+    expect(envExample).toContain('CNC_ENABLE_GLM_OCR=true');
     expect(envExample).toContain('GLM_OCR_RUNNER_BUILD_CONTEXT=./repo_erp/glm-ocr-runner');
     expect(envExample).toContain('GLM_OCR_MODEL_FILE=GLM-OCR-Q8_0.gguf');
     expect(envExample).toContain('GLM_OCR_MMPROJ_FILE=mmproj-GLM-OCR-Q8_0.gguf');
+    const normalUpSegment = workerScript.slice(
+      workerScript.indexOf('  up)'),
+      workerScript.indexOf('  up-glm)'),
+    );
+    expect(normalUpSegment).toContain('compose up -d --build cnc-telegram-worker');
+    expect(normalUpSegment).not.toContain('compose up -d --build glm-ocr-model-init');
+    expect(workerScript).toContain('enable_profile cnc-telegram-glm');
+    expect(workerScript).toContain('export CNC_ENABLE_GLM_OCR="true"');
+    expect(workerScript).toContain('export CNC_OCR_COMMAND_TIMEOUT_SECONDS="$((10#$client_timeout + 60))"');
+    expect(workerScript).toContain('export CNC_OCR_ENGINE="glm-ocr-0.9b-q8"');
+    expect(workerScript).toContain(
+      'compose up -d --build --wait --wait-timeout 1800 glm-ocr-runner',
+    );
+    expect(workerScript).toMatch(
+      /--wait-timeout 1800 glm-ocr-runner[\s\S]*compose up -d --build cnc-telegram-worker/,
+    );
   });
 
   it('defines target-specific Docker Compose overlays for test and prod', () => {

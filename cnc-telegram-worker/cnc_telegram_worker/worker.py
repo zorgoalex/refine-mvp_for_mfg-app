@@ -17,7 +17,7 @@ from .cleanup import cleanup_temp_dir
 from .config import WorkerConfig
 from .erp_client import BackendAuth, ErpClient
 from .gcode import extract_order_names, parse_gcode_text
-from .ocr import OcrResult
+from .ocr import OcrResult, run_ocr_command
 from .packet import (
     GcodeMeta,
     ImageMeta,
@@ -195,6 +195,7 @@ class CncTelegramWorker:
         run_dir = self.config.temp_dir / f"{chat_id.strip('-')}-{source_message.id}"
         run_dir.mkdir(parents=True, exist_ok=True)
         gcode_meta: GcodeMeta | None = None
+        image_path: Path | None = None
         try:
             vector_path = await download_media(group.vector_message, run_dir, "vector")
             if vector_path is None:
@@ -234,6 +235,18 @@ class CncTelegramWorker:
                 vector_caption = message_text(group.vector_message)
                 if vector_caption and vector_caption not in comments:
                     comments.insert(0, vector_caption)
+            if self.config.enable_glm_ocr and image_path is not None:
+                ocr = await run_ocr_command(
+                    self.config.ocr_command,
+                    image_path,
+                    timeout_seconds=self.config.ocr_command_timeout_seconds,
+                )
+            elif self.config.enable_glm_ocr:
+                ocr = OcrResult(analysis_warnings=[
+                    "GLM-OCR fallback enabled but no screenshot is attached; SVG used without OCR cross-check"
+                ])
+            else:
+                ocr = OcrResult()
             image = ImageMeta(
                 chat_id=chat_id,
                 message_id=int(source_message.id),
@@ -247,7 +260,7 @@ class CncTelegramWorker:
                 image=image,
                 workday=workday,
                 comments=comments,
-                ocr=OcrResult(),
+                ocr=ocr,
                 gcode=gcode_meta,
                 cutting_sequence_no=cutting_sequence_no,
                 vector_items=vector_items,

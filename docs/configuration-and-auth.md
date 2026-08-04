@@ -236,16 +236,20 @@ ERP_WORKER_PASSWORD=<password>
 CNC_TEMP_TTL_HOURS=24
 CNC_HISTORY_DAYS=7
 CNC_POLL_INTERVAL_SECONDS=60
-GLM_OCR_MODEL_FILE=GLM-OCR-Q8_0.gguf
-GLM_OCR_MMPROJ_FILE=mmproj-GLM-OCR-Q8_0.gguf
-GLM_OCR_RUNNER_URL=http://glm-ocr-runner:8001/ocr
 ```
 
-`ERP_BEARER_TOKEN` может заменить `ERP_WORKER_LOGIN/PASSWORD`.
-`CNC_OCR_COMMAND` по умолчанию вызывает internal `glm-ocr-runner`; переопределять
-его нужно только для кастомного OCR pipeline.
-Первый start profile скачивает GLM-OCR GGUF и multimodal projector в Docker
-volume через `glm-ocr-model-init`; дальше `llama-server` читает локальные файлы.
+`ERP_BEARER_TOKEN` может заменить `ERP_WORKER_LOGIN/PASSWORD`. Обычный worker
+обрабатывает только валидный SVG и не запускает OCR. GLM-OCR остаётся отдельным
+fallback profile и в обычном `cnc-telegram` не запускается и не вызывается.
+Временное переключение выполняется командой
+`repo_erp/ops/cnc-telegram-worker.sh up-glm`; возврат к SVG-only режиму — обычным
+`repo_erp/ops/cnc-telegram-worker.sh up`. Для постоянного fallback нужно вместе
+задать `COMPOSE_PROFILES=cnc-telegram,cnc-telegram-glm`,
+`CNC_ENABLE_GLM_OCR=true`,
+`CNC_OCR_COMMAND="python -m cnc_telegram_worker.glm_ocr_client --image {image}"`,
+`CNC_OCR_COMMAND_TIMEOUT_SECONDS=720` и `CNC_OCR_ENGINE=glm-ocr-0.9b-q8`.
+Outer command timeout должен быть больше `GLM_OCR_CLIENT_TIMEOUT_SECONDS` (по
+умолчанию 660); engine входит в source fingerprint.
 
 ## JSON snapshot заказов
 

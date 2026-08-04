@@ -50,14 +50,47 @@ CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=false
 Roles: `disabled`, `reader`, `writer`. Non-production `writer` remains blocked
 unless `CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true` is deliberately set.
 
-`CNC_OCR_COMMAND` defaults to the internal RapidOCR service command:
+The normal worker parses valid SVG layouts and does not run an OCR subprocess or
+call an OCR service. The legacy/default OCR command remains available for
+configuration compatibility, while the engine identifier preserves existing
+source fingerprints; the command is dormant while `CNC_ENABLE_GLM_OCR=false`.
 
 ```env
-CNC_OCR_COMMAND=python -m cnc_telegram_worker.rapid_ocr_client --image {image}
+CNC_OCR_COMMAND="python -m cnc_telegram_worker.rapid_ocr_client --image {image}"
 CNC_RAPID_OCR_URL=http://ocr-service:8000/ocr
 ```
 
-Custom OCR commands must print JSON to stdout. Minimal supported shape:
+GLM-OCR is retained as an explicit screenshot cross-check fallback and is not
+started or called by the normal `cnc-telegram` profile. The stack wrapper
+enables the OCR gate, switches the command and engine, and activates the
+separate `cnc-telegram-glm` profile for one run:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh up-glm
+```
+
+The wrapper waits up to 30 minutes for the runner healthcheck (which also checks
+llama) before starting the worker. A failed GLM startup therefore cannot be
+recorded as a completed fallback pass.
+
+Run `repo_erp/ops/cnc-telegram-worker.sh up` to return to SVG-only processing
+and remove the GLM containers. The downloaded model volume is kept for future
+fallback. For a persisted fallback, set all five values:
+
+```env
+COMPOSE_PROFILES=cnc-telegram,cnc-telegram-glm
+CNC_ENABLE_GLM_OCR=true
+CNC_OCR_COMMAND="python -m cnc_telegram_worker.glm_ocr_client --image {image}"
+CNC_OCR_COMMAND_TIMEOUT_SECONDS=720
+CNC_OCR_ENGINE=glm-ocr-0.9b-q8
+```
+
+The outer command timeout must exceed `GLM_OCR_CLIENT_TIMEOUT_SECONDS` (660 by
+default). The engine identifier is part of the source fingerprint and must
+match the selected OCR.
+
+When the explicit fallback gate is enabled, its OCR command must print JSON to
+stdout. Minimal supported shape:
 
 ```json
 {
@@ -75,11 +108,4 @@ Custom OCR commands must print JSON to stdout. Minimal supported shape:
   "comments": ["optional structured note"],
   "analysisWarnings": []
 }
-```
-
-Custom example:
-
-```env
-CNC_OCR_ENGINE=rapidocr-ppocrv5-eslav
-CNC_OCR_COMMAND=python -m cnc_telegram_worker.rapid_ocr_client --image {image}
 ```

@@ -161,13 +161,11 @@ ERP_WORKER_LOGIN=<erp-user-with-cut.manage>
 ERP_WORKER_PASSWORD=<password>
 ```
 
-The same profile starts GLM-OCR:
-
-- `glm-ocr-model-init`: downloads `GLM-OCR-Q8_0.gguf` and
-  `mmproj-GLM-OCR-Q8_0.gguf` into a Docker volume once;
-- `glm-ocr-llama`: `ghcr.io/ggml-org/llama.cpp:server` loading local files;
-- `glm-ocr-runner`: internal `/ocr` wrapper returning structured JSON;
-- `cnc-telegram-worker`: default OCR command calls `glm-ocr-runner`.
+The normal `cnc-telegram` profile parses valid SVG layouts and does not run an
+OCR subprocess or call an OCR service. GLM-OCR is retained only as an explicit
+screenshot cross-check fallback under the separate `cnc-telegram-glm` profile,
+so its llama server and runner do not reserve CPU, RAM, or swap during normal
+operation.
 
 One-time Telethon login:
 
@@ -187,13 +185,36 @@ Logs:
 repo_erp/ops/cnc-telegram-worker.sh logs
 ```
 
+Temporary GLM fallback and return to SVG-only processing:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh up-glm
+repo_erp/ops/cnc-telegram-worker.sh logs-glm
+repo_erp/ops/cnc-telegram-worker.sh up
+```
+
+`up-glm` activates `cnc-telegram-glm` for that command, enables the OCR gate,
+and switches the worker command and engine to GLM. It waits up to 30 minutes for
+the runner healthcheck (including llama reachability) before starting the
+worker, so a failed model startup cannot be persisted as a completed OCR pass.
+A normal `up` keeps the OCR gate disabled and removes old GLM containers while
+preserving the downloaded model volume. For a persisted fallback, set all five:
+`COMPOSE_PROFILES=cnc-telegram,cnc-telegram-glm` and
+`CNC_ENABLE_GLM_OCR=true`,
+`CNC_OCR_COMMAND="python -m cnc_telegram_worker.glm_ocr_client --image {image}"`,
+`CNC_OCR_COMMAND_TIMEOUT_SECONDS=720`, plus
+`CNC_OCR_ENGINE=glm-ocr-0.9b-q8`. The outer timeout must exceed
+`GLM_OCR_CLIENT_TIMEOUT_SECONDS` (660 by default). The engine value participates
+in the source fingerprint and must identify the actual OCR implementation.
+
 `deploy-stack.sh` loads a target overlay from `ERP_STACK_ENV`:
 `ops/templates/docker-compose.test.yml` or
-`ops/templates/docker-compose.prod.yml`. It also handles old live
-`docker-compose.yml` files: when `COMPOSE_PROFILES=cnc-telegram` is enabled
-but the live file has no `cnc-telegram-worker`, it adds
-`ops/templates/docker-compose.cnc-telegram-worker.yml` as an overlay for that
-deploy run.
+`ops/templates/docker-compose.prod.yml`. Whenever
+`COMPOSE_PROFILES=cnc-telegram` is enabled, it also applies
+`ops/templates/docker-compose.cnc-telegram-worker.yml`. Its explicit profile
+overrides keep GLM opt-in even when an old live `docker-compose.yml` still has
+the former shared profile. This uses Compose `!override`; `deploy-stack.sh`
+fails before deployment when Docker Compose is older than `2.24.4`.
 
 For one shared CNC Telegram chat, keep exactly one writer. Prod `.env`:
 `ERP_STACK_ENV=prod`, `COMPOSE_PROFILES=cnc-telegram`,

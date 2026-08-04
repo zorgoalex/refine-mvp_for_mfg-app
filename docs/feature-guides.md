@@ -48,8 +48,9 @@ Data flow:
 1. `cnc-telegram-worker` на Telethon читает новые сообщения, history за неделю,
    файлы G-code, подписи/комментарии и
    реакции в чате.
-2. OCR worker на CPU анализирует скриншот и объединяет результат с G-code
-   parser. G-code используется только для размеров деталей и фрез.
+2. Worker разбирает валидный SVG и объединяет его с G-code parser. G-code
+   используется только для размеров деталей и фрез. OCR screenshot cross-check
+   выполняется только в явно включённом GLM fallback.
 3. Backend получает только структурированный JSON через
    `POST /api/v1/cnc-telegram/ingest`.
 4. UI читает выбранный день через `GET /api/v1/cnc-telegram/today?date=YYYY-MM-DD`.
@@ -65,10 +66,9 @@ Backend intentionally raw-free: скриншоты, G-code файлы и пол�
 повторный проход был идемпотентным.
 
 Prod worker находится в `cnc-telegram-worker/` и запускается Docker Compose
-profile `cnc-telegram`. В этот же profile входят `glm-ocr-model-init`
-(скачивает GGUF и mmproj в Docker volume), `glm-ocr-llama` (official
-`ghcr.io/ggml-org/llama.cpp:server` с local model files) и `glm-ocr-runner`
-(internal structured `/ocr`).
+profile `cnc-telegram`. Обычный режим разбирает валидный SVG без OCR. GLM model
+init, llama server и runner вынесены в отдельный opt-in profile
+`cnc-telegram-glm` и в обычном режиме не запускаются и не вызываются.
 В `.env` prod нужно включить:
 
 ```env
@@ -94,24 +94,30 @@ repo_erp/ops/cnc-telegram-worker.sh login
 repo_erp/ops/cnc-telegram-worker.sh backfill 7
 ```
 
-Если prod использует старый live `docker-compose.yml`, `ops/deploy-stack.sh`
-добавит tracked overlay `ops/templates/docker-compose.cnc-telegram-worker.yml`
-при включённом `COMPOSE_PROFILES=cnc-telegram`.
+При `COMPOSE_PROFILES=cnc-telegram` `ops/deploy-stack.sh` всегда добавляет
+tracked overlay `ops/templates/docker-compose.cnc-telegram-worker.yml`. Его
+profile overrides сохраняют GLM opt-in даже со старым live Compose.
 
-Default worker OCR command уже вызывает internal runner:
+Legacy/default OCR command остаётся в env для совместимости, но при
+`CNC_ENABLE_GLM_OCR=false` worker его не выполняет:
 
 ```env
-CNC_OCR_COMMAND=python -m cnc_telegram_worker.glm_ocr_client --image {image}
-GLM_OCR_RUNNER_URL=http://glm-ocr-runner:8001/ocr
-GLM_OCR_MODEL_FILE=GLM-OCR-Q8_0.gguf
-GLM_OCR_MMPROJ_FILE=mmproj-GLM-OCR-Q8_0.gguf
+CNC_OCR_COMMAND="python -m cnc_telegram_worker.rapid_ocr_client --image {image}"
+CNC_RAPID_OCR_URL=http://ocr-service:8000/ocr
 ```
 
-Primary OCR для CPU-VPS: GLM-OCR 0.9B Q8 через `llama.cpp`. Он тяжелее
-классических OCR, но лучше переносит реальные скриншоты раскроя и подходит для
-фоновой очереди. PaddleOCR можно держать быстрым fallback, Tesseract — только
-последним резервом. Решение OCR остаётся вне ERP backend: backend доверяет
-только нормализованному packet contract и помечает сомнительные строки
+GLM-OCR 0.9B Q8 через `llama.cpp` сохранён как аварийный fallback:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh up-glm
+```
+
+`up-glm` для этого запуска включает gate, профиль, GLM command и GLM engine.
+Outer command timeout при этом автоматически ставится на 60 секунд больше
+`GLM_OCR_CLIENT_TIMEOUT_SECONDS`, чтобы штатный CPU inference не был оборван.
+Обычный `up` возвращает SVG-only режим и останавливает GLM containers, не
+удаляя скачанный model volume. Решение OCR остаётся вне ERP backend: backend
+доверяет только нормализованному packet contract и помечает сомнительные строки
 `needs_review`.
 
 Backend semantics:

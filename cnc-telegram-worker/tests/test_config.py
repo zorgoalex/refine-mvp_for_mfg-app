@@ -15,7 +15,42 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertEqual(config.stack_env, "test")
         self.assertEqual(config.worker_role, "disabled")
         self.assertEqual(config.poll_interval_seconds, 60)
+        self.assertFalse(config.enable_glm_ocr)
+        self.assertEqual(config.ocr_command_timeout_seconds, 180)
+        self.assertEqual(config.glm_ocr_client_timeout_seconds, 660)
         self.assertFalse(config.enabled)
+
+    def test_glm_ocr_fallback_requires_explicit_enable(self) -> None:
+        with patch.dict(os.environ, {
+            "CNC_ENABLE_GLM_OCR": "true",
+            "CNC_OCR_COMMAND_TIMEOUT_SECONDS": "720",
+        }, clear=True):
+            config = WorkerConfig.from_env()
+
+        self.assertTrue(config.enable_glm_ocr)
+        self.assertEqual(config.ocr_command_timeout_seconds, 720)
+
+    def test_enabled_glm_fallback_requires_consistent_runtime_bundle(self) -> None:
+        base = {
+            "ERP_STACK_ENV": "test",
+            "CNC_TELEGRAM_WORKER_ROLE": "reader",
+            "CNC_ENABLE_GLM_OCR": "true",
+            "CNC_OCR_COMMAND": "python -m cnc_telegram_worker.rapid_ocr_client --image {image}",
+            "CNC_OCR_ENGINE": "rapidocr",
+            "CNC_OCR_COMMAND_TIMEOUT_SECONDS": "720",
+        }
+        with patch.dict(os.environ, base, clear=True):
+            invalid = WorkerConfig.from_env()
+        with self.assertRaisesRegex(RuntimeError, "glm_ocr_client"):
+            invalid.require_worker_enabled()
+
+        base.update({
+            "CNC_OCR_COMMAND": "python -m cnc_telegram_worker.glm_ocr_client --image {image}",
+            "CNC_OCR_ENGINE": "glm-ocr-0.9b-q8",
+        })
+        with patch.dict(os.environ, base, clear=True):
+            valid = WorkerConfig.from_env()
+        valid.require_worker_enabled()
 
     def test_writer_requires_prod_stack_by_default(self) -> None:
         with patch.dict(os.environ, {

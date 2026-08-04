@@ -23,7 +23,10 @@ class WorkerConfig:
     erp_bearer_token: str
     erp_worker_login: str
     erp_worker_password: str
+    enable_glm_ocr: bool
     ocr_command: str
+    ocr_command_timeout_seconds: int
+    glm_ocr_client_timeout_seconds: int
     ocr_engine: str
     parser_version: str
     default_machine: str
@@ -65,7 +68,10 @@ class WorkerConfig:
             erp_bearer_token=env("ERP_BEARER_TOKEN"),
             erp_worker_login=env("ERP_WORKER_LOGIN"),
             erp_worker_password=env("ERP_WORKER_PASSWORD"),
+            enable_glm_ocr=bool_env("CNC_ENABLE_GLM_OCR", False),
             ocr_command=env("CNC_OCR_COMMAND"),
+            ocr_command_timeout_seconds=positive_int_env("CNC_OCR_COMMAND_TIMEOUT_SECONDS", 180),
+            glm_ocr_client_timeout_seconds=positive_int_env("GLM_OCR_CLIENT_TIMEOUT_SECONDS", 660),
             ocr_engine=env("CNC_OCR_ENGINE", "rapidocr-ppocrv5-eslav"),
             parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v14"),
             default_machine=env("CNC_MACHINE_DEFAULT"),
@@ -102,6 +108,18 @@ class WorkerConfig:
                 "CNC Telegram writer is allowed only with ERP_STACK_ENV=prod; "
                 "set CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true only for a deliberate one-off run",
             )
+        if self.enable_glm_ocr:
+            if "cnc_telegram_worker.glm_ocr_client" not in self.ocr_command:
+                raise RuntimeError(
+                    "CNC_ENABLE_GLM_OCR=true requires CNC_OCR_COMMAND to use "
+                    "cnc_telegram_worker.glm_ocr_client",
+                )
+            if not self.ocr_engine.startswith("glm-ocr"):
+                raise RuntimeError("CNC_ENABLE_GLM_OCR=true requires CNC_OCR_ENGINE=glm-ocr*")
+            if self.ocr_command_timeout_seconds <= self.glm_ocr_client_timeout_seconds:
+                raise RuntimeError(
+                    "CNC_OCR_COMMAND_TIMEOUT_SECONDS must exceed GLM_OCR_CLIENT_TIMEOUT_SECONDS",
+                )
 
     def require_telegram(self) -> None:
         missing = []

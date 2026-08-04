@@ -68,13 +68,29 @@ compose_profile_enabled() {
   return 1
 }
 
+require_compose_override_support() {
+  local raw version major minor patch
+  raw="$(docker compose version --short 2>/dev/null)" \
+    || fail "docker compose is required for the CNC Telegram overlay"
+  version="${raw#v}"
+  version="${version%%-*}"
+  IFS='.' read -r major minor patch <<< "$version"
+  if [[ ! "$major" =~ ^[0-9]+$ || ! "$minor" =~ ^[0-9]+$ || ! "$patch" =~ ^[0-9]+$ ]]; then
+    fail "cannot parse docker compose version '$raw'; CNC Telegram overlay requires >= 2.24.4"
+  fi
+  if (( major < 2 || (major == 2 && minor < 24) || (major == 2 && minor == 24 && patch < 4) )); then
+    fail "docker compose >= 2.24.4 is required for CNC Telegram profile overrides (found $raw)"
+  fi
+}
+
 prepare_compose_file_args() {
   local stack_env
   COMPOSE_FILE_ARGS=(-f "$COMPOSE_FILE")
-  if compose_profile_enabled cnc-telegram && ! grep -qE '^[[:space:]]+cnc-telegram-worker:' "$COMPOSE_FILE"; then
+  if compose_profile_enabled cnc-telegram; then
+    require_compose_override_support
     [[ -f "$CNC_TELEGRAM_OVERLAY" ]] || fail "CNC Telegram overlay not found: $CNC_TELEGRAM_OVERLAY"
     COMPOSE_FILE_ARGS+=(-f "$CNC_TELEGRAM_OVERLAY")
-    log "Using CNC Telegram worker overlay for existing Compose file"
+    log "Using CNC Telegram overlay to enforce worker and GLM fallback profiles"
   fi
   stack_env="$(env_file_value ERP_STACK_ENV)"
   stack_env="${stack_env:-test}"

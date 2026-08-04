@@ -340,7 +340,7 @@ services:
       start_period: 30s
 
   glm-ocr-model-init:
-    profiles: ["cnc-telegram"]
+    profiles: ["cnc-telegram-glm"]
     image: ${GLM_OCR_MODEL_INIT_IMAGE:-curlimages/curl:8.10.1}
     restart: "no"
     user: "0:0"
@@ -379,7 +379,7 @@ services:
         max-file: "3"
 
   glm-ocr-llama:
-    profiles: ["cnc-telegram"]
+    profiles: ["cnc-telegram-glm"]
     image: ${GLM_OCR_LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server}
     restart: unless-stopped
     depends_on:
@@ -423,7 +423,7 @@ services:
         max-file: "3"
 
   glm-ocr-runner:
-    profiles: ["cnc-telegram"]
+    profiles: ["cnc-telegram-glm"]
     build:
       context: ${GLM_OCR_RUNNER_BUILD_CONTEXT:-./repo_erp/glm-ocr-runner}
       dockerfile: Dockerfile
@@ -467,8 +467,6 @@ services:
     depends_on:
       backend:
         condition: service_healthy
-      ocr-service:
-        condition: service_healthy
     environment:
       ERP_STACK_ENV: ${ERP_STACK_ENV:-test}
       CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}
@@ -482,7 +480,9 @@ services:
       ERP_BEARER_TOKEN: ${ERP_BEARER_TOKEN:-}
       ERP_WORKER_LOGIN: ${ERP_WORKER_LOGIN:-}
       ERP_WORKER_PASSWORD: ${ERP_WORKER_PASSWORD:-}
+      CNC_ENABLE_GLM_OCR: ${CNC_ENABLE_GLM_OCR:-false}
       CNC_OCR_COMMAND: ${CNC_OCR_COMMAND:-python -m cnc_telegram_worker.rapid_ocr_client --image {image}}
+      CNC_OCR_COMMAND_TIMEOUT_SECONDS: ${CNC_OCR_COMMAND_TIMEOUT_SECONDS:-180}
       CNC_RAPID_OCR_URL: ${CNC_RAPID_OCR_URL:-http://ocr-service:8000/ocr}
       CNC_RAPID_OCR_TIMEOUT_SECONDS: ${CNC_RAPID_OCR_TIMEOUT_SECONDS:-120}
       GLM_OCR_RUNNER_URL: ${GLM_OCR_RUNNER_URL:-http://glm-ocr-runner:8001/ocr}

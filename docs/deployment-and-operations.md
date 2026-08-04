@@ -102,15 +102,10 @@ ERP_WORKER_LOGIN=<erp-user-with-cut.manage>
 ERP_WORKER_PASSWORD=<password>
 ```
 
-Этот же profile поднимает OCR stack:
-
-- `glm-ocr-model-init`: one-shot download of `GLM-OCR-Q8_0.gguf` and
-  `mmproj-GLM-OCR-Q8_0.gguf` into the shared Docker volume;
-- `glm-ocr-llama`: official `ghcr.io/ggml-org/llama.cpp:server`, local model
-  files, internal network only;
-- `glm-ocr-runner`: internal FastAPI wrapper `/ocr`, возвращает structured JSON;
-- `cnc-telegram-worker`: вызывает runner через default
-  `python -m cnc_telegram_worker.glm_ocr_client --image {image}`.
+Profile `cnc-telegram` поднимает SVG-only worker без OCR subprocess/service.
+GLM-OCR не запускается и не вызывается автоматически: model init, llama server
+и runner находятся в отдельном opt-in profile `cnc-telegram-glm`, а вызов OCR
+защищён отдельным `CNC_ENABLE_GLM_OCR` gate.
 
 Перед daemon нужен один интерактивный Telethon login:
 
@@ -118,6 +113,31 @@ ERP_WORKER_PASSWORD=<password>
 repo_erp/ops/cnc-telegram-worker.sh login
 repo_erp/ops/cnc-telegram-worker.sh up
 ```
+
+Явный временный GLM fallback:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh up-glm
+repo_erp/ops/cnc-telegram-worker.sh logs-glm
+```
+
+`up-glm` сначала ждёт healthy runner (его healthcheck также проверяет llama) до
+30 минут и только затем запускает worker. При timeout worker не запускается и
+не фиксирует ложный завершённый fallback pass.
+
+Вернуться к SVG-only обработке и удалить старые GLM containers, сохранив model
+cache:
+
+```bash
+repo_erp/ops/cnc-telegram-worker.sh up
+```
+
+Для постоянного fallback задаются одновременно
+`COMPOSE_PROFILES=cnc-telegram,cnc-telegram-glm`, `CNC_ENABLE_GLM_OCR=true` и
+`CNC_OCR_COMMAND="python -m cnc_telegram_worker.glm_ocr_client --image {image}"`,
+плюс `CNC_OCR_COMMAND_TIMEOUT_SECONDS=720` и
+`CNC_OCR_ENGINE=glm-ocr-0.9b-q8` для корректного source fingerprint. Outer
+timeout обязан быть больше `GLM_OCR_CLIENT_TIMEOUT_SECONDS` (default 660).
 
 Backfill за неделю:
 
@@ -127,9 +147,11 @@ repo_erp/ops/cnc-telegram-worker.sh backfill 7
 
 Worker internal-only: без ports/traefik. `/data` хранит только Telethon session,
 state и temp; temp hard-delete ограничен `CNC_TEMP_TTL_HOURS<=24`.
-Если `deploy-stack.sh` запускается со старым live `docker-compose.yml`, где ещё
-нет этого service, script добавляет tracked overlay
-`ops/templates/docker-compose.cnc-telegram-worker.yml` при включённом profile.
+При включённом `cnc-telegram` `deploy-stack.sh` всегда добавляет tracked overlay
+`ops/templates/docker-compose.cnc-telegram-worker.yml`. Его explicit profile
+overrides не дают старому live `docker-compose.yml` вернуть GLM в обычный
+profile. Для безопасной замены старого списка profiles используется Compose
+`!override`, поэтому deploy fail-closed требует Docker Compose `>=2.24.4`.
 
 ## Redis/Valkey для rate limit
 

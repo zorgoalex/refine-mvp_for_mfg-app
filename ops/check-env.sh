@@ -173,6 +173,39 @@ if csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram"; then
   fi
 fi
 
+case "${CNC_ENABLE_GLM_OCR:-false}" in
+  false) ;;
+  true)
+    csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram-glm" \
+      || mark_error "CNC_ENABLE_GLM_OCR=true requires COMPOSE_PROFILES to include cnc-telegram-glm"
+    ;;
+  *) mark_error "CNC_ENABLE_GLM_OCR must be true or false" ;;
+esac
+
+if csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram-glm"; then
+  glm_client_timeout="${GLM_OCR_CLIENT_TIMEOUT_SECONDS:-660}"
+  glm_runner_timeout="${GLM_OCR_TIMEOUT_SECONDS:-600}"
+  ocr_command_timeout="${CNC_OCR_COMMAND_TIMEOUT_SECONDS:-180}"
+  csv_contains "${COMPOSE_PROFILES:-}" "cnc-telegram" \
+    || mark_error "COMPOSE_PROFILES=cnc-telegram-glm requires cnc-telegram"
+  [[ "${CNC_OCR_COMMAND:-}" == *"cnc_telegram_worker.glm_ocr_client"* ]] \
+    || mark_error "COMPOSE_PROFILES=cnc-telegram-glm requires CNC_OCR_COMMAND to use cnc_telegram_worker.glm_ocr_client"
+  [[ "${CNC_ENABLE_GLM_OCR:-false}" == "true" ]] \
+    || mark_error "COMPOSE_PROFILES=cnc-telegram-glm requires CNC_ENABLE_GLM_OCR=true"
+  [[ "${CNC_OCR_ENGINE:-}" == glm-ocr* ]] \
+    || mark_error "COMPOSE_PROFILES=cnc-telegram-glm requires CNC_OCR_ENGINE=glm-ocr* for truthful source fingerprints"
+  if [[ ! "$glm_runner_timeout" =~ ^[1-9][0-9]*$ \
+      || ! "$glm_client_timeout" =~ ^[1-9][0-9]*$ \
+      || ! "$ocr_command_timeout" =~ ^[1-9][0-9]*$ ]]; then
+    mark_error "GLM_OCR_TIMEOUT_SECONDS, GLM_OCR_CLIENT_TIMEOUT_SECONDS, and CNC_OCR_COMMAND_TIMEOUT_SECONDS must be positive integers"
+  else
+    (( 10#$glm_client_timeout > 10#$glm_runner_timeout )) \
+      || mark_error "GLM_OCR_CLIENT_TIMEOUT_SECONDS must exceed GLM_OCR_TIMEOUT_SECONDS"
+    (( 10#$ocr_command_timeout > 10#$glm_client_timeout )) \
+      || mark_error "CNC_OCR_COMMAND_TIMEOUT_SECONDS must exceed GLM_OCR_CLIENT_TIMEOUT_SECONDS"
+  fi
+fi
+
 if [[ "$DNS_CHECK" == "1" ]]; then
   if [[ -z "$EXPECTED_IP" ]]; then
     EXPECTED_IP="$(curl -fsS --max-time 5 https://api.ipify.org || true)"

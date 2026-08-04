@@ -6,6 +6,7 @@ import tempfile
 import types
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 telethon_stub = types.ModuleType("telethon")
 telethon_stub.TelegramClient = object
@@ -14,6 +15,7 @@ sys.modules.setdefault("telethon", telethon_stub)
 
 from cnc_telegram_worker.telegram_source import is_image_message, is_vector_message
 from cnc_telegram_worker.packet import external_packet_key
+from cnc_telegram_worker.ocr import OcrResult
 from cnc_telegram_worker.state import StateStore
 from cnc_telegram_worker.worker import (
     CncTelegramWorker,
@@ -417,14 +419,82 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(worker.state.cutting_sequence_replied("telegram:-100123:320"))
 
+    async def test_glm_fallback_runs_only_when_explicitly_enabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            vector = FakeMessage(
+                331,
+                filename="CNC#1_1234.svg",
+                mime_type="image/svg+xml",
+                media_content=VALID_SVG,
+            )
+            image = FakeMessage(
+                330,
+                filename="sheet.jpg",
+                mime_type="image/jpeg",
+                media_content="fake-image",
+            )
+            group = SvgGroup(
+                vector_message=vector,
+                image_message=image,
+                comments=[],
+                cutting_sequence_no=None,
+                gcode_message=None,
+            )
+            ocr_result = OcrResult(items=[{
+                "orderName": "1234",
+                "detailNumber": 7,
+                "widthMm": 200,
+                "heightMm": 100,
+                "quantity": 1,
+            }])
 
-def make_worker(temp_dir: Path, *, can_write_chat: bool = False) -> CncTelegramWorker:
+            with patch(
+                "cnc_telegram_worker.worker.run_ocr_command",
+                new_callable=AsyncMock,
+                return_value=ocr_result,
+            ) as run_ocr:
+                normal = make_worker(temp_path / "normal", ocr_engine="rapidocr-ppocrv5-eslav")
+                await normal.process_group(
+                    FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24)
+                )
+                run_ocr.assert_not_awaited()
+
+                fallback = make_worker(
+                    temp_path / "fallback",
+                    enable_glm_ocr=True,
+                    ocr_engine="glm-ocr-0.9b-q8",
+                    ocr_command="python -m cnc_telegram_worker.glm_ocr_client --image {image}",
+                    ocr_command_timeout_seconds=720,
+                )
+                await fallback.process_group(
+                    FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24)
+                )
+
+            run_ocr.assert_awaited_once()
+            self.assertEqual(run_ocr.await_args.kwargs["timeout_seconds"], 720)
+            self.assertEqual(fallback.erp.packets[0]["ocrEngine"], "glm-ocr-0.9b-q8")
+            self.assertEqual(fallback.erp.packets[0]["items"][0]["orderName"], "1234")
+
+
+def make_worker(
+    temp_dir: Path,
+    *,
+    can_write_chat: bool = False,
+    enable_glm_ocr: bool = False,
+    ocr_engine: str = "none",
+    ocr_command: str = "",
+    ocr_command_timeout_seconds: int = 180,
+) -> CncTelegramWorker:
     worker = object.__new__(CncTelegramWorker)
     worker.config = types.SimpleNamespace(
         can_write_chat=can_write_chat,
         resend_unchanged=False,
         parser_version="test-svg-v1",
-        ocr_engine="none",
+        enable_glm_ocr=enable_glm_ocr,
+        ocr_engine=ocr_engine,
+        ocr_command=ocr_command,
+        ocr_command_timeout_seconds=ocr_command_timeout_seconds,
         temp_dir=temp_dir / "tmp",
         media_dir=temp_dir / "media",
         default_machine="",
