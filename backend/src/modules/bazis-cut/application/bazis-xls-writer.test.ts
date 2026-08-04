@@ -16,9 +16,9 @@ describe('buildBazisCutXls', () => {
     expect(sheet['!ref']).toBe('A1:AI2');
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
     expect(rows[0]).toEqual([...BAZIS_CUT_HEADERS]);
-    expect(rows[1]?.[5]).toBe('1319');
+    expect(rows[1]?.[5]).toBe('BP-7');
     expect(rows[1]?.[6]).toBe('01.00.07');
-    expect(rows[1]?.[7]).toBe('131901.00.07');
+    expect(rows[1]?.[7]).toBe('BP-701.00.07');
     expect(rows[1]?.[4]).toBe(18);
     expect(rows[1]?.[28]).toBeNull();
     expect(rows[1]?.[29]).toBe('=literal');
@@ -34,9 +34,11 @@ describe('buildBazisCutXls', () => {
     ['1319', 'Кухня.01.00.07', '1319Кухня.01.00.07'],
     ['1319', '', '1319'],
     ['', '', ''],
-  ])('writes Position and builds QR-code from Order plus Position', (order, position, expectedQrCode) => {
+  ])('writes the Basis project into Order and builds QR-code from it plus Position',
+    (project, position, expectedQrCode) => {
     const bytes = buildBazisCutXls([detail({
-      sourceBazisOrderNo: order,
+      sourceBazisProjectName: project,
+      sourceBazisOrderNo: 'BZ-100',
       position,
     })]);
     const workbook = XLSX.read(bytes, { type: 'buffer' });
@@ -45,7 +47,7 @@ describe('buildBazisCutXls', () => {
       { header: 1, defval: null },
     );
 
-    expect(rows[1]?.[5]).toBe(order);
+    expect(rows[1]?.[5]).toBe(project);
     expect(rows[1]?.[6]).toBe(position);
     expect(rows[1]?.[7]).toBe(expectedQrCode);
   });
@@ -57,7 +59,7 @@ function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetai
     sourceOrderDetailId: 7, sourceOrderId: 14, sourceOrderDeleted: false, sourceProjectId: 3,
     sourceBazisProjectId: 2, sourceBazisRevisionId: 4, sourceBazisNodeId: 5,
     sourceOrderName: '1491', sourceOrderFullNumber: 'МП-1-1491', sourceProjectCode: 'МП-1',
-    sourceBazisProjectName: '1319', sourceBazisOrderNo: '1319', sourceBazisProductName: 'Кухня',
+    sourceBazisProjectName: 'BP-7', sourceBazisOrderNo: 'BZ-100', sourceBazisProductName: 'Кухня',
     cutEnabled: true, materialType: 'Площадной', materialName: 'ЛДСП Белый', materialArticle: '',
     thicknessMm: 18, position: '01.00.01', partName: 'Панель', finishedLengthMm: 410.99,
     finishedWidthMm: 374.5, cutLengthMm: 411, cutWidthMm: 374.5, quantity: 2,

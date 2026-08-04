@@ -7,16 +7,16 @@ describe('buildBazisCutQrCode', () => {
     ['1319', '', '1319'],
     ['', 'Кухня.01.00.07', 'Кухня.01.00.07'],
     ['', '', ''],
-  ])('joins Order and Position values', (order, position, expected) => {
+  ])('joins Basis project and Position values', (project, position, expected) => {
     expect(buildBazisCutQrCode({
-      sourceBazisOrderNo: order,
+      sourceBazisProjectName: project,
       position,
     })).toBe(expected);
   });
 
   it('trims values without inserting blank fragments', () => {
     expect(buildBazisCutQrCode({
-      sourceBazisOrderNo: ' 1319 ',
+      sourceBazisProjectName: ' 1319 ',
       position: ' Кухня.01.00.07 ',
     })).toBe('1319Кухня.01.00.07');
   });

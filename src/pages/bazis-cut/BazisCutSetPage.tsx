@@ -60,10 +60,10 @@ const FIELD_GROUPS = ['Основное', 'Размеры', 'Кромки', 'Д�
 const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
   FIELDS.filter((field) => field.group === group && field.key !== 'position' && field.key !== 'partName'),
 );
-const LEADING_COLUMN_COUNT = 6;
-const QR_CODE_COLUMN_INDEX = 4;
+const LEADING_COLUMN_COUNT = 7;
+const QR_CODE_COLUMN_INDEX = 5;
 const QR_CODE_STICKY_CLASS = 'bazis-cut-sticky-qr';
-const QR_CODE_STICKY_LEFT_PX = 58 + 210 + 150;
+const QR_CODE_STICKY_LEFT_PX = 58 + 210 + 150 + 150;
 const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
 const QUANTITY_COLUMN_INDEX = LEADING_COLUMN_COUNT
   + GROUPED_FIELDS.findIndex((field) => field.key === 'quantity');
@@ -149,7 +149,7 @@ export const BazisCutSetPage: React.FC = () => {
     <Card title="Детали набора"><Table className="bazis-cut-set-details-table"
       style={{ '--bazis-cut-sticky-qr-left': `${QR_CODE_STICKY_LEFT_PX}px` } as React.CSSProperties}
       rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
-      loading={loading} pagination={false} scroll={{ x: 5320, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
+      loading={loading} pagination={false} scroll={{ x: 5470, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
       rowClassName={(row) => orderDeletedReferenceClassName(row.sourceOrderDeleted)}
       summary={(details) => <DetailTableSummary details={details} canManage={canManage} />}
       size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
@@ -185,7 +185,13 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
         <OrderDeletedTag deleted={row.sourceOrderDeleted} />
       </Space>
     ) : 'Снимок' },
-    { title: 'Базис заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left', width: 150,
+    { title: 'Базис-проект', dataIndex: 'sourceBazisProjectName', key: 'sourceBazisProjectName', fixed: 'left', width: 150,
+      render: (value: string, row) => value
+        ? row.sourceBazisProjectId
+          ? <Link to={`/bazis/projects/${row.sourceBazisProjectId}`}><span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span></Link>
+          : <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        : <Text type="secondary">—</Text> },
+    { title: 'Базис-заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left', width: 150,
       render: (value: string) => value
         ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
         : <Text type="secondary">—</Text> },

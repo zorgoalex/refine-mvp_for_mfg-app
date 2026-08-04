@@ -4,8 +4,7 @@ export interface BazisCutSnapshotSource {
   materialName: string;
   thicknessMm: number;
   detailNumber: number;
-  orderName: string;
-  basisOrder: string | null;
+  bazisProject: string | null;
   basisProduct: string | null;
   basisDesignation: string | null;
   basisData: string | null;
@@ -23,11 +22,10 @@ export interface BazisCutSnapshotSource {
 export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): BazisCutDetailFields | null {
   const length = source.verticalTexture ? source.widthMm : source.heightMm;
   const width = source.verticalTexture ? source.heightMm : source.widthMm;
-  const identity = buildBazisCutSnapshotIdentity(source);
   const fields: BazisCutDetailFields = {
     cutEnabled: true, materialType: 'Площадной', materialName: source.materialName.trim(),
     materialArticle: '', thicknessMm: source.thicknessMm,
-    position: identity.position,
+    position: buildBazisCutPosition(source.bazisProject, source.basisProduct, source.basisDesignation),
     partName: firstNonEmpty(source.detailName, source.basisData?.split('/')[2], `Деталь ${source.detailNumber}`),
     finishedLengthMm: length, finishedWidthMm: width,
     cutLengthMm: roundTenth(length), cutWidthMm: roundTenth(width), quantity: source.quantity,
@@ -40,34 +38,15 @@ export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): Bazis
   return bazisCutDetailFieldsSchema.safeParse(fields).success ? fields : null;
 }
 
-export function buildBazisCutSnapshotIdentity(
-  source: Pick<BazisCutSnapshotSource,
-    'orderName' | 'detailNumber' | 'basisOrder' | 'basisProduct' | 'basisDesignation'>,
-): { order: string; position: string } {
-  const basisOrder = source.basisOrder?.trim() ?? '';
-  const basisProduct = source.basisProduct?.trim() ?? '';
-  const basisDesignation = source.basisDesignation?.trim() ?? '';
-
-  if (!basisOrder && !basisProduct && !basisDesignation) {
-    return {
-      order: source.orderName.trim(),
-      position: String(source.detailNumber),
-    };
-  }
-
-  return {
-    order: basisOrder,
-    position: buildBazisCutPosition(basisProduct, basisDesignation),
-  };
-}
-
 export function buildBazisCutPosition(
+  bazisProject: string | null | undefined,
   basisProduct: string | null | undefined,
   basisDesignation: string | null | undefined,
 ): string {
+  const project = bazisProject?.trim() ?? '';
   const product = basisProduct?.trim() ?? '';
   const designation = basisDesignation?.trim() ?? '';
-  return product || designation ? `${product}.${designation}` : '';
+  return `${project ? product : ''}.${designation}`;
 }
 
 function roundTenth(value: number): number {

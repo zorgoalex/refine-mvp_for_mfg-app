@@ -56,7 +56,9 @@ describe('Basis-cut UI integration guards', () => {
 
   it('keeps all 33 fields editable and uses native picker with fallback', () => {
     expect((card.match(/key: '[A-Za-z0-9]+'/g) ?? []).length).toBeGreaterThanOrEqual(33);
-    expect(card).toContain("title: 'Базис заказ'");
+    expect(card).toContain("title: 'Базис-проект'");
+    expect(card).toContain("dataIndex: 'sourceBazisProjectName'");
+    expect(card).toContain("title: 'Базис-заказ'");
     expect(card).toContain("dataIndex: 'sourceBazisOrderNo'");
     expect(card).not.toContain("dataIndex: 'sourceBazisProductName'");
     expect(card).not.toContain("title: 'Базис изделие'");
@@ -82,16 +84,17 @@ describe('Basis-cut UI integration guards', () => {
     for (const fixedColumn of [
       "title: '№', key: 'rowNumber', fixed: 'left'",
       "title: 'Источник', key: 'source', fixed: 'left'",
-      "title: 'Базис заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left'",
+      "title: 'Базис-проект', dataIndex: 'sourceBazisProjectName', key: 'sourceBazisProjectName', fixed: 'left'",
+      "title: 'Базис-заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left'",
     ]) expect(columns).toContain(fixedColumn);
     expect(columns).toContain("title: 'QR-code', key: 'qrCode', className: QR_CODE_STICKY_CLASS");
-    expect((columns.match(/fixed: 'left'/g) ?? [])).toHaveLength(3);
+    expect((columns.match(/fixed: 'left'/g) ?? [])).toHaveLength(4);
     expect(columns).toContain("title: 'Позиция', dataIndex: 'position', key: 'position', width: 130");
     expect(columns).toContain("title: 'Наименование', dataIndex: 'partName', key: 'partName', width: 200");
     expect(card).toContain("className={index === QR_CODE_COLUMN_INDEX ? QR_CODE_STICKY_CLASS : undefined}");
     expect(styles).toContain('.bazis-cut-set-details-table.ant-table-wrapper .ant-table-cell.bazis-cut-sticky-qr');
     expect(styles).toContain('left: var(--bazis-cut-sticky-qr-left);');
-    expect(card).toContain('scroll={{ x: 5320, y: 480 }}');
+    expect(card).toContain('scroll={{ x: 5470, y: 480 }}');
     expect(card).toContain('<Table.Summary fixed="bottom">');
     expect(card).toContain('Итого позиций:');
   });
