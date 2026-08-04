@@ -160,9 +160,9 @@ export function panelsGroupedKey(userId: string | number): string {
 export function loadPanelsGrouped(userId: string | number): boolean {
   try {
     const raw = localStorage.getItem(panelsGroupedKey(userId));
-    return raw == null ? true : raw === 'true';
+    return raw === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 

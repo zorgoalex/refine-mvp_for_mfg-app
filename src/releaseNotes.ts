@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-04",
+    title: "Базис-проекты: панели без группировки по умолчанию",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В карточке Базис-проекта чек-бокс «Группировать по изделию» по умолчанию выключен; сохранённый выбор пользователя не сбрасывается.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-04",
     title: "Базис-раскрой: проект, заказ и позиция",
     services: ["ERP"],
     repositories: ["repo_erp"],

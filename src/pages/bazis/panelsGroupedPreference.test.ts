@@ -19,12 +19,12 @@ describe('panels grouped per-user preference', () => {
     expect(panelsGroupedKey(42)).toBe('bazis-panels:grouped:42');
   });
 
-  it('defaults to true when nothing is stored or storage is unavailable', () => {
+  it('defaults to false when nothing is stored or storage is unavailable', () => {
     withStorage({});
-    expect(loadPanelsGrouped(1)).toBe(true);
+    expect(loadPanelsGrouped(1)).toBe(false);
     vi.unstubAllGlobals();
     // node без localStorage — try/catch возвращает дефолт
-    expect(loadPanelsGrouped(1)).toBe(true);
+    expect(loadPanelsGrouped(1)).toBe(false);
   });
 
   it('round-trips false and true per user', () => {
@@ -35,6 +35,6 @@ describe('panels grouped per-user preference', () => {
     savePanelsGrouped(7, true);
     expect(loadPanelsGrouped(7)).toBe(true);
     // другой юзер не затронут
-    expect(loadPanelsGrouped(8)).toBe(true);
+    expect(loadPanelsGrouped(8)).toBe(false);
   });
 });
