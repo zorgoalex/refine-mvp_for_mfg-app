@@ -57,4 +57,11 @@ describe('bazis panels selection UI guards', () => {
     // Карточное выделение строки не зависит от занятости
     expect(panelsTab).toContain("row.bazisNodeId === selectedId ? 'ant-table-row-selected' : ''");
   });
+
+  it('передаёт точные выбранные node ids в прямой XLS-экспорт', () => {
+    expect(panelsTab).toContain('onSelectionChange?.(selectedNodeIds)');
+    expect(panelsTab).toContain('onExportXls(selectedNodeIds)');
+    expect(panelsTab).toContain('Экспорт XLS');
+    expect(panelsTab).toContain("Нужно право cut.view");
+  });
 });

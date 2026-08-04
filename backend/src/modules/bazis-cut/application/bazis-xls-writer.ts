@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { ApiError } from '../../../common/errors/api-error';
-import type { BazisCutDetailFields, BazisCutSetDetailDto } from '../dto/bazis-cut.dto';
+import type { BazisCutDetailFields } from '../dto/bazis-cut.dto';
 
 export const BAZIS_CUT_SHEET_NAME = 'Детали для раскроя';
 
@@ -14,7 +14,9 @@ export const BAZIS_CUT_HEADERS = [
   '%Пользовательское свойство', '%Склейка', '%Фрезировка', '%Маршрут', '%Пленка',
 ] as const;
 
-export function buildBazisCutXls(details: readonly BazisCutSetDetailDto[]): Buffer {
+export function buildBazisCutXls(
+  details: readonly (BazisCutDetailFields & { sourceBazisProjectName?: string })[],
+): Buffer {
   if (details.length === 0) {
     throw new ApiError(422, 'BAZIS_CUT_SET_EMPTY', 'Нельзя экспортировать пустой набор');
   }

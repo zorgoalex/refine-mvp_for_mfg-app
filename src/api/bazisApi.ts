@@ -23,6 +23,11 @@ import type {
   UpsertMaterialMapping,
 } from './types/bazisApi.types';
 
+export interface BazisRevisionCutExportFile {
+  blob: Blob;
+  fileName: string | null;
+}
+
 export const bazisApi = {
   import(
     file: File,
@@ -117,6 +122,23 @@ export const bazisApi = {
     );
   },
 
+  async exportCutXls(
+    revisionId: number,
+    selectedNodeIds: number[],
+  ): Promise<BazisRevisionCutExportFile> {
+    validateNodeSelection(selectedNodeIds);
+    const { blob, fileName } = await httpClient.download(
+      apiRoutes.bazis.revisionCutXls(validateId(revisionId, 'revisionId')),
+      {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ selectedNodeIds }),
+      },
+    );
+    return { blob, fileName };
+  },
+
   listMaterialMappings(names?: string[]): Promise<MaterialMapping[]> {
     const normalizedNames = names?.map((name) => name.trim()).filter(Boolean) ?? [];
     return httpClient.get<MaterialMapping[]>(
@@ -186,4 +208,11 @@ function validateId(value: number, field: string): number {
   }
 
   return value;
+}
+
+function validateNodeSelection(selectedNodeIds: number[]): void {
+  if (!Array.isArray(selectedNodeIds) || selectedNodeIds.length < 1 || selectedNodeIds.length > 500) {
+    throw new Error('Invalid selectedNodeIds');
+  }
+  selectedNodeIds.forEach((nodeId) => validateId(nodeId, 'nodeId'));
 }

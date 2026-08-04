@@ -31,6 +31,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-04",
+    title: "Базис-проекты: прямой экспорт выбранных панелей в XLS",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В карточке Базис-проекта можно выделить нужные панели и сразу скачать файл Базис-раскроя Excel 97–2003 (.xls), не создавая промежуточный набор.",
+    ],
+    changed: [
+      "Поля XLS формируются тем же серверным mapper-ом, что и при экспорте деталей ERP-заказа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-04",
     title: "Создание заказа из Базис-проекта: компактная информация о проекте",
     services: ["ERP"],
     repositories: ["repo_erp"],

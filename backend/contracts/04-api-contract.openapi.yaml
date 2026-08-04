@@ -4209,6 +4209,65 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/bazis/revisions/{id}/export-cut.xls:
+    post:
+      tags:
+        - Bazis
+      operationId: exportBazisRevisionCutXls
+      summary: Export selected Bazis panels as BIFF8 XLS
+      description: Requires both `bazis.view` and `cut.view`; no persistent Basis-cut set is created.
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [selectedNodeIds]
+              properties:
+                selectedNodeIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: BIFF8 XLS
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/vnd.ms-excel:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/bazis/material-mappings:
     get:
       tags:

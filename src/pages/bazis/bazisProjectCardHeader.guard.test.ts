@@ -22,4 +22,12 @@ describe('Bazis project card header guards', () => {
   it('uses PATCH for the rename command', () => {
     expect(api).toMatch(/renameProject[\s\S]*httpClient\.patch/);
   });
+
+  it('exports selected panels as direct Basis-cut XLS from the project card', () => {
+    expect(view).toContain("can('cut.view')");
+    expect(view).toContain('bazisApi.exportCutXls(selectedRevision.bazisRevisionId, nodeIds)');
+    expect(view).toContain('onSelectionChange={setSelectedPanelNodeIds}');
+    expect(view).toContain('Экспорт XLS');
+    expect(api).toMatch(/exportCutXls[\s\S]*revisionCutXls[\s\S]*selectedNodeIds/);
+  });
 });

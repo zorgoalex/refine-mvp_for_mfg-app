@@ -19,6 +19,12 @@ export interface BazisCutSnapshotSource {
   verticalTexture: boolean;
 }
 
+export interface BazisDocumentLabels {
+  sourceBazisProjectName: string;
+  sourceBazisOrderNo: string;
+  sourceBazisProductName: string;
+}
+
 export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): BazisCutDetailFields | null {
   const length = source.verticalTexture ? source.widthMm : source.heightMm;
   const width = source.verticalTexture ? source.heightMm : source.widthMm;
@@ -47,6 +53,29 @@ export function buildBazisCutPosition(
   const product = basisProduct?.trim() ?? '';
   const designation = basisDesignation?.trim() ?? '';
   return `${project ? product : ''}.${designation}`;
+}
+
+export function resolveBazisDetailLabels(input: {
+  rootProductCount: number | null;
+  productOrderNo: string | null;
+  revisionBazisOrderNo: string | null;
+  detailBazisProject: string | null;
+  detailBazisProduct: string | null;
+}): BazisDocumentLabels {
+  const productOrderNo = input.productOrderNo?.trim() ?? '';
+  const revisionBazisOrderNo = input.revisionBazisOrderNo?.trim() ?? '';
+  const detailBazisProject = input.detailBazisProject?.trim() ?? '';
+  const isBazisProject = (input.rootProductCount ?? 1) > 1;
+  const unmatchedDocumentNumber = input.rootProductCount === null ? detailBazisProject : '';
+  return {
+    sourceBazisProjectName: isBazisProject
+      ? revisionBazisOrderNo || productOrderNo
+      : '',
+    sourceBazisOrderNo: isBazisProject
+      ? ''
+      : productOrderNo || revisionBazisOrderNo || unmatchedDocumentNumber,
+    sourceBazisProductName: input.detailBazisProduct?.trim() ?? '',
+  };
 }
 
 function roundTenth(value: number): number {

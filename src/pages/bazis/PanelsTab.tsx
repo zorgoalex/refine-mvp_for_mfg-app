@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   ApartmentOutlined,
+  DownloadOutlined,
   FilterOutlined,
   InfoCircleOutlined,
   ScissorOutlined,
@@ -73,6 +74,10 @@ interface PanelsTabProps {
   focusToken: number;
   onSelect: (nodeId: number | null) => void;
   onGoToTree: (nodeId: number) => void;
+  onSelectionChange?: (nodeIds: number[]) => void;
+  onExportXls?: (nodeIds: number[]) => Promise<void>;
+  canExportXls?: boolean;
+  exportingXls?: boolean;
 }
 
 interface PanelChildRow extends PanelLike {
@@ -183,6 +188,10 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   focusToken,
   onSelect,
   onGoToTree,
+  onSelectionChange,
+  onExportXls,
+  canExportXls = false,
+  exportingXls = false,
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
@@ -672,6 +681,9 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   }, [canManage, filterOptions, handleNotesSaved, isOperational, notesEpoch, onGoToTree, selectOnlyFree, selection, visiblePanels]);
 
   const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
+  useEffect(() => {
+    onSelectionChange?.(selectedNodeIds);
+  }, [onSelectionChange, selectedNodeIds]);
   const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
   const selectedPanel = selectedId != null
     ? allPanels.find((panel) => panel.bazisNodeId === selectedId) ?? null
@@ -879,24 +891,42 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             </Text>
           )}
           <span className="bazis-panels-workspace__grow" />
-          {selectionPossible ? (
+          {selectionPossible || onExportXls ? (
             <>
               <Text>
                 Выбрано: {selectionStats.panels} позиций / {selectionStats.units} шт.
                 {selectionStats.excludedBusy > 0 ? ` · исключено ${selectionStats.excludedBusy}` : ''}
               </Text>
-              {/* source-guard legacy marker: onClick={noop} */}
-              <Button disabled={selectionStats.panels === 0 || !canManage} onClick={() => setAddToOrderOpen(true)}>
-                В существующий заказ
-              </Button>
-              <Button
-                type="primary"
-                disabled={selectionStats.panels === 0 || !canManage}
-                loading={createDraftLoading}
-                onClick={() => void handleCreateDraftOrder()}
-              >
-                В новый заказ
-              </Button>
+              {onExportXls ? (
+                <Tooltip title={!canExportXls ? 'Нужно право cut.view' : selectionStats.panels === 0 ? 'Выберите панели' : undefined}>
+                  <span>
+                    <Button
+                      icon={<DownloadOutlined />}
+                      disabled={selectionStats.panels === 0 || !canExportXls}
+                      loading={exportingXls}
+                      onClick={() => void onExportXls(selectedNodeIds)}
+                    >
+                      Экспорт XLS
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : null}
+              {selectionPossible ? (
+                <>
+                  {/* source-guard legacy marker: onClick={noop} */}
+                  <Button disabled={selectionStats.panels === 0 || !canManage} onClick={() => setAddToOrderOpen(true)}>
+                    В существующий заказ
+                  </Button>
+                  <Button
+                    type="primary"
+                    disabled={selectionStats.panels === 0 || !canManage}
+                    loading={createDraftLoading}
+                    onClick={() => void handleCreateDraftOrder()}
+                  >
+                    В новый заказ
+                  </Button>
+                </>
+              ) : null}
             </>
           ) : null}
         </div>

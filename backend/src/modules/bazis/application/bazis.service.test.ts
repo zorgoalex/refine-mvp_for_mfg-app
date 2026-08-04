@@ -172,6 +172,30 @@ describe('BazisService', () => {
     });
   });
 
+  it('requires both bazis.view and cut.view for direct XLS export', async () => {
+    const repository = createRepository();
+    const service = createService(repository);
+    const command = {
+      requestId: 'req-export',
+      revisionId: 82,
+      selectedNodeIds: [101, 102],
+    };
+
+    await expect(service.exportCutXls({ ...command, currentUser: viewerUser() }))
+      .rejects.toMatchObject({
+        statusCode: 403,
+        details: { requiredPermissions: ['cut.view'] },
+      } satisfies Partial<ApiError>);
+    await expect(service.exportCutXls({ ...command, currentUser: cutOnlyUser() }))
+      .rejects.toMatchObject({
+        statusCode: 403,
+        details: { requiredPermissions: ['bazis.view'] },
+      } satisfies Partial<ApiError>);
+    await expect(service.exportCutXls({ ...command, currentUser: bazisCutViewer() }))
+      .resolves.toMatchObject({ revisionId: 82, positionCount: 2 });
+    expect(repository.exportCutXls).toHaveBeenCalledTimes(1);
+  });
+
   describe('manager writes', () => {
     it.each([
       ['deleteProject', (service: BazisService, user: CurrentUser) => service.deleteProject(user, 'req', 41)],
@@ -785,6 +809,14 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       details: [],
       duplicates: [],
     }),
+    exportCutXls: vi.fn().mockResolvedValue({
+      bytes: Buffer.from('xls'),
+      bazisProjectId: 1,
+      bazisProjectName: 'Проект',
+      revisionId: 82,
+      positionCount: 2,
+      quantity: 3,
+    }),
     createOrderFromDraft: vi.fn().mockResolvedValue({
       orderId: 1,
       orderName: 'Order',
@@ -852,6 +884,26 @@ function viewerUser(): CurrentUser {
     role: 'manager',
     roleId: 1,
     permissions: ['bazis.view'],
+  };
+}
+
+function bazisCutViewer(): CurrentUser {
+  return {
+    id: '15',
+    username: 'bazis-cut-viewer',
+    role: 'manager',
+    roleId: 1,
+    permissions: ['bazis.view', 'cut.view'],
+  };
+}
+
+function cutOnlyUser(): CurrentUser {
+  return {
+    id: '16',
+    username: 'cut-only',
+    role: 'manager',
+    roleId: 1,
+    permissions: ['cut.view'],
   };
 }
 

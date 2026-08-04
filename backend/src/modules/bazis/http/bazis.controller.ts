@@ -1,9 +1,10 @@
 import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Put, Query, Req, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
+import type { Response } from 'express';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
@@ -197,6 +198,10 @@ const buildOrderDraftBodySchema = z.object({
   targetOrderId: optionalNumericIdSchema.nullish(),
 });
 
+const exportCutXlsBodySchema = z.object({
+  selectedNodeIds: z.array(z.coerce.number().int().positive()).min(1).max(500),
+}).strict();
+
 const setNodeNotesSchema = z
   .object({
     notes: z.union([z.string(), z.null()]),
@@ -325,6 +330,20 @@ const buildOrderDraftRequestSwaggerSchema = {
       items: { type: 'integer' },
     },
     targetOrderId: { type: 'integer', nullable: true },
+  },
+} as const;
+
+const exportCutXlsRequestSwaggerSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['selectedNodeIds'],
+  properties: {
+    selectedNodeIds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 500,
+      items: { type: 'integer' },
+    },
   },
 } as const;
 
@@ -713,6 +732,39 @@ export class BazisController {
     });
   }
 
+  @ApiOperation({ operationId: 'exportBazisRevisionCutXls', summary: 'Export selected Bazis panels as BIFF8 XLS' })
+  @ApiBody({ schema: swaggerSchema(exportCutXlsRequestSwaggerSchema) })
+  @ApiProduces('application/vnd.ms-excel')
+  @ApiResponse({ status: 200, description: 'BIFF8 XLS', schema: { type: 'string', format: 'binary' } })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis revision not found' })
+  @ApiResponse({ status: 422, description: 'Invalid or non-exportable panel selection' })
+  @ApiResponse({ status: 503, description: 'Bazis or Bazis-cut API is disabled' })
+  @Post('revisions/:id/export-cut.xls')
+  @HttpCode(200)
+  async exportCutXls(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<StreamableFile> {
+    this.assertBazisCutEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseExportCutXlsBody(body);
+    const result = await this.bazis.exportCutXls({
+      currentUser,
+      requestId: request.requestId,
+      revisionId: parseNumericPathParam(id, 'id'),
+      selectedNodeIds: parsed.selectedNodeIds,
+    });
+    const filename = buildBazisCutFilename(result.bazisProjectName, result.revisionId);
+    response.setHeader('Content-Type', 'application/vnd.ms-excel');
+    response.setHeader('Content-Disposition', contentDisposition(filename));
+    response.setHeader('Cache-Control', 'private, no-store');
+    return new StreamableFile(result.bytes);
+  }
+
   @ApiOperation({ operationId: 'listBazisMaterialMappings', summary: 'List Bazis material mappings' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -750,6 +802,15 @@ export class BazisController {
     if (!this.runtimeConfig.getFeatureFlags().bazisEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Bazis API is disabled', {
         feature: 'bazis',
+      });
+    }
+  }
+
+  private assertBazisCutEnabled(): void {
+    const flags = this.runtimeConfig.getFeatureFlags();
+    if (!flags.bazisEnabled || !flags.bazisCutEnabled) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Bazis-cut API is disabled', {
+        feature: 'bazisCut',
       });
     }
   }
@@ -867,6 +928,14 @@ export function parseBuildOrderDraftBody(body: unknown): {
   );
 }
 
+export function parseExportCutXlsBody(body: unknown): { selectedNodeIds: number[] } {
+  return parseWithZod(
+    exportCutXlsBodySchema,
+    body,
+    'Bazis cut XLS payload validation failed',
+  );
+}
+
 export function parseSetNodeNotesBody(body: unknown): { notes: string | null } {
   return parseWithZod(setNodeNotesSchema, body, 'Bazis node notes payload validation failed');
 }
@@ -910,4 +979,15 @@ function validationError(error: z.ZodError, message: string, fallbackField?: str
       message: issue.message,
     })),
   });
+}
+
+function buildBazisCutFilename(projectName: string, revisionId: number): string {
+  const safe = projectName.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '').slice(0, 120) || 'проект';
+  return `Базис-раскрой-${safe}-${revisionId}.xls`;
+}
+
+function contentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }

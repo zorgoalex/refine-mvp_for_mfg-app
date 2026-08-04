@@ -7,7 +7,11 @@ import { DatabaseService } from '../../../database/database.service';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { buildBazisCutXls } from '../application/bazis-xls-writer';
-import { mapBazisCutSnapshotFields } from '../application/bazis-cut-snapshot-mapper';
+import {
+  mapBazisCutSnapshotFields,
+  resolveBazisDetailLabels,
+} from '../application/bazis-cut-snapshot-mapper';
+export { resolveBazisDetailLabels } from '../application/bazis-cut-snapshot-mapper';
 import type {
   AddBazisCutDetailsCommand,
   BazisCutRepositoryPort,
@@ -882,31 +886,6 @@ function parseRefs(value: unknown): BazisCutSourceRefDto[] {
   }
   return [...map].map(([label, ref]) => ({ id: ref.id, label, ...(ref.deleted ? { deleted: true } : {}) }))
     .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
-}
-
-export function resolveBazisDetailLabels(
-  input: {
-    rootProductCount: number | null;
-    productOrderNo: string | null;
-    revisionBazisOrderNo: string | null;
-    detailBazisProject: string | null;
-    detailBazisProduct: string | null;
-  },
-): Pick<Snapshot['provenance'], 'sourceBazisProjectName' | 'sourceBazisOrderNo' | 'sourceBazisProductName'> {
-  const productOrderNo = input.productOrderNo?.trim() ?? '';
-  const revisionBazisOrderNo = input.revisionBazisOrderNo?.trim() ?? '';
-  const detailBazisProject = input.detailBazisProject?.trim() ?? '';
-  const isBazisProject = (input.rootProductCount ?? 1) > 1;
-  const unmatchedDocumentNumber = input.rootProductCount === null ? detailBazisProject : '';
-  return {
-    sourceBazisProjectName: isBazisProject
-      ? revisionBazisOrderNo || productOrderNo
-      : '',
-    sourceBazisOrderNo: isBazisProject
-      ? ''
-      : productOrderNo || revisionBazisOrderNo || unmatchedDocumentNumber,
-    sourceBazisProductName: input.detailBazisProduct?.trim() ?? '',
-  };
 }
 
 function hashRequest(command: string, user: CurrentUser, body: unknown): string {
