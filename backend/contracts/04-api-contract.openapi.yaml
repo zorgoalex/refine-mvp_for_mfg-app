@@ -3384,7 +3384,7 @@ paths:
                     paintName:
                       type: string
                       nullable: true
-                      description: Пользовательское свойство панели «Краска»
+                      description: Пользовательское свойство панели «Краска»/«Краска (обр)»
                     notes:
                       type: string
                       nullable: true

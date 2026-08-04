@@ -35,7 +35,7 @@ describe('buildDraftDetails user property priority', () => {
   it('reads paint from nested and legacy user properties case-insensitively', () => {
     expect(panelCustomPaintName({
       ПользовательскиеСвойства: {
-        Свойство: { Имя: 'Краска', Значение: '  RAL 9003  ' },
+        Свойство: { Имя: 'Краска (обр)', Значение: '  RAL 9003  ' },
       },
     })).toBe('RAL 9003');
     expect(panelCustomPaintName({

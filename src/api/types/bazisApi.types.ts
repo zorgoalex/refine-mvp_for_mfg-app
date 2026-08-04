@@ -94,7 +94,7 @@ export interface BazisTreeNode {
   millingName?: string | null;
   /** Пользовательское свойство «Пленка»/«Плёнка». Коэрсить `?? null`. */
   filmName?: string | null;
-  /** Пользовательское свойство «Краска». Коэрсить `?? null`. */
+  /** Пользовательское свойство «Краска»/«Краска (обр)». Коэрсить `?? null`. */
   paintName?: string | null;
   /** Примечание оператора. Коэрсить `?? null`. */
   notes: string | null;
