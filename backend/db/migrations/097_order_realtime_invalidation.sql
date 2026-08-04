@@ -60,4 +60,6 @@ CREATE INDEX IF NOT EXISTS idx_realtime_event_log_cut_refs_replay
   ON realtime_event_log(order_id, cut_refs_revision, commit_sequence)
   WHERE cut_refs_revision IS NOT NULL;
 
+COMMENT ON TABLE realtime_event_log IS 'order-realtime-invalidation-v1';
+
 COMMIT;

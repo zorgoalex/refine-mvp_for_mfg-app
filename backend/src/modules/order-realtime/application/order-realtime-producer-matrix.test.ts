@@ -9,7 +9,8 @@ describe('order realtime producer matrix', () => {
       expect(row.mutatedTables.length).toBeGreaterThan(0);
       expect(row.domains.length).toBeGreaterThan(0);
       expect(row.producer).not.toMatch(/TBD|unverified/i);
-      expect(row.test).toMatch(/\.test\.ts$/);
+      expect(row.producer).toMatch(/^098:/);
+      expect(row.test).toBe('098_order_realtime_producer_bridge.test.ts');
     }
   });
 

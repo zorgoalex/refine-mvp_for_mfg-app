@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./097_order_realtime_producer_bridge.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./098_order_realtime_producer_bridge.sql', import.meta.url), 'utf8');
 
-describe('096 order realtime producer bridge migration', () => {
+describe('098 order realtime producer bridge migration', () => {
   it('is fail-closed and bounds shared-reference fan-out', () => {
     expect(sql).toContain("'order_realtime.writes'");
     expect(sql).toContain('{"enabled":false,"maxFanoutOrders":5000,"maxDetailIds":500}');
@@ -12,6 +12,7 @@ describe('096 order realtime producer bridge migration', () => {
     expect(sql).toMatch(/order_realtime_bridge_enabled_for_fanout/i);
     expect(sql.match(/order_realtime_bridge_enabled_for_fanout\(0\)/g)).toHaveLength(11);
     expect(sql).toMatch(/cardinality\(v_detail_ids\)[\s\S]*v_max_detail_ids[\s\S]*v_detail_ids := NULL/i);
+    expect(sql).toContain("IS 'order-realtime-producer-bridge-v1'");
   });
 
   it('uses statement transition tables for status and cut producers', () => {

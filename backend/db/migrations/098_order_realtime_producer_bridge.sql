@@ -942,4 +942,7 @@ AFTER UPDATE ON cut_param_profiles
 REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
 FOR EACH STATEMENT EXECUTE FUNCTION trg_order_realtime_cut_profile_update();
 
+COMMENT ON FUNCTION order_realtime_emit_one(BIGINT, TEXT[], BIGINT[], TEXT)
+  IS 'order-realtime-producer-bridge-v1';
+
 COMMIT;

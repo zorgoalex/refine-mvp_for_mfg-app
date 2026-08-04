@@ -81,7 +81,7 @@ BACKEND_DEADLINE_ACTIONS_ENABLED=false
 BACKEND_DEADLINE_NOTIFICATIONS_ENABLED=false
 ```
 
-Order realtime remains off until migrations `095` and `096` are applied, the
+Order realtime remains off until migrations `097` and `098` are applied, the
 three backend flags above are enabled, and both `order_realtime.writes` and
 `order_realtime.rollout` are explicitly enabled in `app_settings`. Enable
 frontend `RUNTIME_CONFIG_ORDER_REALTIME` last.
