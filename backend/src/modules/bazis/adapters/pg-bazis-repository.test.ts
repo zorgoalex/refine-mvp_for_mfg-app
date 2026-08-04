@@ -324,6 +324,7 @@ describe('PgBazisRepository reads + mappings', () => {
         hasDrilling: false,
         millingName: null,
         filmName: null,
+        paintName: null,
         notes: null,
         childrenCount: 2,
         orders: [],
@@ -3046,6 +3047,7 @@ describe('PgBazisRepository tree order provenance', () => {
             Свойство: [
               { Имя: 'Фрезировка', Значение: 'Модерн' },
               { Имя: 'Плёнка', Значение: 'Белый глянец' },
+              { Имя: 'Краска', Значение: 'RAL 9003' },
             ],
           },
           legacy_user_properties: null,
@@ -3063,6 +3065,7 @@ describe('PgBazisRepository tree order provenance', () => {
         productOrderNo: '1443',
         millingName: 'Модерн',
         filmName: 'Белый глянец',
+        paintName: 'RAL 9003',
       },
     ]);
 

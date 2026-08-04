@@ -185,6 +185,12 @@ export function panelCustomMillingName(
   return panelUserPropertyValue(rawJson, new Set(['фрезировка', 'фрезеровка']));
 }
 
+export function panelCustomPaintName(
+  rawJson: Record<string, unknown> | null,
+): string | null {
+  return panelUserPropertyValue(rawJson, new Set(['краска']));
+}
+
 export function panelPreferredFilmName(
   rawJson: Record<string, unknown> | null,
 ): string | null {

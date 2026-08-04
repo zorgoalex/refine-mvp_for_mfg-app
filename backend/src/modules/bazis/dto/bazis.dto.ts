@@ -71,6 +71,8 @@ export interface BazisTreeNodeDto {
   millingName: string | null;
   /** Пользовательское свойство панели «Пленка»/«Плёнка». */
   filmName: string | null;
+  /** Пользовательское свойство панели «Краска». */
+  paintName: string | null;
   /** Примечание оператора (migration 064). */
   notes: string | null;
   childrenCount: number;

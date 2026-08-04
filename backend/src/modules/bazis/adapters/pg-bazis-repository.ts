@@ -36,6 +36,7 @@ import {
   orderDtoToSaveDto,
   panelCustomFilmName,
   panelCustomMillingName,
+  panelCustomPaintName,
   panelPreferredFilmName,
 } from './bazis-order-draft';
 import type { BazisDraftReferenceLookup } from './bazis-order-draft';
@@ -2963,6 +2964,7 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     hasDrilling: Boolean(row.has_drilling),
     millingName: panelCustomMillingName(rawUserProperties),
     filmName: panelCustomFilmName(rawUserProperties),
+    paintName: panelCustomPaintName(rawUserProperties),
     notes: row.notes,
     childrenCount: Number(row.children_count),
     orders: (row.linked_orders ?? [])

@@ -3381,6 +3381,10 @@ paths:
                       type: string
                       nullable: true
                       description: Пользовательское свойство панели «Пленка»/«Плёнка»
+                    paintName:
+                      type: string
+                      nullable: true
+                      description: Пользовательское свойство панели «Краска»
                     notes:
                       type: string
                       nullable: true

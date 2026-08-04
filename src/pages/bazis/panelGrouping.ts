@@ -44,6 +44,8 @@ export interface PanelGroupRow {
   millingNames: string[];
   /** Уникальные непустые значения пользовательского свойства «Пленка». */
   filmNames: string[];
+  /** Уникальные непустые значения пользовательского свойства «Краска». */
+  paintNames: string[];
   children: PanelLike[];
 }
 
@@ -134,6 +136,7 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         drillingState: 'none',
         millingNames: [],
         filmNames: [],
+        paintNames: [],
         children: [],
       };
       groups.set(key, group);
@@ -158,6 +161,7 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
     pushUniqueText(group.orderNos, panel.productOrderNo);
     pushUniqueText(group.millingNames, panel.millingName);
     pushUniqueText(group.filmNames, panel.filmName);
+    pushUniqueText(group.paintNames, panel.paintName);
 
     for (const order of panel.orders) {
       if (!group.orders.some((existing) => existing.orderId === order.orderId)) {

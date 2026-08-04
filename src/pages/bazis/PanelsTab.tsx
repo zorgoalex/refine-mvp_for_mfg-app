@@ -257,6 +257,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             hasDrilling: node.hasDrilling ?? false,
             millingName: normalizeText(node.millingName),
             filmName: normalizeText(node.filmName),
+            paintName: normalizeText(node.paintName),
             pathTitle: nodePathTitle(ancestors),
             productName: normalizeText(rootAncestor?.name),
             bazisProjectNo: documentColumns.bazisProjectNo,
@@ -281,6 +282,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       panel.productOrderNo,
       panel.millingName,
       panel.filmName,
+      panel.paintName,
       formatSize(panel),
     ].some((value) => String(value ?? '').toLocaleLowerCase('ru-RU').includes(query)));
   }, [allPanels, searchQuery]);
@@ -495,7 +497,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         title: 'Наименование',
         key: 'name',
         // Fixed width: без неё это flex-колонка, и после добавления
-        // Кромка/Присадка/Фрезеровка/Плёнка/Примечания остаток ширины схлопывался в ноль —
+        // Кромка/Присадка/Фрезеровка/Плёнка/Краска/Примечания остаток ширины схлопывался в ноль —
         // колонка «исчезала» на обычных экранах. Узкая, содержимое
         // переносится по словам (без ellipsis).
         width: 65,
@@ -611,6 +613,14 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           row.rowType === 'group' ? row.filmNames.join(', ') || '—' : row.filmName || '—',
       },
       {
+        title: 'Краска',
+        key: 'paintName',
+        width: 120,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.paintNames.join(', ') || '—' : row.paintName || '—',
+      },
+      {
         title: 'Примечания',
         key: 'notes',
         width: 200,
@@ -687,6 +697,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       'hasDrilling',
       'millingName',
       'filmName',
+      'paintName',
       'orders',
       'path',
       'actions',
@@ -855,7 +866,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
                     {totals.totalAreaM2 != null ? `${formatAreaM2(totals.totalAreaM2)} м\u00B2` : '—'}
                   </span>
                 </Table.Summary.Cell>
-                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].map((cellIndex) => (
+                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((cellIndex) => (
                   <Table.Summary.Cell key={cellIndex} index={cellIndex} />
                 ))}
               </Table.Summary.Row>
