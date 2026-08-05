@@ -46,8 +46,8 @@ export const BazisProjectViewPage: React.FC = () => {
 
   useEffect(() => {
     if (projectCard?.name) {
-      // Название базис-проекта в заголовок workspace-вкладки
-      setTabTitle(`/bazis/projects/${projectCard.bazisProjectId}`, projectCard.name);
+      // Префикс отличает карточку Базис-проекта от заказа/проекта с тем же именем.
+      setTabTitle(`/bazis/projects/${projectCard.bazisProjectId}`, `БП ${projectCard.name.trim()}`);
     }
   }, [projectCard, setTabTitle]);
   const [loading, setLoading] = useState(false);

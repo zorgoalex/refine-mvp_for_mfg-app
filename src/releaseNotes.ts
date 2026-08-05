@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-05",
+    title: "Карточки Базис: короткие префиксы вкладок",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Вкладки открытых карточек Базис-проектов начинаются с «БП», а карточек наборов Базис-раскроя — с «БР».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-05",
     title: "Базис-проекты: связанные заказы и присадка по маршруту",
     services: ["ERP"],
     repositories: ["repo_erp"],

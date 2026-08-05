@@ -5,6 +5,10 @@ const view = readFileSync(new URL('./BazisProjectViewPage.tsx', import.meta.url)
 const api = readFileSync(new URL('../../api/bazisApi.ts', import.meta.url), 'utf8');
 
 describe('Bazis project card header guards', () => {
+  it('prefixes the workspace tab title with БП', () => {
+    expect(view).toContain('`БП ${projectCard.name.trim()}`');
+  });
+
   it('shows owning ERP project name with a link', () => {
     expect(view).toContain('projectCard.projectName?.trim()');
     expect(view).toContain('ERP-проект:');

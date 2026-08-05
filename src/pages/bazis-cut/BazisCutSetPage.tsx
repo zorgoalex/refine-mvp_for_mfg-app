@@ -79,7 +79,7 @@ export const BazisCutSetPage: React.FC = () => {
   const tableHeaderOffset = useWorkspaceTabsHeight();
 
   useEffect(() => {
-    if (valid) setTabTitle(`/bazis-cut/${setId}`, `Базис-раскрой #${setId}`);
+    if (valid) setTabTitle(`/bazis-cut/${setId}`, `БР #${setId}`);
   }, [setId, setTabTitle, valid]);
 
   const load = useCallback(async () => {

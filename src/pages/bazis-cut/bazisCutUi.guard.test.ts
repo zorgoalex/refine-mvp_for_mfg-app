@@ -68,8 +68,8 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain("error.name === 'AbortError'");
   });
 
-  it('shows the set number in its workspace tab and keeps detail headers visible', () => {
-    expect(card).toContain('`Базис-раскрой #${setId}`');
+  it('shows the set number with the БР prefix in its workspace tab and keeps detail headers visible', () => {
+    expect(card).toContain('`БР #${setId}`');
     expect(card).toContain('sticky={{ offsetHeader: tableHeaderOffset }}');
     expect(card).toContain("document.querySelector<HTMLElement>('.workspace-tabs')");
     expect(card).toContain('new ResizeObserver(update)');
