@@ -280,7 +280,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const viewStateRef = useRef(viewState);
   viewStateRef.current = viewState;
   const [cardDisplayMode, setCardDisplayMode] =
-    useState<StatusBoardCardDisplayMode>('standard');
+    useState<StatusBoardCardDisplayMode>('compact');
   const [cncCardDisplayMode, setCncCardDisplayMode] =
     useState<CncCardDisplayMode>('standard');
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
@@ -1142,7 +1142,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           <div className="status-board-page__header">
             <div>
               <Typography.Title id="status-board-title" level={3} tabIndex={-1}>
-                Доски статусов
+                {isCncToday ? 'МДФ-работы' : 'Доски статусов'}
               </Typography.Title>
               <Typography.Text type="secondary">
                 Заказы, производство и CNC-работы на сегодня.

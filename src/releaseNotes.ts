@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-05",
+    title: "Доски статусов: корректный заголовок и компактный вид",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "На отдельном экране МДФ-доски заголовок изменён с «Доски статусов» на «МДФ-работы».",
+      "Для досок статусов по умолчанию выбран компактный вид карточек.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-05",
     title: "Базис-раскрой: изделие, ванна и полная позиция",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

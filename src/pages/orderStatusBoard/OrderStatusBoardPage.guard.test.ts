@@ -102,6 +102,7 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
+    expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
     expect(page).toContain('{!fixedView && (');
     expect(page).not.toContain("{ key: 'cnc_today', label: 'МДФ-работы' }");
     expect(app).toContain('name: "mdf-work-board"');
@@ -732,6 +733,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('keeps order cards dense, badge-based and project-code-free', () => {
     expect(page).toContain("type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal'");
+    expect(page).toContain("useState<StatusBoardCardDisplayMode>('compact')");
     expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_OPTIONS');
     expect(page).toContain('Вид карточек заказов');
     expect(page).toContain('Стандартный');
