@@ -85,20 +85,26 @@ export class PgBazisCutPicker {
            NULL::text AS key_value, e.order_name::text AS label, NULL::text AS type_value
          FROM eligible e
          UNION ALL
-         SELECT DISTINCT 'clients', e.client_id, NULL, e.client_name, NULL FROM eligible e
+         SELECT DISTINCT 'clients'::text, e.client_id::bigint, NULL::text, e.client_name::text, NULL::text
+           FROM eligible e
          UNION ALL
-         SELECT DISTINCT 'sheet_materials', e.sheet_material_type_id, NULL, e.material_name, NULL FROM eligible e
+         SELECT DISTINCT 'sheet_materials'::text, e.sheet_material_type_id::bigint,
+           NULL::text, e.material_name::text, NULL::text FROM eligible e
          UNION ALL
-         SELECT DISTINCT 'milling_types', e.milling_type_id, NULL, e.milling_name, NULL
+         SELECT DISTINCT 'milling_types'::text, e.milling_type_id::bigint,
+           NULL::text, e.milling_name::text, NULL::text
            FROM eligible e WHERE e.milling_type_id IS NOT NULL
          UNION ALL
-         SELECT DISTINCT 'bazis_sources', NULL, e.bazis_key, e.bazis_label, e.bazis_type
+         SELECT DISTINCT 'bazis_sources'::text, NULL::bigint,
+           e.bazis_key::text, e.bazis_label::text, e.bazis_type::text
            FROM eligible e WHERE e.bazis_key IS NOT NULL
          UNION ALL
-         SELECT DISTINCT 'design_engineers', e.design_engineer_id, NULL, e.design_engineer_name, NULL
+         SELECT DISTINCT 'design_engineers'::text, e.design_engineer_id::bigint,
+           NULL::text, e.design_engineer_name::text, NULL::text
            FROM eligible e WHERE e.design_engineer_id IS NOT NULL
          UNION ALL
-         SELECT DISTINCT 'doweling_orders', e.doweling_order_id, NULL, e.doweling_order_name, NULL
+         SELECT DISTINCT 'doweling_orders'::text, e.doweling_order_id::bigint,
+           NULL::text, e.doweling_order_name::text, NULL::text
            FROM eligible e WHERE e.doweling_order_id IS NOT NULL
        )
        SELECT facet_key, id_value, key_value, label, type_value

@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import { BazisCutSetsController } from './bazis-cut-sets.controller';
 
 describe('BazisCutSetsController runtime guard', () => {
+  it('returns picker search with the documented 200 status', () => {
+    expect(Reflect.getMetadata(
+      HTTP_CODE_METADATA,
+      BazisCutSetsController.prototype.pickerSearch,
+    )).toBe(200);
+  });
+
   it.each([
     ['list', (controller: BazisCutSetsController) => controller.list({} as never, {})],
     ['pickerFacets', (controller: BazisCutSetsController) => controller.pickerFacets({} as never, {})],

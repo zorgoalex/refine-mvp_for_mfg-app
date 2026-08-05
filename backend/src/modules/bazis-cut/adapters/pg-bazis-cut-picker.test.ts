@@ -36,6 +36,8 @@ describe('PgBazisCutPicker', () => {
     expect(sql).toContain('o.order_date BETWEEN $1::date AND $2::date');
     expect(sql).toContain('(o.created_by = $3 OR o.manager_id = $3)');
     expect(sql).toContain("'doweling_orders'");
+    expect(sql).toContain("'bazis_sources'::text, NULL::bigint");
+    expect(sql).toContain('e.design_engineer_id::bigint');
     expect(query.mock.calls[0][1]).toEqual(['2026-08-01', '2026-08-05', 42]);
   });
 

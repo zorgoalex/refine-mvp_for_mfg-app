@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, Headers, Inject, Param, Patch, Post, Query, Req,
+  Body, Controller, Delete, Get, Headers, HttpCode, Inject, Param, Patch, Post, Query, Req,
   Res, StreamableFile,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiHeader, ApiOperation, ApiParam, ApiProduces, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -153,6 +153,7 @@ export class BazisCutSetsController {
       pageSize: { type: 'integer', minimum: 1, maximum: 100, default: 25 },
     } } })
   @ApiResponse({ status: 200, description: 'Paginated details, totals, criteria hash, and stale tokens' })
+  @HttpCode(200)
   @Post('picker/search')
   pickerSearch(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
     this.assertEnabled();
