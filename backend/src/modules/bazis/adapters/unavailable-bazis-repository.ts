@@ -9,6 +9,7 @@ import type {
   ExportBazisCutXlsCommand,
   ImportRevisionCommand,
   RenameBazisProjectInput,
+  SetBazisProjectDesignEngineerInput,
   SetNodeNotesInput,
 } from '../application/bazis.types';
 import type {
@@ -17,6 +18,7 @@ import type {
   BazisRevisionEstimateDto,
   BazisImportResponseDto,
   BazisProjectDeleteResponseDto,
+  BazisProjectDesignEngineerDto,
   BazisNodeCardDto,
   BazisNodeNotesDto,
   BazisNodeSearchResponseDto,
@@ -59,6 +61,12 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   }
 
   renameProject(_input: RenameBazisProjectInput): Promise<BazisProjectNameDto> {
+    return unavailable();
+  }
+
+  setProjectDesignEngineer(
+    _input: SetBazisProjectDesignEngineerInput,
+  ): Promise<BazisProjectDesignEngineerDto> {
     return unavailable();
   }
 

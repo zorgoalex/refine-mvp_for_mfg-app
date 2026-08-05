@@ -15,6 +15,7 @@ import {
   resolveBazisDetailLabels,
 } from '../../bazis-cut/application/bazis-cut-snapshot-mapper';
 import type { ParsedBazisNode } from '../application/bazis-xml-parser';
+import { matchBazisDesignEngineer } from '../application/bazis-design-engineer';
 import type {
   AddToOrderCommand,
   BazisRepositoryPort,
@@ -25,6 +26,7 @@ import type {
   ExportBazisCutXlsCommand,
   ImportRevisionCommand,
   RenameBazisProjectInput,
+  SetBazisProjectDesignEngineerInput,
   SetNodeNotesInput,
 } from '../application/bazis.types';
 import {
@@ -47,6 +49,7 @@ import type {
   BazisImportResponseDto,
   BazisOrderDraftResponseDto,
   BazisProjectDeleteResponseDto,
+  BazisProjectDesignEngineerDto,
   BazisNodeCardDto,
   BazisNodeNotesDto,
   BazisNodeSearchItemDto,
@@ -135,6 +138,10 @@ interface ProjectListRow {
   last_revision_no: number | string | null;
   last_imported_at: string | null;
   bazis_order_no: string | null;
+  design_engineer_id: number | string | null;
+  design_engineer_name: string | null;
+  design_engineer_xml_name: string | null;
+  design_engineer_source: 'xml' | 'manual' | null;
   linked_order_ids: Array<number | string> | null;
   linked_orders?: Array<{ orderId: number | string; orderName: string | null; orderDeleted?: boolean | null }> | null;
 }
@@ -203,6 +210,8 @@ interface RevisionProjectRow {
   revision_bazis_order_no: string | null;
   project_client_id: number | string | null;
   client_name: string | null;
+  design_engineer_id: number | string | null;
+  design_engineer_name: string | null;
 }
 
 interface DraftNodeLookupRow {
@@ -346,15 +355,44 @@ export class PgBazisRepository implements BazisRepositoryPort {
       const requestId = requestIdOrFallback(command.requestId, 'bazis-import');
       const bazisOrderNo =
         command.parsed.bazisOrderNo ?? firstRootProductOrderNo(command.parsed.nodes);
+      const warnings: string[] = [];
+      const activeEmployees = await tx.query<{ employee_id: number | string; full_name: string }>(
+        `
+        SELECT employee_id, full_name
+        FROM employees
+        WHERE is_active = true
+        ORDER BY employee_id
+        `,
+      );
+      const xmlDesignEngineer = matchBazisDesignEngineer(
+        command.parsed.designEngineerName,
+        activeEmployees.rows.map((row) => ({
+          employeeId: Number(row.employee_id),
+          fullName: row.full_name,
+        })),
+      );
+      if (command.parsed.designEngineerName && !xmlDesignEngineer) {
+        warnings.push(
+          `Конструктор «${command.parsed.designEngineerName}» из XML не найден однозначно в справочнике сотрудников`,
+        );
+      }
 
       let bazisProjectId = command.bazisProjectId;
       let projectId = command.projectId;
       let bazisProjectName: string;
+      let effectiveDesignEngineerId = xmlDesignEngineer?.employeeId ?? null;
+      let effectiveDesignEngineerSource: 'xml' | 'manual' | null = xmlDesignEngineer ? 'xml' : null;
 
       if (bazisProjectId != null) {
-        const existing = await tx.query<{ bazis_project_id: number; project_id: number; name: string }>(
+        const existing = await tx.query<{
+          bazis_project_id: number;
+          project_id: number;
+          name: string;
+          design_engineer_id: number | string | null;
+          design_engineer_source: 'xml' | 'manual' | null;
+        }>(
           `
-          SELECT bazis_project_id, project_id, name
+          SELECT bazis_project_id, project_id, name, design_engineer_id, design_engineer_source
           FROM bazis_projects
           WHERE bazis_project_id = $1
           FOR UPDATE
@@ -366,6 +404,29 @@ export class PgBazisRepository implements BazisRepositoryPort {
         }
         projectId = Number(existing.rows[0].project_id);
         bazisProjectName = existing.rows[0].name;
+        if (existing.rows[0].design_engineer_source === 'manual') {
+          effectiveDesignEngineerId = nullableNumber(existing.rows[0].design_engineer_id);
+          effectiveDesignEngineerSource = 'manual';
+          await tx.query(
+            `
+            UPDATE bazis_projects
+            SET design_engineer_xml_name = $2
+            WHERE bazis_project_id = $1
+            `,
+            [bazisProjectId, command.parsed.designEngineerName],
+          );
+        } else {
+          await tx.query(
+            `
+            UPDATE bazis_projects
+            SET design_engineer_id = $2,
+                design_engineer_xml_name = $3,
+                design_engineer_source = CASE WHEN $2::bigint IS NULL THEN NULL ELSE 'xml' END
+            WHERE bazis_project_id = $1
+            `,
+            [bazisProjectId, xmlDesignEngineer?.employeeId ?? null, command.parsed.designEngineerName],
+          );
+        }
       } else {
         if (projectId == null) {
           throw new BazisReferenceNotFoundError('projectId');
@@ -373,11 +434,19 @@ export class PgBazisRepository implements BazisRepositoryPort {
         bazisProjectName = bazisOrderNo ?? command.fileName;
         const inserted = await tx.query<{ bazis_project_id: number | string }>(
           `
-          INSERT INTO bazis_projects (project_id, name, created_by)
-          VALUES ($1, $2, $3)
+          INSERT INTO bazis_projects
+            (project_id, name, created_by, design_engineer_id,
+             design_engineer_xml_name, design_engineer_source)
+          VALUES ($1, $2, $3, $4, $5, CASE WHEN $4::bigint IS NULL THEN NULL ELSE 'xml' END)
           RETURNING bazis_project_id
           `,
-          [projectId, bazisProjectName, numericUserId(command.currentUser)],
+          [
+            projectId,
+            bazisProjectName,
+            numericUserId(command.currentUser),
+            xmlDesignEngineer?.employeeId ?? null,
+            command.parsed.designEngineerName,
+          ],
         );
         bazisProjectId = Number(inserted.rows[0].bazis_project_id);
 
@@ -395,7 +464,14 @@ export class PgBazisRepository implements BazisRepositoryPort {
             { entityType: 'bazis_project', entityId: bazisProjectId },
           ],
           before: {},
-          after: { bazisProjectId, projectId, name: bazisProjectName },
+          after: {
+            bazisProjectId,
+            projectId,
+            name: bazisProjectName,
+            designEngineerId: effectiveDesignEngineerId,
+            designEngineerXmlName: command.parsed.designEngineerName,
+            designEngineerSource: effectiveDesignEngineerSource,
+          },
           metadata: {
             source: SOURCE,
             action: 'bazis_project_create',
@@ -416,7 +492,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
         throw new BazisRevisionDuplicateError(Number(dupSame.rows[0].revision_no));
       }
 
-      const warnings: string[] = [];
       const dupOther = await tx.query<{ bazis_project_id: number | string; name: string }>(
         `
         SELECT r.bazis_project_id, p.name
@@ -551,6 +626,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
           revisionNo,
           xmlSha256: command.xmlSha256,
           fileName: command.fileName,
+          designEngineerId: effectiveDesignEngineerId,
+          designEngineerXmlName: command.parsed.designEngineerName,
+          designEngineerSource: effectiveDesignEngineerSource,
         },
         metadata: {
           source: SOURCE,
@@ -576,6 +654,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
             bazisProjectId,
             projectId,
             actorUserId: command.currentUser.id,
+            designEngineerId: effectiveDesignEngineerId,
+            designEngineerSource: effectiveDesignEngineerSource,
             requestId,
           }),
           `bazis-revision-imported-${command.xmlSha256}-${bazisProjectId}`,
@@ -953,6 +1033,137 @@ export class PgBazisRepository implements BazisRepositoryPort {
     });
   }
 
+  async setProjectDesignEngineer(
+    input: SetBazisProjectDesignEngineerInput,
+  ): Promise<BazisProjectDesignEngineerDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, input.currentUser.id);
+      const requestId = requestIdOrFallback(input.requestId, 'bazis-set-design-engineer');
+      const existing = await tx.query<{
+        project_id: number | string;
+        design_engineer_id: number | string | null;
+        design_engineer_name: string | null;
+        design_engineer_xml_name: string | null;
+        design_engineer_source: 'xml' | 'manual' | null;
+      }>(
+        `
+        SELECT bp.project_id,
+               bp.design_engineer_id,
+               employee.full_name AS design_engineer_name,
+               bp.design_engineer_xml_name,
+               bp.design_engineer_source
+        FROM bazis_projects bp
+        LEFT JOIN employees employee ON employee.employee_id = bp.design_engineer_id
+        WHERE bp.bazis_project_id = $1
+        FOR UPDATE OF bp
+        `,
+        [input.bazisProjectId],
+      );
+      if (existing.rows.length === 0) {
+        throw new BazisProjectNotFoundError(input.bazisProjectId);
+      }
+
+      let designEngineerName: string | null = null;
+      if (input.designEngineerId != null) {
+        const employee = await tx.query<{ full_name: string }>(
+          `
+          SELECT full_name
+          FROM employees
+          WHERE employee_id = $1 AND is_active = true
+          `,
+          [input.designEngineerId],
+        );
+        if (employee.rows.length === 0) {
+          throw new ApiError(
+            422,
+            'VALIDATION_ERROR',
+            'Выбранный конструктор не найден или неактивен',
+            { field: 'designEngineerId' },
+          );
+        }
+        designEngineerName = employee.rows[0].full_name;
+      }
+
+      const row = existing.rows[0];
+      const unchanged = nullableNumber(row.design_engineer_id) === input.designEngineerId
+        && row.design_engineer_source === 'manual';
+      if (!unchanged) {
+        await tx.query(
+          `
+          UPDATE bazis_projects
+          SET design_engineer_id = $2,
+              design_engineer_source = 'manual'
+          WHERE bazis_project_id = $1
+          `,
+          [input.bazisProjectId, input.designEngineerId],
+        );
+
+        const auditId = await auditService.record(tx, {
+          event: 'bazis.project_design_engineer_changed',
+          entityType: 'bazis_project',
+          entityId: String(input.bazisProjectId),
+          actorUserId: input.currentUser.id,
+          actorUsername: input.currentUser.username,
+          actorRole: input.currentUser.role,
+          requestId,
+          source: SOURCE,
+          relatedEntities: [
+            { entityType: 'project', entityId: Number(row.project_id) },
+            { entityType: 'bazis_project', entityId: input.bazisProjectId },
+            ...(input.designEngineerId == null
+              ? []
+              : [{ entityType: 'employee', entityId: input.designEngineerId }]),
+          ],
+          before: {
+            designEngineerId: nullableNumber(row.design_engineer_id),
+            designEngineerName: row.design_engineer_name,
+            designEngineerSource: row.design_engineer_source,
+          },
+          after: {
+            designEngineerId: input.designEngineerId,
+            designEngineerName,
+            designEngineerSource: 'manual',
+          },
+          metadata: { source: SOURCE, action: 'bazis_project_set_design_engineer', requestId },
+        });
+
+        await tx.query(
+          `
+          INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+          VALUES ($1,$2,$3,$4::jsonb,$5)
+          ON CONFLICT (idempotency_key) DO NOTHING
+          `,
+          [
+            'bazis.project_design_engineer_changed',
+            'bazis_project',
+            String(input.bazisProjectId),
+            JSON.stringify({
+              eventType: 'bazis.project_design_engineer_changed',
+              bazisProjectId: input.bazisProjectId,
+              projectId: Number(row.project_id),
+              designEngineerId: input.designEngineerId,
+              actorUserId: input.currentUser.id,
+              requestId,
+            }),
+            input.requestId
+              ? `bazis-project-design-engineer-${input.bazisProjectId}-${input.requestId}`
+              : `bazis-project-design-engineer-${input.bazisProjectId}-audit-${auditId}`,
+          ],
+        );
+      } else {
+        designEngineerName = row.design_engineer_name;
+      }
+
+      return {
+        bazisProjectId: input.bazisProjectId,
+        designEngineerId: input.designEngineerId,
+        designEngineerName,
+        designEngineerXmlName: row.design_engineer_xml_name,
+        designEngineerSource: 'manual',
+      };
+    });
+  }
+
   async deleteProject(input: DeleteBazisProjectInput): Promise<BazisProjectDeleteResponseDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, input.currentUser.id);
@@ -1079,6 +1290,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
              bp.project_id,
              erp_project.name AS project_name,
              bp.name,
+             bp.design_engineer_id,
+             employee.full_name AS design_engineer_name,
+             bp.design_engineer_xml_name,
+             bp.design_engineer_source,
              COUNT(DISTINCT r_all.bazis_revision_id)::int AS revisions_count,
              MAX(r_all.revision_no)::int AS last_revision_no,
              MAX(r_all.imported_at)::text AS last_imported_at,
@@ -1107,6 +1322,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
              ), '[]'::jsonb) AS linked_orders
       FROM bazis_projects bp
       JOIN projects erp_project ON erp_project.project_id = bp.project_id
+      LEFT JOIN employees employee ON employee.employee_id = bp.design_engineer_id
       LEFT JOIN bazis_project_revisions r_all ON r_all.bazis_project_id = bp.bazis_project_id
       LEFT JOIN LATERAL (
         SELECT r_latest.bazis_revision_id, r_latest.bazis_order_no
@@ -1118,7 +1334,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
       WHERE ($1::bigint IS NULL OR bp.project_id = $1)
       GROUP BY bp.bazis_project_id, bp.project_id, erp_project.name, bp.name,
-               rev.bazis_revision_id, rev.bazis_order_no
+               bp.design_engineer_id, employee.full_name, bp.design_engineer_xml_name,
+               bp.design_engineer_source, rev.bazis_revision_id, rev.bazis_order_no
       ORDER BY bp.bazis_project_id DESC
       `,
       [filter.projectId ?? null],
@@ -1133,6 +1350,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
              bp.project_id,
              erp_project.name AS project_name,
              bp.name,
+             bp.design_engineer_id,
+             employee.full_name AS design_engineer_name,
+             bp.design_engineer_xml_name,
+             bp.design_engineer_source,
              COUNT(DISTINCT r_all.bazis_revision_id)::int AS revisions_count,
              MAX(r_all.revision_no)::int AS last_revision_no,
              MAX(r_all.imported_at)::text AS last_imported_at,
@@ -1161,6 +1382,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
              ), '[]'::jsonb) AS linked_orders
       FROM bazis_projects bp
       JOIN projects erp_project ON erp_project.project_id = bp.project_id
+      LEFT JOIN employees employee ON employee.employee_id = bp.design_engineer_id
       LEFT JOIN bazis_project_revisions r_all ON r_all.bazis_project_id = bp.bazis_project_id
       LEFT JOIN LATERAL (
         SELECT r_latest.bazis_revision_id, r_latest.bazis_order_no
@@ -1172,7 +1394,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
       LEFT JOIN bazis_order_links bol ON bol.bazis_project_id = bp.bazis_project_id
       WHERE bp.bazis_project_id = $1
       GROUP BY bp.bazis_project_id, bp.project_id, erp_project.name, bp.name,
-               rev.bazis_revision_id, rev.bazis_order_no
+               bp.design_engineer_id, employee.full_name, bp.design_engineer_xml_name,
+               bp.design_engineer_source, rev.bazis_revision_id, rev.bazis_order_no
       `,
       [bazisProjectId],
     );
@@ -1800,6 +2023,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         await this.failCreateOrderIdempotency(command);
         throw new BazisRevisionNotFoundError(command.revisionId);
       }
+      assertBazisProjectHasDesignEngineer(revision);
       if (revision.projectClientId !== command.clientId) {
         await this.failCreateOrderIdempotency(command);
         throw new ApiError(
@@ -1864,6 +2088,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
     if (!this.orderTransactions) {
       throw new ApiError(500, 'BAZIS_ORDER_CREATE_UNAVAILABLE', 'Order transaction service is not configured');
     }
+    if (command.nodes.length === 0) {
+      throw validationErrorForField('nodes', 'Выберите хотя бы одну деталь Базис-проекта');
+    }
 
     const requestId = requestIdOrFallback(command.requestId, 'bazis-create-order-from-draft');
     const orderForHash = normalizeDraftOrderForHash(command.order);
@@ -1891,6 +2118,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
         await this.failCreateOrderIdempotency(command);
         throw new BazisRevisionNotFoundError(command.revisionId);
       }
+      assertBazisProjectHasDesignEngineer(revision);
 
       const order = sanitizeDraftOrder(command.order, revision.projectId);
       if (revision.projectClientId !== order.header.clientId) {
@@ -2384,6 +2612,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
     revisionBazisOrderNo: string | null;
     projectClientId: number | null;
     clientName: string | null;
+    designEngineerId: number | null;
+    designEngineerName: string | null;
   } | null> {
     const result = await this.database.query<RevisionProjectRow>(
       `
@@ -2393,11 +2623,14 @@ export class PgBazisRepository implements BazisRepositoryPort {
              bp.name AS bazis_project_name,
              r.bazis_order_no AS revision_bazis_order_no,
              p.client_id AS project_client_id,
-             c.client_name
+             c.client_name,
+             bp.design_engineer_id,
+             employee.full_name AS design_engineer_name
       FROM bazis_project_revisions r
       JOIN bazis_projects bp ON bp.bazis_project_id = r.bazis_project_id
       LEFT JOIN projects p ON p.project_id = bp.project_id
       LEFT JOIN clients c ON c.client_id = p.client_id
+      LEFT JOIN employees employee ON employee.employee_id = bp.design_engineer_id
       WHERE r.bazis_revision_id = $1
       `,
       [revisionId],
@@ -2417,6 +2650,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
       revisionBazisOrderNo: row.revision_bazis_order_no,
       projectClientId: nullableNumber(row.project_client_id),
       clientName: row.client_name,
+      designEngineerId: nullableNumber(row.design_engineer_id),
+      designEngineerName: row.design_engineer_name,
     };
   }
 
@@ -2764,6 +2999,9 @@ export class PgBazisRepository implements BazisRepositoryPort {
       bazisProjectId: number;
       projectId: number;
       bazisProjectName: string;
+      revisionBazisOrderNo: string | null;
+      designEngineerId: number;
+      designEngineerName: string | null;
     };
     panels: ReadonlyArray<{ bazisNodeId: number }>;
     created: { orderId: number; detailIdsByClientKey: Map<string, number> };
@@ -2814,6 +3052,68 @@ export class PgBazisRepository implements BazisRepositoryPort {
       [input.revision.bazisProjectId, input.created.orderId, input.revision.revisionId],
     );
 
+    const statusDefaults = await input.tx.query<{
+      payment_status_id: number | string | null;
+      production_status_id: number | string | null;
+    }>(
+      `
+      SELECT
+        (SELECT payment_status_id
+         FROM payment_statuses
+         WHERE lower(btrim(payment_status_name)) = lower('Не оплачен')
+         ORDER BY payment_status_id
+         LIMIT 1) AS payment_status_id,
+        (SELECT production_status_id
+         FROM production_statuses
+         WHERE lower(btrim(production_status_code)) = 'drawn'
+         ORDER BY production_status_id
+         LIMIT 1) AS production_status_id
+      `,
+    );
+    const paymentStatusId = nullableNumber(statusDefaults.rows[0]?.payment_status_id);
+    if (paymentStatusId == null) {
+      throw new ApiError(
+        500,
+        'BAZIS_DOWELING_DEFAULT_STATUS_MISSING',
+        'Не найден статус оплаты «Не оплачен» для присадки Базис-проекта',
+      );
+    }
+    const productionStatusId = nullableNumber(statusDefaults.rows[0]?.production_status_id);
+    if (productionStatusId == null) {
+      throw new ApiError(
+        500,
+        'BAZIS_DOWELING_DEFAULT_STATUS_MISSING',
+        'Не найден производственный статус «drawn» для присадки Базис-проекта',
+      );
+    }
+    const dowelingOrderName = input.revision.revisionBazisOrderNo?.trim()
+      || input.revision.bazisProjectName.trim();
+    const doweling = await input.tx.query<{ doweling_order_id: number | string }>(
+      `
+      INSERT INTO doweling_orders
+        (doweling_order_name, doweling_order_date, order_id, payment_status_id,
+         production_status_id, design_engineer_id, parts_count)
+      VALUES ($1, CURRENT_DATE, $2, $3, $4, $5, $6)
+      RETURNING doweling_order_id
+      `,
+      [
+        dowelingOrderName,
+        input.created.orderId,
+        paymentStatusId,
+        productionStatusId,
+        input.revision.designEngineerId,
+        input.detailsCreated,
+      ],
+    );
+    const dowelingOrderId = Number(doweling.rows[0].doweling_order_id);
+    await input.tx.query(
+      `
+      INSERT INTO order_doweling_links (order_id, doweling_order_id)
+      VALUES ($1, $2)
+      `,
+      [input.created.orderId, dowelingOrderId],
+    );
+
     const mappedNodes = input.panels.filter((panel) =>
       input.created.detailIdsByClientKey.has(
         input.clientKeyByNodeId?.get(panel.bazisNodeId) ?? clientKeyForNode(panel.bazisNodeId),
@@ -2843,12 +3143,17 @@ export class PgBazisRepository implements BazisRepositoryPort {
         panelsSelected: input.panels.length,
         detailsCreated: input.detailsCreated,
         revisionId: input.revision.revisionId,
+        dowelingOrderId,
+        dowelingOrderName,
+        designEngineerId: input.revision.designEngineerId,
         ...(input.metadataSource ? { source: input.metadataSource } : {}),
       },
       relatedEntities: [
         { entityType: 'project', entityId: input.revision.projectId },
         { entityType: 'bazis_project', entityId: input.revision.bazisProjectId },
         { entityType: 'bazis_revision', entityId: input.revision.revisionId },
+        { entityType: 'doweling_order', entityId: dowelingOrderId },
+        { entityType: 'employee', entityId: input.revision.designEngineerId },
       ],
     });
     response.auditId = auditId;
@@ -2872,6 +3177,59 @@ export class PgBazisRepository implements BazisRepositoryPort {
           requestId: input.requestId,
         }),
         input.outboxIdempotencyKey ?? `bazis-order-created-${input.command.idempotencyKey}`,
+      ],
+    );
+
+    const dowelingAuditId = await auditService.record(input.tx, {
+      event: 'doweling.created',
+      entityType: 'doweling_order',
+      entityId: String(dowelingOrderId),
+      actorUserId: input.command.currentUser.id,
+      actorUsername: input.command.currentUser.username,
+      actorRole: input.command.currentUser.role,
+      requestId: input.requestId,
+      source: SOURCE,
+      relatedOrderId: input.created.orderId,
+      relatedEntities: [
+        { entityType: 'order', entityId: input.created.orderId },
+        { entityType: 'project', entityId: input.revision.projectId },
+        { entityType: 'bazis_project', entityId: input.revision.bazisProjectId },
+        { entityType: 'employee', entityId: input.revision.designEngineerId },
+        { entityType: 'doweling_order', entityId: dowelingOrderId },
+      ],
+      before: {},
+      after: {
+        dowelingOrderId,
+        dowelingOrderName,
+        orderId: input.created.orderId,
+        designEngineerId: input.revision.designEngineerId,
+        designEngineerName: input.revision.designEngineerName,
+        paymentStatusId,
+        productionStatusId,
+      },
+      metadata: { source: SOURCE, action: 'bazis_doweling_create', requestId: input.requestId },
+    });
+    await input.tx.query(
+      `
+      INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+      VALUES ($1,$2,$3,$4::jsonb,$5)
+      ON CONFLICT (idempotency_key) DO NOTHING
+      `,
+      [
+        'doweling_order.created',
+        'doweling_order',
+        String(dowelingOrderId),
+        JSON.stringify({
+          eventType: 'doweling_order.created',
+          dowelingOrderId,
+          dowelingOrderName,
+          orderId: input.created.orderId,
+          bazisProjectId: input.revision.bazisProjectId,
+          designEngineerId: input.revision.designEngineerId,
+          actorUserId: input.command.currentUser.id,
+          requestId: input.requestId,
+        }),
+        `bazis-doweling-created-${input.created.orderId}-${dowelingAuditId}`,
       ],
     );
 
@@ -2908,6 +3266,19 @@ function firstRootProductOrderNo(nodes: ParsedBazisNode[]): string | null {
     }
   }
   return null;
+}
+
+function assertBazisProjectHasDesignEngineer(revision: {
+  designEngineerId: number | null;
+}): asserts revision is { designEngineerId: number } {
+  if (revision.designEngineerId == null) {
+    throw new ApiError(
+      422,
+      'VALIDATION_ERROR',
+      'Укажите конструктора в карточке Базис-проекта перед созданием ERP-заказа',
+      { field: 'designEngineerId' },
+    );
+  }
 }
 
 function numericUserId(currentUser: CurrentUser): number {
@@ -3024,6 +3395,10 @@ function mapProjectListRow(row: ProjectListRow): BazisProjectListItemDto {
     lastRevisionNo: nullableNumber(row.last_revision_no),
     lastImportedAt: row.last_imported_at,
     bazisOrderNo: row.bazis_order_no,
+    designEngineerId: nullableNumber(row.design_engineer_id),
+    designEngineerName: row.design_engineer_name,
+    designEngineerXmlName: row.design_engineer_xml_name,
+    designEngineerSource: row.design_engineer_source,
     linkedOrderIds: (row.linked_order_ids ?? []).map((value) => Number(value)),
     linkedOrders,
   };

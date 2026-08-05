@@ -98,7 +98,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -115,6 +115,15 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const migration101Probe = probeFn.slice(probeFn.indexOf('101_export_templates*'), probeFn.indexOf('*) return 2'));
     expect(migration101Probe).not.toContain('bazis-cut-set-standard-v1');
     expect(migration101Probe).not.toContain('bazis-project-cut-standard-v1');
+  });
+
+  it('pins migration 102 Bazis designer effect markers', () => {
+    expect(probeFn).toContain('102_bazis_project_design_engineer*');
+    expect(probeFn).toContain('q_col bazis_projects design_engineer_id');
+    expect(probeFn).toContain('q_col bazis_projects design_engineer_xml_name');
+    expect(probeFn).toContain('q_col bazis_projects design_engineer_source');
+    expect(probeFn).toContain('q_con_on bazis_projects chk_bazis_projects_design_engineer_source');
+    expect(probeFn).toContain('q_idx bazis_projects_design_engineer_idx');
   });
 });
 

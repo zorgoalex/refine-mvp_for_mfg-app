@@ -22,6 +22,7 @@ import type {
   BazisNodeSearchResponseDto,
   BazisProjectCardDto,
   BazisProjectDeleteResponseDto,
+  BazisProjectDesignEngineerDto,
   BazisProjectListItemDto,
   BazisProjectNameDto,
   BazisRevisionMaterialsSummaryDto,
@@ -176,7 +177,7 @@ const createOrderFromDraftBodySchema = z.object({
       clientKey: z.string().trim().min(1).max(255),
       bazisNodeId: z.coerce.number().int().positive(),
     }),
-  ),
+  ).min(1),
   idempotencyKey: z.string().trim().min(1).max(200),
 });
 
@@ -211,6 +212,12 @@ const setNodeNotesSchema = z
 const renameProjectSchema = z
   .object({
     name: z.string().trim().min(1).max(300),
+  })
+  .strict();
+
+const setProjectDesignEngineerSchema = z
+  .object({
+    designEngineerId: z.union([numericIdSchema, z.null()]),
   })
   .strict();
 
@@ -457,6 +464,41 @@ export class BazisController {
       request.requestId,
       parseNumericPathParam(id, 'id'),
       parsed.name,
+    );
+  }
+
+  @ApiOperation({
+    operationId: 'setBazisProjectDesignEngineer',
+    summary: 'Set or clear the Bazis project design engineer manually',
+  })
+  @ApiBody({
+    schema: swaggerSchema({
+      type: 'object',
+      required: ['designEngineerId'],
+      additionalProperties: false,
+      properties: { designEngineerId: { type: 'integer', nullable: true, minimum: 1 } },
+    }),
+  })
+  @ApiResponse({ status: 200, description: 'Updated Bazis project design engineer' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Bazis project or employee not found' })
+  @ApiResponse({ status: 422, description: 'Invalid project or employee id' })
+  @ApiResponse({ status: 503, description: 'Bazis API is disabled' })
+  @Patch('projects/:id/design-engineer')
+  async setProjectDesignEngineer(
+    @Req() request: RequestWithCurrentUser,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<BazisProjectDesignEngineerDto> {
+    this.assertBazisEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseSetProjectDesignEngineerBody(body);
+    return this.bazis.setProjectDesignEngineer(
+      currentUser,
+      request.requestId,
+      parseNumericPathParam(id, 'id'),
+      parsed.designEngineerId,
     );
   }
 
@@ -945,6 +987,16 @@ export function parseSetNodeNotesBody(body: unknown): { notes: string | null } {
 
 export function parseRenameProjectBody(body: unknown): { name: string } {
   return parseWithZod(renameProjectSchema, body, 'Bazis project name payload validation failed');
+}
+
+export function parseSetProjectDesignEngineerBody(body: unknown): {
+  designEngineerId: number | null;
+} {
+  return parseWithZod(
+    setProjectDesignEngineerSchema,
+    body,
+    'Bazis project design engineer payload validation failed',
+  );
 }
 
 function parseNumericPathParam(value: unknown, field: string): number {

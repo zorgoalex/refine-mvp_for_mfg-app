@@ -28,6 +28,7 @@ import {
   type BazisNodeSearchResponseDto,
   type BazisProjectCardDto,
   type BazisProjectDeleteResponseDto,
+  type BazisProjectDesignEngineerDto,
   type BazisProjectListItemDto,
   type BazisProjectNameDto,
   type BazisRevisionMaterialsSummaryDto,
@@ -139,6 +140,21 @@ export class BazisService {
       requestId,
       bazisProjectId,
       name,
+    });
+  }
+
+  async setProjectDesignEngineer(
+    currentUser: CurrentUser,
+    requestId: string | undefined,
+    bazisProjectId: number,
+    designEngineerId: number | null,
+  ): Promise<BazisProjectDesignEngineerDto> {
+    await this.requirePermission(currentUser, 'bazis.manage', 'set_project_design_engineer', requestId);
+    return this.ports.repository.setProjectDesignEngineer({
+      currentUser,
+      requestId,
+      bazisProjectId,
+      designEngineerId,
     });
   }
 

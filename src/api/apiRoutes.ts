@@ -193,6 +193,7 @@ export const apiRoutes = {
     imports: backendApiPath('/bazis/imports'),
     projects: backendApiPath('/bazis/projects'),
     project: (id: number) => backendApiPath(`/bazis/projects/${id}`),
+    projectDesignEngineer: (id: number) => backendApiPath(`/bazis/projects/${id}/design-engineer`),
     node: (id: number) => backendApiPath(`/bazis/nodes/${id}`),
     nodeNotes: (id: number) => backendApiPath(`/bazis/nodes/${id}/notes`),
     revisionTree: (id: number) => backendApiPath(`/bazis/revisions/${id}/tree`),

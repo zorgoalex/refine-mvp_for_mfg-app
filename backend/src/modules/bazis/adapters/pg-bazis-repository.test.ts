@@ -44,7 +44,7 @@ describe('PgBazisRepository.importRevision', () => {
 
     const ordered = database.queries.map((query) => normalizeSql(query.text));
     expect(ordered[0]).toBe('SELECT set_session_user($1)');
-    expect(ordered).toContain('INSERT INTO bazis_projects (project_id, name, created_by) VALUES ($1, $2, $3) RETURNING bazis_project_id');
+    expect(ordered.some((sql) => sql.startsWith('INSERT INTO bazis_projects'))).toBe(true);
     const projectInsert = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO bazis_projects'),
     );
@@ -79,6 +79,25 @@ describe('PgBazisRepository.importRevision', () => {
       normalizeSql(query.text).startsWith('INSERT INTO bazis_project_revisions'),
     );
     expect(revisionInsert?.params[7]).toBe('1457');
+  });
+
+  it('matches the XML developer to one active employee and stores XML provenance', async () => {
+    const database = createDatabase({
+      activeEmployees: [{ employee_id: 10, full_name: 'Тапен Жамит' }],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    const response = await repository.importRevision(importCommand({
+      parsed: parsedRevision({ designEngineerName: 'Тапен Ж.К' }),
+    }));
+
+    const projectInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO bazis_projects'),
+    );
+    expect(projectInsert?.params.slice(3, 5)).toEqual([10, 'Тапен Ж.К']);
+    expect(response.warnings).not.toEqual(expect.arrayContaining([
+      expect.stringContaining('не найден однозначно'),
+    ]));
   });
 
   it('falls back to first root productOrderNo when parsed bazisOrderNo is null', async () => {
@@ -994,6 +1013,79 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
     expect(sql).toContain('ON CONFLICT (node_id, order_id) DO NOTHING');
     expect(sql).toContain('INSERT INTO bazis_order_links');
     expect(sql).toContain('ON CONFLICT (bazis_project_id, order_id) DO NOTHING');
+    const dowelingInsert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO doweling_orders'),
+    );
+    expect(dowelingInsert?.params).toEqual(['1457', 9001, 1, 2, 88, 2]);
+    expect(normalizeSql(dowelingInsert?.text ?? '')).not.toContain('operator_id');
+    expect(database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO order_doweling_links'),
+    )?.params).toEqual([9001, 501]);
+    expect(database.queries.some((query) => query.params?.[0] === 'doweling.created')).toBe(true);
+  });
+
+  it('requires a constructor before creating the ERP order', async () => {
+    const create = vi.fn();
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: { ...baseRevisionRow(), design_engineer_id: null, design_engineer_name: null },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, { create });
+
+    await expect(repository.createOrderFromRevision(createOrderCommand())).rejects.toMatchObject({
+      statusCode: 422,
+      code: 'VALIDATION_ERROR',
+      details: { field: 'designEngineerId' },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the legacy doweling production status is missing', async () => {
+    const database = createDatabase({
+      createOrderState: {
+        revisionRow: baseRevisionRow(),
+        draftNodeRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
+        dowelingStatusDefaults: { payment_status_id: 1, production_status_id: null },
+      },
+    });
+    const repository = new PgBazisRepository(database.service, {
+      create: async (command) => {
+        await command.postPersistHook?.(
+          { getTransactionClient: () => database.tx },
+          {
+            orderId: 9001,
+            detailIdsByClientKey: new Map([['draft-detail-1', 7001]]),
+          },
+        );
+        return buildOrderDto(9001, 'never');
+      },
+    });
+
+    await expect(repository.createOrderFromDraft(createOrderFromDraftCommand({
+      nodes: [{ clientKey: 'draft-detail-1', bazisNodeId: 101 }],
+    }))).rejects.toMatchObject({
+      statusCode: 500,
+      code: 'BAZIS_DOWELING_DEFAULT_STATUS_MISSING',
+    });
+    expect(database.queries.some((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO doweling_orders'),
+    )).toBe(false);
+  });
+
+  it('rejects an empty Bazis node set before reserving idempotency', async () => {
+    const create = vi.fn();
+    const database = createDatabase();
+    const repository = new PgBazisRepository(database.service, { create });
+
+    await expect(repository.createOrderFromDraft(createOrderFromDraftCommand({ nodes: [] })))
+      .rejects.toMatchObject({
+        statusCode: 422,
+        code: 'VALIDATION_ERROR',
+        details: { errors: [{ field: 'nodes', message: 'Выберите хотя бы одну деталь Базис-проекта' }] },
+      });
+    expect(create).not.toHaveBeenCalled();
+    expect(database.queries).toHaveLength(0);
   });
 
   it('replays a completed bazis idempotency response without creating another order', async () => {
@@ -1516,7 +1608,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
           bazis_project_name: 'Шкаф Nova',
           project_client_id: 5,
         },
-        draftNodeRows: [],
+        draftNodeRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
       },
     });
     const orderTransactions: Pick<OrderTransactionService, 'create'> = {
@@ -1524,7 +1616,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
         expect(command.dto.header.projectId).toBe(77);
         await command.postPersistHook?.(
           { getTransactionClient: () => database.tx },
-          { orderId: 9001, detailIdsByClientKey: new Map() },
+          { orderId: 9001, detailIdsByClientKey: new Map([['draft-detail-1', 7001]]) },
         );
         return buildOrderDto(9001, 'ERP order draft');
       },
@@ -1534,7 +1626,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
     await repository.createOrderFromDraft(
       createOrderFromDraftCommand({
         order: createSaveOrderDto({ header: { projectId: 999999 } }),
-        nodes: [],
+        nodes: [{ clientKey: 'draft-detail-1', bazisNodeId: 101 }],
       }),
     );
   });
@@ -1708,7 +1800,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
           bazis_project_name: 'Шкаф Nova',
           project_client_id: 5,
         },
-        draftNodeRows: [],
+        draftNodeRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
       },
     });
     const orderTransactions: Pick<OrderTransactionService, 'create'> = {
@@ -1716,7 +1808,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
         expect(command.dto.idempotencyKey).toBeUndefined();
         await command.postPersistHook?.(
           { getTransactionClient: () => database.tx },
-          { orderId: 9001, detailIdsByClientKey: new Map() },
+          { orderId: 9001, detailIdsByClientKey: new Map([['draft-detail-1', 7001]]) },
         );
         return buildOrderDto(9001, 'ERP order draft');
       },
@@ -1726,7 +1818,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
     await repository.createOrderFromDraft(
       createOrderFromDraftCommand({
         order: createSaveOrderDto({ idempotencyKey: 'nested-idem-key' }),
-        nodes: [],
+        nodes: [{ clientKey: 'draft-detail-1', bazisNodeId: 101 }],
       }),
     );
   });
@@ -1741,7 +1833,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
           bazis_project_name: 'Шкаф Nova',
           project_client_id: 5,
         },
-        draftNodeRows: [],
+        draftNodeRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
       },
     });
     const repository = new PgBazisRepository(database.service, {
@@ -1751,7 +1843,9 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
     });
 
     await expect(
-      repository.createOrderFromDraft(createOrderFromDraftCommand({ nodes: [] })),
+      repository.createOrderFromDraft(createOrderFromDraftCommand({
+        nodes: [{ clientKey: 'draft-detail-1', bazisNodeId: 101 }],
+      })),
     ).rejects.toMatchObject({
       statusCode: 409,
       code: 'ORDER_NAME_DUPLICATE',
@@ -3276,6 +3370,10 @@ function createDatabase(
       draftNodeRows?: Array<Record<string, unknown>>;
       mappingRows?: Array<Record<string, unknown>>;
       referenceRows?: Array<Record<string, unknown>>;
+      dowelingStatusDefaults?: {
+        payment_status_id: number | null;
+        production_status_id: number | null;
+      };
       nowIso?: string;
     };
     addToOrderState?: {
@@ -3317,6 +3415,11 @@ function createDatabase(
     pruneCandidates?: Array<Record<string, unknown>>;
     projectListRows?: Array<Record<string, unknown>>;
     pruneProtectedRevisionIds?: number[];
+    activeEmployees?: Array<{ employee_id: number; full_name: string }>;
+    projectDesignEngineerState?: {
+      existingRow?: Record<string, unknown> | null;
+      employeeRow?: Record<string, unknown> | null;
+    };
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -3329,6 +3432,23 @@ function createDatabase(
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
+
+      if (normalized === 'SELECT employee_id, full_name FROM employees WHERE is_active = true ORDER BY employee_id') {
+        return {
+          rows: options.activeEmployees ?? [],
+          rowCount: options.activeEmployees?.length ?? 0,
+        };
+      }
+
+      if (normalized.startsWith('SELECT bp.project_id, bp.design_engineer_id, employee.full_name AS design_engineer_name')) {
+        const row = options.projectDesignEngineerState?.existingRow;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
+
+      if (normalized.startsWith('SELECT full_name FROM employees WHERE employee_id = $1 AND is_active = true')) {
+        const row = options.projectDesignEngineerState?.employeeRow;
+        return row ? { rows: [row], rowCount: 1 } : { rows: [], rowCount: 0 };
+      }
 
       if (normalized.startsWith('INSERT INTO command_idempotency_keys')) {
         if (
@@ -3394,7 +3514,10 @@ function createDatabase(
           options.orderDraftState?.revisionRow ??
           options.createOrderState?.revisionRow;
         return row
-          ? { rows: [row], rowCount: 1 }
+          ? {
+              rows: [{ design_engineer_id: 88, design_engineer_name: 'Конструктор Тест', ...row }],
+              rowCount: 1,
+            }
           : { rows: [], rowCount: 0 };
       }
 
@@ -3575,6 +3698,20 @@ function createDatabase(
           : { rows: [{ bazis_revision_id: 82 }], rowCount: 1 };
       }
 
+      if (normalized.includes('FROM payment_statuses') && normalized.includes('FROM production_statuses')) {
+        return {
+          rows: [options.createOrderState?.dowelingStatusDefaults ?? {
+            payment_status_id: 1,
+            production_status_id: 2,
+          }],
+          rowCount: 1,
+        };
+      }
+
+      if (normalized.startsWith('INSERT INTO doweling_orders')) {
+        return { rows: [{ doweling_order_id: 501 }], rowCount: 1 };
+      }
+
       if (normalized.includes('prune_keep')) {
         const rows = options.pruneCandidates ?? [];
         return { rows, rowCount: rows.length };
@@ -3692,6 +3829,7 @@ function parsedRevision(overrides: Partial<ParsedBazisRevision> = {}): ParsedBaz
   return {
     bazisVersion: '11',
     bazisOrderNo: '1457',
+    designEngineerName: null,
     productName: 'Шкаф Nova',
     productPrice: 1200,
     nodes: [
@@ -4132,6 +4270,8 @@ function baseRevisionRow() {
     revision_bazis_order_no: '1457',
     project_client_id: 5,
     client_name: 'ООО Клиент',
+    design_engineer_id: 88,
+    design_engineer_name: 'Конструктор Тест',
   };
 }
 
@@ -4293,6 +4433,66 @@ describe('PgBazisRepository.renameProject', () => {
       bazisProjectId: 404,
       name: '1485',
     })).rejects.toBeInstanceOf(BazisProjectNotFoundError);
+  });
+});
+
+describe('PgBazisRepository.setProjectDesignEngineer', () => {
+  it('validates the active employee and writes a manual audited selection', async () => {
+    const database = createDatabase({
+      projectDesignEngineerState: {
+        existingRow: {
+          project_id: 77,
+          design_engineer_id: null,
+          design_engineer_name: null,
+          design_engineer_xml_name: 'Тапен Ж.К',
+          design_engineer_source: null,
+        },
+        employeeRow: { full_name: 'Тапен Жамит' },
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(repository.setProjectDesignEngineer({
+      currentUser: currentUser('admin'),
+      requestId: 'req-engineer-1',
+      bazisProjectId: 41,
+      designEngineerId: 10,
+    })).resolves.toEqual({
+      bazisProjectId: 41,
+      designEngineerId: 10,
+      designEngineerName: 'Тапен Жамит',
+      designEngineerXmlName: 'Тапен Ж.К',
+      designEngineerSource: 'manual',
+    });
+
+    expect(database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('UPDATE bazis_projects SET design_engineer_id'),
+    )?.params).toEqual([41, 10]);
+    expect(database.queries.some((query) =>
+      query.params?.[0] === 'bazis.project_design_engineer_changed'),
+    ).toBe(true);
+  });
+
+  it('rejects an inactive or missing employee', async () => {
+    const database = createDatabase({
+      projectDesignEngineerState: {
+        existingRow: {
+          project_id: 77,
+          design_engineer_id: null,
+          design_engineer_name: null,
+          design_engineer_xml_name: null,
+          design_engineer_source: null,
+        },
+        employeeRow: null,
+      },
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    await expect(repository.setProjectDesignEngineer({
+      currentUser: currentUser('admin'),
+      bazisProjectId: 41,
+      designEngineerId: 999,
+    })).rejects.toMatchObject({ statusCode: 422, code: 'VALIDATION_ERROR' });
   });
 });
 

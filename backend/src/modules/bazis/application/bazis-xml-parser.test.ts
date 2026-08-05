@@ -19,6 +19,23 @@ describe('parseBazisXml', () => {
     expect(parsed.nodes[0]?.productOrderNo).toBeNull();
   });
 
+  it('normalizes the root XML developer and rejects conflicting product developers', () => {
+    const one = parseBazisXml(
+      '<Проект><Изделие><Разработчик>Конструктор: Тапен Ж.К</Разработчик></Изделие></Проект>',
+    );
+    expect(one.designEngineerName).toBe('Тапен Ж.К');
+
+    const placeholder = parseBazisXml(
+      '<Проект><Изделие><Разработчик>Конструктор:</Разработчик></Изделие></Проект>',
+    );
+    expect(placeholder.designEngineerName).toBeNull();
+
+    const conflict = parseBazisXml(
+      '<Проект><Изделие><Разработчик>Тапен Ж.К</Разработчик></Изделие><Изделие><Разработчик>Иванов И.И</Разработчик></Изделие></Проект>',
+    );
+    expect(conflict.designEngineerName).toBeNull();
+  });
+
   it('builds tree: every parentIndex precedes child index, root is product', () => {
     const parsed = parseBazisXml(fixture);
     expect(parsed.nodes[0].nodeKind).toBe('product');

@@ -33,6 +33,8 @@ export interface ParsedBazisMaterialUsage {
 export interface ParsedBazisRevision {
   bazisVersion: string | null;
   bazisOrderNo: string | null;
+  /** Значение корневого XML-поля «Разработчик», очищенное от служебного префикса. */
+  designEngineerName: string | null;
   productName: string | null;
   productPrice: number | null;
   nodes: ParsedBazisNode[];
@@ -341,10 +343,20 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
   const productPrices = products
     .map((product) => toNumber(product['Цена']))
     .filter((price): price is number => price !== null);
+  const designEngineerNames = [
+    ...new Set(
+      products
+        .map((product) => normalizeDesignEngineerName(toText(product['Разработчик'])))
+        .filter((name): name is string => name !== null),
+    ),
+  ];
 
   return {
     bazisVersion: toText(project['@_Версия']),
     bazisOrderNo: toText(project['@_Наименование']),
+    // Несколько изделий могут входить в один XML. Автовыбор безопасен только
+    // когда во всех заполненных корнях указан один и тот же разработчик.
+    designEngineerName: designEngineerNames.length === 1 ? designEngineerNames[0] : null,
     productName: productNames.length > 0 ? productNames.join(' + ') : null,
     productPrice:
       productPrices.length > 0
@@ -361,4 +373,15 @@ export function parseBazisXml(source: Buffer | string): ParsedBazisRevision {
       uniqueMaterials: materials.length,
     },
   };
+}
+
+export function normalizeDesignEngineerName(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const normalized = value
+    .replace(/^\s*(?:конструктор|разработчик)\s*:\s*/iu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized.length > 0 ? normalized : null;
 }

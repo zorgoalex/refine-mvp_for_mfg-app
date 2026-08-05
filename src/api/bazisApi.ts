@@ -13,6 +13,7 @@ import type {
   BazisNodeSearchResponse,
   BazisProjectCard,
   BazisProjectDeleteResponse,
+  BazisProjectDesignEngineerResponse,
   BazisProjectListItem,
   BazisProjectNameResponse,
   BazisRevisionMaterialsSummary,
@@ -58,6 +59,16 @@ export const bazisApi = {
     return httpClient.patch<BazisProjectNameResponse>(
       apiRoutes.bazis.project(validateId(id, 'bazisProjectId')),
       { name },
+    );
+  },
+
+  setProjectDesignEngineer(
+    id: number,
+    designEngineerId: number | null,
+  ): Promise<BazisProjectDesignEngineerResponse> {
+    return httpClient.patch<BazisProjectDesignEngineerResponse>(
+      apiRoutes.bazis.projectDesignEngineer(validateId(id, 'bazisProjectId')),
+      { designEngineerId },
     );
   },
 
