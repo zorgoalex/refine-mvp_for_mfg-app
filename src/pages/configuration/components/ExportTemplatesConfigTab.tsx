@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert, Button, Card, Checkbox, Col, Empty, Form, Input, List, Popconfirm, Row, Select,
-  Space, Spin, Table, Tag, Typography, message,
+  Space, Spin, Table, Tag, Tooltip, Typography, message,
 } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import {
@@ -11,6 +11,7 @@ import {
 } from '../../../api/exportTemplatesApi';
 import { can } from '../../../utils/permissions';
 import { ExportExpressionEditor } from './ExportExpressionEditor';
+import './ExportTemplatesConfigTab.css';
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -90,7 +91,8 @@ export const ExportTemplatesConfigTab: React.FC = () => {
       </Paragraph></div>
     {!canManage && <Alert type="info" showIcon message="Режим просмотра" description="Для изменения нужен доступ settings.manage." />}
     <Row gutter={[16, 16]} align="top">
-      <Col xs={24} xl={7}><Card title="Шаблоны" extra={canManage && <Button icon={<PlusOutlined />} style={{ minHeight: 40 }} onClick={() => createDraft()}>Создать</Button>}>
+      <Col xs={24} className="export-templates-list-pane"><Card size="small" title="Шаблоны" extra={canManage && <Tooltip title="Создать шаблон"><Button
+        aria-label="Создать шаблон" icon={<PlusOutlined />} style={{ minWidth: 40, minHeight: 40 }} onClick={() => createDraft()} /></Tooltip>}>
         <List dataSource={templates} locale={{ emptyText: 'Шаблонов пока нет' }} renderItem={(template) => <List.Item
           style={{ cursor: 'pointer', borderRadius: 8, paddingInline: 10, background: selectedId === template.exportTemplateId ? '#e6f4ff' : undefined }}
           onClick={() => selectTemplate(template)}>
@@ -98,7 +100,7 @@ export const ExportTemplatesConfigTab: React.FC = () => {
             description={`${targetLabel(template.targetScreen)} · XLS`} />
         </List.Item>} />
       </Card></Col>
-      <Col xs={24} xl={17}>{draft ? <Card title={selected ? 'Редактирование шаблона' : 'Новый шаблон'} extra={<Space wrap>
+      <Col xs={24} className="export-templates-editor-pane">{draft ? <Card title={selected ? 'Редактирование шаблона' : 'Новый шаблон'} extra={<Space wrap>
         {selected && <Button icon={<CopyOutlined />} disabled={!canManage} style={{ minHeight: 40 }} onClick={() => createDraft(selected)}>Дублировать</Button>}
         <Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={!canManage} style={{ minHeight: 40 }} onClick={() => void save()}>Сохранить</Button>
       </Space>}>
@@ -123,18 +125,19 @@ export const ExportTemplatesConfigTab: React.FC = () => {
           <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}><Title level={5} style={{ margin: 0 }}>Колонки <Text type="secondary">({draft.columns.length})</Text></Title>
             <Button icon={<PlusOutlined />} disabled={!canManage || draft.columns.length >= 100} style={{ minHeight: 40 }}
               onClick={() => setDraft({ ...draft, columns: [...draft.columns, newColumn(draft.columns.length, catalog)] })}>Добавить колонку</Button></Space>
-          {draft.columns.map((column, index) => <Card key={column.columnKey} size="small" title={<Space><Text type="secondary" style={{ fontVariantNumeric: 'tabular-nums' }}>{index + 1}</Text><Input
-            aria-label={`Название колонки ${index + 1}`} value={column.header} maxLength={200} disabled={!canManage} style={{ width: 280 }}
-            onChange={(event) => updateColumn(index, { ...column, header: event.target.value }, draft, setDraft)} /></Space>}
-            extra={<Space size={4}><Button aria-label="Поднять колонку" icon={<ArrowUpOutlined />} disabled={!canManage || index === 0} style={{ minWidth: 40, minHeight: 40 }}
+          {draft.columns.map((column, index) => <div key={column.columnKey} className="export-template-column-row">
+            <Text type="secondary" className="export-template-column-index" style={{ fontVariantNumeric: 'tabular-nums' }}>{index + 1}</Text>
+            <Input className="export-template-column-header" aria-label={`Название колонки ${index + 1}`} value={column.header} maxLength={200} disabled={!canManage}
+              onChange={(event) => updateColumn(index, { ...column, header: event.target.value }, draft, setDraft)} />
+            <div className="export-template-column-expression"><ExportExpressionEditor value={column.expression} catalog={catalog} disabled={!canManage}
+              onChange={(expression) => updateColumn(index, { ...column, expression }, draft, setDraft)} /></div>
+            <Space className="export-template-column-actions" size={4}><Button aria-label="Поднять колонку" icon={<ArrowUpOutlined />} disabled={!canManage || index === 0} style={{ minWidth: 40, minHeight: 40 }}
               onClick={() => setDraft({ ...draft, columns: moveColumn(draft.columns, index, index - 1) })} />
               <Button aria-label="Опустить колонку" icon={<ArrowDownOutlined />} disabled={!canManage || index === draft.columns.length - 1} style={{ minWidth: 40, minHeight: 40 }}
                 onClick={() => setDraft({ ...draft, columns: moveColumn(draft.columns, index, index + 1) })} />
               <Button aria-label="Удалить колонку" danger icon={<DeleteOutlined />} disabled={!canManage || draft.columns.length === 1} style={{ minWidth: 40, minHeight: 40 }}
-                onClick={() => setDraft({ ...draft, columns: draft.columns.filter((_, itemIndex) => itemIndex !== index) })} /></Space>}>
-            <ExportExpressionEditor value={column.expression} catalog={catalog} disabled={!canManage}
-              onChange={(expression) => updateColumn(index, { ...column, expression }, draft, setDraft)} />
-          </Card>)}
+                onClick={() => setDraft({ ...draft, columns: draft.columns.filter((_, itemIndex) => itemIndex !== index) })} /></Space>
+          </div>)}
           <Space wrap><Button onClick={() => void runPreview()} style={{ minHeight: 40 }}>Проверить и показать пример</Button>
             {selected && !selected.isDefault && <Button disabled={!canManage} style={{ minHeight: 40 }} onClick={() => void setDefault()}>Сделать по умолчанию</Button>}
             {selected && <Popconfirm title="Удалить шаблон?" description="Это действие скроет шаблон из экспорта." disabled={selected.isDefault}

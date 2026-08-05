@@ -31,22 +31,22 @@ export const ExportExpressionEditor: React.FC<{
   const fieldOptions = catalog.fields.map((field) => ({ value: field.key, label: `${field.group} · ${field.label}` }));
   const options = depth >= 8 ? NODE_OPTIONS.filter((option) => !['concat', 'if_else', 'string_fn', 'number_fn', 'math'].includes(option.value)) : NODE_OPTIONS;
   return (
-    <div data-export-expression={value.type} style={{ padding: 12, border: '1px solid #e5e7eb', borderRadius: 10, background: depth % 2 ? '#fff' : '#f8fafc' }}>
-      <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        <Select value={value.type} options={options} disabled={disabled} style={{ width: 230 }}
+    <div className="export-expression-editor" data-export-expression={value.type} style={{ background: depth % 2 ? '#fff' : '#f8fafc' }}>
+      <div className="export-expression-editor-row">
+        <Select className="export-expression-editor-type" value={value.type} options={options} disabled={disabled}
           onChange={(type: ExportExpression['type']) => onChange(defaultExpression(type, firstField))} />
         {value.type === 'field' && <Select showSearch optionFilterProp="label" value={value.field} options={fieldOptions}
-          disabled={disabled} style={{ width: '100%' }} onChange={(field) => onChange({ type: 'field', field })} />}
+          disabled={disabled} className="export-expression-editor-value" onChange={(field) => onChange({ type: 'field', field })} />}
         {value.type === 'constant' && <ConstantEditor value={value.value} disabled={disabled}
           onChange={(constant) => onChange({ type: 'constant', value: constant })} />}
         {value.type === 'empty' && <Text type="secondary">В ячейке будет пустое значение.</Text>}
         {(value.type === 'concat' || value.type === 'math') && <PartsEditor expression={value} catalog={catalog}
           disabled={disabled} depth={depth} onChange={onChange} />}
-        {value.type === 'if_else' && <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Text strong>Если</Text>
+        {value.type === 'if_else' && <div className="export-expression-editor-compound">
+          <Text strong className="export-expression-editor-label">Если</Text>
           <ExportExpressionEditor value={value.when.left} catalog={catalog} disabled={disabled} depth={depth + 1}
             onChange={(left) => onChange({ ...value, when: { ...value.when, left } })} />
-          <Select value={value.when.op} disabled={disabled} style={{ width: '100%' }}
+          <Select className="export-expression-editor-operator" value={value.when.op} disabled={disabled}
             options={catalog.operators.map((op) => ({ value: op, label: OP_LABELS[op] }))}
             onChange={(op: ExportConditionOperator) => onChange({ ...value, when: needsRight(op)
               ? { ...value.when, op, right: value.when.right ?? { type: 'constant', value: '' } }
@@ -54,22 +54,22 @@ export const ExportExpressionEditor: React.FC<{
           {needsRight(value.when.op) && <ExportExpressionEditor
             value={value.when.right ?? { type: 'constant', value: '' }} catalog={catalog} disabled={disabled} depth={depth + 1}
             onChange={(right) => onChange({ ...value, when: { ...value.when, right } })} />}
-          <Text strong>Тогда</Text>
+          <Text strong className="export-expression-editor-label">Тогда</Text>
           <ExportExpressionEditor value={value.then} catalog={catalog} disabled={disabled} depth={depth + 1}
             onChange={(thenValue) => onChange({ ...value, then: thenValue })} />
-          <Text strong>Иначе</Text>
+          <Text strong className="export-expression-editor-label">Иначе</Text>
           <ExportExpressionEditor value={value.else} catalog={catalog} disabled={disabled} depth={depth + 1}
             onChange={(elseValue) => onChange({ ...value, else: elseValue })} />
-        </Space>}
+        </div>}
         {value.type === 'string_fn' && <>
-          <Select value={value.fn} disabled={disabled} style={{ width: '100%' }}
+          <Select className="export-expression-editor-function" value={value.fn} disabled={disabled}
             options={catalog.functions.string.map((fn) => ({ value: fn, label: ({ trim: 'Убрать пробелы по краям', upper: 'ВЕРХНИЙ РЕГИСТР', lower: 'нижний регистр' })[fn] }))}
             onChange={(fn) => onChange({ ...value, fn })} />
           <ExportExpressionEditor value={value.input} catalog={catalog} disabled={disabled} depth={depth + 1}
             onChange={(input) => onChange({ ...value, input })} />
         </>}
         {value.type === 'number_fn' && <>
-          <Space.Compact block>
+          <Space.Compact className="export-expression-editor-number-function">
             <Select value={value.fn} disabled={disabled} style={{ width: '65%' }}
               options={catalog.functions.number.map((fn) => ({ value: fn, label: ({ round: 'Округлить', floor: 'Вниз', ceil: 'Вверх', abs: 'Модуль' })[fn] }))}
               onChange={(fn) => onChange({ ...value, fn })} />
@@ -79,7 +79,7 @@ export const ExportExpressionEditor: React.FC<{
           <ExportExpressionEditor value={value.input} catalog={catalog} disabled={disabled} depth={depth + 1}
             onChange={(input) => onChange({ ...value, input })} />
         </>}
-      </Space>
+      </div>
     </div>
   );
 };
@@ -92,15 +92,15 @@ const PartsEditor: React.FC<{
   onChange: (value: ExportExpression) => void;
 }> = ({ expression, catalog, disabled, depth, onChange }) => {
   const firstField = catalog.fields[0]?.key ?? 'row.number';
-  return <Space direction="vertical" size={10} style={{ width: '100%' }}>
-    {expression.type === 'math' && <Select value={expression.fn} disabled={disabled} style={{ width: '100%' }}
+  return <div className="export-expression-parts">
+    {expression.type === 'math' && <Select className="export-expression-editor-function" value={expression.fn} disabled={disabled}
       options={catalog.functions.math.map((fn) => ({ value: fn, label: ({ add: 'Сложить', subtract: 'Вычесть', multiply: 'Умножить', divide: 'Разделить' })[fn] }))}
       onChange={(fn) => onChange({ ...expression, fn })} />}
-    {expression.type === 'concat' && <Text type="secondary">Части склеиваются слева направо.</Text>}
-    {expression.parts.map((part, index) => <div key={index} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 40px', gap: 8 }}>
+    {expression.type === 'concat' && <Text type="secondary" className="export-expression-editor-label">Слева направо:</Text>}
+    {expression.parts.map((part, index) => <div key={index} className="export-expression-part">
       <ExportExpressionEditor value={part} catalog={catalog} disabled={disabled} depth={depth + 1}
         onChange={(next) => onChange({ ...expression, parts: expression.parts.map((item, itemIndex) => itemIndex === index ? next : item) })} />
-      <Space direction="vertical" size={4}>
+      <Space className="export-expression-part-actions" size={4}>
         <Button aria-label="Поднять часть" icon={<ArrowUpOutlined />} disabled={disabled || index === 0}
           style={{ minWidth: 40, minHeight: 40 }} onClick={() => onChange({ ...expression, parts: move(expression.parts, index, index - 1) })} />
         <Button aria-label="Опустить часть" icon={<ArrowDownOutlined />} disabled={disabled || index === expression.parts.length - 1}
@@ -111,12 +111,12 @@ const PartsEditor: React.FC<{
     </div>)}
     <Button icon={<PlusOutlined />} disabled={disabled || expression.parts.length >= 20} style={{ minHeight: 40 }}
       onClick={() => onChange({ ...expression, parts: [...expression.parts, { type: 'field', field: firstField }] })}>Добавить часть</Button>
-  </Space>;
+  </div>;
 };
 
 const ConstantEditor: React.FC<{ value: ExportScalar; disabled: boolean; onChange: (value: ExportScalar) => void }> = ({ value, disabled, onChange }) => {
   const kind = value === null ? 'blank' : typeof value;
-  return <Space.Compact block>
+  return <Space.Compact className="export-expression-constant">
     <Select value={kind} disabled={disabled} style={{ width: 150 }} options={[
       { value: 'string', label: 'Текст' }, { value: 'number', label: 'Число' },
       { value: 'boolean', label: 'Да / нет' }, { value: 'blank', label: 'Пусто' },
