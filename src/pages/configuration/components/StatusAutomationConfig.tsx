@@ -34,7 +34,8 @@ import { SETTING_KEYS, useAppSettings } from '../../../hooks/useAppSettings';
 import { can } from '../../../utils/permissions';
 import {
   DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES,
-  type MdfBoardHiddenProductionStatusesSetting,
+  resolveDefaultMdfBoardHiddenOrderStatusIds,
+  type MdfBoardHiddenStatusesSetting,
 } from '../../orderStatusBoard/model';
 import { DeadlineTransitionRulesConfig } from './DeadlineTransitionRulesConfig';
 import {
@@ -139,7 +140,7 @@ function isConflict(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409;
 }
 
-function normalizeProductionStatusIds(value: readonly unknown[] | null | undefined): number[] {
+function normalizeStatusIds(value: readonly unknown[] | null | undefined): number[] {
   const ids = new Set<number>();
   for (const item of value ?? []) {
     const numeric = typeof item === 'number' ? item : Number(item);
@@ -148,7 +149,7 @@ function normalizeProductionStatusIds(value: readonly unknown[] | null | undefin
   return Array.from(ids).sort((left, right) => left - right);
 }
 
-function productionStatusIdsEqual(left: readonly number[], right: readonly number[]): boolean {
+function statusIdsEqual(left: readonly number[], right: readonly number[]): boolean {
   if (left.length !== right.length) return false;
   return left.every((value, index) => value === right[index]);
 }
@@ -168,8 +169,10 @@ export function StatusAutomationConfig() {
   const [autoCutStatusEnabled, setAutoCutStatusEnabled] = useState(false);
   const [confirmedAutoCutStatusEnabled, setConfirmedAutoCutStatusEnabled] =
     useState<boolean | null>(null);
-  const [mdfBoardHiddenStatusIdsSaving, setMdfBoardHiddenStatusIdsSaving] = useState(false);
-  const [mdfBoardHiddenStatusIds, setMdfBoardHiddenStatusIds] = useState<number[]>([]);
+  const [mdfBoardHiddenStatusesSaving, setMdfBoardHiddenStatusesSaving] = useState(false);
+  const [mdfBoardHiddenProductionStatusIds, setMdfBoardHiddenProductionStatusIds] =
+    useState<number[]>([]);
+  const [mdfBoardHiddenOrderStatusIds, setMdfBoardHiddenOrderStatusIds] = useState<number[]>([]);
   const [deletingRuleId, setDeletingRuleId] = useState<number | null>(null);
   const [updatingRuleId, setUpdatingRuleId] = useState<number | null>(null);
   const {
@@ -247,12 +250,12 @@ export function StatusAutomationConfig() {
   const storedAutoCutStatusEnabled =
     getSetting<boolean>(SETTING_KEYS.STATUS_AUTOMATION_CNC_MARK_CUT_DETAILS) === true;
   const storedMdfBoardHiddenStatusSetting =
-    getSetting<MdfBoardHiddenProductionStatusesSetting>(
+    getSetting<MdfBoardHiddenStatusesSetting>(
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
     );
-  const defaultMdfBoardHiddenStatusIds = useMemo(() => {
+  const defaultMdfBoardHiddenProductionStatusIds = useMemo(() => {
     const defaultNames = new Set(DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES);
-    return normalizeProductionStatusIds(
+    return normalizeStatusIds(
       (productionStatusesData?.data ?? [])
         .filter((status) => defaultNames.has(
           status.production_status_name.trim().toLocaleLowerCase('ru-RU'),
@@ -260,17 +263,38 @@ export function StatusAutomationConfig() {
         .map((status) => status.production_status_id),
     );
   }, [productionStatusesData]);
-  const storedMdfBoardHiddenStatusIds = useMemo(
-    () => normalizeProductionStatusIds(storedMdfBoardHiddenStatusSetting?.productionStatusIds),
+  const defaultMdfBoardHiddenOrderStatusIds = useMemo(
+    () => resolveDefaultMdfBoardHiddenOrderStatusIds(
+      (orderStatusesData?.data ?? []).map((status) => ({
+        id: status.order_status_id,
+        name: status.order_status_name,
+        sortOrder: status.sort_order,
+      })),
+    ),
+    [orderStatusesData],
+  );
+  const storedMdfBoardHiddenProductionStatusIds = useMemo(
+    () => normalizeStatusIds(storedMdfBoardHiddenStatusSetting?.productionStatusIds),
     [storedMdfBoardHiddenStatusSetting],
   );
-  const effectiveMdfBoardHiddenStatusIds =
+  const storedMdfBoardHiddenOrderStatusIds = useMemo(
+    () => normalizeStatusIds(storedMdfBoardHiddenStatusSetting?.orderStatusIds),
+    [storedMdfBoardHiddenStatusSetting],
+  );
+  const effectiveMdfBoardHiddenProductionStatusIds =
     storedMdfBoardHiddenStatusSetting && Array.isArray(storedMdfBoardHiddenStatusSetting.productionStatusIds)
-      ? storedMdfBoardHiddenStatusIds
-      : defaultMdfBoardHiddenStatusIds;
-  const mdfBoardHiddenStatusIdsDirty = !productionStatusIdsEqual(
-    mdfBoardHiddenStatusIds,
-    effectiveMdfBoardHiddenStatusIds,
+      ? storedMdfBoardHiddenProductionStatusIds
+      : defaultMdfBoardHiddenProductionStatusIds;
+  const effectiveMdfBoardHiddenOrderStatusIds =
+    storedMdfBoardHiddenStatusSetting && Array.isArray(storedMdfBoardHiddenStatusSetting.orderStatusIds)
+      ? storedMdfBoardHiddenOrderStatusIds
+      : defaultMdfBoardHiddenOrderStatusIds;
+  const mdfBoardHiddenStatusesDirty = !statusIdsEqual(
+    mdfBoardHiddenProductionStatusIds,
+    effectiveMdfBoardHiddenProductionStatusIds,
+  ) || !statusIdsEqual(
+    mdfBoardHiddenOrderStatusIds,
+    effectiveMdfBoardHiddenOrderStatusIds,
   );
   const catalogs = useMemo<StatusAutomationCatalogs>(
     () => ({
@@ -335,9 +359,14 @@ export function StatusAutomationConfig() {
   }, [autoCutStatusSaving, confirmedAutoCutStatusEnabled, storedAutoCutStatusEnabled]);
 
   useEffect(() => {
-    if (mdfBoardHiddenStatusIdsSaving) return;
-    setMdfBoardHiddenStatusIds(effectiveMdfBoardHiddenStatusIds);
-  }, [effectiveMdfBoardHiddenStatusIds, mdfBoardHiddenStatusIdsSaving]);
+    if (mdfBoardHiddenStatusesSaving) return;
+    setMdfBoardHiddenProductionStatusIds(effectiveMdfBoardHiddenProductionStatusIds);
+    setMdfBoardHiddenOrderStatusIds(effectiveMdfBoardHiddenOrderStatusIds);
+  }, [
+    effectiveMdfBoardHiddenOrderStatusIds,
+    effectiveMdfBoardHiddenProductionStatusIds,
+    mdfBoardHiddenStatusesSaving,
+  ]);
 
   useEffect(() => {
     const catalogError = orderStatusesError ?? paymentStatusesError ?? productionStatusesError;
@@ -506,25 +535,31 @@ export function StatusAutomationConfig() {
   };
 
   const handleMdfBoardHiddenStatusesSave = async () => {
-    setMdfBoardHiddenStatusIdsSaving(true);
-    const nextStatusIds = normalizeProductionStatusIds(mdfBoardHiddenStatusIds);
-    setMdfBoardHiddenStatusIds(nextStatusIds);
+    setMdfBoardHiddenStatusesSaving(true);
+    const nextProductionStatusIds = normalizeStatusIds(mdfBoardHiddenProductionStatusIds);
+    const nextOrderStatusIds = normalizeStatusIds(mdfBoardHiddenOrderStatusIds);
+    setMdfBoardHiddenProductionStatusIds(nextProductionStatusIds);
+    setMdfBoardHiddenOrderStatusIds(nextOrderStatusIds);
     try {
       await saveSetting(
         SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
-        { productionStatusIds: nextStatusIds },
-        'Производственные статусы заказов, скрывающие карточки заказов и ванн на доске МДФ-работы',
+        {
+          productionStatusIds: nextProductionStatusIds,
+          orderStatusIds: nextOrderStatusIds,
+        },
+        'Статусы заказов и производства, скрывающие карточки заказов и ванн на доске МДФ-работы',
       );
       message.success('Настройка МДФ-доски сохранена');
     } catch (error) {
       message.error(errorText(error, 'Не удалось сохранить настройку МДФ-доски'));
     } finally {
-      setMdfBoardHiddenStatusIdsSaving(false);
+      setMdfBoardHiddenStatusesSaving(false);
     }
   };
 
   const handleMdfBoardHiddenStatusesReset = () => {
-    setMdfBoardHiddenStatusIds(defaultMdfBoardHiddenStatusIds);
+    setMdfBoardHiddenProductionStatusIds(defaultMdfBoardHiddenProductionStatusIds);
+    setMdfBoardHiddenOrderStatusIds(defaultMdfBoardHiddenOrderStatusIds);
   };
 
   if (!canView) {
@@ -580,44 +615,66 @@ export function StatusAutomationConfig() {
       </Card>
 
       <Card size="small" title="МДФ-доска">
-        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Text type="secondary">
-            Заказы с выбранными производственными статусами скрываются из колонки заказов,
-            а ванны исчезают, когда все связанные заказы находятся в этих статусах.
+            Заказ скрывается из колонки, если его обычный статус заказа или производственный
+            статус выбран ниже. Ванна исчезает, когда условие выполнено для всех связанных заказов.
           </Text>
-          <Space wrap style={{ width: '100%' }} align="start">
+          <div>
+            <Text strong>Обычные статусы заказа</Text>
             <Select<number[]>
               mode="multiple"
-              value={mdfBoardHiddenStatusIds}
-              onChange={(value) => setMdfBoardHiddenStatusIds(
-                normalizeProductionStatusIds(value),
+              value={mdfBoardHiddenOrderStatusIds}
+              onChange={(value) => setMdfBoardHiddenOrderStatusIds(normalizeStatusIds(value))}
+              options={orderStatusOptions}
+              disabled={!canManage || appSettingsLoading || orderStatusesLoading}
+              loading={appSettingsLoading || orderStatusesLoading}
+              placeholder="Выберите статусы заказа"
+              style={{ width: '100%', marginTop: 4 }}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              maxTagCount="responsive"
+              aria-label="Статусы заказа, скрывающие карточки с МДФ-доски"
+            />
+          </div>
+          <div>
+            <Text strong>Производственные статусы</Text>
+            <Select<number[]>
+              mode="multiple"
+              value={mdfBoardHiddenProductionStatusIds}
+              onChange={(value) => setMdfBoardHiddenProductionStatusIds(
+                normalizeStatusIds(value),
               )}
               options={productionStatusOptions}
               disabled={!canManage || appSettingsLoading || productionStatusesLoading}
               loading={appSettingsLoading || productionStatusesLoading}
-              placeholder="Статусы, скрывающие карточки с МДФ-доски"
-              style={{ minWidth: 360, flex: 1 }}
+              placeholder="Выберите производственные статусы"
+              style={{ width: '100%', marginTop: 4 }}
               allowClear
               showSearch
               optionFilterProp="label"
               maxTagCount="responsive"
               aria-label="Производственные статусы, скрывающие карточки с МДФ-доски"
             />
+          </div>
+          <Space wrap style={{ width: '100%', justifyContent: 'flex-end' }}>
             <Button
               onClick={handleMdfBoardHiddenStatusesReset}
               disabled={
                 !canManage
                 || appSettingsLoading
+                || orderStatusesLoading
                 || productionStatusesLoading
-                || mdfBoardHiddenStatusIdsSaving
+                || mdfBoardHiddenStatusesSaving
               }
             >
               По умолчанию
             </Button>
             <Button
               type="primary"
-              loading={mdfBoardHiddenStatusIdsSaving}
-              disabled={!canManage || appSettingsLoading || !mdfBoardHiddenStatusIdsDirty}
+              loading={mdfBoardHiddenStatusesSaving}
+              disabled={!canManage || appSettingsLoading || !mdfBoardHiddenStatusesDirty}
               onClick={() => void handleMdfBoardHiddenStatusesSave()}
             >
               Сохранить

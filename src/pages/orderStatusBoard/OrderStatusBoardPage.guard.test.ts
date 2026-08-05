@@ -318,7 +318,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(page).toContain('filterCncBathColumnsByOrderStatuses(');
     expect(page).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
+    expect(page).toContain('resolveMdfBoardHiddenOrderStatusIds(');
     expect(page).toContain('resolveMdfBoardHiddenProductionStatusIds(');
+    expect(page).toContain('cncHiddenOrderStatusIds');
     expect(page).toContain('cncHiddenProductionStatusIds');
     expect(page).toContain('cncOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId))');
   });

@@ -20,7 +20,7 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain('storedAutoCutStatusEnabled === confirmedAutoCutStatusEnabled');
   });
 
-  it('stores explicit MDF board production statuses in the Auto statuses tab', () => {
+  it('stores explicit MDF board order and production statuses in the Auto statuses tab', () => {
     expect(settings).toContain(
       "STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES:",
     );
@@ -28,11 +28,14 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
       "'status_automation.mdf_board_hidden_production_statuses'",
     );
     expect(config).toContain('DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES');
-    expect(config).toContain('MdfBoardHiddenProductionStatusesSetting');
+    expect(config).toContain('MdfBoardHiddenStatusesSetting');
     expect(config).toContain('title="МДФ-доска"');
     expect(config).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
-    expect(config).toContain('{ productionStatusIds: nextStatusIds }');
+    expect(config).toContain('productionStatusIds: nextProductionStatusIds');
+    expect(config).toContain('orderStatusIds: nextOrderStatusIds');
     expect(config).toContain('aria-label="Производственные статусы, скрывающие карточки с МДФ-доски"');
+    expect(config).toContain('aria-label="Статусы заказа, скрывающие карточки с МДФ-доски"');
+    expect(config).toContain('Обычные статусы заказа');
   });
 
   it('shows a permission-aware toggle in the Auto statuses tab', () => {

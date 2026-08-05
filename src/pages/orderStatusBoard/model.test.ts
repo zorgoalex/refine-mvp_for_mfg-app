@@ -17,6 +17,8 @@ import {
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
+  resolveDefaultMdfBoardHiddenOrderStatusIds,
+  resolveMdfBoardHiddenOrderStatusIds,
   resolveMdfBoardHiddenProductionStatusIds,
   serializeOrderStatusBoardViewState,
   toggleCncCardStandardOverride,
@@ -312,6 +314,17 @@ describe('order status board model', () => {
       productionStatusName: 'На отгрузку',
       orderStatusName: 'В работе',
     }, new Set([11]))).toBe(true);
+    expect(isCncOrderHiddenFromMdfBoard({
+      ...card(2700),
+      orderStatusId: 7,
+      orderStatusName: 'Готов к выдаче',
+    }, new Set(), new Set([7]))).toBe(true);
+    expect(isCncOrderHiddenFromMdfBoard({
+      ...card(2700),
+      orderStatusId: 8,
+      orderStatusName: 'Выдан',
+      orderStatusIssuedOrLater: true,
+    }, new Set(), new Set())).toBe(false);
   });
 
   it('resolves explicit MDF board hidden production statuses by id', () => {
@@ -352,7 +365,37 @@ describe('order status board model', () => {
     }))).toEqual([10, 11]);
     expect(Array.from(resolveMdfBoardHiddenProductionStatusIds(columns, {
       productionStatusIds: [],
+      orderStatusIds: [],
     }))).toEqual([]);
+  });
+
+  it('resolves explicit MDF board hidden order statuses without changing legacy settings', () => {
+    expect(resolveMdfBoardHiddenOrderStatusIds(null)).toBeUndefined();
+    expect(resolveMdfBoardHiddenOrderStatusIds({
+      productionStatusIds: [10],
+    })).toBeUndefined();
+    expect(Array.from(resolveMdfBoardHiddenOrderStatusIds({
+      productionStatusIds: [10],
+      orderStatusIds: [8, 8, 0, Number.NaN, 7],
+    }) ?? [])).toEqual([7, 8]);
+    expect(Array.from(resolveMdfBoardHiddenOrderStatusIds({
+      productionStatusIds: [10],
+      orderStatusIds: [],
+    }) ?? [])).toEqual([]);
+  });
+
+  it('derives legacy MDF order-status defaults from «Выдан» sort order with name fallback', () => {
+    expect(resolveDefaultMdfBoardHiddenOrderStatusIds([
+      { id: 5, name: 'В работе', sortOrder: 5 },
+      { id: 8, name: ' Выдан ', sortOrder: 20 },
+      { id: 9, name: 'Архивный пользовательский', sortOrder: 30 },
+      { id: 10, name: 'Завершён' },
+    ])).toEqual([8, 9, 10]);
+    expect(resolveDefaultMdfBoardHiddenOrderStatusIds([
+      { id: 5, name: 'В работе', sortOrder: 5 },
+      { id: 8, name: 'Выдан' },
+      { id: 10, name: 'Завершен', sortOrder: 10 },
+    ])).toEqual([8, 10]);
   });
 
   it('removes a bath only when every linked order has left the MDF board', () => {
@@ -360,10 +403,11 @@ describe('order status board model', () => {
       {
         key: 'baths',
         title: 'Карты ванн',
-        total: 4,
+        total: 5,
         packets: [],
         baths: [
           cncBath('terminal', ['2700'], [2700]),
+          cncBath('cross-status-terminal', ['2700', '2712'], [2700, 2712]),
           cncBath('mixed', ['2700', '2706'], [2700, 2706]),
           cncBath('order-terminal', ['2712'], [2712]),
           cncBath('status-missing', ['3000'], [3000]),
@@ -387,10 +431,15 @@ describe('order status board model', () => {
     const cards = [
       { ...card(2700), productionStatusId: 10, productionStatusName: 'Закатан' },
       { ...card(2706), productionStatusId: 9, productionStatusName: 'К закатке' },
-      { ...card(2712), orderStatusName: 'Выдан' },
+      { ...card(2712), orderStatusId: 7, orderStatusName: 'Готов к выдаче' },
     ];
 
-    const filtered = filterCncBathColumnsByOrderStatuses(columns, cards, new Set([10]));
+    const filtered = filterCncBathColumnsByOrderStatuses(
+      columns,
+      cards,
+      new Set([10]),
+      new Set([7]),
+    );
 
     expect(filtered[0]?.baths.map((bath) => bath.bathCardId)).toEqual([
       'mixed',

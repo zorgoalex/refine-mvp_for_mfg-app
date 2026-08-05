@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-05",
+    title: "МДФ-доска: скрытие по обычным статусам заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В настройках автостатусов МДФ-доски можно отдельно выбрать обычные статусы заказа и производственные статусы, которые скрывают заказы и полностью завершённые ванны.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-05",
     title: "Меню производства: отдельная доска МДФ-работ",
     services: ["ERP"],
     repositories: ["repo_erp"],

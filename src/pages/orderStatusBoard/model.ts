@@ -10,8 +10,9 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
-export interface MdfBoardHiddenProductionStatusesSetting {
+export interface MdfBoardHiddenStatusesSetting {
   productionStatusIds: number[];
+  orderStatusIds?: number[];
 }
 
 export const DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES = [
@@ -23,11 +24,12 @@ export const DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES = [
 const MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES = new Set(
   DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES,
 );
-const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set([
+const DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES = [
   'выдан',
   'завершен',
   'завершён',
-]);
+] as const;
+const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set(DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1d' | '1w' | '2w' | '1m';
 export type CncCardDisplayMode = 'standard' | 'compact';
@@ -239,22 +241,25 @@ export function filterCncBathColumnsByMachineOrderMatches(
 export function isCncOrderHiddenFromMdfBoard(
   card: OrderStatusBoardCard,
   hiddenProductionStatusIds?: ReadonlySet<number>,
+  hiddenOrderStatusIds?: ReadonlySet<number>,
 ): boolean {
   const productionStatusName = normalizeStatusName(card.productionStatusName);
   const orderStatusName = normalizeStatusName(card.orderStatusName);
   const hiddenByProductionStatus = hiddenProductionStatusIds
     ? isPositiveInteger(card.productionStatusId) && hiddenProductionStatusIds.has(card.productionStatusId)
     : MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES.has(productionStatusName);
+  const hiddenByOrderStatus = hiddenOrderStatusIds
+    ? isPositiveInteger(card.orderStatusId) && hiddenOrderStatusIds.has(card.orderStatusId)
+    : card.orderStatusIssuedOrLater === true || MDF_HIDDEN_ORDER_STATUS_NAMES.has(orderStatusName);
   return (
     hiddenByProductionStatus
-    || card.orderStatusIssuedOrLater === true
-    || MDF_HIDDEN_ORDER_STATUS_NAMES.has(orderStatusName)
+    || hiddenByOrderStatus
   );
 }
 
 export function resolveMdfBoardHiddenProductionStatusIds(
   columns: readonly OrderStatusBoardColumn[],
-  setting: MdfBoardHiddenProductionStatusesSetting | null | undefined,
+  setting: MdfBoardHiddenStatusesSetting | null | undefined,
 ): Set<number> {
   if (setting && Array.isArray(setting.productionStatusIds)) {
     return new Set(normalizePositiveIntegerArray(setting.productionStatusIds));
@@ -272,14 +277,56 @@ export function resolveMdfBoardHiddenProductionStatusIds(
   return ids;
 }
 
+export function resolveMdfBoardHiddenOrderStatusIds(
+  setting: MdfBoardHiddenStatusesSetting | null | undefined,
+): Set<number> | undefined {
+  if (!setting || !Array.isArray(setting.orderStatusIds)) return undefined;
+  return new Set(normalizePositiveIntegerArray(setting.orderStatusIds));
+}
+
+export function resolveDefaultMdfBoardHiddenOrderStatusIds(
+  statuses: readonly {
+    id: number;
+    name: string;
+    sortOrder?: number | null;
+  }[],
+): number[] {
+  const issuedSortOrders = statuses
+    .filter((status) => normalizeStatusName(status.name) === 'выдан')
+    .map((status) => status.sortOrder)
+    .filter((sortOrder): sortOrder is number =>
+      typeof sortOrder === 'number' && Number.isFinite(sortOrder));
+  const issuedSortOrder = issuedSortOrders.length > 0 ? Math.min(...issuedSortOrders) : null;
+
+  return normalizePositiveIntegerArray(
+    statuses
+      .filter((status) => {
+        if (
+          issuedSortOrder !== null
+          && typeof status.sortOrder === 'number'
+          && Number.isFinite(status.sortOrder)
+        ) {
+          return status.sortOrder >= issuedSortOrder;
+        }
+        return MDF_HIDDEN_ORDER_STATUS_NAMES.has(normalizeStatusName(status.name));
+      })
+      .map((status) => status.id),
+  );
+}
+
 export function filterCncBathColumnsByOrderStatuses(
   columns: CncTelegramTodayColumn[],
   orderCards: readonly OrderStatusBoardCard[],
   hiddenProductionStatusIds?: ReadonlySet<number>,
+  hiddenOrderStatusIds?: ReadonlySet<number>,
 ): CncTelegramTodayColumn[] {
   const hiddenOrderIds = new Set(
     orderCards
-      .filter((card) => isCncOrderHiddenFromMdfBoard(card, hiddenProductionStatusIds))
+      .filter((card) => isCncOrderHiddenFromMdfBoard(
+        card,
+        hiddenProductionStatusIds,
+        hiddenOrderStatusIds,
+      ))
       .map((card) => card.orderId),
   );
   if (hiddenOrderIds.size === 0) return columns;
