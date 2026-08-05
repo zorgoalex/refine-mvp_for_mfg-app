@@ -142,6 +142,7 @@ export interface OrderDetail {
   link_pdf_file?: string | null;
   cut_job?: CutDetailLastReadyJobRef | null;
   bath_cut_job?: CutDetailLastReadyJobRef | null;
+  bazis_cut_sets?: Array<{ bazisCutSetId: number; name: string }>;
 
   // Management
   delete_flag?: boolean;

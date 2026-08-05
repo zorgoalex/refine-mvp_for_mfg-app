@@ -588,6 +588,12 @@ export interface OrderDetailDto {
   refKey1c?: string | null;
   cutJob?: CutDetailLastReadyJobRef | null;
   bathCutJob?: CutDetailLastReadyJobRef | null;
+  bazisCutSets?: OrderDetailBazisCutSetRefDto[];
+}
+
+export interface OrderDetailBazisCutSetRefDto {
+  bazisCutSetId: number;
+  name: string;
 }
 
 export interface PaymentDto {

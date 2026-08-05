@@ -145,6 +145,8 @@ describe('orders OpenAPI contract', () => {
     expect(
       sectionBetween(orderDetailDtoSection, '        materialId:', '        sheetMaterialTypeId:'),
     ).toContain('nullable: true');
+    expect(orderDetailDtoSection).toContain('- bazisCutSets');
+    expect(orderDetailDtoSection).toContain('bazisCutSetId:');
 
     // SaveOrderDetailDto (request): sheetMaterialTypeId in required; materialId not in required
     const saveOrderDetailDtoSection = sectionBetween(
@@ -238,6 +240,16 @@ describe('orders controller Swagger schemas — Variant B shape (generated-doc a
     expect(typeof materialIdProp.description).toBe('string');
     const desc = (materialIdProp.description as string).toLowerCase();
     expect(desc).toMatch(/null|absent/);
+  });
+
+  it('orderDetailResponseSwaggerSchema documents linked Basis-cut sets', () => {
+    expect(orderDetailResponseSwaggerSchema.required).toContain('bazisCutSets');
+    expect(orderDetailResponseSwaggerSchema.properties.bazisCutSets).toMatchObject({
+      type: 'array',
+      items: {
+        required: ['bazisCutSetId', 'name'],
+      },
+    });
   });
 
   it('orderDetailResponseSwaggerSchema: materialId is NOT in required (Variant B: always null)', () => {

@@ -170,7 +170,13 @@ export type OrderDetailDto = CalculatedOrderDetailDto & {
   materialName?: string | null;
   cutJob?: OrderDetailCutJobRefDto | null;
   bathCutJob?: OrderDetailCutJobRefDto | null;
+  bazisCutSets: OrderDetailBazisCutSetRefDto[];
 };
+
+export interface OrderDetailBazisCutSetRefDto {
+  bazisCutSetId: number;
+  name: string;
+}
 
 export interface OrderDetailCutJobRefDto {
   cutJobId: number;

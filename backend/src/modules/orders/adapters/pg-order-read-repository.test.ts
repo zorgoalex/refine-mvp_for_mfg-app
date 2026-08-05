@@ -247,6 +247,10 @@ describe('PgOrderReadRepository', () => {
           detailCost: 120,
           cutJob: { cutJobId: 41, resultNo: 2, cutNumber: '41-2', name: 'Раскрой заказа' },
           bathCutJob: { cutJobId: 42, resultNo: 3, cutNumber: '42-3', name: 'Ванна заказа' },
+          bazisCutSets: [
+            { bazisCutSetId: 8, name: 'БР-8' },
+            { bazisCutSetId: 12, name: 'Фасады' },
+          ],
         },
       ],
       payments: [{ id: 300, amount: 50 }],
@@ -271,6 +275,21 @@ describe('PgOrderReadRepository', () => {
       },
       version: 3,
     });
+  });
+
+  it('reads linked Basis-cut sets by source order detail with stable numeric order', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await repository.getOrderById({
+      currentUser: currentUser('42'),
+      orderId: 100,
+    });
+
+    const detailQuery = database.queries.find((query) => query.text.includes('FROM order_details od'))?.text ?? '';
+    expect(detailQuery).toContain('FROM bazis_cut_set_details d');
+    expect(detailQuery).toContain('d.source_order_detail_id = od.detail_id');
+    expect(detailQuery).toContain('ORDER BY refs.bazis_cut_set_id');
   });
 
   it('keeps the default getOrderById SQL free of trash-only select and join fragments', async () => {
@@ -698,6 +717,10 @@ function createDatabase() {
               bath_cut_job_param_profile_id: 7,
               bath_cut_job_profile_name: 'Вакуум',
               bath_cut_job_profile_is_active: true,
+              bazis_cut_sets: [
+                { bazisCutSetId: 12, name: 'Фасады' },
+                { bazisCutSetId: 8, name: 'БР-8' },
+              ],
             },
           ],
         };

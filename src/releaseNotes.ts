@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-05",
+    title: "Связи деталей с наборами Базис-раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В форме просмотра ERP-заказа и в списке панелей Базис-проекта появилась колонка «Базис-раскрой» с кликабельными номерами всех связанных наборов.",
+      "На мобильной форме просмотра ERP-заказа связанные наборы показываются в карточке детали.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-05",
     title: "Базис-проекты: конструктор из XML и в ERP-заказе",
     services: ["ERP"],
     repositories: ["repo_erp"],
