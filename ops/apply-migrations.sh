@@ -896,6 +896,23 @@ probe_file() {
                          AND COALESCE(NULLIF(btrim(source.basis_data), ''), '') = ''
                          AND btrim(snapshot.position) IN ('', '.')
                      );" ;;
+    100_bazis_cut_product_bath_export*) probe_all \
+                     "$(q_col bazis_cut_set_details source_bath_cut_number)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                       FROM information_schema.columns
+                       WHERE table_schema='public'
+                         AND table_name='bazis_cut_set_details'
+                         AND column_name='source_bath_cut_number'
+                         AND is_nullable='NO'
+                         AND column_default IS NOT NULL
+                     );" \
+                     "SELECT col_description(
+                       'bazis_cut_set_details'::regclass,
+                       (SELECT attnum FROM pg_attribute
+                        WHERE attrelid='bazis_cut_set_details'::regclass
+                          AND attname='source_bath_cut_number')
+                     ) LIKE 'bazis-cut-bath-number-v1:%';" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -907,7 +924,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

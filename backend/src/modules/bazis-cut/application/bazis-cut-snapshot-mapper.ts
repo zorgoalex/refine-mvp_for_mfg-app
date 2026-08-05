@@ -86,6 +86,16 @@ export function resolveBazisDetailLabels(input: {
   };
 }
 
+export function buildBazisBathCutNumber(
+  cutJobId: number | null | undefined,
+  resultNo: number | null | undefined,
+): string {
+  return typeof cutJobId === 'number' && Number.isInteger(cutJobId) && cutJobId > 0
+    && typeof resultNo === 'number' && Number.isInteger(resultNo) && resultNo > 0
+    ? `${cutJobId}-${resultNo}`
+    : '';
+}
+
 function roundTenth(value: number): number {
   return Math.round((value + Number.EPSILON) * 10) / 10;
 }

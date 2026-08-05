@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
@@ -15,10 +16,18 @@ const user: CurrentUser = {
 };
 
 afterEach(() => vi.restoreAllMocks());
+const repositorySource = readFileSync(new URL('./pg-bazis-cut-repository.ts', import.meta.url), 'utf8');
 
 describe('PgBazisCutRepository security and event contract', () => {
   it('builds the backend-owned set name from its generated id', () => {
     expect(buildBazisCutSetName(42)).toBe('БР-42');
+  });
+
+  it('snapshots the Basis root product and latest ready vacuum result number', () => {
+    expect(repositorySource).toMatch(/WITH RECURSIVE ancestry[\s\S]*ancestry\.node_kind='product'/);
+    expect(repositorySource).toMatch(/cj\.last_calc_params->>'layout_mode'[\s\S]*='vacuum_table'/);
+    expect(repositorySource).toContain('sourceBathCutNumber: buildBazisBathCutNumber(');
+    expect(repositorySource).toContain("'source_bazis_product_name', 'source_bath_cut_number'");
   });
 
   it('uses unprefixed ERP order numbers in the list', async () => {
@@ -46,6 +55,7 @@ describe('PgBazisCutRepository security and event contract', () => {
 
     expect(card.orders).toEqual([{ id: 30, label: '1' }]);
     expect(card.details[0].sourceOrderFullNumber).toBe('P-1');
+    expect(card.details[0].sourceBathCutNumber).toBe('28-2');
   });
 
   it('maps a multi-product Basis revision to Basis project fields', () => {
@@ -182,7 +192,7 @@ function detailRow() {
     source_bazis_project_id: 60, source_bazis_revision_id: 70, source_bazis_node_id: 80,
     source_order_name: '1', source_order_full_number: 'P-1', source_project_code: 'P',
     source_bazis_project_name: 'BP', source_bazis_order_no: 'BO',
-    source_bazis_product_name: 'Кухня', cut_enabled: true,
+    source_bazis_product_name: 'Кухня', source_bath_cut_number: '28-2', cut_enabled: true,
     material_type: 'Площадной', material_name: 'ЛДСП', material_article: '', thickness_mm: '16',
     position: '001', part_name: 'Бок', finished_length_mm: '100', finished_width_mm: '50',
     cut_length_mm: '100', cut_width_mm: '50', quantity: 2, orientation: 'Не задана', groove: '',

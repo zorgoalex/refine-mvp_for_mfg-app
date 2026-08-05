@@ -2282,7 +2282,14 @@ export class PgBazisRepository implements BazisRepositoryPort {
         invalidNodeIds.push(detail.bazisNodeId);
         return [];
       }
-      return [{ ...fields, sourceBazisProjectName: labels.sourceBazisProjectName }];
+      return [{
+        ...fields,
+        sourceBazisProjectName: labels.sourceBazisProjectName,
+        sourceBazisOrderNo: labels.sourceBazisOrderNo,
+        sourceBazisProductName: labels.sourceBazisProductName,
+        sourceBathCutNumber: '',
+        xlsOrder: labels.sourceBazisProjectName,
+      }];
     });
 
     if (invalidNodeIds.length > 0) {

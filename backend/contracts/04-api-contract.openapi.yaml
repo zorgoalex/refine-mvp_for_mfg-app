@@ -11974,7 +11974,7 @@ components:
           required: [bazisCutSetDetailId, bazisCutSetId, sortOrder, sourceOrderDetailId, sourceOrderId,
             sourceProjectId, sourceBazisProjectId, sourceBazisRevisionId, sourceBazisNodeId,
             sourceOrderName, sourceOrderFullNumber, sourceProjectCode, sourceBazisProjectName,
-            sourceBazisOrderNo, sourceBazisProductName, createdAt, updatedAt]
+            sourceBazisOrderNo, sourceBazisProductName, sourceBathCutNumber, createdAt, updatedAt]
           properties:
             bazisCutSetDetailId: { type: integer, format: int64 }
             bazisCutSetId: { type: integer, format: int64 }
@@ -11991,6 +11991,7 @@ components:
             sourceBazisProjectName: { type: string }
             sourceBazisOrderNo: { type: string }
             sourceBazisProductName: { type: string }
+            sourceBathCutNumber: { type: string }
             createdAt: { type: string, format: date-time }
             updatedAt: { type: string, format: date-time }
     BazisCutSet:

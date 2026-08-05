@@ -111,6 +111,7 @@ export interface BazisCutSetDetailDto extends BazisCutDetailFields {
   sourceBazisProjectName: string;
   sourceBazisOrderNo: string;
   sourceBazisProductName: string;
+  sourceBathCutNumber: string;
   createdAt: string;
   updatedAt: string;
 }

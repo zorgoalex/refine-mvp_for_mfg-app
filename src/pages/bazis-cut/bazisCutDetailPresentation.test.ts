@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
+import {
+  buildBazisCutCardPosition,
+  buildBazisCutQrCode,
+  summarizeBazisCutDetails,
+} from './bazisCutDetailPresentation';
+
+describe('buildBazisCutCardPosition', () => {
+  it.each([
+    ['BZ-100', '', '.01.00.07', 'BZ-100.01.00.07'],
+    ['', 'BP-7', 'Кухня.01.00.07', 'BP-7Кухня.01.00.07'],
+    ['', '', 'ERP-1491.7', 'ERP-1491.7'],
+  ])('prefixes Position with the filled Basis order or Basis project',
+    (order, project, position, expected) => {
+      expect(buildBazisCutCardPosition({
+        sourceBazisOrderNo: order,
+        sourceBazisProjectName: project,
+        position,
+      })).toBe(expected);
+    });
+
+  it('prefers the Basis order when both provenance fields are unexpectedly filled', () => {
+    expect(buildBazisCutCardPosition({
+      sourceBazisOrderNo: ' BZ-100 ',
+      sourceBazisProjectName: ' BP-7 ',
+      position: ' .01 ',
+    })).toBe('BZ-100.01');
+  });
+});
 
 describe('buildBazisCutQrCode', () => {
   it.each([

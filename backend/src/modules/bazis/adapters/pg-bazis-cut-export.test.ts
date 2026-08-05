@@ -95,11 +95,11 @@ describe('PgBazisRepository.exportCutXls', () => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]]!;
     const data = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
     expect(data[1]?.slice(0, 15)).toEqual([
-      'Да', 'Площадной', 'ЛДСП Белый', '', 16, 'BP-7', 'Кухня.01.00.01',
-      'BP-7Кухня.01.00.01', 'Панель 101', 500, 1000, 500, 1000, 2, 'Не задана',
+      'Да', 'Площадной', 'ЛДСП Белый', '', 16, 'BP-7', 'Кухня', 'BP-7Кухня.01.00.01',
+      'BP-7Кухня.01.00.01', 'Панель 101', 500, 1000, 500, 1000, 2,
     ]);
-    expect(data[1]?.slice(32, 35)).toEqual(['Модерн', 'Присадка:', 'ПВХ белая']);
-    expect(data[2]?.[6]).toBe('Шкаф.02.00.01');
+    expect(data[1]?.slice(33, 37)).toEqual(['Модерн', 'Присадка:', '', 'ПВХ белая']);
+    expect(data[2]?.[7]).toBe('BP-7Шкаф.02.00.01');
     const auditCall = query.mock.calls.find(([text]) => String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('));
     expect(auditCall?.[1]?.[0]).toBe('bazis.cut_xls_exported');
     expect(transaction).toHaveBeenCalledTimes(1);

@@ -3,6 +3,17 @@ export interface BazisCutQrCodeSource {
   position?: string | null;
 }
 
+export interface BazisCutPositionSource {
+  sourceBazisOrderNo?: string | null;
+  sourceBazisProjectName?: string | null;
+  position?: string | null;
+}
+
+export function buildBazisCutCardPosition(source: BazisCutPositionSource): string {
+  const prefix = clean(source.sourceBazisOrderNo) || clean(source.sourceBazisProjectName);
+  return `${prefix}${clean(source.position)}`;
+}
+
 export function buildBazisCutQrCode(source: BazisCutQrCodeSource): string {
   return `${clean(source.sourceBazisProjectName)}${clean(source.position)}`;
 }

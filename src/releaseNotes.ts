@@ -31,6 +31,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-05",
+    title: "Базис-раскрой: изделие, ванна и полная позиция",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В карточке набора и XLS появились поля «Изделие» и «Ванна» с комплексным номером расчёта ванны.",
+    ],
+    changed: [
+      "Колонка «Заказ» XLS всегда получает значение «Базис-заказ», а «Позиция» дополняется соответствующим номером заказа или Базис-проекта.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-05",
     title: "МДФ-доска: скрытие по обычным статусам заказа",
     services: ["ERP"],
     repositories: ["repo_erp"],

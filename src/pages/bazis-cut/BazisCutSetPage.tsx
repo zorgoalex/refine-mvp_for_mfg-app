@@ -12,7 +12,11 @@ import {
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
-import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
+import {
+  buildBazisCutCardPosition,
+  buildBazisCutQrCode,
+  summarizeBazisCutDetails,
+} from './bazisCutDetailPresentation';
 import { saveBazisCutFile, type BazisCutSaveHandle } from './bazisCutSaveFile';
 import './BazisCutSetPage.css';
 
@@ -61,8 +65,8 @@ const FIELD_GROUPS = ['Основное', 'Размеры', 'Кромки', 'Д�
 const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
   FIELDS.filter((field) => field.group === group && field.key !== 'position' && field.key !== 'partName'),
 );
-const LEADING_COLUMN_COUNT = 7;
-const QR_CODE_COLUMN_INDEX = 5;
+const LEADING_COLUMN_COUNT = 9;
+const QR_CODE_COLUMN_INDEX = 7;
 const QR_CODE_STICKY_CLASS = 'bazis-cut-sticky-qr';
 const QR_CODE_STICKY_LEFT_PX = 58 + 210 + 150 + 150;
 const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
@@ -152,7 +156,7 @@ export const BazisCutSetPage: React.FC = () => {
     <Card title="Детали набора"><Table className="bazis-cut-set-details-table"
       style={{ '--bazis-cut-sticky-qr-left': `${QR_CODE_STICKY_LEFT_PX}px` } as React.CSSProperties}
       rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
-      loading={loading} pagination={false} scroll={{ x: 5470, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
+      loading={loading} pagination={false} scroll={{ x: 5750, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
       rowClassName={(row) => orderDeletedReferenceClassName(row.sourceOrderDeleted)}
       summary={(details) => <DetailTableSummary details={details} canManage={canManage} />}
       size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
@@ -198,8 +202,14 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
       render: (value: string) => value
         ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
         : <Text type="secondary">—</Text> },
+    { title: 'Изделие', dataIndex: 'sourceBazisProductName', key: 'sourceBazisProductName', width: 140,
+      render: (value: string) => value || <Text type="secondary">—</Text> },
+    { title: 'Ванна', dataIndex: 'sourceBathCutNumber', key: 'sourceBathCutNumber', width: 140,
+      render: (value: string) => value
+        ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        : <Text type="secondary">—</Text> },
     { title: 'Позиция', dataIndex: 'position', key: 'position', width: 130,
-      render: (value: string) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span> },
+      render: (_value: string, row) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{buildBazisCutCardPosition(row)}</span> },
     { title: 'QR-code', key: 'qrCode', className: QR_CODE_STICKY_CLASS, width: 220, render: (_: unknown, row: BazisCutSetDetailDto) => {
       const qrCode = buildBazisCutQrCode(row);
       return qrCode

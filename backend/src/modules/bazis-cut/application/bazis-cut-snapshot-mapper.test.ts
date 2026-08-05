@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { bazisCutFieldsToRow } from './bazis-xls-writer';
 import {
+  buildBazisBathCutNumber,
   buildBazisCutPosition,
   buildOrdinaryErpPosition,
   mapBazisCutSnapshotFields,
 } from './bazis-cut-snapshot-mapper';
+
+describe('buildBazisBathCutNumber', () => {
+  it.each([
+    [28, 2, '28-2'],
+    [null, 2, ''],
+    [28, null, ''],
+    [0, 2, ''],
+  ])('keeps only the cut-job and result version numbers', (jobId, resultNo, expected) => {
+    expect(buildBazisBathCutNumber(jobId, resultNo)).toBe(expected);
+  });
+});
 
 // Real source L/W/orientation are extracted from adjacent 1491.xml; expected
 // L/W and the remaining export values are independently extracted from 1491.xls.
@@ -77,7 +89,7 @@ describe('buildBazisCutPosition', () => {
 });
 
 describe('1491 snapshot mapper golden', () => {
-  it('reproduces all 35 export cells for all 28 positions from real XML source dimensions/orientation', () => {
+  it('reproduces all 37 export cells for all 28 positions from real XML source dimensions/orientation', () => {
     const rows = GOLDEN_1491.map(([position, name, sourceLength, sourceWidth, verticalTexture,
       _length, _width, quantity, milling, route, film], index) => {
       const fields = mapBazisCutSnapshotFields({
@@ -95,19 +107,19 @@ describe('1491 snapshot mapper golden', () => {
       length, width, quantity, milling, route, film]) => {
       const computedPosition = `.${position}`;
       return [
-      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', computedPosition, computedPosition, name, length, width,
+      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', '', computedPosition, computedPosition, name, length, width,
       Math.round(length * 10) / 10, Math.round(width * 10) / 10, quantity, 'Не задана', '',
-      '', '', 0, '', '', 0, '', '', 0, '', '', 0, null, '', '', '', milling, route, film,
+      '', '', 0, '', '', 0, '', '', 0, '', '', 0, null, '', '', '', milling, route, '', film,
       ];
     });
 
     expect(rows).toHaveLength(28);
-    expect(rows.every((row) => row.length === 35)).toBe(true);
+    expect(rows.every((row) => row.length === 37)).toBe(true);
     expect(rows).toEqual(expected);
-    expect(rows.reduce((sum, row) => sum + Number(row[13]), 0)).toBe(30);
+    expect(rows.reduce((sum, row) => sum + Number(row[14]), 0)).toBe(30);
     expect(GOLDEN_1491.filter((row) => row[4])).toHaveLength(26);
-    expect(rows.filter((row) => Number(row[9]) < Number(row[10]))).toHaveLength(9);
-    expect(rows[0][6]).toBe('.01.00.07');
+    expect(rows.filter((row) => Number(row[10]) < Number(row[11]))).toHaveLength(9);
     expect(rows[0][7]).toBe('.01.00.07');
+    expect(rows[0][8]).toBe('.01.00.07');
   });
 });

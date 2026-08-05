@@ -6,16 +6,16 @@ export const BAZIS_CUT_SHEET_NAME = 'Детали для раскроя';
 
 export const BAZIS_CUT_HEADERS = [
   'Кроить', 'Тип материала', 'Материал', 'Артикул материала', 'Толщина',
-  'Заказ', 'Позиция', 'QR-code', 'Наименования', 'Длина готовая', 'Ширина готовая',
+  'Заказ', 'Изделие', 'Позиция', 'QR-code', 'Наименования', 'Длина готовая', 'Ширина готовая',
   'Длина распиловочная', 'Ширина распиловочная', 'Кол-во', 'Ориентация', 'Паз',
   'L1 - Наим.', 'L1 - Обозн.', 'L1 - Толщина', 'L2 - Наим.', 'L2 - Обозн.',
   'L2 - Толщина', 'W1 - Наим.', 'W1 - Обозн.', 'W1 - Толщина', 'W2 - Наим.',
   'W2 - Обозн.', 'W2 - Толщина', 'Приоритет', 'Комментарий',
-  '%Пользовательское свойство', '%Склейка', '%Фрезировка', '%Маршрут', '%Пленка',
+  '%Пользовательское свойство', '%Склейка', '%Фрезировка', '%Маршрут', 'Ванна', '%Пленка',
 ] as const;
 
 export function buildBazisCutXls(
-  details: readonly (BazisCutDetailFields & { sourceBazisProjectName?: string })[],
+  details: readonly BazisCutXlsDetail[],
 ): Buffer {
   if (details.length === 0) {
     throw new ApiError(422, 'BAZIS_CUT_SET_EMPTY', 'Нельзя экспортировать пустой набор');
@@ -38,12 +38,14 @@ export function buildBazisCutXls(
 }
 
 export function bazisCutFieldsToRow(
-  detail: BazisCutDetailFields & { sourceBazisProjectName?: string },
+  detail: BazisCutXlsDetail,
 ): unknown[] {
+  const order = detail.xlsOrder?.trim() ?? detail.sourceBazisOrderNo?.trim() ?? '';
   return [
       detail.cutEnabled ? 'Да' : 'Нет', detail.materialType, safeText(detail.materialName),
-      safeText(detail.materialArticle), detail.thicknessMm, safeText(detail.sourceBazisProjectName ?? ''),
-      safeText(detail.position), buildBazisCutQrCode(detail),
+      safeText(detail.materialArticle), detail.thicknessMm, safeText(order),
+      safeText(detail.sourceBazisProductName ?? ''), safeText(`${order}${detail.position.trim()}`),
+      buildBazisCutQrCode(detail),
       safeText(detail.partName), detail.finishedLengthMm, detail.finishedWidthMm,
       detail.cutLengthMm, detail.cutWidthMm, detail.quantity, safeText(detail.orientation),
       safeText(detail.groove), safeText(detail.l1Name), safeText(detail.l1Designation),
@@ -52,15 +54,24 @@ export function bazisCutFieldsToRow(
       detail.w1ThicknessMm, safeText(detail.w2Name), safeText(detail.w2Designation),
       detail.w2ThicknessMm, detail.priority, safeText(detail.comment),
       safeText(detail.customProperty), safeText(detail.glue), safeText(detail.milling),
-      safeText(detail.route), safeText(detail.film),
+      safeText(detail.route), safeText(detail.sourceBathCutNumber ?? ''), safeText(detail.film),
     ];
 }
 
 export function buildBazisCutQrCode(
-  detail: BazisCutDetailFields & { sourceBazisProjectName?: string },
+  detail: BazisCutXlsDetail,
 ): string {
   return `${detail.sourceBazisProjectName?.trim() ?? ''}${detail.position.trim()}`;
 }
+
+type BazisCutXlsDetail = BazisCutDetailFields & {
+  sourceBazisProjectName?: string;
+  sourceBazisOrderNo?: string;
+  sourceBazisProductName?: string;
+  sourceBathCutNumber?: string;
+  /** Direct Basis-project export preserves its project-derived Excel Order. */
+  xlsOrder?: string;
+};
 
 function safeText(value: string): string {
   // aoa_to_sheet stores primitive strings as string cells. The explicit cast

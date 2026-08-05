@@ -30,6 +30,7 @@ describe('Bazis-cut OpenAPI contract', () => {
     expect(contract.match(/name: setId/g)?.length).toBeGreaterThanOrEqual(1);
     expect(contract.match(/required: \[cutEnabled,[\s\S]*?film\]/)?.[0]).toContain('priority');
     expect(contract).toContain('position: { type: string }');
+    expect(contract).toContain('sourceBathCutNumber: { type: string }');
     expect(contract).toContain('required: [orderId, detailIds]');
     expect(contract).not.toContain('required: [name, orderId, detailIds]');
   });
@@ -41,6 +42,7 @@ describe('Bazis-cut OpenAPI contract', () => {
     expect(controller).toContain("description: 'Strict full replacement: all 33 editable Basis fields plus expectedVersion'");
     expect(controller.match(/@ApiQuery\(/g)).toHaveLength(3);
     expect(controller).toContain('additionalProperties: false');
+    expect(controller).toContain("sourceBathCutNumber: { type: 'string' }");
   });
 
   it('generates strict 33-field request and JSON response schemas at runtime', async () => {

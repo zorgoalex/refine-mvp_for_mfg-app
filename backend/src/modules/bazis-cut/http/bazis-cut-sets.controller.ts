@@ -67,7 +67,7 @@ const detailResponseSchema: SchemaObject = { type: 'object', additionalPropertie
   required: [...detailFieldNames, 'bazisCutSetDetailId', 'bazisCutSetId', 'sortOrder', 'sourceOrderDetailId',
     'sourceOrderId', 'sourceProjectId', 'sourceBazisProjectId', 'sourceBazisRevisionId', 'sourceBazisNodeId',
     'sourceOrderDeleted', 'sourceOrderName', 'sourceOrderFullNumber', 'sourceProjectCode', 'sourceBazisProjectName', 'sourceBazisOrderNo',
-    'sourceBazisProductName',
+    'sourceBazisProductName', 'sourceBathCutNumber',
     'createdAt', 'updatedAt'],
   properties: { ...detailProperties,
     bazisCutSetDetailId: { type: 'integer', format: 'int64' }, bazisCutSetId: { type: 'integer', format: 'int64' },
@@ -81,7 +81,7 @@ const detailResponseSchema: SchemaObject = { type: 'object', additionalPropertie
     sourceBazisNodeId: { type: 'integer', format: 'int64', nullable: true },
     sourceOrderName: { type: 'string' }, sourceOrderFullNumber: { type: 'string' }, sourceProjectCode: { type: 'string' },
     sourceBazisProjectName: { type: 'string' }, sourceBazisOrderNo: { type: 'string' },
-    sourceBazisProductName: { type: 'string' },
+    sourceBazisProductName: { type: 'string' }, sourceBathCutNumber: { type: 'string' },
     createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
   } };
 const setResponseSchema: SchemaObject = { type: 'object', additionalProperties: false,

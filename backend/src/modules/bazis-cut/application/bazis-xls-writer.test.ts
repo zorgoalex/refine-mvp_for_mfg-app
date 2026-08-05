@@ -13,16 +13,20 @@ describe('buildBazisCutXls', () => {
     const workbook = XLSX.read(bytes, { type: 'buffer', cellFormula: true });
     expect(workbook.SheetNames).toEqual([BAZIS_CUT_SHEET_NAME]);
     const sheet = workbook.Sheets[BAZIS_CUT_SHEET_NAME];
-    expect(sheet['!ref']).toBe('A1:AI2');
+    expect(sheet['!ref']).toBe('A1:AK2');
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
     expect(rows[0]).toEqual([...BAZIS_CUT_HEADERS]);
-    expect(rows[1]?.[5]).toBe('BP-7');
-    expect(rows[1]?.[6]).toBe('01.00.07');
-    expect(rows[1]?.[7]).toBe('BP-701.00.07');
+    expect(BAZIS_CUT_HEADERS.indexOf('Изделие')).toBe(BAZIS_CUT_HEADERS.indexOf('Заказ') + 1);
+    expect(BAZIS_CUT_HEADERS.indexOf('Ванна')).toBe(BAZIS_CUT_HEADERS.indexOf('%Пленка') - 1);
+    expect(rows[1]?.[5]).toBe('BZ-100');
+    expect(rows[1]?.[6]).toBe('Кухня');
+    expect(rows[1]?.[7]).toBe('BZ-10001.00.07');
+    expect(rows[1]?.[8]).toBe('BP-701.00.07');
     expect(rows[1]?.[4]).toBe(18);
-    expect(rows[1]?.[28]).toBeNull();
-    expect(rows[1]?.[29]).toBe('=literal');
-    expect(sheet.AD2?.f).toBeUndefined();
+    expect(rows[1]?.[29]).toBeNull();
+    expect(rows[1]?.[30]).toBe('=literal');
+    expect(rows[1]?.[35]).toBe('28-2');
+    expect(sheet.AE2?.f).toBeUndefined();
   });
 
   it('rejects an empty set', () => {
@@ -30,15 +34,14 @@ describe('buildBazisCutXls', () => {
   });
 
   it.each([
-    ['', 'Кухня.01.00.07', 'Кухня.01.00.07'],
-    ['1319', 'Кухня.01.00.07', '1319Кухня.01.00.07'],
-    ['1319', '', '1319'],
-    ['', '', ''],
-  ])('writes the Basis project into Order and builds QR-code from it plus Position',
-    (project, position, expectedQrCode) => {
+    ['', 'BZ-100', '.01.00.07', 'BZ-100.01.00.07', '.01.00.07'],
+    ['BP-7', '', 'Кухня.01.00.07', 'Кухня.01.00.07', 'BP-7Кухня.01.00.07'],
+    ['', '', 'ERP-1491.7', 'ERP-1491.7', 'ERP-1491.7'],
+  ])('copies Basis order into Excel Order and prefixes Excel Position with that same value',
+    (project, order, position, expectedPosition, expectedQrCode) => {
     const bytes = buildBazisCutXls([detail({
       sourceBazisProjectName: project,
-      sourceBazisOrderNo: 'BZ-100',
+      sourceBazisOrderNo: order,
       position,
     })]);
     const workbook = XLSX.read(bytes, { type: 'buffer' });
@@ -47,9 +50,10 @@ describe('buildBazisCutXls', () => {
       { header: 1, defval: null },
     );
 
-    expect(rows[1]?.[5]).toBe(project);
-    expect(rows[1]?.[6]).toBe(position);
-    expect(rows[1]?.[7]).toBe(expectedQrCode);
+    expect(rows[1]?.[5]).toBe(order);
+    expect(rows[1]?.[6]).toBe('Кухня');
+    expect(rows[1]?.[7]).toBe(expectedPosition);
+    expect(rows[1]?.[8]).toBe(expectedQrCode);
   });
 });
 
@@ -60,6 +64,7 @@ function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetai
     sourceBazisProjectId: 2, sourceBazisRevisionId: 4, sourceBazisNodeId: 5,
     sourceOrderName: '1491', sourceOrderFullNumber: 'МП-1-1491', sourceProjectCode: 'МП-1',
     sourceBazisProjectName: 'BP-7', sourceBazisOrderNo: 'BZ-100', sourceBazisProductName: 'Кухня',
+    sourceBathCutNumber: '28-2',
     cutEnabled: true, materialType: 'Площадной', materialName: 'ЛДСП Белый', materialArticle: '',
     thicknessMm: 18, position: '01.00.01', partName: 'Панель', finishedLengthMm: 410.99,
     finishedWidthMm: 374.5, cutLengthMm: 411, cutWidthMm: 374.5, quantity: 2,
