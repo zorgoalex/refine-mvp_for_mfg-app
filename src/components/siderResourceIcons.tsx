@@ -44,6 +44,7 @@ export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   orders_view: <FileTextOutlined />,
   calendar: <CalendarOutlined />,
   'order-status-board': <LayoutOutlined />,
+  'mdf-work-board': <TableOutlined />,
   scan: <QrcodeOutlined />,
   'orders-trash': <DeleteOutlined />,
   groups: <ProjectOutlined />,

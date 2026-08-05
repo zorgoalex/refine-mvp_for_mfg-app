@@ -11,6 +11,7 @@ describe('resolveTabLabel', () => {
     expect(resolveTabLabel('/orders')).toBe('Заказы');
     expect(resolveTabLabel('/calendar')).toBe('Календарь');
     expect(resolveTabLabel('/order-status-board')).toBe('Доски статусов');
+    expect(resolveTabLabel('/mdf-work-board')).toBe('МДФ-работы');
     expect(resolveTabLabel('/groups')).toBe('Группы');
   });
   it('does not expose an order id in an edit tab before the record loads', () => {
@@ -42,6 +43,7 @@ describe('resolveTabLabel', () => {
     expect(RESOURCE_LABELS.orders_view).toBe('Заказы');
     expect(RESOURCE_LABELS.groups).toBe('Группы');
     expect(RESOURCE_LABELS['order-status-board']).toBe('Доски статусов');
+    expect(RESOURCE_LABELS['mdf-work-board']).toBe('МДФ-работы');
   });
 });
 

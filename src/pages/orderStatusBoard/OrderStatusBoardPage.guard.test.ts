@@ -5,6 +5,7 @@ const page = readFileSync(
   'src/pages/orderStatusBoard/OrderStatusBoardPage.tsx',
   'utf8',
 );
+const app = readFileSync('src/App.tsx', 'utf8');
 const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
@@ -100,11 +101,15 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
-    expect(page).toContain("key: 'cnc_today'");
+    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
+    expect(page).toContain('{!fixedView && (');
+    expect(page).not.toContain("{ key: 'cnc_today', label: 'МДФ-работы' }");
+    expect(app).toContain('name: "mdf-work-board"');
+    expect(app).toContain('list: "/mdf-work-board"');
+    expect(app).toContain('<Route path="/mdf-work-board">');
     expect(page).toContain('cncTelegramApi.today');
     expect(page).not.toContain('workday ? { date: workday } : {}');
     expect(page).toContain('<CncTelegramTodayColumns');
-    expect(page).toContain("label: 'МДФ-работы'");
     expect(page).toContain("parsed: 'Файлы на станке'");
     expect(page).toContain('CncTelegramBathCardView');
     expect(page).toContain("baths_ready: 'Готовы к закатке'");

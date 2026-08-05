@@ -73,7 +73,7 @@ export const EvolutionAirNavigation: React.FC = () => {
       route: sider.calendarRoute,
       icon: <CalendarOutlined />,
       active: (activeCategory === 'Производство' && !isActive(ORDER_DOMAIN_KEYS))
-        || isActive(['calendar', 'order-status-board']),
+        || isActive(['calendar', 'order-status-board', 'mdf-work-board']),
     },
     {
       key: 'materials',

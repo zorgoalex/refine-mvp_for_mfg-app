@@ -222,18 +222,22 @@ interface BoardDragItem {
   trigger: HTMLElement | null;
 }
 
-export const OrderStatusBoardPage: React.FC = () => {
+interface OrderStatusBoardPageProps {
+  fixedView?: OrderStatusBoardViewState['view'];
+}
+
+export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
   const isOperational = useOperationalUi();
   const { canViewFinancials } = useOrderFinancialVisibility();
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const viewState = useMemo(
-    () => parseOrderStatusBoardViewState(searchParams, {
+  const viewState = useMemo(() => {
+    const parsed = parseOrderStatusBoardViewState(searchParams, {
       cncTelegram: featureFlags.cncTelegram,
-    }),
-    [searchParams],
-  );
+    });
+    return fixedView ? { ...parsed, view: fixedView } : parsed;
+  }, [fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
   const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
   const mdfBoardHiddenProductionStatusSetting =
@@ -317,10 +321,10 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
 
   useEffect(() => {
-    if (isPacker && viewState.view !== 'order') {
+    if (!fixedView && isPacker && viewState.view !== 'order') {
       updateViewState({ view: 'order' });
     }
-  }, [isPacker, updateViewState, viewState.view]);
+  }, [fixedView, isPacker, updateViewState, viewState.view]);
 
   useEffect(() => {
     if (searchDraft.trim() === viewState.search) return;
@@ -650,9 +654,6 @@ export const OrderStatusBoardPage: React.FC = () => {
     () => [
       { key: 'order', label: 'Статусы заказов' },
       ...(isPacker ? [] : [{ key: 'production', label: 'Производство' }]),
-      ...(!isPacker && featureFlags.cncTelegram
-        ? [{ key: 'cnc_today', label: 'МДФ-работы' }]
-        : []),
     ],
     [isPacker],
   );
@@ -1150,16 +1151,18 @@ export const OrderStatusBoardPage: React.FC = () => {
           </div>
         )}
 
-        <Tabs
-          className="status-board-tabs"
-          activeKey={isPacker && viewState.view !== 'order' ? 'order' : viewState.view}
-          onChange={(key) =>
-            updateViewState({
-              view: key as typeof viewState.view,
-            })
-          }
-          items={statusBoardTabItems}
-        />
+        {!fixedView && (
+          <Tabs
+            className="status-board-tabs"
+            activeKey={isPacker && viewState.view !== 'order' ? 'order' : viewState.view}
+            onChange={(key) =>
+              updateViewState({
+                view: key as typeof viewState.view,
+              })
+            }
+            items={statusBoardTabItems}
+          />
+        )}
 
         {!isCncToday && (
           <div
@@ -1572,6 +1575,10 @@ export const OrderStatusBoardPage: React.FC = () => {
     </DndProvider>
   );
 };
+
+export const MdfWorkBoardPage: React.FC = () => (
+  <OrderStatusBoardPage fixedView="cnc_today" />
+);
 
 const StatusBoardToolbarIconToggle: React.FC<{
   active: boolean;

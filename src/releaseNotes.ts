@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-05",
+    title: "Меню производства: отдельная доска МДФ-работ",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Доска «МДФ-работы» вынесена из вкладок досок статусов в отдельный пункт раздела «Производство».",
+      "Пункт «Корзина» перенесён из раздела «Производство» в раздел «Данные».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-05",
     title: "Базис-раскрой: единые названия, номера ERP и площадь деталей",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

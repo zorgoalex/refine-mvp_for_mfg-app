@@ -58,7 +58,10 @@ function resolveModernRouteFamily(pathname: string): string {
   if (pathname.startsWith('/cut-jobs') || pathname.startsWith('/cut')) return 'cut';
   if (pathname.startsWith('/bazis-cut')) return 'bazis-cut';
   if (pathname.startsWith('/bazis')) return 'bazis';
-  if (pathname.startsWith('/order-status-board')) return 'status-board';
+  if (
+    pathname.startsWith('/order-status-board')
+    || pathname.startsWith('/mdf-work-board')
+  ) return 'status-board';
   if (pathname.startsWith('/configuration')) return 'configuration';
   if (pathname.startsWith('/profile')) return 'profile';
   if (pathname.startsWith('/scan')) return 'scan';
@@ -79,7 +82,8 @@ function resolveOperationalPageKind(pathname: string): 'list' | 'show' | 'form' 
   if (
     pathname.startsWith('/calendar') ||
     pathname.startsWith('/cut') ||
-    pathname.startsWith('/order-status-board')
+    pathname.startsWith('/order-status-board') ||
+    pathname.startsWith('/mdf-work-board')
   ) return 'workspace';
   return 'list';
 }

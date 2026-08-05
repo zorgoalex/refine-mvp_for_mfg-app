@@ -1,5 +1,6 @@
 import type { PermissionName } from '../api/types/authApi.types';
 import { can, canAny, type PermissionCarrier } from './permissions';
+import { isPackerUser, type PackerRoleCarrier } from './packerStatusAccess';
 
 const FINANCIAL_NAVIGATION_RESOURCES = new Set(['payments', 'payments_view']);
 
@@ -15,6 +16,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   'orders-trash': ['orders.delete'],
   calendar: ['calendar.view'],
   'order-status-board': ['orders.view'],
+  'mdf-work-board': ['orders.view'],
   scan: ['labels.view'],
   doweling_orders_view: ['orders.view'],
   order_workshops: ['orders.view'],
@@ -90,6 +92,12 @@ export function canViewNavigationResource(
   backendPermissionsEnabled: boolean,
   financialLayerVisible?: boolean,
 ): boolean {
+  if (
+    resourceName === 'mdf-work-board'
+    && isPackerUser(user as (PermissionCarrier & PackerRoleCarrier) | null | undefined)
+  ) {
+    return false;
+  }
   if (FINANCIAL_NAVIGATION_RESOURCES.has(resourceName) && financialLayerVisible === false) {
     return false;
   }

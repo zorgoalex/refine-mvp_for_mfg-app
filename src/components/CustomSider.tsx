@@ -8,6 +8,7 @@ import {
   TeamOutlined,
   SettingOutlined,
   ContactsOutlined,
+  DatabaseOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -54,6 +55,7 @@ const CATEGORY_ORDER = [
   "Финансы",
   "Производство",
   "Материалы",
+  "Данные",
   "Справочники",
   "Настройки",
 ] as const;
@@ -63,6 +65,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Финансы": <DollarOutlined />,
   "Производство": <ToolOutlined />,
   "Материалы": <InboxOutlined />,
+  "Данные": <DatabaseOutlined />,
   "Справочники": <SettingOutlined />,
   "Настройки": <SettingOutlined />,
 };
@@ -75,7 +78,8 @@ const CATEGORY_MAP: Record<string, string> = {
   film_vendors: "Контрагенты",
   payments: "Финансы",
   payments_view: "Финансы",
-  "orders-trash": "Производство",
+  "orders-trash": "Данные",
+  "mdf-work-board": "Производство",
   groups: "Производство",
   projects: "Производство",
   order_workshops: "Производство",

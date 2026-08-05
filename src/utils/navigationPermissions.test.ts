@@ -82,6 +82,7 @@ describe('navigation permissions', () => {
   it('requires orders.view for production-adjacent order resources in backend mode', () => {
     [
       'order-status-board',
+      'mdf-work-board',
       'doweling_orders_view',
       'order_workshops',
       'order_resource_requirements',
@@ -99,6 +100,19 @@ describe('navigation permissions', () => {
         ).toBe(true);
       },
     );
+  });
+
+  it('keeps the MDF board hidden from packers', () => {
+    expect(canViewNavigationResource(
+      'mdf-work-board',
+      { role: 'packer', permissions: ['orders.view'] } as Parameters<typeof canViewNavigationResource>[1],
+      true,
+    )).toBe(false);
+    expect(canViewNavigationResource(
+      'mdf-work-board',
+      { role_id: 30, permissions: [] } as Parameters<typeof canViewNavigationResource>[1],
+      false,
+    )).toBe(false);
   });
 
   it('uses orders.view as the base permission for the Bitrix menu link', () => {

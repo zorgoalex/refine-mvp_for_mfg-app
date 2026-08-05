@@ -15,13 +15,18 @@ describe('CustomSider expanded labels', () => {
     expect(source).toContain('text-wrap: pretty');
   });
 
-  it('places the trash item in the Производство category (both siders)', () => {
+  it('places the trash item in the Данные category (both siders)', () => {
     // Гейт видимости — общий canViewNavigation в category-раскладке
     // (buildCategorizedResources) + navigationPermissions orders-trash→orders.delete.
-    expect(source).toContain('"orders-trash": "Производство"');
-    expect(mobileSource).toContain('"orders-trash": "Производство"');
+    expect(source).toContain('"orders-trash": "Данные"');
+    expect(mobileSource).toContain('"orders-trash": "Данные"');
     // Пункт больше НЕ в top-menu:
     expect(source).not.toContain("trash: canViewNavigation('orders-trash')");
+  });
+
+  it('places the standalone MDF work board in Производство (both siders)', () => {
+    expect(source).toContain('"mdf-work-board": "Производство"');
+    expect(mobileSource).toContain('"mdf-work-board": "Производство"');
   });
 
   it('renders per-user menu order settings below create and at collapsed bottom', () => {
