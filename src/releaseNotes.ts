@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-05",
+    title: "Автостатусы: понятные условия по статусу заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В форме правила условия по статусу заказа переименованы в «Выполнять только при статусах заказа» и «Не выполнять при статусах заказа».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-05",
     title: "Гибкие шаблоны экспорта XLS",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

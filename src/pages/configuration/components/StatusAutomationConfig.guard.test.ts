@@ -54,4 +54,11 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain("=== 'cut'");
     expect(config).toContain('Производственный статус «Распилен» не найден');
   });
+
+  it('uses intent-oriented labels for order-status rule conditions', () => {
+    expect(config).toContain('label="Выполнять только при статусах заказа"');
+    expect(config).toContain('label="Не выполнять при статусах заказа"');
+    expect(config).not.toContain('label="Текущие статусы заказа"');
+    expect(config).not.toContain('label="Исключающие статусы заказа"');
+  });
 });

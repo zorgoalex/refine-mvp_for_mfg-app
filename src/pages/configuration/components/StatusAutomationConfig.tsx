@@ -862,7 +862,7 @@ export function StatusAutomationConfig() {
 
           <Form.Item label="Условия">
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Form.Item label="Текущие статусы заказа" style={{ marginBottom: 0 }}>
+              <Form.Item label="Выполнять только при статусах заказа" style={{ marginBottom: 0 }}>
                 <Select<number[]>
                   mode="multiple"
                   value={form.currentOrderStatusIn ?? []}
@@ -876,7 +876,7 @@ export function StatusAutomationConfig() {
                   optionFilterProp="label"
                 />
               </Form.Item>
-              <Form.Item label="Исключающие статусы заказа" style={{ marginBottom: 0 }}>
+              <Form.Item label="Не выполнять при статусах заказа" style={{ marginBottom: 0 }}>
                 <Select<number[]>
                   mode="multiple"
                   value={form.currentOrderStatusNotIn ?? []}
