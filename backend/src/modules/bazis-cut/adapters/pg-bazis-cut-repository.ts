@@ -6,7 +6,8 @@ import type { DatabaseClient, TransactionClient } from '../../../database/databa
 import { DatabaseService } from '../../../database/database.service';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { buildBazisCutXls } from '../application/bazis-xls-writer';
+import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../application/bazis-xls-writer';
+import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
 import {
   buildBazisBathCutNumber,
   mapBazisCutSnapshotFields,
@@ -142,7 +143,10 @@ interface Snapshot {
 export class PgBazisCutRepository implements BazisCutRepositoryPort {
   private readonly orderAccess = new OrderAccessPolicy();
 
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly exportTemplates?: ExportTemplatesService,
+  ) {}
 
   async list(input: Parameters<BazisCutRepositoryPort['list']>[0]): Promise<BazisCutSetListDto> {
     const offset = (input.page - 1) * input.pageSize;
@@ -380,7 +384,11 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, input.currentUser);
       const set = await loadSet(tx, input.setId);
-      const bytes = buildBazisCutXls(set.details);
+      const template = this.exportTemplates ? await this.exportTemplates.resolveForExport({
+        templateId: input.templateId, targetScreen: 'bazis_cut_set', sourceType: 'bazis_cut_set_detail',
+        format: 'xls_biff8', client: tx,
+      }) : null;
+      const bytes = template ? buildBazisCutXlsFromTemplate(set.details, template) : buildBazisCutXls(set.details);
       await auditService.record(tx, {
         event: 'bazis_cut_set.exported', entityType: 'bazis_cut_set', entityId: input.setId,
         actorUserId: actorId(input.currentUser), actorUsername: input.currentUser.username,
@@ -388,6 +396,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         before: null, after: { setId: input.setId, version: set.version, positionCount: set.positionCount },
         diff: {}, metadata: { format: 'biff8', bytes: bytes.length, actorUserId: actorId(input.currentUser),
           requestId: input.requestId ?? null, setVersion: set.version, physicalQuantity: set.quantity,
+          ...(template ? { templateId: template.exportTemplateId, templateCode: template.code,
+            templateVersion: template.version, templateHash: template.templateHash } : {}),
           ...relatedDimensions(set.details) },
         relatedEntities: auditRelatedEntities(input.setId, set.details),
       });

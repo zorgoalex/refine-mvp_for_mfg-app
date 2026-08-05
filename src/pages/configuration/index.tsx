@@ -15,6 +15,7 @@ import {
   ApartmentOutlined,
   ScissorOutlined,
   TagsOutlined,
+  FileExcelOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
@@ -28,6 +29,7 @@ import { OrgStructureConfig } from './components/OrgStructureConfig';
 import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
+import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
 import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
@@ -630,6 +632,16 @@ export const ConfigurationPage: React.FC = () => {
           },
         ]
       : []),
+    {
+      key: 'export-templates',
+      label: (
+        <span>
+          <FileExcelOutlined />
+          Шаблоны экспорта
+        </span>
+      ),
+      children: <ExportTemplatesConfigTab />,
+    },
     ...(featureFlags.labels && can('labels.view')
       ? [
           {

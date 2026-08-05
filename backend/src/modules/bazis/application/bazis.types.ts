@@ -68,6 +68,7 @@ export interface ExportBazisCutXlsCommand {
   requestId?: string;
   revisionId: number;
   selectedNodeIds: number[];
+  templateId?: number;
 }
 
 export interface BazisCutXlsExportResult {

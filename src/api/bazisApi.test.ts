@@ -68,6 +68,16 @@ describe('bazisApi.exportCutXls', () => {
     expect(result.blob.type).toBe('application/vnd.ms-excel');
   });
 
+  it('passes the selected template id in the query string', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([0xd0, 0xcf]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/vnd.ms-excel' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await bazisApi.exportCutXls(12, [101], 7);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/bazis/revisions/12/export-cut.xls?templateId=7');
+  });
+
   it('rejects an empty or oversized selection before fetch', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

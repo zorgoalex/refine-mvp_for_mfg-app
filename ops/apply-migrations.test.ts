@@ -98,8 +98,23 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
+  });
+
+  it('pins all migration 101 effect markers', () => {
+    expect(probeFn).toContain('101_export_templates*');
+    expect(probeFn).toContain('q_tbl export_templates');
+    expect(probeFn).toContain('q_col export_templates schema_version');
+    expect(probeFn).toContain('q_con_on export_templates chk_export_templates_target_source');
+    expect(probeFn).toContain('q_con_on export_templates chk_export_templates_default_active');
+    expect(probeFn).toContain('q_idx uq_export_templates_code');
+    expect(probeFn).toContain('q_idx uq_export_templates_live_name');
+    expect(probeFn).toContain('q_idx uq_export_templates_active_default');
+    expect(probeFn).toContain('q_idx idx_export_templates_runtime');
+    const migration101Probe = probeFn.slice(probeFn.indexOf('101_export_templates*'), probeFn.indexOf('*) return 2'));
+    expect(migration101Probe).not.toContain('bazis-cut-set-standard-v1');
+    expect(migration101Probe).not.toContain('bazis-project-cut-standard-v1');
   });
 });
 

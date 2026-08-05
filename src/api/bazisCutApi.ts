@@ -221,8 +221,9 @@ export const bazisCutApi = {
     });
   },
 
-  async exportXls(setId: number): Promise<BazisCutExportFile> {
-    const { blob, fileName } = await httpClient.download(bazisCutSetRoutes.exportXls(setId), {
+  async exportXls(setId: number, templateId?: number): Promise<BazisCutExportFile> {
+    const url = templateId ? `${bazisCutSetRoutes.exportXls(setId)}?templateId=${validateId(templateId, 'templateId')}` : bazisCutSetRoutes.exportXls(setId);
+    const { blob, fileName } = await httpClient.download(url, {
       method: 'POST',
       cache: 'no-store',
     });

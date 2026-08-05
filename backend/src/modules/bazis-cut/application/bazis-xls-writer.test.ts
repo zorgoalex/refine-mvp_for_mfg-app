@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { BAZIS_CUT_HEADERS, BAZIS_CUT_SHEET_NAME, buildBazisCutXls } from './bazis-xls-writer';
+import { BAZIS_CUT_HEADERS, BAZIS_CUT_SHEET_NAME, LEGACY_BAZIS_CUT_COLUMNS, buildBazisCutXls, buildBazisCutXlsFromTemplate } from './bazis-xls-writer';
 import type { BazisCutSetDetailDto } from '../dto/bazis-cut.dto';
+import type { ExportTemplateSnapshot } from '../../export-templates/application/export-template.types';
 
 describe('buildBazisCutXls', () => {
   it('writes a real BIFF8 workbook with exact columns and typed cells', () => {
@@ -55,7 +56,42 @@ describe('buildBazisCutXls', () => {
     expect(rows[1]?.[7]).toBe(expectedPosition);
     expect(rows[1]?.[8]).toBe(expectedQrCode);
   });
+
+  it('renders the seeded template exactly like the legacy mapper', () => {
+    const source = detail({ position: '.01', comment: '=literal', sourceBazisOrderNo: 'BZ-7', sourceBazisProductName: 'Шкаф' });
+    const legacy = XLSX.read(buildBazisCutXls([source]), { type: 'buffer' });
+    const templated = XLSX.read(buildBazisCutXlsFromTemplate([source], template()), { type: 'buffer' });
+    expect(XLSX.utils.sheet_to_json(templated.Sheets[BAZIS_CUT_SHEET_NAME], { header: 1, raw: true }))
+      .toEqual(XLSX.utils.sheet_to_json(legacy.Sheets[BAZIS_CUT_SHEET_NAME], { header: 1, raw: true }));
+    expect(templated.Sheets[BAZIS_CUT_SHEET_NAME].AE2?.t).toBe('s');
+    expect(templated.Sheets[BAZIS_CUT_SHEET_NAME].AE2?.f).toBeUndefined();
+  });
+
+  it('preserves direct-project xlsOrder compatibility in the template engine', () => {
+    const source = { ...detail({ sourceBazisOrderNo: 'BZ-7', position: '.01' }), xlsOrder: 'BP-100' };
+    const workbook = XLSX.read(buildBazisCutXlsFromTemplate([source], template()), { type: 'buffer' });
+    const row = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[BAZIS_CUT_SHEET_NAME], { header: 1, raw: true })[1];
+    expect(row[5]).toBe('BP-100');
+    expect(row[7]).toBe('BP-100.01');
+  });
+
+  it('rejects a custom template above the total cell budget before rendering', () => {
+    const columns = Array.from({ length: 100 }, (_, index) => ({
+      columnKey: `c${index}`, header: `C${index}`, expression: { type: 'field' as const, field: 'row.number' },
+    }));
+    expect(() => buildBazisCutXlsFromTemplate(Array(65_535).fill(detail()), template(columns))).toThrow('budget exceeded');
+  });
 });
+
+function template(columns = LEGACY_BAZIS_CUT_COLUMNS): ExportTemplateSnapshot {
+  return {
+    exportTemplateId: 1, code: 'test', name: 'Test', description: null,
+    targetScreen: 'bazis_cut_set', sourceType: 'bazis_cut_set_detail', format: 'xls_biff8',
+    sheetName: BAZIS_CUT_SHEET_NAME, schemaVersion: 1, templateHash: '0'.repeat(64), columns,
+    isActive: true, isDefault: true, version: 1, createdAt: '2026-08-05T00:00:00.000Z',
+    updatedAt: '2026-08-05T00:00:00.000Z', createdBy: null, updatedBy: null,
+  };
+}
 
 function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetailDto {
   return {

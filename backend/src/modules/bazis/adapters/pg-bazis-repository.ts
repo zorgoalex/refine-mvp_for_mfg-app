@@ -8,7 +8,8 @@ import type { OrderTransactionService } from '../../orders/application/order-tra
 import type { OrderDto } from '../../orders/dto/order.dto';
 import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-order.dto';
 import { PgOrderReadRepository } from '../../orders/adapters/pg-order-read-repository';
-import { buildBazisCutXls } from '../../bazis-cut/application/bazis-xls-writer';
+import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../../bazis-cut/application/bazis-xls-writer';
+import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
 import {
   mapBazisCutSnapshotFields,
   resolveBazisDetailLabels,
@@ -336,6 +337,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     // Паритет с orders-модулем: SP3 sheet-колонки в read-пути гейтятся тем же
     // BACKEND_SHEET_ORDERS_READS, а не захардкоженным default'ом.
     private readonly sheetOrdersReads: boolean = true,
+    private readonly exportTemplates?: ExportTemplatesService,
   ) {}
 
   async importRevision(command: ImportRevisionCommand): Promise<BazisImportResponseDto> {
@@ -2288,6 +2290,12 @@ export class PgBazisRepository implements BazisRepositoryPort {
         sourceBazisOrderNo: labels.sourceBazisOrderNo,
         sourceBazisProductName: labels.sourceBazisProductName,
         sourceBathCutNumber: '',
+        sourceOrderDetailId: null,
+        sourceOrderId: null,
+        sourceProjectId: revision.projectId,
+        sourceBazisProjectId: revision.bazisProjectId,
+        sourceBazisRevisionId: revision.revisionId,
+        sourceBazisNodeId: detail.bazisNodeId,
         xlsOrder: labels.sourceBazisProjectName,
       }];
     });
@@ -2301,11 +2309,20 @@ export class PgBazisRepository implements BazisRepositoryPort {
       );
     }
 
-    const bytes = buildBazisCutXls(exportDetails);
     const quantity = exportDetails.reduce((sum, detail) => sum + detail.quantity, 0);
     const requestId = command.requestId ?? `bazis-cut-export-${command.revisionId}`;
-    await this.database.transaction(async (tx) => {
+    const bytes = await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
+      const template = this.exportTemplates ? await this.exportTemplates.resolveForExport({
+        templateId: command.templateId,
+        targetScreen: 'bazis_project_card',
+        sourceType: 'bazis_project_panel',
+        format: 'xls_biff8',
+        client: tx,
+      }) : null;
+      const rendered = template
+        ? buildBazisCutXlsFromTemplate(exportDetails, template)
+        : buildBazisCutXls(exportDetails);
       await auditService.record(tx, {
         event: 'bazis.cut_xls_exported',
         entityType: 'bazis_revision',
@@ -2329,11 +2346,14 @@ export class PgBazisRepository implements BazisRepositoryPort {
         metadata: {
           action: 'bazis_cut_xls_export',
           format: 'biff8',
-          bytes: bytes.length,
+          bytes: rendered.length,
           selectedNodeIds,
           requestId,
+          ...(template ? { templateId: template.exportTemplateId, templateCode: template.code,
+            templateVersion: template.version, templateHash: template.templateHash } : {}),
         },
       });
+      return rendered;
     });
 
     return {

@@ -10,6 +10,7 @@ import {
   bazisCutApi, type BazisCutDetailFields, type BazisCutSetCardDto, type BazisCutSetDetailDto,
 } from '../../api/bazisCutApi';
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
+import { ExportTemplateSelect } from '../../components/ExportTemplateSelect';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
 import {
@@ -78,6 +79,8 @@ export const BazisCutSetPage: React.FC = () => {
   const [set, setSet] = useState<BazisCutSetCardDto | null>(null);
   const [loading, setLoading] = useState(false); const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false); const [editing, setEditing] = useState<BazisCutSetDetailDto | null>(null);
+  const [exportTemplateId, setExportTemplateId] = useState<number>();
+  const [exportTemplatesReady, setExportTemplatesReady] = useState(false);
   const [nameForm] = Form.useForm<{ name: string }>(); const [detailForm] = Form.useForm<BazisCutDetailFields>();
   const canManage = can('cut.manage');
   const setTabTitle = useTabStore((state) => state.setTabTitle);
@@ -125,20 +128,22 @@ export const BazisCutSetPage: React.FC = () => {
       await saveBazisCutFile({
         suggestedName: exportFileName(set.name, setId),
         picker: picker ? (options) => picker.call(window, options) : undefined,
-        fetchFile: () => bazisCutApi.exportXls(setId), fallbackDownload: downloadBlob,
+        fetchFile: () => bazisCutApi.exportXls(setId, exportTemplateId), fallbackDownload: downloadBlob,
         onGenerationStart: () => setExporting(true),
       });
       message.success('Excel-файл сформирован');
     } catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) message.error(error instanceof Error ? error.message : 'Не удалось экспортировать Excel'); }
     finally { setExporting(false); }
-  }, [set, setId]);
+  }, [exportTemplateId, set, setId]);
 
   const columns = useMemo<ColumnsType<BazisCutSetDetailDto>>(() => buildColumns(canManage, startEdit, remove), [canManage, remove, startEdit]);
   const setTotals = useMemo(() => summarizeBazisCutDetails(set?.details ?? []), [set?.details]);
   if (!valid) return <div className="bazis-cut-set-modern"><Alert type="error" showIcon message="Некорректный номер набора" /></div>;
   return <div className="bazis-cut-set-modern"><Space direction="vertical" size="middle" style={{ width: '100%' }}>
     <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}><Title level={3} style={{ margin: 0 }}>Базис-раскрой #{setId}</Title>
-      <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!set || set.positionCount === 0} onClick={() => void exportXls()}>Экспорт XLS</Button></Space>
+      <Space wrap><ExportTemplateSelect targetScreen="bazis_cut_set" sourceType="bazis_cut_set_detail" value={exportTemplateId}
+        disabled={exporting} onChange={setExportTemplateId} onReadyChange={setExportTemplatesReady} />
+      <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!set || set.positionCount === 0 || !exportTemplatesReady} onClick={() => void exportXls()}>Экспорт XLS</Button></Space></Space>
     <Card loading={loading} title="Набор"><Form form={nameForm} layout="inline" onFinish={() => void saveName()}>
       <Form.Item name="name" label="Название" rules={[{ required: true, whitespace: true }, { max: 200 }]} style={{ flex: 1 }}><Input disabled={!canManage} /></Form.Item>
       {canManage && <Button htmlType="submit" icon={<SaveOutlined />} loading={saving}>Сохранить</Button>}

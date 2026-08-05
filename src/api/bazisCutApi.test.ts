@@ -117,6 +117,15 @@ describe('bazisCutApi', () => {
     expect(exported.blob.type).toBe('application/vnd.ms-excel');
   });
 
+  it('passes an optional export template id', async () => {
+    const fetchMock = mockFetch(new Response('OLE2', {
+      status: 200,
+      headers: { 'Content-Type': 'application/vnd.ms-excel' },
+    }));
+    await bazisCutApi.exportXls(42, 9);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/bazis-cut-sets/42/export.xls?templateId=9');
+  });
+
   it('models exactly 33 editable fields and preserves nullable priority', () => {
     const fields = detailFields();
     expect(Object.keys(fields)).toHaveLength(33);

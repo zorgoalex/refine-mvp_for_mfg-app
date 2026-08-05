@@ -125,10 +125,11 @@ export const bazisApi = {
   async exportCutXls(
     revisionId: number,
     selectedNodeIds: number[],
+    templateId?: number,
   ): Promise<BazisRevisionCutExportFile> {
     validateNodeSelection(selectedNodeIds);
     const { blob, fileName } = await httpClient.download(
-      apiRoutes.bazis.revisionCutXls(validateId(revisionId, 'revisionId')),
+      withQuery(apiRoutes.bazis.revisionCutXls(validateId(revisionId, 'revisionId')), { templateId }),
       {
         method: 'POST',
         cache: 'no-store',

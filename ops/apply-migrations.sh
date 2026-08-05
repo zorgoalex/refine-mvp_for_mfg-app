@@ -913,6 +913,15 @@ probe_file() {
                         WHERE attrelid='bazis_cut_set_details'::regclass
                           AND attname='source_bath_cut_number')
                      ) LIKE 'bazis-cut-bath-number-v1:%';" ;;
+    101_export_templates*) probe_all \
+                     "$(q_tbl export_templates)" \
+                     "$(q_col export_templates schema_version)" \
+                     "$(q_con_on export_templates chk_export_templates_target_source)" \
+                     "$(q_con_on export_templates chk_export_templates_default_active)" \
+                     "$(q_idx uq_export_templates_code)" \
+                     "$(q_idx uq_export_templates_live_name)" \
+                     "$(q_idx uq_export_templates_active_default)" \
+                     "$(q_idx idx_export_templates_runtime)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -924,7 +933,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

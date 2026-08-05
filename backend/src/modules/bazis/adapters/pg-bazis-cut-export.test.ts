@@ -2,6 +2,9 @@ import * as XLSX from 'xlsx';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
+import type { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
+import type { ExportTemplateColumn, ExportTemplateSnapshot } from '../../export-templates/application/export-template.types';
+import { LEGACY_BAZIS_CUT_COLUMNS } from '../../bazis-cut/application/bazis-xls-writer';
 import { PgBazisRepository } from './pg-bazis-repository';
 
 describe('PgBazisRepository.exportCutXls', () => {
@@ -74,13 +77,28 @@ describe('PgBazisRepository.exportCutXls', () => {
       throw new Error(`Unexpected SQL: ${sql}`);
     });
     const transaction = vi.fn(async (callback: (tx: { query: typeof query }) => Promise<unknown>) => callback({ query }));
-    const repository = new PgBazisRepository({ query, transaction } as unknown as DatabaseService);
+    const idColumns: ExportTemplateColumn[] = [
+      sourceIdColumn('sourceProjectId'),
+      sourceIdColumn('sourceBazisProjectId'),
+      sourceIdColumn('sourceBazisRevisionId'),
+      sourceIdColumn('sourceBazisNodeId'),
+      sourceIdColumn('sourceOrderDetailId'),
+      sourceIdColumn('sourceOrderId'),
+    ];
+    const resolveForExport = vi.fn().mockResolvedValue(template([...LEGACY_BAZIS_CUT_COLUMNS, ...idColumns]));
+    const repository = new PgBazisRepository(
+      { query, transaction } as unknown as DatabaseService,
+      undefined,
+      true,
+      { resolveForExport } as unknown as ExportTemplatesService,
+    );
 
     const result = await repository.exportCutXls({
       currentUser: user(),
       requestId: 'req-export',
       revisionId: 12,
       selectedNodeIds: [102, 101],
+      templateId: 55,
     });
 
     expect(result).toMatchObject({
@@ -99,12 +117,47 @@ describe('PgBazisRepository.exportCutXls', () => {
       'BP-7Кухня.01.00.01', 'Панель 101', 500, 1000, 500, 1000, 2,
     ]);
     expect(data[1]?.slice(33, 37)).toEqual(['Модерн', 'Присадка:', '', 'ПВХ белая']);
+    expect(data[1]?.slice(37, 43)).toEqual([77, 7, 12, 101, null, null]);
     expect(data[2]?.[7]).toBe('BP-7Шкаф.02.00.01');
+    expect(data[2]?.slice(37, 43)).toEqual([77, 7, 12, 102, null, null]);
+    expect(resolveForExport).toHaveBeenCalledWith(expect.objectContaining({
+      templateId: 55,
+      targetScreen: 'bazis_project_card',
+      sourceType: 'bazis_project_panel',
+      format: 'xls_biff8',
+    }));
     const auditCall = query.mock.calls.find(([text]) => String(text).replace(/\s+/g, ' ').includes('INSERT INTO audit_log ('));
     expect(auditCall?.[1]?.[0]).toBe('bazis.cut_xls_exported');
     expect(transaction).toHaveBeenCalledTimes(1);
   });
 });
+
+function sourceIdColumn(field: string): ExportTemplateColumn {
+  return { columnKey: field, header: field, expression: { type: 'field', field: `source.${field}` } };
+}
+
+function template(columns: ExportTemplateColumn[]): ExportTemplateSnapshot {
+  return {
+    exportTemplateId: 55,
+    code: null,
+    name: 'Source IDs',
+    description: null,
+    targetScreen: 'bazis_project_card',
+    sourceType: 'bazis_project_panel',
+    format: 'xls_biff8',
+    sheetName: 'Детали для раскроя',
+    schemaVersion: 1,
+    templateHash: '0'.repeat(64),
+    columns,
+    isActive: true,
+    isDefault: false,
+    version: 1,
+    createdAt: '2026-08-05T00:00:00.000Z',
+    updatedAt: '2026-08-05T00:00:00.000Z',
+    createdBy: null,
+    updatedBy: null,
+  };
+}
 
 function panelRow(
   id: number,

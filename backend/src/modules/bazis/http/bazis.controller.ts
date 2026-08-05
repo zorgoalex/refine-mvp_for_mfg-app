@@ -2,7 +2,7 @@ import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Put, Query, Req, Res, StreamableFile, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiProduces, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import type { Response } from 'express';
 import { z } from 'zod';
@@ -733,6 +733,7 @@ export class BazisController {
   }
 
   @ApiOperation({ operationId: 'exportBazisRevisionCutXls', summary: 'Export selected Bazis panels as BIFF8 XLS' })
+  @ApiQuery({ name: 'templateId', required: false, type: Number })
   @ApiBody({ schema: swaggerSchema(exportCutXlsRequestSwaggerSchema) })
   @ApiProduces('application/vnd.ms-excel')
   @ApiResponse({ status: 200, description: 'BIFF8 XLS', schema: { type: 'string', format: 'binary' } })
@@ -746,6 +747,7 @@ export class BazisController {
   async exportCutXls(
     @Req() request: RequestWithCurrentUser,
     @Param('id') id: string,
+    @Query('templateId') templateId: string | undefined,
     @Body() body: unknown,
     @Res({ passthrough: true }) response: Response,
   ): Promise<StreamableFile> {
@@ -757,6 +759,7 @@ export class BazisController {
       requestId: request.requestId,
       revisionId: parseNumericPathParam(id, 'id'),
       selectedNodeIds: parsed.selectedNodeIds,
+      ...(templateId ? { templateId: parseNumericPathParam(templateId, 'templateId') } : {}),
     });
     const filename = buildBazisCutFilename(result.bazisProjectName, result.revisionId);
     response.setHeader('Content-Type', 'application/vnd.ms-excel');

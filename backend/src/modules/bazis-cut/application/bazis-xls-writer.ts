@@ -1,6 +1,17 @@
 import * as XLSX from 'xlsx';
 import { ApiError } from '../../../common/errors/api-error';
 import type { BazisCutDetailFields } from '../dto/bazis-cut.dto';
+import {
+  evaluateExpression,
+  EXPORT_LIMITS,
+  validateExportColumns,
+} from '../../export-templates/application/export-expression';
+import type {
+  BazisExportDetail,
+  ExportExpression,
+  ExportTemplateColumn,
+  ExportTemplateSnapshot,
+} from '../../export-templates/application/export-template.types';
 
 export const BAZIS_CUT_SHEET_NAME = 'Детали для раскроя';
 
@@ -13,6 +24,30 @@ export const BAZIS_CUT_HEADERS = [
   'W2 - Обозн.', 'W2 - Толщина', 'Приоритет', 'Комментарий',
   '%Пользовательское свойство', '%Склейка', '%Фрезировка', '%Маршрут', 'Ванна', '%Пленка',
 ] as const;
+
+const field = (name: string): ExportExpression => ({ type: 'field', field: name });
+
+export const LEGACY_BAZIS_CUT_COLUMNS: ExportTemplateColumn[] = [
+  ['cut', 'Кроить', 'legacy.cutEnabled'], ['materialType', 'Тип материала', 'detail.materialType'],
+  ['material', 'Материал', 'detail.materialName'], ['materialArticle', 'Артикул материала', 'detail.materialArticle'],
+  ['thickness', 'Толщина', 'detail.thicknessMm'], ['order', 'Заказ', 'legacy.order'],
+  ['product', 'Изделие', 'legacy.product'], ['position', 'Позиция', 'legacy.position'],
+  ['qr', 'QR-code', 'legacy.qr'], ['name', 'Наименования', 'detail.partName'],
+  ['finishedLength', 'Длина готовая', 'detail.finishedLengthMm'], ['finishedWidth', 'Ширина готовая', 'detail.finishedWidthMm'],
+  ['cutLength', 'Длина распиловочная', 'detail.cutLengthMm'], ['cutWidth', 'Ширина распиловочная', 'detail.cutWidthMm'],
+  ['quantity', 'Кол-во', 'detail.quantity'], ['orientation', 'Ориентация', 'detail.orientation'],
+  ['groove', 'Паз', 'detail.groove'], ['l1Name', 'L1 - Наим.', 'detail.l1Name'],
+  ['l1Designation', 'L1 - Обозн.', 'detail.l1Designation'], ['l1Thickness', 'L1 - Толщина', 'detail.l1ThicknessMm'],
+  ['l2Name', 'L2 - Наим.', 'detail.l2Name'], ['l2Designation', 'L2 - Обозн.', 'detail.l2Designation'],
+  ['l2Thickness', 'L2 - Толщина', 'detail.l2ThicknessMm'], ['w1Name', 'W1 - Наим.', 'detail.w1Name'],
+  ['w1Designation', 'W1 - Обозн.', 'detail.w1Designation'], ['w1Thickness', 'W1 - Толщина', 'detail.w1ThicknessMm'],
+  ['w2Name', 'W2 - Наим.', 'detail.w2Name'], ['w2Designation', 'W2 - Обозн.', 'detail.w2Designation'],
+  ['w2Thickness', 'W2 - Толщина', 'detail.w2ThicknessMm'], ['priority', 'Приоритет', 'detail.priority'],
+  ['comment', 'Комментарий', 'detail.comment'], ['customProperty', '%Пользовательское свойство', 'detail.customProperty'],
+  ['glue', '%Склейка', 'detail.glue'], ['milling', '%Фрезировка', 'detail.milling'],
+  ['route', '%Маршрут', 'detail.route'], ['bath', 'Ванна', 'source.sourceBathCutNumber'],
+  ['film', '%Пленка', 'detail.film'],
+].map(([columnKey, header, fieldName]) => ({ columnKey, header, expression: field(fieldName) }));
 
 export function buildBazisCutXls(
   details: readonly BazisCutXlsDetail[],
@@ -35,6 +70,73 @@ export function buildBazisCutXls(
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, BAZIS_CUT_SHEET_NAME);
   return XLSX.write(workbook, { type: 'buffer', bookType: 'biff8' }) as Buffer;
+}
+
+export function buildBazisCutXlsFromTemplate(
+  details: readonly BazisExportDetail[],
+  template: ExportTemplateSnapshot,
+  exportedAt = new Date(),
+): Buffer {
+  if (details.length === 0) {
+    throw new ApiError(422, 'BAZIS_CUT_SET_EMPTY', 'Нельзя экспортировать пустой набор');
+  }
+  if (details.length > 65_535) {
+    throw new ApiError(422, 'BAZIS_CUT_SET_TOO_LARGE', 'Набор превышает лимит BIFF8');
+  }
+  const nodeCounts = validateExportColumns(template.columns);
+  const cellCount = details.length * template.columns.length;
+  const evaluatedNodes = details.length * nodeCounts.reduce((sum, count) => sum + count, 0);
+  if (cellCount > EXPORT_LIMITS.maxCells || evaluatedNodes > EXPORT_LIMITS.maxEvaluatedNodes) {
+    throw budgetError({ cellCount, evaluatedNodes });
+  }
+
+  const startedAt = Date.now();
+  let stringChars = 0;
+  let visitedCells = 0;
+  const rows: unknown[][] = [template.columns.map((column) => column.header)];
+  details.forEach((detail, detailIndex) => {
+    const context = { rowNumber: detailIndex + 1, exportedAt, templateName: template.name };
+    const row = template.columns.map((column, columnIndex) => {
+      visitedCells += 1;
+      if (visitedCells % 256 === 0 && Date.now() - startedAt > EXPORT_LIMITS.maxElapsedMs) {
+        throw budgetError({ elapsedMs: Date.now() - startedAt });
+      }
+      try {
+        const value = evaluateExpression(
+          column.expression,
+          detail,
+          context,
+          `columns.${columnIndex}.expression`,
+        );
+        if (typeof value === 'string') {
+          stringChars += value.length;
+          if (stringChars > EXPORT_LIMITS.maxStringChars) throw budgetError({ stringChars });
+        }
+        return value;
+      } catch (error) {
+        if (error instanceof ApiError) {
+          throw new ApiError(error.statusCode, error.code, error.message, {
+            ...(error.details ?? {}),
+            rowNumber: detailIndex + 1,
+            columnKey: column.columnKey,
+            columnHeader: column.header,
+          });
+        }
+        throw error;
+      }
+    });
+    rows.push(row);
+  });
+
+  const worksheet = XLSX.utils.aoa_to_sheet(rows, { cellDates: false });
+  worksheet['!cols'] = template.columns.map((column) => ({
+    wch: Math.min(42, Math.max(column.header.length + 2, 12)),
+  }));
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, template.sheetName);
+  const bytes = XLSX.write(workbook, { type: 'buffer', bookType: 'biff8' }) as Buffer;
+  if (bytes.length > EXPORT_LIMITS.maxBytes) throw budgetError({ bytes: bytes.length });
+  return bytes;
 }
 
 export function bazisCutFieldsToRow(
@@ -64,7 +166,7 @@ export function buildBazisCutQrCode(
   return `${detail.sourceBazisProjectName?.trim() ?? ''}${detail.position.trim()}`;
 }
 
-type BazisCutXlsDetail = BazisCutDetailFields & {
+export type BazisCutXlsDetail = BazisCutDetailFields & {
   sourceBazisProjectName?: string;
   sourceBazisOrderNo?: string;
   sourceBazisProductName?: string;
@@ -77,4 +179,8 @@ function safeText(value: string): string {
   // aoa_to_sheet stores primitive strings as string cells. The explicit cast
   // also documents that operator text must never become an Excel formula.
   return String(value ?? '');
+}
+
+function budgetError(details: Record<string, unknown>): ApiError {
+  return new ApiError(422, 'EXPORT_TEMPLATE_BUDGET_EXCEEDED', 'Export template evaluation budget exceeded', details);
 }

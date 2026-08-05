@@ -216,14 +216,16 @@ export class BazisCutSetsController {
 
   @ApiOperation({ operationId: 'exportBazisCutSetXls', summary: 'Export a saved set as BIFF8 XLS' })
   @ApiParam(idParameter)
+  @ApiQuery({ name: 'templateId', required: false, type: Number })
   @ApiProduces('application/vnd.ms-excel')
   @ApiResponse({ status: 201, description: 'BIFF8 XLS', schema: { type: 'string', format: 'binary' } })
   @Post(':setId/export.xls')
   async export(@Req() request: RequestWithCurrentUser, @Param('setId') setId: string,
+    @Query('templateId') templateId: string | undefined,
     @Res({ passthrough: true }) response: Response): Promise<StreamableFile> {
     this.assertEnabled();
     const result = await this.service.export({ currentUser: requireUser(request), requestId: request.requestId,
-      setId: parseId(setId) });
+      setId: parseId(setId), ...(templateId ? { templateId: parseId(templateId) } : {}) });
     const filename = buildFilename(result.set.name, result.set.bazisCutSetId);
     response.setHeader('Content-Type', 'application/vnd.ms-excel');
     response.setHeader('Content-Disposition', contentDisposition(filename));

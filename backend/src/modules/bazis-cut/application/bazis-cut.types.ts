@@ -57,5 +57,5 @@ export interface BazisCutRepositoryPort {
   addDetails(command: AddBazisCutDetailsCommand): Promise<BazisCutMutationResultDto>;
   updateDetail(command: UpdateBazisCutDetailCommand): Promise<BazisCutMutationResultDto>;
   deleteDetail(command: DeleteBazisCutDetailCommand): Promise<BazisCutMutationResultDto>;
-  export(input: BazisCutContext & { setId: number }): Promise<{ set: BazisCutSetDto; bytes: Buffer }>;
+  export(input: BazisCutContext & { setId: number; templateId?: number }): Promise<{ set: BazisCutSetDto; bytes: Buffer }>;
 }

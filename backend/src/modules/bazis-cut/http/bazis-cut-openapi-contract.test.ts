@@ -40,7 +40,7 @@ describe('Bazis-cut OpenAPI contract', () => {
     expect(controller.match(/@ApiParam\(idParameter\)/g)).toHaveLength(6);
     expect(controller).toContain("@ApiProduces('application/vnd.ms-excel')");
     expect(controller).toContain("description: 'Strict full replacement: all 33 editable Basis fields plus expectedVersion'");
-    expect(controller.match(/@ApiQuery\(/g)).toHaveLength(3);
+    expect(controller.match(/@ApiQuery\(/g)).toHaveLength(4);
     expect(controller).toContain('additionalProperties: false');
     expect(controller).toContain("sourceBathCutNumber: { type: 'string' }");
   });
