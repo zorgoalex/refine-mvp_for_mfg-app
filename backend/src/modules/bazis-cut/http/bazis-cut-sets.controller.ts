@@ -122,7 +122,7 @@ export class BazisCutSetsController {
 
   @ApiOperation({ operationId: 'createBazisCutSet', summary: 'Create a Basis-cut set from order details' })
   @ApiHeader(commandHeader)
-  @ApiBody({ schema: { type: 'object', required: ['name', 'orderId', 'detailIds'], properties: {
+  @ApiBody({ schema: { type: 'object', required: ['orderId', 'detailIds'], properties: {
     name: { type: 'string', minLength: 1, maxLength: 200 }, orderId: { type: 'integer', minimum: 1 },
     detailIds: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'integer', minimum: 1 } },
   } } })

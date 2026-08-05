@@ -1,21 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Form, Input, Modal, Radio, Select, Space, message } from 'antd';
+import { Alert, Modal, Radio, Select, Space, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto } from '../../api/bazisCutApi';
 
 interface Props {
   open: boolean;
   orderId: number;
-  orderName?: string;
   detailIds: number[];
   onClose: () => void;
   onDone?: () => void;
 }
 
-export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, orderName, detailIds, onClose, onDone }) => {
+export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds, onClose, onDone }) => {
   const navigate = useNavigate();
   const [mode, setMode] = useState<'new' | 'existing'>('new');
-  const [name, setName] = useState('');
   const [search, setSearch] = useState('');
   const [sets, setSets] = useState<BazisCutSetListItemDto[]>([]);
   const [setId, setSetId] = useState<number>();
@@ -25,9 +23,7 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, orderName, 
   useEffect(() => {
     if (!open) return;
     setMode('new'); setSetId(undefined); setSearch('');
-    const date = new Intl.DateTimeFormat('ru-RU').format(new Date());
-    setName(`${orderName?.trim() || `Заказ ${orderId}`} — ${date}`.slice(0, 200));
-  }, [open, orderId, orderName]);
+  }, [open]);
 
   useEffect(() => {
     if (!open || mode !== 'existing') return;
@@ -52,7 +48,7 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, orderName, 
     try {
       const idempotencyKey = commandKey('bazis-cut-add');
       const result = mode === 'new'
-        ? await bazisCutApi.create({ name: name.trim(), orderId, detailIds }, { idempotencyKey })
+        ? await bazisCutApi.create({ orderId, detailIds }, { idempotencyKey })
         : await addToExisting(setId, orderId, detailIds, idempotencyKey);
       message.success(result.addedCount === 0 ? 'Эти детали уже есть в наборе' : `Добавлено деталей: ${result.addedCount ?? detailIds.length}`);
       onDone?.(); onClose();
@@ -64,22 +60,20 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, orderName, 
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Не удалось добавить детали');
     } finally { setSubmitting(false); }
-  }, [detailIds, mode, name, onClose, onDone, orderId, navigate, setId]);
+  }, [detailIds, mode, onClose, onDone, orderId, navigate, setId]);
 
   return (
     <Modal title={`Добавить в Базис раскрой (${detailIds.length})`} open={open}
       onOk={() => void submit()} onCancel={onClose} confirmLoading={submitting}
       okText="Добавить" cancelText="Отмена"
-      okButtonProps={{ disabled: detailIds.length === 0 || (mode === 'new' ? !name.trim() : !setId) }}>
+      okButtonProps={{ disabled: detailIds.length === 0 || (mode === 'existing' && !setId) }}>
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Radio.Group value={mode} onChange={(event) => setMode(event.target.value)}>
           <Radio value="new">Новый набор</Radio>
           <Radio value="existing">Существующий набор</Radio>
         </Radio.Group>
         {mode === 'new' ? (
-          <Form layout="vertical"><Form.Item label="Название набора" required>
-            <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={200} />
-          </Form.Item></Form>
+          <Alert showIcon type="info" message="Новый набор получит название «БР-<номер набора>»." />
         ) : (
           <Select showSearch allowClear filterOption={false} value={setId} onChange={setSetId}
             onSearch={setSearch} options={options} loading={loading} placeholder="Найти набор"
@@ -100,4 +94,3 @@ async function addToExisting(setId: number | undefined, orderId: number, detailI
 function commandKey(prefix: string): string {
   return `${prefix}-${typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`;
 }
-

@@ -147,7 +147,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
               COUNT(d.bazis_cut_set_detail_id)::bigint AS position_count,
               COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
                 'id', d.source_order_id,
-                'label', d.source_order_full_number,
+                'label', d.source_order_name,
                 'deleted', COALESCE(source_order.delete_flag, false)
               ))
                 FILTER (WHERE d.source_order_id IS NOT NULL), '[]'::jsonb) AS orders,
@@ -202,7 +202,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await setSessionUser(tx, command.currentUser);
       const detailIds = uniqueIds(command.detailIds);
       const requestHash = hashRequest('bazis_cut_set.create', command.currentUser, {
-        name: command.name.trim(), orderId: command.orderId, detailIds,
+        orderId: command.orderId, detailIds,
       });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.create', actorId(command.currentUser), 'bazis_cut_set', 'pending', requestHash);
@@ -211,9 +211,13 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const inserted = await tx.query<{ bazis_cut_set_id: string | number }>(
         `INSERT INTO bazis_cut_sets (name, created_by, updated_by)
          VALUES ($1,$2,$2) RETURNING bazis_cut_set_id`,
-        [command.name.trim(), actorId(command.currentUser)],
+        ['БР', actorId(command.currentUser)],
       );
       const setId = toNumber(inserted.rows[0].bazis_cut_set_id);
+      await tx.query(
+        'UPDATE bazis_cut_sets SET name=$2 WHERE bazis_cut_set_id=$1',
+        [setId, buildBazisCutSetName(setId)],
+      );
       const snapshots = await loadSnapshots(tx, command.orderId, detailIds);
       await insertSnapshots(tx, setId, snapshots, 0, actorId(command.currentUser));
       const set = await loadSet(tx, setId);
@@ -587,8 +591,18 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
       detailBazisProject: row.detail_bazis_project,
       detailBazisProduct: row.detail_bazis_product,
     });
+    const ordinaryErpOrder = [
+      bazisLabels.sourceBazisProjectName,
+      bazisLabels.sourceBazisOrderNo,
+      bazisLabels.sourceBazisProductName,
+      row.detail_bazis_project,
+      row.detail_bazis_product,
+      row.basis_designation,
+      row.basis_data,
+    ].every((value) => !value?.trim());
     const snapshotSource = {
       materialName: row.material_name, thicknessMm: thickness!, detailNumber: row.detail_number,
+      orderName: row.order_name, ordinaryErpOrder,
       bazisProject: bazisLabels.sourceBazisProjectName,
       basisProduct: row.detail_bazis_product, basisDesignation: row.basis_designation,
       basisData: row.basis_data, detailName: row.detail_name,
@@ -670,7 +684,7 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
     createdBy: nullableNumber(header.created_by), updatedBy: nullableNumber(header.updated_by),
     createdAt: iso(header.created_at), updatedAt: iso(header.updated_at), details,
     quantity: details.reduce((sum, detail) => sum + detail.quantity, 0), positionCount: details.length,
-    orders: refs(details, 'sourceOrderId', 'sourceOrderFullNumber', 'sourceOrderDeleted'),
+    orders: refs(details, 'sourceOrderId', 'sourceOrderName', 'sourceOrderDeleted'),
     projects: refs(details, 'sourceProjectId', 'sourceProjectCode'),
     bazisProjects: labelRefs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
     bazisOrders: labelRefs(details, 'sourceBazisRevisionId', 'sourceBazisOrderNo'),
@@ -902,6 +916,7 @@ async function setSessionUser(client: TransactionClient, user: CurrentUser): Pro
 }
 
 function actorId(user: CurrentUser): number | null { return nullableNumber(user.id); }
+export function buildBazisCutSetName(setId: number): string { return `БР-${setId}`; }
 function setNotFound(id: number) { return new ApiError(404, 'BAZIS_CUT_SET_NOT_FOUND', 'Набор Базис-раскрой не найден', { setId: id }); }
 function detailNotFound(id: number) { return new ApiError(404, 'BAZIS_CUT_DETAIL_NOT_FOUND', 'Деталь набора не найдена', { detailId: id }); }
 function uniqueIds(ids: number[]): number[] { return [...new Set(ids)].sort((a, b) => a - b); }

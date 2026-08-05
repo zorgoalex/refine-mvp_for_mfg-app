@@ -51,7 +51,7 @@ describe('bazisCutApi', () => {
 
     await bazisCutApi.list({ search: '1491', page: 1, pageSize: 20 });
     await bazisCutApi.create(
-      { name: '1491', orderId: 9, detailIds: [101, 102] },
+      { orderId: 9, detailIds: [101, 102] },
       { idempotencyKey: 'create-key-1491' },
     );
     await bazisCutApi.get(42);
@@ -108,7 +108,6 @@ describe('bazisCutApi', () => {
     });
 
     expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
-      name: '1491',
       orderId: 9,
       detailIds: [101, 102],
     });
@@ -131,7 +130,7 @@ describe('bazisCutApi', () => {
     expect(() => bazisCutApi.get(0)).toThrow('Invalid setId');
     expect(() =>
       bazisCutApi.create(
-        { name: 'Bad', orderId: 9, detailIds: [] },
+        { orderId: 9, detailIds: [] },
         { idempotencyKey: 'create-key-1491' },
       ),
     ).toThrow('Invalid detailIds');

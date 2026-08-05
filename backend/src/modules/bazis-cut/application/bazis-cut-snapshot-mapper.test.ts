@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { bazisCutFieldsToRow } from './bazis-xls-writer';
 import {
   buildBazisCutPosition,
+  buildOrdinaryErpPosition,
   mapBazisCutSnapshotFields,
 } from './bazis-cut-snapshot-mapper';
 
@@ -59,16 +60,19 @@ describe('buildBazisCutPosition', () => {
     expect(buildBazisCutPosition('BP', 'И'.repeat(1500), 'Д'.repeat(1500))).toHaveLength(3001);
   });
 
-  it('does not fall back to the ERP detail number when Basis fields are empty', () => {
+  it('builds the ordinary ERP position from the order and detail numbers', () => {
+    expect(buildOrdinaryErpPosition(' ERP-заказ 1491 ', 7)).toBe('ERP-заказ 1491.7');
+
     const fields = mapBazisCutSnapshotFields({
       materialName: 'ЛДСП', thicknessMm: 16, detailNumber: 1,
+      orderName: 'ERP-заказ 1491', ordinaryErpOrder: true,
       bazisProject: null,
       basisProduct: null, basisDesignation: null, basisData: null, detailName: 'Бок',
       heightMm: 100, widthMm: 50, quantity: 1, note: null, milling: null, film: null,
       doweling: false, verticalTexture: false,
     });
 
-    expect(fields?.position).toBe('.');
+    expect(fields?.position).toBe('ERP-заказ 1491.1');
   });
 });
 
@@ -78,6 +82,7 @@ describe('1491 snapshot mapper golden', () => {
       _length, _width, quantity, milling, route, film], index) => {
       const fields = mapBazisCutSnapshotFields({
         materialName: 'МДФ 16 мм', thicknessMm: 16, detailNumber: index + 1,
+        orderName: '1491', ordinaryErpOrder: false,
         bazisProject: '',
         basisProduct: 'Кухня', basisDesignation: position, basisData: null, detailName: name,
         heightMm: sourceLength, widthMm: sourceWidth,

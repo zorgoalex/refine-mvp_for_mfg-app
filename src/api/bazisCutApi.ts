@@ -105,7 +105,6 @@ export interface BazisCutMutationResultDto {
 }
 
 export interface CreateBazisCutSetRequest {
-  name: string;
   orderId: number;
   detailIds: number[];
 }

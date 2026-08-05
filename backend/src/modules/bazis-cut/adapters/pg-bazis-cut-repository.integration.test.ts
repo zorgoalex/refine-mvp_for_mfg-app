@@ -170,6 +170,7 @@ integration('PgBazisCutRepository real PostgreSQL transaction harness', () => {
         detailIds: [Number(candidate.detail_id)],
       });
       ownedSetIds.push(created.set.bazisCutSetId);
+      expect(created.set.name).toBe(`БР-${created.set.bazisCutSetId}`);
       const detail = created.set.details[0];
       const rootProductCount = Number(candidate.root_product_count);
       const bazisProject = rootProductCount > 1

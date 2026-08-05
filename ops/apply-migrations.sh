@@ -804,11 +804,11 @@ probe_file() {
                             AND attname='source_bazis_project_name'))
                          LIKE 'bazis-cut-document-fields-v2:%';" \
                      "SELECT
-                       col_description('bazis_cut_set_details'::regclass,
+                       COALESCE(col_description('bazis_cut_set_details'::regclass,
                          (SELECT attnum FROM pg_attribute
                           WHERE attrelid='bazis_cut_set_details'::regclass
-                            AND attname='position'))
-                         LIKE 'bazis-cut-document-fields-v2:%';" ;;
+                            AND attname='position')), '')
+                         LIKE ANY (ARRAY['bazis-cut-document-fields-v2:%', 'bazis-cut-position-v3:%']);" ;;
     097_order_realtime_invalidation*) probe_all "$(q_tbl order_realtime_stream)" \
                      "$(q_tbl realtime_event_log)" \
                      "$(q_con_hash_on order_realtime_stream_pkey order_realtime_stream 5c77932d9dfbffa547edc0134599bff5)" \
@@ -876,6 +876,26 @@ probe_file() {
                      "$(q_stmt_trg trg_order_realtime_cut_archive_insert cut_result_archive_state trg_order_realtime_cut_archive_insert 4 '' new_rows)" \
                      "$(q_stmt_trg trg_order_realtime_cut_archive_delete cut_result_archive_state trg_order_realtime_cut_archive_delete 8 old_rows '')" \
                      "$(q_stmt_trg trg_order_realtime_cut_profile_update cut_param_profiles trg_order_realtime_cut_profile_update 16 old_rows new_rows)" ;;
+    099_bazis_cut_ordinary_erp_positions*) probe_all "SELECT
+                       col_description('bazis_cut_set_details'::regclass,
+                         (SELECT attnum FROM pg_attribute
+                          WHERE attrelid='bazis_cut_set_details'::regclass
+                            AND attname='position'))
+                         LIKE 'bazis-cut-position-v3:%';" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM bazis_cut_set_details snapshot
+                       JOIN order_details source ON source.detail_id = snapshot.source_order_detail_id
+                       WHERE NULLIF(btrim(snapshot.source_order_name), '') IS NOT NULL
+                         AND COALESCE(NULLIF(btrim(snapshot.source_bazis_project_name), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(snapshot.source_bazis_order_no), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(snapshot.source_bazis_product_name), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(source.basis_project), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(source.basis_product), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(source.basis_designation), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(source.basis_data), ''), '') = ''
+                         AND btrim(snapshot.position) IN ('', '.')
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -887,7 +907,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

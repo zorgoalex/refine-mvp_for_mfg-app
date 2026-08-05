@@ -3027,7 +3027,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             <AddToBazisCutModal
               open={bazisCutModalOpen}
               orderId={record.order_id}
-              orderName={record.order_name}
               detailIds={cutSelectedDetailIds}
               onClose={() => setBazisCutModalOpen(false)}
               onDone={() => {

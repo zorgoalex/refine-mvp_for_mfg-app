@@ -3,7 +3,11 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { PgBazisCutRepository, resolveBazisDetailLabels } from './pg-bazis-cut-repository';
+import {
+  buildBazisCutSetName,
+  PgBazisCutRepository,
+  resolveBazisDetailLabels,
+} from './pg-bazis-cut-repository';
 
 const user: CurrentUser = {
   id: '7', username: 'manager', role: 'manager', roleId: 3,
@@ -13,6 +17,37 @@ const user: CurrentUser = {
 afterEach(() => vi.restoreAllMocks());
 
 describe('PgBazisCutRepository security and event contract', () => {
+  it('builds the backend-owned set name from its generated id', () => {
+    expect(buildBazisCutSetName(42)).toBe('БР-42');
+  });
+
+  it('uses unprefixed ERP order numbers in the list', async () => {
+    const query = vi.fn(async (_sql: string, _params?: readonly unknown[]) => result([]));
+    const database = { query, transaction: vi.fn() } as unknown as DatabaseService;
+    const repository = new PgBazisCutRepository(database);
+
+    await repository.list({ currentUser: user, search: '', page: 1, pageSize: 25 });
+
+    const sql = String(query.mock.calls[0][0]);
+    expect(sql).toMatch(/'label', d\.source_order_name,[\s\S]*AS orders/i);
+    expect(sql).not.toMatch(/'label', d\.source_order_full_number,[\s\S]*AS orders/i);
+  });
+
+  it('uses unprefixed ERP order numbers on the card and preserves full provenance', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT * FROM bazis_cut_sets WHERE')) return result([setRow(0)]);
+      if (sql.includes('FROM bazis_cut_set_details')) return result([detailRow()]);
+      return result([]);
+    });
+    const database = { query, transaction: vi.fn() } as unknown as DatabaseService;
+    const repository = new PgBazisCutRepository(database);
+
+    const card = await repository.get({ currentUser: user, setId: 10 });
+
+    expect(card.orders).toEqual([{ id: 30, label: '1' }]);
+    expect(card.details[0].sourceOrderFullNumber).toBe('P-1');
+  });
+
   it('maps a multi-product Basis revision to Basis project fields', () => {
     expect(resolveBazisDetailLabels({
       rootProductCount: 2,

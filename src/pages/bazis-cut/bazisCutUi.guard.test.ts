@@ -43,6 +43,8 @@ describe('Basis-cut UI integration guards', () => {
     expect(modal).toContain('Существующий набор');
     expect(modal).toContain('showSearch');
     expect(modal).toContain('filterOption={false}');
+    expect(modal).toContain('БР-<номер набора>');
+    expect(modal).not.toContain('Название набора');
   });
 
   it('wires the action into order edit/show and blocks dirty edit drafts', () => {
@@ -66,6 +68,9 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain('showSaveFilePicker');
     expect(card).toContain('downloadBlob');
     expect(card).toContain("error.name === 'AbortError'");
+    expect(card).toContain('label="Общая площадь"');
+    expect(card).toContain("row.sourceOrderName || '—'");
+    expect(card).not.toContain('row.sourceOrderFullNumber || row.sourceOrderName');
   });
 
   it('shows the set number with the БР prefix in its workspace tab and keeps detail headers visible', () => {

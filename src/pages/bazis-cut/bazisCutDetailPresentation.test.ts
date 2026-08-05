@@ -23,10 +23,16 @@ describe('buildBazisCutQrCode', () => {
 });
 
 describe('summarizeBazisCutDetails', () => {
-  it('counts positions and sums Quantity', () => {
-    expect(summarizeBazisCutDetails([{ quantity: 2 }, { quantity: 3 }, { quantity: 1 }])).toEqual({
+  it('counts positions and sums quantity and finished-detail area', () => {
+    const summary = summarizeBazisCutDetails([
+      { quantity: 2, finishedLengthMm: 1000, finishedWidthMm: 500 },
+      { quantity: 3, finishedLengthMm: 500, finishedWidthMm: 200 },
+      { quantity: 1, finishedLengthMm: 1000, finishedWidthMm: 100 },
+    ]);
+    expect(summary).toMatchObject({
       positionCount: 3,
       quantity: 6,
     });
+    expect(summary.totalAreaM2).toBeCloseTo(1.4);
   });
 });

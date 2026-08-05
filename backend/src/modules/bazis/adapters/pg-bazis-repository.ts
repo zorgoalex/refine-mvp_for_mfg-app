@@ -2262,6 +2262,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
         materialName: sheet.reference_name,
         thicknessMm,
         detailNumber: index + 1,
+        orderName: labels.sourceBazisOrderNo || labels.sourceBazisProjectName,
+        ordinaryErpOrder: false,
         bazisProject: labels.sourceBazisProjectName,
         basisProduct: detail.basisProduct,
         basisDesignation: detail.basisDesignation,

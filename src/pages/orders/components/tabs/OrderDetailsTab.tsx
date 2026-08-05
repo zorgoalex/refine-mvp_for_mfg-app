@@ -859,7 +859,6 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
           <AddToBazisCutModal
             open={addToBazisCutOpen}
             orderId={header.order_id}
-            orderName={header.order_name}
             detailIds={bazisCutDetailIds}
             onClose={() => setAddToBazisCutOpen(false)}
             onDone={() => handleSelectChange([])}

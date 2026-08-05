@@ -4,6 +4,8 @@ export interface BazisCutSnapshotSource {
   materialName: string;
   thicknessMm: number;
   detailNumber: number;
+  orderName: string;
+  ordinaryErpOrder: boolean;
   bazisProject: string | null;
   basisProduct: string | null;
   basisDesignation: string | null;
@@ -31,7 +33,9 @@ export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): Bazis
   const fields: BazisCutDetailFields = {
     cutEnabled: true, materialType: 'Площадной', materialName: source.materialName.trim(),
     materialArticle: '', thicknessMm: source.thicknessMm,
-    position: buildBazisCutPosition(source.bazisProject, source.basisProduct, source.basisDesignation),
+    position: source.ordinaryErpOrder
+      ? buildOrdinaryErpPosition(source.orderName, source.detailNumber)
+      : buildBazisCutPosition(source.bazisProject, source.basisProduct, source.basisDesignation),
     partName: firstNonEmpty(source.detailName, source.basisData?.split('/')[2], `Деталь ${source.detailNumber}`),
     finishedLengthMm: length, finishedWidthMm: width,
     cutLengthMm: roundTenth(length), cutWidthMm: roundTenth(width), quantity: source.quantity,
@@ -42,6 +46,10 @@ export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): Bazis
     milling: source.milling ?? '', route: source.doweling ? 'Присадка:' : '', film: source.film ?? '',
   };
   return bazisCutDetailFieldsSchema.safeParse(fields).success ? fields : null;
+}
+
+export function buildOrdinaryErpPosition(orderName: string, detailNumber: number): string {
+  return `${orderName.trim()}.${detailNumber}`;
 }
 
 export function buildBazisCutPosition(
