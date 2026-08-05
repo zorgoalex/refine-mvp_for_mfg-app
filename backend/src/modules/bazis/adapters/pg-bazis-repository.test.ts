@@ -322,6 +322,9 @@ describe('PgBazisRepository reads + mappings', () => {
         mainMaterialName: null,
         edgeCount: 0,
         hasDrilling: false,
+        millingName: null,
+        filmName: null,
+        paintName: null,
         notes: null,
         childrenCount: 2,
         orders: [],
@@ -3040,6 +3043,14 @@ describe('PgBazisRepository tree order provenance', () => {
           width_mm: 50,
           thickness_mm: 16,
           main_material_name: 'ЛДСП',
+          user_properties: {
+            Свойство: [
+              { Имя: 'Фрезировка', Значение: 'Модерн' },
+              { Имя: 'Плёнка', Значение: 'Белый глянец' },
+              { Имя: 'Краска (обр)', Значение: 'RAL 9003' },
+            ],
+          },
+          legacy_user_properties: null,
           children_count: 0,
           linked_orders: null,
         },
@@ -3052,6 +3063,9 @@ describe('PgBazisRepository tree order provenance', () => {
         bazisNodeId: 101,
         designation: 'D-01',
         productOrderNo: '1443',
+        millingName: 'Модерн',
+        filmName: 'Белый глянец',
+        paintName: 'RAL 9003',
       },
     ]);
 
@@ -3060,6 +3074,8 @@ describe('PgBazisRepository tree order provenance', () => {
       .find((sql) => sql.startsWith('SELECT n.bazis_node_id, n.parent_node_id'));
     expect(treeSql).toContain('n.designation');
     expect(treeSql).toContain("CASE WHEN n.parent_node_id IS NULL THEN NULLIF(trim(n.raw_json->>'Заказ'), '') ELSE NULL END AS product_order_no");
+    expect(treeSql).toContain("n.raw_json->'ПользовательскиеСвойства' AS user_properties");
+    expect(treeSql).toContain("n.raw_json->'Свойство' AS legacy_user_properties");
   });
 
   it('exposes orderIds on tree nodes from the node-order map (created details only)', async () => {

@@ -105,13 +105,14 @@ import {
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
   parseOrderStatusBoardViewState,
+  resolveMdfBoardHiddenOrderStatusIds,
   resolveMdfBoardHiddenProductionStatusIds,
   serializeOrderStatusBoardViewState,
   toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
   type CncCardDisplayMode,
   type CncOrderSearchPeriod,
-  type MdfBoardHiddenProductionStatusesSetting,
+  type MdfBoardHiddenStatusesSetting,
   type OrderStatusBoardViewState,
 } from './model';
 import {
@@ -222,22 +223,26 @@ interface BoardDragItem {
   trigger: HTMLElement | null;
 }
 
-export const OrderStatusBoardPage: React.FC = () => {
+interface OrderStatusBoardPageProps {
+  fixedView?: OrderStatusBoardViewState['view'];
+}
+
+export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
   const isOperational = useOperationalUi();
   const { canViewFinancials } = useOrderFinancialVisibility();
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const viewState = useMemo(
-    () => parseOrderStatusBoardViewState(searchParams, {
+  const viewState = useMemo(() => {
+    const parsed = parseOrderStatusBoardViewState(searchParams, {
       cncTelegram: featureFlags.cncTelegram,
-    }),
-    [searchParams],
-  );
+    });
+    return fixedView ? { ...parsed, view: fixedView } : parsed;
+  }, [fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
   const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
-  const mdfBoardHiddenProductionStatusSetting =
-    getAppSetting<MdfBoardHiddenProductionStatusesSetting>(
+  const mdfBoardHiddenStatusesSetting =
+    getAppSetting<MdfBoardHiddenStatusesSetting>(
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
     );
   const datasetKey = useMemo(() => {
@@ -275,7 +280,7 @@ export const OrderStatusBoardPage: React.FC = () => {
   const viewStateRef = useRef(viewState);
   viewStateRef.current = viewState;
   const [cardDisplayMode, setCardDisplayMode] =
-    useState<StatusBoardCardDisplayMode>('standard');
+    useState<StatusBoardCardDisplayMode>('compact');
   const [cncCardDisplayMode, setCncCardDisplayMode] =
     useState<CncCardDisplayMode>('standard');
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
@@ -317,10 +322,10 @@ export const OrderStatusBoardPage: React.FC = () => {
   );
 
   useEffect(() => {
-    if (isPacker && viewState.view !== 'order') {
+    if (!fixedView && isPacker && viewState.view !== 'order') {
       updateViewState({ view: 'order' });
     }
-  }, [isPacker, updateViewState, viewState.view]);
+  }, [fixedView, isPacker, updateViewState, viewState.view]);
 
   useEffect(() => {
     if (searchDraft.trim() === viewState.search) return;
@@ -650,9 +655,6 @@ export const OrderStatusBoardPage: React.FC = () => {
     () => [
       { key: 'order', label: 'Статусы заказов' },
       ...(isPacker ? [] : [{ key: 'production', label: 'Производство' }]),
-      ...(!isPacker && featureFlags.cncTelegram
-        ? [{ key: 'cnc_today', label: 'МДФ-работы' }]
-        : []),
     ],
     [isPacker],
   );
@@ -786,17 +788,27 @@ export const OrderStatusBoardPage: React.FC = () => {
   const cncHiddenProductionStatusIds = useMemo(
     () => resolveMdfBoardHiddenProductionStatusIds(
       cncOrderBoardColumns,
-      mdfBoardHiddenProductionStatusSetting,
+      mdfBoardHiddenStatusesSetting,
     ),
-    [cncOrderBoardColumns, mdfBoardHiddenProductionStatusSetting],
+    [cncOrderBoardColumns, mdfBoardHiddenStatusesSetting],
+  );
+  const cncHiddenOrderStatusIds = useMemo(
+    () => resolveMdfBoardHiddenOrderStatusIds(mdfBoardHiddenStatusesSetting),
+    [mdfBoardHiddenStatusesSetting],
   );
   const cncActiveColumns = useMemo(
     () => filterCncBathColumnsByOrderStatuses(
       cncFilteredColumns,
       cncOrderStatusCards,
       cncHiddenProductionStatusIds,
+      cncHiddenOrderStatusIds,
     ),
-    [cncFilteredColumns, cncOrderStatusCards, cncHiddenProductionStatusIds],
+    [
+      cncFilteredColumns,
+      cncOrderStatusCards,
+      cncHiddenOrderStatusIds,
+      cncHiddenProductionStatusIds,
+    ],
   );
   const cncShownDataColumns = useMemo(
     () => cncActiveColumns.filter((column) =>
@@ -807,10 +819,14 @@ export const OrderStatusBoardPage: React.FC = () => {
   const cncMutedOrderIds = useMemo(
     () => new Set(
       cncOrderStatusCards
-        .filter((card) => isCncOrderHiddenFromMdfBoard(card, cncHiddenProductionStatusIds))
+        .filter((card) => isCncOrderHiddenFromMdfBoard(
+          card,
+          cncHiddenProductionStatusIds,
+          cncHiddenOrderStatusIds,
+        ))
         .map((card) => card.orderId),
     ),
-    [cncHiddenProductionStatusIds, cncOrderStatusCards],
+    [cncHiddenOrderStatusIds, cncHiddenProductionStatusIds, cncOrderStatusCards],
   );
   const cncOrderCards = useMemo(
     () => cncTerminalColumnsVisible
@@ -1126,7 +1142,7 @@ export const OrderStatusBoardPage: React.FC = () => {
           <div className="status-board-page__header">
             <div>
               <Typography.Title id="status-board-title" level={3} tabIndex={-1}>
-                Доски статусов
+                {isCncToday ? 'МДФ-работы' : 'Доски статусов'}
               </Typography.Title>
               <Typography.Text type="secondary">
                 Заказы, производство и CNC-работы на сегодня.
@@ -1150,16 +1166,18 @@ export const OrderStatusBoardPage: React.FC = () => {
           </div>
         )}
 
-        <Tabs
-          className="status-board-tabs"
-          activeKey={isPacker && viewState.view !== 'order' ? 'order' : viewState.view}
-          onChange={(key) =>
-            updateViewState({
-              view: key as typeof viewState.view,
-            })
-          }
-          items={statusBoardTabItems}
-        />
+        {!fixedView && (
+          <Tabs
+            className="status-board-tabs"
+            activeKey={isPacker && viewState.view !== 'order' ? 'order' : viewState.view}
+            onChange={(key) =>
+              updateViewState({
+                view: key as typeof viewState.view,
+              })
+            }
+            items={statusBoardTabItems}
+          />
+        )}
 
         {!isCncToday && (
           <div
@@ -1572,6 +1590,10 @@ export const OrderStatusBoardPage: React.FC = () => {
     </DndProvider>
   );
 };
+
+export const MdfWorkBoardPage: React.FC = () => (
+  <OrderStatusBoardPage fixedView="cnc_today" />
+);
 
 const StatusBoardToolbarIconToggle: React.FC<{
   active: boolean;

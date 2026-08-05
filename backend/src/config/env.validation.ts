@@ -151,6 +151,16 @@ export const envSchema = z
       }, 'WORKOS_API_BASE must be an https://*.workos.com URL (or http://localhost for local mocks)')
       .default('https://api.workos.com'),
     BACKEND_ENABLE_ORDERS: booleanFromEnv.default(false),
+    BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT: booleanFromEnv.default(false),
+    BACKEND_ENABLE_ORDER_REALTIME_WRITES: booleanFromEnv.default(false),
+    BACKEND_ENABLE_ORDER_REALTIME_STREAM: booleanFromEnv.default(false),
+    BACKEND_ORDER_REALTIME_HEARTBEAT_MS: z.coerce.number().int().min(5000).default(20000),
+    BACKEND_ORDER_REALTIME_CATCHUP_MS: z.coerce.number().int().min(250).default(1000),
+    BACKEND_ORDER_REALTIME_RETENTION_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+    BACKEND_ORDER_REALTIME_MAX_CONNECTIONS: z.coerce.number().int().min(1).max(10000).default(500),
+    BACKEND_ORDER_REALTIME_MAX_CONNECTIONS_PER_USER: z.coerce.number().int().min(1).max(20).default(3),
+    BACKEND_ORDER_REALTIME_MAX_QUEUE_EVENTS: z.coerce.number().int().min(10).max(10000).default(250),
+    BACKEND_ORDER_REALTIME_MAX_DETAIL_IDS: z.coerce.number().int().min(1).max(10000).default(500),
     BACKEND_ENABLE_PAYMENTS: booleanFromEnv.default(false),
     BACKEND_ENABLE_CLIENT_PHONES: booleanFromEnv.default(false),
     BACKEND_ENABLE_PRODUCTION_ACTIONS: booleanFromEnv.default(false),
@@ -420,6 +430,30 @@ export const envSchema = z
         code: 'custom',
         message: 'DATABASE_POOL_MIN cannot be greater than DATABASE_POOL_MAX',
         path: ['DATABASE_POOL_MIN'],
+      });
+    }
+
+    if (
+      (env.BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT ||
+        env.BACKEND_ENABLE_ORDER_REALTIME_WRITES ||
+        env.BACKEND_ENABLE_ORDER_REALTIME_STREAM) &&
+      (!env.DATABASE_URL || !env.BACKEND_ENABLE_ORDERS)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Order realtime features require DATABASE_URL and BACKEND_ENABLE_ORDERS=true',
+        path: ['BACKEND_ENABLE_ORDER_REALTIME_STREAM'],
+      });
+    }
+
+    if (
+      env.BACKEND_ENABLE_ORDER_REALTIME_STREAM &&
+      (!env.BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT || !env.BACKEND_ENABLE_ORDER_REALTIME_WRITES)
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Order realtime stream requires live snapshot and realtime writes',
+        path: ['BACKEND_ENABLE_ORDER_REALTIME_STREAM'],
       });
     }
 

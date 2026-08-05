@@ -86,6 +86,12 @@ export function panelHasDrilling(rawJson: Record<string, unknown> | null): boole
   return Array.isArray(items) && items.length > 0;
 }
 
+// Непустой пользовательский «Маршрут» тоже требует присадки в ERP-заказе,
+// даже если Базис не выгрузил отдельные записи отверстий для панели.
+export function panelHasRoute(rawJson: Record<string, unknown> | null): boolean {
+  return panelUserPropertyValue(rawJson, new Set(['маршрут'])) !== null;
+}
+
 export function collectUnmappedSheetNames(
   panels: ReadonlyArray<Pick<BazisDraftPanel, 'mainMaterialName'>>,
   mappings: Map<string, BazisDraftMaterialMapping>,
@@ -135,8 +141,10 @@ export function buildDraftDetails(
       bazisNodeId: panel.bazisNodeId,
       clientKey: clientKeyForNode(panel.bazisNodeId),
       detailName: panel.name,
-      height: panel.lengthMm ?? 0,
-      width: panel.widthMm ?? 0,
+      // Защита для старых ревизий во время rolling deploy: даже до backfill
+      // ERP-детали получают те же целые размеры, что и новые XML-импорты.
+      height: Math.round(panel.lengthMm ?? 0),
+      width: Math.round(panel.widthMm ?? 0),
       quantity: panel.cumulativeQuantity ?? 0,
       sheetMaterialTypeId:
         sheetMapping?.target_kind === 'sheet'
@@ -151,7 +159,7 @@ export function buildDraftDetails(
       basisProduct: panel.productName ?? null,
       basisDesignation: panel.designation,
       basisData: `${panel.position ?? ''}/${panel.designation ?? ''}/${panel.name ?? ''}`,
-      doweling: panelHasDrilling(panel.rawJson),
+      doweling: panelHasDrilling(panel.rawJson) || panelHasRoute(panel.rawJson),
     };
   });
 }
@@ -181,6 +189,12 @@ export function panelCustomMillingName(
   rawJson: Record<string, unknown> | null,
 ): string | null {
   return panelUserPropertyValue(rawJson, new Set(['фрезировка', 'фрезеровка']));
+}
+
+export function panelCustomPaintName(
+  rawJson: Record<string, unknown> | null,
+): string | null {
+  return panelUserPropertyValue(rawJson, new Set(['краска', 'краска (обр)']));
 }
 
 export function panelPreferredFilmName(

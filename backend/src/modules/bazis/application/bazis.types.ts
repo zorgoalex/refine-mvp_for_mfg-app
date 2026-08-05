@@ -63,6 +63,23 @@ export interface BuildOrderDraftCommand {
   targetOrderId?: number | null;
 }
 
+export interface ExportBazisCutXlsCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+  revisionId: number;
+  selectedNodeIds: number[];
+  templateId?: number;
+}
+
+export interface BazisCutXlsExportResult {
+  bytes: Buffer;
+  bazisProjectId: number;
+  bazisProjectName: string;
+  revisionId: number;
+  positionCount: number;
+  quantity: number;
+}
+
 export interface CreateOrderFromDraftCommand {
   currentUser: CurrentUser;
   requestId?: string;
@@ -124,6 +141,7 @@ export interface BazisRepositoryPort {
     items: UpsertMaterialMappingDto[],
   ): Promise<MaterialMappingDto[]>;
   buildOrderDraft(command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto>;
+  exportCutXls(command: ExportBazisCutXlsCommand): Promise<BazisCutXlsExportResult>;
   createOrderFromDraft(command: CreateOrderFromDraftCommand): Promise<CreateOrderFromRevisionResponseDto>;
   createOrderFromRevision(
     command: CreateOrderFromRevisionCommand,

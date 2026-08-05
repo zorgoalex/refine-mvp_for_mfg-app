@@ -11,6 +11,7 @@ import {
   parseAddToOrderBody,
   parseBuildOrderDraftBody,
   parseCreateOrderFromDraftBody,
+  parseExportCutXlsBody,
   parseMaterialMappingsQuery,
   parseNodeSearchQuery,
   parseRenameProjectBody,
@@ -392,6 +393,60 @@ describe('BazisController', () => {
     );
   });
 
+  it('exports selected panels as XLS and sets download headers', async () => {
+    const exportCutXls = vi.fn().mockResolvedValue({
+      bytes: Buffer.from('xls'),
+      bazisProjectId: 7,
+      bazisProjectName: 'Шкаф / тест',
+      revisionId: 12,
+      positionCount: 2,
+      quantity: 3,
+    });
+    const controller = createController({ bazisEnabled: true, service: { exportCutXls } });
+    const response = { setHeader: vi.fn() };
+
+    const file = await controller.exportCutXls(
+      request(),
+      '12',
+      { selectedNodeIds: ['101', '102'] },
+      response as never,
+    );
+
+    expect(exportCutXls).toHaveBeenCalledWith({
+      currentUser: request().user,
+      requestId: 'req-1',
+      revisionId: 12,
+      selectedNodeIds: [101, 102],
+    });
+    expect(response.setHeader).toHaveBeenCalledWith('Content-Type', 'application/vnd.ms-excel');
+    expect(response.setHeader).toHaveBeenCalledWith(
+      'Content-Disposition',
+      expect.stringContaining("filename*=UTF-8''"),
+    );
+    expect(file).toBeDefined();
+  });
+
+  it('fails closed when direct Bazis-cut export is disabled', async () => {
+    const controller = createController({ bazisEnabled: true, bazisCutEnabled: false });
+
+    await expect(controller.exportCutXls(
+      request(),
+      '12',
+      { selectedNodeIds: [101] },
+      { setHeader: vi.fn() } as never,
+    )).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'SERVICE_UNAVAILABLE',
+      details: { feature: 'bazisCut' },
+    } satisfies Partial<ApiError>);
+  });
+
+  it('validates direct XLS panel selection', () => {
+    expect(parseExportCutXlsBody({ selectedNodeIds: ['1', '2'] })).toEqual({ selectedNodeIds: [1, 2] });
+    expect(() => parseExportCutXlsBody({ selectedNodeIds: [] })).toThrowError(ApiError);
+    expect(() => parseExportCutXlsBody({ selectedNodeIds: [1], extra: true })).toThrowError(ApiError);
+  });
+
   it('parseAddToOrderBody requires a positive order id, pair arrays, and non-empty idempotencyKey', () => {
     expect(
       parseAddToOrderBody({
@@ -529,6 +584,7 @@ describe('BazisController', () => {
 
 function createController(input: {
   bazisEnabled: boolean;
+  bazisCutEnabled?: boolean;
   service?: Partial<BazisService>;
 }): BazisController {
   const service = {
@@ -545,13 +601,17 @@ function createController(input: {
     listMaterialMappings: vi.fn(),
     upsertMaterialMappings: vi.fn(),
     buildOrderDraft: vi.fn(),
+    exportCutXls: vi.fn(),
     addToOrder: vi.fn(),
     createOrderFromDraft: vi.fn(),
     createOrderFromRevision: vi.fn(),
     ...input.service,
   } as unknown as BazisService;
   const runtimeConfig = {
-    getFeatureFlags: () => ({ bazisEnabled: input.bazisEnabled }),
+    getFeatureFlags: () => ({
+      bazisEnabled: input.bazisEnabled,
+      bazisCutEnabled: input.bazisCutEnabled ?? true,
+    }),
   } as BazisRuntimeConfigService;
   return new BazisController(service, runtimeConfig);
 }

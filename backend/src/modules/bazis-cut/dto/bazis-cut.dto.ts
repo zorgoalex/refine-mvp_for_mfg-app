@@ -42,7 +42,7 @@ export const bazisCutDetailFieldsSchema = z.object({
 }).strict();
 
 export const createBazisCutSetSchema = z.object({
-  name: nonEmpty(200),
+  name: nonEmpty(200).optional(),
   orderId: z.number().int().positive(),
   detailIds: z.array(z.number().int().positive()).min(1).max(500),
 }).strict();
@@ -111,6 +111,7 @@ export interface BazisCutSetDetailDto extends BazisCutDetailFields {
   sourceBazisProjectName: string;
   sourceBazisOrderNo: string;
   sourceBazisProductName: string;
+  sourceBathCutNumber: string;
   createdAt: string;
   updatedAt: string;
 }

@@ -20,6 +20,7 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_BACKEND_BAZIS',
   'RUNTIME_CONFIG_BAZIS_CUT',
   'RUNTIME_CONFIG_ORDER_STATUS_BOARD',
+  'RUNTIME_CONFIG_ORDER_REALTIME',
   'RUNTIME_CONFIG_CNC_TELEGRAM',
   'RUNTIME_CONFIG_ENABLE_LEGACY_HASURA',
   'RUNTIME_CONFIG_UI_EVOLUTION',
@@ -68,6 +69,7 @@ describe('runtime-config handler', () => {
         bazisCut: false,
         bazisImport: false,
         cncTelegram: false,
+        orderRealtime: false,
         enableLegacyHasura: true,
       },
     });
@@ -79,6 +81,7 @@ describe('runtime-config handler', () => {
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_DEADLINES', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BAZIS_CUT', 'true');
     vi.stubEnv('RUNTIME_CONFIG_CNC_TELEGRAM', 'true');
+    vi.stubEnv('RUNTIME_CONFIG_ORDER_REALTIME', 'true');
     vi.stubEnv('RUNTIME_CONFIG_ENABLE_LEGACY_HASURA', 'false');
     vi.stubEnv('RUNTIME_CONFIG_UI_EVOLUTION', 'true');
 
@@ -97,6 +100,7 @@ describe('runtime-config handler', () => {
         backendDeadlines: true,
         bazisCut: true,
         cncTelegram: true,
+        orderRealtime: true,
         enableLegacyHasura: false,
       },
     });

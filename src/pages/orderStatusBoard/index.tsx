@@ -1,5 +1,4 @@
 import './orderStatusBoard.css';
 
-export { OrderStatusBoardPage } from './OrderStatusBoardPage';
+export { MdfWorkBoardPage, OrderStatusBoardPage } from './OrderStatusBoardPage';
 export { OrderStatusBoardPage as default } from './OrderStatusBoardPage';
-

@@ -102,6 +102,91 @@ integration('PgBazisCutRepository real PostgreSQL transaction harness', () => {
       'bazis_cut_set.detail_updated', 'bazis_cut_set.detail_removed',
     ]));
   });
+
+  it('creates snapshots with Basis project/order parity and the conditional product prefix', async () => {
+    const candidates = await pool.query<{
+      order_id: string;
+      detail_id: string;
+      basis_product: string | null;
+      basis_designation: string | null;
+      root_product_count: string;
+      revision_bazis_order_no: string | null;
+      product_order_no: string | null;
+    }>(`
+      WITH mapped AS (
+        SELECT od.order_id, od.detail_id, od.basis_product, od.basis_designation,
+               bn.revision_id,
+               COUNT(*) OVER (PARTITION BY od.detail_id) AS mapping_count
+        FROM order_details od
+        JOIN bazis_node_order_detail_map mapping ON mapping.order_detail_id=od.detail_id
+        JOIN bazis_nodes bn ON bn.bazis_node_id=mapping.node_id
+        JOIN orders source_order ON source_order.order_id=od.order_id AND source_order.delete_flag=false
+        JOIN sheet_material_types material ON material.sheet_material_type_id=od.sheet_material_type_id
+        WHERE od.delete_flag=false
+          AND NULLIF(btrim(material.name), '') IS NOT NULL
+          AND material.thickness_mm > 0
+          AND od.height > 0 AND od.width > 0
+          AND od.quantity > 0 AND od.quantity=trunc(od.quantity)
+      ), candidates AS (
+        SELECT mapped.*,
+               NULLIF(btrim(revision.bazis_order_no), '') AS revision_bazis_order_no,
+               (
+                 SELECT COUNT(*)
+                 FROM bazis_nodes root
+                 WHERE root.revision_id=mapped.revision_id
+                   AND root.parent_node_id IS NULL
+                   AND root.node_kind='product'
+               ) AS root_product_count,
+               (
+                 SELECT NULLIF(btrim(root.raw_json->>'Заказ'), '')
+                 FROM bazis_nodes root
+                 WHERE root.revision_id=mapped.revision_id
+                   AND root.parent_node_id IS NULL
+                   AND root.node_kind='product'
+                   AND NULLIF(btrim(root.raw_json->>'Заказ'), '') IS NOT NULL
+                 ORDER BY root.seq
+                 LIMIT 1
+               ) AS product_order_no
+        FROM mapped
+        JOIN bazis_project_revisions revision ON revision.bazis_revision_id=mapped.revision_id
+        WHERE mapped.mapping_count=1
+      )
+      SELECT DISTINCT ON (root_product_count > 1)
+             order_id::text, detail_id::text, basis_product, basis_designation,
+             root_product_count::text, revision_bazis_order_no, product_order_no
+      FROM candidates
+      ORDER BY (root_product_count > 1), detail_id
+    `);
+    if (candidates.rows.length === 0) return;
+
+    const repository = new PgBazisCutRepository(database);
+    for (const [index, candidate] of candidates.rows.entries()) {
+      const created = await repository.create({
+        currentUser: user,
+        requestId: `${keyPrefix}-source-${index}`,
+        idempotencyKey: `${keyPrefix}-source-${index}`,
+        name: `IT source ${keyPrefix} ${index}`,
+        orderId: Number(candidate.order_id),
+        detailIds: [Number(candidate.detail_id)],
+      });
+      ownedSetIds.push(created.set.bazisCutSetId);
+      expect(created.set.name).toBe(`БР-${created.set.bazisCutSetId}`);
+      const detail = created.set.details[0];
+      const rootProductCount = Number(candidate.root_product_count);
+      const bazisProject = rootProductCount > 1
+        ? candidate.revision_bazis_order_no ?? candidate.product_order_no ?? ''
+        : '';
+      const bazisOrder = rootProductCount > 1
+        ? ''
+        : candidate.product_order_no ?? candidate.revision_bazis_order_no ?? '';
+      const product = candidate.basis_product?.trim() ?? '';
+      const designation = candidate.basis_designation?.trim() ?? '';
+
+      expect(detail.sourceBazisProjectName).toBe(bazisProject);
+      expect(detail.sourceBazisOrderNo).toBe(bazisOrder);
+      expect(detail.position).toBe(`${bazisProject ? product : ''}.${designation}`);
+    }
+  });
 });
 
 function fields(overrides: Partial<BazisCutDetailFields> = {}): BazisCutDetailFields {

@@ -17,6 +17,7 @@
     "bazisCut": false,
     "labels": false,
     "orderStatusBoard": false,
+    "orderRealtime": false,
     "cncTelegram": false,
     "enableLegacyHasura": true,
     "workosAuth": false

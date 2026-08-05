@@ -8,6 +8,7 @@ import type { AccessTokenIssuerPort, IssuedAccessToken } from '../auth.types';
 export interface AccessTokenPayload {
   sub: string;
   iat: number;
+  exp?: number;
   username: string;
   role: UserRole;
   roleId: number;
@@ -71,6 +72,10 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
   }
 
   verifyAccessToken(accessToken: string): CurrentUser {
+    return this.verifyAccessTokenContext(accessToken).user;
+  }
+
+  verifyAccessTokenContext(accessToken: string): { user: CurrentUser; expiresAt: Date } {
     try {
       const payload = jwt.verify(accessToken, this.secret, {
         clockTimestamp: Math.floor(this.now().getTime() / 1000),
@@ -79,14 +84,20 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
       if (payload.tokenType !== 'access') {
         throw new ApiError(401, 'ACCESS_TOKEN_INVALID', 'Access token is invalid');
       }
+      if (!Number.isSafeInteger(payload.exp) || (payload.exp ?? 0) <= 0) {
+        throw new ApiError(401, 'ACCESS_TOKEN_INVALID', 'Access token expiry is invalid');
+      }
 
       return {
-        id: payload.sub,
-        username: payload.username,
-        role: payload.role,
-        roleId: payload.roleId,
-        permissions: payload.permissions,
-        sessionId: payload.sessionId,
+        user: {
+          id: payload.sub,
+          username: payload.username,
+          role: payload.role,
+          roleId: payload.roleId,
+          permissions: payload.permissions,
+          sessionId: payload.sessionId,
+        },
+        expiresAt: new Date((payload.exp ?? 0) * 1000),
       };
     } catch (error) {
       if (error instanceof ApiError) {

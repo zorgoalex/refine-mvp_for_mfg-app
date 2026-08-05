@@ -62,6 +62,60 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).toMatch(/040_seed_standard_label_template\*/);
     expect(scriptText).toMatch(/040_user_preferences\*/);
   });
+
+  it('fingerprints every realtime constraint, function, and statement trigger', () => {
+    const requiredConstraints = [
+      'order_realtime_stream_pkey',
+      'order_realtime_stream_order_id_fkey',
+      'chk_order_realtime_stream_commit_sequence',
+      'chk_order_realtime_stream_detail_status_revision',
+      'chk_order_realtime_stream_cut_refs_revision',
+      'pk_realtime_event_log',
+      'realtime_event_log_order_id_fkey',
+      'uq_realtime_event_log_source',
+      'chk_realtime_event_log_commit_sequence',
+      'chk_realtime_event_log_schema_version',
+      'chk_realtime_event_log_domains',
+      'chk_realtime_event_log_domain_revisions',
+    ];
+    const sql098 = readFileSync(resolve(migDir, '098_order_realtime_producer_bridge.sql'), 'utf8');
+    const requiredFunctions = [...sql098.matchAll(/CREATE OR REPLACE FUNCTION\s+(\w+)/g)]
+      .map((match) => match[1]);
+    const requiredTriggers = [...sql098.matchAll(/CREATE TRIGGER\s+(\w+)/g)]
+      .map((match) => match[1]);
+
+    expect(requiredFunctions).toHaveLength(18);
+    expect(requiredTriggers).toHaveLength(11);
+    for (const name of requiredConstraints) expect(probeFn).toContain(`q_con_hash_on ${name} `);
+    for (const name of requiredFunctions) expect(probeFn).toContain(`q_fun_hash '${name}(`);
+    for (const name of requiredTriggers) expect(probeFn).toContain(`q_stmt_trg ${name} `);
+    expect(scriptText).toMatch(/q_fun_hash\(\).*md5\(pg_get_functiondef\(oid\)\)/);
+    expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
+    expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(18);
+  });
+
+  it('requires realtime end-state probes before advancing the migration ledger', () => {
+    const verifyStart = scriptText.indexOf('verify_applied_effect() {');
+    const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
+    const verifyFn = scriptText.slice(verifyStart, verifyEnd);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\)/);
+    expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
+  });
+
+  it('pins all migration 101 effect markers', () => {
+    expect(probeFn).toContain('101_export_templates*');
+    expect(probeFn).toContain('q_tbl export_templates');
+    expect(probeFn).toContain('q_col export_templates schema_version');
+    expect(probeFn).toContain('q_con_on export_templates chk_export_templates_target_source');
+    expect(probeFn).toContain('q_con_on export_templates chk_export_templates_default_active');
+    expect(probeFn).toContain('q_idx uq_export_templates_code');
+    expect(probeFn).toContain('q_idx uq_export_templates_live_name');
+    expect(probeFn).toContain('q_idx uq_export_templates_active_default');
+    expect(probeFn).toContain('q_idx idx_export_templates_runtime');
+    const migration101Probe = probeFn.slice(probeFn.indexOf('101_export_templates*'), probeFn.indexOf('*) return 2'));
+    expect(migration101Probe).not.toContain('bazis-cut-set-standard-v1');
+    expect(migration101Probe).not.toContain('bazis-project-cut-standard-v1');
+  });
 });
 
 describe('apply-migrations.sh auto — semantic view markers (pinned to real SQL)', () => {

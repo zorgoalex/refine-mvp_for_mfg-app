@@ -10,13 +10,19 @@ import {
   bazisCutApi, type BazisCutDetailFields, type BazisCutSetCardDto, type BazisCutSetDetailDto,
 } from '../../api/bazisCutApi';
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
+import { ExportTemplateSelect } from '../../components/ExportTemplateSelect';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
-import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
+import {
+  buildBazisCutCardPosition,
+  buildBazisCutQrCode,
+  summarizeBazisCutDetails,
+} from './bazisCutDetailPresentation';
 import { saveBazisCutFile, type BazisCutSaveHandle } from './bazisCutSaveFile';
 import './BazisCutSetPage.css';
 
 const { Title, Text } = Typography;
+const AREA_FORMATTER = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 type FieldKey = keyof BazisCutDetailFields;
 interface FieldDefinition { key: FieldKey; label: string; group: 'Основное' | 'Размеры' | 'Кромки' | 'Дополнительно'; kind: 'text' | 'long' | 'number' | 'integer' | 'boolean'; }
@@ -60,10 +66,10 @@ const FIELD_GROUPS = ['Основное', 'Размеры', 'Кромки', 'Д�
 const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
   FIELDS.filter((field) => field.group === group && field.key !== 'position' && field.key !== 'partName'),
 );
-const LEADING_COLUMN_COUNT = 6;
-const QR_CODE_COLUMN_INDEX = 4;
+const LEADING_COLUMN_COUNT = 9;
+const QR_CODE_COLUMN_INDEX = 7;
 const QR_CODE_STICKY_CLASS = 'bazis-cut-sticky-qr';
-const QR_CODE_STICKY_LEFT_PX = 58 + 210 + 150;
+const QR_CODE_STICKY_LEFT_PX = 58 + 210 + 150 + 150;
 const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
 const QUANTITY_COLUMN_INDEX = LEADING_COLUMN_COUNT
   + GROUPED_FIELDS.findIndex((field) => field.key === 'quantity');
@@ -73,13 +79,15 @@ export const BazisCutSetPage: React.FC = () => {
   const [set, setSet] = useState<BazisCutSetCardDto | null>(null);
   const [loading, setLoading] = useState(false); const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false); const [editing, setEditing] = useState<BazisCutSetDetailDto | null>(null);
+  const [exportTemplateId, setExportTemplateId] = useState<number>();
+  const [exportTemplatesReady, setExportTemplatesReady] = useState(false);
   const [nameForm] = Form.useForm<{ name: string }>(); const [detailForm] = Form.useForm<BazisCutDetailFields>();
   const canManage = can('cut.manage');
   const setTabTitle = useTabStore((state) => state.setTabTitle);
   const tableHeaderOffset = useWorkspaceTabsHeight();
 
   useEffect(() => {
-    if (valid) setTabTitle(`/bazis-cut/${setId}`, `Базис-раскрой #${setId}`);
+    if (valid) setTabTitle(`/bazis-cut/${setId}`, `БР #${setId}`);
   }, [setId, setTabTitle, valid]);
 
   const load = useCallback(async () => {
@@ -120,19 +128,22 @@ export const BazisCutSetPage: React.FC = () => {
       await saveBazisCutFile({
         suggestedName: exportFileName(set.name, setId),
         picker: picker ? (options) => picker.call(window, options) : undefined,
-        fetchFile: () => bazisCutApi.exportXls(setId), fallbackDownload: downloadBlob,
+        fetchFile: () => bazisCutApi.exportXls(setId, exportTemplateId), fallbackDownload: downloadBlob,
         onGenerationStart: () => setExporting(true),
       });
       message.success('Excel-файл сформирован');
     } catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) message.error(error instanceof Error ? error.message : 'Не удалось экспортировать Excel'); }
     finally { setExporting(false); }
-  }, [set, setId]);
+  }, [exportTemplateId, set, setId]);
 
   const columns = useMemo<ColumnsType<BazisCutSetDetailDto>>(() => buildColumns(canManage, startEdit, remove), [canManage, remove, startEdit]);
+  const setTotals = useMemo(() => summarizeBazisCutDetails(set?.details ?? []), [set?.details]);
   if (!valid) return <div className="bazis-cut-set-modern"><Alert type="error" showIcon message="Некорректный номер набора" /></div>;
   return <div className="bazis-cut-set-modern"><Space direction="vertical" size="middle" style={{ width: '100%' }}>
     <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}><Title level={3} style={{ margin: 0 }}>Базис-раскрой #{setId}</Title>
-      <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!set || set.positionCount === 0} onClick={() => void exportXls()}>Экспорт XLS</Button></Space>
+      <Space wrap><ExportTemplateSelect targetScreen="bazis_cut_set" sourceType="bazis_cut_set_detail" value={exportTemplateId}
+        disabled={exporting} onChange={setExportTemplateId} onReadyChange={setExportTemplatesReady} />
+      <Button type="primary" icon={<DownloadOutlined />} loading={exporting} disabled={!set || set.positionCount === 0 || !exportTemplatesReady} onClick={() => void exportXls()}>Экспорт XLS</Button></Space></Space>
     <Card loading={loading} title="Набор"><Form form={nameForm} layout="inline" onFinish={() => void saveName()}>
       <Form.Item name="name" label="Название" rules={[{ required: true, whitespace: true }, { max: 200 }]} style={{ flex: 1 }}><Input disabled={!canManage} /></Form.Item>
       {canManage && <Button htmlType="submit" icon={<SaveOutlined />} loading={saving}>Сохранить</Button>}
@@ -141,6 +152,7 @@ export const BazisCutSetPage: React.FC = () => {
       <Descriptions.Item label="Сформирован">{new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(set.createdAt))}</Descriptions.Item>
       <Descriptions.Item label="Деталей"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{set.quantity}</span></Descriptions.Item>
       <Descriptions.Item label="Позиций"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{set.positionCount}</span></Descriptions.Item>
+      <Descriptions.Item label="Общая площадь"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{AREA_FORMATTER.format(setTotals.totalAreaM2)} м²</span></Descriptions.Item>
       <Descriptions.Item label="ERP-заказы"><SourceRefs refs={set.orders} href={(refId) => `/orders/show/${refId}`} /></Descriptions.Item>
       <Descriptions.Item label="ERP-проекты"><SourceRefs refs={set.projects} /></Descriptions.Item>
       <Descriptions.Item label="Базис-проекты"><SourceRefs refs={set.bazisProjects} href={(refId) => `/bazis/projects/${refId}`} /></Descriptions.Item>
@@ -149,7 +161,7 @@ export const BazisCutSetPage: React.FC = () => {
     <Card title="Детали набора"><Table className="bazis-cut-set-details-table"
       style={{ '--bazis-cut-sticky-qr-left': `${QR_CODE_STICKY_LEFT_PX}px` } as React.CSSProperties}
       rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
-      loading={loading} pagination={false} scroll={{ x: 5320, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
+      loading={loading} pagination={false} scroll={{ x: 5750, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
       rowClassName={(row) => orderDeletedReferenceClassName(row.sourceOrderDeleted)}
       summary={(details) => <DetailTableSummary details={details} canManage={canManage} />}
       size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
@@ -181,16 +193,28 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
       render: (_: unknown, _row: BazisCutSetDetailDto, index: number) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{index + 1}</span> },
     { title: 'Источник', key: 'source', fixed: 'left', width: 210, render: (_, row) => row.sourceOrderId ? (
       <Space size={4} wrap>
-        <Link to={`/orders/show/${row.sourceOrderId}`}>{row.sourceOrderFullNumber || row.sourceOrderName}</Link>
+        <Link to={`/orders/show/${row.sourceOrderId}`}>{row.sourceOrderName || '—'}</Link>
         <OrderDeletedTag deleted={row.sourceOrderDeleted} />
       </Space>
     ) : 'Снимок' },
-    { title: 'Базис заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left', width: 150,
+    { title: 'Базис-проект', dataIndex: 'sourceBazisProjectName', key: 'sourceBazisProjectName', fixed: 'left', width: 150,
+      render: (value: string, row) => value
+        ? row.sourceBazisProjectId
+          ? <Link to={`/bazis/projects/${row.sourceBazisProjectId}`}><span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span></Link>
+          : <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        : <Text type="secondary">—</Text> },
+    { title: 'Базис-заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left', width: 150,
+      render: (value: string) => value
+        ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        : <Text type="secondary">—</Text> },
+    { title: 'Изделие', dataIndex: 'sourceBazisProductName', key: 'sourceBazisProductName', width: 140,
+      render: (value: string) => value || <Text type="secondary">—</Text> },
+    { title: 'Ванна', dataIndex: 'sourceBathCutNumber', key: 'sourceBathCutNumber', width: 140,
       render: (value: string) => value
         ? <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span>
         : <Text type="secondary">—</Text> },
     { title: 'Позиция', dataIndex: 'position', key: 'position', width: 130,
-      render: (value: string) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</span> },
+      render: (_value: string, row) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{buildBazisCutCardPosition(row)}</span> },
     { title: 'QR-code', key: 'qrCode', className: QR_CODE_STICKY_CLASS, width: 220, render: (_: unknown, row: BazisCutSetDetailDto) => {
       const qrCode = buildBazisCutQrCode(row);
       return qrCode

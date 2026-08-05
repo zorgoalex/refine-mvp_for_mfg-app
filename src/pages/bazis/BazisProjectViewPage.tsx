@@ -12,8 +12,10 @@ import { Alert, Button, Card, Col, Descriptions, Empty, Input, Row, Select, Spac
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
+import { featureFlags } from '../../config/featureFlags';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
+import { ExportTemplateSelect } from '../../components/ExportTemplateSelect';
 import { EstimateTab } from './EstimateTab';
 import { HardwareTab } from './HardwareTab';
 import { MaterialsSummaryTab } from './MaterialsSummaryTab';
@@ -24,6 +26,7 @@ import { NodeSearch } from './NodeSearch';
 import { RevisionOrdersTab } from './RevisionOrdersTab';
 import { buildSubtreeSummaries, useRevisionData } from './useRevisionData';
 import { ViewerTree, type ViewerTreeHandle } from './ViewerTree';
+import { saveBazisCutFile, type BazisCutSaveHandle } from '../bazis-cut/bazisCutSaveFile';
 import {
   OperationalPageHeader,
   useOperationalUi,
@@ -44,8 +47,8 @@ export const BazisProjectViewPage: React.FC = () => {
 
   useEffect(() => {
     if (projectCard?.name) {
-      // Название базис-проекта в заголовок workspace-вкладки
-      setTabTitle(`/bazis/projects/${projectCard.bazisProjectId}`, projectCard.name);
+      // Префикс отличает карточку Базис-проекта от заказа/проекта с тем же именем.
+      setTabTitle(`/bazis/projects/${projectCard.bazisProjectId}`, `БП ${projectCard.name.trim()}`);
     }
   }, [projectCard, setTabTitle]);
   const [loading, setLoading] = useState(false);
@@ -55,7 +58,12 @@ export const BazisProjectViewPage: React.FC = () => {
   const viewerTreeRef = useRef<ViewerTreeHandle>(null);
   const [activeTab, setActiveTab] = useState('panels');
   const [selectedPanelId, setSelectedPanelId] = useState<number | null>(null);
+  const [selectedPanelNodeIds, setSelectedPanelNodeIds] = useState<number[]>([]);
+  const [exportingCutXls, setExportingCutXls] = useState(false);
+  const [exportTemplateId, setExportTemplateId] = useState<number>();
+  const [exportTemplatesReady, setExportTemplatesReady] = useState(false);
   const canManage = can('bazis.manage');
+  const canExportBazisCut = can('cut.view');
   // Счётчик внешних переходов «к панели»: PanelsTab по нему форсирует
   // авто-раскрытие группы даже при повторном переходе на ту же панель
   const [panelFocusToken, setPanelFocusToken] = useState(0);
@@ -140,6 +148,7 @@ export const BazisProjectViewPage: React.FC = () => {
   useEffect(() => {
     setSelectedNodeId(null);
     setSelectedPanelId(null);
+    setSelectedPanelNodeIds([]);
     setPendingTreeNodeId(null);
     setActiveTab('panels');
   }, [selectedRevisionId]);
@@ -250,6 +259,27 @@ export const BazisProjectViewPage: React.FC = () => {
     anchor.download = `bazis-project-${projectCard.bazisProjectId}.json`;
     anchor.click();
     URL.revokeObjectURL(href);
+  };
+
+  const exportSelectedPanelsXls = async (nodeIds: number[]) => {
+    if (!selectedRevision || !projectCard || nodeIds.length === 0 || exportingCutXls || !exportTemplatesReady) return;
+    const picker = (window as PickerWindow).showSaveFilePicker;
+    try {
+      await saveBazisCutFile({
+        suggestedName: directCutExportFileName(projectCard.name, selectedRevision.bazisRevisionId),
+        picker: picker ? (options) => picker.call(window, options) : undefined,
+        fetchFile: () => bazisApi.exportCutXls(selectedRevision.bazisRevisionId, nodeIds, exportTemplateId),
+        fallbackDownload: downloadBlob,
+        onGenerationStart: () => setExportingCutXls(true),
+      });
+      message.success('XLS для Базис-раскроя сформирован');
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        message.error(error instanceof Error ? error.message : 'Не удалось экспортировать XLS');
+      }
+    } finally {
+      setExportingCutXls(false);
+    }
   };
 
   if (!can('bazis.view')) {
@@ -388,9 +418,35 @@ export const BazisProjectViewPage: React.FC = () => {
               >
                 Изменения
               </Button>
-              <Button icon={<DownloadOutlined />} onClick={exportProjectSnapshot}>
-                Экспорт
-              </Button>
+              {featureFlags.bazisCut ? (
+                <Space wrap>
+                <ExportTemplateSelect targetScreen="bazis_project_card" sourceType="bazis_project_panel"
+                  value={exportTemplateId} disabled={exportingCutXls || !canExportBazisCut}
+                  onChange={setExportTemplateId} onReadyChange={setExportTemplatesReady} />
+                <Tooltip
+                  title={!canExportBazisCut
+                    ? 'Нужно право cut.view'
+                    : selectedPanelNodeIds.length === 0
+                      ? 'Выберите панели в списке'
+                      : undefined}
+                >
+                  <span>
+                    <Button
+                      icon={<DownloadOutlined />}
+                      loading={exportingCutXls}
+                      disabled={!canExportBazisCut || selectedPanelNodeIds.length === 0 || !exportTemplatesReady}
+                      onClick={() => void exportSelectedPanelsXls(selectedPanelNodeIds)}
+                    >
+                      Экспорт XLS
+                    </Button>
+                  </span>
+                </Tooltip>
+                </Space>
+              ) : (
+                <Button icon={<DownloadOutlined />} onClick={exportProjectSnapshot}>
+                  Экспорт JSON
+                </Button>
+              )}
               <Button type="primary" icon={<PlusOutlined />} disabled>
                 Создать заказ
               </Button>
@@ -454,6 +510,10 @@ export const BazisProjectViewPage: React.FC = () => {
                     focusToken={panelFocusToken}
                     onSelect={setSelectedPanelId}
                     onGoToTree={goToTree}
+                    onSelectionChange={setSelectedPanelNodeIds}
+                    onExportXls={featureFlags.bazisCut ? exportSelectedPanelsXls : undefined}
+                    canExportXls={canExportBazisCut && exportTemplatesReady}
+                    exportingXls={exportingCutXls}
                   />
                 ),
               },
@@ -540,6 +600,28 @@ export const BazisProjectViewPage: React.FC = () => {
     </div>
   );
 };
+
+function directCutExportFileName(projectName: string, revisionId: number): string {
+  const safe = projectName.trim().replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '').slice(0, 120) || 'проект';
+  return `Базис-раскрой-${safe}-${revisionId}.xls`;
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+interface PickerWindow extends Window {
+  showSaveFilePicker?: (options: {
+    suggestedName: string;
+    types: Array<{ description: string; accept: Record<string, string[]> }>;
+  }) => Promise<BazisCutSaveHandle>;
+}
 
 function buildRevisionLabel(revision: BazisProjectCard['revisions'][number]): string {
   const parts = [`Ревизия #${revision.revisionNo}`];

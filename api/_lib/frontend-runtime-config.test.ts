@@ -27,6 +27,7 @@ describe('frontend runtime config delivery', () => {
         bazisCut: false,
         labels: false,
         orderStatusBoard: false,
+        orderRealtime: false,
         cncTelegram: false,
         pdfImportLayoutPatterns: false,
         projects: false,
@@ -56,6 +57,7 @@ describe('frontend runtime config delivery', () => {
         RUNTIME_CONFIG_BACKEND_REFERENCES: 'false',
         RUNTIME_CONFIG_BAZIS_CUT: 'true',
         RUNTIME_CONFIG_ORDER_STATUS_BOARD: 'true',
+        RUNTIME_CONFIG_ORDER_REALTIME: 'true',
         RUNTIME_CONFIG_CNC_TELEGRAM: 'true',
         RUNTIME_CONFIG_ENABLE_LEGACY_HASURA: 'false',
         GAS_API_KEY: 'must-not-leak',
@@ -84,6 +86,7 @@ describe('frontend runtime config delivery', () => {
         bazisCut: true,
         labels: false,
         orderStatusBoard: true,
+        orderRealtime: true,
         cncTelegram: true,
         pdfImportLayoutPatterns: false,
         projects: false,
@@ -137,6 +140,13 @@ describe('frontend runtime config delivery', () => {
     expect(buildFrontendRuntimeConfig({
       RUNTIME_CONFIG_CNC_TELEGRAM: 'true',
     }).features.cncTelegram).toBe(true);
+  });
+
+  it('maps order realtime runtime flag default-off and true', () => {
+    expect(buildFrontendRuntimeConfig({}).features.orderRealtime).toBe(false);
+    expect(buildFrontendRuntimeConfig({
+      RUNTIME_CONFIG_ORDER_REALTIME: 'true',
+    }).features.orderRealtime).toBe(true);
   });
 
   it('maps projects runtime flag default-off and true', () => {

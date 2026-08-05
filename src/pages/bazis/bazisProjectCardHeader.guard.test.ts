@@ -5,6 +5,10 @@ const view = readFileSync(new URL('./BazisProjectViewPage.tsx', import.meta.url)
 const api = readFileSync(new URL('../../api/bazisApi.ts', import.meta.url), 'utf8');
 
 describe('Bazis project card header guards', () => {
+  it('prefixes the workspace tab title with БП', () => {
+    expect(view).toContain('`БП ${projectCard.name.trim()}`');
+  });
+
   it('shows owning ERP project name with a link', () => {
     expect(view).toContain('projectCard.projectName?.trim()');
     expect(view).toContain('ERP-проект:');
@@ -21,5 +25,13 @@ describe('Bazis project card header guards', () => {
 
   it('uses PATCH for the rename command', () => {
     expect(api).toMatch(/renameProject[\s\S]*httpClient\.patch/);
+  });
+
+  it('exports selected panels as direct Basis-cut XLS from the project card', () => {
+    expect(view).toContain("can('cut.view')");
+    expect(view).toContain('bazisApi.exportCutXls(selectedRevision.bazisRevisionId, nodeIds)');
+    expect(view).toContain('onSelectionChange={setSelectedPanelNodeIds}');
+    expect(view).toContain('Экспорт XLS');
+    expect(api).toMatch(/exportCutXls[\s\S]*revisionCutXls[\s\S]*selectedNodeIds/);
   });
 });

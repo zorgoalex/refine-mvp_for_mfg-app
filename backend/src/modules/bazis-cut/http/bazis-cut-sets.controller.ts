@@ -67,7 +67,7 @@ const detailResponseSchema: SchemaObject = { type: 'object', additionalPropertie
   required: [...detailFieldNames, 'bazisCutSetDetailId', 'bazisCutSetId', 'sortOrder', 'sourceOrderDetailId',
     'sourceOrderId', 'sourceProjectId', 'sourceBazisProjectId', 'sourceBazisRevisionId', 'sourceBazisNodeId',
     'sourceOrderDeleted', 'sourceOrderName', 'sourceOrderFullNumber', 'sourceProjectCode', 'sourceBazisProjectName', 'sourceBazisOrderNo',
-    'sourceBazisProductName',
+    'sourceBazisProductName', 'sourceBathCutNumber',
     'createdAt', 'updatedAt'],
   properties: { ...detailProperties,
     bazisCutSetDetailId: { type: 'integer', format: 'int64' }, bazisCutSetId: { type: 'integer', format: 'int64' },
@@ -81,7 +81,7 @@ const detailResponseSchema: SchemaObject = { type: 'object', additionalPropertie
     sourceBazisNodeId: { type: 'integer', format: 'int64', nullable: true },
     sourceOrderName: { type: 'string' }, sourceOrderFullNumber: { type: 'string' }, sourceProjectCode: { type: 'string' },
     sourceBazisProjectName: { type: 'string' }, sourceBazisOrderNo: { type: 'string' },
-    sourceBazisProductName: { type: 'string' },
+    sourceBazisProductName: { type: 'string' }, sourceBathCutNumber: { type: 'string' },
     createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
   } };
 const setResponseSchema: SchemaObject = { type: 'object', additionalProperties: false,
@@ -122,7 +122,7 @@ export class BazisCutSetsController {
 
   @ApiOperation({ operationId: 'createBazisCutSet', summary: 'Create a Basis-cut set from order details' })
   @ApiHeader(commandHeader)
-  @ApiBody({ schema: { type: 'object', required: ['name', 'orderId', 'detailIds'], properties: {
+  @ApiBody({ schema: { type: 'object', required: ['orderId', 'detailIds'], properties: {
     name: { type: 'string', minLength: 1, maxLength: 200 }, orderId: { type: 'integer', minimum: 1 },
     detailIds: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'integer', minimum: 1 } },
   } } })
@@ -216,14 +216,16 @@ export class BazisCutSetsController {
 
   @ApiOperation({ operationId: 'exportBazisCutSetXls', summary: 'Export a saved set as BIFF8 XLS' })
   @ApiParam(idParameter)
+  @ApiQuery({ name: 'templateId', required: false, type: Number })
   @ApiProduces('application/vnd.ms-excel')
   @ApiResponse({ status: 201, description: 'BIFF8 XLS', schema: { type: 'string', format: 'binary' } })
   @Post(':setId/export.xls')
   async export(@Req() request: RequestWithCurrentUser, @Param('setId') setId: string,
+    @Query('templateId') templateId: string | undefined,
     @Res({ passthrough: true }) response: Response): Promise<StreamableFile> {
     this.assertEnabled();
     const result = await this.service.export({ currentUser: requireUser(request), requestId: request.requestId,
-      setId: parseId(setId) });
+      setId: parseId(setId), ...(templateId ? { templateId: parseId(templateId) } : {}) });
     const filename = buildFilename(result.set.name, result.set.bazisCutSetId);
     response.setHeader('Content-Type', 'application/vnd.ms-excel');
     response.setHeader('Content-Disposition', contentDisposition(filename));

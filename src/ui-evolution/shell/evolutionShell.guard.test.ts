@@ -81,4 +81,9 @@ describe('evolution shell behavior preservation', () => {
     expect(styles).toContain('.bazis-project-modern-card');
     expect(styles).toContain('.order-show-summary-tabs-sticky');
   });
+
+  it('renders the standalone MDF board with the status-board workspace layout', () => {
+    expect(layout).toContain("pathname.startsWith('/mdf-work-board')");
+    expect(layout).toMatch(/mdf-work-board'[\s\S]*return 'status-board'/);
+  });
 });

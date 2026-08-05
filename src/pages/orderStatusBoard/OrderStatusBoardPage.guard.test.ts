@@ -5,6 +5,7 @@ const page = readFileSync(
   'src/pages/orderStatusBoard/OrderStatusBoardPage.tsx',
   'utf8',
 );
+const app = readFileSync('src/App.tsx', 'utf8');
 const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
@@ -100,11 +101,16 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
-    expect(page).toContain("key: 'cnc_today'");
+    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
+    expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
+    expect(page).toContain('{!fixedView && (');
+    expect(page).not.toContain("{ key: 'cnc_today', label: 'МДФ-работы' }");
+    expect(app).toContain('name: "mdf-work-board"');
+    expect(app).toContain('list: "/mdf-work-board"');
+    expect(app).toContain('<Route path="/mdf-work-board">');
     expect(page).toContain('cncTelegramApi.today');
     expect(page).not.toContain('workday ? { date: workday } : {}');
     expect(page).toContain('<CncTelegramTodayColumns');
-    expect(page).toContain("label: 'МДФ-работы'");
     expect(page).toContain("parsed: 'Файлы на станке'");
     expect(page).toContain('CncTelegramBathCardView');
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
@@ -313,7 +319,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(page).toContain('filterCncBathColumnsByOrderStatuses(');
     expect(page).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
+    expect(page).toContain('resolveMdfBoardHiddenOrderStatusIds(');
     expect(page).toContain('resolveMdfBoardHiddenProductionStatusIds(');
+    expect(page).toContain('cncHiddenOrderStatusIds');
     expect(page).toContain('cncHiddenProductionStatusIds');
     expect(page).toContain('cncOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId))');
   });
@@ -527,7 +535,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("baths_laminated: 'Закатаны/выданы'");
     expect(page).toContain('...terminalColumns');
     expect(page).toContain('cncMuted={mutedOrderIds.has(card.orderId)}');
-    expect(css).toContain('.cnc-today-column--terminal');
+    expect(css).toMatch(
+      /\.status-board-column\.cnc-today-column--terminal\s*\{[^}]*background: #f2f3f5;/s,
+    );
     expect(css).toContain('.cnc-terminal-card--muted');
     expect(settings).toContain('checked={viewState.hideEmpty}');
     expect(settings).toContain('Скрыть пустые');
@@ -723,6 +733,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('keeps order cards dense, badge-based and project-code-free', () => {
     expect(page).toContain("type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal'");
+    expect(page).toContain("useState<StatusBoardCardDisplayMode>('compact')");
     expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_OPTIONS');
     expect(page).toContain('Вид карточек заказов');
     expect(page).toContain('Стандартный');

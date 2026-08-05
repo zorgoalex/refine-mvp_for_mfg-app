@@ -234,6 +234,10 @@ q_con_def() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$2' FROM 
 q_trg_def() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$2' FROM pg_trigger WHERE tgname='$1'), false);"; }
 q_con_def_on() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
 q_con_def_on_safe() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)=\$erp_probe\$$3\$erp_probe\$ FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
+q_con_hash_on() { echo "SELECT COALESCE((SELECT md5(pg_get_constraintdef(oid))='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
+q_idx_hash() { echo "SELECT COALESCE((SELECT md5(indexdef)='$2' FROM pg_indexes WHERE schemaname='public' AND indexname='$1'), false);"; }
+q_fun_hash() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid))='$2' FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
+q_stmt_trg() { echo "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='$1' AND t.tgrelid='public.$2'::regclass AND t.tgfoid='$3()'::regprocedure AND t.tgtype=$4 AND t.tgenabled='O' AND NOT t.tgisinternal AND COALESCE(t.tgoldtable, '')='$5' AND COALESCE(t.tgnewtable, '')='$6');"; }
 q_trg_def_on() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$3' FROM pg_trigger WHERE tgname='$1' AND tgrelid='public.$2'::regclass), false);"; }
 probe_true() { [ "$(pg_query "$1")" = "t" ]; }
 # AND-chain: every argument is a boolean SQL statement; all must be true.
@@ -786,17 +790,150 @@ probe_file() {
                      "$(q_idx idx_cnc_telegram_packets_svg_cut_job)" \
                      "$(q_idx idx_cnc_telegram_packets_cut_layout_valid)" ;;
     094_user_preferences_sidebar_menu_order*) probe_all "$(q_col user_preferences sidebar_menu_order)" ;;
+    095_bazis_panel_dimensions_rounding*) probe_all "SELECT EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE conname = 'chk_bazis_panel_dimensions_integer'
+                           AND conrelid = 'bazis_nodes'::regclass
+                           AND convalidated
+                      );" ;;
+    096_bazis_cut_document_fields*) probe_all "SELECT
+                       col_description('bazis_cut_set_details'::regclass,
+                         (SELECT attnum FROM pg_attribute
+                          WHERE attrelid='bazis_cut_set_details'::regclass
+                            AND attname='source_bazis_project_name'))
+                         LIKE 'bazis-cut-document-fields-v2:%';" \
+                     "SELECT
+                       COALESCE(col_description('bazis_cut_set_details'::regclass,
+                         (SELECT attnum FROM pg_attribute
+                          WHERE attrelid='bazis_cut_set_details'::regclass
+                            AND attname='position')), '')
+                         LIKE ANY (ARRAY['bazis-cut-document-fields-v2:%', 'bazis-cut-position-v3:%']);" ;;
+    097_order_realtime_invalidation*) probe_all "$(q_tbl order_realtime_stream)" \
+                     "$(q_tbl realtime_event_log)" \
+                     "$(q_con_hash_on order_realtime_stream_pkey order_realtime_stream 5c77932d9dfbffa547edc0134599bff5)" \
+                     "$(q_con_hash_on order_realtime_stream_order_id_fkey order_realtime_stream 194ff749324dcdbff3899d715d005561)" \
+                     "$(q_con_hash_on chk_order_realtime_stream_commit_sequence order_realtime_stream 3ef7ee200ff69a3f0320dc922a8f5d07)" \
+                     "$(q_con_hash_on chk_order_realtime_stream_detail_status_revision order_realtime_stream e049683d0915ba49b8a54954b76a78a5)" \
+                     "$(q_con_hash_on chk_order_realtime_stream_cut_refs_revision order_realtime_stream 52774b3be8f2ba8bf3445059b10111b9)" \
+                     "$(q_con_hash_on pk_realtime_event_log realtime_event_log 3e84dec0fbdc6dbdfbb04a9161201a97)" \
+                     "$(q_con_hash_on realtime_event_log_order_id_fkey realtime_event_log 194ff749324dcdbff3899d715d005561)" \
+                     "$(q_con_hash_on uq_realtime_event_log_source realtime_event_log 48be58aeda25080b496f72c48e9b5bf6)" \
+                     "$(q_con_hash_on chk_realtime_event_log_commit_sequence realtime_event_log 8b746f19cb6635aa79787c84223a919b)" \
+                     "$(q_con_hash_on chk_realtime_event_log_schema_version realtime_event_log 082bc7d916e4cd09f835790c2342c81f)" \
+                     "$(q_con_hash_on chk_realtime_event_log_domains realtime_event_log f143a6a68aca2dfed7baf88e1c3d1f93)" \
+                     "$(q_con_hash_on chk_realtime_event_log_domain_revisions realtime_event_log 9edd9a167624f74c4637ddaed6db6bd9)" \
+                     "$(q_idx_hash idx_realtime_event_log_created_at bbc642b29444fce67811fe60872a3cd9)" \
+                     "$(q_idx_hash idx_realtime_event_log_detail_status_replay 01776c00a1db4f9220379de8576276be)" \
+                     "$(q_idx_hash idx_realtime_event_log_cut_refs_replay 2aa58272654629ea30c5e35408af94da)" \
+                     "SELECT obj_description('realtime_event_log'::regclass) = 'order-realtime-invalidation-v1';" ;;
+    098_order_realtime_producer_bridge*) probe_all "SELECT EXISTS (
+                       SELECT 1 FROM app_settings
+                       WHERE setting_key = 'order_realtime.writes'
+                         AND is_active = true
+                         AND value_json ? 'enabled'
+                         AND value_json ? 'maxFanoutOrders'
+                         AND value_json ? 'maxDetailIds'
+                     );" \
+                     "SELECT EXISTS (
+                       SELECT 1 FROM app_settings
+                       WHERE setting_key = 'order_realtime.rollout'
+                         AND is_active = true
+                         AND value_json ? 'enabled'
+                         AND value_json ? 'userIds'
+                         AND value_json ? 'rolloutPercent'
+                     );" \
+                     "SELECT obj_description(
+                       'order_realtime_emit_one(bigint,text[],bigint[],text)'::regprocedure,
+                       'pg_proc'
+                     ) = 'order-realtime-producer-bridge-v1';" \
+                     "$(q_fun_hash 'order_realtime_bridge_config()' e01f74bddefb964202c854e017a183cb)" \
+                     "$(q_fun_hash 'order_realtime_bridge_enabled_for_fanout(integer)' 31c9de672533a32b0493235924ea8261)" \
+                     "$(q_fun_hash 'order_realtime_bridge_max_detail_ids()' d0485616d61b3904e36418387a09f506)" \
+                     "$(q_fun_hash 'order_realtime_cut_job_snapshot_visible(bigint,text,text,bigint)' d0bb80f56f3010c62312a66b6a3575d2)" \
+                     "$(q_fun_hash 'order_realtime_emit_one(bigint,text[],bigint[],text)' bbf8a2f2fad9cd1483a144244fe9d522)" \
+                     "$(q_fun_hash 'order_realtime_lock_cut_roots(bigint[])' 496b5bf6aebf43754456e0ec0dbb47d2)" \
+                     "$(q_fun_hash 'order_realtime_order_snapshot_visible(bigint)' a8e335d989b19d0246523aa34fbfc324)" \
+                     "$(q_fun_hash 'trg_order_realtime_detail_status_insert()' d3a33ea887a1ef1110ff46eb164773ea)" \
+                     "$(q_fun_hash 'trg_order_realtime_detail_status_update()' b7d647c727baa47e28b099f666348392)" \
+                     "$(q_fun_hash 'trg_order_realtime_detail_status_delete()' 2f0a2b87d4dc4fcbc12bd772b120d267)" \
+                     "$(q_fun_hash 'trg_order_realtime_order_visibility_update()' b8f1151d541def16ed99645dcbd0bd00)" \
+                     "$(q_fun_hash 'trg_order_realtime_cut_item_insert()' 7cb9c7c6011f976c0dc6905413dc3d4c)" \
+                     "$(q_fun_hash 'trg_order_realtime_cut_item_update()' bdaeb834d7bf4605625a8e1c1a47d31e)" \
+                     "$(q_fun_hash 'trg_order_realtime_cut_item_delete()' 6a0779b7b23e5f18b348d32dee71cff4)" \
+                     "$(q_fun_hash 'trg_order_realtime_cut_job_update()' a17812b9593da92363ffc4948ad91171)" \
+                     "$(q_fun_hash 'trg_order_realtime_cut_archive_insert()' 9affe83ae3c2f3d4a19a76d77af396ec)" \
+                     "$(q_fun_hash 'trg_order_realtime_cut_archive_delete()' f967e352db6ced39819e7fbc0a5b9212)" \
+                     "$(q_fun_hash 'trg_order_realtime_cut_profile_update()' d5b60c2bc01f2f41cda19353c495d48b)" \
+                     "$(q_stmt_trg trg_order_realtime_detail_status_insert order_details trg_order_realtime_detail_status_insert 4 '' new_rows)" \
+                     "$(q_stmt_trg trg_order_realtime_detail_status_update order_details trg_order_realtime_detail_status_update 16 old_rows new_rows)" \
+                     "$(q_stmt_trg trg_order_realtime_detail_status_delete order_details trg_order_realtime_detail_status_delete 8 old_rows '')" \
+                     "$(q_stmt_trg trg_order_realtime_order_visibility_update orders trg_order_realtime_order_visibility_update 16 old_rows new_rows)" \
+                     "$(q_stmt_trg trg_order_realtime_cut_item_insert cut_job_item trg_order_realtime_cut_item_insert 4 '' new_rows)" \
+                     "$(q_stmt_trg trg_order_realtime_cut_item_update cut_job_item trg_order_realtime_cut_item_update 16 old_rows new_rows)" \
+                     "$(q_stmt_trg trg_order_realtime_cut_item_delete cut_job_item trg_order_realtime_cut_item_delete 8 old_rows '')" \
+                     "$(q_stmt_trg trg_order_realtime_cut_job_update cut_job trg_order_realtime_cut_job_update 16 old_rows new_rows)" \
+                     "$(q_stmt_trg trg_order_realtime_cut_archive_insert cut_result_archive_state trg_order_realtime_cut_archive_insert 4 '' new_rows)" \
+                     "$(q_stmt_trg trg_order_realtime_cut_archive_delete cut_result_archive_state trg_order_realtime_cut_archive_delete 8 old_rows '')" \
+                     "$(q_stmt_trg trg_order_realtime_cut_profile_update cut_param_profiles trg_order_realtime_cut_profile_update 16 old_rows new_rows)" ;;
+    099_bazis_cut_ordinary_erp_positions*) probe_all "SELECT
+                       col_description('bazis_cut_set_details'::regclass,
+                         (SELECT attnum FROM pg_attribute
+                          WHERE attrelid='bazis_cut_set_details'::regclass
+                            AND attname='position'))
+                         LIKE 'bazis-cut-position-v3:%';" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM bazis_cut_set_details snapshot
+                       JOIN order_details source ON source.detail_id = snapshot.source_order_detail_id
+                       WHERE NULLIF(btrim(snapshot.source_order_name), '') IS NOT NULL
+                         AND COALESCE(NULLIF(btrim(snapshot.source_bazis_project_name), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(snapshot.source_bazis_order_no), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(snapshot.source_bazis_product_name), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(source.basis_project), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(source.basis_product), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(source.basis_designation), ''), '') = ''
+                         AND COALESCE(NULLIF(btrim(source.basis_data), ''), '') = ''
+                         AND btrim(snapshot.position) IN ('', '.')
+                     );" ;;
+    100_bazis_cut_product_bath_export*) probe_all \
+                     "$(q_col bazis_cut_set_details source_bath_cut_number)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                       FROM information_schema.columns
+                       WHERE table_schema='public'
+                         AND table_name='bazis_cut_set_details'
+                         AND column_name='source_bath_cut_number'
+                         AND is_nullable='NO'
+                         AND column_default IS NOT NULL
+                     );" \
+                     "SELECT col_description(
+                       'bazis_cut_set_details'::regclass,
+                       (SELECT attnum FROM pg_attribute
+                        WHERE attrelid='bazis_cut_set_details'::regclass
+                          AND attname='source_bath_cut_number')
+                     ) LIKE 'bazis-cut-bath-number-v1:%';" ;;
+    101_export_templates*) probe_all \
+                     "$(q_tbl export_templates)" \
+                     "$(q_col export_templates schema_version)" \
+                     "$(q_con_on export_templates chk_export_templates_target_source)" \
+                     "$(q_con_on export_templates chk_export_templates_default_active)" \
+                     "$(q_idx uq_export_templates_code)" \
+                     "$(q_idx uq_export_templates_live_name)" \
+                     "$(q_idx uq_export_templates_active_default)" \
+                     "$(q_idx idx_export_templates_runtime)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
 
-# 073/074/087/088/089/091/094 contain conditional or multi-step DDL. A partial object can therefore
+# These migrations contain conditional or multi-step DDL, or define an exact
+# realtime contract. A partial/drifted object must never advance the ledger.
 # let PostgreSQL finish the file without reaching the required end state. Never
 # record those migrations in the ledger until the complete effect probe passes.
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

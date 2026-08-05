@@ -30,6 +30,9 @@ describe('Bazis-cut OpenAPI contract', () => {
     expect(contract.match(/name: setId/g)?.length).toBeGreaterThanOrEqual(1);
     expect(contract.match(/required: \[cutEnabled,[\s\S]*?film\]/)?.[0]).toContain('priority');
     expect(contract).toContain('position: { type: string }');
+    expect(contract).toContain('sourceBathCutNumber: { type: string }');
+    expect(contract).toContain('required: [orderId, detailIds]');
+    expect(contract).not.toContain('required: [name, orderId, detailIds]');
   });
 
   it('keeps matching Swagger metadata on every command route', () => {
@@ -37,8 +40,9 @@ describe('Bazis-cut OpenAPI contract', () => {
     expect(controller.match(/@ApiParam\(idParameter\)/g)).toHaveLength(6);
     expect(controller).toContain("@ApiProduces('application/vnd.ms-excel')");
     expect(controller).toContain("description: 'Strict full replacement: all 33 editable Basis fields plus expectedVersion'");
-    expect(controller.match(/@ApiQuery\(/g)).toHaveLength(3);
+    expect(controller.match(/@ApiQuery\(/g)).toHaveLength(4);
     expect(controller).toContain('additionalProperties: false');
+    expect(controller).toContain("sourceBathCutNumber: { type: 'string' }");
   });
 
   it('generates strict 33-field request and JSON response schemas at runtime', async () => {
@@ -50,6 +54,13 @@ describe('Bazis-cut OpenAPI contract', () => {
         expect.arrayContaining(['search', 'page', 'pageSize']),
       );
       expect(list?.responses?.['200']?.content?.['application/json']?.schema).toBeDefined();
+
+      const create = document.paths['/bazis-cut-sets']?.post;
+      const createSchema = create?.requestBody && 'content' in create.requestBody
+        ? create.requestBody.content['application/json']?.schema
+        : undefined;
+      expect(createSchema && 'required' in createSchema ? createSchema.required : [])
+        .toEqual(['orderId', 'detailIds']);
 
       const update = document.paths['/bazis-cut-sets/{setId}/details/{detailId}']?.patch;
       const schema = update?.requestBody && 'content' in update.requestBody

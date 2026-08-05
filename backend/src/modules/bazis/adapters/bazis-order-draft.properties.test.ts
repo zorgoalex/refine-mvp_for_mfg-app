@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bazisReferenceLookupKey,
   buildDraftDetails,
+  panelCustomPaintName,
   type BazisDraftMaterialMapping,
 } from './bazis-order-draft';
 
@@ -31,6 +32,17 @@ const filmMapping = (filmId: number): BazisDraftMaterialMapping => ({
 });
 
 describe('buildDraftDetails user property priority', () => {
+  it('reads paint from nested and legacy user properties case-insensitively', () => {
+    expect(panelCustomPaintName({
+      ПользовательскиеСвойства: {
+        Свойство: { Имя: 'Краска (обр)', Значение: '  RAL 9003  ' },
+      },
+    })).toBe('RAL 9003');
+    expect(panelCustomPaintName({
+      Свойство: { Наименование: 'КРАСКА', Значение: 'Белая матовая' },
+    })).toBe('Белая матовая');
+  });
+
   it('takes milling and film from nested user properties before face coating', () => {
     const rawJson = {
       ОблицовкаПласти1: { Пласть: [{ Наименование: 'Старая плёнка' }] },

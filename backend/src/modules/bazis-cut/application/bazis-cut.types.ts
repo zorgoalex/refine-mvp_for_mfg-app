@@ -12,7 +12,8 @@ export interface BazisCutContext {
 }
 
 export interface CreateBazisCutSetCommand extends BazisCutContext {
-  name: string;
+  /** Accepted only for rolling compatibility; the backend owns generated names. */
+  name?: string;
   orderId: number;
   detailIds: number[];
   idempotencyKey: string;
@@ -56,6 +57,5 @@ export interface BazisCutRepositoryPort {
   addDetails(command: AddBazisCutDetailsCommand): Promise<BazisCutMutationResultDto>;
   updateDetail(command: UpdateBazisCutDetailCommand): Promise<BazisCutMutationResultDto>;
   deleteDetail(command: DeleteBazisCutDetailCommand): Promise<BazisCutMutationResultDto>;
-  export(input: BazisCutContext & { setId: number }): Promise<{ set: BazisCutSetDto; bytes: Buffer }>;
+  export(input: BazisCutContext & { setId: number; templateId?: number }): Promise<{ set: BazisCutSetDto; bytes: Buffer }>;
 }
-

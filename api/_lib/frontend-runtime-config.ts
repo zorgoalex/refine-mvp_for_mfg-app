@@ -24,6 +24,7 @@ export interface FrontendRuntimeConfigResponse {
     bazisImport: boolean;
     labels: boolean;
     orderStatusBoard: boolean;
+    orderRealtime: boolean;
     cncTelegram: boolean;
     pdfImportLayoutPatterns: boolean;
     enableLegacyHasura: boolean;
@@ -75,6 +76,7 @@ export function buildFrontendRuntimeConfig(
       bazisImport: readBooleanEnv(env.RUNTIME_CONFIG_BACKEND_BAZIS, false),
       labels: readBooleanEnv(env.RUNTIME_CONFIG_LABELS, false),
       orderStatusBoard: readBooleanEnv(env.RUNTIME_CONFIG_ORDER_STATUS_BOARD, false),
+      orderRealtime: readBooleanEnv(env.RUNTIME_CONFIG_ORDER_REALTIME, false),
       cncTelegram: readBooleanEnv(env.RUNTIME_CONFIG_CNC_TELEGRAM, false),
       pdfImportLayoutPatterns: readBooleanEnv(
         env.RUNTIME_CONFIG_PDF_IMPORT_LAYOUT_PATTERNS,

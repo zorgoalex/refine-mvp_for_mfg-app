@@ -44,14 +44,13 @@ import type { ProjectDto } from "../../api/projectsApi";
 import { CutJobVersionLines } from "./CutJobVersionLines";
 import {
   buildCutJobLinkMapsFromDetails,
-  buildOrderDetailLiveCellRenderVersion,
   cutJobDeepLink,
   cutJobProfileLabel,
   mergeCutJobLinkMaps,
 } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
-import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
+import { useKeepAlive, useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
 import { buildGroupedRows, GROUP_TINT_COUNT, selectedGroupLabelForCut } from './detailGrouping';
@@ -80,6 +79,7 @@ import { buildOrderEditAddPaymentPath } from "./orderPaymentIntent";
 import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/OperationalPrimitives";
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
+import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -274,6 +274,31 @@ const areDetailProductionStatusMapsEqual = (
   return true;
 };
 
+const ORDER_SHOW_LIVE_STATUS_VERSION = '__orderShowLiveStatusVersion';
+const ORDER_SHOW_LIVE_CUT_VERSION = '__orderShowLiveCutVersion';
+const ORDER_SHOW_LIVE_BATH_CUT_VERSION = '__orderShowLiveBathCutVersion';
+
+const orderShowCutRefVersion = (ref: CutDetailLastReadyJobRef | undefined): string => (
+  ref
+    ? JSON.stringify([
+        ref.cutJobId,
+        ref.resultNo,
+        ref.cutNumber,
+        ref.name,
+        ref.paramProfileId,
+        ref.profileName,
+        ref.profileIsActive,
+      ])
+    : ''
+);
+
+const unwrapOrderShowDetailRow = (row: any) =>
+  row?.kind === 'detail'
+    ? row.detail
+    : row?.kind === 'separator' || row?.kind === 'summary'
+      ? null
+      : row;
+
 const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatusTag({
   statusId,
   name,
@@ -437,6 +462,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const dataProvider = useDataProvider();
   const isOperational = useOperationalUi();
   const isMobile = useIsMobile();
+  const { isActive: isWorkspaceTabActive } = useKeepAlive();
   const { id: currentOrderId } = useParams();
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
@@ -501,6 +527,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   const record = data?.data;
   const useBackendOrdersRead = featureFlags.useBackendOrdersRead;
+  const orderRealtimeEnabled = featureFlags.orderRealtime && useBackendOrdersRead;
   const backendOrder = useBackendOrdersRead ? record?.__backendOrder : null;
   const labelsEnabled = featureFlags.labels && canAny(['labels.view', 'labels.generate']);
   const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
@@ -710,14 +737,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     });
     return map;
   }, [details]);
+  const orderDetailLiveState = useOrderDetailLiveState({
+    enabled: orderRealtimeEnabled,
+    active: isWorkspaceTabActive,
+    orderId: record?.order_id,
+  });
   const detailProductionStatusBaseByIdRef = useRef(detailProductionStatusBaseById);
   const currentDetailProductionStatusById = useMemo(() => {
     const map = new Map(detailProductionStatusBaseById);
-    liveDetailProductionStatusById.forEach((statusId, detailId) => {
+    const liveStatuses = orderDetailLiveState.loaded
+      ? orderDetailLiveState.statusByDetailId
+      : liveDetailProductionStatusById;
+    liveStatuses.forEach((statusId, detailId) => {
       if (map.has(detailId)) map.set(detailId, statusId);
     });
     return map;
-  }, [detailProductionStatusBaseById, liveDetailProductionStatusById]);
+  }, [detailProductionStatusBaseById, liveDetailProductionStatusById, orderDetailLiveState]);
 
   useEffect(() => {
     liveDetailProductionStatusByIdRef.current = liveDetailProductionStatusById;
@@ -732,6 +767,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   }, [record?.order_id]);
 
   const refreshLiveDetailProductionStatuses = useCallback(async () => {
+    if (orderRealtimeEnabled) return;
     const orderId = Number(record?.order_id);
     if (!Number.isInteger(orderId) || orderId <= 0) return;
     if (detailProductionStatusBaseByIdRef.current.size === 0) return;
@@ -778,10 +814,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     } finally {
       detailStatusPollInFlightRef.current = false;
     }
-  }, [dataProvider, record?.order_id, useBackendOrdersRead]);
+  }, [dataProvider, orderRealtimeEnabled, record?.order_id, useBackendOrdersRead]);
 
   useEffect(() => {
-    if (!record?.order_id || typeof window === 'undefined' || typeof document === 'undefined') {
+    if (
+      orderRealtimeEnabled
+      || !record?.order_id
+      || typeof window === 'undefined'
+      || typeof document === 'undefined'
+    ) {
       return undefined;
     }
 
@@ -803,7 +844,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       document.removeEventListener('visibilitychange', refreshOnVisibilityChange);
       window.clearInterval(intervalId);
     };
-  }, [record?.order_id, refreshLiveDetailProductionStatuses]);
+  }, [orderRealtimeEnabled, record?.order_id, refreshLiveDetailProductionStatuses]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
@@ -1068,14 +1109,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   );
   const embeddedCutJobMaps = useMemo(() => buildCutJobLinkMapsFromDetails(details), [details]);
   const fetchedCutJobMaps = useCutDetailLastReady({
-    enabled: cutColumnEnabled,
+    enabled: cutColumnEnabled && !orderRealtimeEnabled,
     detailIds: cutDetailIds,
     orderId: record?.order_id,
     pollIntervalMs: ORDER_DETAIL_STATUS_REFRESH_MS,
   });
   const cutJobMaps = useMemo(
-    () => fetchedCutJobMaps.loaded ? fetchedCutJobMaps : mergeCutJobLinkMaps(embeddedCutJobMaps, fetchedCutJobMaps),
-    [embeddedCutJobMaps, fetchedCutJobMaps],
+    () => {
+      if (orderDetailLiveState.loaded) return orderDetailLiveState;
+      if (orderRealtimeEnabled) return embeddedCutJobMaps;
+      return fetchedCutJobMaps.loaded
+        ? fetchedCutJobMaps
+        : mergeCutJobLinkMaps(embeddedCutJobMaps, fetchedCutJobMaps);
+    },
+    [embeddedCutJobMaps, fetchedCutJobMaps, orderDetailLiveState, orderRealtimeEnabled],
   );
   const { cutJobByDetailId, bathCutJobByDetailId } = cutJobMaps;
   const latestReadyCutRefByJobId = useMemo(() => {
@@ -1231,6 +1278,71 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       : details),
     [groupingActive, details, grouping.state.field, cutSelectMode, groupLabelOf],
   );
+  const orderShowLiveRowsRef = useRef<any[]>([]);
+  const orderShowDetailsDataSource = useMemo(() => {
+    const previousRows = orderShowLiveRowsRef.current;
+    const previousDetailRows = new Map<string, any>();
+    previousRows.forEach((row, index) => {
+      if (row?.kind !== 'detail') return;
+      const detailId = Number(row.detail?.detail_id);
+      const key = `${Number.isSafeInteger(detailId) ? detailId : `index-${index}`}:${row.groupIndex}`;
+      previousDetailRows.set(key, row);
+    });
+
+    const nextRows = groupedDataSource.map((row: any, index: number) => {
+      if (row?.kind === 'separator' || row?.kind === 'summary') return row;
+      const detail = unwrapOrderShowDetailRow(row);
+      const detailId = Number(detail?.detail_id);
+      const groupIndex = row?.kind === 'detail' ? row.groupIndex : -1;
+      const key = `${Number.isSafeInteger(detailId) ? detailId : `index-${index}`}:${groupIndex}`;
+      const statusId = Number.isSafeInteger(detailId) && currentDetailProductionStatusById.has(detailId)
+        ? currentDetailProductionStatusById.get(detailId)
+        : normalizeProductionStatusId(detail?.production_status_id);
+      const baseStatusId = normalizeProductionStatusId(detail?.production_status_id);
+      const statusMeta = statusId == null ? undefined : productionStatusesById.get(statusId);
+      const directStatusName = statusId === baseStatusId ? detail?.production_status_name : undefined;
+      const statusVersion = JSON.stringify([
+        statusId ?? null,
+        directStatusName ?? null,
+        statusMeta?.name ?? null,
+        statusMeta?.color ?? null,
+        productionStatusesLoading,
+      ]);
+      const cutVersion = orderShowCutRefVersion(cutJobByDetailId.get(detailId));
+      const bathCutVersion = orderShowCutRefVersion(bathCutJobByDetailId.get(detailId));
+      const previous = previousDetailRows.get(key);
+      if (
+        previous?.detail === detail
+        && previous[ORDER_SHOW_LIVE_STATUS_VERSION] === statusVersion
+        && previous[ORDER_SHOW_LIVE_CUT_VERSION] === cutVersion
+        && previous[ORDER_SHOW_LIVE_BATH_CUT_VERSION] === bathCutVersion
+      ) {
+        return previous;
+      }
+      return {
+        kind: 'detail',
+        detail,
+        groupIndex,
+        [ORDER_SHOW_LIVE_STATUS_VERSION]: statusVersion,
+        [ORDER_SHOW_LIVE_CUT_VERSION]: cutVersion,
+        [ORDER_SHOW_LIVE_BATH_CUT_VERSION]: bathCutVersion,
+      };
+    });
+
+    const stableRows = nextRows.length === previousRows.length
+      && nextRows.every((row, index) => row === previousRows[index])
+      ? previousRows
+      : nextRows;
+    orderShowLiveRowsRef.current = stableRows;
+    return stableRows;
+  }, [
+    bathCutJobByDetailId,
+    currentDetailProductionStatusById,
+    cutJobByDetailId,
+    groupedDataSource,
+    productionStatusesById,
+    productionStatusesLoading,
+  ]);
 
   const cutSelectedGroupName = useMemo(
     () =>
@@ -1524,15 +1636,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     });
   }, [backendOrder?.version, navigate, record?.order_id, record?.order_name, record?.version]);
 
-  // Unwrap a GroupedRow to the underlying detail, or null for separator rows.
-  // Declared at component scope (NOT inside JSX) — statements inside JSX are invalid TSX.
-  const asDetail = (row: any) =>
-    row?.kind === 'detail'
-      ? row.detail
-      : row?.kind === 'separator' || row?.kind === 'summary'
-        ? null
-        : row;
-
   const { settings: showColumnSettings, saveSettings: saveShowColumnSettings } = useOrderDetailColumnPreferences(
     'orderShow',
     orderDetailShowDefaultOrder,
@@ -1745,16 +1848,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         const originalRender = column.render;
         const originalShouldCellUpdate = column.shouldCellUpdate;
         const dataIndex = typeof column.dataIndex === 'string' ? column.dataIndex : null;
-        const isLiveExternalColumn = column.key === 'production_status_id'
-          || column.key === 'cut_job'
-          || column.key === 'bath_cut_job';
+        const liveVersionKey = column.key === 'production_status_id'
+          ? ORDER_SHOW_LIVE_STATUS_VERSION
+          : column.key === 'cut_job'
+            ? ORDER_SHOW_LIVE_CUT_VERSION
+            : column.key === 'bath_cut_job'
+              ? ORDER_SHOW_LIVE_BATH_CUT_VERSION
+              : null;
         return {
           ...column,
           shouldCellUpdate: (row: any, previousRow: any) => {
-            if (originalShouldCellUpdate) return originalShouldCellUpdate(row, previousRow);
-            // Status values live outside the row record. Other cells can skip
-            // unrelated parent updates such as sticky-header state changes.
-            return isLiveExternalColumn || row !== previousRow;
+            if (liveVersionKey) return row?.[liveVersionKey] !== previousRow?.[liveVersionKey];
+            if (row?.kind !== 'detail' || previousRow?.kind !== 'detail') return row !== previousRow;
+            const detail = unwrapOrderShowDetailRow(row);
+            const previousDetail = unwrapOrderShowDetailRow(previousRow);
+            if (originalShouldCellUpdate) return originalShouldCellUpdate(detail, previousDetail);
+            return detail !== previousDetail;
           },
           onCell: (row: any) => {
             if (row?.kind !== 'separator') return {};
@@ -1769,7 +1878,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 ? <span style={{ fontWeight: 600, color: 'var(--app-text-muted)' }}>{row.label}</span>
                 : null;
             }
-            const detail = asDetail(row);
+            const detail = unwrapOrderShowDetailRow(row);
             if (!detail) return null;
             const detailValue = dataIndex ? detail[dataIndex] : value;
             return originalRender ? originalRender(detailValue, detail, renderIndex) : detailValue;
@@ -1778,19 +1887,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       }),
     [renderGroupedSummaryValue, visibleDetailColumns],
   );
-  const liveExternalCellRenderVersion = buildOrderDetailLiveCellRenderVersion({
-    currentDetailProductionStatusById,
-    productionStatusesById,
-    productionStatusesLoading,
-    cutJobByDetailId,
-    bathCutJobByDetailId,
-  });
   const stableRenderedDetailColumns = useStableOrderShowColumns(
     renderedDetailColumns,
-    liveExternalCellRenderVersion,
+    'order-show-live-cells-v2',
   );
   const orderShowDetailTableRenderVersion = [
-    liveExternalCellRenderVersion,
     cutSelectMode ? `cut:${cutSelectedDetailIds.join(',')}` : 'view',
     highlightDetail ?? '',
     canEditOrderContent ? 'editable' : 'readonly',
@@ -2767,7 +2868,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             <MemoizedOrderShowTable
               renderVersion={orderShowDetailTableRenderVersion}
               className={`${groupingActive ? 'details-grouped ' : ''}order-show-details-table`}
-              dataSource={groupedDataSource as any}
+              dataSource={orderShowDetailsDataSource as any}
               rowKey={(row: any) =>
                 row?.kind === 'separator' || row?.kind === 'summary'
                   ? row.key
@@ -2926,7 +3027,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             <AddToBazisCutModal
               open={bazisCutModalOpen}
               orderId={record.order_id}
-              orderName={record.order_name}
               detailIds={cutSelectedDetailIds}
               onClose={() => setBazisCutModalOpen(false)}
               onDone={() => {

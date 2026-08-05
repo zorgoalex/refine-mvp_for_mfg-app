@@ -6,11 +6,14 @@ import type { DatabaseClient, TransactionClient } from '../../../database/databa
 import { DatabaseService } from '../../../database/database.service';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { buildBazisCutXls } from '../application/bazis-xls-writer';
+import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../application/bazis-xls-writer';
+import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
 import {
-  buildBazisCutSnapshotIdentity,
+  buildBazisBathCutNumber,
   mapBazisCutSnapshotFields,
+  resolveBazisDetailLabels,
 } from '../application/bazis-cut-snapshot-mapper';
+export { resolveBazisDetailLabels } from '../application/bazis-cut-snapshot-mapper';
 import type {
   AddBazisCutDetailsCommand,
   BazisCutRepositoryPort,
@@ -93,13 +96,23 @@ interface SourceRow extends QueryResultRow {
   exact_node_id: string | number | null;
   exact_revision_id: string | number | null;
   exact_bazis_project_id: string | number | null;
-  exact_bazis_project_name: string | null;
-  exact_bazis_order_no: string | null;
+  exact_revision_bazis_order_no: string | null;
+  exact_root_product_count: string | number | null;
+  exact_product_order_no: string | null;
+  exact_product_name: string | null;
   exact_vertical: boolean | null;
   fallback_revision_id: string | number | null;
   fallback_bazis_project_id: string | number | null;
-  fallback_bazis_project_name: string | null;
-  fallback_bazis_order_no: string | null;
+  fallback_revision_bazis_order_no: string | null;
+  fallback_root_product_count: string | number | null;
+  fallback_product_order_no: string | null;
+  inferred_revision_id: string | number | null;
+  inferred_bazis_project_id: string | number | null;
+  inferred_revision_bazis_order_no: string | null;
+  inferred_root_product_count: string | number | null;
+  inferred_product_order_no: string | null;
+  bath_cut_job_id: string | number | null;
+  bath_cut_result_no: string | number | null;
 }
 
 interface OrderScopeRow extends QueryResultRow {
@@ -122,6 +135,7 @@ interface Snapshot {
     sourceBazisProjectName: string;
     sourceBazisOrderNo: string;
     sourceBazisProductName: string;
+    sourceBathCutNumber: string;
   };
   fields: BazisCutDetailFields;
 }
@@ -129,7 +143,10 @@ interface Snapshot {
 export class PgBazisCutRepository implements BazisCutRepositoryPort {
   private readonly orderAccess = new OrderAccessPolicy();
 
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly exportTemplates?: ExportTemplatesService,
+  ) {}
 
   async list(input: Parameters<BazisCutRepositoryPort['list']>[0]): Promise<BazisCutSetListDto> {
     const offset = (input.page - 1) * input.pageSize;
@@ -139,7 +156,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
               COUNT(d.bazis_cut_set_detail_id)::bigint AS position_count,
               COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
                 'id', d.source_order_id,
-                'label', d.source_order_full_number,
+                'label', d.source_order_name,
                 'deleted', COALESCE(source_order.delete_flag, false)
               ))
                 FILTER (WHERE d.source_order_id IS NOT NULL), '[]'::jsonb) AS orders,
@@ -194,7 +211,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await setSessionUser(tx, command.currentUser);
       const detailIds = uniqueIds(command.detailIds);
       const requestHash = hashRequest('bazis_cut_set.create', command.currentUser, {
-        name: command.name.trim(), orderId: command.orderId, detailIds,
+        orderId: command.orderId, detailIds,
       });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.create', actorId(command.currentUser), 'bazis_cut_set', 'pending', requestHash);
@@ -203,9 +220,13 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const inserted = await tx.query<{ bazis_cut_set_id: string | number }>(
         `INSERT INTO bazis_cut_sets (name, created_by, updated_by)
          VALUES ($1,$2,$2) RETURNING bazis_cut_set_id`,
-        [command.name.trim(), actorId(command.currentUser)],
+        ['БР', actorId(command.currentUser)],
       );
       const setId = toNumber(inserted.rows[0].bazis_cut_set_id);
+      await tx.query(
+        'UPDATE bazis_cut_sets SET name=$2 WHERE bazis_cut_set_id=$1',
+        [setId, buildBazisCutSetName(setId)],
+      );
       const snapshots = await loadSnapshots(tx, command.orderId, detailIds);
       await insertSnapshots(tx, setId, snapshots, 0, actorId(command.currentUser));
       const set = await loadSet(tx, setId);
@@ -363,7 +384,11 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, input.currentUser);
       const set = await loadSet(tx, input.setId);
-      const bytes = buildBazisCutXls(set.details);
+      const template = this.exportTemplates ? await this.exportTemplates.resolveForExport({
+        templateId: input.templateId, targetScreen: 'bazis_cut_set', sourceType: 'bazis_cut_set_detail',
+        format: 'xls_biff8', client: tx,
+      }) : null;
+      const bytes = template ? buildBazisCutXlsFromTemplate(set.details, template) : buildBazisCutXls(set.details);
       await auditService.record(tx, {
         event: 'bazis_cut_set.exported', entityType: 'bazis_cut_set', entityId: input.setId,
         actorUserId: actorId(input.currentUser), actorUsername: input.currentUser.username,
@@ -371,6 +396,8 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         before: null, after: { setId: input.setId, version: set.version, positionCount: set.positionCount },
         diff: {}, metadata: { format: 'biff8', bytes: bytes.length, actorUserId: actorId(input.currentUser),
           requestId: input.requestId ?? null, setVersion: set.version, physicalQuantity: set.quantity,
+          ...(template ? { templateId: template.exportTemplateId, templateCode: template.code,
+            templateVersion: template.version, templateHash: template.templateHash } : {}),
           ...relatedDimensions(set.details) },
         relatedEntities: auditRelatedEntities(input.setId, set.details),
       });
@@ -421,11 +448,23 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
             COALESCE(od.doweling, false) AS doweling,
             COALESCE(exact.exact_count, 0) AS exact_count,
             exact.exact_node_id, exact.exact_revision_id, exact.exact_bazis_project_id,
-            exact.exact_bazis_project_name, exact.exact_bazis_order_no, exact.exact_vertical,
+            exact.exact_revision_bazis_order_no,
+            exact_document.root_product_count AS exact_root_product_count,
+            exact_document.product_order_no AS exact_product_order_no,
+            exact_product.product_name AS exact_product_name,
+            exact.exact_vertical,
             fallback.revision_id AS fallback_revision_id,
             fallback.bazis_project_id AS fallback_bazis_project_id,
-            fallback.bazis_project_name AS fallback_bazis_project_name,
-            fallback.bazis_order_no AS fallback_bazis_order_no
+            fallback.revision_bazis_order_no AS fallback_revision_bazis_order_no,
+            fallback.root_product_count AS fallback_root_product_count,
+            fallback.product_order_no AS fallback_product_order_no,
+            inferred.revision_id AS inferred_revision_id,
+            inferred.bazis_project_id AS inferred_bazis_project_id,
+            inferred.revision_bazis_order_no AS inferred_revision_bazis_order_no,
+            inferred.root_product_count AS inferred_root_product_count,
+            inferred.product_order_no AS inferred_product_order_no,
+            bath.cut_job_id AS bath_cut_job_id,
+            bath.result_no AS bath_cut_result_no
      FROM order_details od
      JOIN orders o ON o.order_id=od.order_id AND o.delete_flag=false
      JOIN projects p ON p.project_id=o.project_id
@@ -437,8 +476,7 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
               MIN(bn.bazis_node_id) AS exact_node_id,
               MIN(br.bazis_revision_id) AS exact_revision_id,
               MIN(bp.bazis_project_id) AS exact_bazis_project_id,
-              MIN(bp.name) AS exact_bazis_project_name,
-              MIN(COALESCE(NULLIF(br.bazis_order_no,''), NULLIF(br.product_name,''), 'Ревизия ' || br.revision_no::text)) AS exact_bazis_order_no,
+              MIN(NULLIF(btrim(br.bazis_order_no), '')) AS exact_revision_bazis_order_no,
               BOOL_OR(COALESCE(NULLIF(bn.texture_orientation,''), bn.raw_json->>'ОриентацияТекстуры')='Вертикальная') AS exact_vertical
        FROM bazis_node_order_detail_map bm
        JOIN bazis_nodes bn ON bn.bazis_node_id=bm.node_id
@@ -447,14 +485,129 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
        WHERE bm.order_detail_id=od.detail_id
      ) exact ON true
      LEFT JOIN LATERAL (
-       SELECT bol.revision_id, bol.bazis_project_id, bp.name AS bazis_project_name,
-              COALESCE(NULLIF(br.bazis_order_no,''), NULLIF(br.product_name,''), 'Ревизия ' || br.revision_no::text) AS bazis_order_no
+       SELECT COUNT(*) AS root_product_count,
+              (
+                SELECT NULLIF(btrim(first_root.raw_json->>'Заказ'), '')
+                FROM bazis_nodes first_root
+                WHERE first_root.revision_id=exact.exact_revision_id
+                  AND first_root.parent_node_id IS NULL
+                  AND first_root.node_kind='product'
+                  AND NULLIF(btrim(first_root.raw_json->>'Заказ'), '') IS NOT NULL
+                ORDER BY first_root.seq
+                LIMIT 1
+              ) AS product_order_no
+       FROM bazis_nodes root
+       WHERE root.revision_id=exact.exact_revision_id
+         AND root.parent_node_id IS NULL
+         AND root.node_kind='product'
+     ) exact_document ON exact.exact_count=1
+     LEFT JOIN LATERAL (
+       WITH RECURSIVE ancestry AS (
+         SELECT node.bazis_node_id, node.parent_node_id, node.node_kind, node.name,
+                0 AS depth, ARRAY[node.bazis_node_id] AS visited
+         FROM bazis_nodes node
+         WHERE node.bazis_node_id=exact.exact_node_id
+         UNION ALL
+         SELECT parent.bazis_node_id, parent.parent_node_id, parent.node_kind, parent.name,
+                ancestry.depth+1, ancestry.visited || parent.bazis_node_id
+         FROM ancestry
+         JOIN bazis_nodes parent ON parent.bazis_node_id=ancestry.parent_node_id
+         WHERE NOT parent.bazis_node_id=ANY(ancestry.visited)
+           AND ancestry.depth<100
+       )
+       SELECT NULLIF(btrim(ancestry.name), '') AS product_name
+       FROM ancestry
+       WHERE ancestry.parent_node_id IS NULL
+         AND ancestry.node_kind='product'
+       ORDER BY ancestry.depth DESC
+       LIMIT 1
+     ) exact_product ON exact.exact_count=1
+     LEFT JOIN LATERAL (
+       SELECT bol.revision_id, bol.bazis_project_id,
+              NULLIF(btrim(br.bazis_order_no), '') AS revision_bazis_order_no,
+              (
+                SELECT COUNT(*)
+                FROM bazis_nodes root
+                WHERE root.revision_id=br.bazis_revision_id
+                  AND root.parent_node_id IS NULL
+                  AND root.node_kind='product'
+              ) AS root_product_count,
+              (
+                SELECT NULLIF(btrim(root.raw_json->>'Заказ'), '')
+                FROM bazis_nodes root
+                WHERE root.revision_id=br.bazis_revision_id
+                  AND root.parent_node_id IS NULL
+                  AND root.node_kind='product'
+                  AND NULLIF(btrim(root.raw_json->>'Заказ'), '') IS NOT NULL
+                ORDER BY root.seq
+                LIMIT 1
+              ) AS product_order_no
        FROM bazis_order_links bol
-       JOIN bazis_projects bp ON bp.bazis_project_id=bol.bazis_project_id
        JOIN bazis_project_revisions br ON br.bazis_revision_id=bol.revision_id
        WHERE bol.order_id=o.order_id
        ORDER BY bol.created_at DESC, bol.bazis_order_link_id DESC LIMIT 1
      ) fallback ON true
+     LEFT JOIN LATERAL (
+       SELECT br.bazis_revision_id AS revision_id, br.bazis_project_id,
+              NULLIF(btrim(br.bazis_order_no), '') AS revision_bazis_order_no,
+              (
+                SELECT COUNT(*)
+                FROM bazis_nodes root
+                WHERE root.revision_id=br.bazis_revision_id
+                  AND root.parent_node_id IS NULL
+                  AND root.node_kind='product'
+              ) AS root_product_count,
+              (
+                SELECT NULLIF(btrim(root.raw_json->>'Заказ'), '')
+                FROM bazis_nodes root
+                WHERE root.revision_id=br.bazis_revision_id
+                  AND root.parent_node_id IS NULL
+                  AND root.node_kind='product'
+                  AND NULLIF(btrim(root.raw_json->>'Заказ'), '') IS NOT NULL
+                ORDER BY root.seq
+                LIMIT 1
+              ) AS product_order_no
+       FROM bazis_project_revisions br
+       WHERE NULLIF(btrim(od.basis_project), '') IS NOT NULL
+         AND (
+           NULLIF(btrim(br.bazis_order_no), '')=NULLIF(btrim(od.basis_project), '')
+           OR EXISTS (
+             SELECT 1
+             FROM bazis_nodes root
+             WHERE root.revision_id=br.bazis_revision_id
+               AND root.parent_node_id IS NULL
+               AND root.node_kind='product'
+               AND NULLIF(btrim(root.raw_json->>'Заказ'), '')=NULLIF(btrim(od.basis_project), '')
+           )
+         )
+       ORDER BY br.revision_no DESC, br.imported_at DESC, br.bazis_revision_id DESC
+       LIMIT 1
+     ) inferred ON fallback.revision_id IS NULL
+     LEFT JOIN LATERAL (
+       SELECT cj.cut_job_id, cr.result_no
+       FROM cut_job_item cji
+       JOIN cut_job cj ON cj.cut_job_id=cji.cut_job_id
+       JOIN cut_result cr
+         ON cr.cut_result_id=cj.current_cut_result_id
+        AND cr.cut_job_id=cj.cut_job_id
+       LEFT JOIN cut_result_archive_state archived
+         ON archived.cut_job_id=cr.cut_job_id
+        AND archived.result_no=cr.result_no
+       LEFT JOIN cut_param_profiles profile
+         ON profile.cut_param_profile_id=cj.param_profile_id
+       WHERE cji.order_detail_id=od.detail_id
+         AND cji.is_active=true
+         AND cj.status='ready'
+         AND cj.last_calc_basis IS NOT NULL
+         AND archived.cut_job_id IS NULL
+         AND COALESCE(
+           cj.last_calc_params->>'layout_mode',
+           profile.params->>'layout_mode',
+           cj.params->>'layout_mode'
+         )='vacuum_table'
+       ORDER BY cj.cut_job_id DESC
+       LIMIT 1
+     ) bath ON true
      WHERE od.order_id=$1 AND od.delete_flag=false AND od.detail_id=ANY($2::bigint[])
      ORDER BY od.detail_id`,
     [orderId, detailIds],
@@ -479,20 +632,60 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
       invalid.push(toNumber(row.detail_id));
       continue;
     }
-    const bazisLabels = resolveBazisDetailLabels(row.detail_bazis_project, row.detail_bazis_product);
+    const exactMatch = exactCount === 1;
+    const fallbackRevisionId = nullableNumber(row.fallback_revision_id);
+    const inferredRevisionId = nullableNumber(row.inferred_revision_id);
+    const rootProductCount = exactMatch
+      ? nullableNumber(row.exact_root_product_count)
+      : fallbackRevisionId !== null
+        ? nullableNumber(row.fallback_root_product_count)
+        : nullableNumber(row.inferred_root_product_count);
+    const productOrderNo = exactMatch
+      ? row.exact_product_order_no
+      : fallbackRevisionId !== null ? row.fallback_product_order_no : row.inferred_product_order_no;
+    const revisionBazisOrderNo = exactMatch
+      ? row.exact_revision_bazis_order_no
+      : fallbackRevisionId !== null
+        ? row.fallback_revision_bazis_order_no
+        : row.inferred_revision_bazis_order_no;
+    const sourceProductName = exactMatch
+      ? row.exact_product_name ?? row.detail_bazis_product
+      : row.detail_bazis_product;
+    const bazisLabels = resolveBazisDetailLabels({
+      rootProductCount,
+      productOrderNo,
+      revisionBazisOrderNo,
+      detailBazisProject: row.detail_bazis_project,
+      detailBazisProduct: sourceProductName,
+    });
+    const ordinaryErpOrder = [
+      bazisLabels.sourceBazisProjectName,
+      bazisLabels.sourceBazisOrderNo,
+      bazisLabels.sourceBazisProductName,
+      row.detail_bazis_project,
+      row.detail_bazis_product,
+      row.basis_designation,
+      row.basis_data,
+    ].every((value) => !value?.trim());
     const snapshotSource = {
       materialName: row.material_name, thicknessMm: thickness!, detailNumber: row.detail_number,
-      orderName: row.order_name, basisOrder: bazisLabels.sourceBazisOrderNo,
-      basisProduct: row.detail_bazis_product, basisDesignation: row.basis_designation,
+      orderName: row.order_name, ordinaryErpOrder,
+      bazisProject: bazisLabels.sourceBazisProjectName,
+      basisProduct: sourceProductName, basisDesignation: row.basis_designation,
       basisData: row.basis_data, detailName: row.detail_name,
       heightMm: height!, widthMm: width!, quantity: quantity!, note: row.note, milling: row.milling,
       film: row.film, doweling: row.doweling, verticalTexture: exactCount === 1 && row.exact_vertical === true,
     };
-    const identity = buildBazisCutSnapshotIdentity(snapshotSource);
     const fields = mapBazisCutSnapshotFields(snapshotSource);
     if (!fields) { invalid.push(toNumber(row.detail_id)); continue; }
-    const bazisProjectId = exactCount === 1 ? nullableNumber(row.exact_bazis_project_id) : nullableNumber(row.fallback_bazis_project_id);
-    const bazisRevisionId = exactCount === 1 ? nullableNumber(row.exact_revision_id) : nullableNumber(row.fallback_revision_id);
+    const bazisProjectId = exactMatch
+      ? nullableNumber(row.exact_bazis_project_id)
+      : fallbackRevisionId !== null
+        ? nullableNumber(row.fallback_bazis_project_id)
+        : nullableNumber(row.inferred_bazis_project_id);
+    const bazisRevisionId = exactMatch
+      ? nullableNumber(row.exact_revision_id)
+      : fallbackRevisionId ?? inferredRevisionId;
     snapshots.push({
       provenance: {
         sourceOrderDetailId: toNumber(row.detail_id), sourceOrderId: toNumber(row.order_id),
@@ -501,8 +694,11 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
         sourceBazisNodeId: exactCount === 1 ? nullableNumber(row.exact_node_id) : null,
         sourceOrderName: row.order_name, sourceOrderFullNumber: row.order_full_number,
         sourceProjectCode: row.project_code,
+        sourceBathCutNumber: buildBazisBathCutNumber(
+          nullableNumber(row.bath_cut_job_id),
+          nullableNumber(row.bath_cut_result_no),
+        ),
         ...bazisLabels,
-        sourceBazisOrderNo: identity.order,
       },
       fields,
     });
@@ -520,7 +716,7 @@ async function insertSnapshots(client: DatabaseClient, setId: number, snapshots:
     'source_order_detail_id', 'source_order_id', 'source_project_id', 'source_bazis_project_id',
     'source_bazis_revision_id', 'source_bazis_node_id', 'source_order_name',
     'source_order_full_number', 'source_project_code', 'source_bazis_project_name', 'source_bazis_order_no',
-    'source_bazis_product_name',
+    'source_bazis_product_name', 'source_bath_cut_number',
   ];
   for (let index = 0; index < snapshots.length; index += 1) {
     const snapshot = snapshots[index];
@@ -529,6 +725,7 @@ async function insertSnapshots(client: DatabaseClient, setId: number, snapshots:
       p.sourceOrderDetailId, p.sourceOrderId, p.sourceProjectId, p.sourceBazisProjectId,
       p.sourceBazisRevisionId, p.sourceBazisNodeId, p.sourceOrderName, p.sourceOrderFullNumber,
       p.sourceProjectCode, p.sourceBazisProjectName, p.sourceBazisOrderNo, p.sourceBazisProductName,
+      p.sourceBathCutNumber,
       ...fieldsToValues(snapshot.fields), userId, userId];
     const columns = ['bazis_cut_set_id', 'sort_order', ...provenanceColumns, ...DETAIL_FIELD_COLUMNS, 'created_by', 'updated_by'];
     await client.query(
@@ -559,7 +756,7 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
     createdBy: nullableNumber(header.created_by), updatedBy: nullableNumber(header.updated_by),
     createdAt: iso(header.created_at), updatedAt: iso(header.updated_at), details,
     quantity: details.reduce((sum, detail) => sum + detail.quantity, 0), positionCount: details.length,
-    orders: refs(details, 'sourceOrderId', 'sourceOrderFullNumber', 'sourceOrderDeleted'),
+    orders: refs(details, 'sourceOrderId', 'sourceOrderName', 'sourceOrderDeleted'),
     projects: refs(details, 'sourceProjectId', 'sourceProjectCode'),
     bazisProjects: labelRefs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
     bazisOrders: labelRefs(details, 'sourceBazisRevisionId', 'sourceBazisOrderNo'),
@@ -587,6 +784,7 @@ function mapDetail(row: DetailRow): BazisCutSetDetailDto {
     sourceProjectCode: textValue(row.source_project_code), sourceBazisProjectName: textValue(row.source_bazis_project_name),
     sourceBazisOrderNo: textValue(row.source_bazis_order_no),
     sourceBazisProductName: textValue(row.source_bazis_product_name),
+    sourceBathCutNumber: textValue(row.source_bath_cut_number),
     cutEnabled: Boolean(row.cut_enabled), materialType: textValue(row.material_type), materialName: textValue(row.material_name),
     materialArticle: textValue(row.material_article), thicknessMm: toNumber(row.thickness_mm), position: textValue(row.position),
     partName: textValue(row.part_name), finishedLengthMm: toNumber(row.finished_length_mm),
@@ -777,18 +975,6 @@ function parseRefs(value: unknown): BazisCutSourceRefDto[] {
     .sort((a, b) => a.label.localeCompare(b.label, 'ru'));
 }
 
-export function resolveBazisDetailLabels(
-  detailBazisProject: string | null,
-  detailBazisProduct: string | null,
-): Pick<Snapshot['provenance'], 'sourceBazisProjectName' | 'sourceBazisOrderNo' | 'sourceBazisProductName'> {
-  const basisProject = detailBazisProject?.trim() ?? '';
-  return {
-    sourceBazisProjectName: basisProject,
-    sourceBazisOrderNo: basisProject,
-    sourceBazisProductName: detailBazisProduct?.trim() ?? '',
-  };
-}
-
 function hashRequest(command: string, user: CurrentUser, body: unknown): string {
   return createHash('sha256').update(JSON.stringify({ commandName: command, actorUserId: user.id, body })).digest('hex');
 }
@@ -803,6 +989,7 @@ async function setSessionUser(client: TransactionClient, user: CurrentUser): Pro
 }
 
 function actorId(user: CurrentUser): number | null { return nullableNumber(user.id); }
+export function buildBazisCutSetName(setId: number): string { return `БР-${setId}`; }
 function setNotFound(id: number) { return new ApiError(404, 'BAZIS_CUT_SET_NOT_FOUND', 'Набор Базис-раскрой не найден', { setId: id }); }
 function detailNotFound(id: number) { return new ApiError(404, 'BAZIS_CUT_DETAIL_NOT_FOUND', 'Деталь набора не найдена', { detailId: id }); }
 function uniqueIds(ids: number[]): number[] { return [...new Set(ids)].sort((a, b) => a - b); }

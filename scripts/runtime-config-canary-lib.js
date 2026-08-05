@@ -18,6 +18,7 @@ const ROLLOUT_FEATURE_KEYS = [
   'bazisCut',
   'labels',
   'orderStatusBoard',
+  'orderRealtime',
   'cncTelegram',
   'workosAuth',
 ];
@@ -282,6 +283,14 @@ function validateFeatureDependencies(features, label) {
 
   if (features.cncTelegram === true && features.orderStatusBoard !== true) {
     errors.push(`${label}: cncTelegram requires orderStatusBoard`);
+  }
+
+  if (features.orderRealtime === true && features.backendAuth !== true) {
+    errors.push(`${label}: orderRealtime requires backendAuth`);
+  }
+
+  if (features.orderRealtime === true && features.backendOrdersRead !== true) {
+    errors.push(`${label}: orderRealtime requires backendOrdersRead`);
   }
 
   return errors;

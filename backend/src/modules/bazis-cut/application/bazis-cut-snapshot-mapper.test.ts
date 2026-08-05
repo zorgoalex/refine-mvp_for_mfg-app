@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import { bazisCutFieldsToRow } from './bazis-xls-writer';
 import {
+  buildBazisBathCutNumber,
   buildBazisCutPosition,
-  buildBazisCutSnapshotIdentity,
+  buildOrdinaryErpPosition,
   mapBazisCutSnapshotFields,
 } from './bazis-cut-snapshot-mapper';
+
+describe('buildBazisBathCutNumber', () => {
+  it.each([
+    [28, 2, '28-2'],
+    [null, 2, ''],
+    [28, null, ''],
+    [0, 2, ''],
+  ])('keeps only the cut-job and result version numbers', (jobId, resultNo, expected) => {
+    expect(buildBazisBathCutNumber(jobId, resultNo)).toBe(expected);
+  });
+});
 
 // Real source L/W/orientation are extracted from adjacent 1491.xml; expected
 // L/W and the remaining export values are independently extracted from 1491.xls.
@@ -42,73 +54,48 @@ const GOLDEN_1491: GoldenRow[] = [
 
 describe('buildBazisCutPosition', () => {
   it.each([
-    ['Кухня', '01.00.07', 'Кухня.01.00.07'],
-    ['Кухня', '', 'Кухня.'],
-    ['', '01.00.07', '.01.00.07'],
-    ['', '', ''],
-  ])('joins ERP Basis product and detail designations with a mandatory dot', (product, designation, expected) => {
-    expect(buildBazisCutPosition(product, designation)).toBe(expected);
+    ['BP-7', 'Кухня', '01.00.07', 'Кухня.01.00.07'],
+    ['BP-7', '', '01.00.07', '.01.00.07'],
+    ['', 'Кухня', '01.00.07', '.01.00.07'],
+    ['', 'Кухня', '', '.'],
+    ['', '', '', '.'],
+  ])('prepends the product only for a Basis project and always keeps the designation dot',
+    (project, product, designation, expected) => {
+      expect(buildBazisCutPosition(project, product, designation)).toBe(expected);
   });
 
-  it('trims both input values', () => {
-    expect(buildBazisCutPosition(' Кухня ', ' 01.00.07 ')).toBe('Кухня.01.00.07');
+  it('trims all input values', () => {
+    expect(buildBazisCutPosition(' BP-7 ', ' Кухня ', ' 01.00.07 ')).toBe('Кухня.01.00.07');
   });
 
   it('does not truncate long source fields', () => {
-    expect(buildBazisCutPosition('И'.repeat(1500), 'Д'.repeat(1500))).toHaveLength(3001);
+    expect(buildBazisCutPosition('BP', 'И'.repeat(1500), 'Д'.repeat(1500))).toHaveLength(3001);
   });
 
-  it('uses the ERP detail number when all three Basis fields are empty', () => {
+  it('builds the ordinary ERP position from the order and detail numbers', () => {
+    expect(buildOrdinaryErpPosition(' ERP-заказ 1491 ', 7)).toBe('ERP-заказ 1491.7');
+
     const fields = mapBazisCutSnapshotFields({
       materialName: 'ЛДСП', thicknessMm: 16, detailNumber: 1,
-      orderName: 'ERP-заказ 1491', basisOrder: null,
+      orderName: 'ERP-заказ 1491', ordinaryErpOrder: true,
+      bazisProject: null,
       basisProduct: null, basisDesignation: null, basisData: null, detailName: 'Бок',
       heightMm: 100, widthMm: 50, quantity: 1, note: null, milling: null, film: null,
       doweling: false, verticalTexture: false,
     });
 
-    expect(fields?.position).toBe('1');
+    expect(fields?.position).toBe('ERP-заказ 1491.1');
   });
-});
-
-describe('buildBazisCutSnapshotIdentity', () => {
-  it('writes ERP order name and detail number to the Excel identity columns when all Basis fields are empty', () => {
-    const source = {
-      materialName: 'ЛДСП', thicknessMm: 16,
-      orderName: ' ERP-заказ 1491 ', detailNumber: 17,
-      basisOrder: ' ', basisProduct: null, basisDesignation: '',
-      basisData: null, detailName: 'Бок', heightMm: 100, widthMm: 50, quantity: 1,
-      note: null, milling: null, film: null, doweling: false, verticalTexture: false,
-    };
-    const identity = buildBazisCutSnapshotIdentity(source);
-    const fields = mapBazisCutSnapshotFields(source);
-
-    expect(identity).toEqual({ order: 'ERP-заказ 1491', position: '17' });
-    expect(fields).not.toBeNull();
-    const row = bazisCutFieldsToRow({ ...fields!, sourceBazisOrderNo: identity.order });
-    expect(row.slice(5, 8)).toEqual(['ERP-заказ 1491', '17', 'ERP-заказ 149117']);
-  });
-
-  it.each([
-    ['1319', '', '', { order: '1319', position: '' }],
-    ['', 'Кухня', '', { order: '', position: 'Кухня.' }],
-    ['', '', '01.00.07', { order: '', position: '.01.00.07' }],
-  ])('does not use ERP fallback when any Basis field is present',
-    (basisOrder, basisProduct, basisDesignation, expected) => {
-      expect(buildBazisCutSnapshotIdentity({
-        orderName: 'ERP-заказ 1491', detailNumber: 17,
-        basisOrder, basisProduct, basisDesignation,
-      })).toEqual(expected);
-    });
 });
 
 describe('1491 snapshot mapper golden', () => {
-  it('reproduces all 35 export cells for all 28 positions from real XML source dimensions/orientation', () => {
+  it('reproduces all 37 export cells for all 28 positions from real XML source dimensions/orientation', () => {
     const rows = GOLDEN_1491.map(([position, name, sourceLength, sourceWidth, verticalTexture,
       _length, _width, quantity, milling, route, film], index) => {
       const fields = mapBazisCutSnapshotFields({
         materialName: 'МДФ 16 мм', thicknessMm: 16, detailNumber: index + 1,
-        orderName: '1491', basisOrder: '',
+        orderName: '1491', ordinaryErpOrder: false,
+        bazisProject: '',
         basisProduct: 'Кухня', basisDesignation: position, basisData: null, detailName: name,
         heightMm: sourceLength, widthMm: sourceWidth,
         quantity, note: null, milling, film, doweling: route === 'Присадка:', verticalTexture,
@@ -118,21 +105,21 @@ describe('1491 snapshot mapper golden', () => {
     });
     const expected = GOLDEN_1491.map(([position, name, _sourceLength, _sourceWidth, _vertical,
       length, width, quantity, milling, route, film]) => {
-      const computedPosition = `Кухня.${position}`;
+      const computedPosition = `.${position}`;
       return [
-      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', computedPosition, computedPosition, name, length, width,
+      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', '', computedPosition, computedPosition, name, length, width,
       Math.round(length * 10) / 10, Math.round(width * 10) / 10, quantity, 'Не задана', '',
-      '', '', 0, '', '', 0, '', '', 0, '', '', 0, null, '', '', '', milling, route, film,
+      '', '', 0, '', '', 0, '', '', 0, '', '', 0, null, '', '', '', milling, route, '', film,
       ];
     });
 
     expect(rows).toHaveLength(28);
-    expect(rows.every((row) => row.length === 35)).toBe(true);
+    expect(rows.every((row) => row.length === 37)).toBe(true);
     expect(rows).toEqual(expected);
-    expect(rows.reduce((sum, row) => sum + Number(row[13]), 0)).toBe(30);
+    expect(rows.reduce((sum, row) => sum + Number(row[14]), 0)).toBe(30);
     expect(GOLDEN_1491.filter((row) => row[4])).toHaveLength(26);
-    expect(rows.filter((row) => Number(row[9]) < Number(row[10]))).toHaveLength(9);
-    expect(rows[0][6]).toBe('Кухня.01.00.07');
-    expect(rows[0][7]).toBe('Кухня.01.00.07');
+    expect(rows.filter((row) => Number(row[10]) < Number(row[11]))).toHaveLength(9);
+    expect(rows[0][7]).toBe('.01.00.07');
+    expect(rows[0][8]).toBe('.01.00.07');
   });
 });

@@ -49,6 +49,8 @@ const cutMapV1Schema = z.object({
   fit: z.literal('contain'),
   highlightFill: z.string().regex(/^#[0-9a-fA-F]{6}$/),
   highlightStroke: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  flipHorizontal: z.boolean().optional(),
+  flipVertical: z.boolean().optional(),
 }).strict();
 const labelElementStyleSchema = jsonObjectSchema.superRefine((style, ctx) => {
   // Existing unversioned keys are intentionally preserved. Only the new,

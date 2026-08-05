@@ -49,7 +49,7 @@ describe('LabelsService', () => {
 
     await expect(service.getRendererCapabilities({ currentUser: manager, requestId: 'req-capabilities' }))
       .resolves.toEqual({
-        rendererCapabilities: ['if_else_v1', 'typography_v1', 'cut_map_v1', 'custom_expression_v1'],
+        rendererCapabilities: ['if_else_v1', 'typography_v1', 'cut_map_v1', 'cut_map_flip_v1', 'custom_expression_v1'],
       });
   });
 

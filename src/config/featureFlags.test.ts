@@ -31,6 +31,7 @@ describe('featureFlags', () => {
       labels: false,
       statusAutomation: false,
       orderStatusBoard: false,
+      orderRealtime: false,
       cncTelegram: false,
       pdfImportLayoutPatterns: false,
       sheetMaterialsReads: false,
@@ -60,6 +61,20 @@ describe('featureFlags', () => {
         { orderStatusBoard: true },
       ).orderStatusBoard,
     ).toBe(true);
+  });
+
+  it('fails closed for order realtime until backend auth and order reads are enabled', () => {
+    expect(getFeatureFlags({ VITE_ORDER_REALTIME: 'true' }).orderRealtime).toBe(false);
+    expect(getFeatureFlags({
+      VITE_ORDER_REALTIME: 'true',
+      VITE_USE_BACKEND_AUTH: 'true',
+      VITE_USE_BACKEND_ORDERS_READ: 'true',
+    }).orderRealtime).toBe(true);
+    expect(getFeatureFlags({}, {
+      backendAuth: true,
+      backendOrdersRead: true,
+      orderRealtime: true,
+    }).orderRealtime).toBe(true);
   });
 
   it('fails closed for CNC Telegram until the status board is enabled', () => {

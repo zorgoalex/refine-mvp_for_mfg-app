@@ -3373,6 +3373,18 @@ paths:
                     hasDrilling:
                       type: boolean
                       description: Присадка — у узла есть отверстия в raw_json, derived read-only
+                    millingName:
+                      type: string
+                      nullable: true
+                      description: Пользовательское свойство панели «Фрезировка»/«Фрезеровка»
+                    filmName:
+                      type: string
+                      nullable: true
+                      description: Пользовательское свойство панели «Пленка»/«Плёнка»
+                    paintName:
+                      type: string
+                      nullable: true
+                      description: Пользовательское свойство панели «Краска»/«Краска (обр)»
                     notes:
                       type: string
                       nullable: true
@@ -4192,6 +4204,69 @@ paths:
                         matchedBy:
                           type: string
                           enum: [node_map, basis_fields]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis revision not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/revisions/{id}/export-cut.xls:
+    post:
+      tags:
+        - Bazis
+      operationId: exportBazisRevisionCutXls
+      summary: Export selected Bazis panels as BIFF8 XLS
+      description: Requires both `bazis.view` and `cut.view`; no persistent Basis-cut set is created.
+      security:
+        - bearerAuth: []
+      x-permission: cut.view
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: templateId
+          required: false
+          schema: { type: integer, minimum: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [selectedNodeIds]
+              properties:
+                selectedNodeIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: BIFF8 XLS
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/vnd.ms-excel:
+              schema:
+                type: string
+                format: binary
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -11288,6 +11363,11 @@ paths:
       summary: Export a saved set as BIFF8 XLS
       security: [{ bearerAuth: [] }]
       x-permission: cut.view
+      parameters:
+        - in: query
+          name: templateId
+          required: false
+          schema: { type: integer, minimum: 1 }
       responses:
         '201':
           description: BIFF8 XLS
@@ -11299,6 +11379,126 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/export-templates/catalog:
+    get:
+      tags: [ExportTemplates]
+      operationId: getExportTemplateCatalog
+      summary: Get source fields and formula capabilities
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.view
+      responses:
+        '200': { description: Catalog, content: { application/json: { schema: { $ref: '#/components/schemas/ExportTemplateCatalog' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/export-templates/available:
+    get:
+      tags: [ExportTemplates]
+      operationId: listAvailableExportTemplates
+      summary: List active templates for an export screen
+      security: [{ bearerAuth: [] }]
+      description: Uses the target export permission (`cut.view` or `bazis.view`), not settings access.
+      parameters:
+        - { in: query, name: targetScreen, required: true, schema: { $ref: '#/components/schemas/ExportTemplateTarget' } }
+        - { in: query, name: sourceType, required: true, schema: { $ref: '#/components/schemas/ExportTemplateSource' } }
+        - { in: query, name: format, required: true, schema: { type: string, enum: [xls_biff8] } }
+      responses:
+        '200': { description: Active templates, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ExportTemplateSummary' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/export-templates/preview:
+    post:
+      tags: [ExportTemplates]
+      operationId: previewExportTemplate
+      summary: Validate formulas and preview one synthetic row
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.view
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ExportTemplatePreviewRequest' } } }
+      responses:
+        '201': { description: Preview cells, content: { application/json: { schema: { type: array, items: { type: object, additionalProperties: true } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/export-templates:
+    get:
+      tags: [ExportTemplates]
+      operationId: listExportTemplates
+      summary: List export templates for administration
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.view
+      parameters:
+        - { in: query, name: targetScreen, required: false, schema: { $ref: '#/components/schemas/ExportTemplateTarget' } }
+        - { in: query, name: sourceType, required: false, schema: { $ref: '#/components/schemas/ExportTemplateSource' } }
+        - { in: query, name: format, required: false, schema: { type: string, enum: [xls_biff8] } }
+        - { in: query, name: includeInactive, required: false, schema: { type: boolean, default: false } }
+      responses:
+        '200': { description: Templates, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ExportTemplate' } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [ExportTemplates]
+      operationId: createExportTemplate
+      summary: Create an export template
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.manage
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateExportTemplateRequest' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/ExportTemplate' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/export-templates/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer, minimum: 1 } }
+    get:
+      tags: [ExportTemplates]
+      operationId: getExportTemplate
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.view
+      responses:
+        '200': { description: Template, content: { application/json: { schema: { $ref: '#/components/schemas/ExportTemplate' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [ExportTemplates]
+      operationId: updateExportTemplate
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.manage
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateExportTemplateRequest' } } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/ExportTemplate' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [ExportTemplates]
+      operationId: deleteExportTemplate
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.manage
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VersionedExportTemplateCommand' } } } }
+      responses:
+        '204': { description: Deleted }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/export-templates/{id}/set-default:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: integer, minimum: 1 } }
+    post:
+      tags: [ExportTemplates]
+      operationId: setDefaultExportTemplate
+      summary: Atomically set a default template
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.manage
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/VersionedExportTemplateCommand' } } } }
+      responses:
+        '201': { description: New default, content: { application/json: { schema: { $ref: '#/components/schemas/ExportTemplate' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /health/live:
     get:
@@ -11788,10 +11988,112 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    ExportTemplateTarget:
+      type: string
+      enum: [bazis_cut_set, bazis_project_card]
+    ExportTemplateSource:
+      type: string
+      enum: [bazis_cut_set_detail, bazis_project_panel]
+    ExportExpression:
+      type: object
+      required: [type]
+      description: Strict recursive AST; accepted nodes are field, constant, empty, concat, if_else, string_fn, number_fn and math. Arbitrary code is never evaluated.
+      properties:
+        type: { type: string, enum: [field, constant, empty, concat, if_else, string_fn, number_fn, math] }
+      additionalProperties: true
+    ExportTemplateColumn:
+      type: object
+      additionalProperties: false
+      required: [columnKey, header, expression]
+      properties:
+        columnKey: { type: string, minLength: 1, maxLength: 100, pattern: '^[A-Za-z0-9._-]+$' }
+        header: { type: string, minLength: 1, maxLength: 200 }
+        expression: { $ref: '#/components/schemas/ExportExpression' }
+    ExportTemplateSummary:
+      type: object
+      required: [exportTemplateId, name, targetScreen, sourceType, format, isDefault, version]
+      properties:
+        exportTemplateId: { type: integer, format: int64 }
+        code: { type: string, nullable: true }
+        name: { type: string }
+        targetScreen: { $ref: '#/components/schemas/ExportTemplateTarget' }
+        sourceType: { $ref: '#/components/schemas/ExportTemplateSource' }
+        format: { type: string, enum: [xls_biff8] }
+        isDefault: { type: boolean }
+        version: { type: integer, minimum: 1 }
+    ExportTemplate:
+      allOf:
+        - { $ref: '#/components/schemas/ExportTemplateSummary' }
+        - type: object
+          required: [description, sheetName, schemaVersion, templateHash, columns, isActive, createdAt, updatedAt]
+          properties:
+            description: { type: string, nullable: true }
+            sheetName: { type: string, minLength: 1, maxLength: 31 }
+            schemaVersion: { type: integer, enum: [1] }
+            templateHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+            columns: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/ExportTemplateColumn' } }
+            isActive: { type: boolean }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    CreateExportTemplateRequest:
+      type: object
+      additionalProperties: false
+      required: [name, targetScreen, sourceType, format, sheetName, columns, isActive, idempotencyKey]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, nullable: true, maxLength: 2000 }
+        targetScreen: { $ref: '#/components/schemas/ExportTemplateTarget' }
+        sourceType: { $ref: '#/components/schemas/ExportTemplateSource' }
+        format: { type: string, enum: [xls_biff8] }
+        sheetName: { type: string, minLength: 1, maxLength: 31 }
+        schemaVersion: { type: integer, enum: [1], default: 1 }
+        columns: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/ExportTemplateColumn' } }
+        isActive: { type: boolean }
+        idempotencyKey: { type: string, minLength: 8, maxLength: 200 }
+    UpdateExportTemplateRequest:
+      type: object
+      additionalProperties: false
+      required: [name, sheetName, schemaVersion, columns, isActive, expectedVersion, idempotencyKey]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, nullable: true, maxLength: 2000 }
+        sheetName: { type: string, minLength: 1, maxLength: 31 }
+        schemaVersion: { type: integer, enum: [1] }
+        columns: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/ExportTemplateColumn' } }
+        isActive: { type: boolean }
+        expectedVersion: { type: integer, minimum: 1 }
+        idempotencyKey: { type: string, minLength: 8, maxLength: 200 }
+    VersionedExportTemplateCommand:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion, idempotencyKey]
+      properties:
+        expectedVersion: { type: integer, minimum: 1 }
+        idempotencyKey: { type: string, minLength: 8, maxLength: 200 }
+    ExportTemplatePreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [targetScreen, sourceType, format, columns]
+      properties:
+        targetScreen: { $ref: '#/components/schemas/ExportTemplateTarget' }
+        sourceType: { $ref: '#/components/schemas/ExportTemplateSource' }
+        format: { type: string, enum: [xls_biff8] }
+        columns: { type: array, minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/ExportTemplateColumn' } }
+    ExportTemplateCatalog:
+      type: object
+      required: [schemaVersion, targets, formats, fields, operators, functions, limits]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        targets: { type: array, items: { type: object, additionalProperties: true } }
+        formats: { type: array, items: { type: object, additionalProperties: true } }
+        fields: { type: array, items: { type: object, additionalProperties: true } }
+        operators: { type: array, items: { type: string } }
+        functions: { type: object, additionalProperties: true }
+        limits: { type: object, additionalProperties: { type: integer } }
     CreateBazisCutSetRequest:
       type: object
       additionalProperties: false
-      required: [name, orderId, detailIds]
+      required: [orderId, detailIds]
       properties:
         name: { type: string, minLength: 1, maxLength: 200 }
         orderId: { type: integer, format: int64, minimum: 1 }
@@ -11903,7 +12205,7 @@ components:
           required: [bazisCutSetDetailId, bazisCutSetId, sortOrder, sourceOrderDetailId, sourceOrderId,
             sourceProjectId, sourceBazisProjectId, sourceBazisRevisionId, sourceBazisNodeId,
             sourceOrderName, sourceOrderFullNumber, sourceProjectCode, sourceBazisProjectName,
-            sourceBazisOrderNo, sourceBazisProductName, createdAt, updatedAt]
+            sourceBazisOrderNo, sourceBazisProductName, sourceBathCutNumber, createdAt, updatedAt]
           properties:
             bazisCutSetDetailId: { type: integer, format: int64 }
             bazisCutSetId: { type: integer, format: int64 }
@@ -11920,6 +12222,7 @@ components:
             sourceBazisProjectName: { type: string }
             sourceBazisOrderNo: { type: string }
             sourceBazisProductName: { type: string }
+            sourceBathCutNumber: { type: string }
             createdAt: { type: string, format: date-time }
             updatedAt: { type: string, format: date-time }
     BazisCutSet:

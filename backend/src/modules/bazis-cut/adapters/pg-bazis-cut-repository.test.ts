@@ -1,9 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { DatabaseService } from '../../../database/database.service';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { PgBazisCutRepository, resolveBazisDetailLabels } from './pg-bazis-cut-repository';
+import {
+  buildBazisCutSetName,
+  PgBazisCutRepository,
+  resolveBazisDetailLabels,
+} from './pg-bazis-cut-repository';
 
 const user: CurrentUser = {
   id: '7', username: 'manager', role: 'manager', roleId: 3,
@@ -11,18 +16,97 @@ const user: CurrentUser = {
 };
 
 afterEach(() => vi.restoreAllMocks());
+const repositorySource = readFileSync(new URL('./pg-bazis-cut-repository.ts', import.meta.url), 'utf8');
 
 describe('PgBazisCutRepository security and event contract', () => {
-  it('maps the ERP detail Basis project and product to separate frozen labels', () => {
-    expect(resolveBazisDetailLabels(' 1319 ', ' Кухня ')).toEqual({
-      sourceBazisProjectName: '1319',
-      sourceBazisOrderNo: '1319',
+  it('builds the backend-owned set name from its generated id', () => {
+    expect(buildBazisCutSetName(42)).toBe('БР-42');
+  });
+
+  it('snapshots the Basis root product and latest ready vacuum result number', () => {
+    expect(repositorySource).toMatch(/WITH RECURSIVE ancestry[\s\S]*ancestry\.node_kind='product'/);
+    expect(repositorySource).toMatch(/cj\.last_calc_params->>'layout_mode'[\s\S]*='vacuum_table'/);
+    expect(repositorySource).toContain('sourceBathCutNumber: buildBazisBathCutNumber(');
+    expect(repositorySource).toContain("'source_bazis_product_name', 'source_bath_cut_number'");
+  });
+
+  it('uses unprefixed ERP order numbers in the list', async () => {
+    const query = vi.fn(async (_sql: string, _params?: readonly unknown[]) => result([]));
+    const database = { query, transaction: vi.fn() } as unknown as DatabaseService;
+    const repository = new PgBazisCutRepository(database);
+
+    await repository.list({ currentUser: user, search: '', page: 1, pageSize: 25 });
+
+    const sql = String(query.mock.calls[0][0]);
+    expect(sql).toMatch(/'label', d\.source_order_name,[\s\S]*AS orders/i);
+    expect(sql).not.toMatch(/'label', d\.source_order_full_number,[\s\S]*AS orders/i);
+  });
+
+  it('uses unprefixed ERP order numbers on the card and preserves full provenance', async () => {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('SELECT * FROM bazis_cut_sets WHERE')) return result([setRow(0)]);
+      if (sql.includes('FROM bazis_cut_set_details')) return result([detailRow()]);
+      return result([]);
+    });
+    const database = { query, transaction: vi.fn() } as unknown as DatabaseService;
+    const repository = new PgBazisCutRepository(database);
+
+    const card = await repository.get({ currentUser: user, setId: 10 });
+
+    expect(card.orders).toEqual([{ id: 30, label: '1' }]);
+    expect(card.details[0].sourceOrderFullNumber).toBe('P-1');
+    expect(card.details[0].sourceBathCutNumber).toBe('28-2');
+  });
+
+  it('maps a multi-product Basis revision to Basis project fields', () => {
+    expect(resolveBazisDetailLabels({
+      rootProductCount: 2,
+      productOrderNo: ' BZ-100 ',
+      revisionBazisOrderNo: ' BP-7 ',
+      detailBazisProject: 'legacy',
+      detailBazisProduct: ' Кухня ',
+    })).toEqual({
+      sourceBazisProjectName: 'BP-7',
+      sourceBazisOrderNo: '',
       sourceBazisProductName: 'Кухня',
     });
-    expect(resolveBazisDetailLabels(null, '')).toEqual({
+  });
+
+  it('maps a single-product Basis revision to Basis order fields', () => {
+    expect(resolveBazisDetailLabels({
+      rootProductCount: 1,
+      productOrderNo: ' BZ-100 ',
+      revisionBazisOrderNo: ' BP-7 ',
+      detailBazisProject: 'legacy',
+      detailBazisProduct: ' Шкаф ',
+    })).toEqual({
       sourceBazisProjectName: '',
-      sourceBazisOrderNo: '',
-      sourceBazisProductName: '',
+      sourceBazisOrderNo: 'BZ-100',
+      sourceBazisProductName: 'Шкаф',
+    });
+  });
+
+  it('treats an unlinked ERP Basis number as a Basis order', () => {
+    expect(resolveBazisDetailLabels({
+      rootProductCount: null,
+      productOrderNo: null,
+      revisionBazisOrderNo: null,
+      detailBazisProject: ' 1319 ',
+      detailBazisProduct: '',
+    })).toEqual({
+      sourceBazisProjectName: '', sourceBazisOrderNo: '1319', sourceBazisProductName: '',
+    });
+  });
+
+  it('does not revive a legacy ERP number when the matched Basis revision has no document number', () => {
+    expect(resolveBazisDetailLabels({
+      rootProductCount: 1,
+      productOrderNo: null,
+      revisionBazisOrderNo: null,
+      detailBazisProject: 'legacy',
+      detailBazisProduct: 'Кухня',
+    })).toEqual({
+      sourceBazisProjectName: '', sourceBazisOrderNo: '', sourceBazisProductName: 'Кухня',
     });
   });
 
@@ -108,7 +192,7 @@ function detailRow() {
     source_bazis_project_id: 60, source_bazis_revision_id: 70, source_bazis_node_id: 80,
     source_order_name: '1', source_order_full_number: 'P-1', source_project_code: 'P',
     source_bazis_project_name: 'BP', source_bazis_order_no: 'BO',
-    source_bazis_product_name: 'Кухня', cut_enabled: true,
+    source_bazis_product_name: 'Кухня', source_bath_cut_number: '28-2', cut_enabled: true,
     material_type: 'Площадной', material_name: 'ЛДСП', material_article: '', thickness_mm: '16',
     position: '001', part_name: 'Бок', finished_length_mm: '100', finished_width_mm: '50',
     cut_length_mm: '100', cut_width_mm: '50', quantity: 2, orientation: 'Не задана', groove: '',

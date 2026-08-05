@@ -1,0 +1,109 @@
+.export-template-column-row {
+  display: grid;
+  grid-template-columns: 28px 220px minmax(420px, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+@media (min-width: 1200px) {
+  .export-templates-list-pane.ant-col {
+    flex: 0 0 14.583333%;
+    max-width: 14.583333%;
+  }
+
+  .export-templates-editor-pane.ant-col {
+    flex: 0 0 85.416667%;
+    max-width: 85.416667%;
+  }
+}
+
+.export-template-column-index {
+  padding-top: 9px;
+  text-align: center;
+}
+
+.export-template-column-header {
+  width: 220px;
+}
+
+.export-template-column-expression {
+  min-width: 420px;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.export-template-column-actions,
+.export-expression-editor-row,
+.export-expression-editor-compound,
+.export-expression-parts,
+.export-expression-part,
+.export-expression-part-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.export-template-column-actions,
+.export-expression-part-actions {
+  gap: 4px;
+}
+
+.export-expression-editor {
+  display: inline-flex;
+  width: max-content;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.export-template-column-expression > .export-expression-editor {
+  min-width: 100%;
+}
+
+.export-expression-editor-type {
+  width: 200px;
+  flex: 0 0 200px;
+}
+
+.export-expression-editor-value {
+  width: 300px;
+  flex: 0 0 300px;
+}
+
+.export-expression-editor-function,
+.export-expression-editor-operator {
+  width: 190px;
+  flex: 0 0 190px;
+}
+
+.export-expression-editor-number-function,
+.export-expression-constant {
+  width: 300px;
+  flex: 0 0 300px;
+}
+
+.export-expression-editor-label {
+  padding-top: 9px;
+  white-space: nowrap;
+}
+
+.export-expression-part {
+  padding-left: 8px;
+  border-left: 1px solid #d9d9d9;
+}
+
+@media (max-width: 1199px) {
+  .export-template-column-row {
+    grid-template-columns: 28px 200px minmax(420px, 1fr) auto;
+  }
+
+  .export-template-column-header {
+    width: 200px;
+  }
+}

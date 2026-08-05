@@ -43,6 +43,8 @@ describe('Basis-cut UI integration guards', () => {
     expect(modal).toContain('Существующий набор');
     expect(modal).toContain('showSearch');
     expect(modal).toContain('filterOption={false}');
+    expect(modal).toContain('БР-<номер набора>');
+    expect(modal).not.toContain('Название набора');
   });
 
   it('wires the action into order edit/show and blocks dirty edit drafts', () => {
@@ -56,18 +58,25 @@ describe('Basis-cut UI integration guards', () => {
 
   it('keeps all 33 fields editable and uses native picker with fallback', () => {
     expect((card.match(/key: '[A-Za-z0-9]+'/g) ?? []).length).toBeGreaterThanOrEqual(33);
-    expect(card).toContain("title: 'Базис заказ'");
+    expect(card).toContain("title: 'Базис-проект'");
+    expect(card).toContain("dataIndex: 'sourceBazisProjectName'");
+    expect(card).toContain("title: 'Базис-заказ'");
     expect(card).toContain("dataIndex: 'sourceBazisOrderNo'");
-    expect(card).not.toContain("dataIndex: 'sourceBazisProductName'");
-    expect(card).not.toContain("title: 'Базис изделие'");
+    expect(card).toContain("title: 'Изделие'");
+    expect(card).toContain("dataIndex: 'sourceBazisProductName'");
+    expect(card).toContain("title: 'Ванна'");
+    expect(card).toContain("dataIndex: 'sourceBathCutNumber'");
     expect(card).not.toContain("field.key === 'position' ||");
     expect(card).toContain('showSaveFilePicker');
     expect(card).toContain('downloadBlob');
     expect(card).toContain("error.name === 'AbortError'");
+    expect(card).toContain('label="Общая площадь"');
+    expect(card).toContain("row.sourceOrderName || '—'");
+    expect(card).not.toContain('row.sourceOrderFullNumber || row.sourceOrderName');
   });
 
-  it('shows the set number in its workspace tab and keeps detail headers visible', () => {
-    expect(card).toContain('`Базис-раскрой #${setId}`');
+  it('shows the set number with the БР prefix in its workspace tab and keeps detail headers visible', () => {
+    expect(card).toContain('`БР #${setId}`');
     expect(card).toContain('sticky={{ offsetHeader: tableHeaderOffset }}');
     expect(card).toContain("document.querySelector<HTMLElement>('.workspace-tabs')");
     expect(card).toContain('new ResizeObserver(update)');
@@ -82,16 +91,20 @@ describe('Basis-cut UI integration guards', () => {
     for (const fixedColumn of [
       "title: '№', key: 'rowNumber', fixed: 'left'",
       "title: 'Источник', key: 'source', fixed: 'left'",
-      "title: 'Базис заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left'",
+      "title: 'Базис-проект', dataIndex: 'sourceBazisProjectName', key: 'sourceBazisProjectName', fixed: 'left'",
+      "title: 'Базис-заказ', dataIndex: 'sourceBazisOrderNo', key: 'sourceBazisOrderNo', fixed: 'left'",
     ]) expect(columns).toContain(fixedColumn);
     expect(columns).toContain("title: 'QR-code', key: 'qrCode', className: QR_CODE_STICKY_CLASS");
-    expect((columns.match(/fixed: 'left'/g) ?? [])).toHaveLength(3);
+    expect((columns.match(/fixed: 'left'/g) ?? [])).toHaveLength(4);
     expect(columns).toContain("title: 'Позиция', dataIndex: 'position', key: 'position', width: 130");
+    expect(columns).toContain('buildBazisCutCardPosition(row)');
+    expect(columns.indexOf("title: 'Изделие'")).toBeLessThan(columns.indexOf("title: 'Позиция'"));
+    expect(columns.indexOf("title: 'Ванна'")).toBeLessThan(columns.indexOf("title: 'Позиция'"));
     expect(columns).toContain("title: 'Наименование', dataIndex: 'partName', key: 'partName', width: 200");
     expect(card).toContain("className={index === QR_CODE_COLUMN_INDEX ? QR_CODE_STICKY_CLASS : undefined}");
     expect(styles).toContain('.bazis-cut-set-details-table.ant-table-wrapper .ant-table-cell.bazis-cut-sticky-qr');
     expect(styles).toContain('left: var(--bazis-cut-sticky-qr-left);');
-    expect(card).toContain('scroll={{ x: 5320, y: 480 }}');
+    expect(card).toContain('scroll={{ x: 5750, y: 480 }}');
     expect(card).toContain('<Table.Summary fixed="bottom">');
     expect(card).toContain('Итого позиций:');
   });

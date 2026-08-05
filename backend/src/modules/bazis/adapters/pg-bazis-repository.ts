@@ -8,6 +8,12 @@ import type { OrderTransactionService } from '../../orders/application/order-tra
 import type { OrderDto } from '../../orders/dto/order.dto';
 import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-order.dto';
 import { PgOrderReadRepository } from '../../orders/adapters/pg-order-read-repository';
+import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../../bazis-cut/application/bazis-xls-writer';
+import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
+import {
+  mapBazisCutSnapshotFields,
+  resolveBazisDetailLabels,
+} from '../../bazis-cut/application/bazis-cut-snapshot-mapper';
 import type { ParsedBazisNode } from '../application/bazis-xml-parser';
 import type {
   AddToOrderCommand,
@@ -16,6 +22,7 @@ import type {
   CreateOrderFromDraftCommand,
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
+  ExportBazisCutXlsCommand,
   ImportRevisionCommand,
   RenameBazisProjectInput,
   SetNodeNotesInput,
@@ -30,6 +37,7 @@ import {
   orderDtoToSaveDto,
   panelCustomFilmName,
   panelCustomMillingName,
+  panelCustomPaintName,
   panelPreferredFilmName,
 } from './bazis-order-draft';
 import type { BazisDraftReferenceLookup } from './bazis-order-draft';
@@ -97,6 +105,8 @@ const HAS_DRILLING_SQL = `(
 
 // Общий SELECT-фрагмент для ОБОИХ tree-запросов (getTreeChildren + listAllTreeNodes).
 const TREE_NODE_EXTRA_SELECT = `n.notes,
+             n.raw_json->'ПользовательскиеСвойства' AS user_properties,
+             n.raw_json->'Свойство' AS legacy_user_properties,
              ${EDGE_COUNT_SQL} AS edge_count,
              ${HAS_DRILLING_SQL} AS has_drilling`;
 
@@ -159,6 +169,8 @@ interface TreeNodeRow {
   thickness_mm: number | string | null;
   main_material_name: string | null;
   notes: string | null;
+  user_properties: unknown;
+  legacy_user_properties: unknown;
   edge_count: number | string;
   has_drilling: boolean;
   linked_orders: Array<{ orderId: number | string; orderName: string | null; orderDeleted?: boolean | null }> | null;
@@ -207,6 +219,7 @@ interface SelectedPanelRow {
   cumulative_quantity: number | string | null;
   length_mm: number | string | null;
   width_mm: number | string | null;
+  texture_orientation: string | null;
   main_material_name: string | null;
   product_name: string | null;
   product_order_no: string | null;
@@ -277,6 +290,13 @@ interface PanelReferenceLookupRow {
   name: string;
 }
 
+interface CutExportReferenceRow {
+  reference_kind: 'sheet' | 'film' | 'milling';
+  reference_id: number | string;
+  reference_name: string;
+  thickness_mm: number | string | null;
+}
+
 interface PanelsSummaryRow {
   sheet_material_type_name?: string | null;
   main_material_name: string | null;
@@ -317,6 +337,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     // Паритет с orders-модулем: SP3 sheet-колонки в read-пути гейтятся тем же
     // BACKEND_SHEET_ORDERS_READS, а не захардкоженным default'ом.
     private readonly sheetOrdersReads: boolean = true,
+    private readonly exportTemplates?: ExportTemplatesService,
   ) {}
 
   async importRevision(command: ImportRevisionCommand): Promise<BazisImportResponseDto> {
@@ -2187,6 +2208,164 @@ export class PgBazisRepository implements BazisRepositoryPort {
     };
   }
 
+  async exportCutXls(command: ExportBazisCutXlsCommand) {
+    const revision = await this.loadRevisionProject(command.revisionId);
+    if (!revision) {
+      throw new BazisRevisionNotFoundError(command.revisionId);
+    }
+
+    const selectedNodeIds = uniqueNumbers(command.selectedNodeIds);
+    await this.assertPanelNodesBelongToRevision(command.revisionId, selectedNodeIds, 'selectedNodeIds');
+    const panels = await this.loadSelectedPanels(command.revisionId, selectedNodeIds);
+    if (panels.length === 0) {
+      throw new BazisNoPanelsSelectedError();
+    }
+
+    const mappings = await this.loadMaterialMappingsForPanels(panels);
+    const unmappedSheetNames = collectUnmappedSheetNames(panels, mappings);
+    if (unmappedSheetNames.length > 0) {
+      throw new BazisUnmappedMaterialsError(unmappedSheetNames);
+    }
+
+    const referenceLookup = await this.loadPanelReferenceLookup(panels);
+    const draftDetails = buildDraftDetails(panels, mappings, revision, referenceLookup);
+    const rootProductCount = await this.loadRootProductCount(command.revisionId);
+    const exportReferences = await this.loadCutExportReferences(draftDetails);
+    const panelsById = new Map(panels.map((panel) => [panel.bazisNodeId, panel] as const));
+    const invalidNodeIds: number[] = [];
+    const exportDetails = draftDetails.flatMap((detail, index) => {
+      const panel = panelsById.get(detail.bazisNodeId);
+      const sheet = detail.sheetMaterialTypeId == null
+        ? undefined
+        : exportReferences.get(`sheet:${detail.sheetMaterialTypeId}`);
+      const milling = exportReferences.get(`milling:${detail.millingTypeId}`);
+      const film = detail.filmId == null ? undefined : exportReferences.get(`film:${detail.filmId}`);
+      const thicknessMm = nullableNumber(sheet?.thickness_mm);
+      if (
+        !panel
+        || !sheet?.reference_name.trim()
+        || thicknessMm == null
+        || thicknessMm <= 0
+        || !milling
+        || (detail.filmId != null && !film)
+      ) {
+        invalidNodeIds.push(detail.bazisNodeId);
+        return [];
+      }
+
+      const labels = resolveBazisDetailLabels({
+        rootProductCount,
+        productOrderNo: panel.productOrderNo,
+        revisionBazisOrderNo: revision.revisionBazisOrderNo,
+        detailBazisProject: detail.basisProject,
+        detailBazisProduct: detail.basisProduct,
+      });
+      const fields = mapBazisCutSnapshotFields({
+        materialName: sheet.reference_name,
+        thicknessMm,
+        detailNumber: index + 1,
+        orderName: labels.sourceBazisOrderNo || labels.sourceBazisProjectName,
+        ordinaryErpOrder: false,
+        bazisProject: labels.sourceBazisProjectName,
+        basisProduct: detail.basisProduct,
+        basisDesignation: detail.basisDesignation,
+        basisData: detail.basisData,
+        detailName: detail.detailName,
+        heightMm: detail.height,
+        widthMm: detail.width,
+        quantity: detail.quantity,
+        note: null,
+        milling: milling.reference_name,
+        film: film?.reference_name ?? null,
+        doweling: detail.doweling,
+        verticalTexture: panel.textureOrientation?.trim() === 'Вертикальная',
+      });
+      if (!fields) {
+        invalidNodeIds.push(detail.bazisNodeId);
+        return [];
+      }
+      return [{
+        ...fields,
+        sourceBazisProjectName: labels.sourceBazisProjectName,
+        sourceBazisOrderNo: labels.sourceBazisOrderNo,
+        sourceBazisProductName: labels.sourceBazisProductName,
+        sourceBathCutNumber: '',
+        sourceOrderDetailId: null,
+        sourceOrderId: null,
+        sourceProjectId: revision.projectId,
+        sourceBazisProjectId: revision.bazisProjectId,
+        sourceBazisRevisionId: revision.revisionId,
+        sourceBazisNodeId: detail.bazisNodeId,
+        xlsOrder: labels.sourceBazisProjectName,
+      }];
+    });
+
+    if (invalidNodeIds.length > 0) {
+      throw new ApiError(
+        422,
+        'BAZIS_CUT_DETAIL_NOT_EXPORTABLE',
+        'Некоторые панели нельзя экспортировать',
+        { nodeIds: uniqueNumbers(invalidNodeIds) },
+      );
+    }
+
+    const quantity = exportDetails.reduce((sum, detail) => sum + detail.quantity, 0);
+    const requestId = command.requestId ?? `bazis-cut-export-${command.revisionId}`;
+    const bytes = await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const template = this.exportTemplates ? await this.exportTemplates.resolveForExport({
+        templateId: command.templateId,
+        targetScreen: 'bazis_project_card',
+        sourceType: 'bazis_project_panel',
+        format: 'xls_biff8',
+        client: tx,
+      }) : null;
+      const rendered = template
+        ? buildBazisCutXlsFromTemplate(exportDetails, template)
+        : buildBazisCutXls(exportDetails);
+      await auditService.record(tx, {
+        event: 'bazis.cut_xls_exported',
+        entityType: 'bazis_revision',
+        entityId: String(command.revisionId),
+        actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId,
+        source: SOURCE,
+        relatedEntities: [
+          { entityType: 'project', entityId: revision.projectId },
+          { entityType: 'bazis_project', entityId: revision.bazisProjectId },
+          { entityType: 'bazis_revision', entityId: command.revisionId },
+        ],
+        before: {},
+        after: {
+          revisionId: command.revisionId,
+          positionCount: exportDetails.length,
+          quantity,
+        },
+        metadata: {
+          action: 'bazis_cut_xls_export',
+          format: 'biff8',
+          bytes: rendered.length,
+          selectedNodeIds,
+          requestId,
+          ...(template ? { templateId: template.exportTemplateId, templateCode: template.code,
+            templateVersion: template.version, templateHash: template.templateHash } : {}),
+        },
+      });
+      return rendered;
+    });
+
+    return {
+      bytes,
+      bazisProjectId: revision.bazisProjectId,
+      bazisProjectName: revision.bazisProjectName,
+      revisionId: command.revisionId,
+      positionCount: exportDetails.length,
+      quantity,
+    };
+  }
+
   private async assertRevisionExists(revisionId: number): Promise<void> {
     const result = await this.database.query<{ ok: number }>(
       `SELECT 1 AS ok FROM bazis_project_revisions WHERE bazis_revision_id = $1`,
@@ -2252,6 +2431,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     cumulativeQuantity: number | null;
     lengthMm: number | null;
     widthMm: number | null;
+    textureOrientation: string | null;
     mainMaterialName: string | null;
     productName: string | null;
     productOrderNo: string | null;
@@ -2281,6 +2461,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
                s.cumulative_quantity,
                s.length_mm,
                s.width_mm,
+               s.texture_orientation,
                s.main_material_name,
                s.raw_json
         FROM sel s
@@ -2325,6 +2506,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
              p.cumulative_quantity,
              p.length_mm,
              p.width_mm,
+             p.texture_orientation,
              p.main_material_name,
              rp.product_name,
              rp.product_order_no,
@@ -2344,6 +2526,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       cumulativeQuantity: nullableNumber(row.cumulative_quantity),
       lengthMm: nullableNumber(row.length_mm),
       widthMm: nullableNumber(row.width_mm),
+      textureOrientation: row.texture_orientation,
       mainMaterialName: row.main_material_name,
       productName: row.product_name,
       productOrderNo: row.product_order_no,
@@ -2509,6 +2692,65 @@ export class PgBazisRepository implements BazisRepositoryPort {
       }
     }
     return lookup;
+  }
+
+  private async loadRootProductCount(revisionId: number): Promise<number> {
+    const result = await this.database.query<{ root_product_count: number | string }>(
+      `
+      SELECT COUNT(*)::int AS root_product_count
+      FROM bazis_nodes
+      WHERE revision_id = $1
+        AND parent_node_id IS NULL
+        AND node_kind = 'product'
+      `,
+      [revisionId],
+    );
+    return Number(result.rows[0]?.root_product_count ?? 0);
+  }
+
+  private async loadCutExportReferences(
+    details: ReadonlyArray<{
+      sheetMaterialTypeId: number | null;
+      millingTypeId: number;
+      filmId: number | null;
+    }>,
+  ): Promise<Map<string, CutExportReferenceRow>> {
+    const sheetIds = uniqueNumbers(
+      details.flatMap((detail) => detail.sheetMaterialTypeId == null ? [] : [detail.sheetMaterialTypeId]),
+    );
+    const millingIds = uniqueNumbers(details.map((detail) => detail.millingTypeId));
+    const filmIds = uniqueNumbers(
+      details.flatMap((detail) => detail.filmId == null ? [] : [detail.filmId]),
+    );
+    const result = await this.database.query<CutExportReferenceRow>(
+      `
+      SELECT 'sheet'::text AS reference_kind,
+             sheet_material_type_id AS reference_id,
+             name::text AS reference_name,
+             thickness_mm
+      FROM sheet_material_types
+      WHERE sheet_material_type_id = ANY($1::bigint[])
+      UNION ALL
+      SELECT 'milling'::text AS reference_kind,
+             milling_type_id AS reference_id,
+             milling_type_name::text AS reference_name,
+             NULL::numeric AS thickness_mm
+      FROM milling_types
+      WHERE milling_type_id = ANY($2::bigint[])
+      UNION ALL
+      SELECT 'film'::text AS reference_kind,
+             film_id AS reference_id,
+             film_name::text AS reference_name,
+             NULL::numeric AS thickness_mm
+      FROM films
+      WHERE film_id = ANY($3::bigint[])
+      ORDER BY reference_kind, reference_id
+      `,
+      [sheetIds, millingIds, filmIds],
+    );
+    return new Map(
+      result.rows.map((row) => [`${row.reference_kind}:${Number(row.reference_id)}`, row]),
+    );
   }
 
   private async runCreateOrderHook(input: {
@@ -2724,6 +2966,12 @@ function parseNumeric(value: string | null | undefined): number | null {
 }
 
 function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
+  const rawUserProperties = row.user_properties == null && row.legacy_user_properties == null
+    ? null
+    : {
+        ПользовательскиеСвойства: row.user_properties,
+        Свойство: row.legacy_user_properties,
+      };
   return {
     bazisNodeId: Number(row.bazis_node_id),
     parentNodeId: nullableNumber(row.parent_node_id),
@@ -2743,6 +2991,9 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     mainMaterialName: row.main_material_name,
     edgeCount: Number(row.edge_count),
     hasDrilling: Boolean(row.has_drilling),
+    millingName: panelCustomMillingName(rawUserProperties),
+    filmName: panelCustomFilmName(rawUserProperties),
+    paintName: panelCustomPaintName(rawUserProperties),
     notes: row.notes,
     childrenCount: Number(row.children_count),
     orders: (row.linked_orders ?? [])

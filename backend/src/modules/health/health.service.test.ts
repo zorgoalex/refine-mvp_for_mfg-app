@@ -32,6 +32,28 @@ function createRateLimits(input: { ping?: () => Promise<void> } = {}): RateLimit
 }
 
 describe('HealthService readiness', () => {
+  it('reports a disconnected realtime listener as degraded without failing core readiness', async () => {
+    const service = new HealthService(
+      createConfig({
+        APP_NAME: 'erp-backend',
+        READINESS_REQUIRE_DATABASE: false,
+        READINESS_REQUIRE_REDIS: false,
+      }),
+      createDatabase({ isConfigured: false }),
+      createRateLimits(),
+      {
+        healthCheck: () => ({ status: 'degraded', message: 'listener disconnected' }),
+      } as never,
+    );
+
+    await expect(service.ready()).resolves.toMatchObject({
+      status: 'ready',
+      checks: {
+        realtime: { status: 'degraded', message: 'listener disconnected' },
+      },
+    });
+  });
+
   it('skips database ping when database readiness is disabled', async () => {
     const ping = vi.fn();
     const service = new HealthService(

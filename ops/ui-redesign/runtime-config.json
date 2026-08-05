@@ -25,6 +25,7 @@
     "labels": true,
     "statusAutomation": true,
     "orderStatusBoard": true,
+    "orderRealtime": false,
     "pdfImportLayoutPatterns": true,
     "sheetMaterialsReads": true,
     "enableLegacyHasura": false,

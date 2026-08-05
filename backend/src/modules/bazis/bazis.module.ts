@@ -10,9 +10,11 @@ import { BazisService } from './application/bazis.service';
 import { BazisController } from './http/bazis.controller';
 import { BazisRuntimeConfigService } from './http/bazis-runtime-config.service';
 import { PdfTablePatternsModule } from './pdf-table-patterns/pdf-table-patterns.controller';
+import { ExportTemplatesModule } from '../export-templates/export-templates.module';
+import { ExportTemplatesService } from '../export-templates/application/export-templates.service';
 
 @Module({
-  imports: [DatabaseModule, OrdersModule, PdfTablePatternsModule],
+  imports: [DatabaseModule, OrdersModule, PdfTablePatternsModule, ExportTemplatesModule],
   controllers: [BazisController],
   providers: [
     BazisRuntimeConfigService,
@@ -22,6 +24,7 @@ import { PdfTablePatternsModule } from './pdf-table-patterns/pdf-table-patterns.
         database: DatabaseService,
         orderTransactions: OrderTransactionService,
         config: ConfigService,
+        exportTemplates: ExportTemplatesService,
       ) =>
         new BazisService({
           repository: database.isConfigured
@@ -29,11 +32,12 @@ import { PdfTablePatternsModule } from './pdf-table-patterns/pdf-table-patterns.
                 database,
                 orderTransactions,
                 config.get('BACKEND_SHEET_ORDERS_READS') ?? true,
+                exportTemplates,
               )
             : new UnavailableBazisRepository(),
           auditDatabase: database.isConfigured ? database : undefined,
         }),
-      inject: [DatabaseService, OrderTransactionService, ConfigService],
+      inject: [DatabaseService, OrderTransactionService, ConfigService, ExportTemplatesService],
     },
   ],
   exports: [BazisRuntimeConfigService, BazisService],

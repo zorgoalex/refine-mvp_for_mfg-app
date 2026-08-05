@@ -20,7 +20,7 @@ export interface LabelCutMapAsset {
 
 export type LabelCutMapAssets = ReadonlyMap<number, LabelCutMapAsset>;
 
-const CUT_MAP_RENDERER_VERSION = 4;
+const CUT_MAP_RENDERER_VERSION = 5;
 const CUT_MAP_DETAIL_STROKE_MULTIPLIER = 2;
 const CUT_MAP_SELECTED_FILL = '#000000';
 
@@ -192,11 +192,18 @@ function renderCutMapElement(
     : keepLegacyRotatedOrigin
       ? `<g transform="translate(${num(map.sheetHeightMm)} 0) rotate(90)">${sheetBody}</g>`
       : `<g transform="matrix(0 1 1 0 0 0)">${sheetBody}</g>`;
+  const flipScaleX = style.flipHorizontal ? -1 : 1;
+  const flipScaleY = style.flipVertical ? -1 : 1;
+  const flipTranslateX = style.flipHorizontal ? orientedSheetWidthMm : 0;
+  const flipTranslateY = style.flipVertical ? orientedSheetHeightMm : 0;
+  const displayedSheetBody = style.flipHorizontal || style.flipVertical
+    ? `<g transform="translate(${num(flipTranslateX)} ${num(flipTranslateY)}) scale(${flipScaleX} ${flipScaleY})">${orientedSheetBody}</g>`
+    : orientedSheetBody;
 
   return [
-    `<g data-label-element-kind="cut_map" data-cut-number="${escapeXml(map.cutNumber)}" data-cut-result-placement-id="${map.cutResultPlacementId}">`,
+    `<g data-label-element-kind="cut_map" data-cut-number="${escapeXml(map.cutNumber)}" data-cut-result-placement-id="${map.cutResultPlacementId}" data-cut-map-flip-horizontal="${style.flipHorizontal}" data-cut-map-flip-vertical="${style.flipVertical}">`,
     `<svg x="${num(element.xMm)}" y="${num(element.yMm)}" width="${num(element.widthMm)}" height="${num(element.heightMm)}" viewBox="0 0 ${num(orientedSheetWidthMm)} ${num(orientedSheetHeightMm)}" preserveAspectRatio="xMidYMid meet" overflow="hidden">`,
-    orientedSheetBody,
+    displayedSheetBody,
     '</svg>',
     '</g>',
   ].join('');

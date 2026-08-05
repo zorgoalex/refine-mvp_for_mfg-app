@@ -23,6 +23,13 @@ describe('configuration tabs layout', () => {
     expect(source).toContain('<TableVisibilityByRoleTab />');
   });
 
+  it('registers the export templates configuration tab', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+    expect(source).toContain("key: 'export-templates'");
+    expect(source).toContain('Шаблоны экспорта');
+    expect(source).toContain('<ExportTemplatesConfigTab />');
+  });
+
   it('embeds the financial layer matrix in finance settings', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
     const matrixSource = fs.readFileSync(

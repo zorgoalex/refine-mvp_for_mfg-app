@@ -57,6 +57,9 @@ All risky stage-1 APIs are disabled or read-only by default.
 ```env
 BACKEND_ENABLE_AUTH=false
 BACKEND_ENABLE_ORDERS=false
+BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT=false
+BACKEND_ENABLE_ORDER_REALTIME_WRITES=false
+BACKEND_ENABLE_ORDER_REALTIME_STREAM=false
 BACKEND_ENABLE_PAYMENTS=false
 BACKEND_ENABLE_PRODUCTION_ACTIONS=false
 BACKEND_ENABLE_ORDER_EXPORT=false
@@ -77,6 +80,11 @@ BACKEND_DEADLINE_WORKER_ID=backend-local
 BACKEND_DEADLINE_ACTIONS_ENABLED=false
 BACKEND_DEADLINE_NOTIFICATIONS_ENABLED=false
 ```
+
+Order realtime remains off until migrations `097` and `098` are applied, the
+three backend flags above are enabled, and both `order_realtime.writes` and
+`order_realtime.rollout` are explicitly enabled in `app_settings`. Enable
+frontend `RUNTIME_CONFIG_ORDER_REALTIME` last.
 
 `BACKEND_ENABLE_PRODUCTION_ACTIONS=true` enables the narrow calendar/order
 header production actions API: calendar date move, order status change, and

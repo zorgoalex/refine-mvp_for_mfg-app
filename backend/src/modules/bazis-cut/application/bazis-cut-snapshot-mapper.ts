@@ -5,7 +5,8 @@ export interface BazisCutSnapshotSource {
   thicknessMm: number;
   detailNumber: number;
   orderName: string;
-  basisOrder: string | null;
+  ordinaryErpOrder: boolean;
+  bazisProject: string | null;
   basisProduct: string | null;
   basisDesignation: string | null;
   basisData: string | null;
@@ -20,14 +21,21 @@ export interface BazisCutSnapshotSource {
   verticalTexture: boolean;
 }
 
+export interface BazisDocumentLabels {
+  sourceBazisProjectName: string;
+  sourceBazisOrderNo: string;
+  sourceBazisProductName: string;
+}
+
 export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): BazisCutDetailFields | null {
   const length = source.verticalTexture ? source.widthMm : source.heightMm;
   const width = source.verticalTexture ? source.heightMm : source.widthMm;
-  const identity = buildBazisCutSnapshotIdentity(source);
   const fields: BazisCutDetailFields = {
     cutEnabled: true, materialType: 'Площадной', materialName: source.materialName.trim(),
     materialArticle: '', thicknessMm: source.thicknessMm,
-    position: identity.position,
+    position: source.ordinaryErpOrder
+      ? buildOrdinaryErpPosition(source.orderName, source.detailNumber)
+      : buildBazisCutPosition(source.bazisProject, source.basisProduct, source.basisDesignation),
     partName: firstNonEmpty(source.detailName, source.basisData?.split('/')[2], `Деталь ${source.detailNumber}`),
     finishedLengthMm: length, finishedWidthMm: width,
     cutLengthMm: roundTenth(length), cutWidthMm: roundTenth(width), quantity: source.quantity,
@@ -40,34 +48,52 @@ export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): Bazis
   return bazisCutDetailFieldsSchema.safeParse(fields).success ? fields : null;
 }
 
-export function buildBazisCutSnapshotIdentity(
-  source: Pick<BazisCutSnapshotSource,
-    'orderName' | 'detailNumber' | 'basisOrder' | 'basisProduct' | 'basisDesignation'>,
-): { order: string; position: string } {
-  const basisOrder = source.basisOrder?.trim() ?? '';
-  const basisProduct = source.basisProduct?.trim() ?? '';
-  const basisDesignation = source.basisDesignation?.trim() ?? '';
-
-  if (!basisOrder && !basisProduct && !basisDesignation) {
-    return {
-      order: source.orderName.trim(),
-      position: String(source.detailNumber),
-    };
-  }
-
-  return {
-    order: basisOrder,
-    position: buildBazisCutPosition(basisProduct, basisDesignation),
-  };
+export function buildOrdinaryErpPosition(orderName: string, detailNumber: number): string {
+  return `${orderName.trim()}.${detailNumber}`;
 }
 
 export function buildBazisCutPosition(
+  bazisProject: string | null | undefined,
   basisProduct: string | null | undefined,
   basisDesignation: string | null | undefined,
 ): string {
+  const project = bazisProject?.trim() ?? '';
   const product = basisProduct?.trim() ?? '';
   const designation = basisDesignation?.trim() ?? '';
-  return product || designation ? `${product}.${designation}` : '';
+  return `${project ? product : ''}.${designation}`;
+}
+
+export function resolveBazisDetailLabels(input: {
+  rootProductCount: number | null;
+  productOrderNo: string | null;
+  revisionBazisOrderNo: string | null;
+  detailBazisProject: string | null;
+  detailBazisProduct: string | null;
+}): BazisDocumentLabels {
+  const productOrderNo = input.productOrderNo?.trim() ?? '';
+  const revisionBazisOrderNo = input.revisionBazisOrderNo?.trim() ?? '';
+  const detailBazisProject = input.detailBazisProject?.trim() ?? '';
+  const isBazisProject = (input.rootProductCount ?? 1) > 1;
+  const unmatchedDocumentNumber = input.rootProductCount === null ? detailBazisProject : '';
+  return {
+    sourceBazisProjectName: isBazisProject
+      ? revisionBazisOrderNo || productOrderNo
+      : '',
+    sourceBazisOrderNo: isBazisProject
+      ? ''
+      : productOrderNo || revisionBazisOrderNo || unmatchedDocumentNumber,
+    sourceBazisProductName: input.detailBazisProduct?.trim() ?? '',
+  };
+}
+
+export function buildBazisBathCutNumber(
+  cutJobId: number | null | undefined,
+  resultNo: number | null | undefined,
+): string {
+  return typeof cutJobId === 'number' && Number.isInteger(cutJobId) && cutJobId > 0
+    && typeof resultNo === 'number' && Number.isInteger(resultNo) && resultNo > 0
+    ? `${cutJobId}-${resultNo}`
+    : '';
 }
 
 function roundTenth(value: number): number {

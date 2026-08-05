@@ -51,7 +51,7 @@ describe('bazisCutApi', () => {
 
     await bazisCutApi.list({ search: '1491', page: 1, pageSize: 20 });
     await bazisCutApi.create(
-      { name: '1491', orderId: 9, detailIds: [101, 102] },
+      { orderId: 9, detailIds: [101, 102] },
       { idempotencyKey: 'create-key-1491' },
     );
     await bazisCutApi.get(42);
@@ -108,7 +108,6 @@ describe('bazisCutApi', () => {
     });
 
     expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({
-      name: '1491',
       orderId: 9,
       detailIds: [101, 102],
     });
@@ -116,6 +115,15 @@ describe('bazisCutApi', () => {
     expect(fetchMock.mock.calls[7][1]).toMatchObject({ cache: 'no-store' });
     expect(exported.fileName).toBe('Базис-1491.xls');
     expect(exported.blob.type).toBe('application/vnd.ms-excel');
+  });
+
+  it('passes an optional export template id', async () => {
+    const fetchMock = mockFetch(new Response('OLE2', {
+      status: 200,
+      headers: { 'Content-Type': 'application/vnd.ms-excel' },
+    }));
+    await bazisCutApi.exportXls(42, 9);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/bazis-cut-sets/42/export.xls?templateId=9');
   });
 
   it('models exactly 33 editable fields and preserves nullable priority', () => {
@@ -131,7 +139,7 @@ describe('bazisCutApi', () => {
     expect(() => bazisCutApi.get(0)).toThrow('Invalid setId');
     expect(() =>
       bazisCutApi.create(
-        { name: 'Bad', orderId: 9, detailIds: [] },
+        { orderId: 9, detailIds: [] },
         { idempotencyKey: 'create-key-1491' },
       ),
     ).toThrow('Invalid detailIds');

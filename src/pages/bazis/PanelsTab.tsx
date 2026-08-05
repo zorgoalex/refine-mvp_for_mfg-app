@@ -11,6 +11,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   ApartmentOutlined,
+  DownloadOutlined,
   FilterOutlined,
   InfoCircleOutlined,
   ScissorOutlined,
@@ -73,6 +74,10 @@ interface PanelsTabProps {
   focusToken: number;
   onSelect: (nodeId: number | null) => void;
   onGoToTree: (nodeId: number) => void;
+  onSelectionChange?: (nodeIds: number[]) => void;
+  onExportXls?: (nodeIds: number[]) => Promise<void>;
+  canExportXls?: boolean;
+  exportingXls?: boolean;
 }
 
 interface PanelChildRow extends PanelLike {
@@ -160,9 +165,9 @@ export function panelsGroupedKey(userId: string | number): string {
 export function loadPanelsGrouped(userId: string | number): boolean {
   try {
     const raw = localStorage.getItem(panelsGroupedKey(userId));
-    return raw == null ? true : raw === 'true';
+    return raw === 'true';
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -183,6 +188,10 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   focusToken,
   onSelect,
   onGoToTree,
+  onSelectionChange,
+  onExportXls,
+  canExportXls = false,
+  exportingXls = false,
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
@@ -246,6 +255,9 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             notes: notesByNodeId?.has(node.bazisNodeId) ? notesByNodeId.get(node.bazisNodeId) ?? null : node.notes ?? null,
             edgeCount: node.edgeCount ?? 0,
             hasDrilling: node.hasDrilling ?? false,
+            millingName: normalizeText(node.millingName),
+            filmName: normalizeText(node.filmName),
+            paintName: normalizeText(node.paintName),
             pathTitle: nodePathTitle(ancestors),
             productName: normalizeText(rootAncestor?.name),
             bazisProjectNo: documentColumns.bazisProjectNo,
@@ -268,6 +280,9 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       panel.productName,
       panel.bazisProjectNo,
       panel.productOrderNo,
+      panel.millingName,
+      panel.filmName,
+      panel.paintName,
       formatSize(panel),
     ].some((value) => String(value ?? '').toLocaleLowerCase('ru-RU').includes(query)));
   }, [allPanels, searchQuery]);
@@ -482,7 +497,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         title: 'Наименование',
         key: 'name',
         // Fixed width: без неё это flex-колонка, и после добавления
-        // Кромка/Присадка/Примечания остаток ширины схлопывался в ноль —
+        // Кромка/Присадка/Фрезеровка/Плёнка/Краска/Примечания остаток ширины схлопывался в ноль —
         // колонка «исчезала» на обычных экранах. Узкая, содержимое
         // переносится по словам (без ellipsis).
         width: 65,
@@ -582,6 +597,30 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         },
       },
       {
+        title: 'Фрезеровка',
+        key: 'millingName',
+        width: 110,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.millingNames.join(', ') || '—' : row.millingName || '—',
+      },
+      {
+        title: 'Плёнка',
+        key: 'filmName',
+        width: 120,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.filmNames.join(', ') || '—' : row.filmName || '—',
+      },
+      {
+        title: 'Краска',
+        key: 'paintName',
+        width: 120,
+        ellipsis: true,
+        render: (_, row) =>
+          row.rowType === 'group' ? row.paintNames.join(', ') || '—' : row.paintName || '—',
+      },
+      {
         title: 'Примечания',
         key: 'notes',
         width: 200,
@@ -656,6 +695,9 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       'productOrderNo',
       'edgeCount',
       'hasDrilling',
+      'millingName',
+      'filmName',
+      'paintName',
       'orders',
       'path',
       'actions',
@@ -672,6 +714,9 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   }, [canManage, filterOptions, handleNotesSaved, isOperational, notesEpoch, onGoToTree, selectOnlyFree, selection, visiblePanels]);
 
   const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
+  useEffect(() => {
+    onSelectionChange?.(selectedNodeIds);
+  }, [onSelectionChange, selectedNodeIds]);
   const selectedAncestors = selectedId != null ? ancestorsOf(selectedId) : [];
   const selectedPanel = selectedId != null
     ? allPanels.find((panel) => panel.bazisNodeId === selectedId) ?? null
@@ -821,7 +866,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
                     {totals.totalAreaM2 != null ? `${formatAreaM2(totals.totalAreaM2)} м\u00B2` : '—'}
                   </span>
                 </Table.Summary.Cell>
-                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].map((cellIndex) => (
+                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((cellIndex) => (
                   <Table.Summary.Cell key={cellIndex} index={cellIndex} />
                 ))}
               </Table.Summary.Row>
@@ -879,24 +924,42 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             </Text>
           )}
           <span className="bazis-panels-workspace__grow" />
-          {selectionPossible ? (
+          {selectionPossible || onExportXls ? (
             <>
               <Text>
                 Выбрано: {selectionStats.panels} позиций / {selectionStats.units} шт.
                 {selectionStats.excludedBusy > 0 ? ` · исключено ${selectionStats.excludedBusy}` : ''}
               </Text>
-              {/* source-guard legacy marker: onClick={noop} */}
-              <Button disabled={selectionStats.panels === 0 || !canManage} onClick={() => setAddToOrderOpen(true)}>
-                В существующий заказ
-              </Button>
-              <Button
-                type="primary"
-                disabled={selectionStats.panels === 0 || !canManage}
-                loading={createDraftLoading}
-                onClick={() => void handleCreateDraftOrder()}
-              >
-                В новый заказ
-              </Button>
+              {onExportXls ? (
+                <Tooltip title={!canExportXls ? 'Нужно право cut.view' : selectionStats.panels === 0 ? 'Выберите панели' : undefined}>
+                  <span>
+                    <Button
+                      icon={<DownloadOutlined />}
+                      disabled={selectionStats.panels === 0 || !canExportXls}
+                      loading={exportingXls}
+                      onClick={() => void onExportXls(selectedNodeIds)}
+                    >
+                      Экспорт XLS
+                    </Button>
+                  </span>
+                </Tooltip>
+              ) : null}
+              {selectionPossible ? (
+                <>
+                  {/* source-guard legacy marker: onClick={noop} */}
+                  <Button disabled={selectionStats.panels === 0 || !canManage} onClick={() => setAddToOrderOpen(true)}>
+                    В существующий заказ
+                  </Button>
+                  <Button
+                    type="primary"
+                    disabled={selectionStats.panels === 0 || !canManage}
+                    loading={createDraftLoading}
+                    onClick={() => void handleCreateDraftOrder()}
+                  >
+                    В новый заказ
+                  </Button>
+                </>
+              ) : null}
             </>
           ) : null}
         </div>

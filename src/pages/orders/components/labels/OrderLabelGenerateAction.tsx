@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Checkbox, Modal, Radio, Select, Space, Typography, message } from 'antd';
 import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../../api/labelsApi';
+import { subscribeLabelTemplateChanged } from '../../../../api/labelTemplateEvents';
 import type { LabelCutMapOption, LabelTemplate, OrderLabelCutMapOptions, OrderLabelsPreview } from '../../../../api/types/labelsApi.types';
 import { can } from '../../../../utils/permissions';
 import { saveLabelBlob } from './labelDownloads';
@@ -73,6 +74,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   const [cutMapOptionsLoading, setCutMapOptionsLoading] = useState(false);
   const [cutMapSource, setCutMapSource] = useState<OrderCutMapSelectionSource>('regular');
   const [cutMapSelection, setCutMapSelection] = useState<OrderCutMapSelectionState>({});
+  const templateRequestRef = useRef(0);
   const previewRequestRef = useRef(0);
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
@@ -148,21 +150,61 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     [previewDetailId],
   );
 
+  const loadTemplates = useCallback(async () => {
+    const requestId = templateRequestRef.current + 1;
+    templateRequestRef.current = requestId;
+    setLoading(true);
+    try {
+      const next = await labelsApi.listTemplates(true);
+      if (templateRequestRef.current !== requestId) return;
+      setTemplates((current) => {
+        const currentById = new Map(current.map((template) => [template.labelTemplateId, template]));
+        return next.map((template) => {
+          const previous = currentById.get(template.labelTemplateId);
+          return previous?.version === template.version ? previous : template;
+        });
+      });
+      setTemplateId((current) => current ?? next.find((template) => template.isActive)?.labelTemplateId ?? null);
+    } catch {
+      if (templateRequestRef.current === requestId) {
+        message.error('Не удалось загрузить шаблоны бирок');
+      }
+    } finally {
+      if (templateRequestRef.current === requestId) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     setPreviewDetailId(initialDetailId);
     setPreview(null);
     setGeneratedPreview(null);
     setGeneratedGenerationId(null);
-    setLoading(true);
-    labelsApi.listTemplates(true)
-      .then((next) => {
-        setTemplates(next);
-        setTemplateId((current) => current ?? next.find((template) => template.isActive)?.labelTemplateId ?? null);
-      })
-      .catch(() => message.error('Не удалось загрузить шаблоны бирок'))
-      .finally(() => setLoading(false));
-  }, [initialDetailId, open]);
+    void loadTemplates();
+  }, [initialDetailId, loadTemplates, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const reload = (changedTemplateId?: number) => {
+      if (changedTemplateId === templateId) {
+        // An old in-flight preview must not win after the saved template changed.
+        previewRequestRef.current += 1;
+        setPreview(null);
+        setGeneratedPreview(null);
+        setGeneratedGenerationId(null);
+      }
+      void loadTemplates();
+    };
+    const unsubscribe = subscribeLabelTemplateChanged((payload) => reload(payload.templateId));
+    const onFocus = () => reload();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [loadTemplates, open, templateId]);
 
   useEffect(() => {
     if (!open || !hasCutMap || !canViewCut) {

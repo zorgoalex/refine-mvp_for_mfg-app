@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, httpClient } from './httpClient';
+import { ApiError, httpClient, refreshAuthSession } from './httpClient';
 import { authSession } from './authSession';
 import { applyRuntimeConfig, resetRuntimeConfigForTests } from '../config/runtimeConfig';
 
@@ -32,6 +32,23 @@ describe('httpClient', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/orders', expect.any(Object));
     expect(init?.credentials).toBe('include');
     expect(headers.get('Authorization')).toBe('Bearer access-token');
+  });
+
+  it('returns raw 304 responses without treating them as API errors', async () => {
+    const fetchMock = mockFetch(new Response(null, {
+      status: 304,
+      headers: { ETag: '"cursor-1"' },
+    }));
+    authSession.setAccessToken('access-token');
+
+    const response = await httpClient.raw('/api/v1/orders/1/detail-live-state', {
+      headers: { 'If-None-Match': '"cursor-1"' },
+    });
+
+    expect(response.status).toBe(304);
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer access-token');
+    expect(headers.get('If-None-Match')).toBe('"cursor-1"');
   });
 
   it('serializes JSON POST body', async () => {
@@ -160,6 +177,28 @@ describe('httpClient', () => {
       status: 401,
       requestId: 'req-1',
     });
+    expect(authSession.getAccessToken()).toBeNull();
+    expect(authSession.getUser()).toBeNull();
+    expect(expiredListener).toHaveBeenCalledTimes(1);
+    unsubscribeExpired();
+  });
+
+  it('expires the session when a direct proactive refresh returns 401', async () => {
+    const expiredListener = vi.fn();
+    const unsubscribeExpired = authSession.subscribeExpired(expiredListener);
+    mockFetch(jsonResponse(
+      401,
+      { error: { code: 'AUTH_REQUIRED', message: 'Refresh expired' } },
+      'Unauthorized',
+    ));
+    authSession.setAccessToken('still-valid-access-token');
+    authSession.setUser({ id: '1', username: 'admin', role: 'superadmin' });
+
+    await expect(refreshAuthSession()).rejects.toMatchObject({
+      code: 'AUTH_REQUIRED',
+      status: 401,
+    });
+
     expect(authSession.getAccessToken()).toBeNull();
     expect(authSession.getUser()).toBeNull();
     expect(expiredListener).toHaveBeenCalledTimes(1);

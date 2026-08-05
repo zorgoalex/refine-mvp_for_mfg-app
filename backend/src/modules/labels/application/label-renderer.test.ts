@@ -89,6 +89,85 @@ describe('label renderer', () => {
     ]))).toThrow(/Invalid frozen cut-map asset/);
   });
 
+  it('mirrors the final cut-map thumbnail horizontally, vertically, or on both axes', () => {
+    const render = (
+      flipHorizontal: boolean,
+      flipVertical: boolean,
+      options: { rotate?: boolean; isVacuum?: boolean } = {},
+    ) => {
+      const sheetWidthMm = options.rotate ? 500 : 1000;
+      const sheetHeightMm = options.rotate ? 1000 : 500;
+      const mapped: LabelRow = {
+        ...row({}),
+        cutMap: {
+          cutResultPlacementId: 77,
+          cutResultSheetMapId: 9,
+          cutResultId: 4,
+          cutJobId: 12,
+          cutNumber: '12-3',
+          cutJobName: 'Кухня',
+          variant: 'auto',
+          sheetIndex: 8,
+          sheetNumber: 2,
+          sheetWidthMm,
+          sheetHeightMm,
+          xMm: 120,
+          yMm: 80,
+          widthMm: 200,
+          heightMm: 50,
+        },
+      };
+      const assets = new Map([[9, {
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${sheetWidthMm} ${sheetHeightMm}"><rect x="10" y="20" width="300" height="100"/></svg>`,
+        isVacuum: options.isVacuum ?? false,
+      }]]);
+      const base = template();
+      base.rendererCapabilities = ['if_else_v1', 'typography_v1', 'cut_map_v1', 'cut_map_flip_v1'];
+      base.elements = [{
+        labelTemplateElementId: 10,
+        elementKey: 'cut-map',
+        kind: 'cut_map',
+        sourceField: null,
+        staticText: null,
+        xMm: 5,
+        yMm: 7,
+        widthMm: 42,
+        heightMm: 18,
+        rotationDeg: 0,
+        zIndex: 0,
+        style: {
+          cutMap: {
+            version: 1,
+            fit: 'contain',
+            highlightFill: '#ffd666',
+            highlightStroke: '#d4380d',
+            flipHorizontal,
+            flipVertical,
+          },
+        },
+        condition: {},
+      }];
+      return renderSvgPages(base, [mapped], assets).pages[0];
+    };
+
+    expect(render(true, false)).toContain('transform="translate(1000 0) scale(-1 1)"');
+    expect(render(false, true)).toContain('transform="translate(0 500) scale(1 -1)"');
+    expect(render(true, true)).toContain('transform="translate(1000 500) scale(-1 -1)"');
+    expect(render(false, false)).not.toContain('scale(-1');
+
+    const flippedCases = [
+      { horizontal: true, vertical: false, transform: 'translate(1000 0) scale(-1 1)' },
+      { horizontal: false, vertical: true, transform: 'translate(0 500) scale(1 -1)' },
+      { horizontal: true, vertical: true, transform: 'translate(1000 500) scale(-1 -1)' },
+    ];
+    for (const flip of flippedCases) {
+      expect(render(flip.horizontal, flip.vertical, { rotate: true, isVacuum: false }))
+        .toContain(`transform="${flip.transform}"><g transform="matrix(0 1 1 0 0 0)"`);
+      expect(render(flip.horizontal, flip.vertical, { rotate: true, isVacuum: true }))
+        .toContain(`transform="${flip.transform}"><g transform="translate(1000 0) rotate(90)"`);
+    }
+  });
+
   it('accepts frozen cut maps with safe piece groups and bath guide labels', () => {
     const base = template();
     base.rendererCapabilities = ['if_else_v1', 'typography_v1', 'cut_map_v1'];

@@ -50,7 +50,13 @@ async function bootstrap(): Promise<void> {
       callback(new Error('CORS origin denied'), false);
     },
     credentials: cors.credentials,
-    exposedHeaders: ['Content-Disposition'],
+    exposedHeaders: [
+      'Content-Disposition',
+      'ETag',
+      'X-ERP-Stream-Cursor',
+      'X-ERP-Realtime-Enabled',
+      'Retry-After',
+    ],
   });
   setupSwagger(app, {
     API_PREFIX: config.get('API_PREFIX', { infer: true }),

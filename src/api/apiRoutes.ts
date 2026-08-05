@@ -49,6 +49,9 @@ export const apiRoutes = {
     resourceDemands: backendApiPath('/orders/resource-demands'),
     statusBoard: backendApiPath('/orders/status-board'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
+    detailLiveState: (orderId: number) =>
+      backendApiPath(`/orders/${orderId}/detail-live-state`),
+    liveEvents: (orderId: number) => backendApiPath(`/orders/${orderId}/live-events`),
     transferTargets: (orderId: number) => backendApiPath(`/orders/${orderId}/transfer-targets`),
     transferDetails: (orderId: number) => backendApiPath(`/orders/${orderId}/details/transfer`),
     restore: (orderId: number) => backendApiPath(`/orders/${orderId}/restore`),
@@ -197,6 +200,7 @@ export const apiRoutes = {
     revisionMaterialsSummary: (id: number) => backendApiPath(`/bazis/revisions/${id}/materials-summary`),
     revisionOrders: (id: number) => backendApiPath(`/bazis/revisions/${id}/orders`),
     revisionEstimate: (id: number) => backendApiPath(`/bazis/revisions/${id}/estimate`),
+    revisionCutXls: (id: number) => backendApiPath(`/bazis/revisions/${id}/export-cut.xls`),
     materialMappings: backendApiPath('/bazis/material-mappings'),
     pdfTablePatterns: backendApiPath('/bazis/pdf-table-patterns'),
     matchPdfTablePatterns: backendApiPath('/bazis/pdf-table-patterns/match'),

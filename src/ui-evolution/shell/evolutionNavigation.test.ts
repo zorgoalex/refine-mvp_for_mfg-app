@@ -43,6 +43,11 @@ function visibleCategories(input: {
 }
 
 describe('evolution navigation permission parity', () => {
+  it('places MDF work in production and trash in data', () => {
+    expect(EVOLUTION_CATEGORY_MAP['mdf-work-board']).toBe('Производство');
+    expect(EVOLUTION_CATEGORY_MAP['orders-trash']).toBe('Данные');
+  });
+
   it('keeps settings resources hidden from a legacy non-admin', () => {
     const categories = visibleCategories({ user: { role: 'manager' }, backendPermissions: false });
     expect(categories['Настройки']).toEqual([]);

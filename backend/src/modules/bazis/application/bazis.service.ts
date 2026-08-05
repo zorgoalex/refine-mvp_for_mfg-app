@@ -16,6 +16,7 @@ import type {
   BuildOrderDraftCommand,
   CreateOrderFromDraftCommand,
   CreateOrderFromRevisionCommand,
+  ExportBazisCutXlsCommand,
   ImportXmlInput,
 } from './bazis.types';
 import {
@@ -258,6 +259,12 @@ export class BazisService {
       await this.requirePermission(command.currentUser, 'orders.update', 'order_draft', command.requestId);
     }
     return this.ports.repository.buildOrderDraft(command);
+  }
+
+  async exportCutXls(command: ExportBazisCutXlsCommand) {
+    await this.requirePermission(command.currentUser, 'bazis.view', 'export_cut_xls', command.requestId);
+    await this.requirePermission(command.currentUser, 'cut.view', 'export_cut_xls', command.requestId);
+    return this.ports.repository.exportCutXls(command);
   }
 
   private async requirePermission(

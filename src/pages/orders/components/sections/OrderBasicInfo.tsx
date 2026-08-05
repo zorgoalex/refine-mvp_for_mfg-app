@@ -1,7 +1,8 @@
 // Order Basic Info Section
 // Row 1: Client, Order Name, Order Date
 // Row 2: Order Status, Payment Status, Manager, Priority
-// Row 3: Doweling Orders Table (Name, Engineer)
+// Row 3: ERP project when enabled
+// Row 4: Doweling Orders Table (Name, Engineer)
 
 import React, { useCallback, useRef, useState } from 'react';
 import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, Switch, Tooltip, Tag, notification } from 'antd';
@@ -31,9 +32,14 @@ interface OrderBasicInfoProps {
   /** Bazis draft-режим: клиент зафиксирован клиентом Базис-проекта (backend
    * валидирует совпадение), Select реально disabled, создание клиента скрыто. */
   clientLocked?: boolean;
+  /** Компактное поле ERP-проекта, размещённое внутри основной информации. */
+  projectField?: React.ReactNode;
 }
 
-export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = false }) => {
+export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
+  clientLocked = false,
+  projectField,
+}) => {
   const {
     header,
     updateHeaderField,
@@ -664,7 +670,13 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({ clientLocked = f
           </Col>
         </Row>
 
-        {/* Row 3: Присадки */}
+        {projectField ? (
+          <Row gutter={16}>
+            <Col span={7}>{projectField}</Col>
+          </Row>
+        ) : null}
+
+        {/* Row 4: Присадки */}
         <Row gutter={16}>
           <Col span={24}>
             <Form.Item

@@ -1,10 +1,12 @@
 import type {
   AddToOrderCommand,
+  BazisCutXlsExportResult,
   BazisRepositoryPort,
   BuildOrderDraftCommand,
   CreateOrderFromDraftCommand,
   CreateOrderFromRevisionCommand,
   DeleteBazisProjectInput,
+  ExportBazisCutXlsCommand,
   ImportRevisionCommand,
   RenameBazisProjectInput,
   SetNodeNotesInput,
@@ -85,6 +87,10 @@ export class UnavailableBazisRepository implements BazisRepositoryPort {
   }
 
   buildOrderDraft(_command: BuildOrderDraftCommand): Promise<BazisOrderDraftResponseDto> {
+    return unavailable();
+  }
+
+  exportCutXls(_command: ExportBazisCutXlsCommand): Promise<BazisCutXlsExportResult> {
     return unavailable();
   }
 

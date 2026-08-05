@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
-import { BAZIS_CUT_HEADERS, BAZIS_CUT_SHEET_NAME, buildBazisCutXls } from './bazis-xls-writer';
+import { BAZIS_CUT_HEADERS, BAZIS_CUT_SHEET_NAME, LEGACY_BAZIS_CUT_COLUMNS, buildBazisCutXls, buildBazisCutXlsFromTemplate } from './bazis-xls-writer';
 import type { BazisCutSetDetailDto } from '../dto/bazis-cut.dto';
+import type { ExportTemplateSnapshot } from '../../export-templates/application/export-template.types';
 
 describe('buildBazisCutXls', () => {
   it('writes a real BIFF8 workbook with exact columns and typed cells', () => {
@@ -13,16 +14,20 @@ describe('buildBazisCutXls', () => {
     const workbook = XLSX.read(bytes, { type: 'buffer', cellFormula: true });
     expect(workbook.SheetNames).toEqual([BAZIS_CUT_SHEET_NAME]);
     const sheet = workbook.Sheets[BAZIS_CUT_SHEET_NAME];
-    expect(sheet['!ref']).toBe('A1:AI2');
+    expect(sheet['!ref']).toBe('A1:AK2');
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
     expect(rows[0]).toEqual([...BAZIS_CUT_HEADERS]);
-    expect(rows[1]?.[5]).toBe('1319');
-    expect(rows[1]?.[6]).toBe('01.00.07');
-    expect(rows[1]?.[7]).toBe('131901.00.07');
+    expect(BAZIS_CUT_HEADERS.indexOf('Изделие')).toBe(BAZIS_CUT_HEADERS.indexOf('Заказ') + 1);
+    expect(BAZIS_CUT_HEADERS.indexOf('Ванна')).toBe(BAZIS_CUT_HEADERS.indexOf('%Пленка') - 1);
+    expect(rows[1]?.[5]).toBe('BZ-100');
+    expect(rows[1]?.[6]).toBe('Кухня');
+    expect(rows[1]?.[7]).toBe('BZ-10001.00.07');
+    expect(rows[1]?.[8]).toBe('BP-701.00.07');
     expect(rows[1]?.[4]).toBe(18);
-    expect(rows[1]?.[28]).toBeNull();
-    expect(rows[1]?.[29]).toBe('=literal');
-    expect(sheet.AD2?.f).toBeUndefined();
+    expect(rows[1]?.[29]).toBeNull();
+    expect(rows[1]?.[30]).toBe('=literal');
+    expect(rows[1]?.[35]).toBe('28-2');
+    expect(sheet.AE2?.f).toBeUndefined();
   });
 
   it('rejects an empty set', () => {
@@ -30,12 +35,13 @@ describe('buildBazisCutXls', () => {
   });
 
   it.each([
-    ['', 'Кухня.01.00.07', 'Кухня.01.00.07'],
-    ['1319', 'Кухня.01.00.07', '1319Кухня.01.00.07'],
-    ['1319', '', '1319'],
-    ['', '', ''],
-  ])('writes Position and builds QR-code from Order plus Position', (order, position, expectedQrCode) => {
+    ['', 'BZ-100', '.01.00.07', 'BZ-100.01.00.07', '.01.00.07'],
+    ['BP-7', '', 'Кухня.01.00.07', 'Кухня.01.00.07', 'BP-7Кухня.01.00.07'],
+    ['', '', 'ERP-1491.7', 'ERP-1491.7', 'ERP-1491.7'],
+  ])('copies Basis order into Excel Order and prefixes Excel Position with that same value',
+    (project, order, position, expectedPosition, expectedQrCode) => {
     const bytes = buildBazisCutXls([detail({
+      sourceBazisProjectName: project,
       sourceBazisOrderNo: order,
       position,
     })]);
@@ -46,10 +52,46 @@ describe('buildBazisCutXls', () => {
     );
 
     expect(rows[1]?.[5]).toBe(order);
-    expect(rows[1]?.[6]).toBe(position);
-    expect(rows[1]?.[7]).toBe(expectedQrCode);
+    expect(rows[1]?.[6]).toBe('Кухня');
+    expect(rows[1]?.[7]).toBe(expectedPosition);
+    expect(rows[1]?.[8]).toBe(expectedQrCode);
+  });
+
+  it('renders the seeded template exactly like the legacy mapper', () => {
+    const source = detail({ position: '.01', comment: '=literal', sourceBazisOrderNo: 'BZ-7', sourceBazisProductName: 'Шкаф' });
+    const legacy = XLSX.read(buildBazisCutXls([source]), { type: 'buffer' });
+    const templated = XLSX.read(buildBazisCutXlsFromTemplate([source], template()), { type: 'buffer' });
+    expect(XLSX.utils.sheet_to_json(templated.Sheets[BAZIS_CUT_SHEET_NAME], { header: 1, raw: true }))
+      .toEqual(XLSX.utils.sheet_to_json(legacy.Sheets[BAZIS_CUT_SHEET_NAME], { header: 1, raw: true }));
+    expect(templated.Sheets[BAZIS_CUT_SHEET_NAME].AE2?.t).toBe('s');
+    expect(templated.Sheets[BAZIS_CUT_SHEET_NAME].AE2?.f).toBeUndefined();
+  });
+
+  it('preserves direct-project xlsOrder compatibility in the template engine', () => {
+    const source = { ...detail({ sourceBazisOrderNo: 'BZ-7', position: '.01' }), xlsOrder: 'BP-100' };
+    const workbook = XLSX.read(buildBazisCutXlsFromTemplate([source], template()), { type: 'buffer' });
+    const row = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[BAZIS_CUT_SHEET_NAME], { header: 1, raw: true })[1];
+    expect(row[5]).toBe('BP-100');
+    expect(row[7]).toBe('BP-100.01');
+  });
+
+  it('rejects a custom template above the total cell budget before rendering', () => {
+    const columns = Array.from({ length: 100 }, (_, index) => ({
+      columnKey: `c${index}`, header: `C${index}`, expression: { type: 'field' as const, field: 'row.number' },
+    }));
+    expect(() => buildBazisCutXlsFromTemplate(Array(65_535).fill(detail()), template(columns))).toThrow('budget exceeded');
   });
 });
+
+function template(columns = LEGACY_BAZIS_CUT_COLUMNS): ExportTemplateSnapshot {
+  return {
+    exportTemplateId: 1, code: 'test', name: 'Test', description: null,
+    targetScreen: 'bazis_cut_set', sourceType: 'bazis_cut_set_detail', format: 'xls_biff8',
+    sheetName: BAZIS_CUT_SHEET_NAME, schemaVersion: 1, templateHash: '0'.repeat(64), columns,
+    isActive: true, isDefault: true, version: 1, createdAt: '2026-08-05T00:00:00.000Z',
+    updatedAt: '2026-08-05T00:00:00.000Z', createdBy: null, updatedBy: null,
+  };
+}
 
 function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetailDto {
   return {
@@ -57,7 +99,8 @@ function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetai
     sourceOrderDetailId: 7, sourceOrderId: 14, sourceOrderDeleted: false, sourceProjectId: 3,
     sourceBazisProjectId: 2, sourceBazisRevisionId: 4, sourceBazisNodeId: 5,
     sourceOrderName: '1491', sourceOrderFullNumber: 'МП-1-1491', sourceProjectCode: 'МП-1',
-    sourceBazisProjectName: '1319', sourceBazisOrderNo: '1319', sourceBazisProductName: 'Кухня',
+    sourceBazisProjectName: 'BP-7', sourceBazisOrderNo: 'BZ-100', sourceBazisProductName: 'Кухня',
+    sourceBathCutNumber: '28-2',
     cutEnabled: true, materialType: 'Площадной', materialName: 'ЛДСП Белый', materialArticle: '',
     thicknessMm: 18, position: '01.00.01', partName: 'Панель', finishedLengthMm: 410.99,
     finishedWidthMm: 374.5, cutLengthMm: 411, cutWidthMm: 374.5, quantity: 2,

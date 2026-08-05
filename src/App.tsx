@@ -34,6 +34,7 @@ const OrderCreate = lazy(async () => ({ default: (await import("./pages/orders/c
 const OrderTrash = lazy(async () => ({ default: (await import("./pages/orders/trash")).OrderTrash }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const OrderStatusBoardPage = lazy(async () => ({ default: (await import("./pages/orderStatusBoard")).OrderStatusBoardPage }));
+const MdfWorkBoardPage = lazy(async () => ({ default: (await import("./pages/orderStatusBoard")).MdfWorkBoardPage }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
@@ -305,6 +306,15 @@ const ThemedApp = () => {
                       list: "/order-status-board",
                       meta: {
                         label: "Доски статусов",
+                      },
+                    }]
+                  : []),
+                ...(featureFlags.orderStatusBoard && featureFlags.cncTelegram
+                  ? [{
+                      name: "mdf-work-board",
+                      list: "/mdf-work-board",
+                      meta: {
+                        label: "МДФ-работы",
                       },
                     }]
                   : []),
@@ -711,6 +721,11 @@ const ThemedApp = () => {
                   {featureFlags.orderStatusBoard && (
                     <Route path="/order-status-board">
                       <Route index element={<OrderStatusBoardPage />} />
+                    </Route>
+                  )}
+                  {featureFlags.orderStatusBoard && featureFlags.cncTelegram && (
+                    <Route path="/mdf-work-board">
+                      <Route index element={<MdfWorkBoardPage />} />
                     </Route>
                   )}
                   {featureFlags.useBackendGroups && (
