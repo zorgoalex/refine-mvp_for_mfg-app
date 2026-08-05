@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-05",
+    title: "Базис-проекты: связанные заказы и присадка по маршруту",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В списке Базис-проектов и в строках панелей карточки отображаются связанные ERP-заказы со ссылками на них.",
+      "При создании ERP-заказа поле «Присадка» детали включается, если у панели есть отверстия либо заполнено пользовательское свойство «Маршрут».",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-04",
     title: "Базис-проекты: фрезеровка, плёнка и краска в списке панелей",
     services: ["ERP"],

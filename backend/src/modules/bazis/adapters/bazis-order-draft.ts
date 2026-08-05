@@ -86,6 +86,12 @@ export function panelHasDrilling(rawJson: Record<string, unknown> | null): boole
   return Array.isArray(items) && items.length > 0;
 }
 
+// Непустой пользовательский «Маршрут» тоже требует присадки в ERP-заказе,
+// даже если Базис не выгрузил отдельные записи отверстий для панели.
+export function panelHasRoute(rawJson: Record<string, unknown> | null): boolean {
+  return panelUserPropertyValue(rawJson, new Set(['маршрут'])) !== null;
+}
+
 export function collectUnmappedSheetNames(
   panels: ReadonlyArray<Pick<BazisDraftPanel, 'mainMaterialName'>>,
   mappings: Map<string, BazisDraftMaterialMapping>,
@@ -153,7 +159,7 @@ export function buildDraftDetails(
       basisProduct: panel.productName ?? null,
       basisDesignation: panel.designation,
       basisData: `${panel.position ?? ''}/${panel.designation ?? ''}/${panel.name ?? ''}`,
-      doweling: panelHasDrilling(panel.rawJson),
+      doweling: panelHasDrilling(panel.rawJson) || panelHasRoute(panel.rawJson),
     };
   });
 }

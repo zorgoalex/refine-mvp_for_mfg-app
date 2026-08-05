@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDraftDetails, panelHasDrilling } from './bazis-order-draft';
+import { buildDraftDetails, panelHasDrilling, panelHasRoute } from './bazis-order-draft';
 
 const panel = (rawJson: Record<string, unknown> | null) => ({
   bazisNodeId: 701,
@@ -41,17 +41,53 @@ describe('panelHasDrilling', () => {
   });
 });
 
+describe('panelHasRoute', () => {
+  it('detects a non-empty nested «Маршрут» property case-insensitively', () => {
+    expect(panelHasRoute({
+      ПользовательскиеСвойства: {
+        Свойство: { Имя: 'МАРШРУТ', Значение: '  Присадка:  ' },
+      },
+    })).toBe(true);
+  });
+
+  it('supports legacy direct properties and rejects an empty route', () => {
+    expect(panelHasRoute({
+      Свойство: { Наименование: 'Маршрут', Значение: 'Присадка:' },
+    })).toBe(true);
+    expect(panelHasRoute({
+      ПользовательскиеСвойства: {
+        Свойство: { Имя: 'Маршрут', Значение: '   ' },
+      },
+    })).toBe(false);
+  });
+});
+
 describe('buildDraftDetails doweling', () => {
-  it('sets doweling=true only for panels with holes', () => {
+  it('sets doweling=true for holes or a non-empty route', () => {
     const details = buildDraftDetails(
       [
         panel({ Отверстия: { Отверстие: [{ Диаметр: '5' }] } }),
-        { ...panel(null), bazisNodeId: 702 },
+        {
+          ...panel({
+            ПользовательскиеСвойства: {
+              Свойство: { Имя: 'Маршрут', Значение: 'Присадка:' },
+            },
+          }),
+          bazisNodeId: 702,
+        },
+        {
+          ...panel({
+            ПользовательскиеСвойства: {
+              Свойство: { Имя: 'Маршрут', Значение: '' },
+            },
+          }),
+          bazisNodeId: 703,
+        },
       ],
       new Map(),
       revision,
     );
 
-    expect(details.map((detail) => detail.doweling)).toEqual([true, false]);
+    expect(details.map((detail) => detail.doweling)).toEqual([true, true, false]);
   });
 });
