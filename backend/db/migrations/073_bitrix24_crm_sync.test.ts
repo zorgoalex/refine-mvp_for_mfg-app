@@ -29,6 +29,6 @@ describe('073 Bitrix24 CRM sync migration', () => {
     expect(runner).toContain('q_con_def_on uq_crm_sync_mapping_bitrix crm_sync_mapping');
     expect(runner).toContain('q_trg_def_on trg_crm_sync_client_phones client_phones');
     expect(runner).toContain("column_name IN ('twenty_object', 'twenty_id')");
-    expect(runner).toMatch(/073_\*\|074_\*\|087_\*\)[\s\S]*probe_file "\$f"/);
+    expect(runner).toMatch(/073_\*\|074_\*\|087_\*[\s\S]*?\)[\s\S]*probe_file "\$f"/);
   });
 });

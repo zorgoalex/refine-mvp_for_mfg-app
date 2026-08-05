@@ -29,7 +29,8 @@ describe('Bazis project card header guards', () => {
 
   it('exports selected panels as direct Basis-cut XLS from the project card', () => {
     expect(view).toContain("can('cut.view')");
-    expect(view).toContain('bazisApi.exportCutXls(selectedRevision.bazisRevisionId, nodeIds)');
+    expect(view).toContain('bazisApi.exportCutXls(selectedRevision.bazisRevisionId, nodeIds, exportTemplateId)');
+    expect(view).toContain('<ExportTemplateSelect');
     expect(view).toContain('onSelectionChange={setSelectedPanelNodeIds}');
     expect(view).toContain('Экспорт XLS');
     expect(api).toMatch(/exportCutXls[\s\S]*revisionCutXls[\s\S]*selectedNodeIds/);

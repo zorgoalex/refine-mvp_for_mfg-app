@@ -15,11 +15,14 @@ describe('order area aggregate integration', () => {
   });
 
   it('uses raw-geometry totals for material and film groups', () => {
-    const materialsSource = read('../pages/orders/components/sections/OrderMaterialsTab.tsx');
+    const materialsTabSource = read('../pages/orders/components/sections/OrderMaterialsTab.tsx');
+    const materialsSummarySource = read('../pages/orders/orderMaterialsSummary.ts');
     const importValidationSource = read('../pages/orders/components/import/hooks/useImportValidation.ts');
 
-    expect(materialsSource).toContain('calculateOrderTotalArea(item.areaDetails)');
-    expect(materialsSource).not.toMatch(/totalArea\s*\+=\s*area/);
+    expect(materialsTabSource).toContain('buildOrderFilmMaterialRows');
+    expect(materialsTabSource).toContain('buildOrderSheetMaterialRows');
+    expect(materialsSummarySource).toContain('calculateOrderTotalArea(row.areaDetails)');
+    expect(materialsSummarySource).not.toMatch(/totalArea\s*\+=\s*area/);
     expect(importValidationSource).toContain(
       'totalArea: calculateOrderTotalArea(validatedRows.filter((row) => row.isValid))',
     );

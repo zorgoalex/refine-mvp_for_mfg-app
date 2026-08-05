@@ -15,7 +15,7 @@ const appRoutes = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8'
 
 describe('bazis draft order guards', () => {
   it('/orders/create зароучен — draft-first навигация не падает в пустой экран', () => {
-    expect(appRoutes).toContain('<Route path="create" element={<OrderCreate />} />');
+    expect(appRoutes).toMatch(/path="create"[\s\S]*?<OrderCreate \/>/);
     expect(appRoutes).toContain('pages/orders/create');
   });
 
@@ -37,7 +37,7 @@ describe('bazis draft order guards', () => {
   });
 
   it('draft save gates unpriced details (parity with the detail modal cost rule)', () => {
-    expect(useOrderSave).toContain('Не заполнены цены деталей');
+    expect(useOrderSave).toContain('Укажите «Цена за кв.м.» для детали');
     expect(useOrderSave).toMatch(/milling_cost_per_sqm == null \|\| detail\.milling_cost_per_sqm === 0/);
   });
 
@@ -52,9 +52,9 @@ describe('bazis draft order guards', () => {
   it('order create form seeds from bazisDraft and locks the client field for real', () => {
     expect(orderForm).toContain('draftToFormSeed(bazisDraft)');
     expect(orderForm).toContain('readBazisDraftFromLocationState');
-    expect(orderForm).toContain('<OrderBasicInfo clientLocked={bazisDraftClientLocked} />');
+    expect(orderForm).toMatch(/<OrderBasicInfo[\s\S]*?clientLocked=\{bazisDraftClientLocked\}[\s\S]*?\/>/);
     // Проп идёт из memoized tab-tree — deps обязаны включать lock-флаг (Critic code-R2)
-    expect(orderForm).toMatch(/\[mode, header\.order_id, orderId, labelsEnabled, isDirty, cutTabEnabled, bazisDraftClientLocked, isOperational\]/);
+    expect(orderForm).toMatch(/const headerTabItems = useMemo[\s\S]*?\[[\s\S]*?bazisDraftClientLocked,[\s\S]*?\]\s*\);/);
     // Настоящий disabled + скрытое создание клиента, не DOM-косметика
     expect(orderBasicInfo).toContain('disabled={clientLocked}');
     expect(orderBasicInfo).toMatch(/if \(clientLocked\) \{\s*return;\s*\}/);

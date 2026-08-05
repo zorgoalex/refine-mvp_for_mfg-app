@@ -408,6 +408,7 @@ describe('BazisController', () => {
     const file = await controller.exportCutXls(
       request(),
       '12',
+      undefined,
       { selectedNodeIds: ['101', '102'] },
       response as never,
     );
@@ -432,6 +433,7 @@ describe('BazisController', () => {
     await expect(controller.exportCutXls(
       request(),
       '12',
+      undefined,
       { selectedNodeIds: [101] },
       { setHeader: vi.fn() } as never,
     )).rejects.toMatchObject({

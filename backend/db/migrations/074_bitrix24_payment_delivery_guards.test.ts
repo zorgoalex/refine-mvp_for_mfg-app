@@ -31,6 +31,6 @@ describe('migration 074 Bitrix24 payment delivery guards', () => {
     expect(runner).toContain('q_con_def_on crm_sync_payment_create_guard_pkey crm_sync_payment_create_guard');
     expect(runner).toContain('q_trg_def_on trg_crm_sync_payments payments');
     expect(runner).toContain("pg_get_functiondef('crm_sync_enqueue_payment_order()'::regprocedure)");
-    expect(runner).toMatch(/073_\*\|074_\*\|087_\*\)[\s\S]*probe_file "\$f"/);
+    expect(runner).toMatch(/073_\*\|074_\*\|087_\*[\s\S]*?\)[\s\S]*probe_file "\$f"/);
   });
 });

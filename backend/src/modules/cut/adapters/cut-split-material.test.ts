@@ -136,8 +136,8 @@ function makeRepo(opts: { status: string; version: number; current: boolean }): 
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 0 };
     if (sql.startsWith('INSERT INTO audit_log')) { auditCalls.push(text); return { rows: [{ audit_id: 'aud-1' }], rowCount: 1 }; }
     if (sql.startsWith('INSERT INTO outbox_events')) { outboxCalls.push(text); return { rows: [], rowCount: 1 }; }
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material FROM cut_job')) {
-      return { rows: [{ cut_job_id: 9, name: 'J', status: opts.status, source: 'manual', version: opts.version, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, combine_films: false, split_by_material: opts.current }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version,')) {
+      return { rows: [{ cut_job_id: 9, name: 'J', status: opts.status, source: 'manual', version: opts.version, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, combine_films: false, split_by_material: opts.current, last_calc_params: null }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) return { rows: [{ cut_job_id: 9, positions: 0, details: 0, area: 0, materials_count: 0, films_count: 0 }], rowCount: 1 };
     if (sql.startsWith('SELECT g.cut_job_id')) return { rows: [{ cut_job_id: 9, sheets: 0 }], rowCount: 1 };

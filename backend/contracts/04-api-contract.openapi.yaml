@@ -2240,6 +2240,88 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/detail-live-state:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: getOrderDetailLiveState
+      summary: Получить актуальное состояние производственных ячеек заказа
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Компактный снимок текущих статусов деталей и ссылок на раскрой
+          headers:
+            ETag:
+              schema:
+                type: string
+            X-ERP-Stream-Cursor:
+              schema:
+                type: string
+            X-ERP-Realtime-Enabled:
+              schema:
+                type: string
+                enum: ['true', 'false']
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '304':
+          description: Состояние не изменилось
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/live-events:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      tags:
+        - Orders
+      operationId: streamOrderLiveEvents
+      summary: Получать realtime-инвалидации состояния заказа
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Поток Server-Sent Events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '204':
+          description: Realtime выключен для пользователя
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}/snapshot:
     parameters:
       - $ref: '#/components/parameters/OrderId'

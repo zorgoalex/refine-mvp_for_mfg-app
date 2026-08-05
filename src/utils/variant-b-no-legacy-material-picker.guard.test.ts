@@ -32,7 +32,7 @@ describe('Variant B: no legacy material picker', () => {
   });
 
   it('materials tab no longer aggregates by material_id', () => {
-    const src = read('src/pages/orders/components/sections/OrderMaterialsTab.tsx');
+    const src = read('src/pages/orders/orderMaterialsSummary.ts');
     expect(src).toMatch(/sheet_material_type_id/);
   });
 
