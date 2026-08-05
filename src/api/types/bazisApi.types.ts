@@ -37,6 +37,10 @@ export interface BazisProjectListItem {
   lastRevisionNo: number | null;
   lastImportedAt: string | null;
   bazisOrderNo: string | null;
+  designEngineerId: number | null;
+  designEngineerName: string | null;
+  designEngineerXmlName: string | null;
+  designEngineerSource: 'xml' | 'manual' | null;
   linkedOrderIds: number[];
   linkedOrders: BazisOrderRef[];
 }
@@ -45,6 +49,14 @@ export interface BazisProjectNameResponse {
   bazisProjectId: number;
   projectId: number;
   name: string;
+}
+
+export interface BazisProjectDesignEngineerResponse {
+  bazisProjectId: number;
+  designEngineerId: number | null;
+  designEngineerName: string | null;
+  designEngineerXmlName: string | null;
+  designEngineerSource: 'manual';
 }
 
 export interface BazisProjectDeleteResponse {

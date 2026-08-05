@@ -15,6 +15,7 @@ import {
   parseMaterialMappingsQuery,
   parseNodeSearchQuery,
   parseRenameProjectBody,
+  parseSetProjectDesignEngineerBody,
   parseRevisionTreeQuery,
   parseSetNodeNotesBody,
   parseUpsertMaterialMappingsBody,
@@ -491,6 +492,11 @@ describe('BazisController', () => {
     expect(() => parseCreateOrderFromDraftBody({ order: null, nodes: [], idempotencyKey: 'x' })).toThrowError(
       ApiError,
     );
+    expect(() => parseCreateOrderFromDraftBody({
+      order: createDraftOrderBody().order,
+      nodes: [],
+      idempotencyKey: 'draft-key',
+    })).toThrowError(ApiError);
     expect(() =>
       parseCreateOrderFromDraftBody({
         order: createDraftOrderBody().order,
@@ -568,6 +574,33 @@ describe('BazisController', () => {
     );
   });
 
+  describe('project design engineer', () => {
+    it('parses nullable employee id and delegates to the service', async () => {
+      expect(parseSetProjectDesignEngineerBody({ designEngineerId: '10' })).toEqual({
+        designEngineerId: 10,
+      });
+      expect(parseSetProjectDesignEngineerBody({ designEngineerId: null })).toEqual({
+        designEngineerId: null,
+      });
+      expect(() => parseSetProjectDesignEngineerBody({ designEngineerId: 0 })).toThrowError(ApiError);
+      expect(() => parseSetProjectDesignEngineerBody({ designEngineerId: 10, extra: true })).toThrowError(ApiError);
+
+      const setProjectDesignEngineer = vi.fn().mockResolvedValue({
+        bazisProjectId: 41,
+        designEngineerId: 10,
+        designEngineerName: 'Тапен Жамит',
+        designEngineerXmlName: 'Тапен Ж.К',
+        designEngineerSource: 'manual',
+      });
+      const controller = createController({
+        bazisEnabled: true,
+        service: { setProjectDesignEngineer },
+      });
+      await controller.setProjectDesignEngineer(request(), '41', { designEngineerId: '10' });
+      expect(setProjectDesignEngineer).toHaveBeenCalledWith(request().user, 'req-1', 41, 10);
+    });
+  });
+
   describe('parseSetNodeNotesBody', () => {
     it('accepts string and null', () => {
       expect(parseSetNodeNotesBody({ notes: 'x' })).toEqual({ notes: 'x' });
@@ -592,6 +625,7 @@ function createController(input: {
     listProjects: vi.fn().mockResolvedValue([]),
     getProject: vi.fn(),
     renameProject: vi.fn(),
+    setProjectDesignEngineer: vi.fn(),
     getTree: vi.fn(),
     getNodeCard: vi.fn(),
     setNodeNotes: vi.fn(),

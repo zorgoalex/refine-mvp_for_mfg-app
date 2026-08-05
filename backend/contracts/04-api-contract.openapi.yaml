@@ -2783,6 +2783,10 @@ paths:
                     - projectId
                     - projectName
                     - name
+                    - designEngineerId
+                    - designEngineerName
+                    - designEngineerXmlName
+                    - designEngineerSource
                     - revisionsCount
                     - linkedOrderIds
                     - linkedOrders
@@ -2795,6 +2799,20 @@ paths:
                       type: string
                     name:
                       type: string
+                    designEngineerId:
+                      type: integer
+                      format: int64
+                      nullable: true
+                    designEngineerName:
+                      type: string
+                      nullable: true
+                    designEngineerXmlName:
+                      type: string
+                      nullable: true
+                    designEngineerSource:
+                      type: string
+                      enum: [xml, manual]
+                      nullable: true
                     revisionsCount:
                       type: integer
                     lastRevisionNo:
@@ -2973,6 +2991,10 @@ paths:
                   - projectId
                   - projectName
                   - name
+                  - designEngineerId
+                  - designEngineerName
+                  - designEngineerXmlName
+                  - designEngineerSource
                   - revisionsCount
                   - linkedOrderIds
                   - linkedOrders
@@ -2986,6 +3008,20 @@ paths:
                     type: string
                   name:
                     type: string
+                  designEngineerId:
+                    type: integer
+                    format: int64
+                    nullable: true
+                  designEngineerName:
+                    type: string
+                    nullable: true
+                  designEngineerXmlName:
+                    type: string
+                    nullable: true
+                  designEngineerSource:
+                    type: string
+                    enum: [xml, manual]
+                    nullable: true
                   revisionsCount:
                     type: integer
                   lastRevisionNo:
@@ -3050,6 +3086,86 @@ paths:
                         importedAt:
                           type: string
                           format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Bazis project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiErrorEnvelope'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/bazis/projects/{id}/design-engineer:
+    patch:
+      tags:
+        - Bazis
+      operationId: setBazisProjectDesignEngineer
+      summary: Set or clear the Bazis project design engineer manually
+      security:
+        - bearerAuth: []
+      x-permission: bazis.manage
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - designEngineerId
+              properties:
+                designEngineerId:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  nullable: true
+      responses:
+        '200':
+          description: Updated Bazis project design engineer
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - bazisProjectId
+                  - designEngineerId
+                  - designEngineerName
+                  - designEngineerXmlName
+                  - designEngineerSource
+                properties:
+                  bazisProjectId:
+                    type: integer
+                    format: int64
+                  designEngineerId:
+                    type: integer
+                    format: int64
+                    nullable: true
+                  designEngineerName:
+                    type: string
+                    nullable: true
+                  designEngineerXmlName:
+                    type: string
+                    nullable: true
+                  designEngineerSource:
+                    type: string
+                    enum: [manual]
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

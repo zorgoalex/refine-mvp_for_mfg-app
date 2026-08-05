@@ -9,6 +9,7 @@ import {
   PlusOutlined,
 } from '@ant-design/icons';
 import { Alert, Button, Card, Col, Descriptions, Empty, Input, Row, Select, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd';
+import { useSelect } from '@refinedev/antd';
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';
@@ -43,6 +44,7 @@ export const BazisProjectViewPage: React.FC = () => {
   const [renameDraft, setRenameDraft] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameErrorText, setRenameErrorText] = useState<string | null>(null);
+  const [designEngineerSaving, setDesignEngineerSaving] = useState(false);
   const setTabTitle = useTabStore((state) => state.setTabTitle);
 
   useEffect(() => {
@@ -63,6 +65,13 @@ export const BazisProjectViewPage: React.FC = () => {
   const [exportTemplateId, setExportTemplateId] = useState<number>();
   const [exportTemplatesReady, setExportTemplatesReady] = useState(false);
   const canManage = can('bazis.manage');
+  const { selectProps: employeeSelectProps } = useSelect({
+    resource: 'employees',
+    optionLabel: 'full_name',
+    optionValue: 'employee_id',
+    filters: [{ field: 'is_active', operator: 'eq', value: true }],
+    queryOptions: { enabled: canManage },
+  });
   const canExportBazisCut = can('cut.view');
   // Счётчик внешних переходов «к панели»: PanelsTab по нему форсирует
   // авто-раскрытие группы даже при повторном переходе на ту же панель
@@ -246,6 +255,23 @@ export const BazisProjectViewPage: React.FC = () => {
       setRenameErrorText(error instanceof Error ? error.message : 'Не удалось изменить название');
     } finally {
       setRenameSaving(false);
+    }
+  };
+
+  const saveDesignEngineer = async (designEngineerId: number | undefined) => {
+    if (!projectCard || designEngineerSaving) return;
+    const nextId = designEngineerId ?? null;
+    if (projectCard.designEngineerId === nextId && projectCard.designEngineerSource === 'manual') return;
+
+    setDesignEngineerSaving(true);
+    try {
+      const updated = await bazisApi.setProjectDesignEngineer(projectCard.bazisProjectId, nextId);
+      setProjectCard((current) => current ? { ...current, ...updated } : current);
+      message.success(nextId == null ? 'Конструктор очищен' : 'Конструктор обновлён');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось изменить конструктора');
+    } finally {
+      setDesignEngineerSaving(false);
     }
   };
 
@@ -483,6 +509,37 @@ export const BazisProjectViewPage: React.FC = () => {
           </Space>
         ) : null}
       >
+        <Descriptions
+          size="small"
+          column={{ xs: 1, sm: 1, md: 2, lg: 3, xl: 3, xxl: 3 }}
+          style={{ marginBottom: 16 }}
+        >
+          <Descriptions.Item label="Конструктор">
+            {canManage ? (
+              <Space direction="vertical" size={2} style={{ width: 'min(420px, 100%)' }}>
+                <Select<number>
+                  {...employeeSelectProps}
+                  aria-label="Конструктор Базис-проекта"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="Выберите сотрудника"
+                  value={projectCard.designEngineerId ?? undefined}
+                  loading={Boolean(employeeSelectProps.loading) || designEngineerSaving}
+                  disabled={designEngineerSaving}
+                  style={{ width: '100%', minHeight: 40 }}
+                  onChange={(value) => void saveDesignEngineer(value)}
+                />
+                <DesignEngineerHint project={projectCard} />
+              </Space>
+            ) : (
+              <Space direction="vertical" size={2}>
+                <Text>{projectCard.designEngineerName?.trim() || projectCard.designEngineerXmlName?.trim() || 'Не указан'}</Text>
+                <DesignEngineerHint project={projectCard} />
+              </Space>
+            )}
+          </Descriptions.Item>
+        </Descriptions>
         {projectCard.revisions.length === 0 || !selectedRevision ? (
           <Empty description="У проекта пока нет ревизий" />
         ) : (
@@ -599,6 +656,23 @@ export const BazisProjectViewPage: React.FC = () => {
       </Card>
     </div>
   );
+};
+
+const DesignEngineerHint: React.FC<{ project: BazisProjectCard }> = ({ project }) => {
+  if (project.designEngineerSource === 'manual') {
+    return <Text type="secondary">Выбран вручную</Text>;
+  }
+  if (project.designEngineerSource === 'xml') {
+    return <Text type="secondary">Заполнен из XML</Text>;
+  }
+  if (project.designEngineerXmlName?.trim()) {
+    return (
+      <Text type="warning">
+        {`Из XML: ${project.designEngineerXmlName.trim()} — нет однозначного совпадения в сотрудниках`}
+      </Text>
+    );
+  }
+  return null;
 };
 
 function directCutExportFileName(projectName: string, revisionId: number): string {

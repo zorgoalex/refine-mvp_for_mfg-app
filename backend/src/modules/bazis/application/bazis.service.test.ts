@@ -25,6 +25,8 @@ vi.mock('./bazis-xml-parser', async () => {
 
 const fixtureParsed = {
   bazisVersion: '12',
+  bazisOrderNo: null,
+  designEngineerName: null,
   productName: 'Шкаф',
   productPrice: 100,
   nodes: [],
@@ -200,6 +202,8 @@ describe('BazisService', () => {
     it.each([
       ['deleteProject', (service: BazisService, user: CurrentUser) => service.deleteProject(user, 'req', 41)],
       ['renameProject', (service: BazisService, user: CurrentUser) => service.renameProject(user, 'req', 41, '1485')],
+      ['setProjectDesignEngineer', (service: BazisService, user: CurrentUser) =>
+        service.setProjectDesignEngineer(user, 'req', 41, 10)],
       ['setNodeNotes', (service: BazisService, user: CurrentUser) => service.setNodeNotes(user, 'req', 1, 'x')],
     ])('%s requires bazis.manage', async (_name, call) => {
       await expect(call(createService(), viewerUser())).rejects.toMatchObject({ statusCode: 403 });
@@ -750,7 +754,13 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       revisionsCount: 0,
       lastRevisionNo: null,
       lastImportedAt: null,
+      bazisOrderNo: null,
+      designEngineerId: null,
+      designEngineerName: null,
+      designEngineerXmlName: null,
+      designEngineerSource: null,
       linkedOrderIds: [],
+      linkedOrders: [],
       revisions: [],
     }),
     getTreeChildren: vi.fn().mockResolvedValue([]),
@@ -845,6 +855,13 @@ function createRepository(overrides: Partial<BazisRepositoryPort> = {}) {
       bazisProjectId: 41,
       projectId: 77,
       name: '1485',
+    }),
+    setProjectDesignEngineer: vi.fn().mockResolvedValue({
+      bazisProjectId: 41,
+      designEngineerId: 10,
+      designEngineerName: 'Тапен Жамит',
+      designEngineerXmlName: 'Тапен Ж.К',
+      designEngineerSource: 'manual',
     }),
     deleteProject: vi.fn().mockResolvedValue({
       bazisProjectId: 41,

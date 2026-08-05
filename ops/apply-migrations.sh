@@ -922,6 +922,19 @@ probe_file() {
                      "$(q_idx uq_export_templates_live_name)" \
                      "$(q_idx uq_export_templates_active_default)" \
                      "$(q_idx idx_export_templates_runtime)" ;;
+    102_bazis_project_design_engineer*) probe_all \
+                     "$(q_col bazis_projects design_engineer_id)" \
+                     "$(q_col bazis_projects design_engineer_xml_name)" \
+                     "$(q_col bazis_projects design_engineer_source)" \
+                     "$(q_con_on bazis_projects chk_bazis_projects_design_engineer_source)" \
+                     "$(q_idx bazis_projects_design_engineer_idx)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                       FROM pg_constraint
+                       WHERE conrelid = 'public.bazis_projects'::regclass
+                         AND contype = 'f'
+                         AND pg_get_constraintdef(oid) LIKE 'FOREIGN KEY (design_engineer_id) REFERENCES employees(employee_id)%ON DELETE SET NULL%'
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -933,7 +946,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
