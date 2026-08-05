@@ -4,6 +4,50 @@ const text = (max: number) => z.string().max(max);
 const nonEmpty = (max: number) => text(max).trim().min(1);
 const positiveMm = z.number().positive().max(99_999_999.99);
 const edgeMm = z.number().min(0).max(99_999_999.99);
+const positiveId = z.number().int().positive();
+const pickerIdArray = z.array(positiveId).max(500).default([]);
+const pickerTextArray = z.array(z.string().trim().min(1).max(200)).max(500).default([]);
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
+
+const pickerPeriodShape = { dateFrom: dateOnly, dateTo: dateOnly } as const;
+const pickerCriteriaObject = z.object({
+  ...pickerPeriodShape,
+  orderIds: pickerIdArray,
+  clientIds: pickerIdArray,
+  sheetMaterialTypeIds: pickerIdArray,
+  millingTypeIds: pickerIdArray,
+  bazisKeys: pickerTextArray,
+  designEngineerIds: pickerIdArray,
+  dowelingOrderIds: pickerIdArray,
+  excludedDetailIds: z.array(positiveId).max(2000).default([]),
+}).strict();
+
+function validatePickerPeriod(
+  value: { dateFrom: string; dateTo: string },
+  context: z.RefinementCtx,
+): void {
+  const from = parseDateOnly(value.dateFrom);
+  const to = parseDateOnly(value.dateTo);
+  if (from === null || to === null) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['dateFrom'], message: 'Некорректный период' });
+    return;
+  }
+  if (from > to) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['dateTo'], message: 'Конец периода раньше начала' });
+    return;
+  }
+  const calendarDays = Math.floor((to - from) / 86_400_000) + 1;
+  if (calendarDays > 366) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['dateTo'], message: 'Период не может превышать 366 дней' });
+  }
+}
+
+function parseDateOnly(value: string): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== value) return null;
+  return timestamp;
+}
 
 export const bazisCutDetailFieldsSchema = z.object({
   cutEnabled: z.boolean(),
@@ -72,6 +116,32 @@ export const listBazisCutSetsSchema = z.object({
   pageSize: z.coerce.number().int().positive().max(100).optional().default(25),
 }).strict();
 
+export const bazisCutPickerPeriodSchema = z.object(pickerPeriodShape).strict()
+  .superRefine(validatePickerPeriod);
+
+export const bazisCutPickerCriteriaSchema = pickerCriteriaObject.superRefine(validatePickerPeriod);
+
+export const searchBazisCutPickerSchema = z.object({
+  ...pickerCriteriaObject.shape,
+  page: z.number().int().positive().default(1),
+  pageSize: z.number().int().positive().max(100).default(25),
+}).strict().superRefine(validatePickerPeriod);
+
+export const createBazisCutSetFromPickerSchema = z.object({
+  criteria: bazisCutPickerCriteriaSchema,
+  criteriaHash: z.string().regex(/^[a-f0-9]{64}$/),
+  details: z.array(z.object({
+    detailId: positiveId,
+    selectionToken: z.string().regex(/^[a-f0-9]{64}$/),
+  }).strict()).min(1).max(500),
+}).strict();
+
+export const bazisCutOrderMembershipsSchema = z.object({
+  orderId: z.coerce.number().int().positive(),
+}).strict();
+
+export type BazisCutPickerCriteria = z.infer<typeof bazisCutPickerCriteriaSchema>;
+
 export type BazisCutDetailFields = z.infer<typeof bazisCutDetailFieldsSchema>;
 
 export interface BazisCutSourceRefDto {
@@ -132,4 +202,69 @@ export interface BazisCutSetListDto {
 export interface BazisCutMutationResultDto {
   set: BazisCutSetDto;
   addedCount?: number;
+}
+
+export interface BazisCutPickerOptionDto {
+  id: number;
+  label: string;
+}
+
+export interface BazisCutPickerBazisOptionDto {
+  key: string;
+  label: string;
+  type: 'project' | 'order' | 'legacy';
+}
+
+export interface BazisCutPickerFacetsDto {
+  orders: BazisCutPickerOptionDto[];
+  clients: BazisCutPickerOptionDto[];
+  sheetMaterials: BazisCutPickerOptionDto[];
+  millingTypes: BazisCutPickerOptionDto[];
+  bazisSources: BazisCutPickerBazisOptionDto[];
+  designEngineers: BazisCutPickerOptionDto[];
+  dowelingOrders: BazisCutPickerOptionDto[];
+}
+
+export interface BazisCutPickerMembershipDto {
+  bazisCutSetId: number;
+  name: string;
+}
+
+export interface BazisCutPickerDetailDto {
+  detailId: number;
+  orderId: number;
+  orderNumber: string;
+  orderDate: string;
+  clientName: string;
+  detailNumber: number;
+  detailName: string;
+  quantity: number;
+  heightMm: number;
+  widthMm: number;
+  areaM2: number;
+  materialName: string;
+  millingName: string;
+  bazisLabel: string;
+  designEngineerName: string;
+  dowelingOrderName: string;
+  bazisCutSets: BazisCutPickerMembershipDto[];
+  selectionToken: string;
+}
+
+export interface BazisCutPickerSearchDto {
+  items: BazisCutPickerDetailDto[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalQuantity: number;
+  totalAreaM2: number;
+  criteriaHash: string;
+}
+
+export interface BazisCutOrderMembershipsDto {
+  orderId: number;
+  details: Array<{
+    detailId: number;
+    bazisCutSets: BazisCutPickerMembershipDto[];
+  }>;
 }

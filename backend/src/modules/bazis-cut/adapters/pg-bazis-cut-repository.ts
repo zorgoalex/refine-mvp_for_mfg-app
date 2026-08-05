@@ -4,7 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { DatabaseService } from '../../../database/database.service';
-import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import { appendOrderReadScopeSql } from '../../../permissions/policies/order-read-scope-sql';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../application/bazis-xls-writer';
 import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
@@ -17,11 +17,19 @@ export { resolveBazisDetailLabels } from '../application/bazis-cut-snapshot-mapp
 import type {
   AddBazisCutDetailsCommand,
   BazisCutRepositoryPort,
+  CreateBazisCutSetFromPickerCommand,
   CreateBazisCutSetCommand,
   DeleteBazisCutDetailCommand,
   RenameBazisCutSetCommand,
   UpdateBazisCutDetailCommand,
 } from '../application/bazis-cut.types';
+import {
+  buildBazisCutPickerSelectionToken,
+  hashBazisCutPickerCriteria,
+  normalizeBazisCutPickerCriteria,
+  PgBazisCutPicker,
+  type PickerRow,
+} from './pg-bazis-cut-picker';
 import type {
   BazisCutDetailFields,
   BazisCutMutationResultDto,
@@ -117,8 +125,6 @@ interface SourceRow extends QueryResultRow {
 
 interface OrderScopeRow extends QueryResultRow {
   order_id: string | number;
-  created_by: string | number | null;
-  manager_id: string | number | null;
 }
 
 interface Snapshot {
@@ -141,8 +147,6 @@ interface Snapshot {
 }
 
 export class PgBazisCutRepository implements BazisCutRepositoryPort {
-  private readonly orderAccess = new OrderAccessPolicy();
-
   constructor(
     private readonly database: DatabaseService,
     private readonly exportTemplates?: ExportTemplatesService,
@@ -205,6 +209,55 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     return loadSet(this.database, input.setId);
   }
 
+  async pickerFacets(
+    input: Parameters<BazisCutRepositoryPort['pickerFacets']>[0],
+  ) {
+    return new PgBazisCutPicker(this.database).listFacets(input.currentUser, input);
+  }
+
+  async pickerSearch(
+    input: Parameters<BazisCutRepositoryPort['pickerSearch']>[0],
+  ) {
+    return new PgBazisCutPicker(this.database)
+      .search(input.currentUser, input.criteria, input.page, input.pageSize);
+  }
+
+  async orderMemberships(
+    input: Parameters<BazisCutRepositoryPort['orderMemberships']>[0],
+  ) {
+    const params: unknown[] = [input.orderId];
+    const scope = appendOrderReadScopeSql(params, input.currentUser, 'o');
+    const result = await this.database.query<{
+      order_id: string | number;
+      detail_id: string | number | null;
+      bazis_cut_sets: unknown;
+    }>(
+      `WITH scoped_order AS (
+         SELECT o.order_id FROM orders o
+         WHERE o.order_id=$1 AND o.delete_flag=false AND ${scope.predicate}
+       )
+       SELECT scoped.order_id, od.detail_id,
+         COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
+           'bazisCutSetId', set.bazis_cut_set_id, 'name', set.name
+         )) FILTER (WHERE set.bazis_cut_set_id IS NOT NULL), '[]'::jsonb) AS bazis_cut_sets
+       FROM scoped_order scoped
+       LEFT JOIN order_details od ON od.order_id=scoped.order_id AND od.delete_flag=false
+       LEFT JOIN bazis_cut_set_details detail ON detail.source_order_detail_id=od.detail_id
+       LEFT JOIN bazis_cut_sets set ON set.bazis_cut_set_id=detail.bazis_cut_set_id
+       GROUP BY scoped.order_id, od.detail_id
+       ORDER BY od.detail_id`,
+      params,
+    );
+    if (result.rows.length === 0) throw new ApiError(404, 'ORDER_NOT_FOUND', 'Order not found');
+    return {
+      orderId: input.orderId,
+      details: result.rows.flatMap((row) => row.detail_id === null ? [] : [{
+        detailId: toNumber(row.detail_id),
+        bazisCutSets: parseMembershipRefs(row.bazis_cut_sets),
+      }]),
+    };
+  }
+
   async create(command: CreateBazisCutSetCommand): Promise<BazisCutMutationResultDto> {
     await this.assertOrderReadable(this.database, command.currentUser, command.orderId, command.requestId);
     return this.database.transaction(async (tx) => {
@@ -234,6 +287,54 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.created', setId,
         command.idempotencyKey, null, summaryAudit(set), set, set.details,
         { addedDetailIds: snapshots.map((item) => item.provenance.sourceOrderDetailId) });
+      await completeIdempotency(tx, command.idempotencyKey, result);
+      return result;
+    });
+  }
+
+  async createFromPicker(command: CreateBazisCutSetFromPickerCommand): Promise<BazisCutMutationResultDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser);
+      const criteria = normalizeBazisCutPickerCriteria(command.criteria);
+      const requested = normalizePickerDetails(command.details);
+      const requestHash = hashRequest('bazis_cut_set.create_from_picker', command.currentUser, {
+        criteria, criteriaHash: command.criteriaHash, details: requested,
+      });
+      const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
+        'bazis_cut_set.create_from_picker', actorId(command.currentUser), 'bazis_cut_set', 'pending', requestHash);
+      if (replay) return replay;
+
+      const canonicalHash = hashBazisCutPickerCriteria(criteria);
+      if (canonicalHash !== command.criteriaHash) throw pickerSelectionStale();
+
+      const picker = new PgBazisCutPicker(tx);
+      const initial = await picker.loadSelection(command.currentUser, criteria, requested.map((item) => item.detailId));
+      assertPickerSelection(requested, initial.rows, canonicalHash);
+      const orderIds = uniqueIds(initial.rows.map((row) => toNumber(row.order_id)));
+      await lockPickerOrders(tx, command.currentUser, orderIds);
+      await lockPickerDetails(tx, requested.map((item) => item.detailId));
+
+      const fresh = await picker.loadSelection(command.currentUser, criteria, requested.map((item) => item.detailId));
+      assertPickerSelection(requested, fresh.rows, canonicalHash);
+      const detailIds = fresh.rows.map((row) => toNumber(row.detail_id));
+      const snapshots = await loadSnapshots(tx, null, detailIds);
+
+      const inserted = await tx.query<{ bazis_cut_set_id: string | number }>(
+        `INSERT INTO bazis_cut_sets (name, created_by, updated_by)
+         VALUES ($1,$2,$2) RETURNING bazis_cut_set_id`,
+        ['БР', actorId(command.currentUser)],
+      );
+      const setId = toNumber(inserted.rows[0].bazis_cut_set_id);
+      await tx.query('UPDATE bazis_cut_sets SET name=$2 WHERE bazis_cut_set_id=$1',
+        [setId, buildBazisCutSetName(setId)]);
+      await insertSnapshots(tx, setId, snapshots, 0, actorId(command.currentUser));
+      const set = await loadSet(tx, setId);
+      const result = { set, addedCount: snapshots.length };
+      await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.created', setId,
+        command.idempotencyKey, null, summaryAudit(set), set, set.details, {
+          creationSource: 'picker', criteriaHash: canonicalHash,
+          addedDetailIds: snapshots.map((item) => item.provenance.sourceOrderDetailId),
+        });
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     });
@@ -407,16 +508,15 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
 
   private async assertOrderReadable(tx: DatabaseClient, user: CurrentUser, orderId: number,
     requestId?: string, setId?: number): Promise<void> {
+    const params: unknown[] = [orderId];
+    const scope = appendOrderReadScopeSql(params, user, 'o');
     const result = await tx.query<OrderScopeRow>(
-      `SELECT order_id, created_by, manager_id FROM orders WHERE order_id=$1 AND delete_flag=false`,
-      [orderId],
+      `SELECT o.order_id FROM orders o
+       WHERE o.order_id=$1 AND o.delete_flag=false AND ${scope.predicate}`,
+      params,
     );
     const row = result.rows[0];
-    if (!row || !this.orderAccess.canView(user, row ? {
-      orderId,
-      createdByUserId: row.created_by == null ? null : String(row.created_by),
-      managerUserId: row.manager_id == null ? null : String(row.manager_id),
-    } : { orderId, createdByUserId: null, managerUserId: null })) {
+    if (!row) {
       try {
         await auditService.recordDenied(this.database, {
           event: 'bazis_cut_set.order_scope_denied', entityType: 'bazis_cut_set', entityId: setId ?? 'create',
@@ -436,7 +536,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
   }
 }
 
-async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds: number[]): Promise<Snapshot[]> {
+async function loadSnapshots(client: DatabaseClient, orderId: number | null, detailIds: number[]): Promise<Snapshot[]> {
   const result = await client.query<SourceRow>(
     `SELECT od.detail_id, od.order_id, o.project_id, o.order_name,
             (p.code || '-' || o.order_name) AS order_full_number, p.code::text AS project_code,
@@ -608,8 +708,10 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
        ORDER BY cj.cut_job_id DESC
        LIMIT 1
      ) bath ON true
-     WHERE od.order_id=$1 AND od.delete_flag=false AND od.detail_id=ANY($2::bigint[])
-     ORDER BY od.detail_id`,
+     WHERE ($1::bigint IS NULL OR od.order_id=$1) AND od.delete_flag=false AND od.detail_id=ANY($2::bigint[])
+     ORDER BY CASE WHEN $1::bigint IS NULL THEN od.order_id END,
+              CASE WHEN $1::bigint IS NULL THEN od.detail_number END,
+              od.detail_id`,
     [orderId, detailIds],
   );
   const found = new Set(result.rows.map((row) => toNumber(row.detail_id)));
@@ -617,6 +719,7 @@ async function loadSnapshots(client: DatabaseClient, orderId: number, detailIds:
   if (missing.length > 0) {
     // Keep guessed/deleted/cross-order detail IDs indistinguishable from an
     // inaccessible source order; never expose which requested ID exists.
+    if (orderId === null) throw pickerSelectionStale();
     throw new ApiError(404, 'ORDER_NOT_FOUND', 'Order not found', { orderId });
   }
   const invalid: number[] = [];
@@ -834,6 +937,7 @@ async function recordMutation(client: DatabaseClient, user: CurrentUser, request
   const dimensions = relatedDimensions(details);
   const canonicalMetadata = {
     actorUserId: actorId(user), requestId: requestId ?? null, setVersion: set.version,
+    positionCount: set.positionCount,
     physicalQuantity: details.reduce((sum, detail) => sum + detail.quantity, 0),
     ...dimensions, ...metadata,
   };
@@ -979,6 +1083,75 @@ function hashRequest(command: string, user: CurrentUser, body: unknown): string 
   return createHash('sha256').update(JSON.stringify({ commandName: command, actorUserId: user.id, body })).digest('hex');
 }
 
+function normalizePickerDetails(
+  details: readonly { detailId: number; selectionToken: string }[],
+): Array<{ detailId: number; selectionToken: string }> {
+  const byId = new Map<number, string>();
+  for (const detail of details) {
+    if (byId.has(detail.detailId)) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Деталь выбрана более одного раза');
+    }
+    byId.set(detail.detailId, detail.selectionToken);
+  }
+  return [...byId].map(([detailId, selectionToken]) => ({ detailId, selectionToken }))
+    .sort((left, right) => left.detailId - right.detailId);
+}
+
+function assertPickerSelection(
+  requested: readonly { detailId: number; selectionToken: string }[],
+  rows: readonly PickerRow[],
+  criteriaHash: string,
+): void {
+  if (rows.length !== requested.length) throw pickerSelectionStale();
+  const rowById = new Map(rows.map((row) => [toNumber(row.detail_id), row]));
+  for (const item of requested) {
+    const row = rowById.get(item.detailId);
+    if (!row || buildBazisCutPickerSelectionToken(criteriaHash, row) !== item.selectionToken) {
+      throw pickerSelectionStale();
+    }
+  }
+}
+
+async function lockPickerOrders(
+  client: DatabaseClient,
+  user: CurrentUser,
+  orderIds: readonly number[],
+): Promise<void> {
+  const params: unknown[] = [[...orderIds]];
+  const scope = appendOrderReadScopeSql(params, user, 'o');
+  const result = await client.query<OrderScopeRow>(
+    `SELECT o.order_id FROM orders o
+     WHERE o.order_id=ANY($1::bigint[]) AND o.delete_flag=false AND ${scope.predicate}
+     ORDER BY o.order_id FOR UPDATE`,
+    params,
+  );
+  if (result.rows.length !== orderIds.length) throw pickerSelectionStale();
+}
+
+async function lockPickerDetails(client: DatabaseClient, detailIds: readonly number[]): Promise<void> {
+  const result = await client.query<{ detail_id: string | number }>(
+    `SELECT od.detail_id FROM order_details od
+     WHERE od.detail_id=ANY($1::bigint[]) AND od.delete_flag=false
+     ORDER BY od.order_id, od.detail_number, od.detail_id FOR UPDATE`,
+    [[...detailIds]],
+  );
+  if (result.rows.length !== detailIds.length) throw pickerSelectionStale();
+}
+
+function parseMembershipRefs(value: unknown): Array<{ bazisCutSetId: number; name: string }> {
+  let source = value;
+  if (typeof source === 'string') {
+    try { source = JSON.parse(source) as unknown; } catch { source = []; }
+  }
+  if (!Array.isArray(source)) return [];
+  return source.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const ref = entry as { bazisCutSetId?: unknown; name?: unknown };
+    const bazisCutSetId = nullableNumber(ref.bazisCutSetId);
+    return bazisCutSetId === null ? [] : [{ bazisCutSetId, name: textValue(ref.name) }];
+  }).sort((left, right) => left.bazisCutSetId - right.bazisCutSetId);
+}
+
 function summaryAudit(set: BazisCutSetDto): Record<string, unknown> {
   return { setId: set.bazisCutSetId, name: set.name, version: set.version,
     quantity: set.quantity, positionCount: set.positionCount };
@@ -990,6 +1163,10 @@ async function setSessionUser(client: TransactionClient, user: CurrentUser): Pro
 
 function actorId(user: CurrentUser): number | null { return nullableNumber(user.id); }
 export function buildBazisCutSetName(setId: number): string { return `БР-${setId}`; }
+function pickerSelectionStale() {
+  return new ApiError(409, 'BAZIS_CUT_PICKER_SELECTION_STALE',
+    'Отбор деталей устарел. Обновите список и повторите выбор');
+}
 function setNotFound(id: number) { return new ApiError(404, 'BAZIS_CUT_SET_NOT_FOUND', 'Набор Базис-раскрой не найден', { setId: id }); }
 function detailNotFound(id: number) { return new ApiError(404, 'BAZIS_CUT_DETAIL_NOT_FOUND', 'Деталь набора не найдена', { detailId: id }); }
 function uniqueIds(ids: number[]): number[] { return [...new Set(ids)].sort((a, b) => a - b); }

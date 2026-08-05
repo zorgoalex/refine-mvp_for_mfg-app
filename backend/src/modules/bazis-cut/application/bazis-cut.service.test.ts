@@ -39,4 +39,35 @@ describe('BazisCutService denied audit', () => {
     await expect(service.list({ currentUser: user, requestId: 'req-2', search: '', page: 1, pageSize: 25 }))
       .rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
   });
+
+  it('uses cut.view for picker reads and cut.manage for atomic picker creation', async () => {
+    const repository = {
+      pickerSearch: vi.fn(async () => ({ items: [] })),
+      createFromPicker: vi.fn(async () => ({ set: {} })),
+    } as unknown as BazisCutRepositoryPort;
+    const permissions = { canUser: vi.fn(() => true) } as unknown as PermissionsService;
+    const service = new BazisCutService(repository, permissions);
+    const criteria = { dateFrom: '2026-08-01', dateTo: '2026-08-05', orderIds: [], clientIds: [],
+      sheetMaterialTypeIds: [], millingTypeIds: [], bazisKeys: [], designEngineerIds: [],
+      dowelingOrderIds: [], excludedDetailIds: [] };
+
+    await service.pickerSearch({ currentUser: user, criteria, page: 1, pageSize: 25 });
+    await service.createFromPicker({ currentUser: user, criteria, criteriaHash: 'a'.repeat(64),
+      details: [{ detailId: 1, selectionToken: 'b'.repeat(64) }], idempotencyKey: 'picker-key-123' });
+
+    expect(permissions.canUser).toHaveBeenNthCalledWith(1, user, 'cut.view');
+    expect(permissions.canUser).toHaveBeenNthCalledWith(2, user, 'cut.manage');
+  });
+
+  it('protects legacy membership fallback with orders.view', async () => {
+    const repository = {
+      orderMemberships: vi.fn(async () => ({ orderId: 9, details: [] })),
+    } as unknown as BazisCutRepositoryPort;
+    const permissions = { canUser: vi.fn(() => true) } as unknown as PermissionsService;
+    const service = new BazisCutService(repository, permissions);
+
+    await service.orderMemberships({ currentUser: user, orderId: 9 });
+
+    expect(permissions.canUser).toHaveBeenCalledWith(user, 'orders.view');
+  });
 });

@@ -30,6 +30,7 @@ import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { GroupLinksEditor } from "./components/groups/GroupLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
+import { bazisCutApi } from '../../api/bazisCutApi';
 import { can, canAny } from "../../utils/permissions";
 import {
   filterOrderFinancialItems,
@@ -716,10 +717,36 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     return map;
   }, [detailNamesData]);
 
-  const details = (
+  const rawDetails = (
     backendOrder?.details ??
     (detailsData?.data || []).sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0))
   );
+  const [legacyBazisCutSetsByDetailId, setLegacyBazisCutSetsByDetailId] = useState<Map<number, Array<{
+    bazisCutSetId: number;
+    name: string;
+  }>>>(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    const orderId = Number(record?.order_id);
+    if (!featureFlags.bazisCut || useBackendOrdersRead || !Number.isInteger(orderId) || orderId <= 0) {
+      setLegacyBazisCutSetsByDetailId(new Map());
+      return () => { cancelled = true; };
+    }
+    void bazisCutApi.orderMemberships(orderId).then((response) => {
+      if (cancelled) return;
+      setLegacyBazisCutSetsByDetailId(new Map(response.details.map((detail) => [detail.detailId, detail.bazisCutSets])));
+    }).catch(() => {
+      if (!cancelled) setLegacyBazisCutSetsByDetailId(new Map());
+    });
+    return () => { cancelled = true; };
+  }, [record?.order_id, useBackendOrdersRead]);
+  const details = useMemo(() => {
+    if (useBackendOrdersRead) return rawDetails;
+    return rawDetails.map((detail: any) => ({
+      ...detail,
+      bazis_cut_sets: legacyBazisCutSetsByDetailId.get(Number(detail.detail_id)) ?? [],
+    }));
+  }, [legacyBazisCutSetsByDetailId, rawDetails, useBackendOrdersRead]);
   const showLoading = shouldShowOrderLoading({
     orderLoading: isLoading,
     detailsLoading,

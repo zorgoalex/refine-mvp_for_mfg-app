@@ -42,6 +42,8 @@ import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { CutJobVersionLines } from '../../CutJobVersionLines';
 import { cutJobDeepLink } from '../../cutColumnHelpers';
+import { featureFlags } from '../../../../config/featureFlags';
+import { can } from '../../../../utils/permissions';
 import {
   OrderSaveValidationContext,
   orderValidationDetailKey,
@@ -166,6 +168,7 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'film_id', label: 'Пленка' },
   { key: 'cut_job', label: 'Раскрой' },
   { key: 'bath_cut_job', label: 'Расчет ванны' },
+  { key: 'bazis_cut_sets', label: 'Базис-раскрой' },
   { key: 'priority', label: 'Пр-т' },
   { key: 'production_status_id', label: 'Статус' },
   { key: 'basis_project', label: 'Базис проект' },
@@ -505,6 +508,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const shownValidationRef = useRef<typeof saveValidation>(null);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
+  const bazisCutLinkEnabled = featureFlags.bazisCut && can('cut.view');
 
   // SP3: sheet picker gating (backend write + sheet_materials.view) + order-era
   // eligibility (create OR loaded order's sheet_eligible !== false).
@@ -1594,6 +1598,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             },
           },
         ]
+      : []),
+    ...(featureFlags.bazisCut
+      ? [{
+          title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис-раскрой</div>,
+          key: 'bazis_cut_sets',
+          width: 150,
+          onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+          render: (_: unknown, row: any) => {
+            const detail = asDetail(row);
+            const cutSets = detail?.bazis_cut_sets ?? [];
+            if (cutSets.length === 0) return '—';
+            return <Space wrap size={4}>{cutSets.map((cutSet) => bazisCutLinkEnabled
+              ? <Link key={cutSet.bazisCutSetId} to={`/bazis-cut/${cutSet.bazisCutSetId}`}
+                title={cutSet.name} style={{ fontVariantNumeric: 'tabular-nums' }}>{`БР-${cutSet.bazisCutSetId}`}</Link>
+              : <span key={cutSet.bazisCutSetId} title={cutSet.name}
+                style={{ fontVariantNumeric: 'tabular-nums' }}>{`БР-${cutSet.bazisCutSetId}`}</span>)}</Space>;
+          },
+        }]
       : []),
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пр-т</div>,

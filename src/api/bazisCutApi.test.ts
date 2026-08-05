@@ -3,6 +3,7 @@ import {
   bazisCutApi,
   buildBazisCutSetListUrl,
   type BazisCutDetailFields,
+  type BazisCutPickerCriteria,
   type BazisCutSetCardDto,
 } from './bazisCutApi';
 
@@ -126,6 +127,48 @@ describe('bazisCutApi', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/bazis-cut-sets/42/export.xls?templateId=9');
   });
 
+  it('drives period facets, detail search, atomic picker create, and membership fallback', async () => {
+    const card = cardDto();
+    const fetchMock = mockFetch(
+      jsonResponse({ orders: [], clients: [], sheetMaterials: [], millingTypes: [], bazisSources: [], designEngineers: [], dowelingOrders: [] }),
+      jsonResponse({ items: [], page: 1, pageSize: 25, total: 0, totalQuantity: 0, totalAreaM2: 0, criteriaHash: 'a'.repeat(64) }),
+      jsonResponse({ set: card, addedCount: 1 }),
+      jsonResponse({ orderId: 9, details: [] }),
+    );
+    const criteria = pickerCriteria();
+
+    await bazisCutApi.listPickerFacets(criteria);
+    await bazisCutApi.searchPicker({ ...criteria, page: 1, pageSize: 25 });
+    await bazisCutApi.createFromPicker({
+      criteria, criteriaHash: 'a'.repeat(64),
+      details: [{ detailId: 101, selectionToken: 'b'.repeat(64) }],
+    }, { idempotencyKey: 'picker-create-1491' });
+    await bazisCutApi.orderMemberships(9);
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/bazis-cut-sets/picker/facets?dateFrom=2026-08-01&dateTo=2026-08-05',
+      '/api/v1/bazis-cut-sets/picker/search',
+      '/api/v1/bazis-cut-sets/from-picker',
+      '/api/v1/bazis-cut-sets/order-memberships?orderId=9',
+    ]);
+    expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual(['GET', 'POST', 'POST', 'GET']);
+    expect(new Headers(fetchMock.mock.calls[2][1]?.headers).get('Idempotency-Key')).toBe('picker-create-1491');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toMatchObject({
+      dateFrom: '2026-08-01', dateTo: '2026-08-05', page: 1, pageSize: 25,
+    });
+  });
+
+  it('rejects missing, reversed, and over-366-day picker periods before fetch', () => {
+    const fetchMock = vi.mocked(fetch);
+    expect(() => bazisCutApi.searchPicker({ ...pickerCriteria(), dateFrom: '', page: 1, pageSize: 25 }))
+      .toThrow('Invalid picker period');
+    expect(() => bazisCutApi.searchPicker({ ...pickerCriteria(), dateFrom: '2026-08-06', page: 1, pageSize: 25 }))
+      .toThrow('Invalid picker period');
+    expect(() => bazisCutApi.searchPicker({ ...pickerCriteria(), dateFrom: '2025-08-04', page: 1, pageSize: 25 }))
+      .toThrow('Invalid picker period');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('models exactly 33 editable fields and preserves nullable priority', () => {
     const fields = detailFields();
     expect(Object.keys(fields)).toHaveLength(33);
@@ -203,6 +246,14 @@ function detailFields(): BazisCutDetailFields {
     milling: 'Модерн',
     route: 'Присадка:',
     film: 'Балхаш KZ 10',
+  };
+}
+
+function pickerCriteria(): BazisCutPickerCriteria {
+  return {
+    dateFrom: '2026-08-01', dateTo: '2026-08-05', orderIds: [], clientIds: [],
+    sheetMaterialTypeIds: [], millingTypeIds: [], bazisKeys: [], designEngineerIds: [],
+    dowelingOrderIds: [], excludedDetailIds: [],
   };
 }
 
