@@ -2,13 +2,14 @@
 // материал + размеры (Д×Ш×Т, по миллиметру после округления). Чистый модуль
 // без React — покрывается unit-тестами в node-среде.
 
-import type { BazisOrderRef, BazisTreeNode } from '../../api/types/bazisApi.types';
+import type { BazisCutSetRef, BazisOrderRef, BazisTreeNode } from '../../api/types/bazisApi.types';
 
 export type PanelLike = BazisTreeNode & {
   pathTitle: string;
   productName: string | null;
   bazisProjectNo: string | null;
   productOrderNo: string | null;
+  bazisCutSets: BazisCutSetRef[];
 };
 
 export interface PanelGroupRow {
@@ -36,6 +37,8 @@ export interface PanelGroupRow {
   orderNos: string[];
   /** Уникальные по orderId ERP-заказы детей в порядке появления. */
   orders: BazisOrderRef[];
+  /** Уникальные по номеру наборы Базис-раскроя детей. */
+  bazisCutSets: BazisCutSetRef[];
   /** Число кромок, если оно одинаково у всех вхождений; иначе null. */
   uniformEdgeCount: number | null;
   /** Присадка по вхождениям: у всех / ни у одной / смешанно. */
@@ -132,6 +135,7 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         projectNos: [],
         orderNos: [],
         orders: [],
+        bazisCutSets: [],
         uniformEdgeCount: null,
         drillingState: 'none',
         millingNames: [],
@@ -168,9 +172,15 @@ export function groupPanelRows(panels: PanelLike[]): PanelGroupRow[] {
         group.orders.push(order);
       }
     }
+    for (const cutSet of panel.bazisCutSets ?? []) {
+      if (!group.bazisCutSets.some((existing) => existing.bazisCutSetId === cutSet.bazisCutSetId)) {
+        group.bazisCutSets.push(cutSet);
+      }
+    }
   }
 
   for (const group of groups.values()) {
+    group.bazisCutSets.sort((left, right) => left.bazisCutSetId - right.bazisCutSetId);
     const edgeCounts = group.children.map((child) => child.edgeCount ?? 0);
     group.uniformEdgeCount = edgeCounts.every((value) => value === edgeCounts[0]) ? edgeCounts[0] : null;
 

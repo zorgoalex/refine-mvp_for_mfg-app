@@ -47,6 +47,7 @@ function panel(overrides: Partial<BazisTreeNode & {
     childrenCount: 0,
     orders: [],
     orderIds: [],
+    bazisCutSets: [],
     pathTitle: 'Шкаф',
     productName: null,
     bazisProjectNo: null,
@@ -123,6 +124,20 @@ describe('groupPanelRows', () => {
     const groups = groupPanelRows(rows);
     expect(groups[0].names).toEqual(['Стенка', 'Дно']);
     expect(groups[0].orders.map((o) => o.orderId)).toEqual([5, 7]);
+  });
+
+  it('собирает уникальные наборы Базис-раскроя по возрастанию номера', () => {
+    const rows = [
+      panel({ bazisCutSets: [{ bazisCutSetId: 12, name: 'Фасады' }] }),
+      panel({ bazisCutSets: [
+        { bazisCutSetId: 8, name: 'БР-8' },
+        { bazisCutSetId: 12, name: 'Фасады' },
+      ] }),
+    ];
+    expect(groupPanelRows(rows)[0].bazisCutSets).toEqual([
+      { bazisCutSetId: 8, name: 'БР-8' },
+      { bazisCutSetId: 12, name: 'Фасады' },
+    ]);
   });
 
   it('собирает уникальные обозначения, изделия, Базис-проекты и Базис-заказы группы', () => {

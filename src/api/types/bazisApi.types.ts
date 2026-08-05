@@ -27,6 +27,11 @@ export interface BazisOrderRef {
   orderDeleted?: boolean;
 }
 
+export interface BazisCutSetRef {
+  bazisCutSetId: number;
+  name: string;
+}
+
 export interface BazisProjectListItem {
   bazisProjectId: number;
   projectId: number;
@@ -115,6 +120,8 @@ export interface BazisTreeNode {
   orders: BazisOrderRef[];
   /** Производное от orders; rollout-совместимость. */
   orderIds: number[];
+  /** Наборы Базис-раскроя; optional для смешанного rollout frontend/backend. */
+  bazisCutSets?: BazisCutSetRef[];
 }
 
 export interface BazisNodeOrderLink {

@@ -29,6 +29,15 @@ describe('PanelsTab derived/notes columns', () => {
     expect(panelsTab).toContain('normalizeText(node.filmName)');
     expect(panelsTab).toContain('normalizeText(node.paintName)');
     expect(panelsTab).toContain('node.notes ?? null');
+    expect(panelsTab).toContain('node.bazisCutSets ?? []');
+  });
+
+  it('renders linked Basis-cut set numbers as links after the ERP order column', () => {
+    const orderIndex = panelsTab.indexOf("title: 'Заказ'");
+    const cutSetIndex = panelsTab.indexOf("title: 'Базис-раскрой'");
+    expect(cutSetIndex).toBeGreaterThan(orderIndex);
+    expect(panelsTab).toContain('to={`/bazis-cut/${cutSet.bazisCutSetId}`}');
+    expect(panelsTab).toContain('`БР-${cutSet.bazisCutSetId}`');
   });
 
   it('notes editor saves via backend command with one-shot close semantics', () => {
@@ -50,8 +59,8 @@ describe('PanelsTab derived/notes columns', () => {
     expect(panelsTab).toContain('shouldApplyNotesResponse');
   });
 
-  it('summary row spans all 20 columns after the new user-property columns', () => {
-    expect(panelsTab).toContain('[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]');
+  it('summary row spans all 21 columns after the Basis-cut column', () => {
+    expect(panelsTab).toContain('[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]');
     expect(panelsTab).not.toContain('[5, 6, 7, 8, 9, 10, 11, 12].map');
   });
 });

@@ -92,12 +92,19 @@ export interface BazisTreeNodeDto {
   orders: BazisOrderRefDto[];
   /** Производное от orders; сохранено для rollout-совместимости. */
   orderIds: number[];
+  /** Наборы Базис-раскроя, содержащие эту панель. */
+  bazisCutSets: BazisCutSetRefDto[];
 }
 
 export interface BazisOrderRefDto {
   orderId: number;
   orderName: string;
   orderDeleted?: boolean;
+}
+
+export interface BazisCutSetRefDto {
+  bazisCutSetId: number;
+  name: string;
 }
 
 export interface BazisNodeOrderLinkDto {

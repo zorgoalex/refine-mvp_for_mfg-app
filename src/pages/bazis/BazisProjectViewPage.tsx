@@ -571,6 +571,7 @@ export const BazisProjectViewPage: React.FC = () => {
                     onExportXls={featureFlags.bazisCut ? exportSelectedPanelsXls : undefined}
                     canExportXls={canExportBazisCut && exportTemplatesReady}
                     exportingXls={exportingCutXls}
+                    canViewBazisCut={featureFlags.bazisCut && canExportBazisCut}
                   />
                 ),
               },

@@ -111,6 +111,7 @@ const ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH = 45.9;
 const ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH = 96;
 const ORDER_DETAIL_SHOW_DETAIL_COST_COLUMN_WIDTH = 81.25;
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 96;
+const ORDER_DETAIL_SHOW_BAZIS_CUT_COLUMN_WIDTH = 104;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 const ORDER_DETAIL_STATUS_REFRESH_MS = 15_000;
 
@@ -192,6 +193,7 @@ const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'production_status_id', label: 'Статус' },
   { key: 'cut_job', label: 'Раскрой' },
   { key: 'basis_project', label: 'Базис проект' },
+  { key: 'bazis_cut_sets', label: 'Базис-раскрой' },
 ];
 
 type DetailProductionStatusMeta = {
@@ -1079,6 +1081,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
   const bazisCutVisible = featureFlags.bazisCut;
   const bazisCutManage = can('cut.manage');
+  const bazisCutLinkEnabled = bazisCutVisible && can('cut.view');
   const detailSelectionEnabled = cutEnabled || bazisCutVisible;
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
@@ -1807,6 +1810,36 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'basis_project',
       width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
       render: (value) => value || '—',
+    },
+    {
+      title: 'Базис-раскрой',
+      dataIndex: 'bazis_cut_sets',
+      key: 'bazis_cut_sets',
+      width: ORDER_DETAIL_SHOW_BAZIS_CUT_COLUMN_WIDTH,
+      render: (value: Array<{ bazisCutSetId: number; name: string }> | undefined) => {
+        const cutSets = value ?? [];
+        if (cutSets.length === 0) return '—';
+        return (
+          <Space wrap size={4}>
+            {cutSets.map((cutSet) =>
+              bazisCutLinkEnabled ? (
+                <Link
+                  key={cutSet.bazisCutSetId}
+                  to={`/bazis-cut/${cutSet.bazisCutSetId}`}
+                  title={cutSet.name}
+                  style={{ fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {`БР-${cutSet.bazisCutSetId}`}
+                </Link>
+              ) : (
+                <span key={cutSet.bazisCutSetId} title={cutSet.name} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {`БР-${cutSet.bazisCutSetId}`}
+                </span>
+              ),
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
@@ -2862,7 +2895,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             {isMobile ? (
               <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}
                 selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}
-                onSelectionChange={setCutSelectedDetailIds} />
+                onSelectionChange={setCutSelectedDetailIds} bazisCutLinkEnabled={bazisCutLinkEnabled} />
             ) : (
             <TableTopScroll className="order-show-details-table-wrap">
             <MemoizedOrderShowTable

@@ -78,6 +78,7 @@ interface PanelsTabProps {
   onExportXls?: (nodeIds: number[]) => Promise<void>;
   canExportXls?: boolean;
   exportingXls?: boolean;
+  canViewBazisCut?: boolean;
 }
 
 interface PanelChildRow extends PanelLike {
@@ -192,6 +193,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   onExportXls,
   canExportXls = false,
   exportingXls = false,
+  canViewBazisCut = false,
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
@@ -252,6 +254,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             ...node,
             orders: refreshedOrders ?? node.orders,
             orderIds: refreshedOrders?.map((order) => order.orderId) ?? node.orderIds,
+            bazisCutSets: node.bazisCutSets ?? [],
             notes: notesByNodeId?.has(node.bazisNodeId) ? notesByNodeId.get(node.bazisNodeId) ?? null : node.notes ?? null,
             edgeCount: node.edgeCount ?? 0,
             hasDrilling: node.hasDrilling ?? false,
@@ -283,6 +286,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       panel.millingName,
       panel.filmName,
       panel.paintName,
+      ...(panel.bazisCutSets ?? []).flatMap((cutSet) => [cutSet.bazisCutSetId, cutSet.name]),
       formatSize(panel),
     ].some((value) => String(value ?? '').toLocaleLowerCase('ru-RU').includes(query)));
   }, [allPanels, searchQuery]);
@@ -573,6 +577,35 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
           ),
       },
       {
+        title: 'Базис-раскрой',
+        key: 'bazisCutSets',
+        width: 104,
+        render: (_, row) =>
+          row.bazisCutSets.length > 0 ? (
+            <Space wrap size={4}>
+              {row.bazisCutSets.map((cutSet) =>
+                canViewBazisCut ? (
+                  <RouterLink
+                    key={cutSet.bazisCutSetId}
+                    to={`/bazis-cut/${cutSet.bazisCutSetId}`}
+                    title={cutSet.name}
+                    onClick={(event) => event.stopPropagation()}
+                    style={{ fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {`БР-${cutSet.bazisCutSetId}`}
+                  </RouterLink>
+                ) : (
+                  <span key={cutSet.bazisCutSetId} title={cutSet.name} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {`БР-${cutSet.bazisCutSetId}`}
+                  </span>
+                ),
+              )}
+            </Space>
+          ) : (
+            '—'
+          ),
+      },
+      {
         title: 'Кромка',
         key: 'edgeCount',
         width: 60,
@@ -699,6 +732,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
       'filmName',
       'paintName',
       'orders',
+      'bazisCutSets',
       'path',
       'actions',
     ];
@@ -711,7 +745,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
         if (column.key === 'path') return { ...column, width: 96 };
         return column;
       });
-  }, [canManage, filterOptions, handleNotesSaved, isOperational, notesEpoch, onGoToTree, selectOnlyFree, selection, visiblePanels]);
+  }, [canManage, canViewBazisCut, filterOptions, handleNotesSaved, isOperational, notesEpoch, onGoToTree, selectOnlyFree, selection, visiblePanels]);
 
   const selectedNodeIds = useMemo(() => Array.from(selection.selected), [selection.selected]);
   useEffect(() => {
@@ -866,7 +900,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
                     {totals.totalAreaM2 != null ? `${formatAreaM2(totals.totalAreaM2)} м\u00B2` : '—'}
                   </span>
                 </Table.Summary.Cell>
-                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((cellIndex) => (
+                {[5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20].map((cellIndex) => (
                   <Table.Summary.Cell key={cellIndex} index={cellIndex} />
                 ))}
               </Table.Summary.Row>

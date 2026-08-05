@@ -348,6 +348,7 @@ describe('PgBazisRepository reads + mappings', () => {
         childrenCount: 2,
         orders: [],
         orderIds: [],
+        bazisCutSets: [],
       },
     ]);
   });
@@ -3197,6 +3198,10 @@ describe('PgBazisRepository tree order provenance', () => {
             { orderId: 11385, orderName: 'санузел' },
             { orderId: 11390, orderName: 'шкаф' },
           ],
+          linked_bazis_cut_sets: [
+            { bazisCutSetId: 17, name: 'Фасады' },
+            { bazisCutSetId: 9, name: 'БР-9' },
+          ],
         },
         {
           bazis_node_id: 102,
@@ -3231,8 +3236,13 @@ describe('PgBazisRepository tree order provenance', () => {
       { orderId: 11390, orderName: 'шкаф' },
     ]);
     expect(nodes[0].orderIds).toEqual([11385, 11390]);
+    expect(nodes[0].bazisCutSets).toEqual([
+      { bazisCutSetId: 9, name: 'БР-9' },
+      { bazisCutSetId: 17, name: 'Фасады' },
+    ]);
     expect(nodes[1].orders).toEqual([]);
     expect(nodes[1].orderIds).toEqual([]);
+    expect(nodes[1].bazisCutSets).toEqual([]);
 
     // Агрегат считает только реально созданные детали (order_detail_id NOT NULL),
     // а не любые map-строки (mapping_kind='ignored' не «добавлен в заказ»).
@@ -3244,6 +3254,9 @@ describe('PgBazisRepository tree order provenance', () => {
     expect(treeSql).toContain('order_name');
     expect(treeSql).toContain('delete_flag');
     expect(treeSql).toContain('orderDeleted');
+    expect(treeSql).toContain('bazis_cut_set_details');
+    expect(treeSql).toContain('source_bazis_node_id = n.bazis_node_id');
+    expect(treeSql).toContain('ORDER BY refs.bazis_cut_set_id');
   });
 
   it('returns populated orderIds from the full-tree read (behavior, not just SQL shape)', async () => {

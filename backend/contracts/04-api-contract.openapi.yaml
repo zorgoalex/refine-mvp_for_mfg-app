@@ -3525,6 +3525,19 @@ paths:
                       items:
                         type: integer
                       description: Derived from orders; kept for rollout compatibility
+                    bazisCutSets:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - bazisCutSetId
+                          - name
+                        properties:
+                          bazisCutSetId:
+                            type: integer
+                          name:
+                            type: string
+                      description: Наборы Базис-раскроя, содержащие панель
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -15163,6 +15176,7 @@ components:
         - millingTypeId
         - edgeTypeId
         - detailCost
+        - bazisCutSets
       properties:
         id:
           type: integer
@@ -15238,6 +15252,20 @@ components:
         linkPdfFile:
           type: string
           nullable: true
+        bazisCutSets:
+          type: array
+          items:
+            type: object
+            required:
+              - bazisCutSetId
+              - name
+            properties:
+              bazisCutSetId:
+                type: integer
+                format: int64
+              name:
+                type: string
+          description: Наборы Базис-раскроя, содержащие деталь заказа
 
     PaymentDto:
       type: object

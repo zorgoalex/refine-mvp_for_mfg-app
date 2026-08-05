@@ -239,6 +239,15 @@ const orderDetailCutJobRefSwaggerSchema = {
   },
 } as const;
 
+const orderDetailBazisCutSetRefSwaggerSchema = {
+  type: 'object',
+  required: ['bazisCutSetId', 'name'],
+  properties: {
+    bazisCutSetId: { type: 'integer' },
+    name: { type: 'string' },
+  },
+} as const;
+
 // Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
 export const orderDetailResponseSwaggerSchema = {
   type: 'object',
@@ -272,6 +281,7 @@ export const orderDetailResponseSwaggerSchema = {
     'linkCadFile',
     'linkPdfFile',
     'refKey1c',
+    'bazisCutSets',
   ],
   properties: {
     id: { type: 'integer' },
@@ -307,6 +317,7 @@ export const orderDetailResponseSwaggerSchema = {
     refKey1c: nullableStringSwaggerSchema,
     cutJob: { ...orderDetailCutJobRefSwaggerSchema, nullable: true },
     bathCutJob: { ...orderDetailCutJobRefSwaggerSchema, nullable: true },
+    bazisCutSets: { type: 'array', items: orderDetailBazisCutSetRefSwaggerSchema },
   },
 } as const;
 

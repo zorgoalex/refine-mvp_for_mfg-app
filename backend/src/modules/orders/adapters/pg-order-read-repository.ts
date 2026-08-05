@@ -165,6 +165,7 @@ interface OrderDetailRow extends QueryResultRow {
   bath_cut_job_param_profile_id: string | number | null;
   bath_cut_job_profile_name: string | null;
   bath_cut_job_profile_is_active: boolean | null;
+  bazis_cut_sets: unknown;
 }
 
 interface OrderPaymentRow extends QueryResultRow {
@@ -688,7 +689,17 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
              bath.name AS bath_cut_job_name,
              bath.param_profile_id AS bath_cut_job_param_profile_id,
              bath.profile_name AS bath_cut_job_profile_name,
-             bath.profile_is_active AS bath_cut_job_profile_is_active
+             bath.profile_is_active AS bath_cut_job_profile_is_active,
+             (SELECT jsonb_agg(jsonb_build_object(
+                'bazisCutSetId', refs.bazis_cut_set_id,
+                'name', refs.name
+              ) ORDER BY refs.bazis_cut_set_id)
+              FROM (
+                SELECT DISTINCT s.bazis_cut_set_id, s.name
+                FROM bazis_cut_set_details d
+                JOIN bazis_cut_sets s ON s.bazis_cut_set_id = d.bazis_cut_set_id
+                WHERE d.source_order_detail_id = od.detail_id
+              ) refs) AS bazis_cut_sets
       FROM order_details od
       ${detailMaterialJoin}
       ${detailSheetJoin}
@@ -1336,7 +1347,24 @@ function mapDetail(row: OrderDetailRow) {
     refKey1c: row.ref_key_1c,
     cutJob: mapDetailCutJob(row, 'cut'),
     bathCutJob: mapDetailCutJob(row, 'bath'),
+    bazisCutSets: mapBazisCutSetRefs(row.bazis_cut_sets),
   };
+}
+
+function mapBazisCutSetRefs(value: unknown): Array<{ bazisCutSetId: number; name: string }> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((entry) => {
+      if (entry == null || typeof entry !== 'object') return [];
+      const candidate = entry as Record<string, unknown>;
+      const bazisCutSetId = Number(candidate.bazisCutSetId);
+      if (!Number.isInteger(bazisCutSetId) || bazisCutSetId <= 0) return [];
+      return [{
+        bazisCutSetId,
+        name: typeof candidate.name === 'string' ? candidate.name : '',
+      }];
+    })
+    .sort((left, right) => left.bazisCutSetId - right.bazisCutSetId);
 }
 
 function mapDetailCutJob(row: OrderDetailRow, kind: 'cut' | 'bath') {

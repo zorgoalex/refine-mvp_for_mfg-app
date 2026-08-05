@@ -181,6 +181,7 @@ interface TreeNodeRow {
   edge_count: number | string;
   has_drilling: boolean;
   linked_orders: Array<{ orderId: number | string; orderName: string | null; orderDeleted?: boolean | null }> | null;
+  linked_bazis_cut_sets: Array<{ bazisCutSetId: number | string; name: string | null }> | null;
   children_count: number | string;
 }
 
@@ -1455,6 +1456,16 @@ export class PgBazisRepository implements BazisRepositoryPort {
               JOIN orders o ON o.order_id = m.order_id
               WHERE m.node_id = n.bazis_node_id
                 AND m.order_detail_id IS NOT NULL) AS linked_orders,
+             (SELECT jsonb_agg(jsonb_build_object(
+                'bazisCutSetId', refs.bazis_cut_set_id,
+                'name', refs.name
+              ) ORDER BY refs.bazis_cut_set_id)
+              FROM (
+                SELECT DISTINCT s.bazis_cut_set_id, s.name
+                FROM bazis_cut_set_details d
+                JOIN bazis_cut_sets s ON s.bazis_cut_set_id = d.bazis_cut_set_id
+                WHERE d.source_bazis_node_id = n.bazis_node_id
+              ) refs) AS linked_bazis_cut_sets,
              (SELECT count(*) FROM bazis_nodes c WHERE c.parent_node_id = n.bazis_node_id)::int AS children_count
       FROM bazis_nodes n
       WHERE n.revision_id = $1 AND n.parent_node_id IS NOT DISTINCT FROM $2
@@ -1495,6 +1506,16 @@ export class PgBazisRepository implements BazisRepositoryPort {
               JOIN orders o ON o.order_id = m.order_id
               WHERE m.node_id = n.bazis_node_id
                 AND m.order_detail_id IS NOT NULL) AS linked_orders,
+             (SELECT jsonb_agg(jsonb_build_object(
+                'bazisCutSetId', refs.bazis_cut_set_id,
+                'name', refs.name
+              ) ORDER BY refs.bazis_cut_set_id)
+              FROM (
+                SELECT DISTINCT s.bazis_cut_set_id, s.name
+                FROM bazis_cut_set_details d
+                JOIN bazis_cut_sets s ON s.bazis_cut_set_id = d.bazis_cut_set_id
+                WHERE d.source_bazis_node_id = n.bazis_node_id
+              ) refs) AS linked_bazis_cut_sets,
              (SELECT count(*) FROM bazis_nodes c
               WHERE c.parent_node_id = n.bazis_node_id
                 AND c.revision_id = n.revision_id)::int AS children_count
@@ -3377,6 +3398,12 @@ function mapTreeNodeRow(row: TreeNodeRow): BazisTreeNodeDto {
     orderIds: (row.linked_orders ?? [])
       .map((entry) => Number(entry.orderId))
       .sort((left, right) => left - right),
+    bazisCutSets: (row.linked_bazis_cut_sets ?? [])
+      .map((entry) => ({
+        bazisCutSetId: Number(entry.bazisCutSetId),
+        name: entry.name ?? '',
+      }))
+      .sort((left, right) => left.bazisCutSetId - right.bazisCutSetId),
   };
 }
 

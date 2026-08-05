@@ -127,6 +127,20 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
     expect((values.details[0] as any).cut_job?.cutJobId).toBe(41);
     expect((values.details[0] as any).bath_cut_job?.name).toBe('Ванна заказа');
   });
+
+  it('carries linked Basis-cut sets onto legacy details for the view card', () => {
+    const dtoWithBazisCutSets: OrderDto = {
+      ...dto,
+      details: [{
+        ...(dto.details[0] as any),
+        bazisCutSets: [{ bazisCutSetId: 8, name: 'БР-8' }],
+      } as any],
+    } as any;
+    const values = mapOrderDtoToFormValues(dtoWithBazisCutSets);
+    expect((values.details[0] as any).bazis_cut_sets).toEqual([
+      { bazisCutSetId: 8, name: 'БР-8' },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
