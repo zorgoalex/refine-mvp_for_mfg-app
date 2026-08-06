@@ -11,6 +11,7 @@ export interface WorkflowMockApiOptions {
     runtimeConfig?: false | Record<string, boolean>;
     themeMode?: 'light' | 'dark';
     uiVariant?: 'legacy' | 'evolution' | 'line' | 'air';
+    tabletMode?: boolean;
 }
 
 const AUTH_TOKEN =
@@ -431,6 +432,7 @@ export async function setupWorkflowMockApi(
     db = createWorkflowMockDb(),
     options: WorkflowMockApiOptions = {},
 ): Promise<WorkflowMockDb> {
+    let tabletMode = options.tabletMode ?? false;
     await page.addInitScript((token) => {
         localStorage.clear();
         localStorage.setItem('access_token', token);
@@ -562,6 +564,7 @@ export async function setupWorkflowMockApi(
                 return JSON.parse(route.request().postData() || '{}') as {
                     themeMode?: unknown;
                     uiVariant?: unknown;
+                    tabletMode?: unknown;
                 };
             } catch {
                 return {};
@@ -573,6 +576,9 @@ export async function setupWorkflowMockApi(
         const uiVariant = isMockUiVariant(requestBody.uiVariant)
             ? requestBody.uiVariant
             : options.uiVariant;
+        if (typeof requestBody.tabletMode === 'boolean') {
+            tabletMode = requestBody.tabletMode;
+        }
 
         await route.fulfill({
             status: 200,
@@ -580,6 +586,7 @@ export async function setupWorkflowMockApi(
             body: JSON.stringify({
                 preferences: {
                     themeMode,
+                    tabletMode,
                     ...(uiVariant ? { uiVariant } : {}),
                 },
             }),

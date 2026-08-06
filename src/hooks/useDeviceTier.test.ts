@@ -8,6 +8,7 @@ import {
   TABLET_LANDSCAPE_MEDIA_QUERY,
   TABLET_MEDIA_QUERY,
   COARSE_POINTER_QUERY,
+  LANDSCAPE_MEDIA_QUERY,
   readDeviceTier,
 } from './useDeviceTier';
 
@@ -15,6 +16,10 @@ describe('tierFromMatches', () => {
   it('phone wins over tablet', () => {
     expect(tierFromMatches(true, false, false, false)).toBe('phone');
     expect(tierFromMatches(true, true, true, true)).toBe('phone');
+  });
+  it('forced tablet mode wins over physical phone and desktop matches', () => {
+    expect(tierFromMatches(true, true, false, false, true, false)).toBe('tablet');
+    expect(tierFromMatches(false, false, false, false, true, true)).toBe('tablet-landscape');
   });
   it('keeps wide short coarse devices in the phone tier', () => {
     expect(tierFromMatches(false, true, true, false)).toBe('phone');
@@ -42,6 +47,7 @@ describe('media query constants', () => {
     expect(TABLET_LANDSCAPE_MEDIA_QUERY).toContain('(any-pointer: coarse)');
     expect(TABLET_LANDSCAPE_MEDIA_QUERY).toContain('(orientation: landscape)');
     expect(COARSE_POINTER_QUERY).toBe('(pointer: coarse), (any-pointer: coarse)');
+    expect(LANDSCAPE_MEDIA_QUERY).toBe('(orientation: landscape)');
   });
 
   it('detects a hybrid tablet with a fine primary pointer and coarse touch input', () => {
@@ -49,6 +55,13 @@ describe('media query constants', () => {
       matches: query === TABLET_LANDSCAPE_MEDIA_QUERY,
     })) as typeof globalThis.matchMedia;
     expect(readDeviceTier(matchMedia)).toBe('tablet-landscape');
+  });
+
+  it('forces a desktop viewport into the orientation-matching tablet tier', () => {
+    const matchMedia = ((query: string) => ({
+      matches: query === LANDSCAPE_MEDIA_QUERY,
+    })) as typeof globalThis.matchMedia;
+    expect(readDeviceTier(matchMedia, true)).toBe('tablet-landscape');
   });
 });
 

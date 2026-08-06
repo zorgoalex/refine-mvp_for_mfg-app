@@ -572,6 +572,8 @@
 /* Boards: use remaining tablet content budget and internal column scroll. */
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-modern-route="status-board"] {
   overflow: hidden;
+  padding: 0;
+  scrollbar-gutter: auto;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-modern-route="status-board"] .evolution-screen-frame,
@@ -585,6 +587,11 @@
   min-height: 0;
   padding: 0;
   gap: 8px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page:not(.status-board-page--cnc) {
+  max-height: 100%;
+  gap: 0;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page__header {
@@ -623,15 +630,18 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-scrollbar {
-  flex: 0 0 16px;
+  display: none;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-viewport {
   min-height: 0;
   flex: 1 1 0;
-  scroll-snap-type: x mandatory;
+  height: calc(100% - var(--tablet-sticky-row));
+  scroll-snap-type: x proximity;
   overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y;
   -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: auto;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column {
@@ -639,6 +649,11 @@
   min-width: 288px;
   height: 100%;
   scroll-snap-align: start;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column {
+  width: 288px !important;
+  min-width: 288px !important;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column__header {
@@ -651,7 +666,9 @@
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column__cards {
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-x: auto;
   overscroll-behavior-y: contain;
+  touch-action: pan-x pan-y;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
@@ -1009,9 +1026,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column {
-    width: 276px;
-    min-width: 276px;
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column,
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column {
+    width: 276px !important;
+    min-width: 276px !important;
   }
 
   :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__identity-copy,
@@ -1054,9 +1072,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column {
-    width: calc(100vw - 32px);
-    min-width: calc(100vw - 32px);
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column,
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column {
+    width: calc(100vw - 32px) !important;
+    min-width: calc(100vw - 32px) !important;
   }
 
   :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content:where(

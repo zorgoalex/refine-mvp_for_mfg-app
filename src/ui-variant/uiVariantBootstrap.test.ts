@@ -67,6 +67,34 @@ describe('UI variant bootstrap', () => {
     )).resolves.toBe('legacy');
   });
 
+  it('forces Evolution from the confirmed cross-device tablet preference', async () => {
+    const setTabletModeCached = vi.fn();
+    const dependencies = makeDependencies({
+      getPreferences: async () => ({
+        preferences: { uiVariant: 'legacy', tabletMode: true },
+      }),
+      setTabletModeCached,
+    });
+
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      dependencies,
+    )).resolves.toBe('evolution');
+    expect(setTabletModeCached).toHaveBeenCalledWith('7', true);
+  });
+
+  it('uses the same-user tablet cache during a mixed frontend/backend rollout', async () => {
+    const dependencies = makeDependencies({
+      getPreferences: async () => ({ preferences: { uiVariant: 'legacy' } }),
+      getTabletModeCached: () => true,
+    });
+
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      dependencies,
+    )).resolves.toBe('evolution');
+  });
+
   it('uses only the same-user confirmed cache when preferences are unavailable', async () => {
     const dependencies = makeDependencies({
       getPreferences: async () => {
@@ -133,6 +161,8 @@ function makeDependencies(
     getPreferences: async () => ({ preferences: { uiVariant: 'legacy' } }),
     getCached: () => null,
     setCached: () => undefined,
+    getTabletModeCached: () => null,
+    setTabletModeCached: () => undefined,
     timeoutMs: 50,
     ...overrides,
   };

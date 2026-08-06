@@ -41,6 +41,8 @@ export interface UserPreferencesDto {
   uiSize: UiSize;
   /** Optional only while frontend can meet an older backend during rollout. */
   uiVariant?: UiVariant;
+  /** Optional only while frontend can meet an older backend during rollout. */
+  tabletMode?: boolean;
   orderDetailColumns: Record<string, OrderDetailColumnPreference>;
   /** Optional during mixed frontend/backend rollout. */
   recentReferences?: RecentReferences;
@@ -68,6 +70,7 @@ export interface UpdateUserPreferencesRequest {
   themeMode?: ThemeMode;
   uiSize?: UiSize;
   uiVariant?: UiVariant;
+  tabletMode?: boolean;
   orderDetailColumns?: Record<string, OrderDetailColumnPreference>;
   pageSizePreferences?: PageSizePreferences;
   sidebarMenuOrder?: SidebarMenuOrderPreference;

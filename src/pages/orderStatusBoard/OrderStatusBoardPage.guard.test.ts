@@ -84,6 +84,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toContain('.status-board-toolbar__tablet-board-switch .ant-segmented-item');
     expect(tabletCss).toContain('.status-board-toolbar__cnc-card-mode-text');
     expect(tabletCss).toContain('scrollbar-width: none');
+    expect(tabletCss).toContain('height: calc(100% - var(--tablet-sticky-row))');
+    expect(tabletCss).toMatch(/\.evolution-shell--tablet \.status-board-scrollbar \{\s*display: none;/);
+    expect(tabletCss).toContain('overscroll-behavior-x: auto');
+    expect(tabletCss).toContain('touch-action: pan-x pan-y');
+    expect(tabletCss).toContain('scroll-snap-type: x proximity');
   });
 
   it('keeps the upper scrollbar synchronized with the board viewport', () => {

@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getStoredThemeMode,
+  getStoredTabletMode,
   isThemeMode,
+  setStoredTabletMode,
   setStoredThemeMode,
+  tabletModeStorageKey,
   themeModeStorageKey,
 } from './themeStorage';
 
@@ -17,6 +20,16 @@ describe('themeStorage', () => {
 
   it('uses user-scoped keys', () => {
     expect(themeModeStorageKey('7')).toBe('erp.themeMode.7');
+    expect(tabletModeStorageKey('7')).toBe('erp.tabletMode.7');
+  });
+
+  it('reads and writes the tablet override independently for each user', () => {
+    setStoredTabletMode('7', true);
+    setStoredTabletMode('8', false);
+
+    expect(getStoredTabletMode('7')).toBe(true);
+    expect(getStoredTabletMode('8')).toBe(false);
+    expect(getStoredTabletMode('9')).toBeNull();
   });
 
   it('reads and writes valid theme modes per user', () => {

@@ -12868,6 +12868,7 @@ components:
         - themeMode
         - uiSize
         - uiVariant
+        - tabletMode
         - orderDetailColumns
         - recentReferences
         - pageSizePreferences
@@ -12882,6 +12883,9 @@ components:
         uiVariant:
           type: string
           enum: [legacy, evolution, line, air]
+        tabletMode:
+          type: boolean
+          description: Force the tablet layout independently of physical device or viewport size.
         orderDetailColumns:
           type: object
           additionalProperties:
@@ -12917,6 +12921,8 @@ components:
         uiVariant:
           type: string
           enum: [legacy, evolution, line, air]
+        tabletMode:
+          type: boolean
         orderDetailColumns:
           type: object
           additionalProperties:

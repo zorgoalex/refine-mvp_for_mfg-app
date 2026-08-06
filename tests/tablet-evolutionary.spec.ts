@@ -287,6 +287,12 @@ test.describe('Evolutionary tablet UI', () => {
         await expect(page.getByLabel('Переключатель досок')).toBeVisible();
         await expect(page.locator('.status-board-toolbar__tablet-refresh')).toBeVisible();
         await expectSingleLineBoardToolbar(page);
+        await expectFullHeightBoardViewport(page);
+        await touchPanBoardFromMiddle(context, page);
+        await page.locator('.status-board-viewport').evaluate((element) => {
+            element.scrollLeft = 0;
+            element.dispatchEvent(new Event('scroll', { bubbles: true }));
+        });
         await expect(page.locator('.status-board-toolbar__label').first()).toBeHidden();
         await captureTabletState(page, testInfo, '03a-order-board-compact-header');
         await touchDragCard(context, page, 'Tablet QA 015', 'order-2');
@@ -627,11 +633,17 @@ function buildBoardResponse(board: 'order' | 'production', orderStatusId: number
         { id: 1, code: 'new', name: 'Новый', color: '#1677ff' },
         { id: 2, code: 'approved', name: 'Согласован', color: '#13a8a8' },
         { id: 3, code: 'issued', name: 'Выдан', color: '#52c41a' },
+        { id: 4, code: 'assembled', name: 'Собран', color: '#722ed1' },
+        { id: 5, code: 'delivery', name: 'Доставка', color: '#eb2f96' },
+        { id: 6, code: 'closed', name: 'Закрыт', color: '#595959' },
     ];
     const productionStatuses = [
         { id: 1, code: 'new', name: 'Новый', color: '#1677ff' },
         { id: 2, code: 'in_progress', name: 'В работе', color: '#fa8c16' },
         { id: 3, code: 'done', name: 'Готово', color: '#52c41a' },
+        { id: 4, code: 'packing', name: 'Упаковка', color: '#722ed1' },
+        { id: 5, code: 'warehouse', name: 'Склад', color: '#13c2c2' },
+        { id: 6, code: 'closed', name: 'Закрыто', color: '#595959' },
     ];
     const statuses = board === 'order' ? orderStatuses : productionStatuses;
     const currentId = board === 'order' ? orderStatusId : productionStatusId;
@@ -704,6 +716,65 @@ async function touchDragCard(context: BrowserContext, page: Page, orderNumber: s
     await expect(target).toHaveAttribute('data-touch-drop-over', 'true');
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await cdp.detach();
+}
+
+async function touchPanBoardFromMiddle(context: BrowserContext, page: Page) {
+    const viewport = page.locator('.status-board-viewport');
+    const viewportBox = await viewport.boundingBox();
+    expect(viewportBox).not.toBeNull();
+    const metrics = await viewport.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        columnsWidth: element.querySelector<HTMLElement>('.status-board-columns')?.scrollWidth ?? 0,
+        columnWidths: Array.from(element.querySelectorAll<HTMLElement>('.status-board-column'))
+            .map((column) => Math.round(column.getBoundingClientRect().width)),
+    }));
+    expect(metrics.scrollWidth, JSON.stringify(metrics)).toBeGreaterThan(metrics.clientWidth);
+    const start = {
+        x: Math.min(viewportBox!.x + viewportBox!.width - 120, viewportBox!.x + 700),
+        y: viewportBox!.y + viewportBox!.height * 0.62,
+    };
+    const endX = viewportBox!.x + 120;
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ ...start, id: 2, radiusX: 8, radiusY: 8, force: 1 }],
+    });
+    for (let step = 1; step <= 6; step += 1) {
+        await cdp.send('Input.dispatchTouchEvent', {
+            type: 'touchMove',
+            touchPoints: [{
+                x: start.x + ((endX - start.x) * step) / 6,
+                y: start.y,
+                id: 2,
+                radiusX: 8,
+                radiusY: 8,
+                force: 1,
+            }],
+        });
+        await page.waitForTimeout(20);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+    await expect.poll(() => viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(120);
+}
+
+async function expectFullHeightBoardViewport(page: Page) {
+    const dimensions = await page.locator('.status-board-viewport').evaluate((element) => {
+        const viewport = element.getBoundingClientRect();
+        const toolbar = document.querySelector<HTMLElement>('.status-board-toolbar');
+        const toolbarBox = toolbar?.getBoundingClientRect();
+        return {
+            viewportHeight: viewport.height,
+            viewportBottom: viewport.bottom,
+            toolbarHeight: toolbarBox?.height ?? 0,
+            windowHeight: window.innerHeight,
+        };
+    });
+    expect(Math.abs(dimensions.viewportBottom - dimensions.windowHeight)).toBeLessThanOrEqual(1);
+    expect(Math.abs(
+        dimensions.viewportHeight - (dimensions.windowHeight - dimensions.toolbarHeight),
+    )).toBeLessThanOrEqual(1);
 }
 
 async function expectTabletShell(page: Page, family: string) {
