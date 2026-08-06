@@ -81,6 +81,7 @@ import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/Op
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
+import { BasisProjectLink } from "./components/BasisProjectLink";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -1109,6 +1110,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const bazisCutVisible = featureFlags.bazisCut;
   const bazisCutManage = can('cut.manage');
   const bazisCutLinkEnabled = bazisCutVisible && can('cut.view');
+  const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
   const detailSelectionEnabled = cutEnabled || bazisCutVisible;
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
@@ -1836,7 +1838,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       dataIndex: 'basis_project',
       key: 'basis_project',
       width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
-      render: (value) => value || '—',
+      render: (value, detail) => (
+        <BasisProjectLink
+          value={value}
+          bazisProjectId={detail.bazis_project_id}
+          enabled={bazisProjectLinkEnabled}
+          fallback="—"
+        />
+      ),
     },
     {
       title: 'Базис-раскрой',

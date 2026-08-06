@@ -141,6 +141,19 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
       { bazisCutSetId: 8, name: 'БР-8' },
     ]);
   });
+
+  it('carries linked Basis-project id onto legacy details for view and edit links', () => {
+    const dtoWithBazisProject: OrderDto = {
+      ...dto,
+      details: [{
+        ...(dto.details[0] as any),
+        basisProject: '1491',
+        bazisProjectId: 41,
+      } as any],
+    } as any;
+    const values = mapOrderDtoToFormValues(dtoWithBazisProject);
+    expect((values.details[0] as any).bazis_project_id).toBe(41);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -260,6 +260,7 @@ describe('PgOrderReadRepository', () => {
           id: 200,
           detailNumber: 1,
           detailCost: 120,
+          bazisProjectId: 41,
           cutJob: { cutJobId: 41, resultNo: 2, cutNumber: '41-2', name: 'Раскрой заказа' },
           bathCutJob: { cutJobId: 42, resultNo: 3, cutNumber: '42-3', name: 'Ванна заказа' },
           bazisCutSets: [
@@ -305,6 +306,21 @@ describe('PgOrderReadRepository', () => {
     expect(detailQuery).toContain('FROM bazis_cut_set_details d');
     expect(detailQuery).toContain('d.source_order_detail_id = od.detail_id');
     expect(detailQuery).toContain('ORDER BY refs.bazis_cut_set_id');
+  });
+
+  it('resolves the source Basis-project id from the imported detail mapping', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await repository.getOrderById({
+      currentUser: currentUser('42'),
+      orderId: 100,
+    });
+
+    const detailQuery = database.queries.find((query) => query.text.includes('FROM order_details od'))?.text ?? '';
+    expect(detailQuery).toContain('FROM bazis_node_order_detail_map map');
+    expect(detailQuery).toContain('map.order_detail_id = od.detail_id');
+    expect(detailQuery).toContain('revision.bazis_project_id');
   });
 
   it('keeps the default getOrderById SQL free of trash-only select and join fragments', async () => {
@@ -715,6 +731,8 @@ function createDatabase() {
               production_status_id: null,
               joint_order_id: null,
               note: null,
+              basis_project: '1491',
+              bazis_project_id: 41,
               link_cutting_file: null,
               link_cutting_image_file: null,
               link_cad_file: null,

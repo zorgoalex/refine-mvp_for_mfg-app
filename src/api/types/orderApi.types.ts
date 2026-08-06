@@ -577,6 +577,7 @@ export interface OrderDetailDto {
   jointOrderId?: number | null;
   note?: string | null;
   basisProject?: string | null;
+  bazisProjectId: number | null;
   basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;

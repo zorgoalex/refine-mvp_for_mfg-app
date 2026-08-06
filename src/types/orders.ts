@@ -124,6 +124,7 @@ export interface OrderDetail {
   // Additional
   note?: string | null;
   basis_project?: string | null;
+  bazis_project_id?: number | null;
   basis_product?: string | null;
   basis_data?: string | null;
   basis_designation?: string | null;

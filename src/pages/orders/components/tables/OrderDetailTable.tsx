@@ -54,6 +54,7 @@ import {
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
+import { BasisProjectLink } from '../BasisProjectLink';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -509,6 +510,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
   const bazisCutLinkEnabled = featureFlags.bazisCut && can('cut.view');
+  const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
 
   // SP3: sheet picker gating (backend write + sheet_materials.view) + order-era
   // eligibility (create OR loaded order's sheet_eligible !== false).
@@ -1693,7 +1695,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{getDisplayedField(d, 'basis_project') || ''}</span>
+          <BasisProjectLink
+            value={getDisplayedField(d, 'basis_project')}
+            bazisProjectId={getDisplayedField(d, 'bazis_project_id')}
+            enabled={bazisProjectLinkEnabled}
+            style={{ fontSize: '90%' }}
+          />
         );
       },
     },

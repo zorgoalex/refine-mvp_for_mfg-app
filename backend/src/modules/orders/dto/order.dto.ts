@@ -172,6 +172,7 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
 export type OrderDetailDto = CalculatedOrderDetailDto & {
   id: number;
   orderId: number;
+  bazisProjectId: number | null;
   // SP3: server-resolved COALESCE(sheet,material) display name (no sheet_materials.view needed).
   materialName?: string | null;
   cutJob?: OrderDetailCutJobRefDto | null;

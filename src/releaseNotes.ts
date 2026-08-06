@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "Переход из заказа в Базис-проект",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Номера в колонке «Базис проект» на формах просмотра и редактирования заказа стали ссылками на связанный Базис-проект.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "Базис-проекты: одно изделие в сводке",
     services: ["ERP"],
     repositories: ["repo_erp"],

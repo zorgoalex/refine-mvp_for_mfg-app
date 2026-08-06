@@ -266,6 +266,14 @@ describe('orders controller Swagger schemas — Variant B shape (generated-doc a
     });
   });
 
+  it('orderDetailResponseSwaggerSchema documents source Basis-project id', () => {
+    expect(orderDetailResponseSwaggerSchema.required).toContain('bazisProjectId');
+    expect(orderDetailResponseSwaggerSchema.properties.bazisProjectId).toMatchObject({
+      type: 'integer',
+      nullable: true,
+    });
+  });
+
   it('orderDetailResponseSwaggerSchema: materialId is NOT in required (Variant B: always null)', () => {
     expect(orderDetailResponseSwaggerSchema.required).not.toContain('materialId');
   });

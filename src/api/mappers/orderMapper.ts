@@ -522,6 +522,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     production_status_id: detail.productionStatusId ?? null,
     joint_order_id: detail.jointOrderId ?? null,
     basis_project: detail.basisProject ?? null,
+    bazis_project_id: detail.bazisProjectId ?? null,
     basis_product: detail.basisProduct ?? null,
     basis_data: detail.basisData ?? null,
     basis_designation: detail.basisDesignation ?? null,

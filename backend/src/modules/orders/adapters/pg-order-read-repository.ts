@@ -147,6 +147,7 @@ interface OrderDetailRow extends QueryResultRow {
   joint_order_id: string | number | null;
   note: string | null;
   basis_project: string | null;
+  bazis_project_id: string | number | null;
   basis_product: string | null;
   basis_data: string | null;
   basis_designation: string | null;
@@ -736,6 +737,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
              bath.param_profile_id AS bath_cut_job_param_profile_id,
              bath.profile_name AS bath_cut_job_profile_name,
              bath.profile_is_active AS bath_cut_job_profile_is_active,
+             (SELECT revision.bazis_project_id
+              FROM bazis_node_order_detail_map map
+              JOIN bazis_nodes node ON node.bazis_node_id = map.node_id
+              JOIN bazis_project_revisions revision ON revision.bazis_revision_id = node.revision_id
+              WHERE map.order_id = od.order_id
+                AND map.order_detail_id = od.detail_id
+              ORDER BY map.created_at DESC, map.bazis_node_order_detail_map_id DESC
+              LIMIT 1) AS bazis_project_id,
              (SELECT jsonb_agg(jsonb_build_object(
                 'bazisCutSetId', refs.bazis_cut_set_id,
                 'name', refs.name
@@ -1388,6 +1397,7 @@ function mapDetail(row: OrderDetailRow) {
     jointOrderId: toNullableNumber(row.joint_order_id),
     note: row.note,
     basisProject: row.basis_project,
+    bazisProjectId: toNullableNumber(row.bazis_project_id),
     basisProduct: row.basis_product,
     basisData: row.basis_data,
     basisDesignation: row.basis_designation,
