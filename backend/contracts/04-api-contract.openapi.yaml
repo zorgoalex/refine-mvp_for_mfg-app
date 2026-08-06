@@ -15048,6 +15048,9 @@ components:
         - partsCount
         - totalArea
         - basisProjects
+        - bazisCutNumbers
+        - cutNumbers
+        - bathCutNumbers
         - primaryGroup
         - groups
         - updatedAt
@@ -15130,6 +15133,21 @@ components:
           items:
             type: string
           description: "Unique non-empty detail basis_project values in first-detail order."
+        bazisCutNumbers:
+          type: array
+          items:
+            type: string
+          description: "Canonical Basis-cut numbers (БР-<set id>) containing order details."
+        cutNumbers:
+          type: array
+          items:
+            type: string
+          description: "Current non-vacuum cut result numbers containing order details."
+        bathCutNumbers:
+          type: array
+          items:
+            type: string
+          description: "Current vacuum-table cut result numbers containing order details."
         sheetMaterialTypeIds:
           type: array
           items:

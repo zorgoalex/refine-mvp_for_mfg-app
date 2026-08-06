@@ -711,6 +711,12 @@ export interface OrderListItemDto {
   materialNames?: string[];
   /** Unique non-empty detail basisProject values in first-detail order. */
   basisProjects?: string[];
+  /** Canonical Basis-cut numbers (БР-<set id>) containing order details. */
+  bazisCutNumbers?: string[];
+  /** Current non-vacuum cut result numbers containing order details. */
+  cutNumbers?: string[];
+  /** Current vacuum-table cut result numbers containing order details. */
+  bathCutNumbers?: string[];
   filmNames?: string[];
   /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
   sheetMaterialTypeIds?: number[];

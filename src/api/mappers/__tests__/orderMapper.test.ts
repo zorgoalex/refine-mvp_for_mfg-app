@@ -170,6 +170,18 @@ describe('mapOrderListItemToLegacyRow — header-material fallback (critic R8)',
     expect(row.basis_projects).toEqual(['1491', '1492']);
   });
 
+  it('maps backend production-number aggregates for orders-list columns', () => {
+    const item = makeListItem({
+      bazisCutNumbers: ['БР-8', 'БР-12'],
+      cutNumbers: ['42-3', '51-1'],
+      bathCutNumbers: ['70-2'],
+    });
+    const row = mapOrderListItemToLegacyRow(item);
+    expect(row.bazis_cut_numbers).toEqual(['БР-8', 'БР-12']);
+    expect(row.cut_numbers).toEqual(['42-3', '51-1']);
+    expect(row.bath_cut_numbers).toEqual(['70-2']);
+  });
+
   it('maps backend detail filmNames for the orders list film column', () => {
     const item = makeListItem({
       filmNames: ['Пленка A', 'Пленка B'],

@@ -215,6 +215,20 @@ describe('orders OpenAPI contract', () => {
     expect(orderListItemSection).toContain('- basisProjects');
     expect(orderListItemSection).toContain('basisProjects:');
   });
+
+  it('documents production-number aggregates in the orders list response', () => {
+    const contract = readOpenApiContract();
+    const orderListItemSection = sectionBetween(
+      contract,
+      '    OrderListItemDto:',
+      '    OrderResponse:',
+    );
+
+    for (const field of ['bazisCutNumbers', 'cutNumbers', 'bathCutNumbers']) {
+      expect(orderListItemSection).toContain(`- ${field}`);
+      expect(orderListItemSection).toContain(`${field}:`);
+    }
+  });
 });
 
 // Generated Swagger document tests — asserts the CONTROLLER DECORATOR schemas (not only the

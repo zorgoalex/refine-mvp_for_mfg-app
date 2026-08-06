@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "Номера раскроев в списке заказов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке заказов появились колонки «Базис-раскрой», «Раскрой» и «Расчет ванны» со всеми уникальными номерами наборов и текущих расчетов, в которые вошли детали заказа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "Позиции деталей в Базис-раскрое",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

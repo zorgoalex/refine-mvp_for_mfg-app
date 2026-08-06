@@ -98,6 +98,7 @@ import {
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
 import { resolveOrderListBasisProjectValues } from "./orderListBasisProjects";
+import { normalizeOrderListProductionNumbers } from "./orderListProductionNumbers";
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -105,6 +106,9 @@ const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'order_name', label: 'Заказ', lockVisible: true },
   ...(featureFlags.projects ? [{ key: 'project_code', label: '№ проекта' }] : []),
   { key: 'doweling_order_name', label: 'Базис-проект' },
+  { key: 'bazis_cut_numbers', label: 'Базис-раскрой' },
+  { key: 'cut_numbers', label: 'Раскрой' },
+  { key: 'bath_cut_numbers', label: 'Расчет ванны' },
   { key: 'groups', label: 'Группа' },
   { key: 'order_date', label: 'Дата заказа' },
   { key: 'client_name', label: 'Клиент' },
@@ -1258,6 +1262,29 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         ) : "—";
       },
     },
+    ...[
+      { dataIndex: "bazis_cut_numbers", title: "Базис-раскрой", width: 112 },
+      { dataIndex: "cut_numbers", title: "Раскрой", width: 96 },
+      { dataIndex: "bath_cut_numbers", title: "Расчет ванны", width: 108 },
+    ].map(({ dataIndex, title, width }) => ({
+      dataIndex,
+      key: dataIndex,
+      title,
+      width,
+      className: "orders-col orders-col--production-numbers",
+      render: (value: unknown) => {
+        const numbers = normalizeOrderListProductionNumbers(value);
+        if (numbers.length === 0) return "—";
+
+        return (
+          <span className="orders-production-number-list" title={numbers.join(", ")}>
+            {numbers.map((number, index) => (
+              <span key={number}>{number}{index < numbers.length - 1 ? "," : ""}</span>
+            ))}
+          </span>
+        );
+      },
+    })),
     ...(useBackendOrdersRead && featureFlags.useBackendGroups
       ? [{
           dataIndex: "groups",

@@ -104,6 +104,9 @@ interface OrderHeaderRow extends QueryResultRow {
   material_ids: unknown[] | null;
   material_names: unknown[] | null;
   basis_projects: unknown[] | null;
+  bazis_cut_numbers: unknown[] | null;
+  cut_numbers: unknown[] | null;
+  bath_cut_numbers: unknown[] | null;
   film_names: unknown[] | null;
   sheet_material_type_ids: unknown[] | null;
   material_id: string | number | null;
@@ -434,6 +437,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         material_projection.material_ids,
         material_projection.material_names,
         basis_projection.basis_projects,
+        bazis_cut_projection.bazis_cut_numbers,
+        cut_projection.cut_numbers,
+        cut_projection.bath_cut_numbers,
         film_projection.film_names,
         material_projection.sheet_material_type_ids,
         milling_projection.milling_type_id,
@@ -477,6 +483,46 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           ORDER BY LOWER(BTRIM(od.basis_project)), od.detail_number, od.detail_id
         ) projects
       ) basis_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT ARRAY_AGG('БР-' || sets.bazis_cut_set_id::text ORDER BY sets.bazis_cut_set_id) AS bazis_cut_numbers
+        FROM (
+          SELECT DISTINCT detail.bazis_cut_set_id
+          FROM bazis_cut_set_details detail
+          WHERE detail.source_order_id = o.order_id
+        ) sets
+      ) bazis_cut_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          ARRAY_AGG(cuts.cut_number ORDER BY cuts.cut_job_id)
+            FILTER (WHERE cuts.is_vacuum = false) AS cut_numbers,
+          ARRAY_AGG(cuts.cut_number ORDER BY cuts.cut_job_id)
+            FILTER (WHERE cuts.is_vacuum = true) AS bath_cut_numbers
+        FROM (
+          SELECT DISTINCT
+            cj.cut_job_id,
+            cr.result_no,
+            cj.cut_job_id::text || '-' || cr.result_no::text AS cut_number,
+            COALESCE(
+              cj.last_calc_params->>'layout_mode',
+              cpp.params->>'layout_mode',
+              cj.params->>'layout_mode'
+            ) = 'vacuum_table' AS is_vacuum
+          FROM cut_job_item cji
+          JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+          JOIN cut_result cr
+            ON cr.cut_result_id = cj.current_cut_result_id
+           AND cr.cut_job_id = cj.cut_job_id
+          LEFT JOIN cut_result_archive_state archived
+            ON archived.cut_job_id = cr.cut_job_id
+           AND archived.result_no = cr.result_no
+          LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
+          WHERE cji.order_id = o.order_id
+            AND cji.is_active = true
+            AND cj.status = 'ready'
+            AND cj.last_calc_basis IS NOT NULL
+            AND archived.cut_job_id IS NULL
+        ) cuts
+      ) cut_projection ON true
       LEFT JOIN LATERAL (
         SELECT ARRAY_AGG(films.film_name ORDER BY films.first_detail_number, films.first_detail_id) AS film_names
         FROM (
@@ -1286,6 +1332,9 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     materialIds: toNumberArray(row.material_ids),
     materialNames: toStringArray(row.material_names),
     basisProjects: toStringArray(row.basis_projects),
+    bazisCutNumbers: toStringArray(row.bazis_cut_numbers),
+    cutNumbers: toStringArray(row.cut_numbers),
+    bathCutNumbers: toStringArray(row.bath_cut_numbers),
     filmNames: toStringArray(row.film_names),
     sheetMaterialTypeIds: toNumberArray(row.sheet_material_type_ids),
     headerMaterialName: row.header_material_name ?? null,

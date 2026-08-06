@@ -610,7 +610,7 @@ const orderResponseSwaggerSchema = {
 
 const orderListItemSwaggerSchema = {
   type: 'object',
-  required: ['orderId', 'orderName', 'projectId', 'projectCode', 'fullNumber', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'basisProjects', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'primaryGroup', 'groups', 'createdBy', 'editedBy', 'updatedAt', 'version'],
+  required: ['orderId', 'orderName', 'projectId', 'projectCode', 'fullNumber', 'clientId', 'clientName', 'orderDate', 'plannedCompletionDate', 'completionDate', 'issueDate', 'paymentDate', 'orderStatusId', 'orderStatusName', 'paymentStatusId', 'paymentStatusName', 'productionStatusId', 'productionStatusName', 'priority', 'totalAmount', 'discount', 'surcharge', 'finalAmount', 'paidAmount', 'debtAmount', 'partsCount', 'totalArea', 'managerId', 'notes', 'materialIds', 'materialNames', 'basisProjects', 'bazisCutNumbers', 'cutNumbers', 'bathCutNumbers', 'millingTypeId', 'millingTypeName', 'dowelingOrderId', 'dowelingOrderName', 'designEngineerId', 'passedProductionStatusCodes', 'primaryGroup', 'groups', 'createdBy', 'editedBy', 'updatedAt', 'version'],
   properties: {
     orderId: { type: 'integer' },
     orderName: { type: 'string' },
@@ -645,6 +645,9 @@ const orderListItemSwaggerSchema = {
     materialIds: { type: 'array', items: { type: 'integer' }, deprecated: true },
     materialNames: { type: 'array', items: { type: 'string' } },
     basisProjects: { type: 'array', items: { type: 'string' } },
+    bazisCutNumbers: { type: 'array', items: { type: 'string' } },
+    cutNumbers: { type: 'array', items: { type: 'string' } },
+    bathCutNumbers: { type: 'array', items: { type: 'string' } },
     sheetMaterialTypeIds: { type: 'array', items: { type: 'integer' } },
     millingTypeId: nullableIntegerSwaggerSchema,
     millingTypeName: nullableStringSwaggerSchema,

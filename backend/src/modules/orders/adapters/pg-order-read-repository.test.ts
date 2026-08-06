@@ -35,6 +35,9 @@ describe('PgOrderReadRepository', () => {
           materialIds: [10, 11],
           materialNames: ['MDF 16', 'MDF 18'],
           basisProjects: ['1491', '1492'],
+          bazisCutNumbers: ['БР-8', 'БР-12'],
+          cutNumbers: ['42-3', '51-1'],
+          bathCutNumbers: ['70-2'],
           filmNames: ['Film A', 'Film B'],
           millingTypeId: 1,
           millingTypeName: 'Modern',
@@ -64,6 +67,15 @@ describe('PgOrderReadRepository', () => {
     expect(listQuery).toContain('FROM order_details od');
     expect(listQuery).toContain('AS basis_projects');
     expect(listQuery).toContain('NULLIF(BTRIM(od.basis_project), \'\') IS NOT NULL');
+    expect(listQuery).toContain('AS bazis_cut_numbers');
+    expect(listQuery).toContain('FROM bazis_cut_set_details detail');
+    expect(listQuery).toContain('detail.source_order_id = o.order_id');
+    expect(listQuery).toContain('AS cut_numbers');
+    expect(listQuery).toContain('AS bath_cut_numbers');
+    expect(listQuery).toContain("cj.status = 'ready'");
+    expect(listQuery).toContain('cj.last_calc_basis IS NOT NULL');
+    expect(listQuery).toContain("= 'vacuum_table' AS is_vacuum");
+    expect(listQuery).toContain('archived.cut_job_id IS NULL');
     expect(listQuery).toContain('FROM order_doweling_links odl');
     expect(listQuery).toContain('FROM production_status_events pse');
     expect(listQuery).toContain('ORDER BY (o.final_amount - o.paid_amount) ASC');
@@ -918,6 +930,9 @@ function orderRow() {
     material_ids: [10, 11],
     material_names: ['MDF 16', 'MDF 18'],
     basis_projects: ['1491', '1492'],
+    bazis_cut_numbers: ['БР-8', 'БР-12'],
+    cut_numbers: ['42-3', '51-1'],
+    bath_cut_numbers: ['70-2'],
     film_names: ['Film A', 'Film B'],
     milling_type_id: 1,
     milling_type_name: 'Modern',
@@ -975,6 +990,9 @@ function mergeBaseDefaultListSql(): string {
     '        material_projection.material_ids,',
     '        material_projection.material_names,',
     '        basis_projection.basis_projects,',
+    '        bazis_cut_projection.bazis_cut_numbers,',
+    '        cut_projection.cut_numbers,',
+    '        cut_projection.bath_cut_numbers,',
     '        film_projection.film_names,',
     '        material_projection.sheet_material_type_ids,',
     '        milling_projection.milling_type_id,',
@@ -1018,6 +1036,46 @@ function mergeBaseDefaultListSql(): string {
     '          ORDER BY LOWER(BTRIM(od.basis_project)), od.detail_number, od.detail_id',
     '        ) projects',
     '      ) basis_projection ON true',
+    '      LEFT JOIN LATERAL (',
+    "        SELECT ARRAY_AGG('БР-' || sets.bazis_cut_set_id::text ORDER BY sets.bazis_cut_set_id) AS bazis_cut_numbers",
+    '        FROM (',
+    '          SELECT DISTINCT detail.bazis_cut_set_id',
+    '          FROM bazis_cut_set_details detail',
+    '          WHERE detail.source_order_id = o.order_id',
+    '        ) sets',
+    '      ) bazis_cut_projection ON true',
+    '      LEFT JOIN LATERAL (',
+    '        SELECT',
+    '          ARRAY_AGG(cuts.cut_number ORDER BY cuts.cut_job_id)',
+    '            FILTER (WHERE cuts.is_vacuum = false) AS cut_numbers,',
+    '          ARRAY_AGG(cuts.cut_number ORDER BY cuts.cut_job_id)',
+    '            FILTER (WHERE cuts.is_vacuum = true) AS bath_cut_numbers',
+    '        FROM (',
+    '          SELECT DISTINCT',
+    '            cj.cut_job_id,',
+    '            cr.result_no,',
+    "            cj.cut_job_id::text || '-' || cr.result_no::text AS cut_number,",
+    '            COALESCE(',
+    "              cj.last_calc_params->>'layout_mode',",
+    "              cpp.params->>'layout_mode',",
+    "              cj.params->>'layout_mode'",
+    "            ) = 'vacuum_table' AS is_vacuum",
+    '          FROM cut_job_item cji',
+    '          JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id',
+    '          JOIN cut_result cr',
+    '            ON cr.cut_result_id = cj.current_cut_result_id',
+    '           AND cr.cut_job_id = cj.cut_job_id',
+    '          LEFT JOIN cut_result_archive_state archived',
+    '            ON archived.cut_job_id = cr.cut_job_id',
+    '           AND archived.result_no = cr.result_no',
+    '          LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id',
+    '          WHERE cji.order_id = o.order_id',
+    '            AND cji.is_active = true',
+    "            AND cj.status = 'ready'",
+    '            AND cj.last_calc_basis IS NOT NULL',
+    '            AND archived.cut_job_id IS NULL',
+    '        ) cuts',
+    '      ) cut_projection ON true',
     '      LEFT JOIN LATERAL (',
     '        SELECT ARRAY_AGG(films.film_name ORDER BY films.first_detail_number, films.first_detail_id) AS film_names',
     '        FROM (',

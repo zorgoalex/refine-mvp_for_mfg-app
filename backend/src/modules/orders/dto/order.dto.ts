@@ -115,6 +115,9 @@ export interface OrderListItemDto {
   materialIds: number[];
   materialNames: string[];
   basisProjects: string[];
+  bazisCutNumbers: string[];
+  cutNumbers: string[];
+  bathCutNumbers: string[];
   filmNames: string[];
   /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
   sheetMaterialTypeIds: number[];
