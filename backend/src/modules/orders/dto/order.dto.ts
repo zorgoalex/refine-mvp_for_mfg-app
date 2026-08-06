@@ -144,7 +144,10 @@ export interface OrderListItemDto {
 export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   orderId: number;
   clientName: string | null;
+  orderStatusName: string;
   paymentStatusId: number;
+  paymentStatusName: string;
+  productionStatusName: string | null;
   totalAmount: number;
   finalAmount: number;
   paidAmount: number;

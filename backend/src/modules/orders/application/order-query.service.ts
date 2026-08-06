@@ -215,6 +215,7 @@ function maskOrderFinancials(
       ...order.header,
       paymentDate: null,
       paymentStatusId: 0,
+      paymentStatusName: '',
       totalAmount: 0,
       discount: 0,
       surcharge: 0,
