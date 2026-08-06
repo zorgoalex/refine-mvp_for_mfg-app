@@ -3,6 +3,7 @@ import { Card, Checkbox, Space, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 import { buildDetailCardModel } from './detailCardModel';
 import type { DetailCardLookups } from './detailCardModel';
+import { BasisProjectLink } from '../components/BasisProjectLink';
 
 export const DetailCardList: React.FC<{
   rows: readonly Record<string, unknown>[];
@@ -53,6 +54,12 @@ export const DetailCardList: React.FC<{
               return [{ bazisProjectId, bazisRevisionId, revisionNo, name: typeof ref.name === 'string' ? ref.name : '' }];
             })
           : [];
+        const primaryBazisProject = bazisProjects[0];
+        const basisProjectValue = row.basis_project ?? row.basisProject ?? primaryBazisProject?.name;
+        const bazisProjectId = row.bazis_project_id ?? row.bazisProjectId ?? primaryBazisProject?.bazisProjectId;
+        const hasBasisProjectValue =
+          (typeof basisProjectValue === 'string' || typeof basisProjectValue === 'number') &&
+          String(basisProjectValue).trim().length > 0;
         return (
           <Card
             key={i}
@@ -78,22 +85,14 @@ export const DetailCardList: React.FC<{
             </Space>
             <Typography.Text style={{ display: 'block' }}>{m.material}</Typography.Text>
             <Typography.Text type="secondary" style={{ display: 'block' }}>{m.milling}</Typography.Text>
-            {bazisProjects.length > 0 && (
+            {hasBasisProjectValue && (
               <Space wrap size={4}>
                 <Typography.Text type="secondary">Базис-проект:</Typography.Text>
-                {bazisProjects.map((project) => bazisProjectLinkEnabled ? (
-                  <Link
-                    key={`${project.bazisProjectId}:${project.bazisRevisionId}`}
-                    to={`/bazis/projects/${project.bazisProjectId}?revision=${project.bazisRevisionId}`}
-                    title={`${project.name}, рев. ${project.revisionNo}`}
-                  >
-                    {`БП-${project.bazisProjectId}`}
-                  </Link>
-                ) : (
-                  <Typography.Text key={`${project.bazisProjectId}:${project.bazisRevisionId}`} title={project.name}>
-                    {`БП-${project.bazisProjectId}`}
-                  </Typography.Text>
-                ))}
+                <BasisProjectLink
+                  value={basisProjectValue}
+                  bazisProjectId={bazisProjectId}
+                  enabled={bazisProjectLinkEnabled}
+                />
               </Space>
             )}
             {bazisCutSets.length > 0 && (

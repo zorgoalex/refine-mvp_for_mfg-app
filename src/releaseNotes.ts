@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "XML-номер Базис-проекта в деталях заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В колонке «Базис проект» у деталей ERP-заказа теперь показывается номер Базис-заказа/проекта из XML, например 1321, а не внутренний идентификатор вида «БП-11»; переход в карточку Базис-проекта сохранён.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "Принудительный планшетный вид и touch-прокрутка досок",
     services: ["ERP"],
     repositories: ["repo_erp"],

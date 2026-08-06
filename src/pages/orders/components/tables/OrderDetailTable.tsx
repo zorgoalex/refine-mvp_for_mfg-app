@@ -1690,30 +1690,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
+        const primaryBazisProject = d.bazis_projects?.[0];
         return isEditingField(d, 'basis_project') ? (
           <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
-        ) : d.bazis_projects && d.bazis_projects.length > 0 ? (
-          <Space wrap size={4}>
-            {d.bazis_projects.map((project) => bazisProjectLinkEnabled ? (
-              <Link
-                key={`${project.bazisProjectId}:${project.bazisRevisionId}`}
-                to={`/bazis/projects/${project.bazisProjectId}?revision=${project.bazisRevisionId}`}
-                title={`${project.name}, рев. ${project.revisionNo}`}
-              >
-                {`БП-${project.bazisProjectId}`}
-              </Link>
-            ) : (
-              <span key={`${project.bazisProjectId}:${project.bazisRevisionId}`} title={project.name}>
-                {`БП-${project.bazisProjectId}`}
-              </span>
-            ))}
-          </Space>
         ) : (
           <BasisProjectLink
-            value={getDisplayedField(d, 'basis_project')}
-            bazisProjectId={getDisplayedField(d, 'bazis_project_id')}
+            value={getDisplayedField(d, 'basis_project') || primaryBazisProject?.name}
+            bazisProjectId={getDisplayedField(d, 'bazis_project_id') ?? primaryBazisProject?.bazisProjectId}
             enabled={bazisProjectLinkEnabled}
             style={{ fontSize: '90%' }}
           />

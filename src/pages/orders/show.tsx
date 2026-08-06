@@ -1833,37 +1833,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
       render: (value, row) => {
         const projects = row.bazis_projects ?? [];
-        if (projects.length === 0) {
-          return (
-            <BasisProjectLink
-              value={value}
-              bazisProjectId={row.bazis_project_id}
-              enabled={bazisProjectLinkEnabled}
-              fallback="—"
-            />
-          );
-        }
         return (
-          <Space wrap size={4}>
-            {projects.map((project: {
-              bazisProjectId: number;
-              bazisRevisionId: number;
-              revisionNo: number;
-              name: string;
-            }) => bazisProjectLinkEnabled ? (
-              <Link
-                key={`${project.bazisProjectId}:${project.bazisRevisionId}`}
-                to={`/bazis/projects/${project.bazisProjectId}?revision=${project.bazisRevisionId}`}
-                title={`${project.name}, рев. ${project.revisionNo}`}
-              >
-                {`БП-${project.bazisProjectId}`}
-              </Link>
-            ) : (
-              <span key={`${project.bazisProjectId}:${project.bazisRevisionId}`} title={project.name}>
-                {`БП-${project.bazisProjectId}`}
-              </span>
-            ))}
-          </Space>
+          <BasisProjectLink
+            value={value || projects[0]?.name}
+            bazisProjectId={row.bazis_project_id ?? projects[0]?.bazisProjectId}
+            enabled={bazisProjectLinkEnabled}
+            fallback="—"
+          />
         );
       },
     },
