@@ -136,7 +136,7 @@ export function buildOrderProductionPdfDocument({
   <style>
     @page {
       size: A4 portrait;
-      margin: 8mm;
+      margin: 16mm 6mm 9mm;
     }
 
     * { box-sizing: border-box; }
@@ -155,8 +155,17 @@ export function buildOrderProductionPdfDocument({
       table-layout: fixed;
       width: 100%;
     }
+    .excel-company-contacts {
+      font-size: 8.91pt;
+      line-height: 1.15;
+      position: fixed;
+      right: 0;
+      text-align: right;
+      top: -15mm;
+      white-space: nowrap;
+    }
     .excel-order-header {
-      margin-bottom: 2.25pt;
+      margin-bottom: 1.82pt;
     }
     .excel-order-header th,
     .excel-order-header td {
@@ -167,41 +176,43 @@ export function buildOrderProductionPdfDocument({
     }
     .excel-order-header .excel-top-cell { border: 0; }
     .excel-order-header .excel-bottom-rule { border-bottom: 1px solid #444; }
-    .excel-header-row-1 { height: 13.15pt; }
-    .excel-header-row-2 { height: 13.15pt; }
-    .excel-header-row-3 { height: 13.15pt; }
-    .excel-header-row-4 { height: 12pt; }
-    .excel-header-row-5 { height: 12pt; }
-    .excel-header-row-6 { height: 12pt; }
-    .excel-header-row-7 { height: 12pt; }
-    .excel-header-row-8 { height: 13.15pt; }
-    .excel-header-row-9 { height: 12.75pt; }
+    .excel-header-row-1 { height: 10.65pt; }
+    .excel-header-row-2 { height: 10.65pt; }
+    .excel-header-row-3 { height: 10.65pt; }
+    .excel-header-row-4 { height: 9.72pt; }
+    .excel-header-row-5 { height: 9.72pt; }
+    .excel-header-row-6 { height: 9.72pt; }
+    .excel-header-row-7 { height: 9.72pt; }
+    .excel-header-row-8 { height: 10.65pt; }
+    .excel-header-row-9 { height: 10.33pt; }
     .excel-order-year {
-      font-size: 10pt;
+      font-size: 8.1pt;
       text-align: right;
     }
     .excel-order-header .excel-order-name {
-      font-size: 16pt;
+      font-size: 12.96pt;
       font-weight: 700;
       line-height: 1;
     }
-    .excel-prisadka-label { font-size: 6pt; font-weight: 400; text-align: left; }
-    .excel-client-label { font-size: 12pt; font-weight: 700; }
-    .excel-financial-label { font-size: 11pt; font-weight: 400; }
-    .excel-top-value { font-size: 14pt; font-weight: 700; }
-    .excel-financial-value { font-size: 12pt; font-weight: 700; }
-    .excel-section-label { font-size: 11pt; font-weight: 400; }
+    .excel-prisadka-label { color: #f00; font-size: 4.86pt; font-weight: 400; text-align: left; }
+    .excel-client-label { font-size: 9.72pt; font-weight: 700; }
+    .excel-financial-label { font-size: 8.91pt; font-weight: 400; }
+    .excel-top-value { font-size: 11.34pt; font-weight: 700; }
+    .excel-top-value.excel-prisadka-value { color: #f00; }
+    .excel-financial-value { font-size: 9.72pt; font-weight: 700; }
+    .excel-section-label { font-size: 8.91pt; font-style: italic; font-weight: 400; }
     .excel-section-value {
-      font-size: 12pt;
+      font-size: 9.72pt;
       font-weight: 700;
       overflow-wrap: anywhere;
     }
-    .excel-summary-label { font-size: 9pt; font-weight: 400; }
-    .excel-date-label { font-size: 10pt; font-weight: 700; }
-    .excel-date-value { font-size: 11pt; font-weight: 700; }
-    .excel-designer-value { font-size: 10pt; font-weight: 700; }
-    .excel-phone-value { font-family: Arial, Helvetica, sans-serif; font-size: 14pt; font-weight: 700; }
-    .excel-summary-value { font-size: 12pt; font-weight: 700; }
+    .excel-material-value { font-size: 11.34pt; }
+    .excel-summary-label { font-size: 7.29pt; font-style: italic; font-weight: 400; }
+    .excel-date-label { font-size: 8.1pt; font-style: italic; font-weight: 700; }
+    .excel-date-value { font-size: 8.91pt; font-weight: 700; }
+    .excel-designer-value { font-size: 8.1pt; font-weight: 700; }
+    .excel-phone-value { font-family: Arial, Helvetica, sans-serif; font-size: 11.34pt; font-weight: 700; }
+    .excel-summary-value { font-size: 9.72pt; font-weight: 700; }
     thead { display: table-header-group; }
     tr { break-inside: avoid; page-break-inside: avoid; }
     th, td {
@@ -246,6 +257,10 @@ export function buildOrderProductionPdfDocument({
   </style>
 </head>
 <body>
+  <div class="excel-company-contacts" aria-label="Телефоны компании">
+    <div>Наши телефоны:</div>
+    <div>8 701 032 4646, 8 777 032 4646</div>
+  </div>
   <header>
     <table class="excel-order-header" aria-label="Шапка заказа">
       <colgroup>${'<col />'.repeat(13)}</colgroup>
@@ -262,7 +277,7 @@ export function buildOrderProductionPdfDocument({
         <tr class="excel-header-row-2">
           <td data-excel-range="A2" class="excel-top-cell"></td>
           <td data-excel-range="B2" class="excel-top-cell"></td>
-          <td data-excel-range="D2:D3" class="excel-top-value excel-top-cell excel-bottom-rule" rowspan="2">${formatExcelCell(order.prisadkaName)}</td>
+          <td data-excel-range="D2:D3" class="excel-top-value excel-prisadka-value excel-top-cell excel-bottom-rule" rowspan="2">${formatExcelCell(order.prisadkaName)}</td>
           <td data-excel-range="E2:I3" class="excel-top-value excel-top-cell" colspan="5" rowspan="2">${formatExcelCell(order.clientName)}</td>
           <td data-excel-range="J2:K3" class="excel-financial-value excel-top-cell" colspan="2" rowspan="2" data-field="total-amount"></td>
           <td data-excel-range="L2:M3" class="excel-financial-value excel-top-cell" colspan="2" rowspan="2" data-field="discount"></td>
@@ -283,7 +298,7 @@ export function buildOrderProductionPdfDocument({
           <td data-excel-range="A5:C7" class="excel-section-value" colspan="3" rowspan="3">${formatExcelCell(commonMilling)}</td>
           <td data-excel-range="D5:E7" class="excel-section-value" colspan="2" rowspan="3">${formatExcelCell(commonEdge)}</td>
           <td data-excel-range="F5:G7" class="excel-section-value" colspan="2" rowspan="3">${formatExcelCell(commonFilm)}</td>
-          <td data-excel-range="H5:H7" class="excel-section-value" rowspan="3">${formatExcelCell(commonMaterial)}</td>
+          <td data-excel-range="H5:H7" class="excel-section-value excel-material-value" rowspan="3">${formatExcelCell(commonMaterial)}</td>
           <td data-excel-range="I5:I7" class="excel-section-value" rowspan="3"></td>
         </tr>
         <tr class="excel-header-row-6">

@@ -141,11 +141,30 @@ describe('production order PDF document', () => {
     }
 
     expect(html).toContain('font-family: Calibri, Arial, Helvetica, sans-serif');
-    expect(html).toContain('.excel-order-header .excel-order-name {\n      font-size: 16pt;');
-    expect(html).toContain('.excel-client-label { font-size: 12pt; font-weight: 700; }');
-    expect(html).toContain('.excel-header-row-1 { height: 13.15pt; }');
-    expect(html).toContain('.excel-header-row-4 { height: 12pt; }');
-    expect(html).toContain('.excel-header-row-9 { height: 12.75pt; }');
+    expect(html).toContain('.excel-order-header .excel-order-name {\n      font-size: 12.96pt;');
+    expect(html).toContain('.excel-client-label { font-size: 9.72pt; font-weight: 700; }');
+    expect(html).toContain('.excel-header-row-1 { height: 10.65pt; }');
+    expect(html).toContain('.excel-header-row-4 { height: 9.72pt; }');
+    expect(html).toContain('.excel-header-row-9 { height: 10.33pt; }');
+  });
+
+  it('matches the XLS print header and 81 percent scale shown in the reference screenshot', () => {
+    const html = buildOrderProductionPdfDocument(params);
+
+    expect(html).toContain('class="excel-company-contacts"');
+    expect(html).toContain('<div>Наши телефоны:</div>');
+    expect(html).toContain('<div>8 701 032 4646, 8 777 032 4646</div>');
+    expect(html).toContain('margin: 16mm 6mm 9mm;');
+    expect(html).toContain('top: -15mm;');
+    expect(html).toContain('.excel-header-row-1 { height: 10.65pt; }');
+    expect(html).toContain('.excel-header-row-4 { height: 9.72pt; }');
+    expect(html).toContain('.excel-header-row-9 { height: 10.33pt; }');
+    expect(html).toContain('font-size: 12.96pt;');
+    expect(html).toContain('.excel-prisadka-label { color: #f00;');
+    expect(html).toContain('.excel-top-value.excel-prisadka-value { color: #f00;');
+    expect(html).toContain('.excel-section-label { font-size: 8.91pt; font-style: italic;');
+    expect(html).toContain('.excel-summary-label { font-size: 7.29pt; font-style: italic;');
+    expect(html).toContain('.excel-material-value { font-size: 11.34pt; }');
   });
 
   it('keeps financial fields visible but empty and omits payment sections', () => {
