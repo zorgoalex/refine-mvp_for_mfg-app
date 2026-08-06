@@ -64,7 +64,10 @@ describe('production order PDF document', () => {
     const html = buildOrderProductionPdfDocument(params);
 
     expect(html).toContain('class="excel-order-header"');
-    expect(html).toContain('Заказ Ф26-42');
+    expect(html).toContain('data-excel-range="A1"');
+    expect(html).toContain('class="excel-order-year excel-top-cell">26</td>');
+    expect(html).not.toContain('Ф26-42');
+    expect(html).not.toContain('Заказ Ф26-42');
     expect(html).toContain('Фасады &lt;Кухня &amp; бар&gt;');
     expect(html).toContain('ТОО &quot;Заказчик&quot;');
     expect(html).toContain('П-17');
@@ -90,18 +93,67 @@ describe('production order PDF document', () => {
     expect(html).toContain('Белая группа 1 &lt;левая&gt;');
     expect(html).toContain('Белый &amp; матовый');
     expect(html).toContain('0,59');
-    expect(html).toContain('Общая площадь');
+    expect(html).toContain('общая площадь');
     expect(html).toContain('0,87');
-    expect(html).toContain('Кол-во деталей');
+    expect(html).toContain('кол-во деталей');
     expect(html).toContain('4');
+  });
+
+  it('mirrors the Excel A1:M9 header geometry and typography', () => {
+    const html = buildOrderProductionPdfDocument(params);
+
+    for (const range of [
+      'A1',
+      'B1',
+      'C1:C3',
+      'D1',
+      'D2:D3',
+      'E1:I1',
+      'E2:I3',
+      'J1:K1',
+      'J2:K3',
+      'L1:M1',
+      'L2:M3',
+      'A4:C4',
+      'A5:C7',
+      'D4:E4',
+      'D5:E7',
+      'F4:G4',
+      'F5:G7',
+      'H4:I4',
+      'H5:H7',
+      'I5:I7',
+      'J4:J5',
+      'K4:M5',
+      'J6:J7',
+      'K6:M7',
+      'A8:B9',
+      'C8:E9',
+      'F8:F9',
+      'G8:G9',
+      'H8:I9',
+      'J8:J9',
+      'K8:K9',
+      'L8:L9',
+      'M8:M9',
+    ]) {
+      expect(html).toContain(`data-excel-range="${range}"`);
+    }
+
+    expect(html).toContain('font-family: Calibri, Arial, Helvetica, sans-serif');
+    expect(html).toContain('.excel-order-header .excel-order-name {\n      font-size: 16pt;');
+    expect(html).toContain('.excel-client-label { font-size: 12pt; font-weight: 700; }');
+    expect(html).toContain('.excel-header-row-1 { height: 13.15pt; }');
+    expect(html).toContain('.excel-header-row-4 { height: 12pt; }');
+    expect(html).toContain('.excel-header-row-9 { height: 12.75pt; }');
   });
 
   it('keeps financial fields visible but empty and omits payment sections', () => {
     const html = buildOrderProductionPdfDocument(params);
 
-    expect(html).toContain('Общая сумма');
-    expect(html).toContain('Скидка');
-    expect(html).toContain('Остаток оплаты');
+    expect(html).toContain('общая сумма');
+    expect(html).toContain('скидка');
+    expect(html).toContain('остаток оплаты');
     expect(html).toMatch(/data-field="total-amount"[^>]*><\/td>/);
     expect(html).toMatch(/data-field="discount"[^>]*><\/td>/);
     expect(html).toMatch(/data-field="outstanding"[^>]*><\/td>/);

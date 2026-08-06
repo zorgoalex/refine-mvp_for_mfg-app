@@ -94,8 +94,8 @@ export function buildOrderProductionPdfDocument({
   const groupedDetails = groupOrderProductionDetailsByFilm(actualDetails);
   const totalArea = actualDetails.reduce((sum, detail) => sum + (roundArea(detail) ?? 0), 0);
   const totalQuantity = actualDetails.reduce((sum, detail) => sum + detail.quantity, 0);
-  const orderNumber = `Ф${getYearLastTwoDigits(order.orderDate)}-${order.orderId}`;
-  const documentTitle = `Заказ ${orderNumber} — PDF для производства`;
+  const orderYear = getYearLastTwoDigits(order.orderDate);
+  const documentTitle = `${order.orderName} — PDF для производства`;
   const designer = order.prisadkaDesignerName
     ? `конструктор ${order.prisadkaDesignerName}`
     : null;
@@ -144,8 +144,8 @@ export function buildOrderProductionPdfDocument({
     body {
       background: #fff;
       color: #111;
-      font-family: Arial, Helvetica, sans-serif;
-      font-size: 8px;
+      font-family: Calibri, Arial, Helvetica, sans-serif;
+      font-size: 8pt;
       line-height: 1.15;
       print-color-adjust: exact;
       -webkit-print-color-adjust: exact;
@@ -156,33 +156,52 @@ export function buildOrderProductionPdfDocument({
       width: 100%;
     }
     .excel-order-header {
-      margin-bottom: 3px;
+      margin-bottom: 2.25pt;
     }
     .excel-order-header th,
     .excel-order-header td {
       border: 1px solid #444;
-      height: 17px;
-      padding: 2px 4px;
+      padding: 0 2px;
       text-align: center;
+      vertical-align: middle;
     }
-    .excel-order-header th {
-      font-size: 7px;
-      font-weight: 700;
-      text-transform: lowercase;
-    }
-    .excel-order-header .excel-order-number {
-      font-size: 12px;
-      font-weight: 700;
+    .excel-order-header .excel-top-cell { border: 0; }
+    .excel-order-header .excel-bottom-rule { border-bottom: 1px solid #444; }
+    .excel-header-row-1 { height: 13.15pt; }
+    .excel-header-row-2 { height: 13.15pt; }
+    .excel-header-row-3 { height: 13.15pt; }
+    .excel-header-row-4 { height: 12pt; }
+    .excel-header-row-5 { height: 12pt; }
+    .excel-header-row-6 { height: 12pt; }
+    .excel-header-row-7 { height: 12pt; }
+    .excel-header-row-8 { height: 13.15pt; }
+    .excel-header-row-9 { height: 12.75pt; }
+    .excel-order-year {
+      font-size: 10pt;
+      text-align: right;
     }
     .excel-order-header .excel-order-name {
-      font-size: 11px;
+      font-size: 16pt;
       font-weight: 700;
+      line-height: 1;
     }
-    .excel-order-header .excel-value {
-      font-size: 9px;
-      font-weight: 600;
+    .excel-prisadka-label { font-size: 6pt; font-weight: 400; text-align: left; }
+    .excel-client-label { font-size: 12pt; font-weight: 700; }
+    .excel-financial-label { font-size: 11pt; font-weight: 400; }
+    .excel-top-value { font-size: 14pt; font-weight: 700; }
+    .excel-financial-value { font-size: 12pt; font-weight: 700; }
+    .excel-section-label { font-size: 11pt; font-weight: 400; }
+    .excel-section-value {
+      font-size: 12pt;
+      font-weight: 700;
       overflow-wrap: anywhere;
     }
+    .excel-summary-label { font-size: 9pt; font-weight: 400; }
+    .excel-date-label { font-size: 10pt; font-weight: 700; }
+    .excel-date-value { font-size: 11pt; font-weight: 700; }
+    .excel-designer-value { font-size: 10pt; font-weight: 700; }
+    .excel-phone-value { font-family: Arial, Helvetica, sans-serif; font-size: 14pt; font-weight: 700; }
+    .excel-summary-value { font-size: 12pt; font-weight: 700; }
     thead { display: table-header-group; }
     tr { break-inside: avoid; page-break-inside: avoid; }
     th, td {
@@ -231,51 +250,59 @@ export function buildOrderProductionPdfDocument({
     <table class="excel-order-header" aria-label="Шапка заказа">
       <colgroup>${'<col />'.repeat(13)}</colgroup>
       <tbody>
-        <tr>
-          <td class="excel-order-number" colspan="2" rowspan="3">Заказ ${escapeHtml(orderNumber)}</td>
-          <td class="excel-order-name" rowspan="3">${formatExcelCell(order.orderName)}</td>
-          <th scope="row">№ присадки</th>
-          <th colspan="5" scope="row">Заказчик</th>
-          <th colspan="2" scope="row">Общая сумма</th>
-          <th colspan="2" scope="row">Скидка</th>
+        <tr class="excel-header-row-1">
+          <td data-excel-range="A1" class="excel-order-year excel-top-cell">${escapeHtml(orderYear)}</td>
+          <td data-excel-range="B1" class="excel-top-cell"></td>
+          <td data-excel-range="C1:C3" class="excel-order-name excel-top-cell excel-bottom-rule" rowspan="3">${formatExcelCell(order.orderName)}</td>
+          <th data-excel-range="D1" class="excel-prisadka-label excel-top-cell" scope="row">№ присадки</th>
+          <th data-excel-range="E1:I1" class="excel-client-label excel-top-cell" colspan="5" scope="row">Заказчик</th>
+          <th data-excel-range="J1:K1" class="excel-financial-label excel-top-cell" colspan="2" scope="row">общая сумма</th>
+          <th data-excel-range="L1:M1" class="excel-financial-label excel-top-cell" colspan="2" scope="row">скидка</th>
         </tr>
-        <tr>
-          <td class="excel-value" rowspan="2">${formatExcelCell(order.prisadkaName)}</td>
-          <td class="excel-value" colspan="5" rowspan="2">${formatExcelCell(order.clientName)}</td>
-          <td class="excel-value financial-value" colspan="2" rowspan="2" data-field="total-amount"></td>
-          <td class="excel-value financial-value" colspan="2" rowspan="2" data-field="discount"></td>
+        <tr class="excel-header-row-2">
+          <td data-excel-range="A2" class="excel-top-cell"></td>
+          <td data-excel-range="B2" class="excel-top-cell"></td>
+          <td data-excel-range="D2:D3" class="excel-top-value excel-top-cell excel-bottom-rule" rowspan="2">${formatExcelCell(order.prisadkaName)}</td>
+          <td data-excel-range="E2:I3" class="excel-top-value excel-top-cell" colspan="5" rowspan="2">${formatExcelCell(order.clientName)}</td>
+          <td data-excel-range="J2:K3" class="excel-financial-value excel-top-cell" colspan="2" rowspan="2" data-field="total-amount"></td>
+          <td data-excel-range="L2:M3" class="excel-financial-value excel-top-cell" colspan="2" rowspan="2" data-field="discount"></td>
         </tr>
-        <tr></tr>
-        <tr>
-          <th colspan="3" scope="row">Фрезеровка</th>
-          <th colspan="2" scope="row">Обкат</th>
-          <th colspan="2" scope="row">Пленка</th>
-          <th colspan="2" scope="row">Материал</th>
-          <th rowspan="2" scope="row">Остаток оплаты</th>
-          <td class="excel-value financial-value" colspan="3" rowspan="2" data-field="outstanding"></td>
+        <tr class="excel-header-row-3">
+          <td data-excel-range="A3" class="excel-top-cell"></td>
+          <td data-excel-range="B3" class="excel-top-cell"></td>
         </tr>
-        <tr>
-          <td class="excel-value" colspan="3" rowspan="3">${formatExcelCell(commonMilling)}</td>
-          <td class="excel-value" colspan="2" rowspan="3">${formatExcelCell(commonEdge)}</td>
-          <td class="excel-value" colspan="2" rowspan="3">${formatExcelCell(commonFilm)}</td>
-          <td class="excel-value" colspan="2" rowspan="3">${formatExcelCell(commonMaterial)}</td>
+        <tr class="excel-header-row-4">
+          <th data-excel-range="A4:C4" class="excel-section-label" colspan="3" scope="row">фрезеровка</th>
+          <th data-excel-range="D4:E4" class="excel-section-label" colspan="2" scope="row">обкат</th>
+          <th data-excel-range="F4:G4" class="excel-section-label" colspan="2" scope="row">пленка</th>
+          <td data-excel-range="H4:I4" class="excel-section-label" colspan="2"></td>
+          <th data-excel-range="J4:J5" class="excel-summary-label" rowspan="2" scope="row">остаток оплаты</th>
+          <td data-excel-range="K4:M5" class="excel-financial-value" colspan="3" rowspan="2" data-field="outstanding"></td>
         </tr>
-        <tr>
-          <th rowspan="2" scope="row">Срок выполнения</th>
-          <td class="excel-value" colspan="3" rowspan="2"></td>
+        <tr class="excel-header-row-5">
+          <td data-excel-range="A5:C7" class="excel-section-value" colspan="3" rowspan="3">${formatExcelCell(commonMilling)}</td>
+          <td data-excel-range="D5:E7" class="excel-section-value" colspan="2" rowspan="3">${formatExcelCell(commonEdge)}</td>
+          <td data-excel-range="F5:G7" class="excel-section-value" colspan="2" rowspan="3">${formatExcelCell(commonFilm)}</td>
+          <td data-excel-range="H5:H7" class="excel-section-value" rowspan="3">${formatExcelCell(commonMaterial)}</td>
+          <td data-excel-range="I5:I7" class="excel-section-value" rowspan="3"></td>
         </tr>
-        <tr></tr>
-        <tr>
-          <th colspan="2" rowspan="2" scope="row">Дата</th>
-          <td class="excel-value" colspan="3" rowspan="2">${formatExcelCell(formatDate(order.orderDate))}</td>
-          <td class="excel-value" colspan="2" rowspan="2">${formatExcelCell(designer)}</td>
-          <td class="excel-value" colspan="2" rowspan="2">${formatExcelCell(order.clientPhone)}</td>
-          <th rowspan="2" scope="row">Общая площадь</th>
-          <td class="excel-value number" rowspan="2">${formatDecimal(totalArea)}</td>
-          <th rowspan="2" scope="row">Кол-во деталей</th>
-          <td class="excel-value number" rowspan="2">${formatExcelCell(totalQuantity)}</td>
+        <tr class="excel-header-row-6">
+          <th data-excel-range="J6:J7" class="excel-summary-label" rowspan="2" scope="row">срок выполнения</th>
+          <td data-excel-range="K6:M7" class="excel-section-value" colspan="3" rowspan="2"></td>
         </tr>
-        <tr></tr>
+        <tr class="excel-header-row-7"></tr>
+        <tr class="excel-header-row-8">
+          <th data-excel-range="A8:B9" class="excel-date-label" colspan="2" rowspan="2" scope="row">Дата</th>
+          <td data-excel-range="C8:E9" class="excel-date-value" colspan="3" rowspan="2">${formatExcelCell(formatDate(order.orderDate))}</td>
+          <td data-excel-range="F8:F9" class="excel-designer-value" rowspan="2">${formatExcelCell(designer)}</td>
+          <td data-excel-range="G8:G9" rowspan="2"></td>
+          <td data-excel-range="H8:I9" class="excel-phone-value" colspan="2" rowspan="2">${formatExcelCell(order.clientPhone)}</td>
+          <th data-excel-range="J8:J9" class="excel-summary-label" rowspan="2" scope="row">общая площадь</th>
+          <td data-excel-range="K8:K9" class="excel-summary-value number" rowspan="2">${formatDecimal(totalArea)}</td>
+          <th data-excel-range="L8:L9" class="excel-summary-label" rowspan="2" scope="row">кол-во деталей</th>
+          <td data-excel-range="M8:M9" class="excel-summary-value number" rowspan="2">${formatExcelCell(totalQuantity)}</td>
+        </tr>
+        <tr class="excel-header-row-9"></tr>
       </tbody>
     </table>
   </header>
