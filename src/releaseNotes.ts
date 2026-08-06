@@ -41,6 +41,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "Статус новых заказов по умолчанию",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Новые заказы теперь по умолчанию получают статус «Предварительный» независимо от порядка статусов в справочнике; статус «Заявка CRM» остаётся доступен для явного выбора и CRM-сценариев.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "Обновление деталей заказа и связанных документов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

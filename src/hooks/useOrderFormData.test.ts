@@ -28,7 +28,10 @@ describe('useOrderFormData mapping', () => {
 function createFormDataResponse(): OrderFormDataResponse {
   return {
     clients: [{ id: 1, name: 'Client A' }],
-    orderStatuses: [{ id: 2, name: 'New', code: 'new', color: null }],
+    orderStatuses: [
+      { id: 9, name: 'Заявка CRM', code: 'crm_request', color: null },
+      { id: 2, name: 'Предварительный', code: 'preliminary', color: null },
+    ],
     paymentStatuses: [{ id: 3, name: 'Unpaid', code: 'unpaid', color: null }],
     productionStatuses: [{ id: 4, name: 'Cut', code: 'cut', color: null }],
     materials: [{ id: 5, name: 'MDF', unitId: null }],

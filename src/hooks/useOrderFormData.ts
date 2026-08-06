@@ -3,6 +3,7 @@ import { ordersApi } from '../api/ordersApi';
 import { subscribeOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
 import { featureFlags } from '../config/featureFlags';
+import { resolveDefaultNewOrderStatusId } from '../domain/orderStatusDefaults';
 
 export interface ReferenceOption {
   label: string;
@@ -187,7 +188,7 @@ export function mapOrderFormDataToReferences(
     employees,
     units,
     sheetMaterialTypes,
-    defaultOrderStatus: orderStatuses[0]?.value,
+    defaultOrderStatus: resolveDefaultNewOrderStatusId(orderStatuses),
     defaultPaymentStatus: paymentStatuses[0]?.value,
     defaultProductionStatus: productionStatuses[0]?.value,
     materialNameById: toNameMap(materials),
