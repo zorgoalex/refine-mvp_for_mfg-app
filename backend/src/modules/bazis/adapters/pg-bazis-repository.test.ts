@@ -1532,6 +1532,7 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
           bazis_project_name: 'Шкаф Nova',
           revision_bazis_order_no: '1457',
           project_client_id: 5,
+          root_product_count: 1,
         },
         draftNodeRows: [
           { bazis_node_id: 101, object_type: 'Панель' },
@@ -1549,6 +1550,11 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
         });
         expect(command.dto.idempotencyKey).toBeUndefined();
         expect(command.dto.details).toHaveLength(3);
+        expect(command.dto.details.map((detail) => detail.basisProduct ?? null)).toEqual([
+          null,
+          null,
+          'Ручное изделие',
+        ]);
 
         await command.postPersistHook?.(
           { getTransactionClient: () => database.tx },
@@ -1567,7 +1573,11 @@ describe('PgBazisRepository.createOrderFromDraft', () => {
     };
     const repository = new PgBazisRepository(database.service, orderTransactions);
 
-    const result = await repository.createOrderFromDraft(createOrderFromDraftCommand());
+    const draft = createSaveOrderDto();
+    draft.details[0]!.basisProduct = 'Шкаф';
+    draft.details[1]!.basisProduct = 'Шкаф';
+    draft.details[2]!.basisProduct = 'Ручное изделие';
+    const result = await repository.createOrderFromDraft(createOrderFromDraftCommand({ order: draft }));
 
     expect(result).toEqual({
       orderId: 9001,

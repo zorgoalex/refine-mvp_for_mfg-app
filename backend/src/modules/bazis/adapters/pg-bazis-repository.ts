@@ -2192,7 +2192,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
       }
       assertBazisProjectHasDesignEngineer(revision);
 
-      const order = sanitizeDraftOrder(command.order, revision.projectId);
+      const order = sanitizeDraftOrder(command.order, revision.projectId, {
+        rootProductCount: revision.rootProductCount,
+        panelClientKeys: new Set(command.nodes.map((node) => node.clientKey)),
+      });
       if (revision.projectClientId !== order.header.clientId) {
         await this.failCreateOrderIdempotency(command);
         throw new ApiError(
@@ -3677,13 +3680,26 @@ function buildOrderCreateDto(
   };
 }
 
-function sanitizeDraftOrder(order: SaveOrderDto, projectId: number): SaveOrderDto {
+function sanitizeDraftOrder(
+  order: SaveOrderDto,
+  projectId: number,
+  basisProductMapping: {
+    rootProductCount: number;
+    panelClientKeys: ReadonlySet<string>;
+  },
+): SaveOrderDto {
   return {
     ...order,
     header: {
       ...order.header,
       projectId,
     },
+    details: order.details.map((detail) =>
+      basisProductMapping.rootProductCount <= 1
+        && typeof detail.clientKey === 'string'
+        && basisProductMapping.panelClientKeys.has(detail.clientKey)
+        ? { ...detail, basisProduct: null }
+        : detail),
     idempotencyKey: undefined,
   };
 }
