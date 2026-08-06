@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "PDF заказа для производства",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В карточке заказа основным производственным экспортом стал «PDF для производства»: браузер сразу открывает штатный предпросмотр печати с шапкой и таблицей деталей без цен, сумм, оплат и прочих финансовых разделов; прежний Excel для производства доступен в меню «Ещё действия».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "Обновление деталей заказа и связанных документов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -11,8 +11,10 @@ import { resolveOrderTabLabel } from "../../utils/tabLabels";
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
 import { formatNumber } from "../../utils/numberFormat";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
+import type { OrderExcelDetailRow } from "../../utils/excel/orderExcelBuilder";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
+import { openOrderProductionPdfPreview } from "../../utils/pdf/orderProductionPdf";
 import { OrderPrintView } from "./components/print/OrderPrintView";
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
@@ -85,19 +87,6 @@ import { BasisProjectLink } from "./components/BasisProjectLink";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
-
-const productionExcelIcon = (
-  <FileExcelOutlined
-    style={{ color: '#389e0d', fontSize: 18, filter: 'drop-shadow(0 1px 1px rgba(56, 158, 13, 0.18))' }}
-  />
-);
-
-const productionExcelButtonStyle: CSSProperties = {
-  minWidth: 40,
-  minHeight: 40,
-  background: 'rgba(82, 196, 26, 0.08)',
-  borderColor: 'rgba(56, 158, 13, 0.32)',
-};
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
   { key: 'groups', label: 'Группы заказа', color: '#722ed1' },
@@ -1459,6 +1448,55 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     documentTitle: `Заказ-${record?.order_id}`,
   });
 
+  const buildOrderExportDetailRows = (): OrderExcelDetailRow[] => {
+    const mapDetailToExcelRow = (detail: any) => ({
+      detail_id: detail.detail_id,
+      length: detail.height, // ⚠️ В БД height = длина детали
+      width: detail.width,
+      quantity: detail.quantity,
+      area: detail.area,
+      milling_cost_per_sqm: detail.milling_cost_per_sqm,
+      detail_cost: detail.detail_cost,
+      notes: detail.note,
+      milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
+      edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
+      film: { film_name: filmsMap.get(detail.film_id) || '' },
+      material: { material_name: resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '' },
+    });
+
+    return groupingActive && grouping.state.field
+      ? buildGroupedRows(details, grouping.state.field, { groupLabelOf }).flatMap((row) => {
+        if (row.kind === 'separator') return [{ kind: 'blank' as const }];
+        if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)];
+        return [];
+      })
+      : details.map(mapDetailToExcelRow);
+  };
+
+  const handleProductionPdf = () => {
+    if (!record || details.length === 0 || isClientResolving) return;
+
+    const firstDoweling = dowelingLinks[0]?.doweling_order;
+    const opened = openOrderProductionPdfPreview({
+      order: {
+        orderId: record.order_id,
+        orderName: record.order_name,
+        orderDate: record.order_date,
+        clientName: resolvedClientName,
+        clientPhone,
+        prisadkaName: firstDoweling?.doweling_order_name || '',
+        prisadkaDesignerName: firstDoweling?.design_engineer_id
+          ? employeesMap.get(firstDoweling.design_engineer_id) || ''
+          : '',
+      },
+      details: buildOrderExportDetailRows(),
+    });
+
+    if (!opened) {
+      message.error('Не удалось открыть PDF для производства');
+    }
+  };
+
   // Функция экспорта в Excel
   const handleExportExcel = async (exportMode: OrderExcelExportMode = 'full') => {
     if (!record || isAnyExcelExporting || (exportMode === 'full' && !canViewFinancials)) return;
@@ -1487,27 +1525,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         const dateB = b.payment_date ? new Date(b.payment_date).getTime() : 0;
         return dateA - dateB;
       });
-      const mapDetailToExcelRow = (detail: any) => ({
-        detail_id: detail.detail_id,
-        length: detail.height, // ⚠️ В БД height = длина детали
-        width: detail.width,
-        quantity: detail.quantity,
-        area: detail.area,
-        milling_cost_per_sqm: detail.milling_cost_per_sqm,
-        detail_cost: detail.detail_cost,
-        notes: detail.note,
-        milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
-        edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
-        film: { film_name: filmsMap.get(detail.film_id) || '' },
-        material: { material_name: resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '' },
-      });
-      const excelDetailRows = groupingActive && grouping.state.field
-        ? buildGroupedRows(details, grouping.state.field, { groupLabelOf }).flatMap((row) => {
-          if (row.kind === 'separator') return [{ kind: 'blank' as const }];
-          if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)];
-          return [];
-        })
-        : details.map(mapDetailToExcelRow);
+      const excelDetailRows = buildOrderExportDetailRows();
 
       // Генерация и скачивание Excel
       await downloadOrderExcel(
@@ -2059,6 +2077,45 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const activeOrderInfoLabel = isOperational
     ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
     : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
+  const productionPdfDisabled = !record || details.length === 0 || isClientResolving;
+  const productionExcelDisabled = productionPdfDisabled || isAnyExcelExporting;
+  const productionPdfAction = canExportOrders ? (
+    <Button
+      aria-label="PDF для производства"
+      icon={<FilePdfOutlined />}
+      onClick={handleProductionPdf}
+      disabled={productionPdfDisabled}
+    >
+      PDF для производства
+    </Button>
+  ) : null;
+  const productionExcelOverflowAction = canExportOrders ? (
+    <Dropdown
+      trigger={['click']}
+      menu={{
+        items: [{
+          key: 'excel-without-prices',
+          icon: <FileExcelOutlined />,
+          label: 'Excel для производства',
+          disabled: productionExcelDisabled,
+        }],
+        onClick: ({ key }) => {
+          if (key === 'excel-without-prices') {
+            void handleExportExcel('without-prices');
+          }
+        },
+      }}
+    >
+      <Tooltip title="Ещё действия">
+        <Button
+          aria-label="Ещё действия"
+          icon={<EllipsisOutlined />}
+          loading={isPriceFreeExporting}
+          disabled={!record}
+        />
+      </Tooltip>
+    </Dropdown>
+  ) : null;
 
   return (
     <Show
@@ -2105,6 +2162,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         label: 'Экспорт в Excel',
                         disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
                       }] : []),
+                      {
+                        key: 'pdf-production',
+                        icon: <FilePdfOutlined />,
+                        label: 'PDF для производства',
+                        disabled: productionPdfDisabled,
+                      },
                       {
                         key: 'excel-without-prices',
                         icon: <FileExcelOutlined />,
@@ -2154,6 +2217,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     }
                     if (key === 'excel') {
                       void handleExportExcel();
+                    }
+                    if (key === 'pdf-production') {
+                      handleProductionPdf();
                     }
                     if (key === 'excel-without-prices') {
                       void handleExportExcel('without-prices');
@@ -2208,23 +2274,24 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </Tooltip>
                     </>
                   )}
-                  <Tooltip title="Excel для производства">
-                    <Button
-                      aria-label="Excel для производства"
-                      icon={productionExcelIcon}
-                      style={productionExcelButtonStyle}
-                      onClick={() => void handleExportExcel('without-prices')}
-                      loading={isPriceFreeExporting}
-                      disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
-                    />
-                  </Tooltip>
+                  {productionPdfAction}
                 </>
               ) : null}
-              {(canExportOrders && canViewFinancials) || canMoveOrderProject || canDeleteOrder ? (
+              {canExportOrders || canMoveOrderProject || canDeleteOrder ? (
                 <Dropdown
                   trigger={['click']}
                   menu={{
                     items: [
+                      ...(canExportOrders
+                        ? [
+                            {
+                              key: 'excel-without-prices',
+                              icon: <FileExcelOutlined />,
+                              label: 'Excel для производства',
+                              disabled: productionExcelDisabled,
+                            },
+                          ]
+                        : []),
                       ...(canExportOrders && canViewFinancials
                         ? [
                             {
@@ -2241,7 +2308,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             },
                           ]
                         : []),
-                      ...(canExportOrders && canViewFinancials && (canMoveOrderProject || canDeleteOrder)
+                      ...(canExportOrders && (canMoveOrderProject || canDeleteOrder)
                         ? [
                             {
                               type: 'divider' as const,
@@ -2269,6 +2336,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         : []),
                     ],
                     onClick: ({ key }) => {
+                      if (key === 'excel-without-prices') {
+                        void handleExportExcel('without-prices');
+                      }
                       if (key === 'pdf') {
                         handlePrint();
                       }
@@ -2336,16 +2406,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     ) : null}
                     {canExportOrders ? (
                       <>
-                        <Tooltip title="Excel для производства">
-                          <Button
-                            aria-label="Excel для производства"
-                            icon={productionExcelIcon}
-                            style={productionExcelButtonStyle}
-                            onClick={() => void handleExportExcel('without-prices')}
-                            loading={isPriceFreeExporting}
-                            disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
-                          />
-                        </Tooltip>
+                        {productionPdfAction}
+                        {productionExcelOverflowAction}
                         {canViewFinancials && (
                           <>
                             <Button icon={<DownloadOutlined />} onClick={handlePrint}>
@@ -2376,16 +2438,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </Button>
                     ) : null}
                     {canExportOrders ? (
-                      <Tooltip title="Excel для производства">
-                        <Button
-                          aria-label="Excel для производства"
-                          icon={productionExcelIcon}
-                          style={productionExcelButtonStyle}
-                          onClick={() => void handleExportExcel('without-prices')}
-                          loading={isPriceFreeExporting}
-                          disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
-                        />
-                      </Tooltip>
+                      <>
+                        {productionPdfAction}
+                        {productionExcelOverflowAction}
+                      </>
                     ) : null}
                     {canUpdateOrders ? (
                       <Button
