@@ -6,9 +6,10 @@ import { buildOrderCardPagination } from './OrderCardList';
 const read = (p: string) => readFileSync(join(__dirname, '..', '..', '..', p), 'utf8');
 
 describe('orders list phone rendering', () => {
-  it('list.tsx branches on useIsMobile and renders OrderCardList', () => {
+  it('list.tsx branches on the phone device tier and renders OrderCardList', () => {
     const src = read('pages/orders/list.tsx');
-    expect(src).toContain('useIsMobile');
+    expect(src).toContain('useDeviceTier');
+    expect(src).toContain("deviceTier === 'phone'");
     expect(src).toContain('OrderCardList');
   });
   it('OrderCardList uses card model and List pagination, no Table', () => {

@@ -3,6 +3,7 @@ import { authSession } from '../api/authSession';
 import { profileApi } from '../api/profileApi';
 import { featureFlags } from '../config/featureFlags';
 import type { FrontendUiRuntimeConfig } from '../config/runtimeConfig';
+import { isTabletDevice } from '../hooks/useDeviceTier';
 import { authStorage } from '../utils/auth';
 import { isModernUiAvailable, isUiVariant, resolveUiVariant, type UiVariant } from './uiVariant';
 import { getStoredUiVariant, setStoredUiVariant } from './uiVariantStorage';
@@ -22,6 +23,7 @@ export interface UiVariantBootstrapDependencies {
   getPreferences: () => Promise<UiVariantPreferenceResponse>;
   getCached: (userId: string) => UiVariant | null;
   setCached: (userId: string, variant: UiVariant) => void;
+  isTabletDevice?: () => boolean;
   now?: () => number;
   timeoutMs?: number;
 }
@@ -31,6 +33,7 @@ export async function resolveInitialUiVariant(
   dependencies: UiVariantBootstrapDependencies = defaultDependencies(),
 ): Promise<UiVariant> {
   if (!isModernUiAvailable(config)) return resolveUiVariant(config);
+  if ((dependencies.isTabletDevice ?? isTabletDevice)()) return 'evolution';
 
   const now = dependencies.now ?? Date.now;
   const deadline = now() + (

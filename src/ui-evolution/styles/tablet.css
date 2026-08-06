@@ -1,0 +1,708 @@
+/* Evolutionary tablet shell. Activation is runtime device-tier driven, never width-only. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet {
+  --tablet-rail-width: 68px;
+  --tablet-shell-header: 56px;
+  --tablet-shell-tabs: 44px;
+  --tablet-sticky-row: 52px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--evo-canvas);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__main {
+  height: 100dvh;
+  min-height: 0;
+  margin-left: var(--tablet-rail-width);
+  overflow: hidden;
+  background: var(--evo-canvas);
+  transition: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet[data-device-tier="tablet"] .evolution-shell__main {
+  margin-left: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header.ant-layout-header {
+  position: relative;
+  top: auto;
+  z-index: 30;
+  height: var(--tablet-shell-header);
+  min-height: var(--tablet-shell-header);
+  flex: 0 0 var(--tablet-shell-header);
+  padding: 0 14px;
+  gap: 10px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__search {
+  width: clamp(190px, 24vw, 320px);
+  min-height: 44px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__identity {
+  height: 44px;
+  min-height: 44px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-workspace-tabs.workspace-tabs {
+  position: relative;
+  top: auto;
+  z-index: 26;
+  height: var(--tablet-shell-tabs);
+  min-height: var(--tablet-shell-tabs);
+  flex: 0 0 var(--tablet-shell-tabs);
+  padding: 0 12px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-workspace-tabs.workspace-tabs .ant-tabs-nav {
+  height: 43px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-workspace-tabs.workspace-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+  height: 43px;
+  min-height: 43px;
+  padding: 6px 10px !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content.ant-layout-content {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin: 0 !important;
+  padding: 12px 14px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  background: var(--evo-canvas);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-screen-frame,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-screen-frame > div:not([hidden]) {
+  min-height: 100%;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-layout-footer {
+  display: none;
+}
+
+/* 68px landscape rail and 300px permission-bearing drawer trigger. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-tablet-rail.ant-layout-sider {
+  position: fixed !important;
+  inset: 0 auto 0 0;
+  z-index: 60;
+  width: 68px !important;
+  min-width: 68px !important;
+  max-width: 68px !important;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--evo-sidebar) !important;
+  box-shadow: 2px 0 10px rgba(9, 35, 42, 0.1);
+}
+
+.evolution-tablet-rail__brand {
+  display: grid;
+  width: 100%;
+  height: 64px;
+  place-items: center;
+  padding: 6px;
+  border: 0;
+  border-bottom: 1px solid var(--evo-sidebar-border);
+  background: transparent;
+  color: var(--evo-sidebar-text);
+  cursor: pointer;
+}
+
+.evolution-tablet-rail__brand > span:first-child {
+  display: grid;
+  width: 36px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--evo-navigation);
+  color: var(--evo-brand-mark-text);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.evolution-tablet-rail__brand > .anticon {
+  font-size: 11px;
+  transform: translateY(-2px);
+}
+
+.evolution-tablet-rail__nav {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 10px 7px 72px;
+  overflow-y: auto;
+}
+
+.evolution-tablet-rail__button.ant-btn,
+.evolution-tablet-rail__create.ant-btn {
+  position: relative;
+  width: 52px;
+  min-width: 52px;
+  height: 48px;
+  min-height: 48px;
+  border: 0;
+  border-radius: 10px;
+  color: var(--evo-sidebar-text);
+  font-size: 19px;
+}
+
+.evolution-tablet-rail__button.ant-btn:hover,
+.evolution-tablet-rail__button.ant-btn:focus-visible {
+  background: var(--evo-sidebar-hover);
+  color: var(--evo-sidebar-hover-text);
+}
+
+.evolution-tablet-rail__button--active.ant-btn {
+  background: var(--evo-sidebar-selected);
+  color: var(--evo-sidebar-selected-text);
+}
+
+.evolution-tablet-rail__button--active.ant-btn::before {
+  position: absolute;
+  inset: 11px auto 11px -7px;
+  width: 3px;
+  border-radius: 0 4px 4px 0;
+  background: var(--evo-navigation);
+  content: "";
+}
+
+.evolution-tablet-rail__bottom {
+  position: absolute;
+  right: 0;
+  bottom: 12px;
+  left: 0;
+  display: grid;
+  place-items: center;
+}
+
+.evolution-tablet-rail__create.ant-btn {
+  background: var(--evo-primary);
+  color: #fff;
+  box-shadow: var(--evo-button-shadow);
+}
+
+/* Touch targets: visual icons stay compact, hit areas stay at least 44px. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(
+  .ant-btn,
+  .ant-btn-sm,
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next,
+  .ant-pagination-jump-prev,
+  .ant-pagination-jump-next,
+  .ant-tabs-tab,
+  .ant-segmented-item,
+  .ant-dropdown-trigger,
+  .ant-select-selector,
+  .ant-picker,
+  .ant-input-affix-wrapper,
+  .ant-menu-item
+) {
+  min-height: 44px !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(
+  .ant-btn,
+  .ant-btn-sm,
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next,
+  .ant-pagination-jump-prev,
+  .ant-pagination-jump-next
+) {
+  min-width: 44px !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(
+  label.ant-checkbox-wrapper,
+  label.ant-radio-wrapper,
+  .status-board-toolbar__switch
+) {
+  min-height: 44px;
+  align-items: center;
+  padding-inline: 4px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(.ant-btn, .ant-segmented-item, .ant-tabs-tab):active {
+  transform: scale(0.96);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(.ant-btn, .ant-segmented-item, .ant-tabs-tab) {
+  transition-property: color, background-color, border-color, box-shadow, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+/* Compact, sticky page heading. Content remains in normal flow; no row is covered. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-breadcrumb {
+  display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-heading,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .operational-page-head,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-page-header {
+  position: sticky;
+  top: 0;
+  z-index: 22;
+  min-height: 56px;
+  align-items: center;
+  margin: 0;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid transparent;
+  background: color-mix(in srgb, var(--evo-canvas) 96%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-heading-left {
+  min-width: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-heading-title h4.ant-typography,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .operational-page-head h1.ant-typography,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-page-header h1.ant-typography {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(
+  .ant-page-header-heading-extra,
+  .operational-page-head__actions,
+  .evolution-page-header__actions
+) {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  flex-wrap: nowrap;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(
+  .ant-page-header-heading-extra,
+  .operational-page-head__actions,
+  .evolution-page-header__actions
+)::-webkit-scrollbar {
+  display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-content {
+  padding-top: 6px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .operational-breadcrumbs,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .operational-page-head p.ant-typography,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-page-header p.ant-typography {
+  display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"] :where(
+  .ant-page-header-heading,
+  .operational-page-head,
+  .evolution-page-header
+) {
+  min-height: var(--tablet-sticky-row);
+  height: var(--tablet-sticky-row);
+  padding-block: 4px;
+  border-bottom-color: var(--evo-border);
+  background: color-mix(in srgb, var(--evo-surface) 96%, transparent);
+  box-shadow: 0 5px 14px rgba(23, 52, 61, 0.08);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"] :where(
+  .ant-page-header-heading-left,
+  .operational-page-head__title,
+  .evolution-page-header__copy
+) {
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"] :where(
+  .ant-page-header-heading-extra,
+  .operational-page-head__actions,
+  .evolution-page-header__actions
+) {
+  width: 100%;
+  flex: 1 1 100%;
+  justify-content: flex-start;
+}
+
+/* Font-size collapse preserves text in accessibility tree while icons remain visible. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"] :where(
+  .ant-page-header-heading-extra,
+  .operational-page-head__actions,
+  .evolution-page-header__actions
+) .ant-btn:has(.anticon) {
+  width: 44px;
+  max-width: 44px;
+  padding-inline: 0;
+  overflow: hidden;
+  font-size: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"] :where(
+  .ant-page-header-heading-extra,
+  .operational-page-head__actions,
+  .evolution-page-header__actions
+) .ant-btn:has(.anticon) .anticon {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* Dense tablet tables and card view. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-table-wrapper {
+  max-width: 100%;
+  overflow: clip;
+  border: 1px solid var(--evo-border);
+  border-radius: 10px;
+  background: var(--evo-surface);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-table-thead > tr > th {
+  height: 42px;
+  padding-block: 6px;
+  background: var(--evo-surface-muted);
+  color: var(--evo-text-secondary);
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-table-tbody > tr > td {
+  min-height: 58px;
+  height: 58px;
+  padding-block: 8px;
+  vertical-align: middle;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .orders-table .ant-table-body {
+  max-height: calc(100dvh - 326px) !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .orders-table .ant-table-cell-fix-left {
+  background: var(--evo-surface);
+  box-shadow: 2px 0 0 var(--evo-border);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .orders-table .ant-pagination :where(
+  .ant-pagination-item,
+  .ant-pagination-prev,
+  .ant-pagination-next,
+  .ant-select-selector
+) {
+  min-width: 44px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  font-size: 12px;
+  line-height: 42px;
+}
+
+.orders-tablet-view-switch {
+  flex: 0 0 auto;
+}
+
+.order-card-list--tablet .ant-list-items {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.order-card-list--tablet .ant-list-items > .ant-card {
+  min-width: 0;
+  margin: 0 !important;
+  border: 1px solid var(--evo-border);
+  border-left: 3px solid var(--evo-primary);
+  border-radius: 10px;
+  background: var(--evo-surface);
+  box-shadow: 0 6px 16px rgba(23, 52, 61, 0.06);
+  transition-property: transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.order-card-list--tablet .ant-list-items > .ant-card:active {
+  transform: scale(0.96);
+}
+
+.order-card-list--tablet .ant-list-pagination {
+  margin-block: 12px 0;
+}
+
+/* Boards: use remaining 700px tablet content budget and internal column scroll. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-modern-route="status-board"] {
+  overflow: hidden;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-modern-route="status-board"] .evolution-screen-frame,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-modern-route="status-board"] .evolution-screen-frame > div:not([hidden]) {
+  height: 100%;
+  min-height: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  gap: 8px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page__header {
+  min-height: 56px;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page__header h3.ant-typography {
+  margin: 0;
+  font-size: 20px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-tabs .ant-tabs-nav {
+  min-height: 44px;
+  margin: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-toolbar {
+  min-height: 52px;
+  flex: 0 0 52px;
+  padding: 4px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: 10px;
+  scroll-snap-type: x proximity;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-toolbar > * {
+  scroll-snap-align: start;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-scrollbar {
+  flex: 0 0 16px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-viewport {
+  min-height: 0;
+  flex: 1 1 0;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column {
+  width: 288px;
+  min-width: 288px;
+  height: 100%;
+  scroll-snap-align: start;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column__header {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-height: 54px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column__cards {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
+  .status-board-page__header,
+  .operational-page-head,
+  .status-board-tabs
+) {
+  display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 22;
+  box-shadow: 0 5px 14px rgba(23, 52, 61, 0.08);
+}
+
+/* Calendar, details, forms and major tablet workspaces. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-page-wrapper {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-navigation {
+  min-height: 52px;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-grid {
+  min-height: 0;
+  height: calc(100% - 108px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-row {
+  min-width: 1000px;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .day-column {
+  min-width: 136px;
+  border-radius: 10px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content:where(
+  [data-modern-route="order-detail"],
+  [data-modern-route="client-detail"],
+  [data-modern-route="payment-detail"],
+  [data-modern-route="material-detail"]
+) .ant-page-header-content > div > .ant-spin-nested-loading > .ant-spin-container > .ant-card > .ant-card-body {
+  padding: 14px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content:where(
+  [data-modern-route="order-edit"],
+  [data-modern-route="client-form"],
+  [data-modern-route="payment-form"],
+  [data-modern-route="material-form"]
+) form.ant-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content:where(
+  [data-modern-route="order-edit"],
+  [data-modern-route="client-form"],
+  [data-modern-route="payment-form"],
+  [data-modern-route="material-form"]
+) form.ant-form > :where(.ant-card, .ant-tabs, .ant-alert, .ant-space, .ant-form-item:last-child) {
+  grid-column: 1 / -1;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content:where(
+  [data-modern-route="clients-list"],
+  [data-modern-route="payments-list"],
+  [data-modern-route="materials-list"]
+) .ant-page-header-content {
+  min-width: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .cut-page-modern,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .configuration-page {
+  min-width: 0;
+  max-width: 100%;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(
+  .cut-jobs-table-container,
+  .cut-sheet-preview,
+  .configuration-content,
+  .ant-tabs-content-holder
+) {
+  min-width: 0;
+}
+
+@media (max-width: 1199px) {
+  .order-card-list--tablet .ant-list-items {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column {
+    width: 276px;
+    min-width: 276px;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__identity-copy,
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__search kbd {
+    display: none;
+  }
+}
+
+@media (max-width: 899px) {
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__main,
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet.evolution-shell--collapsed .evolution-shell__main {
+    margin-left: 0;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header.ant-layout-header {
+    padding-inline: 10px;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__search {
+    width: 44px;
+    min-width: 44px;
+    padding-inline: 12px;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__search > span:nth-child(2),
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__search kbd,
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__identity-copy {
+    display: none;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-workspace-tabs.workspace-tabs {
+    padding-inline: 8px;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content.ant-layout-content {
+    padding: 10px;
+  }
+
+  .order-card-list--tablet .ant-list-items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column {
+    width: calc(100vw - 32px);
+    min-width: calc(100vw - 32px);
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content:where(
+    [data-modern-route="order-edit"],
+    [data-modern-route="client-form"],
+    [data-modern-route="payment-form"],
+    [data-modern-route="material-form"]
+  ) form.ant-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-row {
+    row-gap: 10px;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-col {
+    max-width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(.ant-btn, .ant-segmented-item, .ant-tabs-tab) {
+    transition: none;
+  }
+}
+
+/* Keep the physical hit box touch-safe even when page-specific dense toolbars load later. */
+html[data-ui-variant] .evolution-shell.evolution-shell--tablet button.ant-btn {
+  min-width: 44px !important;
+  min-height: 44px !important;
+}

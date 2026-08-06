@@ -42,6 +42,31 @@ describe('UI variant bootstrap', () => {
     expect(restoreSession).not.toHaveBeenCalled();
   });
 
+  it('forces Evolution before preference lookup on a physical tablet', async () => {
+    const restoreSession = vi.fn(async () => undefined);
+    const getPreferences = vi.fn(async () => ({ preferences: { uiVariant: 'legacy' } }));
+    const dependencies = makeDependencies({
+      isTabletDevice: () => true,
+      restoreSession,
+      getPreferences,
+      getCached: () => 'air',
+    });
+
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      dependencies,
+    )).resolves.toBe('evolution');
+    expect(restoreSession).not.toHaveBeenCalled();
+    expect(getPreferences).not.toHaveBeenCalled();
+  });
+
+  it('keeps forceLegacy stronger than the tablet override', async () => {
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: true },
+      makeDependencies({ isTabletDevice: () => true }),
+    )).resolves.toBe('legacy');
+  });
+
   it('uses only the same-user confirmed cache when preferences are unavailable', async () => {
     const dependencies = makeDependencies({
       getPreferences: async () => {
