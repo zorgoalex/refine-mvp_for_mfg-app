@@ -44,6 +44,15 @@ describe('evolution shell behavior preservation', () => {
     expect(tabletStyles).toMatch(/data-tablet-header-compact="true"[^}]+\.ant-page-header-heading,[\s\S]+position: sticky;/);
   });
 
+  it('forces board workspaces into compact tablet headers before any scroll', () => {
+    expect(layout).toContain('const forceTabletCompactHeader = isTablet');
+    expect(layout).toContain("routeFamily === 'status-board' || routeFamily === 'calendar'");
+    expect(layout).toContain('forceTabletCompactHeader || tabletHeaderCompact');
+    expect(layout).toContain('if (!isTablet || forceTabletCompactHeader) return undefined');
+    expect(layout).toContain('if (!isTablet || forceTabletCompactHeader || !(event.target instanceof HTMLElement)) return');
+    expect(layout).toContain("data-tablet-header-compact={tabletHeaderIsCompact ? 'true' : 'false'}");
+  });
+
   it('moves tablet personal utilities out of the header and into the rail or drawer footer', () => {
     expect(layout).toContain('!isAirDesktop && !isTabletLandscape');
     expect(layout).toContain('tablet={isTabletPortrait}');

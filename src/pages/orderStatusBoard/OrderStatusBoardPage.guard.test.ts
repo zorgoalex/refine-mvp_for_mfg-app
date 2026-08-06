@@ -10,6 +10,7 @@ const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
 );
+const tabletCss = readFileSync('src/ui-evolution/styles/tablet.css', 'utf8');
 const columnSettings = readFileSync(
   'src/pages/orderStatusBoard/StatusBoardColumnSettings.tsx',
   'utf8',
@@ -72,6 +73,17 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('scroll-snap-type: none');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     expect(css).toContain('scroll-snap-type: x mandatory');
+  });
+
+  it('keeps every tablet board action in the forced one-row toolbar', () => {
+    expect(page).toContain('className="status-board-toolbar__tablet-board-switch"');
+    expect(page).toContain('aria-label="Переключатель досок"');
+    expect(page).toContain('className="status-board-toolbar__tablet-refresh"');
+    expect(page).toContain('className="status-board-toolbar__cnc-card-mode-text"');
+    expect(tabletCss).toMatch(/data-modern-route="status-board"[^}]+\.status-board-toolbar \{[\s\S]*height: var\(--tablet-sticky-row\);/);
+    expect(tabletCss).toContain('.status-board-toolbar__tablet-board-switch .ant-segmented-item');
+    expect(tabletCss).toContain('.status-board-toolbar__cnc-card-mode-text');
+    expect(tabletCss).toContain('scrollbar-width: none');
   });
 
   it('keeps the upper scrollbar synchronized with the board viewport', () => {

@@ -67,6 +67,12 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const location = useLocation();
   const routeFamily = resolveModernRouteFamily(location.pathname);
   const pageKind = resolveOperationalPageKind(location.pathname);
+  const forceTabletCompactHeader = isTablet && (
+    routeFamily === 'status-board' || routeFamily === 'calendar'
+  );
+  const tabletHeaderIsCompact = isTablet && (
+    forceTabletCompactHeader || tabletHeaderCompact
+  );
   const isOperational = variant === 'line' || variant === 'air';
   const isAirDesktop = variant === 'air' && !isMobile && !isTablet;
   const effectiveCollapsed = isOperational ? false : collapsed;
@@ -80,7 +86,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   }, [location.pathname, location.search, deviceTier]);
 
   React.useEffect(() => {
-    if (!isTablet) return undefined;
+    if (!isTablet || forceTabletCompactHeader) return undefined;
     const handleWindowScroll = () => {
       const target = document.documentElement;
       setTabletHeaderCompact((current) => {
@@ -99,10 +105,10 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
     };
     window.addEventListener('scroll', handleWindowScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleWindowScroll);
-  }, [isTablet]);
+  }, [forceTabletCompactHeader, isTablet]);
 
   const handleTabletScrollCapture: React.UIEventHandler<HTMLElement> = (event) => {
-    if (!isTablet || !(event.target instanceof HTMLElement)) return;
+    if (!isTablet || forceTabletCompactHeader || !(event.target instanceof HTMLElement)) return;
     const target = event.target;
     const horizontalOnly = target.matches([
       '.app-table-top-scrollbar',
@@ -149,7 +155,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
     <Layout
       className={shellClassName}
       data-device-tier={deviceTier}
-      data-tablet-header-compact={isTablet && tabletHeaderCompact ? 'true' : 'false'}
+      data-tablet-header-compact={tabletHeaderIsCompact ? 'true' : 'false'}
     >
       <a className="evolution-skip-link" href="#evolution-main-content">Перейти к содержимому</a>
       {isTabletLandscape ? (
@@ -178,7 +184,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
           className="evolution-shell__content"
           data-modern-route={routeFamily}
           data-operational-page-kind={pageKind}
-          data-tablet-header-compact={isTablet && tabletHeaderCompact ? 'true' : 'false'}
+          data-tablet-header-compact={tabletHeaderIsCompact ? 'true' : 'false'}
           id="evolution-main-content"
           onScrollCapture={handleTabletScrollCapture}
           tabIndex={-1}

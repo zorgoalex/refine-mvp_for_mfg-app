@@ -25,7 +25,7 @@ describe('calendar filters integration', () => {
     expect(board).toContain('quickSearch');
   });
 
-  it('uses workspace scrolling and one icon-only sticky calendar bar on tablets', () => {
+  it('uses workspace scrolling and one immediately compact icon-only sticky calendar bar on tablets', () => {
     expect(board).toContain('className="calendar-navigation__tablet-filter"');
     expect(board).toContain('className="calendar-navigation__mode-text"');
     expect(tabletStyles).toMatch(/\.evolution-shell--tablet \.calendar-page-wrapper \{[\s\S]*height: auto;[\s\S]*overflow: visible !important;/);

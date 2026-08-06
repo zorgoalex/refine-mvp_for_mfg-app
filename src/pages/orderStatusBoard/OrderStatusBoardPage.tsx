@@ -49,6 +49,7 @@ import {
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
+  ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -180,6 +181,10 @@ const CNC_CARD_DISPLAY_OPTIONS: Array<{
   { label: 'Стандартные', value: 'standard' },
   { label: 'Компактные', value: 'compact' },
 ];
+const CNC_CARD_DISPLAY_ICONS: Record<CncCardDisplayMode, React.ReactNode> = {
+  standard: <ProfileOutlined />,
+  compact: <CompressOutlined />,
+};
 const CNC_SVG_NS = 'http://www.w3.org/2000/svg';
 const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
   '#d7e9ff',
@@ -652,6 +657,42 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           </Tooltip>
         ),
       })),
+    [],
+  );
+  const cncCardDisplayOptions = useMemo(
+    () =>
+      CNC_CARD_DISPLAY_OPTIONS.map((option) => ({
+        value: option.value,
+        label: (
+          <Tooltip title={option.label}>
+            <span className="status-board-toolbar__cnc-card-mode-option">
+              <span aria-hidden="true">{CNC_CARD_DISPLAY_ICONS[option.value]}</span>
+              <span className="status-board-toolbar__cnc-card-mode-text">{option.label}</span>
+            </span>
+          </Tooltip>
+        ),
+      })),
+    [],
+  );
+  const tabletBoardSwitchOptions = useMemo(
+    () => [
+      {
+        value: 'order',
+        label: (
+          <Tooltip title="Статусы заказов">
+            <ProfileOutlined aria-label="Статусы заказов" />
+          </Tooltip>
+        ),
+      },
+      {
+        value: 'production',
+        label: (
+          <Tooltip title="Производство">
+            <ToolOutlined aria-label="Производство" />
+          </Tooltip>
+        ),
+      },
+    ],
     [],
   );
   const statusBoardTabItems = useMemo(
@@ -1190,6 +1231,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             ].filter(Boolean).join(' ')}
             aria-label="Фильтры доски"
           >
+            {!fixedView && !isPacker && (
+              <div
+                className="status-board-toolbar__tablet-board-switch"
+                aria-label="Переключатель досок"
+              >
+                <Segmented
+                  className="status-board-toolbar__segmented"
+                  size="small"
+                  value={viewState.view}
+                  options={tabletBoardSwitchOptions}
+                  onChange={(value) => updateViewState({ view: value as OrderStatusBoardType })}
+                />
+              </div>
+            )}
             <Input
               allowClear
               className="status-board-toolbar__search"
@@ -1289,6 +1344,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 Карточки
               </Typography.Text>
               <Segmented
+                className="status-board-toolbar__segmented"
                 size="small"
                 value={cardDisplayMode}
                 options={productionCardDisplayOptions}
@@ -1297,6 +1353,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 }
               />
             </div>
+            <Tooltip title="Обновить доску">
+              <Button
+                className="status-board-toolbar__tablet-refresh"
+                aria-label="Обновить доску"
+                icon={<ReloadOutlined />}
+                loading={loading}
+                onClick={() => void fetchInitial()}
+              />
+            </Tooltip>
             <StatusBoardColumnSettingsButton
               key={STATUS_BOARD_COLUMN_PREFERENCE_KEYS[viewState.view]}
               boardLabel={STATUS_BOARD_LABELS[viewState.view]}
@@ -1397,9 +1462,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 />
               </Tooltip>
               <Segmented
+                className="status-board-toolbar__segmented"
                 size="small"
                 value={cncCardDisplayMode}
-                options={CNC_CARD_DISPLAY_OPTIONS}
+                options={cncCardDisplayOptions}
                 onChange={(value) =>
                   setCncCardDisplayMode(value as CncCardDisplayMode)
                 }
@@ -1430,6 +1496,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 aria-pressed={cncDetailedEnabled}
                 aria-label={cncDetailedEnabled ? 'Выключить подробный режим' : 'Включить подробный режим'}
                 onClick={() => setCncDetailedEnabled((current) => !current)}
+              />
+            </Tooltip>
+            <Tooltip title="Обновить доску">
+              <Button
+                className="status-board-toolbar__tablet-refresh"
+                aria-label="Обновить доску"
+                icon={<ReloadOutlined />}
+                loading={loading}
+                onClick={() => void fetchInitial()}
               />
             </Tooltip>
             <StatusBoardColumnSettingsButton

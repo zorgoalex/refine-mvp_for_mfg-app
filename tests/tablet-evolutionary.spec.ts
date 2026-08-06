@@ -208,7 +208,7 @@ test.describe('Evolutionary tablet UI', () => {
         }
     });
 
-    test('collapses the tablet calendar header and toolbar into one unconstrained sticky row', async ({ page }, testInfo) => {
+    test('opens the tablet calendar in one unconstrained sticky row before any scroll', async ({ page }, testInfo) => {
         const db = createWorkflowMockDb();
         seedTabletData(db);
         const health = collectPageHealth(page);
@@ -224,8 +224,12 @@ test.describe('Evolutionary tablet UI', () => {
         const navigation = page.locator('.calendar-navigation');
         const grid = page.locator('.calendar-grid');
 
-        await expect(pageHeader).toBeVisible();
-        await expect.poll(async () => Math.round((await pageHeader.boundingBox())?.height ?? 0)).toBe(48);
+        await expect(content).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect(page.locator('.evolution-shell')).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect(pageHeader).toBeHidden();
+        await expect.poll(async () => Math.round((await pageHeader.boundingBox())?.height ?? 0)).toBe(0);
+        await expect(navigation).toHaveCSS('position', 'sticky');
+        await expect.poll(async () => Math.round((await navigation.boundingBox())?.height ?? 0)).toBe(44);
         await expect(grid).toHaveCSS('max-height', 'none');
         await expect(content).toHaveCSS('overflow-y', 'auto');
 
@@ -237,15 +241,6 @@ test.describe('Evolutionary tablet UI', () => {
         const wrapperBox = await wrapper.boundingBox();
         expect(wrapperBox?.height ?? 0, 'calendar wrapper grows beyond the tablet viewport').toBeGreaterThan((contentBox?.height ?? 0) + 200);
 
-        await content.evaluate((element) => {
-            element.scrollTop = 160;
-            element.dispatchEvent(new Event('scroll', { bubbles: true }));
-        });
-        await expect(content).toHaveAttribute('data-tablet-header-compact', 'true');
-        await expect(page.locator('.evolution-shell')).toHaveAttribute('data-tablet-header-compact', 'true');
-        await expect.poll(async () => Math.round((await pageHeader.boundingBox())?.height ?? 0)).toBe(0);
-        await expect(navigation).toHaveCSS('position', 'sticky');
-        await expect.poll(async () => Math.round((await navigation.boundingBox())?.height ?? 0)).toBe(44);
         const compactNavigationBox = await navigation.boundingBox();
         const compactContentBox = await content.boundingBox();
         expect(Math.abs((compactNavigationBox?.y ?? 0) - (compactContentBox?.y ?? 0))).toBeLessThanOrEqual(12);
@@ -259,11 +254,16 @@ test.describe('Evolutionary tablet UI', () => {
         await captureTabletState(page, testInfo, '16-calendar-compact-header');
 
         await content.evaluate((element) => {
+            element.scrollTop = 160;
+            element.dispatchEvent(new Event('scroll', { bubbles: true }));
+        });
+        await expect(content).toHaveAttribute('data-tablet-header-compact', 'true');
+        await content.evaluate((element) => {
             element.scrollTop = 0;
             element.dispatchEvent(new Event('scroll', { bubbles: true }));
         });
-        await expect(content).toHaveAttribute('data-tablet-header-compact', 'false');
-        await expect.poll(async () => Math.round((await pageHeader.boundingBox())?.height ?? 0)).toBe(48);
+        await expect(content).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect.poll(async () => Math.round((await pageHeader.boundingBox())?.height ?? 0)).toBe(0);
 
         expect(health.pageErrors, 'page errors').toEqual([]);
         expect(health.consoleErrors, 'console errors').toEqual([]);
@@ -280,39 +280,27 @@ test.describe('Evolutionary tablet UI', () => {
         await expectTabletShell(page, 'status-board');
         await expect(page.locator('[data-status-board-order-id="15"]')).toBeVisible({ timeout: 30_000 });
         const boardContent = page.locator('.evolution-shell__content');
-        const boardCards = page.locator('.status-board-column__cards').first();
-        const boardDidScroll = await boardCards.evaluate((element) => {
-            const spacer = document.createElement('div');
-            spacer.dataset.tabletBoardScrollSpacer = 'true';
-            spacer.style.height = '900px';
-            spacer.style.minHeight = '900px';
-            spacer.style.flex = '0 0 900px';
-            element.append(spacer);
-            element.scrollTop = 80;
-            element.dispatchEvent(new Event('scroll', { bubbles: true }));
-            return element.scrollTop >= 32;
-        });
-        expect(boardDidScroll, 'status-board column exposes vertical scrolling').toBe(true);
         await expect(boardContent).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect(page.locator('.evolution-shell')).toHaveAttribute('data-tablet-header-compact', 'true');
         await expect(page.locator('.status-board-page__header')).toBeHidden();
         await expect(page.locator('.status-board-tabs')).toBeHidden();
-        await expect.poll(async () => Math.round((await page.locator('.status-board-toolbar').boundingBox())?.height ?? 0)).toBe(44);
+        await expect(page.getByLabel('Переключатель досок')).toBeVisible();
+        await expect(page.locator('.status-board-toolbar__tablet-refresh')).toBeVisible();
+        await expectSingleLineBoardToolbar(page);
         await expect(page.locator('.status-board-toolbar__label').first()).toBeHidden();
         await captureTabletState(page, testInfo, '03a-order-board-compact-header');
-        await boardCards.evaluate((element) => {
-            element.scrollTop = 0;
-            element.dispatchEvent(new Event('scroll', { bubbles: true }));
-            element.querySelector('[data-tablet-board-scroll-spacer="true"]')?.remove();
-        });
-        await expect(boardContent).toHaveAttribute('data-tablet-header-compact', 'false');
         await touchDragCard(context, page, 'Tablet QA 015', 'order-2');
         await expect.poll(() => boardMock.orderStatusBodies.length).toBe(1);
         expect(boardMock.orderStatusBodies[0]).toMatchObject({ orderStatusId: 2, version: 3 });
         await expect(page.locator('[data-status-board-column-key="order-2"] [data-status-board-order-id="15"]')).toBeVisible();
         await captureTabletState(page, testInfo, '03-order-board');
 
-        await page.goto('/order-status-board?board=production');
+        await page.locator('.status-board-toolbar__tablet-board-switch .ant-segmented-item').nth(1).click();
+        await expect(page).toHaveURL(/\/order-status-board\?board=production$/);
         await expectTabletShell(page, 'status-board');
+        await expect(page.locator('.evolution-shell__content')).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect(page.locator('.status-board-tabs')).toBeHidden();
+        await expectSingleLineBoardToolbar(page);
         await touchDragCard(context, page, 'Tablet QA 015', 'production-2');
         await expect.poll(() => boardMock.productionStatusBodies.length).toBe(1);
         expect(boardMock.productionStatusBodies[0]).toMatchObject({ productionStatusId: 2, version: 4 });
@@ -321,6 +309,11 @@ test.describe('Evolutionary tablet UI', () => {
 
         await page.goto('/mdf-work-board');
         await expectTabletShell(page, 'status-board');
+        await expect(page.locator('.evolution-shell__content')).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect(page.locator('.status-board-page__header')).toBeHidden();
+        await expect(page.locator('.status-board-toolbar__tablet-refresh')).toBeVisible();
+        await expectSingleLineBoardToolbar(page);
+        await expect(page.locator('.status-board-toolbar__cnc-card-mode-text').first()).toBeHidden();
         await expect(page.locator('.status-board-columns--cnc .status-board-column')).toHaveCount(5);
         await expect(page.locator('.status-board-card__drag--touch')).toHaveCount(0);
         await captureTabletState(page, testInfo, '05-cnc-board');
@@ -743,6 +736,48 @@ async function expectRepresentativeTouchTargets(page: Page) {
     for (const size of sizes) {
         expect(size.width, JSON.stringify(size)).toBeGreaterThanOrEqual(43.5);
         expect(size.height, JSON.stringify(size)).toBeGreaterThanOrEqual(43.5);
+    }
+}
+
+async function expectSingleLineBoardToolbar(page: Page) {
+    const toolbar = page.locator('.status-board-toolbar:visible').first();
+    await expect(toolbar).toHaveCSS('position', 'sticky');
+    await expect.poll(async () => Math.round((await toolbar.boundingBox())?.height ?? 0)).toBe(44);
+    const geometry = await toolbar.evaluate((element) => {
+        const toolbarBox = element.getBoundingClientRect();
+        const controls = Array.from(element.querySelectorAll<HTMLElement>([
+            ':scope > .ant-btn',
+            ':scope > .ant-input-affix-wrapper',
+            ':scope > .ant-picker',
+            ':scope > .ant-select',
+            ':scope > .status-board-toolbar__checkbox',
+            ':scope > .status-board-toolbar__switch',
+            ':scope > .status-board-toolbar__display-mode',
+            ':scope > .status-board-toolbar__cnc-period',
+            ':scope > .status-board-toolbar__tablet-board-switch',
+            ':scope > .status-board-toolbar__tablet-refresh',
+        ].join(','))).filter((control) => getComputedStyle(control).display !== 'none');
+        return controls.map((control) => {
+            const box = control.getBoundingClientRect();
+            const segmented = control.querySelector<HTMLElement>('.ant-segmented');
+            const segmentedBox = segmented?.getBoundingClientRect();
+            const segmentedStyles = segmented ? getComputedStyle(segmented) : null;
+            return {
+                className: control.className,
+                topDelta: Math.abs(box.top - toolbarBox.top),
+                bottomDelta: Math.abs(toolbarBox.bottom - box.bottom),
+                height: box.height,
+                segmentedHeight: segmentedBox?.height,
+                segmentedPadding: segmentedStyles?.padding,
+                segmentedMinHeight: segmentedStyles?.minHeight,
+            };
+        });
+    });
+    expect(geometry.length).toBeGreaterThan(0);
+    for (const control of geometry) {
+        expect(control.topDelta, JSON.stringify(control)).toBeLessThanOrEqual(1);
+        expect(control.bottomDelta, JSON.stringify(control)).toBeLessThanOrEqual(1);
+        expect(control.height, JSON.stringify(control)).toBeGreaterThanOrEqual(43.5);
     }
 }
 

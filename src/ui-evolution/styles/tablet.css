@@ -569,7 +569,7 @@
   margin-block: 12px 0;
 }
 
-/* Boards: use remaining 700px tablet content budget and internal column scroll. */
+/* Boards: use remaining tablet content budget and internal column scroll. */
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-modern-route="status-board"] {
   overflow: hidden;
 }
@@ -669,9 +669,21 @@
   min-height: var(--tablet-sticky-row);
   height: var(--tablet-sticky-row);
   flex-basis: var(--tablet-sticky-row);
-  padding-block: 0;
-  border-radius: 8px;
+  gap: 4px;
+  padding: 0 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  border-radius: 0 0 10px 10px;
   box-shadow: 0 5px 14px rgba(23, 52, 61, 0.08);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar > * {
+  flex-shrink: 0;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
@@ -680,6 +692,8 @@
 ) {
   width: 44px;
   min-width: 44px;
+  height: 44px;
+  min-height: 44px;
   justify-content: center;
   gap: 0;
   padding-inline: 0;
@@ -692,12 +706,95 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__search {
-  width: 132px;
-  flex-basis: 132px;
+  width: clamp(132px, 15vw, 184px);
+  flex-basis: clamp(132px, 15vw, 184px);
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__search input::placeholder {
   color: transparent;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__date-range {
+  width: clamp(176px, 18vw, 220px);
+  flex-basis: clamp(176px, 18vw, 220px);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
+  .status-board-toolbar__tablet-board-switch,
+  .status-board-toolbar__tablet-refresh
+) {
+  display: inline-flex;
+  align-items: center;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
+  .status-board-toolbar__tablet-board-switch .ant-segmented-item,
+  .status-board-toolbar__display-mode .ant-segmented-item
+) {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding-inline: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
+  .status-board-toolbar__icon-toggle.ant-btn,
+  .status-board-toolbar__settings-button.ant-btn,
+  .status-board-toolbar__cnc-detail-toggle.ant-btn,
+  .status-board-toolbar__cnc-print.ant-btn,
+  .status-board-toolbar__tablet-refresh.ant-btn
+) {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  margin-left: 0;
+  padding-inline: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
+  .status-board-toolbar__cnc-print.ant-btn,
+  .status-board-toolbar--cnc > .ant-btn:has(.anticon)
+) {
+  overflow: hidden;
+  font-size: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
+  .status-board-toolbar__cnc-print.ant-btn,
+  .status-board-toolbar--cnc > .ant-btn:has(.anticon)
+) .anticon {
+  margin: 0;
+  font-size: 16px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar--cnc .ant-picker {
+  width: 132px;
+  flex: 0 0 132px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__cnc-order-search {
+  width: clamp(180px, 20vw, 240px);
+  flex-basis: clamp(180px, 20vw, 240px);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar--cnc .ant-select-selection-placeholder {
+  color: transparent;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__cnc-period {
+  min-height: 44px;
+  gap: 4px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__cnc-period-chip.ant-btn {
+  min-width: 48px;
+  height: 44px;
+  padding-inline: 8px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__cnc-card-mode-icon,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__cnc-card-mode-text {
+  display: none;
 }
 
 /* Calendar, details, forms and major tablet workspaces. */
@@ -751,8 +848,7 @@
   overscroll-behavior: contain;
 }
 
-/* Calendar owns the workspace scroll on tablet. After vertical scroll, the
-   title row collapses completely and its controls move into one 44px bar. */
+/* Calendar owns workspace scroll and starts with one 44px tablet control bar. */
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-page-wrapper > :where(
   .operational-page-head,
   .calendar-page-header
@@ -991,4 +1087,11 @@
 html[data-ui-variant] .evolution-shell.evolution-shell--tablet button.ant-btn {
   min-width: 44px !important;
   min-height: 44px !important;
+}
+
+/* Ant Segmented adds 2px around 44px items; remove it inside forced board bars. */
+.evolution-shell.evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__segmented.ant-segmented {
+  height: 44px !important;
+  min-height: 44px !important;
+  padding: 0 !important;
 }
