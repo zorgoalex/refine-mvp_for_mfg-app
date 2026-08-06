@@ -40,6 +40,8 @@ class WorkerConfig:
     temp_dir: Path
     media_dir: Path
     state_path: Path
+    audit_spool_path: Path
+    audit_allow_unsafe_path: bool
     resend_unchanged: bool
     backfill_on_start: bool
 
@@ -85,6 +87,8 @@ class WorkerConfig:
             temp_dir=Path(env("CNC_TEMP_DIR", "/data/tmp")),
             media_dir=Path(env("CNC_MEDIA_DIR", "/data/cnc-telegram-media")),
             state_path=Path(env("CNC_STATE_PATH", "/data/state.json")),
+            audit_spool_path=Path(env("CNC_AUDIT_SPOOL_PATH", "/data/cnc-telegram-audit.sqlite3")),
+            audit_allow_unsafe_path=bool_env("CNC_AUDIT_ALLOW_UNSAFE_PATH", False),
             resend_unchanged=bool_env("CNC_RESEND_UNCHANGED", False),
             backfill_on_start=bool_env("CNC_BACKFILL_ON_START", True),
         )
@@ -129,6 +133,8 @@ class WorkerConfig:
             missing.append("TELEGRAM_API_HASH")
         if not self.telegram_chat:
             missing.append("TELEGRAM_CHAT or TELEGRAM_ALLOWED_CHAT_ID")
+        if not self.telegram_allowed_chat_ids:
+            missing.append("TELEGRAM_ALLOWED_CHAT_ID")
         if missing:
             raise RuntimeError(f"missing required Telegram config: {', '.join(missing)}")
 

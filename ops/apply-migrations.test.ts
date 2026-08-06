@@ -91,15 +91,40 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     for (const name of requiredTriggers) expect(probeFn).toContain(`q_stmt_trg ${name} `);
     expect(scriptText).toMatch(/q_fun_hash\(\).*md5\(pg_get_functiondef\(oid\)\)/);
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
-    expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(19);
+    expect(probeFn).toContain("q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'");
+    expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(requiredFunctions.length + 2);
   });
 
   it('requires realtime end-state probes before advancing the migration ledger', () => {
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|109_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
+  });
+
+  it('pins the complete Telegram worker audit schema before advancing 107/108/109', () => {
+    const workerProbe = probeFn.slice(probeFn.indexOf('107_cnc_telegram_worker_audit*'), probeFn.indexOf('*) return 2'));
+    expect(workerProbe.match(/q_colset_hash cnc_telegram_worker_/g)).toHaveLength(4);
+    expect(workerProbe.match(/q_conset_hash cnc_telegram_worker_/g)).toHaveLength(4);
+    expect(workerProbe.match(/q_idxset_hash cnc_telegram_worker_/g)).toHaveLength(4);
+    for (const marker of [
+      'cnc_telegram_worker_scans_writer_user_id_fkey',
+      'chk_cnc_tg_worker_message_status',
+      'chk_cnc_tg_worker_operation_status',
+      'cnc_telegram_worker_message_observations_operation_id_fkey',
+      'idx_cnc_tg_worker_messages_search',
+      'uq_cnc_tg_worker_observation_operation_ordinal',
+      "q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)'",
+      'chk_cnc_tg_worker_scan_reason_codes',
+      'chk_cnc_tg_worker_message_reason_codes',
+      'chk_cnc_tg_worker_operation_reason_codes',
+      'chk_cnc_tg_worker_observation_reason_codes',
+      'chk_cnc_tg_worker_observation_classification_code',
+    ]) expect(workerProbe).toContain(marker);
+    expect(scriptText).toMatch(/q_colset_hash\(\).*ordinal_position.*column_default/);
+    expect(scriptText).toMatch(/q_conset_hash\(\).*pg_get_constraintdef/);
+    expect(scriptText).toMatch(/q_idxset_hash\(\).*indexdef/);
   });
 
   it('pins all migration 101 effect markers', () => {
@@ -156,6 +181,12 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     );
     expect(migration104Probe).toContain('14cfb20b020779a070e7ee2ba070ba0d');
     expect(migration104Probe).toContain('d4f7e31052321242dfea61056bae41e7');
+  });
+
+  it('pins migration 107 Bazis ERP identity completion marker', () => {
+    expect(probeFn).toContain('107_bazis_cut_erp_identity*');
+    expect(probeFn).toContain("'bazis_cut_set_details'::regclass");
+    expect(probeFn).toContain('manual snapshot edits are preserved by migration 107');
   });
 });
 

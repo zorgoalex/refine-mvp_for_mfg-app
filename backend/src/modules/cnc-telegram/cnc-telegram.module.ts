@@ -6,12 +6,31 @@ import { UnavailableCncTelegramRepository } from './adapters/unavailable-cnc-tel
 import { CncTelegramService } from './application/cnc-telegram.service';
 import { CncTelegramController } from './http/cnc-telegram.controller';
 import { CncTelegramRuntimeConfigService } from './http/cnc-telegram-runtime-config.service';
+import { ConfigService } from '@nestjs/config';
+import type { BackendEnv } from '../../config/env.validation';
+import { PgCncTelegramWorkerAuditRepository } from './adapters/pg-cnc-telegram-worker-audit-repository';
+import { CncTelegramWorkerAuditService } from './application/cnc-telegram-worker-audit.service';
+import { CncTelegramWorkerAuditController } from './http/cnc-telegram-worker-audit.controller';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [CncTelegramController],
+  controllers: [CncTelegramController, CncTelegramWorkerAuditController],
   providers: [
     CncTelegramRuntimeConfigService,
+    {
+      provide: CncTelegramWorkerAuditService,
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) => {
+        const deniedAudit = database.isConfigured
+          ? new PgCncTelegramRepository(database)
+          : new UnavailableCncTelegramRepository();
+        return new CncTelegramWorkerAuditService(
+          new PgCncTelegramWorkerAuditRepository(database),
+          config,
+          deniedAudit,
+        );
+      },
+      inject: [DatabaseService, ConfigService],
+    },
     {
       provide: CncTelegramService,
       useFactory: (database: DatabaseService) => {

@@ -6,6 +6,12 @@ a job without a valid SVG.
 
 Raw screenshots, G-code text and OCR raw text are never sent to the ERP backend.
 
+Every Telegram iterator result, SVG decision, backend ingest and bot reply is
+written first to a durable SQLite WAL outbox (`CNC_AUDIT_SPOOL_PATH`, default
+`/data/cnc-telegram-audit.sqlite3`). ERP exposes the evidence on the
+`Аудит → Telegram-бот` tab. A corrupt/unwritable spool or missing backend
+`cnc_telegram_worker_audit_v1` capability stops the worker before Telegram is read.
+
 ## Commands
 
 ```bash
@@ -30,9 +36,15 @@ TELEGRAM_ALLOWED_CHAT_ID=-1001234567890
 ERP_API_URL=http://backend:3000/api/v1
 ERP_WORKER_LOGIN=cnc-worker
 ERP_WORKER_PASSWORD=...
+CNC_AUDIT_SPOOL_PATH=/data/cnc-telegram-audit.sqlite3
 ```
 
 `ERP_BEARER_TOKEN` can replace `ERP_WORKER_LOGIN/PASSWORD`.
+
+Backend must also set `CNC_TELEGRAM_WORKER_USERNAME` to the exact ERP login and
+`CNC_TELEGRAM_ALLOWED_CHAT_IDS` to the comma-separated allowed chat ids. Audit
+payloads contain only sanitized bounded text and identifiers; raw SVG, image and
+G-code bodies are never stored.
 
 Telegram access mode is explicit:
 

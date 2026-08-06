@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import unittest
+import json
 import sys
 import tempfile
 import types
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -14,6 +16,12 @@ telethon_stub.utils = types.SimpleNamespace(get_peer_id=lambda entity: entity)
 sys.modules.setdefault("telethon", telethon_stub)
 
 from cnc_telegram_worker.telegram_source import is_image_message, is_vector_message
+from cnc_telegram_worker.audit import (
+    AuditSpool,
+    ScanAudit,
+    reconcile_pending_processing_attempts,
+    reconcile_pending_replies,
+)
 from cnc_telegram_worker.packet import external_packet_key
 from cnc_telegram_worker.ocr import OcrResult
 from cnc_telegram_worker.state import StateStore
@@ -22,6 +30,7 @@ from cnc_telegram_worker.worker import (
     SvgGroup,
     apply_cutting_sequence_reply_index,
     apply_known_cutting_sequence_state,
+    assert_allowed_chat,
     collect_cutting_sequence_reply_search_index,
     cutting_sequence_reply_number,
     group_has_thumbs_up,
@@ -90,6 +99,11 @@ class FakeMessage:
         return file
 
 
+class FailingDownloadMessage(FakeMessage):
+    async def download_media(self, *, file: str) -> str | None:
+        raise OSError("Telegram media download failed")
+
+
 class FakeTelegramClient:
     def __init__(self, messages: list[FakeMessage]) -> None:
         self.messages = messages
@@ -108,13 +122,56 @@ class FakeTelegramClient:
         self.sent_messages.append({"entity": entity, "text": text, "reply_to": reply_to})
 
 
+class SearchMissTelegramClient(FakeTelegramClient):
+    def iter_messages(self, entity: object, **kwargs: object):
+        self.iter_messages_calls.append(kwargs)
+        return self._empty() if kwargs.get("search") else self._iter_messages()
+
+    async def _empty(self):
+        if False:
+            yield None
+
+
 class FakeErpClient:
     def __init__(self) -> None:
         self.packets: list[dict[str, object]] = []
+        self.audit_batches: list[dict[str, object]] = []
 
     async def ingest_packet(self, packet: dict[str, object], idempotency_key: str) -> dict[str, object]:
         self.packets.append(packet)
         return {"applied": True, "packet": {"cuttingSequenceNo": 12}}
+
+    async def audit_batch(self, payload: dict[str, object]) -> None:
+        self.audit_batches.append(payload)
+
+
+class FailingErpClient(FakeErpClient):
+    async def ingest_packet(self, packet: dict[str, object], idempotency_key: str) -> dict[str, object]:
+        self.packets.append(packet)
+        raise RuntimeError("ERP unavailable")
+
+
+class BackendRejectedError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("ERP rejected packet with 422")
+        self.response = types.SimpleNamespace(status_code=422)
+
+
+class RejectingErpClient(FakeErpClient):
+    async def ingest_packet(self, packet: dict[str, object], idempotency_key: str) -> dict[str, object]:
+        self.packets.append(packet)
+        raise BackendRejectedError()
+
+
+class FailingTelegramClient(FakeTelegramClient):
+    async def send_message(self, entity: object, text: str, *, reply_to: int) -> None:
+        raise RuntimeError("Telegram send failed")
+
+
+class CrashAfterAcceptErpClient(FakeErpClient):
+    async def ingest_packet(self, packet: dict[str, object], idempotency_key: str) -> dict[str, object]:
+        self.packets.append(packet)
+        raise KeyboardInterrupt("simulated process death after ERP accepted the packet")
 
 
 class WorkerFingerprintTest(unittest.TestCase):
@@ -277,6 +334,8 @@ class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
             FakeMessage(903, text="Раскрой №7", reply_to=100),
             FakeMessage(904, text="Раскрой №99", reply_to=999),
         ])
+        for message in client.messages:
+            message.out = True
 
         index = await collect_cutting_sequence_reply_search_index(client, object(), {100, 200})
         vector_a = FakeMessage(101, filename="2700.svg", mime_type="image/svg+xml")
@@ -291,6 +350,241 @@ class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(groups[1].cutting_sequence_no, 8)
         self.assertEqual(len(client.iter_messages_calls), 1)
         self.assertEqual(client.iter_messages_calls[0], {"search": "Раскрой", "limit": 1000})
+
+    async def test_excludes_out_of_window_reply_and_records_exact_decisions(self) -> None:
+        stale = FakeMessage(900, text="Раскрой №99", reply_to=100)
+        stale.date = datetime(2026, 7, 23, 23, 59, tzinfo=timezone.utc)
+        current = FakeMessage(901, text="Раскрой №7", reply_to=100)
+        current.date = datetime(2026, 7, 24, 5, 0, tzinfo=timezone.utc)
+        current.sender_id = 77
+        current.out = True
+        decisions: list[tuple[int, str]] = []
+
+        async def observe(message: FakeMessage, ordinal: int, decision: str) -> None:
+            decisions.append((int(message.id), decision))
+
+        index = await collect_cutting_sequence_reply_search_index(
+            FakeTelegramClient([stale, current]), object(), {100},
+            session_user_id="77", workday=date(2026, 7, 24), business_timezone=timezone.utc,
+            observer=observe,
+        )
+
+        self.assertEqual(index, {100: 7})
+        self.assertEqual(decisions, [
+            (900, "reply_outside_business_window"),
+            (901, "reply_selected"),
+        ])
+
+    async def test_conflicting_numbers_are_ambiguous_and_supply_no_sequence(self) -> None:
+        decisions: list[str] = []
+        replies = [
+            FakeMessage(910, text="Раскрой №7", reply_to=100),
+            FakeMessage(911, text="Раскрой №8", reply_to=100),
+        ]
+        for reply in replies:
+            reply.out = True
+
+        async def observe(_message: FakeMessage, _ordinal: int, decision: str) -> None:
+            decisions.append(decision)
+
+        index = await collect_cutting_sequence_reply_search_index(
+            FakeTelegramClient(replies),
+            object(),
+            {100},
+            observer=observe,
+        )
+
+        self.assertEqual(index, {100: None})
+        self.assertEqual(decisions, ["reply_selected", "reply_ambiguous"])
+
+    async def test_local_state_mismatch_is_ambiguous_and_clears_sequence(self) -> None:
+        image = FakeMessage(100, text="2700", mime_type="image/jpeg")
+        vector = FakeMessage(101, filename="2700.svg", mime_type="image/svg+xml")
+        groups = group_svg_messages([image, vector])
+        groups = [replace(group, cutting_sequence_no=7) for group in groups]
+        reply = FakeMessage(901, text="Раскрой №8", reply_to=100)
+        reply.sender_id = 77
+        reply.out = True
+        decisions: list[str] = []
+
+        async def observe(_message: FakeMessage, _ordinal: int, decision: str) -> None:
+            decisions.append(decision)
+
+        index = await collect_cutting_sequence_reply_search_index(
+            FakeTelegramClient([reply]), object(), {100}, session_user_id="77",
+            known_sequence_index={100: 7}, observer=observe,
+        )
+        updated = apply_cutting_sequence_reply_index(groups, index)
+
+        self.assertEqual(index, {100: None})
+        self.assertEqual(decisions, ["reply_ambiguous"])
+        self.assertIsNone(updated[0].cutting_sequence_no)
+
+    def test_missing_authenticated_reply_clears_local_sequence(self) -> None:
+        image = FakeMessage(100, text="2700", mime_type="image/jpeg")
+        vector = FakeMessage(101, filename="2700.svg", mime_type="image/svg+xml")
+        groups = [
+            replace(group, cutting_sequence_no=7)
+            for group in group_svg_messages([image, vector])
+        ]
+
+        updated = apply_cutting_sequence_reply_index(groups, {})
+
+        self.assertIsNone(updated[0].cutting_sequence_no)
+
+    async def test_scan_rejects_local_sequence_when_reply_search_misses_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            worker.config.business_timezone = timezone.utc
+            worker.config.max_messages_per_scan = 100
+            worker.state.assign_cutting_sequence_number("telegram:-100123:100", existing_number=7)
+            worker.state.mark_cutting_sequence_replied("telegram:-100123:100")
+            vector = FakeMessage(100, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            client = SearchMissTelegramClient([vector])
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+
+            await worker.scan_workday(
+                client, object(), "-100123", date(2026, 7, 24), spool, "77",
+            )
+
+            self.assertEqual(len(worker.erp.packets), 1)
+            self.assertIsNone(worker.erp.packets[0]["cuttingSequenceNo"])
+            operation_records = [
+                operation
+                for payload in worker.erp.audit_batches
+                for operation in payload.get("operations", [])
+                if operation["operationType"] == "message_processing"
+            ]
+            rejection_steps = [
+                step
+                for operation in operation_records
+                for step in operation["steps"]
+                if step["code"] == "reply_search" and step["status"] == "skipped"
+            ]
+            self.assertTrue(rejection_steps)
+            self.assertIn("подтверждающий исходящий ответ Telegram не найден", rejection_steps[-1]["message"])
+            spool.close()
+
+    async def test_scan_audits_reply_taxonomy_even_when_local_state_has_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            worker.config.business_timezone = timezone.utc
+            worker.config.max_messages_per_scan = 100
+            worker.state.assign_cutting_sequence_number("telegram:-100123:100", existing_number=7)
+            worker.state.mark_cutting_sequence_replied("telegram:-100123:100")
+            vector = FakeMessage(100, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            reply = FakeMessage(101, text="Раскрой №7", reply_to=100)
+            reply.sender_id = 77
+            reply.out = True
+            client = FakeTelegramClient([reply, vector])
+
+            async def skip_processing(*_args: object, **_kwargs: object) -> None:
+                return None
+
+            worker.process_group = skip_processing
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            await worker.scan_workday(
+                client, object(), "-100123", date(2026, 7, 24), spool, "77",
+            )
+
+            self.assertTrue(any(call.get("search") == "Раскрой" for call in client.iter_messages_calls))
+            reply_records = [
+                message
+                for payload in worker.erp.audit_batches
+                for message in payload.get("messages", [])
+                if message["sourceMessageId"] == "101"
+            ]
+            self.assertTrue(any(message["reasonCode"] == "reply_selected" for message in reply_records))
+            spool.close()
+
+    async def test_scan_rejects_reply_that_conflicts_with_local_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            worker.config.business_timezone = timezone.utc
+            worker.config.max_messages_per_scan = 100
+            worker.state.assign_cutting_sequence_number("telegram:-100123:100", existing_number=7)
+            worker.state.mark_cutting_sequence_replied("telegram:-100123:100")
+            vector = FakeMessage(100, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            reply = FakeMessage(101, text="Раскрой №8", reply_to=100)
+            reply.sender_id = 77
+            reply.out = True
+            client = FakeTelegramClient([reply, vector])
+            processed: list[SvgGroup] = []
+
+            async def capture_processing(
+                _client: object, _entity: object, group: SvgGroup,
+                _chat_id: str, _workday: date, **_kwargs: object,
+            ) -> None:
+                processed.append(group)
+
+            worker.process_group = capture_processing
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            await worker.scan_workday(
+                client, object(), "-100123", date(2026, 7, 24), spool, "77",
+            )
+
+            self.assertEqual(len(processed), 1)
+            self.assertIsNone(processed[0].cutting_sequence_no)
+            reply_records = [
+                message
+                for payload in worker.erp.audit_batches
+                for message in payload.get("messages", [])
+                if message["sourceMessageId"] == "101"
+            ]
+            self.assertTrue(any(message["reasonCode"] == "reply_ambiguous" for message in reply_records))
+            spool.close()
+
+    async def test_day_history_reply_missed_by_search_is_not_reported_as_selected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            worker.config.business_timezone = timezone.utc
+            worker.config.max_messages_per_scan = 100
+            vector = FakeMessage(100, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            reply = FakeMessage(101, text="Раскрой №8", reply_to=100)
+            reply.sender_id = 77
+            reply.out = True
+            client = SearchMissTelegramClient([reply, vector])
+            processed: list[SvgGroup] = []
+
+            async def capture_processing(
+                _client: object, _entity: object, group: SvgGroup,
+                _chat_id: str, _workday: date, **_kwargs: object,
+            ) -> None:
+                processed.append(group)
+
+            worker.process_group = capture_processing
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            await worker.scan_workday(
+                client, object(), "-100123", date(2026, 7, 24), spool, "77",
+            )
+
+            self.assertIsNone(processed[0].cutting_sequence_no)
+            records = [
+                message
+                for payload in worker.erp.audit_batches
+                for message in payload.get("messages", [])
+                if message["sourceMessageId"] == "101"
+            ]
+            record = records[-1]
+            self.assertEqual(record["status"], "skipped")
+            self.assertEqual(record["reasonCode"], "reply_unrelated")
+            self.assertIn("не был выбран поиском", record["reasonMessage"])
+            spool.close()
+
+
+class WorkerAllowedChatTest(unittest.TestCase):
+    def test_requires_exact_peer_id_without_suffix_aliases(self) -> None:
+        assert_allowed_chat("-100123", ("-100123",))
+        with self.assertRaisesRegex(RuntimeError, "not in TELEGRAM_ALLOWED_CHAT_ID"):
+            assert_allowed_chat("-123", ("-100123",))
+
+    def test_fails_closed_without_an_allowlist(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "must contain the exact resolved chat id"):
+            assert_allowed_chat("-100123", ())
 
 
 class WorkerCuttingSequenceStateTest(unittest.TestCase):
@@ -337,6 +631,55 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(worker.erp.packets, [])
 
+    async def test_raised_svg_download_has_specific_terminal_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FailingDownloadMessage(305, filename="layout.svg", mime_type="image/svg+xml")
+            group = SvgGroup(vector, None, [], None, None)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with self.assertRaisesRegex(OSError, "media download failed"):
+                await worker.process_group(
+                    FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                )
+
+            operation = latest_operation(spool, "message_processing")
+            self.assertEqual(operation["status"], "failed")
+            self.assertEqual(operation["reasonCode"], "svg_download_failed")
+            self.assertEqual(operation["errorCode"], "svg_download_failed")
+            spool.close()
+
+    async def test_raised_associated_media_download_has_specific_terminal_reason(self) -> None:
+        for attachment_type, expected_reason in (("image", "image_download_failed"), ("gcode", "gcode_download_failed")):
+            with self.subTest(attachment_type=attachment_type), tempfile.TemporaryDirectory() as temp:
+                temp_path = Path(temp)
+                worker = make_worker(temp_path)
+                vector = FakeMessage(306, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+                failing = FailingDownloadMessage(
+                    307,
+                    filename="sheet.jpg" if attachment_type == "image" else "program.txt",
+                    mime_type="image/jpeg" if attachment_type == "image" else "text/plain",
+                )
+                group = SvgGroup(
+                    vector, failing if attachment_type == "image" else None, [], None,
+                    failing if attachment_type == "gcode" else None,
+                )
+                spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+                audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+                with self.assertRaisesRegex(OSError, "media download failed"):
+                    await worker.process_group(
+                        FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                    )
+
+                operation = latest_operation(spool, "message_processing")
+                self.assertEqual(operation["reasonCode"], expected_reason)
+                self.assertEqual(operation["errorCode"], expected_reason)
+                self.assertEqual(audit.record_for(failing)["reasonCode"], expected_reason)
+                spool.close()
+
     async def test_valid_standalone_svg_posts_one_packet_keyed_by_svg(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             worker = make_worker(Path(temp))
@@ -364,6 +707,222 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(packet["cutLayout"]["status"], "valid")
             self.assertEqual(client.sent_messages, [])
             self.assertFalse(worker.state.cutting_sequence_replied("telegram:-100123:301"))
+
+    async def test_valid_svg_audit_has_one_immutable_planned_operation_before_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FakeMessage(
+                302,
+                filename="CNC#1_1234.svg",
+                mime_type="image/svg+xml",
+                media_content=VALID_SVG,
+            )
+            group = SvgGroup(
+                vector_message=vector,
+                image_message=None,
+                comments=[],
+                cutting_sequence_no=None,
+                gcode_message=None,
+            )
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            await worker.process_group(
+                FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+            )
+
+            payloads = [json.loads(row[0]) for row in spool.connection.execute(
+                "SELECT payload_json FROM audit_outbox ORDER BY rowid"
+            ).fetchall()]
+            operations = [
+                operation
+                for payload in payloads
+                for operation in payload.get("operations", [])
+                if operation["operationType"] == "message_processing"
+            ]
+            self.assertEqual([operation["status"] for operation in operations], ["planned", "succeeded"])
+            self.assertEqual(operations[0]["externalPacketKey"], "telegram:-100123:302")
+            self.assertIsNone(operations[0]["sourceVersion"])
+            self.assertEqual(operations[1]["sourceVersion"], "1")
+            spool.close()
+
+    async def test_source_unchanged_marks_associated_image_and_gcode_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FakeMessage(351, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            image = FakeMessage(350, filename="sheet.jpg", mime_type="image/jpeg", media_content="image")
+            gcode = FakeMessage(352, filename="program.txt", mime_type="text/plain", media_content="G0 X0 Y0")
+            group = SvgGroup(
+                vector_message=vector, image_message=image, comments=[],
+                cutting_sequence_no=None, gcode_message=gcode,
+            )
+            await worker.process_group(FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24))
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            await worker.process_group(
+                FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+            )
+
+            self.assertEqual(audit.record_for(image)["reasonCode"], "image_ignored")
+            self.assertEqual(audit.record_for(image)["status"], "skipped")
+            self.assertEqual(audit.record_for(gcode)["reasonCode"], "gcode_ignored")
+            self.assertEqual(audit.record_for(gcode)["status"], "skipped")
+            spool.close()
+
+    async def test_temp_directory_failure_terminalizes_operation_and_attachments(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            worker.config.temp_dir.write_text("not a directory", encoding="utf-8")
+            vector = FakeMessage(360, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            image = FakeMessage(361, filename="sheet.jpg", mime_type="image/jpeg", media_content="image")
+            gcode = FakeMessage(362, filename="program.txt", mime_type="text/plain", media_content="G0 X0 Y0")
+            group = SvgGroup(vector, image, [], None, gcode)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with self.assertRaises((FileExistsError, NotADirectoryError)):
+                await worker.process_group(FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit)
+
+            operation = latest_operation(spool, "message_processing")
+            self.assertEqual(operation["status"], "failed")
+            self.assertEqual(operation["reasonCode"], "unexpected_worker_error")
+            self.assertEqual(audit.record_for(image)["status"], "skipped")
+            self.assertEqual(audit.record_for(gcode)["status"], "skipped")
+            spool.close()
+
+    async def test_gcode_parse_failure_terminalizes_attachment_and_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FakeMessage(370, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            gcode = FakeMessage(371, filename="program.txt", mime_type="text/plain", media_content="broken")
+            group = SvgGroup(vector, None, [], None, gcode)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with patch("cnc_telegram_worker.worker.parse_gcode_text", side_effect=ValueError("bad G-code")):
+                with self.assertRaisesRegex(ValueError, "bad G-code"):
+                    await worker.process_group(FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit)
+
+            operation = latest_operation(spool, "message_processing")
+            self.assertEqual(operation["status"], "failed")
+            self.assertEqual(operation["reasonCode"], "gcode_parse_failed")
+            self.assertEqual(audit.record_for(gcode)["status"], "failed")
+            self.assertEqual(audit.record_for(gcode)["reasonCode"], "gcode_parse_failed")
+            spool.close()
+
+    async def test_gcode_parse_failure_does_not_leave_image_marked_used(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FakeMessage(372, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            image = FakeMessage(371, filename="sheet.jpg", mime_type="image/jpeg", media_content="image")
+            gcode = FakeMessage(373, filename="program.txt", mime_type="text/plain", media_content="broken")
+            group = SvgGroup(vector, image, [], None, gcode)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with patch("cnc_telegram_worker.worker.parse_gcode_text", side_effect=ValueError("bad G-code")):
+                with self.assertRaisesRegex(ValueError, "bad G-code"):
+                    await worker.process_group(
+                        FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                    )
+
+            self.assertEqual(audit.record_for(image)["status"], "skipped")
+            self.assertEqual(audit.record_for(image)["reasonCode"], "image_ignored")
+            self.assertEqual(audit.record_for(gcode)["status"], "failed")
+            image_updates = [
+                message
+                for row in spool.connection.execute("SELECT payload_json FROM audit_outbox ORDER BY rowid").fetchall()
+                for message in json.loads(row[0]).get("messages", [])
+                if message["sourceMessageId"] == "371"
+            ]
+            self.assertFalse(any(message["status"] == "used" for message in image_updates))
+            spool.close()
+
+    async def test_packet_build_failure_keeps_parsed_attachments_truthful(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FakeMessage(375, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            image = FakeMessage(374, filename="sheet.jpg", mime_type="image/jpeg", media_content="image")
+            gcode = FakeMessage(376, filename="program.txt", mime_type="text/plain", media_content="G0 X0 Y0")
+            group = SvgGroup(vector, image, [], None, gcode)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with patch("cnc_telegram_worker.worker.build_structured_packet", side_effect=ValueError("packet failed")):
+                with self.assertRaisesRegex(ValueError, "packet failed"):
+                    await worker.process_group(
+                        FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                    )
+
+            self.assertEqual(latest_operation(spool, "message_processing")["reasonCode"], "unexpected_worker_error")
+            self.assertEqual(audit.record_for(image)["status"], "skipped")
+            self.assertEqual(audit.record_for(gcode)["status"], "skipped")
+            attachment_updates = [
+                message
+                for row in spool.connection.execute("SELECT payload_json FROM audit_outbox ORDER BY rowid").fetchall()
+                for message in json.loads(row[0]).get("messages", [])
+                if message["sourceMessageId"] in {"374", "376"}
+            ]
+            self.assertFalse(any(message["status"] == "used" for message in attachment_updates))
+            spool.close()
+
+    async def test_success_marks_parsed_attachments_used_after_packet_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FakeMessage(378, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            image = FakeMessage(377, filename="sheet.jpg", mime_type="image/jpeg", media_content="image")
+            gcode = FakeMessage(379, filename="program.txt", mime_type="text/plain", media_content="G0 X0 Y0")
+            group = SvgGroup(vector, image, [], None, gcode)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            await worker.process_group(
+                FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+            )
+
+            self.assertEqual(audit.record_for(image)["status"], "used")
+            self.assertEqual(audit.record_for(image)["reasonCode"], "image_selected")
+            self.assertEqual(audit.record_for(gcode)["status"], "used")
+            self.assertEqual(audit.record_for(gcode)["reasonCode"], "gcode_selected")
+            self.assertEqual(latest_operation(spool, "message_processing")["reasonCode"], "backend_ingest_succeeded")
+            spool.close()
+
+    async def test_payload_unchanged_does_not_advance_state_before_terminal_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FakeMessage(380, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            group = SvgGroup(vector, None, [], None, None)
+            await worker.process_group(FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24))
+            key = "telegram:-100123:380"
+            saved = worker.state._state["packets"][key]
+            worker.state.mark_posted(key, saved["payloadHash"], saved["sourceVersion"], "old-fingerprint")
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+            spool.connection.execute("""
+              CREATE TEMP TRIGGER fail_payload_unchanged_audit
+              BEFORE INSERT ON audit_outbox
+              WHEN NEW.payload_json LIKE '%payload_unchanged%'
+              BEGIN SELECT RAISE(ABORT, 'forced terminal audit failure'); END
+            """)
+
+            with self.assertRaisesRegex(RuntimeError, "forced terminal audit failure"):
+                await worker.process_group(FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit)
+
+            self.assertEqual(worker.state._state["packets"][key]["sourceFingerprint"], "old-fingerprint")
+            saved_operation = json.loads(spool.connection.execute(
+                "SELECT payload_json FROM audit_outbox WHERE payload_json LIKE '%message_processing%' ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()[0])["operations"][0]
+            self.assertEqual(saved_operation["status"], "planned")
+            spool.close()
 
     async def test_each_valid_svg_posts_separate_packet(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -476,6 +1035,123 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(fallback.erp.packets[0]["ocrEngine"], "glm-ocr-0.9b-q8")
             self.assertEqual(fallback.erp.packets[0]["items"][0]["orderName"], "1234")
 
+    async def test_ambiguous_backend_failure_stays_planned_for_idempotent_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            worker.erp = FailingErpClient()
+            vector = FakeMessage(330, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            group = SvgGroup(vector_message=vector, image_message=None, comments=[], cutting_sequence_no=None, gcode_message=None)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with self.assertRaisesRegex(RuntimeError, "ERP unavailable"):
+                await worker.process_group(FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit)
+
+            operation = latest_processing_attempt(spool)
+            self.assertEqual(operation["status"], "planned")
+            self.assertEqual(operation["errorCode"], "backend_ingest_failed")
+            self.assertEqual(len(spool.pending_processing_attempts()), 1)
+            spool.close()
+
+    async def test_crash_after_erp_accept_is_recovered_with_same_durable_packet(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            accepting_erp = CrashAfterAcceptErpClient()
+            worker.erp = accepting_erp
+            vector = FakeMessage(335, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            group = SvgGroup(vector, None, [], None, None)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with self.assertRaisesRegex(KeyboardInterrupt, "process death"):
+                await worker.process_group(
+                    FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                )
+
+            pending = spool.pending_processing_attempts()
+            self.assertEqual(len(pending), 1)
+            self.assertEqual(pending[0]["packet"], accepting_erp.packets[0])
+            recovery_erp = FakeErpClient()
+            recovered = await reconcile_pending_processing_attempts(spool, recovery_erp, worker.state)
+            self.assertEqual(len(recovered), 1)
+            self.assertEqual(recovery_erp.packets, accepting_erp.packets)
+            self.assertEqual(latest_processing_attempt(spool)["status"], "succeeded")
+            self.assertTrue(worker.state.source_unchanged(
+                "telegram:-100123:335", pending[0]["sourceFingerprint"],
+            ))
+            spool.close()
+
+    async def test_recovery_terminalizes_definite_backend_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            worker.erp = CrashAfterAcceptErpClient()
+            vector = FakeMessage(336, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            group = SvgGroup(vector, None, [], None, None)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with self.assertRaises(KeyboardInterrupt):
+                await worker.process_group(
+                    FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                )
+
+            rejecting_erp = RejectingErpClient()
+            recovered = await reconcile_pending_processing_attempts(spool, rejecting_erp, worker.state)
+
+            self.assertEqual(len(recovered), 1)
+            operation = latest_processing_attempt(spool)
+            self.assertEqual(operation["status"], "failed")
+            self.assertEqual(operation["reasonCode"], "backend_ingest_failed")
+            self.assertEqual(operation["errorCode"], "backend_ingest_failed")
+            self.assertEqual(spool.pending_processing_attempts(), [])
+            spool.close()
+
+    async def test_reply_send_failure_has_specific_terminal_audit_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path, can_write_chat=True)
+            vector = FakeMessage(340, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            group = SvgGroup(vector_message=vector, image_message=None, comments=[], cutting_sequence_no=None, gcode_message=None)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", True)
+
+            with self.assertRaisesRegex(RuntimeError, "Telegram send failed"):
+                await worker.process_group(FailingTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit)
+
+            operation = latest_reply_attempt(spool)
+            self.assertEqual(operation["status"], "planned")
+            self.assertEqual(operation["errorCode"], "reply_send_failed")
+            self.assertEqual(operation["responses"][-1]["status"], "incomplete")
+            self.assertTrue(spool.has_unresolved_reply("-100123", "340"))
+
+            sent = FakeMessage(341, text="Раскрой №12", reply_to=340)
+            sent.date = datetime.fromisoformat(operation["plannedAt"])
+            sent.sender_id = 77
+            sent.out = True
+            reconciled = await reconcile_pending_replies(
+                spool, FakeTelegramClient([sent]), object(), "77",
+            )
+            self.assertEqual(len(reconciled), 1)
+            self.assertEqual(latest_reply_attempt(spool)["status"], "reconciled")
+            reconciliation_payloads = [
+                json.loads(row[0])
+                for row in spool.connection.execute("SELECT payload_json FROM audit_outbox ORDER BY rowid").fetchall()
+                if json.loads(row[0]).get("observations")
+            ]
+            planned_replies = [
+                operation
+                for payload in [json.loads(row[0]) for row in spool.connection.execute(
+                    "SELECT payload_json FROM audit_outbox ORDER BY rowid"
+                ).fetchall()]
+                for operation in payload.get("operations", [])
+                if operation["operationType"] == "telegram_reply" and operation["status"] == "planned"
+            ]
+            self.assertEqual(reconciliation_payloads[-1]["operations"], [planned_replies[0]])
+            spool.close()
+
 
 def make_worker(
     temp_dir: Path,
@@ -503,6 +1179,35 @@ def make_worker(
     worker.state = StateStore(temp_dir / "state.json")
     worker.erp = FakeErpClient()
     return worker
+
+
+def latest_operation(spool: AuditSpool, operation_type: str) -> dict[str, object]:
+    payloads = [json.loads(row[0]) for row in spool.connection.execute(
+        "SELECT payload_json FROM audit_outbox ORDER BY created_at,outbox_id"
+    ).fetchall()]
+    operations = [
+        operation
+        for payload in payloads
+        for operation in payload.get("operations", [])
+        if operation["operationType"] == operation_type
+    ]
+    return operations[-1]
+
+
+def latest_processing_attempt(spool: AuditSpool) -> dict[str, object]:
+    row = spool.connection.execute(
+        "SELECT operation_json FROM processing_attempts ORDER BY updated_at,operation_key DESC LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    return json.loads(row[0])
+
+
+def latest_reply_attempt(spool: AuditSpool) -> dict[str, object]:
+    row = spool.connection.execute(
+        "SELECT operation_json FROM reply_attempts ORDER BY updated_at,operation_key DESC LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    return json.loads(row[0])
 
 
 if __name__ == "__main__":

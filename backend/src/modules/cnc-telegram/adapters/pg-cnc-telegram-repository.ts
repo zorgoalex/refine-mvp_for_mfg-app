@@ -553,6 +553,22 @@ export class PgCncTelegramRepository
       metadata: { settingKey: CNC_AUTO_CUT_STATUS_SETTING_KEY },
     });
   }
+
+  async recordWorkerAuditWriteDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void> {
+    await auditService.recordDenied(this.database, {
+      event: command.event,
+      entityType: 'cnc_telegram_worker_audit',
+      entityId: 'batch',
+      actorUserId: command.currentUser.id,
+      actorUsername: command.currentUser.username ?? null,
+      actorRole: command.currentUser.role ?? null,
+      requestId: command.requestId ?? 'cnc-telegram-worker-audit-write-denied',
+      source: SOURCE,
+      reason: command.reason,
+      requiredPermissions: command.requiredPermissions,
+      metadata: {},
+    });
+  }
 }
 
 function packetSelectSql(whereSql: string): string {

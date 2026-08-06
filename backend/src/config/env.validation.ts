@@ -191,6 +191,8 @@ export const envSchema = z
     BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
     BACKEND_ENABLE_CNC_TELEGRAM: booleanFromEnv.default(false),
     CNC_TELEGRAM_MEDIA_DIR: z.string().trim().min(1).default('/data/cnc-telegram-media'),
+    CNC_TELEGRAM_WORKER_USERNAME: optionalTrimmedStringFromEnv,
+    CNC_TELEGRAM_ALLOWED_CHAT_IDS: optionalTrimmedStringFromEnv,
     // Independent production workflow for persistent Basis-cut XLS export sets.
     // Default OFF; intentionally not an alias of BACKEND_ENABLE_CUT_JOBS.
     BACKEND_ENABLE_BAZIS_CUT: booleanFromEnv.default(false),

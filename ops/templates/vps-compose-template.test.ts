@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -78,6 +79,29 @@ describe('VPS compose backend runtime flags', () => {
     expect(compose).toContain('BACKEND_ENABLE_CNC_TELEGRAM: ${BACKEND_ENABLE_CNC_TELEGRAM:-false}');
     expect(localCompose).toContain('BACKEND_ENABLE_CNC_TELEGRAM: ${BACKEND_ENABLE_CNC_TELEGRAM:-false}');
     expect(envExample).toContain('BACKEND_ENABLE_CNC_TELEGRAM=false');
+  });
+
+  it('renders explicit worker audit policy for bearer-only backend auth', () => {
+    const composePath = resolve(repoRoot, 'ops/templates/docker-compose.vps.yml');
+    const envPath = resolve(repoRoot, 'ops/templates/env.vps.example');
+    const rendered = JSON.parse(execFileSync(
+      'docker',
+      ['compose', '--env-file', envPath, '-f', composePath, 'config', '--format', 'json'],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          ERP_BEARER_TOKEN: 'test-bearer-token',
+          ERP_WORKER_LOGIN: '',
+          TELEGRAM_ALLOWED_CHAT_ID: '',
+          CNC_TELEGRAM_WORKER_USERNAME: 'cnc-bearer-worker',
+          CNC_TELEGRAM_ALLOWED_CHAT_IDS: '-1009007199254740993',
+        },
+      },
+    ));
+
+    expect(rendered.services.backend.environment.CNC_TELEGRAM_WORKER_USERNAME).toBe('cnc-bearer-worker');
+    expect(rendered.services.backend.environment.CNC_TELEGRAM_ALLOWED_CHAT_IDS).toBe('-1009007199254740993');
   });
 
   it('defines the CNC Telegram Telethon worker as an internal profile service', () => {

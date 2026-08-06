@@ -237,6 +237,9 @@ q_con_def_on_safe() { echo "SELECT COALESCE((SELECT pg_get_constraintdef(oid)=\$
 q_con_hash_on() { echo "SELECT COALESCE((SELECT md5(pg_get_constraintdef(oid))='$3' FROM pg_constraint WHERE conname='$1' AND conrelid='public.$2'::regclass), false);"; }
 q_idx_hash() { echo "SELECT COALESCE((SELECT md5(indexdef)='$2' FROM pg_indexes WHERE schemaname='public' AND indexname='$1'), false);"; }
 q_fun_hash() { echo "SELECT COALESCE((SELECT md5(pg_get_functiondef(oid))='$2' FROM pg_proc WHERE oid=to_regprocedure('$1')), false);"; }
+q_colset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(format('%s|%s|%s|%s|%s',ordinal_position,column_name,data_type,is_nullable,COALESCE(column_default,'∅')), ', ' ORDER BY ordinal_position))='$3' FROM information_schema.columns WHERE table_schema='public' AND table_name='$1' AND column_name=ANY(string_to_array('$2',','))), false);"; }
+q_conset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(conname||'|'||contype::text||'|'||confdeltype::text||'|'||pg_get_constraintdef(oid), ', ' ORDER BY conname))='$3' FROM pg_constraint WHERE connamespace='public'::regnamespace AND conrelid::regclass::text='$1' AND conname=ANY(string_to_array('$2',','))), false);"; }
+q_idxset_hash() { echo "SELECT COALESCE((SELECT md5(string_agg(indexname||'|'||indexdef, ', ' ORDER BY indexname))='$3' FROM pg_indexes WHERE schemaname='public' AND tablename='$1' AND indexname=ANY(string_to_array('$2',','))), false);"; }
 q_stmt_trg() { echo "SELECT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgname='$1' AND t.tgrelid='public.$2'::regclass AND t.tgfoid='$3()'::regprocedure AND t.tgtype=$4 AND t.tgenabled='O' AND NOT t.tgisinternal AND COALESCE(t.tgoldtable, '')='$5' AND COALESCE(t.tgnewtable, '')='$6');"; }
 q_trg_def_on() { echo "SELECT COALESCE((SELECT pg_get_triggerdef(oid)='$3' FROM pg_trigger WHERE tgname='$1' AND tgrelid='public.$2'::regclass), false);"; }
 probe_true() { [ "$(pg_query "$1")" = "t" ]; }
@@ -1030,6 +1033,27 @@ probe_file() {
                         WHERE attrelid='bazis_cut_set_details'::regclass
                           AND attname='position')
                      ) = 'ERP Basis designation when basis_project is filled; otherwise ERP detail_number; manual snapshot edits are preserved by migration 107';" ;;
+    107_cnc_telegram_worker_audit*) probe_all \
+                     "$(q_colset_hash cnc_telegram_worker_scans 'scan_id,source_chat_id,workday,status,started_at,finished_at,session_user_id,day_yielded_count,day_exhausted,day_truncated,day_error_code,reply_search_yielded_count,reply_search_exhausted,reply_search_truncated,reply_search_error_code,svg_count,processed_count,ingested_count,skipped_count,failed_count,parser_version,worker_version,can_write_chat,error_code,error_message,writer_user_id,created_at,updated_at' 93fcf901a0f61b530dda86ed932a153d)" \
+                     "$(q_colset_hash cnc_telegram_worker_message_logs 'log_id,log_key,raw_source_digest,sanitizer_version,source_chat_id,source_message_id,source_thread_id,reply_to_message_id,sender_user_id,source_created_at,source_edited_at,workday,message_type,filename,mime_type,message_text,outgoing,status,reason_code,reason_message,error_code,error_message,related_source_message_id,external_packet_key,source_version,packet_id,cut_job_id,cut_result_no,cutting_sequence_no,backend_applied,backend_stale,ever_ingested,first_observed_at,last_observed_at,last_decision_at,last_scan_id,observed_count,attempt_count,created_at,updated_at' 0c9340f3c3b800a68c4119d19b46d181)" \
+                     "$(q_colset_hash cnc_telegram_worker_operations 'operation_id,operation_key,scan_id,log_id,operation_type,status,planned_at,finished_at,reason_code,reason_message,error_code,error_message,external_packet_key,source_version,packet_id,cut_job_id,cut_result_no,cutting_sequence_no,backend_applied,backend_stale,reply_text,reply_to_message_id,session_sender_user_id,sent_telegram_message_id,reconciliation_yielded_count,reconciliation_exhausted,reconciliation_truncated,reconciliation_error_code,reconciliation_window_from,reconciliation_window_to,steps_json,responses_json,created_at,updated_at' 460b3edcaee829bdfa87ba1564512179)" \
+                     "$(q_colset_hash cnc_telegram_worker_message_observations 'observation_id,scan_id,log_id,operation_id,source_chat_id,source_message_id,observed_at,read_source,read_ordinal,classification_code,decision_code,related_source_message_id' fcb74f33a29709c731b85a97c1653ff7)" \
+                     "$(q_conset_hash cnc_telegram_worker_scans 'chk_cnc_tg_worker_scan_counts,chk_cnc_tg_worker_scan_error_lengths,chk_cnc_tg_worker_scan_status,cnc_telegram_worker_scans_pkey,cnc_telegram_worker_scans_writer_user_id_fkey' a38fdc32909e327b4d72f8976fb55197)" \
+                     "$(q_conset_hash cnc_telegram_worker_message_logs 'chk_cnc_tg_worker_message_bounds,chk_cnc_tg_worker_message_status,chk_cnc_tg_worker_message_type,cnc_telegram_worker_message_logs_last_scan_id_fkey,cnc_telegram_worker_message_logs_log_key_key,cnc_telegram_worker_message_logs_pkey' 470479b7b1483448760f303f90139aac)" \
+                     "$(q_conset_hash cnc_telegram_worker_operations 'chk_cnc_tg_worker_operation_arrays,chk_cnc_tg_worker_operation_bounds,chk_cnc_tg_worker_operation_status,chk_cnc_tg_worker_operation_type,cnc_telegram_worker_operations_log_id_fkey,cnc_telegram_worker_operations_operation_key_key,cnc_telegram_worker_operations_pkey,cnc_telegram_worker_operations_scan_id_fkey' bd78095c69dbabacb354db12160f82a1)" \
+                     "$(q_conset_hash cnc_telegram_worker_message_observations 'chk_cnc_tg_worker_observation_ordinal,chk_cnc_tg_worker_observation_owner,chk_cnc_tg_worker_observation_source,cnc_telegram_worker_message_observations_log_id_fkey,cnc_telegram_worker_message_observations_operation_id_fkey,cnc_telegram_worker_message_observations_pkey,cnc_telegram_worker_message_observations_scan_id_fkey' c1187695840e3dea969d2a91292f4459)" \
+                     "$(q_idxset_hash cnc_telegram_worker_scans 'cnc_telegram_worker_scans_pkey,idx_cnc_tg_worker_scans_started,idx_cnc_tg_worker_scans_status_started' 30c7dde7036a5db58f8801eb18dd8561)" \
+                     "$(q_idxset_hash cnc_telegram_worker_message_logs 'cnc_telegram_worker_message_logs_log_key_key,cnc_telegram_worker_message_logs_pkey,idx_cnc_tg_worker_messages_reason,idx_cnc_tg_worker_messages_search,idx_cnc_tg_worker_messages_source,idx_cnc_tg_worker_messages_status,idx_cnc_tg_worker_messages_type,idx_cnc_tg_worker_messages_workday' b89261e2356a3cd1967d5c07e9b34ceb)" \
+                     "$(q_idxset_hash cnc_telegram_worker_operations 'cnc_telegram_worker_operations_operation_key_key,cnc_telegram_worker_operations_pkey,idx_cnc_tg_worker_operations_log,idx_cnc_tg_worker_operations_scan,idx_cnc_tg_worker_operations_type_status' 6e836ddb93d11c98f68670a6152b1f97)" \
+                     "$(q_idxset_hash cnc_telegram_worker_message_observations 'cnc_telegram_worker_message_observations_pkey,idx_cnc_tg_worker_observations_log,idx_cnc_tg_worker_observations_scan,uq_cnc_tg_worker_observation_operation_ordinal,uq_cnc_tg_worker_observation_scan_ordinal' 0a32f1eea571da3ee5b7e372e0f9ce00)" ;;
+    108_cnc_telegram_worker_audit_reason_codes*) probe_all \
+                     "$(q_fun_hash 'cnc_telegram_worker_reason_code_valid(text)' bb6b155edab4b6ebcc5545fe2b9ab3bc)" \
+                     "$(q_con_hash_on chk_cnc_tg_worker_scan_reason_codes cnc_telegram_worker_scans c2b3deed5b285a3ddd0dcc481617f104)" \
+                     "$(q_con_hash_on chk_cnc_tg_worker_message_reason_codes cnc_telegram_worker_message_logs 522f7d03cbabbfdca19e57af30c1a84e)" \
+                     "$(q_con_hash_on chk_cnc_tg_worker_operation_reason_codes cnc_telegram_worker_operations c403770f0b23cad6082202420969102c)" \
+                     "$(q_con_hash_on chk_cnc_tg_worker_observation_reason_codes cnc_telegram_worker_message_observations edb8109e18cd30146d4ab50cb75b151a)" ;;
+    109_cnc_telegram_worker_audit_classification_codes*) probe_all \
+                     "$(q_con_hash_on chk_cnc_tg_worker_observation_classification_code cnc_telegram_worker_message_observations d00cffd4b59ca731fd8c92aaa5e23409)" ;;
     109_bazis_single_product_reprojection*) probe_all \
                      "$(q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7)" \
                      "SELECT obj_description(
@@ -1047,7 +1071,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|109_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

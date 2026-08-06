@@ -6,6 +6,10 @@ import type {
   CncTelegramOrderCuttingSequencesResponse,
   CncTelegramTodayResponse,
 } from './types/cncTelegramApi.types';
+import type {
+  TelegramWorkerAuditListResponse,
+  TelegramWorkerAuditQuery,
+} from './types/cncTelegramWorkerAudit.types';
 
 export interface CncTelegramTodayQuery {
   date?: string;
@@ -25,6 +29,11 @@ export const cncTelegramApi = {
     }
     return httpClient.get<CncTelegramOrderCuttingSequencesResponse>(
       apiRoutes.cncTelegram.orderCuttingSequences(orderId),
+    );
+  },
+  workerLogs(query: TelegramWorkerAuditQuery = {}): Promise<TelegramWorkerAuditListResponse> {
+    return httpClient.get<TelegramWorkerAuditListResponse>(
+      withQuery(apiRoutes.cncTelegram.workerLogs, query),
     );
   },
   configureAutoCutStatus(

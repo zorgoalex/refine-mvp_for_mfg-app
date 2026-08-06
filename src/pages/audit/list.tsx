@@ -13,6 +13,7 @@ import {
   DatePicker,
   Segmented,
   Select,
+  Tabs,
 } from 'antd';
 import { FilterOutlined, ClearOutlined, AuditOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -31,6 +32,7 @@ import { authSession } from '../../api/authSession';
 import { can } from '../../utils/permissions';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
 import { buildAuditReadableSummary } from './readableSummary';
+import { TelegramWorkerAudit } from './TelegramWorkerAudit';
 
 const { Text } = Typography;
 
@@ -375,7 +377,7 @@ export function ReadableAuditEvent({ record }: { record: AuditLogEventDto }) {
   );
 }
 
-export const AuditList: React.FC = () => {
+const ErpAuditList: React.FC = () => {
   const [form] = Form.useForm<FilterValues>();
   const [filtersVisible, setFiltersVisible] = useState(false);
   const [viewMode, setViewMode] = useState<AuditViewMode>('readable');
@@ -930,3 +932,17 @@ export const AuditList: React.FC = () => {
     </div>
   );
 };
+
+export const AuditList: React.FC = () => (
+  <div style={{ padding: '8px 16px 0' }}>
+    <style>{`.audit-top-tabs .ant-tabs-tab { min-height: 40px; font-weight: 600; }`}</style>
+    <Tabs
+      className="audit-top-tabs"
+      defaultActiveKey="erp"
+      items={[
+        { key: 'erp', label: 'Действия ERP', children: <ErpAuditList /> },
+        { key: 'telegram', label: 'Telegram-бот', children: <TelegramWorkerAudit /> },
+      ]}
+    />
+  </div>
+);

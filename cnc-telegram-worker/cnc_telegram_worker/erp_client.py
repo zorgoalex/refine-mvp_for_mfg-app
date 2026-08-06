@@ -51,6 +51,41 @@ class ErpClient:
                 await asyncio.sleep(delay_seconds)
         raise RuntimeError("ERP ingest retry loop finished without a response")
 
+    async def audit_capabilities(self) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.get(
+                f"{self.api_url}/cnc-telegram/worker-logs/capabilities",
+                headers={"Authorization": await self._authorization_header()},
+            )
+            if response.status_code == 401 and not self.auth.bearer_token:
+                self._access_token = ""
+                response = await client.get(
+                    f"{self.api_url}/cnc-telegram/worker-logs/capabilities",
+                    headers={"Authorization": await self._authorization_header(force=True)},
+                )
+            response.raise_for_status()
+            data = response.json()
+        if data.get("capability") != "cnc_telegram_worker_audit_v1":
+            raise RuntimeError("backend does not expose cnc_telegram_worker_audit_v1")
+        return data
+
+    async def audit_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.post(
+                f"{self.api_url}/cnc-telegram/worker-logs/batch",
+                json=payload,
+                headers={"Authorization": await self._authorization_header()},
+            )
+            if response.status_code == 401 and not self.auth.bearer_token:
+                self._access_token = ""
+                response = await client.post(
+                    f"{self.api_url}/cnc-telegram/worker-logs/batch",
+                    json=payload,
+                    headers={"Authorization": await self._authorization_header(force=True)},
+                )
+            response.raise_for_status()
+            return response.json()
+
     async def _authorization_header(self, force: bool = False) -> str:
         if self.auth.bearer_token:
             return f"Bearer {self.auth.bearer_token}"

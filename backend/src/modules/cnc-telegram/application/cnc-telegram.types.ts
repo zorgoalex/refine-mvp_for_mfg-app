@@ -49,14 +49,16 @@ export interface RecordCncTelegramDeniedAuditCommand {
   currentUser: CurrentUser;
   event:
     | 'cnc.telegram_packet.ingest_denied'
-    | 'cnc.telegram_packet.auto_cut_status_configure_denied';
+    | 'cnc.telegram_packet.auto_cut_status_configure_denied'
+    | 'cnc.telegram_worker.audit_write_denied';
   requestId?: string;
   externalPacketKey?: string;
-  reason: 'PERMISSION_DENIED';
+  reason: 'PERMISSION_DENIED' | 'CNC_TELEGRAM_CHAT_DENIED';
   requiredPermissions: ['cut.manage'] | ['status_automation.manage'];
 }
 
 export interface CncTelegramDeniedAuditPort {
   recordIngestDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void>;
   recordAutoCutStatusConfigureDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void>;
+  recordWorkerAuditWriteDenied?(command: RecordCncTelegramDeniedAuditCommand): Promise<void>;
 }

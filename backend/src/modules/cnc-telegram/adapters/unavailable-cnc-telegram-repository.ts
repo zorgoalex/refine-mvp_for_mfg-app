@@ -47,6 +47,12 @@ export class UnavailableCncTelegramRepository
   ): Promise<void> {
     // No database, no denied-audit sink.
   }
+
+  async recordWorkerAuditWriteDenied(
+    _command: RecordCncTelegramDeniedAuditCommand,
+  ): Promise<void> {
+    // No database, no denied-audit sink.
+  }
 }
 
 function unavailable(): ApiError {

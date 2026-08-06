@@ -213,6 +213,14 @@ API:
   header `Idempotency-Key` и принимает только структурированный JSON. Если
   `date` не передан в today-read, backend использует `CURRENT_DATE` PostgreSQL
   в business timezone контура.
+- `POST /api/v1/cnc-telegram/worker-logs/batch` требует `cut.manage`, точное
+  совпадение пользователя с `CNC_TELEGRAM_WORKER_USERNAME` и разрешённый chat id;
+- `GET /api/v1/cnc-telegram/worker-logs/capabilities` fail-closed проверяет полный
+  результат миграций `107_cnc_telegram_worker_audit.sql`,
+  `108_cnc_telegram_worker_audit_reason_codes.sql` и
+  `109_cnc_telegram_worker_audit_classification_codes.sql` до чтения Telegram;
+- `GET /api/v1/cnc-telegram/worker-logs` требует `audit.view` и возвращает
+  сканирования, сообщения, неизменяемые наблюдения, попытки обработки и ответы.
 
 Backend не принимает и не хранит raw screenshot/G-code payload. Временные файлы
 Telegram-бота или OCR worker удаляют на своей стороне; файлы старше 24 часов
@@ -236,6 +244,7 @@ ERP_WORKER_PASSWORD=<password>
 CNC_TEMP_TTL_HOURS=24
 CNC_HISTORY_DAYS=7
 CNC_POLL_INTERVAL_SECONDS=60
+CNC_AUDIT_SPOOL_PATH=/data/cnc-telegram-audit.sqlite3
 ```
 
 `ERP_BEARER_TOKEN` может заменить `ERP_WORKER_LOGIN/PASSWORD`. Обычный worker
@@ -278,6 +287,9 @@ Snapshot export/import работает через NestJS, когда
 - Общий read endpoint: `GET /api/v1/audit`.
 - Аудит заказа: `GET /api/v1/orders/:id/audit`.
 - Общий endpoint требует `audit.view`.
+- На вкладке `Аудит → Telegram-бот` отдельно видны все сообщения, которые worker
+  получил из истории и поиска ответов: sender/session id, файл/текст, решение,
+  причина, этапы, packet/cut ids и точный ответ с исходным Telegram message id.
 
 Для актуального read-model должны быть применены все audit migrations, включая
 `backend/db/migrations/012_audit_log_payment_deadline_dimensions.sql`.

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 from telethon import utils
@@ -14,12 +14,23 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 VECTOR_EXTENSIONS = {".svg", ".dxf"}
 
 
-async def collect_day_messages(client: Any, entity: Any, workday: date, tz: ZoneInfo, max_messages: int) -> list[Any]:
+async def collect_day_messages(
+    client: Any,
+    entity: Any,
+    workday: date,
+    tz: ZoneInfo,
+    max_messages: int,
+    observer: Callable[[Any, int], Awaitable[None]] | None = None,
+) -> list[Any]:
     start_local = datetime.combine(workday, time.min, tzinfo=tz)
     end_local = datetime.combine(workday, time.max, tzinfo=tz)
     end_utc = end_local.astimezone(timezone.utc)
     messages: list[Any] = []
+    ordinal = 0
     async for message in client.iter_messages(entity, offset_date=end_utc, limit=max_messages):
+        ordinal += 1
+        if observer is not None:
+            await observer(message, ordinal)
         message_date = message_datetime(message).astimezone(tz)
         if message_date.date() < workday:
             break

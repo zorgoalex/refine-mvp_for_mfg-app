@@ -100,7 +100,19 @@ TELEGRAM_CHAT=<chat-id-or-username>
 TELEGRAM_ALLOWED_CHAT_ID=<expected-chat-id>
 ERP_WORKER_LOGIN=<erp-user-with-cut.manage>
 ERP_WORKER_PASSWORD=<password>
+CNC_AUDIT_SPOOL_PATH=/data/cnc-telegram-audit.sqlite3
 ```
+
+Backend получает явные `CNC_TELEGRAM_WORKER_USERNAME` и
+`CNC_TELEGRAM_ALLOWED_CHAT_IDS`; для password-auth сохранены fallback-ы на
+`ERP_WORKER_LOGIN` и `TELEGRAM_ALLOWED_CHAT_ID`. При bearer-only auth явное имя
+worker-а обязательно. Перед обновлением
+worker обязательно применить миграции `107_cnc_telegram_worker_audit.sql`,
+`108_cnc_telegram_worker_audit_reason_codes.sql` и
+`109_cnc_telegram_worker_audit_classification_codes.sql`:
+новая версия проверяет capability endpoint и не читает Telegram при частичной
+схеме или неверной service-account политике. SQLite audit spool живёт в том же
+постоянном `/data` volume; не удаляйте его при обычном redeploy.
 
 Profile `cnc-telegram` поднимает SVG-only worker без OCR subprocess/service.
 GLM-OCR не запускается и не вызывается автоматически: model init, llama server
@@ -146,7 +158,7 @@ repo_erp/ops/cnc-telegram-worker.sh backfill 7
 ```
 
 Worker internal-only: без ports/traefik. `/data` хранит только Telethon session,
-state и temp; temp hard-delete ограничен `CNC_TEMP_TTL_HOURS<=24`.
+state, durable audit spool и temp; temp hard-delete ограничен `CNC_TEMP_TTL_HOURS<=24`.
 При включённом `cnc-telegram` `deploy-stack.sh` всегда добавляет tracked overlay
 `ops/templates/docker-compose.cnc-telegram-worker.yml`. Его explicit profile
 overrides не дают старому live `docker-compose.yml` вернуть GLM в обычный

@@ -1263,6 +1263,72 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/detail-live-state:
+    get:
+      tags:
+        - Orders
+      operationId: getOrderDetailLiveState
+      summary: Read compact authoritative live state for order detail cells
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Compact detail live-state snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+        '304':
+          description: Live-state representation is unchanged
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/orders/{orderId}/live-events:
+    get:
+      tags:
+        - Orders
+      operationId: streamOrderLiveEvents
+      summary: Stream permission-filtered order live-state invalidations
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '204':
+          description: Realtime rollout is disabled for this user
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          description: Realtime connection limit reached
+
   /api/v1/orders/{orderId}/restore:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -9842,6 +9908,140 @@ paths:
           $ref: '#/components/responses/NotFound'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/cnc-telegram/worker-logs:
+    get:
+      tags:
+        - CncTelegramWorkerAudit
+      operationId: listCncTelegramWorkerAudit
+      summary: List Telegram worker messages, decisions, operations, and replies
+      security:
+        - bearerAuth: []
+      x-permission: audit.view
+      parameters:
+        - name: dateFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+        - name: pageSize
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [observed, used, ingested, skipped, failed]
+        - name: messageType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [svg, dxf, image, gcode, bot_reply, text, other]
+        - name: reasonCode
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        '200':
+          description: Paginated worker audit evidence and recent scans
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/cnc-telegram/worker-logs/batch:
+    post:
+      tags:
+        - CncTelegramWorkerAudit
+      operationId: writeCncTelegramWorkerAuditBatch
+      summary: Persist one bounded Telegram worker audit batch atomically
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Audit batch persisted
+          content:
+            application/json:
+              schema:
+                type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
+  /api/v1/cnc-telegram/worker-logs/capabilities:
+    get:
+      tags:
+        - CncTelegramWorkerAudit
+      operationId: getCncTelegramWorkerAuditCapabilities
+      summary: Verify Telegram worker audit storage and writer policy
+      security:
+        - bearerAuth: []
+      x-permission: cut.manage
+      responses:
+        '200':
+          description: Complete worker audit capability is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [capability]
+                properties:
+                  capability:
+                    type: string
+                    enum: [cnc_telegram_worker_audit_v1]
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
 
   /api/v1/cnc-telegram/today:
     get:
