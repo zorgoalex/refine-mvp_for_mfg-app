@@ -9,6 +9,8 @@ describe('evolution shell behavior preservation', () => {
   const operationalStyles = readFileSync('src/ui-operational/operational.css', 'utf8');
   const tabs = readFileSync('src/ui-evolution/shell/EvolutionWorkspaceTabs.tsx', 'utf8');
   const navigation = readFileSync('src/ui-evolution/shell/useEvolutionNavigation.tsx', 'utf8');
+  const tabletNavigation = readFileSync('src/ui-evolution/shell/EvolutionTabletNavigation.tsx', 'utf8');
+  const routeFamily = readFileSync('src/ui-evolution/shell/tabletRouteFamily.ts', 'utf8');
 
   it('keeps tab sync, unload guards, keep-alive routes, and table scrollbars', () => {
     expect(layout).toContain('useTabSync()');
@@ -18,6 +20,20 @@ describe('evolution shell behavior preservation', () => {
       /<React\.Suspense fallback={<EvolutionRouteSkeleton \/>}>[\s\S]*<KeepAliveOutlet \/>[\s\S]*<\/React\.Suspense>/,
     );
     expect(layout).toContain('aria-label="Загрузка страницы"');
+  });
+
+  it('mounts the tablet rail, device marker and scroll-aware header state', () => {
+    expect(layout).toContain('<EvolutionTabletNavigation');
+    expect(layout).toContain('data-device-tier={deviceTier}');
+    expect(layout).toContain('data-tablet-header-compact');
+    expect(layout).toContain('onScrollCapture={handleTabletScrollCapture}');
+    expect(tabletNavigation).toContain('width={68}');
+    expect(tabletNavigation).toContain('aria-label="Планшетная навигация"');
+    expect(tabletNavigation).toContain('sider.categorizedResources');
+    expect(tabletNavigation).toContain('sider.topMenuItems');
+    expect(tabletNavigation).toContain("permittedTopKeys.has('orders_view')");
+    expect(tabletNavigation).toContain("permittedTopKeys.has('calendar')");
+    expect(tabletNavigation).toContain("permittedTopKeys.has('order-status-board')");
   });
 
   it('keeps dirty-tab confirmation and discard semantics', () => {
@@ -83,7 +99,8 @@ describe('evolution shell behavior preservation', () => {
   });
 
   it('renders the standalone MDF board with the status-board workspace layout', () => {
-    expect(layout).toContain("pathname.startsWith('/mdf-work-board')");
-    expect(layout).toMatch(/mdf-work-board'[\s\S]*return 'status-board'/);
+    expect(layout).toContain('resolveModernRouteFamily(location.pathname)');
+    expect(routeFamily).toContain("pathname.startsWith('/mdf-work-board')");
+    expect(routeFamily).toMatch(/mdf-work-board'[\s\S]*return 'status-board'/);
   });
 });

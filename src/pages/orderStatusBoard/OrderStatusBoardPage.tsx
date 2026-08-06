@@ -81,6 +81,7 @@ import type {
 import { featureFlags } from '../../config/featureFlags';
 import { SETTING_KEYS, useAppSettings } from '../../hooks/useAppSettings';
 import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
+import { isTabletTier, useDeviceTier } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
@@ -141,6 +142,7 @@ import {
   cncPacketHasOtherMaterialMarker,
   type CncDetailedMachineSource,
 } from './cncDetailedMachine';
+import { useTouchBoardCardDrag } from './useTouchBoardCardDrag';
 import {
   cncDetailedMachinePreviewsShareSheets,
   loadCncDetailedMachineScreenshot,
@@ -229,6 +231,8 @@ interface OrderStatusBoardPageProps {
 
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
   const isOperational = useOperationalUi();
+  const deviceTier = useDeviceTier();
+  const tabletTouchDragEnabled = isTabletTier(deviceTier);
   const { canViewFinancials } = useOrderFinancialVisibility();
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1475,6 +1479,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         <div className="status-board-live" aria-live="polite" aria-atomic="true">
           {announcement}
         </div>
+        <div id="status-board-touch-drag-instructions" className="status-board-sr-only">
+          Удерживайте кнопку перемещения, затем перетащите заказ в подсвеченную колонку.
+          Для выбора статуса без жеста используйте кнопку меню рядом.
+        </div>
 
         {(isCncToday ? cncHasVisibleColumns : columns.length > 0) && (
           <div
@@ -1569,6 +1577,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   column={column}
                   allColumns={userVisibleBoardColumns}
                   finePointer={finePointer}
+                  touchDragEnabled={tabletTouchDragEnabled}
                   mutationsEnabled={
                     featureFlags.useBackendProductionActions &&
                     !stale &&
@@ -1579,6 +1588,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   loadingMore={loadingColumns.has(column.key)}
                   onLoadMore={loadMore}
                   onMove={moveCard}
+                  onAnnounce={setAnnouncement}
                   onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
                   showFinancials={canViewFinancials}
                 />
@@ -3791,6 +3801,7 @@ interface StatusBoardColumnViewProps {
   column: OrderStatusBoardColumn;
   allColumns: OrderStatusBoardColumn[];
   finePointer: boolean;
+  touchDragEnabled: boolean;
   mutationsEnabled: boolean;
   pendingOrders: Set<number>;
   cardDisplayMode: StatusBoardCardDisplayMode;
@@ -3802,6 +3813,7 @@ interface StatusBoardColumnViewProps {
     statusName: string,
     trigger: HTMLElement | null,
   ) => void;
+  onAnnounce: (message: string) => void;
   onOpenOrder: (orderId: number) => void;
   showFinancials: boolean;
 }
@@ -3811,12 +3823,14 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
   column,
   allColumns,
   finePointer,
+  touchDragEnabled,
   mutationsEnabled,
   pendingOrders,
   cardDisplayMode,
   loadingMore,
   onLoadMore,
   onMove,
+  onAnnounce,
   onOpenOrder,
   showFinancials,
 }) => {
@@ -3861,6 +3875,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
         isOver && canDrop ? 'status-board-column--drop' : '',
       ].filter(Boolean).join(' ')}
       style={{ '--status-color': column.status.color ?? '#8c8c8c' } as React.CSSProperties}
+      data-status-board-column-key={column.key}
       aria-label={`${column.status.name}: ${column.total} заказов`}
     >
       <header className="status-board-column__header">
@@ -3894,7 +3909,9 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
               mutationsEnabled={mutationsEnabled}
               pending={pendingOrders.has(card.orderId)}
               displayMode={cardDisplayMode}
+              touchDragEnabled={mutationsEnabled && touchDragEnabled}
               onMove={onMove}
+              onAnnounce={onAnnounce}
               onOpenOrder={onOpenOrder}
               showFinancials={showFinancials}
             />
@@ -3935,7 +3952,9 @@ interface StatusBoardCardViewProps {
   highlightEnabled?: boolean;
   onSelectRelation?: () => void;
   openOrderOnNumber?: boolean;
+  touchDragEnabled?: boolean;
   onMove: StatusBoardColumnViewProps['onMove'];
+  onAnnounce?: (message: string) => void;
   onOpenOrder: (orderId: number) => void;
   showFinancials: boolean;
 }
@@ -3960,7 +3979,9 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   highlightEnabled = false,
   onSelectRelation,
   openOrderOnNumber = true,
+  touchDragEnabled = false,
   onMove,
+  onAnnounce = () => undefined,
   onOpenOrder,
   showFinancials,
 }) => {
@@ -3996,6 +4017,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         : destinations.length === 0
           ? 'Нет доступных активных статусов для перемещения.'
           : null;
+  const orderNumber = formatStatusBoardOrderNumber(card);
   const [{ isDragging }, dragRef] = useDrag<
     BoardDragItem,
     void,
@@ -4007,13 +4029,35 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
   });
 
-  const orderNumber = formatStatusBoardOrderNumber(card);
   const primaryStatus =
     board === 'order'
       ? card.orderStatusName || 'Без статуса'
       : card.productionStatusName || 'Без статуса';
   const primaryStatusColor =
     resolveStatusBoardStatusColor(board, card, allColumns) ?? '#8c8c8c';
+  const {
+    active: isTouchDragging,
+    ghost: touchDragGhost,
+    handleProps: touchDragHandleProps,
+  } = useTouchBoardCardDrag({
+    enabled: actionsVisible && touchDragEnabled && moveAvailable,
+    orderNumber,
+    sourceColumn,
+    statusName: primaryStatus,
+    destinations: destinations.flatMap((column) =>
+      column.status.id === null
+        ? []
+        : [{
+          key: column.key,
+          statusId: column.status.id,
+          statusName: column.status.name,
+        }],
+    ),
+    onAnnounce,
+    onDrop: (destination, trigger) => {
+      onMove(card, destination.statusId, destination.statusName, trigger);
+    },
+  });
   const showCompactDetails = displayMode !== 'minimal';
   const showStandardDetails = displayMode === 'standard';
   const paymentSummary = showFinancials ? formatPaymentSummary(card) : null;
@@ -4050,7 +4094,9 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   );
 
   return (
-    <div
+    <>
+      {touchDragGhost}
+      <div
       className={cncRelationCardClassName(
         [
           'status-board-card',
@@ -4058,7 +4104,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           cncOrderCard ? 'cnc-order-card' : '',
           cncMuted ? 'cnc-terminal-card--muted' : '',
           cncSummaryOnly ? 'cnc-order-card--summary-only' : '',
-          isDragging ? 'status-board-card--dragging' : '',
+          isDragging || isTouchDragging ? 'status-board-card--dragging' : '',
           pending ? 'status-board-card--pending' : '',
         ].filter(Boolean).join(' '),
         relationState,
@@ -4105,7 +4151,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
               standardView={!cncSummaryOnly}
               onToggle={onToggleDisplay ?? (() => undefined)}
             />
-            {actionsVisible && finePointer && (
+            {actionsVisible && (finePointer || touchDragEnabled) && (
               <Tooltip title={moveAvailable ? 'Перетащить заказ' : unavailableReason}>
                 <Button
                   ref={(node) => {
@@ -4113,10 +4159,15 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
                     dragRef(node);
                   }}
                   type="text"
-                  className="status-board-card__drag"
-                  aria-label={`Перетащить заказ ${orderNumber}`}
+                  className={`status-board-card__drag${touchDragEnabled ? ' status-board-card__drag--touch' : ''}`}
+                  aria-label={touchDragEnabled
+                    ? `Удерживайте и перетащите заказ ${orderNumber}`
+                    : `Перетащить заказ ${orderNumber}`}
+                  aria-describedby={touchDragEnabled ? 'status-board-touch-drag-instructions' : undefined}
+                  data-touch-drag-active={isTouchDragging ? 'true' : undefined}
                   disabled={!moveAvailable}
                   icon={<DragOutlined />}
+                  {...touchDragHandleProps}
                 />
               </Tooltip>
             )}
@@ -4236,7 +4287,8 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           <Spin size="small" /> Обновляем статус…
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 });
 StatusBoardCardView.displayName = 'StatusBoardCardView';

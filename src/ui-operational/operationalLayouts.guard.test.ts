@@ -104,9 +104,11 @@ describe('LINE/AIR operational layout parity', () => {
 
   it('maps unmocked list, show, form, and complex workspace routes to operational layouts', () => {
     const layout = read('src/ui-evolution/shell/EvolutionWorkspaceLayout.tsx');
-    expect(layout).toContain("pathname.startsWith('/orders/create')");
-    expect(layout).toContain("pathname.startsWith('/configuration')");
-    expect(layout).toContain("pathname.startsWith('/profile')");
+    const routeFamilies = read('src/ui-evolution/shell/tabletRouteFamily.ts');
+    expect(layout).toContain('resolveOperationalPageKind(location.pathname)');
+    expect(routeFamilies).toContain("pathname.startsWith('/orders/create')");
+    expect(routeFamilies).toContain("pathname.startsWith('/configuration')");
+    expect(routeFamilies).toContain("pathname.startsWith('/profile')");
     expect(styles).toContain('[data-operational-page-kind="list"]');
     expect(styles).toContain('[data-operational-page-kind="show"]');
     expect(styles).toContain('[data-operational-page-kind="form"]');

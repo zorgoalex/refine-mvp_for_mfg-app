@@ -26,6 +26,10 @@ const interaction = readFileSync(
   'src/pages/orderStatusBoard/interaction.ts',
   'utf8',
 );
+const touchDrag = readFileSync(
+  'src/pages/orderStatusBoard/useTouchBoardCardDrag.tsx',
+  'utf8',
+);
 const detailedMachine = readFileSync(
   'src/pages/orderStatusBoard/cncDetailedMachine.ts',
   'utf8',
@@ -47,9 +51,25 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(interaction).toContain('if (!confirmed)');
   });
 
-  it('keeps mobile drag-free and respects reduced motion', () => {
+  it('keeps desktop DnD and adds explicit, accessible touch drag without enabling CNC', () => {
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
     expect(page).toContain('canDrag: moveAvailable && finePointer');
+    expect(page).toContain('const tabletTouchDragEnabled = isTabletTier(deviceTier)');
+    expect(page).toContain('touchDragEnabled={tabletTouchDragEnabled}');
+    expect(page).toContain('touchDragEnabled={mutationsEnabled && touchDragEnabled}');
+    expect(page).toContain('touchDragEnabled = false');
+    expect(touchDrag).toContain("event.pointerType !== 'touch'");
+    expect(touchDrag).toContain('handle.setPointerCapture');
+    expect(touchDrag).toContain('navigator.vibrate?.(18)');
+    expect(touchDrag).toContain('document.elementFromPoint');
+    expect(page).toContain('data-status-board-column-key={column.key}');
+    expect(page).toContain('status-board-touch-drag-instructions');
+    expect(page).toContain('actionsVisible && (finePointer || touchDragEnabled)');
+    expect(page).not.toContain('touchDragEnabled={false}');
+    expect(css).toContain('.status-board-card__drag--touch');
+    expect(css).toContain('touch-action: none');
+    expect(css).toContain('.status-board-viewport--touch-dragging');
+    expect(css).toContain('scroll-snap-type: none');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     expect(css).toContain('scroll-snap-type: x mandatory');
   });
