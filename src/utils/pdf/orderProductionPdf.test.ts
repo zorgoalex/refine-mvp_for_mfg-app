@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildOrderProductionPdfDocument,
+  groupOrderProductionDetailsByFilm,
   openOrderProductionPdfPreview,
 } from './orderProductionPdf';
 
@@ -22,7 +23,7 @@ const params = {
       quantity: 2,
       milling_cost_per_sqm: 987654,
       detail_cost: 876543,
-      notes: 'Лицевая <левая>',
+      notes: 'Белая группа 1 <левая>',
       milling_type: { milling_type_name: 'Квадро' },
       edge_type: { edge_type_name: 'R2' },
       film: { film_name: 'Белый & матовый' },
@@ -36,7 +37,20 @@ const params = {
       quantity: 1,
       milling_cost_per_sqm: 765432,
       detail_cost: 654321,
-      notes: null,
+      notes: 'Чёрная группа',
+      milling_type: { milling_type_name: 'Квадро' },
+      edge_type: { edge_type_name: 'R2' },
+      film: { film_name: 'Чёрный софт' },
+      material: { material_name: 'МДФ 16' },
+    },
+    {
+      detail_id: 103,
+      length: 500,
+      width: 200,
+      quantity: 1,
+      milling_cost_per_sqm: 543210,
+      detail_cost: 432109,
+      notes: 'Белая группа 2',
       milling_type: { milling_type_name: 'Квадро' },
       edge_type: { edge_type_name: 'R2' },
       film: { film_name: 'Белый & матовый' },
@@ -46,9 +60,10 @@ const params = {
 };
 
 describe('production order PDF document', () => {
-  it('contains only the spreadsheet header and every non-financial detail column', () => {
+  it('keeps the standard Excel A:M header and detail column labels', () => {
     const html = buildOrderProductionPdfDocument(params);
 
+    expect(html).toContain('class="excel-order-header"');
     expect(html).toContain('Заказ Ф26-42');
     expect(html).toContain('Фасады &lt;Кухня &amp; бар&gt;');
     expect(html).toContain('ТОО &quot;Заказчик&quot;');
@@ -58,38 +73,64 @@ describe('production order PDF document', () => {
 
     for (const heading of [
       '№',
-      'Высота, мм',
-      'Ширина, мм',
+      'Высота',
+      'Ширина',
       'Кол-во',
-      'Площадь, м²',
+      'Площадь',
       'Тип детали',
       'Обкат',
       'Примечание',
-      'Плёнка',
+      'Цена за кв.м.',
+      'Сумма',
     ]) {
       expect(html).toContain(`<th scope="col">${heading}</th>`);
     }
+    expect(html).toContain('<th scope="col" colspan="3">Пленка</th>');
 
-    expect(html).toContain('Лицевая &lt;левая&gt;');
+    expect(html).toContain('Белая группа 1 &lt;левая&gt;');
     expect(html).toContain('Белый &amp; матовый');
     expect(html).toContain('0,59');
-    expect(html).toContain('class="detail-separator"');
     expect(html).toContain('Общая площадь');
-    expect(html).toContain('0,77 м²');
+    expect(html).toContain('0,87');
     expect(html).toContain('Кол-во деталей');
-    expect(html).toContain('3');
+    expect(html).toContain('4');
   });
 
-  it('never renders financial columns, values, or payment sections', () => {
+  it('keeps financial fields visible but empty and omits payment sections', () => {
     const html = buildOrderProductionPdfDocument(params);
 
-    expect(html).not.toContain('Цена за кв.м.');
-    expect(html).not.toContain('Сумма');
-    expect(html).not.toContain('Оплата');
+    expect(html).toContain('Общая сумма');
+    expect(html).toContain('Скидка');
+    expect(html).toContain('Остаток оплаты');
+    expect(html).toMatch(/data-field="total-amount"[^>]*><\/td>/);
+    expect(html).toMatch(/data-field="discount"[^>]*><\/td>/);
+    expect(html).toMatch(/data-field="outstanding"[^>]*><\/td>/);
+    expect(html.match(/class="number financial-cell"><\/td>/g)).toHaveLength(6);
     expect(html).not.toContain('987654');
     expect(html).not.toContain('876543');
     expect(html).not.toContain('765432');
     expect(html).not.toContain('654321');
+    expect(html).not.toContain('543210');
+    expect(html).not.toContain('432109');
+    expect(html).not.toContain('Тип оплаты');
+    expect(html).not.toContain('Дата оплаты');
+    expect(html).not.toContain('Сумма оплаты');
+  });
+
+  it('always groups details by film with exactly one blank row between groups', () => {
+    const grouped = groupOrderProductionDetailsByFilm(params.details);
+    expect(grouped.map((row) => ('kind' in row ? row.kind : row.detail_id))).toEqual([
+      101,
+      103,
+      'blank',
+      102,
+    ]);
+
+    const html = buildOrderProductionPdfDocument(params);
+    expect(html.match(/class="detail-separator"/g)).toHaveLength(1);
+    expect(html.indexOf('Белая группа 1')).toBeLessThan(html.indexOf('Белая группа 2'));
+    expect(html.indexOf('Белая группа 2')).toBeLessThan(html.indexOf('class="detail-separator"'));
+    expect(html.indexOf('class="detail-separator"')).toBeLessThan(html.indexOf('Чёрная группа'));
   });
 
   it('uses a repeating spreadsheet header on A4 landscape pages', () => {

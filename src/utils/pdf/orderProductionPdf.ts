@@ -43,25 +43,55 @@ const formatDecimal = (value: number | null, digits = 2): string => (
     }).format(value)
 );
 
-const formatCell = (value: string | number | null | undefined): string => {
-  if (value === null || value === undefined || value === '') return '—';
-  return escapeHtml(String(value));
-};
+const formatExcelCell = (value: string | number | null | undefined): string => (
+  value === null || value === undefined || value === '' ? '' : escapeHtml(String(value))
+);
+
+const formatExcelDecimal = (value: number | null): string => (
+  value === null ? '' : formatDecimal(value)
+);
 
 const commonValue = (
   details: readonly OrderExcelDetail[],
   getValue: (detail: OrderExcelDetail) => string | null | undefined,
 ): string => {
   const values = details.map(getValue).filter((value): value is string => Boolean(value));
-  if (values.length === 0 || values.some((value) => value !== values[0])) return '—';
+  if (values.length === 0 || values.some((value) => value !== values[0])) return '';
   return values[0];
 };
+
+export function groupOrderProductionDetailsByFilm(
+  details: readonly OrderExcelDetailRow[],
+): OrderExcelDetailRow[] {
+  const groups = new Map<string, OrderExcelDetail[]>();
+
+  details.forEach((detail) => {
+    if (isBlankRow(detail)) return;
+    const filmKey = detail.film?.film_name?.trim() || '';
+    const group = groups.get(filmKey);
+    if (group) {
+      group.push(detail);
+    } else {
+      groups.set(filmKey, [detail]);
+    }
+  });
+
+  const orderedGroups = [
+    ...Array.from(groups.entries()).filter(([key]) => key !== '').map(([, group]) => group),
+    ...Array.from(groups.entries()).filter(([key]) => key === '').map(([, group]) => group),
+  ];
+
+  return orderedGroups.flatMap((group, index) => (
+    index === 0 ? group : [{ kind: 'blank' as const }, ...group]
+  ));
+}
 
 export function buildOrderProductionPdfDocument({
   order,
   details,
 }: OrderProductionPdfParams): string {
   const actualDetails = details.filter((detail): detail is OrderExcelDetail => !isBlankRow(detail));
+  const groupedDetails = groupOrderProductionDetailsByFilm(actualDetails);
   const totalArea = actualDetails.reduce((sum, detail) => sum + (roundArea(detail) ?? 0), 0);
   const totalQuantity = actualDetails.reduce((sum, detail) => sum + detail.quantity, 0);
   const orderNumber = `Ф${getYearLastTwoDigits(order.orderDate)}-${order.orderId}`;
@@ -71,43 +101,31 @@ export function buildOrderProductionPdfDocument({
     : null;
 
   let detailOrdinal = 0;
-  const detailRows = details.map((detail) => {
+  const detailRows = groupedDetails.map((detail) => {
     if (isBlankRow(detail)) {
-      return '<tr class="detail-separator" aria-hidden="true"><td colspan="9"></td></tr>';
+      return '<tr class="detail-separator" aria-hidden="true"><td colspan="13"></td></tr>';
     }
 
     detailOrdinal += 1;
     return `<tr>
       <td class="number">${detailOrdinal}</td>
-      <td class="number">${formatCell(detail.length)}</td>
-      <td class="number">${formatCell(detail.width)}</td>
-      <td class="number">${formatCell(detail.quantity)}</td>
-      <td class="number">${formatDecimal(roundArea(detail))}</td>
-      <td>${formatCell(detail.milling_type?.milling_type_name)}</td>
-      <td>${formatCell(detail.edge_type?.edge_type_name)}</td>
-      <td>${formatCell(detail.notes)}</td>
-      <td>${formatCell(detail.film?.film_name)}</td>
+      <td class="number">${formatExcelCell(detail.length)}</td>
+      <td class="number">${formatExcelCell(detail.width)}</td>
+      <td class="number">${formatExcelCell(detail.quantity)}</td>
+      <td class="number">${formatExcelDecimal(roundArea(detail))}</td>
+      <td>${formatExcelCell(detail.milling_type?.milling_type_name)}</td>
+      <td>${formatExcelCell(detail.edge_type?.edge_type_name)}</td>
+      <td>${formatExcelCell(detail.notes)}</td>
+      <td class="number financial-cell"></td>
+      <td class="number financial-cell"></td>
+      <td colspan="3">${formatExcelCell(detail.film?.film_name)}</td>
     </tr>`;
   }).join('\n');
 
-  const headerFields = [
-    ['Название', order.orderName],
-    ['Дата', formatDate(order.orderDate)],
-    ['Заказчик', order.clientName],
-    ['Телефон', order.clientPhone],
-    ['№ присадки', order.prisadkaName],
-    ['Конструктор', designer],
-    ['Фрезеровка', commonValue(actualDetails, (detail) => detail.milling_type?.milling_type_name)],
-    ['Обкат', commonValue(actualDetails, (detail) => detail.edge_type?.edge_type_name)],
-    ['Плёнка', commonValue(actualDetails, (detail) => detail.film?.film_name)],
-    ['Материал', commonValue(actualDetails, (detail) => detail.material?.material_name)],
-    ['Общая площадь', `${formatDecimal(totalArea)} м²`],
-    ['Кол-во деталей', totalQuantity],
-  ].map(([label, value]) => `
-    <div class="header-field">
-      <span>${escapeHtml(String(label))}</span>
-      <strong>${formatCell(value)}</strong>
-    </div>`).join('');
+  const commonMilling = commonValue(actualDetails, (detail) => detail.milling_type?.milling_type_name);
+  const commonEdge = commonValue(actualDetails, (detail) => detail.edge_type?.edge_type_name);
+  const commonFilm = commonValue(actualDetails, (detail) => detail.film?.film_name);
+  const commonMaterial = commonValue(actualDetails, (detail) => detail.material?.material_name);
 
   return `<!doctype html>
 <html lang="ru">
@@ -127,55 +145,48 @@ export function buildOrderProductionPdfDocument({
       background: #fff;
       color: #111;
       font-family: Arial, Helvetica, sans-serif;
-      font-size: 9px;
-      line-height: 1.25;
+      font-size: 8px;
+      line-height: 1.15;
       print-color-adjust: exact;
       -webkit-print-color-adjust: exact;
-    }
-    h1 { font-size: 17px; margin: 0; }
-    .document-heading {
-      align-items: baseline;
-      border-bottom: 2px solid #111;
-      display: flex;
-      gap: 12px;
-      justify-content: space-between;
-      margin-bottom: 6px;
-      padding-bottom: 5px;
-    }
-    .document-heading__name {
-      font-size: 11px;
-      font-weight: 700;
-      text-align: right;
-    }
-    .header-grid {
-      border-left: 1px solid #777;
-      border-top: 1px solid #777;
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      margin-bottom: 8px;
-    }
-    .header-field {
-      border-bottom: 1px solid #777;
-      border-right: 1px solid #777;
-      min-height: 32px;
-      padding: 3px 5px;
-    }
-    .header-field span {
-      color: #444;
-      display: block;
-      font-size: 7px;
-      margin-bottom: 1px;
-      text-transform: uppercase;
-    }
-    .header-field strong {
-      display: block;
-      font-size: 9px;
-      overflow-wrap: anywhere;
     }
     table {
       border-collapse: collapse;
       table-layout: fixed;
       width: 100%;
+    }
+    .excel-order-header {
+      margin-bottom: 3px;
+    }
+    .excel-order-header th,
+    .excel-order-header td {
+      border: 1px solid #444;
+      height: 17px;
+      padding: 2px 4px;
+      text-align: center;
+    }
+    .excel-order-header th {
+      background: #e7e7e7;
+      font-size: 7px;
+      font-weight: 700;
+      text-transform: lowercase;
+    }
+    .excel-order-header .excel-order-number {
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .excel-order-header .excel-order-name {
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .excel-order-header .excel-value {
+      font-size: 9px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .financial-value,
+    .financial-cell {
+      background: #fff;
     }
     thead { display: table-header-group; }
     tr { break-inside: avoid; page-break-inside: avoid; }
@@ -190,6 +201,8 @@ export function buildOrderProductionPdfDocument({
       font-weight: 700;
       text-align: center;
     }
+    .excel-detail-table thead th { height: 44px; }
+    .excel-detail-table tbody td { height: 19px; }
     td {
       overflow-wrap: anywhere;
       white-space: pre-wrap;
@@ -200,44 +213,93 @@ export function buildOrderProductionPdfDocument({
       white-space: nowrap;
     }
     .detail-separator td {
-      border-left: 0;
-      border-right: 0;
-      height: 5px;
+      height: 19px;
       padding: 0;
     }
-    col:nth-child(1) { width: 4%; }
-    col:nth-child(2), col:nth-child(3) { width: 8%; }
-    col:nth-child(4) { width: 6%; }
-    col:nth-child(5) { width: 9%; }
-    col:nth-child(6) { width: 15%; }
-    col:nth-child(7) { width: 11%; }
-    col:nth-child(8) { width: 25%; }
-    col:nth-child(9) { width: 14%; }
+    col:nth-child(1) { width: 3.06%; }
+    col:nth-child(2) { width: 6.48%; }
+    col:nth-child(3) { width: 6.36%; }
+    col:nth-child(4) { width: 5.53%; }
+    col:nth-child(5) { width: 4.36%; }
+    col:nth-child(6) { width: 15.79%; }
+    col:nth-child(7) { width: 4.36%; }
+    col:nth-child(8) { width: 18.73%; }
+    col:nth-child(9) { width: 6.83%; }
+    col:nth-child(10) { width: 10.96%; }
+    col:nth-child(11) { width: 7.66%; }
+    col:nth-child(12) { width: 6.83%; }
+    col:nth-child(13) { width: 3.05%; }
   </style>
 </head>
 <body>
   <header>
-    <div class="document-heading">
-      <h1>Заказ ${escapeHtml(orderNumber)}</h1>
-      <div class="document-heading__name">${formatCell(order.orderName)}</div>
-    </div>
-    <div class="header-grid">${headerFields}
-    </div>
+    <table class="excel-order-header" aria-label="Шапка заказа">
+      <colgroup>${'<col />'.repeat(13)}</colgroup>
+      <tbody>
+        <tr>
+          <td class="excel-order-number" colspan="2" rowspan="3">Заказ ${escapeHtml(orderNumber)}</td>
+          <td class="excel-order-name" rowspan="3">${formatExcelCell(order.orderName)}</td>
+          <th scope="row">№ присадки</th>
+          <th colspan="5" scope="row">Заказчик</th>
+          <th colspan="2" scope="row">Общая сумма</th>
+          <th colspan="2" scope="row">Скидка</th>
+        </tr>
+        <tr>
+          <td class="excel-value" rowspan="2">${formatExcelCell(order.prisadkaName)}</td>
+          <td class="excel-value" colspan="5" rowspan="2">${formatExcelCell(order.clientName)}</td>
+          <td class="excel-value financial-value" colspan="2" rowspan="2" data-field="total-amount"></td>
+          <td class="excel-value financial-value" colspan="2" rowspan="2" data-field="discount"></td>
+        </tr>
+        <tr></tr>
+        <tr>
+          <th colspan="3" scope="row">Фрезеровка</th>
+          <th colspan="2" scope="row">Обкат</th>
+          <th colspan="2" scope="row">Пленка</th>
+          <th colspan="2" scope="row">Материал</th>
+          <th rowspan="2" scope="row">Остаток оплаты</th>
+          <td class="excel-value financial-value" colspan="3" rowspan="2" data-field="outstanding"></td>
+        </tr>
+        <tr>
+          <td class="excel-value" colspan="3" rowspan="3">${formatExcelCell(commonMilling)}</td>
+          <td class="excel-value" colspan="2" rowspan="3">${formatExcelCell(commonEdge)}</td>
+          <td class="excel-value" colspan="2" rowspan="3">${formatExcelCell(commonFilm)}</td>
+          <td class="excel-value" colspan="2" rowspan="3">${formatExcelCell(commonMaterial)}</td>
+        </tr>
+        <tr>
+          <th rowspan="2" scope="row">Срок выполнения</th>
+          <td class="excel-value" colspan="3" rowspan="2"></td>
+        </tr>
+        <tr></tr>
+        <tr>
+          <th colspan="2" rowspan="2" scope="row">Дата</th>
+          <td class="excel-value" colspan="3" rowspan="2">${formatExcelCell(formatDate(order.orderDate))}</td>
+          <td class="excel-value" colspan="2" rowspan="2">${formatExcelCell(designer)}</td>
+          <td class="excel-value" colspan="2" rowspan="2">${formatExcelCell(order.clientPhone)}</td>
+          <th rowspan="2" scope="row">Общая площадь</th>
+          <td class="excel-value number" rowspan="2">${formatDecimal(totalArea)}</td>
+          <th rowspan="2" scope="row">Кол-во деталей</th>
+          <td class="excel-value number" rowspan="2">${formatExcelCell(totalQuantity)}</td>
+        </tr>
+        <tr></tr>
+      </tbody>
+    </table>
   </header>
   <main>
-    <table aria-label="Детали заказа для производства">
-      <colgroup>${'<col />'.repeat(9)}</colgroup>
+    <table class="excel-detail-table" aria-label="Детали заказа для производства">
+      <colgroup>${'<col />'.repeat(13)}</colgroup>
       <thead>
         <tr>
           <th scope="col">№</th>
-          <th scope="col">Высота, мм</th>
-          <th scope="col">Ширина, мм</th>
+          <th scope="col">Высота</th>
+          <th scope="col">Ширина</th>
           <th scope="col">Кол-во</th>
-          <th scope="col">Площадь, м²</th>
+          <th scope="col">Площадь</th>
           <th scope="col">Тип детали</th>
           <th scope="col">Обкат</th>
           <th scope="col">Примечание</th>
-          <th scope="col">Плёнка</th>
+          <th scope="col">Цена за кв.м.</th>
+          <th scope="col">Сумма</th>
+          <th scope="col" colspan="3">Пленка</th>
         </tr>
       </thead>
       <tbody>${detailRows}</tbody>

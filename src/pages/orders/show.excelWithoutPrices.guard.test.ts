@@ -15,9 +15,18 @@ describe('order show price-free Excel export', () => {
     expect(source).toContain("variant: withoutPrices ? 'without-prices' : 'standard'");
   });
 
-  it('exposes the production PDF as the direct order action', () => {
-    expect(source).toContain('aria-label="PDF для производства"');
-    expect(source).toContain('PDF для производства');
+  it('exposes production PDF as a light-green icon button with an accessible tooltip', () => {
+    const action = source.slice(
+      source.indexOf('const productionPdfAction'),
+      source.indexOf('const productionExcelOverflowAction'),
+    );
+
+    expect(action).toContain('<Tooltip title="PDF для производства">');
+    expect(action).toContain('aria-label="PDF для производства"');
+    expect(action).toContain('productionPdfButtonStyle');
+    expect(action).not.toMatch(/>\s*PDF для производства\s*<\/Button>/);
+    expect(source).toContain("background: 'rgba(82, 196, 26, 0.12)'");
+    expect(source).toContain("color: '#52c41a'");
     expect(source).toContain('openOrderProductionPdfPreview');
   });
 });

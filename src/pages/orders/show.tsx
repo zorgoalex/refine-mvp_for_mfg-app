@@ -88,6 +88,14 @@ import { BasisProjectLink } from "./components/BasisProjectLink";
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
 
+const productionPdfButtonStyle: CSSProperties = {
+  minWidth: 40,
+  minHeight: 40,
+  background: 'rgba(82, 196, 26, 0.12)',
+  borderColor: 'rgba(82, 196, 26, 0.36)',
+  color: '#52c41a',
+};
+
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
   { key: 'groups', label: 'Группы заказа', color: '#722ed1' },
   { key: 'deadlines', label: 'Дедлайны', color: '#1677ff' },
@@ -2080,14 +2088,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const productionPdfDisabled = !record || details.length === 0 || isClientResolving;
   const productionExcelDisabled = productionPdfDisabled || isAnyExcelExporting;
   const productionPdfAction = canExportOrders ? (
-    <Button
-      aria-label="PDF для производства"
-      icon={<FilePdfOutlined />}
-      onClick={handleProductionPdf}
-      disabled={productionPdfDisabled}
-    >
-      PDF для производства
-    </Button>
+    <Tooltip title="PDF для производства">
+      <Button
+        aria-label="PDF для производства"
+        icon={<FilePdfOutlined />}
+        style={productionPdfButtonStyle}
+        onClick={handleProductionPdf}
+        disabled={productionPdfDisabled}
+      />
+    </Tooltip>
   ) : null;
   const productionExcelOverflowAction = canExportOrders ? (
     <Dropdown
