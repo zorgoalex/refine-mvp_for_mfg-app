@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { HolderOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDrag, useDragDropManager } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
@@ -25,6 +26,11 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   showFinancials = true,
 }) => {
   const navigate = useNavigate();
+  const dragFromHandleOnly =
+    typeof window !== 'undefined' &&
+    ('ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0) &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches;
 
   // AD-mobile: long press → drag + double-tap → context menu. See
   // OrderCard.tsx for the full rationale on the long-press approach
@@ -35,6 +41,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
     y: number;
     t: number;
     onNumber: boolean;
+    onDragHandle: boolean;
   } | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLongPressDraggingRef = useRef(false);
@@ -46,15 +53,26 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
     }
+    isLongPressDraggingRef.current = false;
   };
 
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+  const handleTouchStart = (e: React.TouchEvent<HTMLElement>) => {
     const t = e.touches[0];
     if (!t) return;
     const target = e.target as HTMLElement;
     const onNumber = !!target.closest('.order-card-compact__number');
-    touchStartRef.current = { x: t.clientX, y: t.clientY, t: Date.now(), onNumber };
-    if (onNumber) return;
+    const onDragHandle = !!target.closest('.calendar-order-card__drag-handle');
+    if (onDragHandle && (e.currentTarget as HTMLElement).classList.contains('order-card')) {
+      return;
+    }
+    touchStartRef.current = {
+      x: t.clientX,
+      y: t.clientY,
+      t: Date.now(),
+      onNumber,
+      onDragHandle,
+    };
+    if (!onDragHandle) return;
     longPressTimerRef.current = setTimeout(() => {
       longPressTimerRef.current = null;
       const start = touchStartRef.current;
@@ -73,12 +91,12 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       dndManager.getActions().beginDrag([handlerId] as any, {
         clientOffset,
         getSourceClientOffset: getSourceClientOffset as any,
-        publishSource: false,
+        publishSource: true,
       } as any);
       isLongPressDraggingRef.current = true;
     }, LONG_PRESS_MS);
   };
-  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+  const handleTouchMove = (e: React.TouchEvent<HTMLElement>) => {
     const start = touchStartRef.current;
     if (!start) return;
     const t = e.touches[0];
@@ -92,7 +110,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       cancelLongPress();
     }
   };
-  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+  const handleTouchEnd = (e: React.TouchEvent<HTMLElement>) => {
     const wasLongPress = isLongPressDraggingRef.current;
     cancelLongPress();
     const start = touchStartRef.current;
@@ -104,7 +122,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
     }
     const t = e.changedTouches[0];
     if (!t) return;
-    if (start.onNumber) {
+    if (start.onNumber || start.onDragHandle) {
       lastTapRef.current = null;
       return;
     }
@@ -158,7 +176,10 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   const handlerId = collected.handlerId;
   const setCardRef = (node: HTMLDivElement | null) => {
     cardNodeRef.current = node;
-    dragRef(node);
+    if (!dragFromHandleOnly) dragRef(node);
+  };
+  const setDragHandleRef = (node: HTMLButtonElement | null) => {
+    if (dragFromHandleOnly) dragRef(node);
   };
 
   // Вычисляем фрезеровку из деталей заказа
@@ -199,7 +220,6 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       className={`order-card order-card--compact ${isDragging || isDraggingProp ? 'order-card--dragging' : ''}`}
       style={{
         borderColor,
-        cursor: 'move',
         opacity: isDragging ? 0.5 : 1,
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
@@ -212,6 +232,22 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       onTouchCancel={handleTouchCancel}
       onClick={handleCardClick}
     >
+      <button
+        ref={setDragHandleRef}
+        type="button"
+        className="calendar-order-card__drag-handle"
+        aria-label={`Удерживайте и перетащите заказ ${order.order_name}`}
+        title="Удерживайте и перетащите"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
+        onClick={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.stopPropagation()}
+      >
+        <HolderOutlined aria-hidden="true" />
+      </button>
+
       {/* Номер заказа */}
       <div
         className="order-card-compact__number"

@@ -285,7 +285,7 @@ test.describe('Evolutionary tablet UI', () => {
         }
     });
 
-    test('opens the tablet calendar in one unconstrained sticky row before any scroll', async ({ page }, testInfo) => {
+    test('opens the tablet calendar in one unconstrained sticky row before any scroll', async ({ page, context }, testInfo) => {
         const db = createWorkflowMockDb();
         seedTabletData(db);
         const health = collectPageHealth(page);
@@ -309,6 +309,16 @@ test.describe('Evolutionary tablet UI', () => {
         await expect.poll(async () => Math.round((await navigation.boundingBox())?.height ?? 0)).toBe(44);
         await expect(grid).toHaveCSS('max-height', 'none');
         await expect(content).toHaveCSS('overflow-y', 'auto');
+
+        await page.setViewportSize(REAL_87_TABLET_CSS_VIEWPORT);
+        await expect(page.locator('.order-card').first()).toBeVisible();
+        await touchPanCalendarFromCard(context, page);
+        await touchHoldCalendarDragHandle(context, page);
+        await navigation.locator('.ant-segmented-item').filter({ hasText: 'Компактный' }).click();
+        await expect(page.locator('.order-card--compact').first()).toBeVisible();
+        await touchPanCalendarFromCard(context, page);
+        await touchHoldCalendarDragHandle(context, page);
+        await navigation.locator('.ant-segmented-item').filter({ hasText: 'Стандартный' }).click();
 
         await page.locator('.day-column').first().evaluate((element) => {
             element.style.minHeight = '1000px';
@@ -813,6 +823,110 @@ async function touchDragCard(context: BrowserContext, page: Page, orderNumber: s
     await expect(target).toHaveAttribute('data-touch-drop-over', 'true');
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await cdp.detach();
+}
+
+async function touchPanCalendarFromCard(context: BrowserContext, page: Page) {
+    const grid = page.locator('.calendar-grid');
+    const card = page.locator('.order-card').first();
+    await card.scrollIntoViewIfNeeded();
+    const metrics = await grid.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        touchAction: getComputedStyle(element.querySelector<HTMLElement>('.order-card')!).touchAction,
+    }));
+    expect(metrics.scrollWidth, JSON.stringify(metrics)).toBeGreaterThan(metrics.clientWidth);
+    expect(metrics.touchAction).toBe('pan-x pan-y');
+
+    await grid.evaluate((element) => {
+        element.scrollLeft = element.scrollWidth;
+    });
+    const before = await grid.evaluate((element) => element.scrollLeft);
+    expect(before).toBeGreaterThan(60);
+    const cardBox = await card.boundingBox();
+    expect(cardBox).not.toBeNull();
+    const start = await card.evaluate((element) => {
+        const cardRect = element.getBoundingClientRect();
+        const gridRect = element.closest('.calendar-grid')!.getBoundingClientRect();
+        const left = Math.max(cardRect.left + 8, gridRect.left + 8);
+        const right = Math.min(cardRect.right - 8, gridRect.right - 8, window.innerWidth - 8);
+        const top = Math.max(cardRect.top + 8, gridRect.top + 8);
+        const bottom = Math.min(cardRect.bottom - 8, gridRect.bottom - 8, window.innerHeight - 8);
+        for (let y = bottom; y >= top; y -= 8) {
+            for (let x = left; x <= right; x += 8) {
+                const target = document.elementFromPoint(x, y) as HTMLElement | null;
+                if (
+                    target?.closest('.order-card') === element &&
+                    !target.closest('.calendar-order-card__drag-handle')
+                ) {
+                    return { x, y };
+                }
+            }
+        }
+        return null;
+    });
+    expect(start, JSON.stringify({ cardBox })).not.toBeNull();
+
+    const endX = Math.min(REAL_87_TABLET_CSS_VIEWPORT.width - 40, start!.x + 560);
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ ...start!, id: 3, radiusX: 8, radiusY: 8, force: 1 }],
+    });
+    for (let step = 1; step <= 8; step += 1) {
+        await cdp.send('Input.dispatchTouchEvent', {
+            type: 'touchMove',
+            touchPoints: [{
+                x: start!.x + ((endX - start!.x) * step) / 8,
+                y: start!.y,
+                id: 3,
+                radiusX: 8,
+                radiusY: 8,
+                force: 1,
+            }],
+        });
+        await page.waitForTimeout(20);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+    await expect.poll(() => grid.evaluate((element) => element.scrollLeft)).toBeLessThan(before - 60);
+}
+
+async function touchHoldCalendarDragHandle(context: BrowserContext, page: Page) {
+    const handle = page.getByRole('button', { name: /Удерживайте и перетащите заказ/ }).first();
+    await expect(handle).toBeVisible();
+    const handleBox = await handle.boundingBox();
+    expect(handleBox).not.toBeNull();
+    expect(Math.round(handleBox!.width)).toBe(44);
+    expect(Math.round(handleBox!.height)).toBe(44);
+    await expect(handle).toHaveCSS('touch-action', 'none');
+    const card = handle.locator('..');
+    const point = {
+        x: handleBox!.x + handleBox!.width / 2,
+        y: handleBox!.y + handleBox!.height / 2,
+    };
+    const hitTarget = await page.evaluate(({ x, y }) => {
+        const target = document.elementFromPoint(x, y) as HTMLElement | null;
+        return {
+            tagName: target?.tagName ?? null,
+            className: target?.className?.toString() ?? null,
+            handleLabel: target?.closest<HTMLButtonElement>('.calendar-order-card__drag-handle')?.ariaLabel ?? null,
+        };
+    }, point);
+    expect(hitTarget.handleLabel, JSON.stringify({ point, handleBox, hitTarget })).not.toBeNull();
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ ...point, id: 4, radiusX: 8, radiusY: 8, force: 1 }],
+    });
+    await page.waitForTimeout(540);
+    await expect(card).toHaveClass(/order-card--dragging/);
+    await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: point.x + 2, y: point.y, id: 4, radiusX: 8, radiusY: 8, force: 1 }],
+    });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await cdp.detach();
+    await expect(card).not.toHaveClass(/order-card--dragging/);
 }
 
 async function touchPanBoardFromMiddle(context: BrowserContext, page: Page) {
