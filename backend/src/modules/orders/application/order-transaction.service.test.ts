@@ -38,7 +38,7 @@ import type {
   OrderSaveAuditEvent,
   OrderStatusAuditEvent,
   OrderStatusAuditInfo,
-  OrderStatusOutboxEvent,
+  OrderAutomationSourceOutboxEvent,
   OrderTransactionManagerPort,
   OrderWriteUnitOfWork,
   ProductionStatusAuditInfo,
@@ -690,8 +690,8 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.state.auditEvents.push(event);
   }
 
-  async enqueueStatusOutboxEvent(event: OrderStatusOutboxEvent): Promise<void> {
-    this.call('enqueueStatusOutboxEvent');
+  async enqueueAutomationSourceOutboxEvent(event: OrderAutomationSourceOutboxEvent): Promise<void> {
+    this.call('enqueueAutomationSourceOutboxEvent');
     this.state.outboxEvents.push({
       eventType: event.eventType,
       orderId: event.orderId,
@@ -1378,6 +1378,7 @@ describe('OrderTransactionService', () => {
       'updateOrderTotalsAndVersion',
       'loadOrderHeaderSnapshot',
       'writeAuditEvent',
+      'enqueueAutomationSourceOutboxEvent',
       'evaluateStatusAutomation',
       'evaluateStatusAutomation',
       'readOrder',
@@ -1412,8 +1413,21 @@ describe('OrderTransactionService', () => {
         paymentsCountAfter: 1,
       }),
     ]);
-    expect(transactions.calls.indexOf('evaluateStatusAutomation')).toBe(
+    expect(transactions.state.outboxEvents).toContainEqual(
+      expect.objectContaining({
+        eventType: 'order.created',
+        idempotencyKey: 'order-create-key-1:order.created',
+        payload: expect.objectContaining({
+          action: 'order_created',
+          scope: { source: 'order-save' },
+        }),
+      }),
+    );
+    expect(transactions.calls.indexOf('enqueueAutomationSourceOutboxEvent')).toBe(
       transactions.calls.indexOf('writeAuditEvent') + 1,
+    );
+    expect(transactions.calls.indexOf('evaluateStatusAutomation')).toBe(
+      transactions.calls.indexOf('enqueueAutomationSourceOutboxEvent') + 1,
     );
   });
 
@@ -1436,6 +1450,35 @@ describe('OrderTransactionService', () => {
       requestId: 'orders-create-100',
       paymentsCountAfter: 1,
     });
+  });
+
+  it('emits a canonical planned-date event after order.created on create', async () => {
+    const transactions = new FakeOrderTransactions();
+    const base = createSaveDto();
+
+    await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      requestId: 'req-create-with-date',
+      dto: {
+        ...base,
+        header: { ...base.header, plannedCompletionDate: '2026-08-20' },
+        payments: [],
+        idempotencyKey: 'create-with-date-key',
+      },
+    });
+
+    expect(transactions.statusAutomationEvents).toEqual([
+      expect.objectContaining({ eventType: 'order.created' }),
+      expect.objectContaining({
+        eventType: 'order.planned_completion_date_changed',
+        plannedCompletionDateBefore: null,
+        plannedCompletionDateAfter: '2026-08-20',
+      }),
+    ]);
+    expect(transactions.state.outboxEvents.map((event) => event.idempotencyKey)).toEqual([
+      'create-with-date-key:order.created',
+      'create-with-date-key:order.planned_completion_date_changed',
+    ]);
   });
 
   it('passes unit of work and persisted detail ids by clientKey to postPersistHook', async () => {
@@ -2063,6 +2106,12 @@ describe('OrderTransactionService', () => {
         requestId: 'req-status-save',
         idempotencyKey: 'save-status-key:order.production_status_changed',
       },
+      {
+        eventType: 'order.updated',
+        orderId: 42,
+        requestId: 'req-status-save',
+        idempotencyKey: 'save-status-key:order.updated',
+      },
     ]);
     expect(transactions.state.outboxEvents[0].payload).toMatchObject({
       orderStatusId: 1002,
@@ -2082,11 +2131,17 @@ describe('OrderTransactionService', () => {
         requestId: 'req-status-save',
         sourceIdempotencyKey: 'save-status-key',
       }),
+      expect.objectContaining({
+        eventType: 'order.updated',
+        orderId: 42,
+        requestId: 'req-status-save',
+        sourceIdempotencyKey: 'save-status-key',
+      }),
     ]);
     expect(transactions.calls.indexOf('writeStatusAuditEvent')).toBeGreaterThan(
       transactions.calls.indexOf('writeAuditEvent'),
     );
-    expect(transactions.calls.indexOf('enqueueStatusOutboxEvent')).toBeGreaterThan(
+    expect(transactions.calls.indexOf('enqueueAutomationSourceOutboxEvent')).toBeGreaterThan(
       transactions.calls.indexOf('writeStatusAuditEvent'),
     );
   });
@@ -2123,8 +2178,15 @@ describe('OrderTransactionService', () => {
     });
 
     expect(transactions.state.auditEvents.map((event) => event.action)).toEqual(['orders.update']);
-    expect(transactions.state.outboxEvents).toEqual([]);
-    expect(transactions.statusAutomationEvents).toEqual([]);
+    expect(transactions.state.outboxEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'order.updated',
+        idempotencyKey: 'req-no-status-change:order.updated',
+      }),
+    ]);
+    expect(transactions.statusAutomationEvents).toEqual([
+      expect.objectContaining({ eventType: 'order.updated', orderId: 42 }),
+    ]);
   });
 
   it('emits payment.created automation when order update adds a nested payment', async () => {
@@ -2172,10 +2234,170 @@ describe('OrderTransactionService', () => {
         requestId: 'req-update-payment',
         paymentsCountAfter: 1,
       }),
+      expect.objectContaining({
+        eventType: 'order.updated',
+        origin: 'user',
+        orderId: 42,
+        requestId: 'req-update-payment',
+      }),
     ]);
     expect(transactions.calls.indexOf('evaluateStatusAutomation')).toBeGreaterThan(
       transactions.calls.indexOf('writeAuditEvent'),
     );
+  });
+
+  it('orders status, planned-date, payment, and generic update events in one save', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      header: createHeader({ orderStatusId: 1001, plannedCompletionDate: '2026-08-10' }),
+      details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+      payments: [],
+    });
+    const observedStatuses: Array<{ eventType: string; orderStatusId: number | undefined }> = [];
+    transactions.onEvaluateStatusAutomation = (event, state) => {
+      const order = state.orders.get(event.orderId);
+      observedStatuses.push({ eventType: event.eventType, orderStatusId: order?.header.orderStatusId });
+      if (event.eventType === 'order.status_changed' && order) {
+        order.header = { ...order.header, orderStatusId: 9090 };
+      }
+    };
+
+    const base = createSaveDto();
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      requestId: 'req-combined-events',
+      dto: {
+        ...base,
+        header: {
+          ...base.header,
+          orderId: 42,
+          orderName: 'Combined events',
+          orderStatusId: 1002,
+          plannedCompletionDate: '2026-08-12',
+        },
+        details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+        payments: [{
+          clientKey: 'combined-payment',
+          typePaidId: 1001,
+          amount: 3000,
+          paymentDate: '2026-08-06',
+        }],
+        version: 3,
+        idempotencyKey: 'combined-events-key',
+      },
+    });
+
+    expect(transactions.statusAutomationEvents.map((event) => event.eventType)).toEqual([
+      'order.status_changed',
+      'order.planned_completion_date_changed',
+      'payment.created',
+      'order.updated',
+    ]);
+    expect(observedStatuses).toEqual([
+      { eventType: 'order.status_changed', orderStatusId: 1002 },
+      { eventType: 'order.planned_completion_date_changed', orderStatusId: 9090 },
+      { eventType: 'payment.created', orderStatusId: 9090 },
+      { eventType: 'order.updated', orderStatusId: 9090 },
+    ]);
+    expect(transactions.state.outboxEvents.map((event) => event.idempotencyKey)).toEqual([
+      'combined-events-key:order.status_changed',
+      'combined-events-key:order.planned_completion_date_changed',
+      'combined-events-key:order.updated',
+    ]);
+  });
+
+  it('emits planned-date clear before the generic update event', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      header: createHeader({ plannedCompletionDate: '2026-08-10' }),
+      details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+      payments: [],
+    });
+    const base = createSaveDto();
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      requestId: 'req-clear-date',
+      dto: {
+        ...base,
+        header: {
+          ...base.header,
+          orderId: 42,
+          plannedCompletionDate: null,
+        },
+        details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+        payments: [],
+        version: 3,
+      },
+    });
+
+    expect(transactions.statusAutomationEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'order.planned_completion_date_changed',
+        plannedCompletionDateBefore: '2026-08-10',
+        plannedCompletionDateAfter: null,
+      }),
+      expect.objectContaining({ eventType: 'order.updated' }),
+    ]);
+  });
+
+  it('emits planned-date set when an update changes null to a value', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      header: createHeader({ plannedCompletionDate: null }),
+      details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+      payments: [],
+    });
+    const base = createSaveDto();
+
+    await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      requestId: 'req-set-date',
+      dto: {
+        ...base,
+        header: {
+          ...base.header,
+          orderId: 42,
+          plannedCompletionDate: '2026-08-15',
+        },
+        details: [calculatedDetail({ id: 11, detailCost: 10000 })],
+        payments: [],
+        version: 3,
+        idempotencyKey: 'set-date-key',
+      },
+    });
+
+    expect(transactions.statusAutomationEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'order.planned_completion_date_changed',
+        plannedCompletionDateBefore: null,
+        plannedCompletionDateAfter: '2026-08-15',
+      }),
+      expect.objectContaining({ eventType: 'order.updated' }),
+    ]);
+    expect(transactions.state.outboxEvents).toEqual([
+      expect.objectContaining({
+        eventType: 'order.planned_completion_date_changed',
+        idempotencyKey: 'set-date-key:order.planned_completion_date_changed',
+        payload: expect.objectContaining({
+          plannedCompletionDateBefore: null,
+          plannedCompletionDateAfter: '2026-08-15',
+        }),
+      }),
+      expect.objectContaining({
+        eventType: 'order.updated',
+        idempotencyKey: 'set-date-key:order.updated',
+      }),
+    ]);
   });
 
   it('allows status automation to bump the order version before reading the save response', async () => {

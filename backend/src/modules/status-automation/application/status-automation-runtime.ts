@@ -160,6 +160,8 @@ async function recordRuleApplied(
       statusCommandAuditId: result.auditId ?? null,
       paymentStatusIdBefore: event.paymentStatusIdBefore ?? null,
       paymentStatusIdAfter: event.paymentStatusIdAfter ?? null,
+      plannedCompletionDateBefore: event.plannedCompletionDateBefore ?? null,
+      plannedCompletionDateAfter: event.plannedCompletionDateAfter ?? null,
     },
   });
 }
@@ -186,6 +188,8 @@ async function recordRuleSkipped(
       targetStatusId: rule.targetStatusId,
       ruleName: rule.name,
       reason,
+      plannedCompletionDateBefore: event.plannedCompletionDateBefore ?? null,
+      plannedCompletionDateAfter: event.plannedCompletionDateAfter ?? null,
     },
   });
 }

@@ -8,6 +8,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
+import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { calculateOrderTotals } from '../domain/order-calculations';
 import type { OrderDto } from '../dto/order.dto';
 import type { CalculatedOrderDetailDto, NormalizedSaveOrderPaymentDto, OrderTotalsDto } from '../dto/save-order.dto';
@@ -491,15 +492,15 @@ export class OrderDetailTransferService {
             ...movedDetailIds.map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
           ],
         });
-        await evaluateStatusAutomation(tx, {
-          eventType: 'order.created',
-          origin: 'user',
+        persistedTargetVersion = await emitCreatedTransferTargetAutomation(tx, {
           orderId: targetOrderId,
+          clientId: toNumber(source.client_id),
           actor: command.currentUser,
           requestId,
           sourceIdempotencyKey: command.idempotencyKey,
+          initialVersion: persistedTargetVersion,
+          inheritedPlannedCompletionDate: dateOnlyOrNull(source.planned_completion_date),
         });
-        persistedTargetVersion = await readOrderVersion(tx, targetOrderId);
         targetAfter = await loadOrderSnapshot(tx, targetOrderId);
       }
 
@@ -540,7 +541,8 @@ export class OrderDetailTransferService {
         ],
       });
       await enqueueTransferOutbox(tx, {
-        idempotencyKey: `${command.idempotencyKey}:details_transferred`,
+        idempotencyKey: `${command.idempotencyKey}:order.details_transferred`,
+        sourceIdempotencyKey: command.idempotencyKey,
         requestId,
         sourceOrderId: command.sourceOrderId,
         targetOrderId,
@@ -1045,6 +1047,75 @@ async function readOrderVersion(tx: TransactionClient, orderId: number): Promise
   return toNumber(result.rows[0].version);
 }
 
+type StatusAutomationEvaluator = (
+  tx: TransactionClient,
+  event: StatusAutomationEvent,
+) => Promise<void>;
+
+export async function emitCreatedTransferTargetAutomation(
+  tx: TransactionClient,
+  input: {
+    orderId: number;
+    clientId: number;
+    actor: CurrentUser;
+    requestId: string;
+    sourceIdempotencyKey: string;
+    initialVersion: number;
+    inheritedPlannedCompletionDate: string | null;
+  },
+  evaluate: StatusAutomationEvaluator = evaluateStatusAutomation,
+): Promise<number> {
+  await enqueueOrderAutomationSourceOutbox(tx, {
+    eventType: 'order.created',
+    orderId: input.orderId,
+    clientId: input.clientId,
+    actorUserId: input.actor.id,
+    requestId: input.requestId,
+    sourceIdempotencyKey: input.sourceIdempotencyKey,
+    action: 'order_created',
+    payload: { version: input.initialVersion },
+  });
+  await evaluate(tx, {
+    eventType: 'order.created',
+    origin: 'user',
+    orderId: input.orderId,
+    actor: input.actor,
+    requestId: input.requestId,
+    sourceIdempotencyKey: input.sourceIdempotencyKey,
+  });
+
+  const versionAfterCreated = await readOrderVersion(tx, input.orderId);
+  if (input.inheritedPlannedCompletionDate === null) {
+    return versionAfterCreated;
+  }
+
+  await enqueueOrderAutomationSourceOutbox(tx, {
+    eventType: 'order.planned_completion_date_changed',
+    orderId: input.orderId,
+    clientId: input.clientId,
+    actorUserId: input.actor.id,
+    requestId: input.requestId,
+    sourceIdempotencyKey: input.sourceIdempotencyKey,
+    action: 'planned_completion_date_change',
+    payload: {
+      plannedCompletionDateBefore: null,
+      plannedCompletionDateAfter: input.inheritedPlannedCompletionDate,
+      version: versionAfterCreated,
+    },
+  });
+  await evaluate(tx, {
+    eventType: 'order.planned_completion_date_changed',
+    origin: 'user',
+    orderId: input.orderId,
+    actor: input.actor,
+    requestId: input.requestId,
+    sourceIdempotencyKey: input.sourceIdempotencyKey,
+    plannedCompletionDateBefore: null,
+    plannedCompletionDateAfter: input.inheritedPlannedCompletionDate,
+  });
+  return readOrderVersion(tx, input.orderId);
+}
+
 async function loadOrderSnapshot(tx: TransactionClient, orderId: number): Promise<Record<string, unknown> | null> {
   const result = await tx.query<SnapshotRow>(
     'SELECT to_jsonb(o) AS snapshot FROM orders o WHERE o.order_id = $1',
@@ -1072,10 +1143,54 @@ async function readOrderOrThrow(reader: PgOrderReadRepository, orderId: number):
   return order;
 }
 
+async function enqueueOrderAutomationSourceOutbox(
+  tx: TransactionClient,
+  input: {
+    eventType: StatusAutomationEvent['eventType'];
+    orderId: number;
+    clientId: number;
+    actorUserId: string;
+    requestId: string;
+    sourceIdempotencyKey: string;
+    action: string;
+    payload?: Record<string, unknown>;
+  },
+): Promise<void> {
+  const outboxIdempotencyKey = `${input.sourceIdempotencyKey}:${input.eventType}`;
+  await tx.query(
+    `
+    INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+    VALUES ($1, 'order', $2, $3::jsonb, $4)
+    ON CONFLICT (idempotency_key) DO NOTHING
+    `,
+    [
+      input.eventType,
+      String(input.orderId),
+      JSON.stringify({
+        source: SOURCE,
+        eventType: input.eventType,
+        actorUserId: input.actorUserId,
+        requestId: input.requestId,
+        entityType: 'order',
+        entityId: String(input.orderId),
+        orderId: input.orderId,
+        clientId: input.clientId,
+        action: input.action,
+        scope: { source: 'order-detail-transfer' },
+        idempotencyKey: input.sourceIdempotencyKey,
+        outboxIdempotencyKey,
+        ...input.payload,
+      }),
+      outboxIdempotencyKey,
+    ],
+  );
+}
+
 async function enqueueTransferOutbox(
   tx: TransactionClient,
   input: {
     idempotencyKey: string;
+    sourceIdempotencyKey: string;
     requestId: string;
     sourceOrderId: number;
     targetOrderId: number;
@@ -1107,6 +1222,8 @@ async function enqueueTransferOutbox(
         sourceVersion: input.sourceVersion,
         targetVersion: input.targetVersion,
         actorUserId: input.actorUserId,
+        idempotencyKey: input.sourceIdempotencyKey,
+        outboxIdempotencyKey: input.idempotencyKey,
       }),
       input.idempotencyKey,
     ],

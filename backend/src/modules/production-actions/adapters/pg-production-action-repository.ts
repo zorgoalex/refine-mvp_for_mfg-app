@@ -251,7 +251,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         eventType: 'order.calendar_moved',
         aggregateType: 'order',
         aggregateId: String(order.orderId),
-        idempotencyKey: command.dto.idempotencyKey,
+        idempotencyKey: `${command.dto.idempotencyKey}:order.calendar_moved`,
         payload: {
           eventType: 'order.calendar_moved',
           actorUserId: command.currentUser.id,
@@ -263,8 +263,45 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           action: 'move',
           scope: { source: 'calendar' },
           idempotencyKey: command.dto.idempotencyKey,
+          outboxIdempotencyKey: `${command.dto.idempotencyKey}:order.calendar_moved`,
         },
       });
+      const plannedDateOutboxIdempotencyKey =
+        `${command.dto.idempotencyKey}:order.planned_completion_date_changed`;
+      await enqueueOutbox(tx, {
+        eventType: 'order.planned_completion_date_changed',
+        aggregateType: 'order',
+        aggregateId: String(order.orderId),
+        idempotencyKey: plannedDateOutboxIdempotencyKey,
+        payload: {
+          eventType: 'order.planned_completion_date_changed',
+          actorUserId: command.currentUser.id,
+          requestId,
+          entityType: 'order',
+          entityId: String(order.orderId),
+          orderId: order.orderId,
+          clientId: order.clientId,
+          action: 'planned_completion_date_change',
+          scope: { source: 'calendar' },
+          idempotencyKey: command.dto.idempotencyKey,
+          outboxIdempotencyKey: plannedDateOutboxIdempotencyKey,
+          plannedCompletionDateBefore: order.plannedCompletionDate,
+          plannedCompletionDateAfter: command.dto.plannedCompletionDate,
+          previousVersion: order.version,
+          version: nextVersion,
+        },
+      });
+      await evaluateStatusAutomationInTransaction(tx, {
+        eventType: 'order.planned_completion_date_changed',
+        origin: 'user',
+        orderId: order.orderId,
+        actor: command.currentUser,
+        requestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey,
+        plannedCompletionDateBefore: order.plannedCompletionDate,
+        plannedCompletionDateAfter: command.dto.plannedCompletionDate,
+      });
+      const responseVersion = await readOrderVersion(tx, order.orderId);
       await enqueueOutbox(tx, {
         eventType: 'deadline.order_sync_requested',
         aggregateType: 'order',
@@ -288,7 +325,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         order: {
           orderId: order.orderId,
           plannedCompletionDate: command.dto.plannedCompletionDate,
-          version: nextVersion,
+          version: responseVersion,
         },
         auditId,
         requestId,
@@ -2746,6 +2783,18 @@ async function updateCalendarDate(
   );
 
   return toNumber(result.rows[0].version);
+}
+
+async function readOrderVersion(tx: TransactionClient, orderId: number): Promise<number> {
+  const result = await tx.query<VersionRow>(
+    'SELECT version FROM orders WHERE order_id = $1',
+    [orderId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new ProductionActionOrderNotFoundError(orderId);
+  }
+  return toNumber(row.version);
 }
 
 async function updateOrderStatus(

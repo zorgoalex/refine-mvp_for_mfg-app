@@ -4,6 +4,8 @@ export type StatusAutomationEventType =
   | 'payment.created'
   | 'order.payment_status_changed'
   | 'order.created'
+  | 'order.updated'
+  | 'order.planned_completion_date_changed'
   | 'order.status_changed'
   | 'order.production_status_changed';
 
@@ -48,6 +50,8 @@ export interface StatusAutomationEvent {
   paymentsCountAfter?: number;
   paymentStatusIdBefore?: number;
   paymentStatusIdAfter?: number;
+  plannedCompletionDateBefore?: string | null;
+  plannedCompletionDateAfter?: string | null;
 }
 
 export interface OrderAutomationState {

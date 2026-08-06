@@ -40,6 +40,7 @@ import {
 import { DeadlineTransitionRulesConfig } from './DeadlineTransitionRulesConfig';
 import {
   allowedConditionKeysForEvent,
+  buildEventTypeSelectOptions,
   buildCreatePayload,
   buildUpdatePayload,
   describeConditions,
@@ -311,6 +312,7 @@ export function StatusAutomationConfig() {
     () => new Map(eventTypes.map((eventType) => [eventType.eventType, eventType])),
     [eventTypes],
   );
+  const eventTypeOptions = useMemo(() => buildEventTypeSelectOptions(eventTypes), [eventTypes]);
   const selectedEvent = editor.kind === 'closed' ? null : eventTypeByName.get(form.eventType) ?? null;
   const allowedConditionKeys = allowedConditionKeysForEvent(selectedEvent);
   const allowedConditionSet = useMemo(() => new Set(allowedConditionKeys), [allowedConditionKeys]);
@@ -380,7 +382,10 @@ export function StatusAutomationConfig() {
   };
 
   const openCreate = () => {
-    const eventType = eventTypes[0]?.eventType ?? 'order.created';
+    const eventType =
+      eventTypes.find((candidate) => candidate.eventType === 'order.created')?.eventType ??
+      eventTypes[0]?.eventType ??
+      'order.created';
     const descriptor = eventTypeByName.get(eventType);
     const firstAction = descriptor?.allowedActions[0] ?? 'change_order_status';
     setForm({ ...emptyForm(eventType), actionType: firstAction });
@@ -826,13 +831,17 @@ export function StatusAutomationConfig() {
               <Select<StatusAutomationEventType>
                 value={form.eventType}
                 onChange={handleEventChange}
-                options={eventTypes.map((eventType) => ({
-                  value: eventType.eventType,
-                  label: eventType.title,
-                }))}
+                options={eventTypeOptions}
                 style={{ width: '100%' }}
                 placeholder="Выберите событие"
+                showSearch
+                optionFilterProp="label"
               />
+              {selectedEvent?.description?.trim() ? (
+                <Text type="secondary" style={{ display: 'block', marginTop: 6 }}>
+                  {selectedEvent.description}
+                </Text>
+              ) : null}
             </Form.Item>
             <Form.Item label="Действие" required style={{ flex: 1 }}>
               <Select<StatusAutomationActionType>

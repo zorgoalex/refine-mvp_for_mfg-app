@@ -13,7 +13,7 @@ import type {
   RestoreOrderCommand,
   OrderSaveAuditMetadata,
   OrderStatusAuditInfo,
-  OrderStatusOutboxEvent,
+  OrderAutomationSourceOutboxEvent,
   LockedOrderRow,
   OrderPermissionCheckerPort,
   ProductionStatusAuditInfo,
@@ -48,6 +48,7 @@ import {
   type SheetValidationDetail,
   type SheetValidationHeader,
 } from '../domain/sheet-order-validation';
+import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 
 interface StoredSheetSummary {
   eligible: boolean;
@@ -70,6 +71,16 @@ function numOrNull(value: unknown): number | null {
 
 function boolOrNull(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
+}
+
+function dateOnlyOrNull(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  const normalized = String(value).trim();
+  if (normalized.length === 0) return null;
+  return /^(\d{4}-\d{2}-\d{2})/.exec(normalized)?.[1] ?? normalized;
 }
 
 function changedDiff(
@@ -304,23 +315,47 @@ export class OrderTransactionService {
           prepared.details,
         ),
       });
-      await unitOfWork.evaluateStatusAutomation({
-        eventType: 'order.created',
-        origin: 'user',
+      const automationRequestId =
+        command.requestId ??
+        (command.dto.idempotencyKey ? 'orders-create' : `orders-create-${orderId}`);
+      const automationBase = {
+        origin: 'user' as const,
         orderId,
         actor: command.currentUser,
-        requestId:
-          command.requestId ??
-          (command.dto.idempotencyKey ? 'orders-create' : `orders-create-${orderId}`),
+        requestId: automationRequestId,
         sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
+      };
+      await this.emitAutomationSourceEvent(unitOfWork, {
+        event: { ...automationBase, eventType: 'order.created' },
+        clientId: prepared.order.header.clientId ?? null,
+        action: 'order_created',
+        scopeSource: 'order-save',
+        payload: { version },
       });
+      const plannedCompletionDate = dateOnlyOrNull(afterSnapshot?.plannedCompletionDate);
+      if (plannedCompletionDate !== null) {
+        await this.emitAutomationSourceEvent(unitOfWork, {
+          event: {
+            ...automationBase,
+            eventType: 'order.planned_completion_date_changed',
+            plannedCompletionDateBefore: null,
+            plannedCompletionDateAfter: plannedCompletionDate,
+          },
+          clientId: prepared.order.header.clientId ?? null,
+          action: 'planned_completion_date_change',
+          scopeSource: 'order-save',
+          payload: {
+            plannedCompletionDateBefore: null,
+            plannedCompletionDateAfter: plannedCompletionDate,
+            version,
+          },
+        });
+      }
       await this.emitPaymentCreatedAutomationEvents(unitOfWork, {
         orderId,
         order: prepared.order,
         currentUser: command.currentUser,
-        requestId:
-          command.requestId ??
-          (command.dto.idempotencyKey ? 'orders-create' : `orders-create-${orderId}`),
+        requestId: automationRequestId,
         sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
       });
       if (command.postPersistHook) {
@@ -624,12 +659,54 @@ export class OrderTransactionService {
         beforeDetailStatusRows,
         afterDetailStatusRows,
       });
+      const plannedCompletionDateBefore = dateOnlyOrNull(beforeSnapshot?.plannedCompletionDate);
+      const plannedCompletionDateAfter = dateOnlyOrNull(afterSnapshot?.plannedCompletionDate);
+      if (plannedCompletionDateBefore !== plannedCompletionDateAfter) {
+        await this.emitAutomationSourceEvent(unitOfWork, {
+          event: {
+            eventType: 'order.planned_completion_date_changed',
+            origin: 'user',
+            orderId: command.orderId,
+            actor: command.currentUser,
+            requestId: automationRequestId,
+            sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
+            plannedCompletionDateBefore,
+            plannedCompletionDateAfter,
+          },
+          clientId: prepared.order.header.clientId ?? null,
+          action: 'planned_completion_date_change',
+          scopeSource: 'order-save',
+          payload: {
+            plannedCompletionDateBefore,
+            plannedCompletionDateAfter,
+            previousVersion: lockedOrder.version,
+            version,
+          },
+        });
+      }
       await this.emitPaymentCreatedAutomationEvents(unitOfWork, {
         orderId: command.orderId,
         order: prepared.order,
         currentUser: command.currentUser,
         requestId: automationRequestId,
         sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
+      });
+      await this.emitAutomationSourceEvent(unitOfWork, {
+        event: {
+          eventType: 'order.updated',
+          origin: 'user',
+          orderId: command.orderId,
+          actor: command.currentUser,
+          requestId: automationRequestId,
+          sourceIdempotencyKey: command.dto.idempotencyKey ?? undefined,
+        },
+        clientId: prepared.order.header.clientId ?? null,
+        action: 'order_updated',
+        scopeSource: 'order-save',
+        payload: {
+          previousVersion: lockedOrder.version,
+          version,
+        },
       });
       if (command.postPersistHook) {
         await command.postPersistHook(unitOfWork, {
@@ -907,6 +984,44 @@ export class OrderTransactionService {
     };
   }
 
+  private async emitAutomationSourceEvent(
+    unitOfWork: OrderWriteUnitOfWork,
+    input: {
+      event: StatusAutomationEvent;
+      clientId: number | null;
+      action: string;
+      scopeSource: 'order-save';
+      payload?: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    const sourceKey = input.event.sourceIdempotencyKey ?? input.event.requestId;
+    const outboxIdempotencyKey = `${sourceKey}:${input.event.eventType}`;
+    await unitOfWork.enqueueAutomationSourceOutboxEvent({
+      eventType: input.event.eventType,
+      orderId: input.event.orderId,
+      clientId: input.clientId,
+      actorUserId: input.event.actor.id,
+      requestId: input.event.requestId,
+      idempotencyKey: outboxIdempotencyKey,
+      sourceIdempotencyKey: input.event.sourceIdempotencyKey,
+      payload: {
+        eventType: input.event.eventType,
+        actorUserId: input.event.actor.id,
+        requestId: input.event.requestId,
+        entityType: 'order',
+        entityId: String(input.event.orderId),
+        orderId: input.event.orderId,
+        clientId: input.clientId,
+        action: input.action,
+        scope: { source: input.scopeSource },
+        idempotencyKey: sourceKey,
+        outboxIdempotencyKey,
+        ...input.payload,
+      },
+    });
+    await unitOfWork.evaluateStatusAutomation(input.event);
+  }
+
   private async emitStatusChangeAuditAndEvents(
     unitOfWork: OrderWriteUnitOfWork,
     input: {
@@ -923,7 +1038,7 @@ export class OrderTransactionService {
       afterDetailStatusRows: OrderDetailStatusAuditRow[];
     },
   ): Promise<void> {
-    const outboxEvents: OrderStatusOutboxEvent[] = [];
+    const outboxEvents: OrderAutomationSourceOutboxEvent[] = [];
     const outboxSeed = input.sourceIdempotencyKey ?? input.requestId;
     const beforeOrderStatusId = numOrNull(input.beforeSnapshot?.orderStatusId);
     const afterOrderStatusId = numOrNull(input.afterSnapshot?.orderStatusId);
@@ -1116,7 +1231,7 @@ export class OrderTransactionService {
     }
 
     for (const event of outboxEvents) {
-      await unitOfWork.enqueueStatusOutboxEvent(event);
+      await unitOfWork.enqueueAutomationSourceOutboxEvent(event);
     }
 
     for (const event of outboxEvents) {

@@ -127,13 +127,21 @@ describe('StatusAutomationRulesService', () => {
     const { service } = buildService();
     const catalog = await service.listEventTypes(user(['status_automation.view']), 'req-event-types');
 
-    expect(catalog).toHaveLength(5);
+    expect(catalog).toHaveLength(7);
     expect(catalog).toContainEqual({
       eventType: 'payment.created',
       title: 'Платёж создан',
+      group: 'payments',
+      description: 'После добавления нового платежа к заказу.',
       allowedConditions: expect.arrayContaining(['firstPaymentOnly', 'paidShareGte']),
       allowedActions: expect.arrayContaining(['change_order_status', 'change_production_status']),
     });
+    expect(catalog).toContainEqual(
+      expect.objectContaining({
+        eventType: 'order.planned_completion_date_changed',
+        group: 'dates',
+      }),
+    );
   });
 
   it.each([0, -1, 1.5, Number.NaN])('rejects invalid ruleId %s with 422', async (ruleId) => {

@@ -181,7 +181,37 @@ describe('evaluateStatusAutomation', () => {
           statusCommandAuditId: 'command-audit-id',
           paymentStatusIdBefore: 1,
           paymentStatusIdAfter: 2,
+          plannedCompletionDateBefore: null,
+          plannedCompletionDateAfter: null,
         },
+      }),
+    );
+  });
+
+  it('copies planned-date before/after into applied audit metadata', async () => {
+    mocks.listEnabledRulesForEvent.mockResolvedValue([makeRule({ id: 10 })]);
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({
+      status: 'executed',
+      auditId: 'date-command-audit-id',
+    });
+
+    await evaluateStatusAutomation(
+      tx(),
+      event({
+        eventType: 'order.planned_completion_date_changed',
+        plannedCompletionDateBefore: '2026-08-10',
+        plannedCompletionDateAfter: '2026-08-12',
+      }),
+    );
+
+    expect(mocks.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        event: 'status_automation.rule_applied',
+        metadata: expect.objectContaining({
+          plannedCompletionDateBefore: '2026-08-10',
+          plannedCompletionDateAfter: '2026-08-12',
+        }),
       }),
     );
   });

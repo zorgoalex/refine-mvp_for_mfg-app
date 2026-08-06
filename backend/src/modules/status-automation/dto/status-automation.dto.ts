@@ -85,6 +85,8 @@ const updateSchema = z
 export interface StatusAutomationEventTypeDto {
   eventType: StatusAutomationEventType;
   title: string;
+  group: 'order' | 'dates' | 'statuses' | 'payments';
+  description: string;
   allowedConditions: Array<keyof StatusAutomationConditions>;
   allowedActions: StatusAutomationActionType[];
 }
@@ -214,6 +216,8 @@ export function listStatusAutomationEventTypes(): StatusAutomationEventTypeDto[]
   return STATUS_AUTOMATION_EVENTS.map((descriptor) => ({
     eventType: descriptor.eventType,
     title: descriptor.title,
+    group: descriptor.group,
+    description: descriptor.description,
     allowedConditions: [...descriptor.allowedConditions],
     allowedActions: [...descriptor.allowedActions],
   }));

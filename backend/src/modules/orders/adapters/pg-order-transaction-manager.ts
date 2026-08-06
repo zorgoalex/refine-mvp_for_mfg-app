@@ -24,7 +24,7 @@ import type {
   OrderSaveAuditEvent,
   OrderStatusAuditEvent,
   OrderStatusAuditInfo,
-  OrderStatusOutboxEvent,
+  OrderAutomationSourceOutboxEvent,
   OrderTransactionManagerPort,
   RestoreOrderCommand,
   ProductionStatusAuditInfo,
@@ -1320,7 +1320,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     });
   }
 
-  async enqueueStatusOutboxEvent(event: OrderStatusOutboxEvent): Promise<void> {
+  async enqueueAutomationSourceOutboxEvent(event: OrderAutomationSourceOutboxEvent): Promise<void> {
     await this.tx.query(
       `
       INSERT INTO outbox_events (

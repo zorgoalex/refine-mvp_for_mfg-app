@@ -6,6 +6,7 @@ import type {
 import {
   allowedConditionKeysForEvent,
   buildCreatePayload,
+  buildEventTypeSelectOptions,
   buildUpdatePayload,
   describeConditions,
   type StatusAutomationFormValues,
@@ -69,6 +70,60 @@ const rule: StatusAutomationRuleDto = {
 };
 
 describe('statusAutomationView', () => {
+  it('groups event options in stable user-facing order', () => {
+    expect(
+      buildEventTypeSelectOptions([
+        eventDescriptor({
+          eventType: 'payment.created',
+          title: 'Платёж создан',
+          group: 'payments',
+        }),
+        eventDescriptor({
+          eventType: 'order.planned_completion_date_changed',
+          title: 'Изменилась плановая дата готовности',
+          group: 'dates',
+        }),
+        eventDescriptor({ eventType: 'order.created', title: 'Заказ создан', group: 'order' }),
+        eventDescriptor({
+          eventType: 'order.status_changed',
+          title: 'Изменился статус заказа',
+          group: 'statuses',
+        }),
+      ]),
+    ).toEqual([
+      { label: 'Заказ', options: [{ value: 'order.created', label: 'Заказ создан' }] },
+      {
+        label: 'Даты',
+        options: [
+          {
+            value: 'order.planned_completion_date_changed',
+            label: 'Изменилась плановая дата готовности',
+          },
+        ],
+      },
+      {
+        label: 'Статусы',
+        options: [{ value: 'order.status_changed', label: 'Изменился статус заказа' }],
+      },
+      { label: 'Оплаты', options: [{ value: 'payment.created', label: 'Платёж создан' }] },
+    ]);
+  });
+
+  it('derives groups when an older backend omits group and description', () => {
+    expect(
+      buildEventTypeSelectOptions([
+        eventDescriptor({ eventType: 'order.updated', title: 'Заказ сохранён' }),
+        eventDescriptor({ eventType: 'order.payment_status_changed', title: 'Статус оплаты' }),
+      ]),
+    ).toEqual([
+      { label: 'Заказ', options: [{ value: 'order.updated', label: 'Заказ сохранён' }] },
+      {
+        label: 'Оплаты',
+        options: [{ value: 'order.payment_status_changed', label: 'Статус оплаты' }],
+      },
+    ]);
+  });
+
   it('describes every supported condition and renders unknown status ids as #id', () => {
     expect(
       describeConditions(

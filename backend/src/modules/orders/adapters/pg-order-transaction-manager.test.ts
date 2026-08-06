@@ -623,7 +623,7 @@ describe('PgOrderTransactionManager', () => {
         diff: { productionStatusId: { before: 2, after: 3 } },
         metadata: { action: 'detail_production_status_change' },
       });
-      await uow.enqueueStatusOutboxEvent({
+      await uow.enqueueAutomationSourceOutboxEvent({
         eventType: 'order.production_status_changed',
         orderId: 77,
         clientId: 555,

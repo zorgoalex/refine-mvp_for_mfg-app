@@ -17808,6 +17808,8 @@ components:
             - payment.created
             - order.payment_status_changed
             - order.created
+            - order.updated
+            - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
         actionType:
@@ -17836,12 +17838,27 @@ components:
           items:
             type: integer
             minimum: 1
+        currentOrderStatusNotIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
         currentPaymentStatusIn:
           type: array
           items:
             type: integer
             minimum: 1
+        currentPaymentStatusNotIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
         currentProductionStatusIn:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+        currentProductionStatusNotIn:
           type: array
           items:
             type: integer
@@ -17866,6 +17883,8 @@ components:
       required:
         - eventType
         - title
+        - group
+        - description
         - allowedConditions
         - allowedActions
       properties:
@@ -17875,9 +17894,20 @@ components:
             - payment.created
             - order.payment_status_changed
             - order.created
+            - order.updated
+            - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
         title:
+          type: string
+        group:
+          type: string
+          enum:
+            - order
+            - dates
+            - statuses
+            - payments
+        description:
           type: string
         allowedConditions:
           type: array
@@ -17885,8 +17915,11 @@ components:
             type: string
             enum:
               - currentOrderStatusIn
+              - currentOrderStatusNotIn
               - currentPaymentStatusIn
+              - currentPaymentStatusNotIn
               - currentProductionStatusIn
+              - currentProductionStatusNotIn
               - paidShareGte
               - orderSourceIn
               - firstPaymentOnly
@@ -17917,6 +17950,8 @@ components:
             - payment.created
             - order.payment_status_changed
             - order.created
+            - order.updated
+            - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
         actionType:
@@ -17952,6 +17987,8 @@ components:
             - payment.created
             - order.payment_status_changed
             - order.created
+            - order.updated
+            - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
         actionType:

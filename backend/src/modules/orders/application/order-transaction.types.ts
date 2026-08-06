@@ -237,8 +237,8 @@ export interface OrderStatusAuditEvent {
   metadata?: Record<string, unknown> | null;
 }
 
-export interface OrderStatusOutboxEvent {
-  eventType: 'order.status_changed' | 'order.production_status_changed';
+export interface OrderAutomationSourceOutboxEvent {
+  eventType: StatusAutomationEvent['eventType'];
   orderId: number;
   clientId: number | null;
   actorUserId: string;
@@ -429,7 +429,7 @@ export interface OrderWriteUnitOfWork {
   }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
   writeStatusAuditEvent(event: OrderStatusAuditEvent): Promise<void>;
-  enqueueStatusOutboxEvent(event: OrderStatusOutboxEvent): Promise<void>;
+  enqueueAutomationSourceOutboxEvent(event: OrderAutomationSourceOutboxEvent): Promise<void>;
   evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void>;
   writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
   enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void>;
