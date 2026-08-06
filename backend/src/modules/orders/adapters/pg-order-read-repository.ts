@@ -688,7 +688,46 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     // needs no sheet_materials.view; sheet_material_type_id carried for FE hydration.
     const details = await this.database.query<OrderDetailRow>(
       `
-      WITH cut_candidates AS (
+      WITH linked_bazis_project_candidates AS MATERIALIZED (
+        SELECT link.order_id,
+               project.bazis_project_id,
+               revision.bazis_revision_id,
+               revision.revision_no,
+               project.name,
+               substring(
+                 btrim(COALESCE(
+                   NULLIF(revision.bazis_order_no, ''),
+                   (
+                     SELECT NULLIF(btrim(root.raw_json->>'Заказ'), '')
+                     FROM bazis_nodes root
+                     WHERE root.revision_id = revision.bazis_revision_id
+                       AND root.parent_node_id IS NULL
+                     ORDER BY root.seq, root.bazis_node_id
+                     LIMIT 1
+                   ),
+                   project.name
+                 ))
+                 from '(?i)(?:№[[:space:]]*)?([0-9]+)'
+               ) AS project_no
+        FROM bazis_order_links link
+        JOIN bazis_project_revisions revision ON revision.bazis_revision_id = link.revision_id
+        JOIN bazis_projects project ON project.bazis_project_id = link.bazis_project_id
+        WHERE link.order_id = $1
+      ),
+      linked_bazis_projects AS MATERIALIZED (
+        SELECT candidate.*
+        FROM linked_bazis_project_candidates candidate
+        JOIN (
+          SELECT order_id, project_no
+          FROM linked_bazis_project_candidates
+          WHERE project_no IS NOT NULL
+          GROUP BY order_id, project_no
+          HAVING count(DISTINCT bazis_project_id) = 1
+        ) safe
+          ON safe.order_id = candidate.order_id
+         AND safe.project_no = candidate.project_no
+      ),
+      cut_candidates AS (
         SELECT cji.order_detail_id,
                cj.cut_job_id,
                cj.name,
@@ -738,14 +777,25 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
              bath.param_profile_id AS bath_cut_job_param_profile_id,
              bath.profile_name AS bath_cut_job_profile_name,
              bath.profile_is_active AS bath_cut_job_profile_is_active,
-             (SELECT revision.bazis_project_id
-              FROM bazis_node_order_detail_map map
-              JOIN bazis_nodes node ON node.bazis_node_id = map.node_id
-              JOIN bazis_project_revisions revision ON revision.bazis_revision_id = node.revision_id
-              WHERE map.order_id = od.order_id
-                AND map.order_detail_id = od.detail_id
-              ORDER BY map.created_at DESC, map.bazis_node_order_detail_map_id DESC
-              LIMIT 1) AS bazis_project_id,
+             COALESCE(
+               (SELECT revision.bazis_project_id
+                FROM bazis_node_order_detail_map map
+                JOIN bazis_nodes node ON node.bazis_node_id = map.node_id
+                JOIN bazis_project_revisions revision ON revision.bazis_revision_id = node.revision_id
+                WHERE map.order_id = od.order_id
+                  AND map.order_detail_id = od.detail_id
+                ORDER BY map.created_at DESC, map.bazis_node_order_detail_map_id DESC
+                LIMIT 1),
+               (SELECT linked.bazis_project_id
+                FROM linked_bazis_projects linked
+                WHERE linked.order_id = od.order_id
+                  AND linked.project_no = substring(
+                    btrim(od.basis_project)
+                    from '(?i)(?:№[[:space:]]*)?([0-9]+)'
+                  )
+                ORDER BY linked.revision_no DESC, linked.bazis_project_id
+                LIMIT 1)
+             ) AS bazis_project_id,
              (SELECT jsonb_agg(jsonb_build_object(
                 'bazisCutSetId', refs.bazis_cut_set_id,
                 'name', refs.name
@@ -780,6 +830,17 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
                 JOIN bazis_projects project ON project.bazis_project_id = revision.bazis_project_id
                 WHERE detail_map.order_id = od.order_id
                   AND detail_map.order_detail_id = od.detail_id
+                UNION
+                SELECT linked.bazis_project_id,
+                       linked.bazis_revision_id,
+                       linked.revision_no,
+                       linked.name
+                FROM linked_bazis_projects linked
+                WHERE linked.order_id = od.order_id
+                  AND linked.project_no = substring(
+                    btrim(od.basis_project)
+                    from '(?i)(?:№[[:space:]]*)?([0-9]+)'
+                  )
               ) refs) AS bazis_projects
       FROM order_details od
       ${detailMaterialJoin}

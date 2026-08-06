@@ -328,6 +328,23 @@ describe('PgOrderReadRepository', () => {
     expect(detailQuery).toContain('revision.bazis_project_id');
   });
 
+  it('falls back to a unique order-level Basis-project link for duplicate imported panels', async () => {
+    const database = createDatabase();
+    const repository = new PgOrderReadRepository(database.service);
+
+    await repository.getOrderById({
+      currentUser: currentUser('42'),
+      orderId: 100,
+    });
+
+    const detailQuery = database.queries.find((query) => query.text.includes('FROM order_details od'))?.text ?? '';
+    expect(detailQuery).toContain('linked_bazis_project_candidates AS MATERIALIZED');
+    expect(detailQuery).toContain('FROM bazis_order_links link');
+    expect(detailQuery).toContain('HAVING count(DISTINCT bazis_project_id) = 1');
+    expect(detailQuery).toContain('FROM linked_bazis_projects linked');
+    expect(detailQuery).toContain('linked.project_no = substring(');
+  });
+
   it('keeps the default getOrderById SQL free of trash-only select and join fragments', async () => {
     const database = createDatabase();
     const repository = new PgOrderReadRepository(database.service);
