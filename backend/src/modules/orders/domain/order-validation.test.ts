@@ -70,7 +70,7 @@ function validationErrors(error: unknown): string[] {
 }
 
 describe('validateSaveOrderDto', () => {
-  it('accepts PDF-import candidate keys only for exactly one new detail', () => {
+  it('accepts candidate keys only for a new ERP detail imported from a Bazis PDF report', () => {
     const valid = normalizeSaveOrderDto(createOrder({
       details: [{
         clientKey: 'pdf-1',

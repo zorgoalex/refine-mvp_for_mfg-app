@@ -981,7 +981,7 @@ describe('OrderTransactionService order-name uniqueness', () => {
 });
 
 describe('OrderTransactionService', () => {
-  it('reconciles only newly persisted details explicitly marked by PDF import', async () => {
+  it('reconciles only new ERP details explicitly imported from a Bazis PDF report', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.reconciledBazisPanelLinks = [{
       nodeId: 701,
