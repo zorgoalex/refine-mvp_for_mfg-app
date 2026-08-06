@@ -306,6 +306,10 @@ export interface OrderFormValues {
   requirements: OrderResourceRequirement[];
   dowelingLinks: OrderDowelingLink[];
 
+  // Transient command intent: only rows added by PDF Basis import.
+  // Deliberately excluded from persisted draft storage and server responses.
+  pdfImportCandidateTempIds?: number[];
+
   // Deleted items (track for deletion on server)
   deletedDetails?: number[];
   deletedPayments?: number[];

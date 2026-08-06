@@ -39,6 +39,11 @@ export function normalizeSaveOrderDto(input: SaveOrderDto): NormalizedSaveOrderD
     'dowelingLinks',
     errors,
   );
+  const bazisImportCandidateClientKeys = normalizeOptionalStringArray(
+    raw.bazisImportCandidateClientKeys,
+    'bazisImportCandidateClientKeys',
+    errors,
+  );
 
   if (!raw.header || typeof raw.header !== 'object' || Array.isArray(raw.header)) {
     errors.push({ field: 'header', message: 'header is required' });
@@ -60,6 +65,7 @@ export function normalizeSaveOrderDto(input: SaveOrderDto): NormalizedSaveOrderD
     requirements: requirements.map(normalizeRequirement),
     dowelingLinks: dowelingLinks.map(normalizeDowelingLink),
     deleted: normalizeDeleted(raw.deleted as SaveOrderDeletedDto),
+    bazisImportCandidateClientKeys,
     version: optionalInteger(raw.version, 'version') ?? undefined,
     idempotencyKey: normalizeOptionalString(raw.idempotencyKey) ?? undefined,
   };
@@ -279,6 +285,19 @@ function normalizeRequiredArray<T>(
   }
 
   return value as T[];
+}
+
+function normalizeOptionalStringArray(
+  value: unknown,
+  field: string,
+  errors: OrderFieldError[],
+): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    errors.push({ field, message: `${field} must be an array` });
+    return [];
+  }
+  return value.map((item) => normalizeOptionalString(item) ?? '');
 }
 
 function normalizeClientKey(raw: RawRecord): string | undefined {

@@ -7,7 +7,7 @@
 // карточку (развёрнута по умолчанию) и спойлеры всех блоков/сборок, в
 // которые она входит (свёрнуты; карточка предка грузится лениво).
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   ApartmentOutlined,
@@ -24,6 +24,7 @@ import type { FilterDropdownProps, FilterValue } from 'antd/es/table/interface';
 import { isApiError } from '../../api/apiError';
 import { authSession } from '../../api/authSession';
 import { bazisApi } from '../../api/bazisApi';
+import { subscribeOrderDataChanged } from '../../api/ordersApi';
 import type { BazisTreeNode } from '../../api/types/bazisApi.types';
 import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { AddToOrderModal } from './AddToOrderModal';
@@ -217,6 +218,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   const [addToOrderOpen, setAddToOrderOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshedOrdersByNodeId, setRefreshedOrdersByNodeId] = useState<Map<number, BazisTreeNode['orders']> | null>(null);
+  const orderRefreshSequenceRef = useRef(0);
   const [notesByNodeId, setNotesByNodeId] = useState<Map<number, string | null> | null>(null);
   // Эпоха данных: инкремент при каждой смене nodes/ревизии. Поздний PATCH-ответ
   // из прошлой эпохи не должен воскресить override (Critic R1 F3).
@@ -351,14 +353,35 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
     return flatRows.filter(rowVisible);
   }, [flatRows, grouped, groupRows, tableFilters]);
 
+  const refreshPanelOrders = useCallback(async () => {
+    const sequence = ++orderRefreshSequenceRef.current;
+    try {
+      const tree = await bazisApi.getFullTree(revisionId);
+      if (sequence !== orderRefreshSequenceRef.current) return;
+      setRefreshedOrdersByNodeId(new Map(tree.map((node) => [node.bazisNodeId, node.orders])));
+    } catch (error) {
+      if (sequence !== orderRefreshSequenceRef.current) return;
+      notification.warning({
+        message: 'Не удалось обновить данные панелей',
+        description: error instanceof Error ? error.message : 'Перезагрузите ревизию позже',
+      });
+    }
+  }, [revisionId]);
+
   useEffect(() => {
     setSelection((current) => pruneSelection(current, alivePanelIds));
   }, [alivePanelIds]);
 
   useEffect(() => {
+    orderRefreshSequenceRef.current += 1;
     setRefreshedOrdersByNodeId(null);
     setNotesByNodeId(null);
   }, [nodes, revisionId]);
+
+  useEffect(
+    () => subscribeOrderDataChanged(() => void refreshPanelOrders()),
+    [refreshPanelOrders],
+  );
 
   // Выбор панели может прийти извне (goToPanel из вкладок Фурнитура/Операции/
   // Смета) — авто-раскрываем группу выбранной панели, иначе она останется
@@ -767,18 +790,6 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
   if (groupRows.length === 0) {
     return <Empty description="В ревизии нет панелей" />;
   }
-
-  const refreshPanelOrders = async () => {
-    try {
-      const tree = await bazisApi.getFullTree(revisionId);
-      setRefreshedOrdersByNodeId(new Map(tree.map((node) => [node.bazisNodeId, node.orders])));
-    } catch (error) {
-      notification.warning({
-        message: 'Не удалось обновить данные панелей',
-        description: error instanceof Error ? error.message : 'Перезагрузите ревизию позже',
-      });
-    }
-  };
 
   const handleCreateDraftOrder = async () => {
     if (selectedNodeIds.length === 0 || createDraftLoading) {

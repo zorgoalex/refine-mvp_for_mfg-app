@@ -41,7 +41,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
   const [sectionMaterialOverrides, setSectionMaterialOverrides] =
     useState<PdfSectionMaterialOverrides>({});
 
-  const addDetail = useOrderFormStore((state) => state.addDetail);
+  const addPdfImportedDetail = useOrderFormStore((state) => state.addPdfImportedDetail);
   const recalculateFinancials = useOrderFormStore((state) => state.recalculateFinancials);
   const materialRecency = useRecentReferences('sheet_material_types');
 
@@ -213,7 +213,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
         doweling: row.doweling === true,
       };
 
-      addDetail(detail);
+      addPdfImportedDetail(detail);
       if (Number.isSafeInteger(row.sheet_material_type_id) && Number(row.sheet_material_type_id) > 0) {
         usedMaterialIds.add(Number(row.sheet_material_type_id));
       }
@@ -231,7 +231,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
 
     // Close modal
     handleClose();
-  }, [importValidation, addDetail, materialRecency.promote, recalculateFinancials, handleClose, pdfParser.result]);
+  }, [importValidation, addPdfImportedDetail, materialRecency.promote, recalculateFinancials, handleClose, pdfParser.result]);
 
   // Validation for next button
   const canGoNext = useMemo(() => {

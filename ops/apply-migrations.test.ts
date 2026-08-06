@@ -91,14 +91,14 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     for (const name of requiredTriggers) expect(probeFn).toContain(`q_stmt_trg ${name} `);
     expect(scriptText).toMatch(/q_fun_hash\(\).*md5\(pg_get_functiondef\(oid\)\)/);
     expect(scriptText).not.toMatch(/q_fun_hash\(\).*md5\(prosrc\)/);
-    expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(18);
+    expect(probeFn.match(/q_fun_hash '[^']+' [a-f0-9]{32}/g)).toHaveLength(19);
   });
 
   it('requires realtime end-state probes before advancing the migration ledger', () => {
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -124,6 +124,18 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(probeFn).toContain('q_col bazis_projects design_engineer_source');
     expect(probeFn).toContain('q_con_on bazis_projects chk_bazis_projects_design_engineer_source');
     expect(probeFn).toContain('q_idx bazis_projects_design_engineer_idx');
+  });
+
+  it('pins migrations 103/104 Bazis product and panel-link end states', () => {
+    expect(probeFn).toContain('103_bazis_cut_position_sources*');
+    expect(probeFn).toContain('bazis-cut-position-v4:');
+    expect(probeFn).toContain('104_bazis_order_detail_product_mapping*');
+    expect(probeFn).toContain('Basis product name from the panel-level Product column');
+    expect(probeFn).toContain('104_bazis_panel_order_links*');
+    expect(probeFn).toContain('q_col bazis_node_order_detail_map import_source');
+    expect(probeFn).toContain('q_con_hash_on bazis_node_order_detail_map_mapping_kind_check');
+    expect(probeFn).toContain("q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'");
+    expect(probeFn).toContain('v104 exact current-revision Basis PDF detail to Bazis panel reconciliation');
   });
 });
 

@@ -267,6 +267,15 @@ export class OrderTransactionService {
         previousVersion: null,
         currentUser: command.currentUser,
       });
+      const bazisPanelLinks = await this.reconcilePdfImportedBazisPanels(unitOfWork, {
+        orderId,
+        version,
+        order: prepared.order,
+        detailIdsByClientKey,
+        currentUser: command.currentUser,
+        requestId: command.requestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey,
+      });
       const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(orderId);
       const afterDetailRefs = touchesSheet ? toAfterDetailRefs(prepared.details) : undefined;
       await unitOfWork.writeAuditEvent({
@@ -288,6 +297,7 @@ export class OrderTransactionService {
           command.requestId,
           touchesSheet ? { before: [], after: afterDetailRefs! } : undefined,
           appliedDefaults.provenance,
+          bazisPanelLinks,
         ),
         relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
           prepared.order.header.sheetMaterialTypeId,
@@ -554,6 +564,15 @@ export class OrderTransactionService {
         previousVersion: lockedOrder.version,
         currentUser: command.currentUser,
       });
+      const bazisPanelLinks = await this.reconcilePdfImportedBazisPanels(unitOfWork, {
+        orderId: command.orderId,
+        version,
+        order: prepared.order,
+        detailIdsByClientKey,
+        currentUser: command.currentUser,
+        requestId: command.requestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey,
+      });
       const afterSnapshot = await unitOfWork.loadOrderHeaderSnapshot(command.orderId);
       const afterDetailStatusRows = await unitOfWork.loadOrderDetailStatusAuditRows(command.orderId);
       const beforeDetailRefs = touchesSheet ? toBeforeDetailRefs(storedDetailSheetIds) : undefined;
@@ -580,6 +599,8 @@ export class OrderTransactionService {
           touchesSheet
             ? { before: beforeDetailRefs!, after: afterDetailRefs2! }
             : undefined,
+          undefined,
+          bazisPanelLinks,
         ),
         relatedSheetMaterialTypeIds: collectSheetMaterialTypeIds(
           prepared.order.header.sheetMaterialTypeId,
@@ -825,6 +846,42 @@ export class OrderTransactionService {
         .filter((detail) => detail.clientKey && detail.id)
         .map((detail) => [detail.clientKey as string, detail.id as number]),
     );
+  }
+
+  private async reconcilePdfImportedBazisPanels(
+    unitOfWork: OrderWriteUnitOfWork,
+    input: {
+      orderId: number;
+      version: number;
+      order: NormalizedSaveOrderDto;
+      detailIdsByClientKey: Map<string, number>;
+      currentUser: CurrentUser;
+      requestId?: string;
+      sourceIdempotencyKey?: string;
+    },
+  ) {
+    if (input.order.bazisImportCandidateClientKeys.length === 0) return [];
+
+    const candidateDetailIds = input.order.bazisImportCandidateClientKeys.map((clientKey) => {
+      const detailId = input.detailIdsByClientKey.get(clientKey);
+      if (!detailId) {
+        throw new ApiError(
+          500,
+          'ORDER_SAVE_FAILED',
+          'Не удалось определить импортированную позицию заказа',
+        );
+      }
+      return detailId;
+    });
+    const requestId = input.requestId ?? `orders-save-${input.orderId}-v${input.version}`;
+    return unitOfWork.reconcileBazisPanelOrderLinks({
+      orderId: input.orderId,
+      candidateDetailIds,
+      source: 'pdf_import',
+      currentUser: input.currentUser,
+      requestId,
+      idempotencyKey: `${input.sourceIdempotencyKey ?? requestId}:bazis-panel-order-links`,
+    });
   }
 
   private async readAndAssertVersion(
@@ -1193,12 +1250,14 @@ export class OrderTransactionService {
     requestId: string | undefined,
     detailSheetMaterialTypeIds?: { before: DetailSheetAuditRef[]; after: DetailSheetAuditRef[] },
     defaultSchedule?: OrderSaveAuditMetadata['defaultSchedule'],
+    bazisPanelLinks?: OrderSaveAuditMetadata['bazisPanelLinks'],
   ): OrderSaveAuditMetadata {
     return {
       commandName,
       ...(requestId ? { requestId } : {}),
       ...(detailSheetMaterialTypeIds ? { detailSheetMaterialTypeIds } : {}),
       ...(defaultSchedule ? { defaultSchedule } : {}),
+      ...(bazisPanelLinks && bazisPanelLinks.length > 0 ? { bazisPanelLinks } : {}),
     };
   }
 

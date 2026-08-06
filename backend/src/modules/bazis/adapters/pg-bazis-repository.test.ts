@@ -234,6 +234,36 @@ describe('PgBazisRepository.importRevision', () => {
     expect(response.warnings).toEqual([]);
   });
 
+  it('reprojects linked order details onto the new current revision before retention', async () => {
+    const database = createDatabase({
+      linkedOrderCandidates: [{ order_id: 11399, detail_ids: ['61235'] }],
+    });
+    const repository = new PgBazisRepository(database.service);
+
+    await repository.importRevision(importCommand());
+
+    const currentRevisionUpdateIndex = database.queries.findIndex((query) =>
+      normalizeSql(query.text).startsWith('UPDATE bazis_projects SET current_revision_id'),
+    );
+    const reconciliationIndex = database.queries.findIndex((query) =>
+      normalizeSql(query.text).startsWith(
+        'SELECT node_id, order_detail_id, bazis_project_id, revision_id, project_link_created FROM reconcile_bazis_panel_order_links',
+      ),
+    );
+    const retentionIndex = database.queries.findIndex((query) =>
+      normalizeSql(query.text).includes('prune_keep'),
+    );
+    expect(reconciliationIndex).toBeGreaterThan(currentRevisionUpdateIndex);
+    expect(retentionIndex).toBeGreaterThan(reconciliationIndex);
+    expect(database.queries[reconciliationIndex]?.params).toEqual([
+      11399,
+      [61235],
+      'revision_reprojection',
+      1,
+      'req-1',
+    ]);
+  });
+
   it('maps parsed node parentIndex to inserted ids (parent id resolved)', async () => {
     const database = createDatabase();
     const repository = new PgBazisRepository(database.service);
@@ -2040,7 +2070,7 @@ describe('PgBazisRepository.addToOrder', () => {
       materialId: null,
     });
     expect(normalizedSql(database.queries)).toContain(
-      "INSERT INTO bazis_node_order_detail_map (node_id, order_detail_id, order_id, mapping_kind) VALUES ($1, $2, $3, 'created') ON CONFLICT (node_id, order_id) DO UPDATE SET order_detail_id = EXCLUDED.order_detail_id, mapping_kind = 'created'",
+      "INSERT INTO bazis_node_order_detail_map (node_id, order_detail_id, order_id, mapping_kind) VALUES ($1, $2, $3, 'created') ON CONFLICT (node_id, order_id) DO UPDATE SET order_detail_id = EXCLUDED.order_detail_id, mapping_kind = 'created' WHERE bazis_node_order_detail_map.mapping_kind <> 'imported' RETURNING node_id",
     );
     const mapInsert = database.queries.find((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO bazis_node_order_detail_map'),
@@ -2140,10 +2170,91 @@ describe('PgBazisRepository.addToOrder', () => {
       normalizeSql(query.text).startsWith('DELETE FROM bazis_node_order_detail_map'),
     );
     expect(deletes.map((query) => query.params)).toEqual([[9001, 7002]]);
+    expect(normalizeSql(deletes[0]?.text ?? '')).toContain("mapping_kind <> 'imported'");
     const inserts = database.queries.filter((query) =>
       normalizeSql(query.text).startsWith('INSERT INTO bazis_node_order_detail_map'),
     );
     expect(inserts.map((query) => query.params)).toEqual([[102, 7002, 9001]]);
+  });
+
+  it('rejects add/replace when it would delete or reclassify imported provenance', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 102, object_type: 'Панель' }],
+        panelRows: [panelRow102()],
+        mappingRows: sheetOnlyMapping(502),
+        duplicateRows: [{ bazis_node_id: 102, order_detail_id: 7002, matched_by: 'node_map' }],
+        protectedImportedRows: [{ node_id: 102, order_detail_id: 7002 }],
+      },
+    });
+    const currentOrder = buildDetailedOrderDto(9001, 'ERP order current');
+    getOrderByIdMock.mockResolvedValue(currentOrder);
+    const update = vi.fn(async (command: Parameters<NonNullable<OrderTransactionService['update']>>[0]) => {
+      await command.prePersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, orderName: currentOrder.header.orderName, version: currentOrder.version, createdByUserId: '1', managerUserId: '1' },
+      );
+      return currentOrder;
+    });
+    const repository = new PgBazisRepository(database.service, { update });
+
+    await expect(
+      repository.addToOrder(createAddToOrderCommand({
+        adds: [],
+        replaces: [{ bazisNodeId: 102, orderDetailId: 7002 }],
+        skips: [],
+      })),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_ADD_TO_ORDER_CONFLICT',
+      details: {
+        protectedImportedMappings: [{ bazisNodeId: 102, orderDetailId: 7002 }],
+      },
+    });
+    expect(database.queries.some((query) =>
+      normalizeSql(query.text).startsWith('DELETE FROM bazis_node_order_detail_map'),
+    )).toBe(false);
+  });
+
+  it('rolls back when imported provenance wins the race after preflight', async () => {
+    const database = createDatabase({
+      addToOrderState: {
+        revisionRow: baseRevisionRow(),
+        targetOrderRow: { order_id: 9001, client_id: 5 },
+        nodeLookupRows: [{ bazis_node_id: 101, object_type: 'Панель' }],
+        panelRows: [panelRow101()],
+        mappingRows: sheetAndFilmMappings(),
+        duplicateRows: [],
+        protectedImportedRows: [],
+        mapUpsertReturnsRow: false,
+      },
+    });
+    const currentOrder = buildDetailedOrderDto(9001, 'ERP order current');
+    getOrderByIdMock.mockResolvedValue(currentOrder);
+    const update = vi.fn(async (command: Parameters<NonNullable<OrderTransactionService['update']>>[0]) => {
+      await command.prePersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, orderName: currentOrder.header.orderName, version: currentOrder.version, createdByUserId: '1', managerUserId: '1' },
+      );
+      await command.postPersistHook?.(
+        { getTransactionClient: () => database.tx } as never,
+        { orderId: 9001, detailIdsByClientKey: new Map([['bazis-node-101', 8001]]) },
+      );
+      return currentOrder;
+    });
+    const repository = new PgBazisRepository(database.service, { update });
+
+    await expect(
+      repository.addToOrder(createAddToOrderCommand({ adds: [101], replaces: [], skips: [] })),
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'BAZIS_ADD_TO_ORDER_CONFLICT',
+      details: {
+        protectedImportedMappings: [{ bazisNodeId: 101, orderDetailId: 8001 }],
+      },
+    });
   });
 
   it('rejects when a replace pair is absent in the fresh duplicate set', async () => {
@@ -3405,6 +3516,8 @@ function createDatabase(
       mappingRows?: Array<Record<string, unknown>>;
       referenceRows?: Array<Record<string, unknown>>;
       duplicateRows?: Array<Record<string, unknown>>;
+      protectedImportedRows?: Array<Record<string, unknown>>;
+      mapUpsertReturnsRow?: boolean;
       nowIso?: string;
     };
     orderDraftState?: {
@@ -3426,6 +3539,7 @@ function createDatabase(
       existingRow?: Record<string, unknown> | null;
     };
     revisionOrders?: Array<Record<string, unknown>>;
+    linkedOrderCandidates?: Array<Record<string, unknown>>;
     pruneCandidates?: Array<Record<string, unknown>>;
     projectListRows?: Array<Record<string, unknown>>;
     pruneProtectedRevisionIds?: number[];
@@ -3591,6 +3705,17 @@ function createDatabase(
         return { rows, rowCount: rows.length };
       }
 
+      if (normalized.startsWith('SELECT node_id, order_detail_id FROM bazis_node_order_detail_map')) {
+        const rows = options.addToOrderState?.protectedImportedRows ?? [];
+        return { rows, rowCount: rows.length };
+      }
+
+      if (normalized.startsWith('INSERT INTO bazis_node_order_detail_map')) {
+        return options.addToOrderState?.mapUpsertReturnsRow === false
+          ? { rows: [], rowCount: 0 }
+          : { rows: [{ node_id: params[0] }], rowCount: 1 };
+      }
+
       if (normalized.startsWith('INSERT INTO bazis_projects')) {
         return { rows: [{ bazis_project_id: 41 }], rowCount: 1 };
       }
@@ -3616,6 +3741,17 @@ function createDatabase(
       if (normalized.startsWith('INSERT INTO bazis_nodes')) {
         nodeId += 1;
         return { rows: [{ bazis_node_id: nodeId }], rowCount: 1 };
+      }
+      if (normalized.startsWith('SELECT link.order_id,')) {
+        const rows = options.linkedOrderCandidates ?? [];
+        return { rows, rowCount: rows.length };
+      }
+      if (
+        normalized.startsWith(
+          'SELECT node_id, order_detail_id, bazis_project_id, revision_id, project_link_created FROM reconcile_bazis_panel_order_links',
+        )
+      ) {
+        return { rows: [], rowCount: 0 };
       }
       if (normalized.startsWith('SELECT source_kind, lower(bazis_name) AS name FROM bazis_material_mappings')) {
         return { rows: options.materialMappings ?? [], rowCount: options.materialMappings?.length ?? 0 };

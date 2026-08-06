@@ -46,6 +46,8 @@ import type {
   SaveContext,
   SheetReferenceValidationInput,
   StoredOrderSheetState,
+  BazisPanelOrderLink,
+  ReconcileBazisPanelOrderLinksInput,
 } from './order-transaction.types';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { collectChildReferences, OrderTransactionService } from './order-transaction.service';
@@ -112,6 +114,7 @@ interface FakeState {
     payload?: Record<string, unknown>;
   }>;
   deniedRestoreAudits: Array<{ orderId: number; requestId: string; actorUserId: string }>;
+  bazisPanelReconciliations: ReconcileBazisPanelOrderLinksInput[];
 }
 
 class FakeOrderTransactions implements OrderTransactionManagerPort {
@@ -133,7 +136,9 @@ class FakeOrderTransactions implements OrderTransactionManagerPort {
     auditEvents: [],
     outboxEvents: [],
     deniedRestoreAudits: [],
+    bazisPanelReconciliations: [],
   };
+  reconciledBazisPanelLinks: BazisPanelOrderLink[] = [];
   completedDeleteResponse?: DeleteOrderResponseDto;
   completedRestoreResponse?: RestoreOrderResponseDto;
   completedCreateResponse?: OrderDto;
@@ -636,6 +641,14 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     return order.version;
   }
 
+  async reconcileBazisPanelOrderLinks(
+    input: ReconcileBazisPanelOrderLinksInput,
+  ): Promise<BazisPanelOrderLink[]> {
+    this.call('reconcileBazisPanelOrderLinks');
+    this.state.bazisPanelReconciliations.push(input);
+    return this.owner.reconciledBazisPanelLinks.map((link) => ({ ...link }));
+  }
+
   async softDeleteOrder(input: {
     orderId: number;
     previousVersion: number;
@@ -968,6 +981,96 @@ describe('OrderTransactionService order-name uniqueness', () => {
 });
 
 describe('OrderTransactionService', () => {
+  it('reconciles only newly persisted details explicitly marked by PDF import', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.reconciledBazisPanelLinks = [{
+      nodeId: 701,
+      orderDetailId: 1000,
+      bazisProjectId: 81,
+      revisionId: 91,
+      projectLinkCreated: true,
+    }];
+
+    await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      requestId: 'pdf-import-request',
+      dto: createSaveDto({
+        bazisImportCandidateClientKeys: ['detail-temp-1'],
+        details: [{
+          clientKey: 'detail-temp-1',
+          height: 550,
+          width: 200,
+          quantity: 2,
+          materialId: null,
+          sheetMaterialTypeId: 1001,
+          millingTypeId: 1001,
+          edgeTypeId: 1001,
+          detailCost: 10000,
+          basisProject: '1495',
+          basisProduct: 'кухня',
+          basisDesignation: '01.02',
+          basisData: '2/01.02/Фасад',
+          detailName: 'Фасад',
+        }],
+      }),
+    });
+
+    expect(transactions.state.bazisPanelReconciliations).toHaveLength(1);
+    expect(transactions.state.bazisPanelReconciliations[0]).toMatchObject({
+      orderId: 100,
+      candidateDetailIds: [1000],
+      source: 'pdf_import',
+      requestId: 'pdf-import-request',
+    });
+    expect(transactions.state.auditEvents[0]).toMatchObject({
+      metadata: { bazisPanelLinks: [{ nodeId: 701, orderDetailId: 1000 }] },
+    });
+  });
+
+  it('does not infer Bazis links from ordinary mutable Basis fields', async () => {
+    const transactions = new FakeOrderTransactions();
+    await new OrderTransactionService({ transactions }).create({
+      currentUser: currentUser('manager'),
+      dto: createSaveDto({
+        details: [{
+          clientKey: 'ordinary-detail',
+          height: 550,
+          width: 200,
+          quantity: 2,
+          materialId: null,
+          sheetMaterialTypeId: 1001,
+          millingTypeId: 1001,
+          edgeTypeId: 1001,
+          detailCost: 10000,
+          basisProject: '1495',
+          basisProduct: 'кухня',
+          basisDesignation: '01.02',
+          basisData: '2/01.02/Фасад',
+          detailName: 'Фасад',
+        }],
+      }),
+    });
+
+    expect(transactions.calls).not.toContain('reconcileBazisPanelOrderLinks');
+    expect(transactions.state.bazisPanelReconciliations).toEqual([]);
+  });
+
+  it('rolls back whole save when Bazis link reconciliation fails', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.failAt = 'reconcileBazisPanelOrderLinks';
+
+    await expect(
+      new OrderTransactionService({ transactions }).create({
+        currentUser: currentUser('manager'),
+        dto: createSaveDto({ bazisImportCandidateClientKeys: ['detail-temp-1'] }),
+      }),
+    ).rejects.toThrow('Injected failure at reconcileBazisPanelOrderLinks');
+
+    expect(transactions.state.orders.size).toBe(0);
+    expect(transactions.state.auditEvents).toEqual([]);
+    expect(transactions.calls.at(-1)).toBe('rollback');
+  });
+
   it('applies configured order and production-stage dates only during create', async () => {
     const transactions = new FakeOrderTransactions();
     const result = await new OrderTransactionService({
@@ -3833,6 +3936,10 @@ function cloneState(state: FakeState): FakeState {
     auditEvents: state.auditEvents.map((event) => ({ ...event })),
     outboxEvents: state.outboxEvents.map((event) => ({ ...event })),
     deniedRestoreAudits: state.deniedRestoreAudits.map((event) => ({ ...event })),
+    bazisPanelReconciliations: state.bazisPanelReconciliations.map((input) => ({
+      ...input,
+      candidateDetailIds: [...input.candidateDetailIds],
+    })),
   };
 }
 

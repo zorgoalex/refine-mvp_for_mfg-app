@@ -176,6 +176,29 @@ export interface OrderSaveAuditMetadata {
       productionStatusId: number;
     }>;
   };
+  bazisPanelLinks?: BazisPanelOrderLink[];
+}
+
+export type BazisPanelOrderLinkSource =
+  | 'pdf_import'
+  | 'historical_backfill'
+  | 'revision_reprojection';
+
+export interface BazisPanelOrderLink {
+  nodeId: number;
+  orderDetailId: number | null;
+  bazisProjectId: number;
+  revisionId: number;
+  projectLinkCreated: boolean;
+}
+
+export interface ReconcileBazisPanelOrderLinksInput {
+  orderId: number;
+  candidateDetailIds: number[];
+  source: BazisPanelOrderLinkSource;
+  currentUser: CurrentUser;
+  requestId: string;
+  idempotencyKey: string;
 }
 
 export interface OrderSaveAuditEvent {
@@ -390,6 +413,9 @@ export interface OrderWriteUnitOfWork {
     previousVersion: number | null;
     currentUser: CurrentUser;
   }): Promise<number>;
+  reconcileBazisPanelOrderLinks(
+    input: ReconcileBazisPanelOrderLinksInput,
+  ): Promise<BazisPanelOrderLink[]>;
   softDeleteOrder(input: {
     orderId: number;
     previousVersion: number;

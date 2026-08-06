@@ -8,6 +8,7 @@ import type { OrderTransactionService } from '../../orders/application/order-tra
 import type { OrderDto } from '../../orders/dto/order.dto';
 import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-order.dto';
 import { PgOrderReadRepository } from '../../orders/adapters/pg-order-read-repository';
+import { reconcileBazisPanelOrderLinks } from '../../orders/adapters/pg-bazis-panel-order-link-reconciler';
 import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../../bazis-cut/application/bazis-xls-writer';
 import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
 import {
@@ -590,6 +591,53 @@ export class PgBazisRepository implements BazisRepositoryPort {
         `,
         [revisionId, bazisProjectId],
       );
+
+      // Project links are durable provenance. When a new current revision is
+      // imported, project its already-linked ERP orders onto exact panels of
+      // this revision before retention considers old revisions.
+      const linkedOrderCandidates = await tx.query<{
+        order_id: string | number;
+        detail_ids: Array<string | number>;
+      }>(
+        `
+        SELECT link.order_id,
+               array_agg(detail.detail_id ORDER BY detail.detail_id) AS detail_ids
+        FROM bazis_order_links link
+        JOIN orders erp_order
+          ON erp_order.order_id = link.order_id
+         AND erp_order.delete_flag = false
+        JOIN order_details detail
+          ON detail.order_id = link.order_id
+         AND detail.delete_flag = false
+        WHERE link.bazis_project_id = $1
+          AND NULLIF(btrim(detail.basis_project), '') IS NOT NULL
+          AND NULLIF(btrim(COALESCE(
+            NULLIF(detail.basis_product, ''),
+            CASE
+              WHEN position('/' in detail.basis_project) > 0
+                THEN regexp_replace(detail.basis_project, '^[^/]*/[[:space:]]*', '')
+              ELSE NULL
+            END
+          )), '') IS NOT NULL
+          AND NULLIF(btrim(detail.basis_designation), '') IS NOT NULL
+          AND NULLIF(btrim(detail.basis_data), '') IS NOT NULL
+          AND NULLIF(btrim(detail.detail_name), '') IS NOT NULL
+        GROUP BY link.order_id
+        ORDER BY link.order_id
+        `,
+        [bazisProjectId],
+      );
+      for (const linkedOrder of linkedOrderCandidates.rows) {
+        const orderId = Number(linkedOrder.order_id);
+        await reconcileBazisPanelOrderLinks(tx, {
+          orderId,
+          candidateDetailIds: linkedOrder.detail_ids.map(Number),
+          source: 'revision_reprojection',
+          currentUser: command.currentUser,
+          requestId,
+          idempotencyKey: `bazis-revision-${revisionId}-order-${orderId}-panel-links`,
+        });
+      }
 
       const lookup = command.parsed.materials.filter((material) => material.kindGuess !== 'hardware');
       const mapped = lookup.length
@@ -1456,7 +1504,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
               FROM bazis_node_order_detail_map m
               JOIN orders o ON o.order_id = m.order_id
               WHERE m.node_id = n.bazis_node_id
-                AND m.order_detail_id IS NOT NULL) AS linked_orders,
+                AND (m.order_detail_id IS NOT NULL OR m.mapping_kind = 'imported')
+                AND m.mapping_kind <> 'ignored') AS linked_orders,
              (SELECT jsonb_agg(jsonb_build_object(
                 'bazisCutSetId', refs.bazis_cut_set_id,
                 'name', refs.name
@@ -1506,7 +1555,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
               FROM bazis_node_order_detail_map m
               JOIN orders o ON o.order_id = m.order_id
               WHERE m.node_id = n.bazis_node_id
-                AND m.order_detail_id IS NOT NULL) AS linked_orders,
+                AND (m.order_detail_id IS NOT NULL OR m.mapping_kind = 'imported')
+                AND m.mapping_kind <> 'ignored') AS linked_orders,
              (SELECT jsonb_agg(jsonb_build_object(
                 'bazisCutSetId', refs.bazis_cut_set_id,
                 'name', refs.name
@@ -2303,6 +2353,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
               DELETE FROM bazis_node_order_detail_map
               WHERE order_id = $1
                 AND order_detail_id = $2
+                AND mapping_kind <> 'imported'
               `,
               [command.orderId, pair.orderDetailId],
             );
@@ -3788,15 +3839,38 @@ async function detectAddToOrderConflicts(input: {
   replaces: ReadonlyArray<{ bazisNodeId: number; orderDetailId: number }>;
   skips: ReadonlyArray<{ bazisNodeId: number; orderDetailId: number }>;
 }): Promise<Record<string, unknown> | null> {
+  const selectedNodeIds = uniqueNumbers([
+    ...input.adds,
+    ...input.replaces.map((pair) => pair.bazisNodeId),
+    ...input.skips.map((pair) => pair.bazisNodeId),
+  ]);
   const freshPairs = await computeTargetOrderDuplicates(input.db, {
     bazisProjectId: input.bazisProjectId,
     orderId: input.orderId,
-    nodeIds: uniqueNumbers([
-      ...input.adds,
-      ...input.replaces.map((pair) => pair.bazisNodeId),
-      ...input.skips.map((pair) => pair.bazisNodeId),
-    ]),
+    nodeIds: selectedNodeIds,
   });
+  const protectedImportedResult = await input.db.query<{
+    node_id: string | number;
+    order_detail_id: string | number | null;
+  }>(
+    `
+    SELECT node_id, order_detail_id
+    FROM bazis_node_order_detail_map
+    WHERE order_id = $1
+      AND mapping_kind = 'imported'
+      AND (
+        node_id = ANY($2::bigint[])
+        OR order_detail_id = ANY($3::bigint[])
+      )
+    ORDER BY node_id, order_detail_id NULLS LAST
+    FOR KEY SHARE
+    `,
+    [input.orderId, selectedNodeIds, input.replaces.map((pair) => pair.orderDetailId)],
+  );
+  const protectedImportedMappings = protectedImportedResult.rows.map((row) => ({
+    bazisNodeId: Number(row.node_id),
+    orderDetailId: row.order_detail_id === null ? null : Number(row.order_detail_id),
+  }));
   const actualPairKeys = new Set(freshPairs.map(pairKey));
   const expectedPairs = [...input.replaces, ...input.skips];
   const expectedPairKeys = new Set(expectedPairs.map(pairKey));
@@ -3824,7 +3898,8 @@ async function detectAddToOrderConflicts(input: {
     missingPairs.length === 0 &&
     unexpectedPairs.length === 0 &&
     addNodeIdsWithDuplicates.length === 0 &&
-    ambiguousPairs.length === 0
+    ambiguousPairs.length === 0 &&
+    protectedImportedMappings.length === 0
   ) {
     return null;
   }
@@ -3834,6 +3909,7 @@ async function detectAddToOrderConflicts(input: {
     unexpectedPairs,
     addNodeIdsWithDuplicates,
     ambiguousPairs,
+    protectedImportedMappings,
     freshPairs,
   };
 }
@@ -3842,7 +3918,7 @@ async function upsertBazisNodeOrderDetailMap(
   tx: TransactionClient,
   input: { bazisNodeId: number; orderDetailId: number; orderId: number },
 ): Promise<void> {
-  await tx.query(
+  const result = await tx.query(
     `
     INSERT INTO bazis_node_order_detail_map (node_id, order_detail_id, order_id, mapping_kind)
     VALUES ($1, $2, $3, 'created')
@@ -3850,9 +3926,18 @@ async function upsertBazisNodeOrderDetailMap(
     DO UPDATE
     SET order_detail_id = EXCLUDED.order_detail_id,
         mapping_kind = 'created'
+    WHERE bazis_node_order_detail_map.mapping_kind <> 'imported'
+    RETURNING node_id
     `,
     [input.bazisNodeId, input.orderDetailId, input.orderId],
   );
+  if (result.rows.length === 0) {
+    throw new BazisAddToOrderConflictError({
+      protectedImportedMappings: [
+        { bazisNodeId: input.bazisNodeId, orderDetailId: input.orderDetailId },
+      ],
+    });
+  }
 }
 
 function validationErrorForField(field: string, message: string): ApiError {

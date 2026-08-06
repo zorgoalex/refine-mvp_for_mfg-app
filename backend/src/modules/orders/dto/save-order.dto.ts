@@ -14,6 +14,8 @@ export interface SaveOrderDto {
   requirements: SaveOrderRequirementDto[];
   dowelingLinks: SaveOrderDowelingLinkDto[];
   deleted: SaveOrderDeletedDto;
+  /** Transient command intent. Never persisted or copied into order details. */
+  bazisImportCandidateClientKeys?: string[];
   version?: number;
   idempotencyKey?: string;
 }
@@ -150,7 +152,7 @@ export interface SaveOrderDeletedDto {
 
 export type NormalizedSaveOrderDto = Omit<
   SaveOrderDto,
-  'header' | 'details' | 'payments' | 'workshops' | 'requirements' | 'dowelingLinks' | 'deleted'
+  'header' | 'details' | 'payments' | 'workshops' | 'requirements' | 'dowelingLinks' | 'deleted' | 'bazisImportCandidateClientKeys'
 > & {
   header: NormalizedSaveOrderHeaderDto;
   details: NormalizedSaveOrderDetailDto[];
@@ -159,6 +161,7 @@ export type NormalizedSaveOrderDto = Omit<
   requirements: NormalizedSaveOrderRequirementDto[];
   dowelingLinks: NormalizedSaveOrderDowelingLinkDto[];
   deleted: Required<SaveOrderDeletedDto>;
+  bazisImportCandidateClientKeys: string[];
 };
 
 export type NormalizedSaveOrderHeaderDto = Required<

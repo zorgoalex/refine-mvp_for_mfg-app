@@ -12,6 +12,7 @@ export interface SaveOrderDto {
   requirements: SaveOrderRequirementDto[];
   dowelingLinks: SaveOrderDowelingLinkDto[];
   deleted: DeletedOrderChildrenDto;
+  bazisImportCandidateClientKeys?: string[];
   idempotencyKey?: string;
   version?: number;
 }

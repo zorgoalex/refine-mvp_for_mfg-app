@@ -65,6 +65,10 @@ const FRONTEND_ONLY_FIELDS = new Set([
 export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDto {
   const header = values.header;
   const version = optionalNonNegativeInteger(values.version ?? header.version);
+  const details = normalizeDetails(values.details ?? []);
+  const candidateClientKeys = new Set(
+    (values.pdfImportCandidateTempIds ?? []).map((tempId) => toClientKey(tempId)),
+  );
   const dto: SaveOrderDto = {
     header: {
       orderName: requiredString(header.order_name, 'header.order_name'),
@@ -107,7 +111,15 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       notes: normalizeOptionalString(header.notes),
       refKey1c: normalizeOptionalString(header.ref_key_1c),
     },
-    details: normalizeDetails(values.details ?? []),
+    details,
+    bazisImportCandidateClientKeys: details
+      .filter(
+        (detail) =>
+          detail.id === undefined &&
+          detail.clientKey !== undefined &&
+          candidateClientKeys.has(detail.clientKey),
+      )
+      .map((detail) => detail.clientKey as string),
     payments: normalizePayments(values.payments ?? []),
     workshops: normalizeWorkshops(values.workshops ?? []),
     requirements: normalizeRequirements(values.requirements ?? []),

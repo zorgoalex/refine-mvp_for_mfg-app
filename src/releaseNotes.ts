@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "ERP-заказы у панелей Базис-проекта",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "После импорта панелей из PDF в ERP-заказ колонка «Заказ» в Базис-проекте обновляется автоматически и содержит кликабельный номер заказа; пропущенные связи восстановлены и сохраняются при импорте новых ревизий.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "PDF заказа для производства",
     services: ["ERP"],
     repositories: ["repo_erp"],

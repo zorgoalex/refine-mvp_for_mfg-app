@@ -28,11 +28,47 @@ export function validateSaveOrderDto(
   validateWorkshops(order.workshops, order.deleted.workshopIds, errors);
   validateRequirements(order.requirements, order.deleted.requirementIds, errors);
   validateDowelingLinks(order, errors);
+  validateBazisImportCandidates(order, errors);
   validateCreateDeletedPolicy(order, options.mode, errors);
 
   if (errors.length > 0) {
     throw new OrderValidationError(errors);
   }
+}
+
+function validateBazisImportCandidates(
+  order: NormalizedSaveOrderDto,
+  errors: OrderFieldError[],
+): void {
+  const seen = new Set<string>();
+  const detailsByClientKey = new Map<string, NormalizedSaveOrderDetailDto[]>();
+  order.details.forEach((detail) => {
+    if (!detail.clientKey) return;
+    const matches = detailsByClientKey.get(detail.clientKey) ?? [];
+    matches.push(detail);
+    detailsByClientKey.set(detail.clientKey, matches);
+  });
+
+  order.bazisImportCandidateClientKeys.forEach((clientKey, index) => {
+    const field = `bazisImportCandidateClientKeys[${index}]`;
+    if (!clientKey) {
+      errors.push({ field, message: 'candidate client key is required' });
+      return;
+    }
+    if (seen.has(clientKey)) {
+      errors.push({ field, message: 'candidate client key must be unique' });
+    }
+    seen.add(clientKey);
+
+    const matches = detailsByClientKey.get(clientKey) ?? [];
+    if (matches.length !== 1) {
+      errors.push({ field, message: 'candidate client key must identify exactly one detail' });
+      return;
+    }
+    if (matches[0].id !== undefined) {
+      errors.push({ field, message: 'only newly imported details may be candidates' });
+    }
+  });
 }
 
 function validateHeader(
