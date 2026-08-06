@@ -8,6 +8,7 @@ import {
   buildBazisCutSetName,
   PgBazisCutRepository,
   resolveBazisDetailLabels,
+  resolveErpOrderBazisLabels,
 } from './pg-bazis-cut-repository';
 import {
   buildBazisCutPickerSelectionToken,
@@ -29,16 +30,18 @@ describe('PgBazisCutRepository security and event contract', () => {
     expect(buildBazisCutSetName(42)).toBe('БР-42');
   });
 
-  it('snapshots the Basis root product and latest ready vacuum result number', () => {
-    expect(repositorySource).toMatch(/WITH RECURSIVE ancestry[\s\S]*ancestry\.node_kind='product'/);
+  it('snapshots the exact Basis orientation and latest ready vacuum result number', () => {
+    expect(repositorySource).toMatch(/BOOL_OR\([\s\S]*ОриентацияТекстуры[\s\S]*AS exact_vertical/i);
     expect(repositorySource).toMatch(/cj\.last_calc_params->>'layout_mode'[\s\S]*='vacuum_table'/);
     expect(repositorySource).toContain('sourceBathCutNumber: buildBazisBathCutNumber(');
     expect(repositorySource).toContain("'source_bazis_product_name', 'source_bath_cut_number'");
   });
 
-  it('loads the exact Basis-node designation for source-aware positions', () => {
-    expect(repositorySource).toMatch(/MIN\(NULLIF\(btrim\(bn\.designation\), ''\)\) AS exact_designation/i);
-    expect(repositorySource).toContain('bazisNodeDesignation: exactMatch ? row.exact_designation : null');
+  it('keeps exact Basis provenance but maps cut-set identity from ERP detail fields', () => {
+    expect(repositorySource).toContain('exact.exact_node_id');
+    expect(repositorySource).toContain('const bazisLabels = resolveErpOrderBazisLabels({');
+    expect(repositorySource).toContain('importedFromBazisProject: false');
+    expect(repositorySource).toContain('bazisNodeDesignation: null');
   });
 
   it('uses unprefixed ERP order numbers in the list', async () => {
@@ -78,6 +81,17 @@ describe('PgBazisCutRepository security and event contract', () => {
       detailBazisProduct: ' Кухня ',
     })).toEqual({
       sourceBazisProjectName: 'BP-7',
+      sourceBazisOrderNo: '',
+      sourceBazisProductName: 'Кухня',
+    });
+  });
+
+  it('maps ERP detail Basis fields without deriving labels from linked XML topology', () => {
+    expect(resolveErpOrderBazisLabels({
+      detailBazisProject: ' 1319 ',
+      detailBazisProduct: ' Кухня ',
+    })).toEqual({
+      sourceBazisProjectName: '1319',
       sourceBazisOrderNo: '',
       sourceBazisProductName: 'Кухня',
     });

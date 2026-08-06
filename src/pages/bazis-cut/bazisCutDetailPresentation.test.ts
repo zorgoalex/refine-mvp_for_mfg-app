@@ -7,10 +7,10 @@ import {
 
 describe('buildBazisCutCardPosition', () => {
   it.each([
-    ['BZ-100', '', '.01.00.07', 'BZ-100.01.00.07'],
-    ['', 'BP-7', 'Кухня.01.00.07', 'BP-7Кухня.01.00.07'],
-    ['', '', 'ERP-1491.7', 'ERP-1491.7'],
-  ])('prefixes Position with the filled Basis order or Basis project',
+    ['BZ-100', '', '01.00.07', '01.00.07'],
+    ['', 'BP-7', '01.00.07', '01.00.07'],
+    ['', '', '7', '7'],
+  ])('shows the frozen Position field without a hidden prefix',
     (order, project, position, expected) => {
       expect(buildBazisCutCardPosition({
         sourceBazisOrderNo: order,
@@ -19,24 +19,26 @@ describe('buildBazisCutCardPosition', () => {
       })).toBe(expected);
     });
 
-  it('prefers the Basis order when both provenance fields are unexpectedly filled', () => {
+  it('trims the frozen Position value', () => {
     expect(buildBazisCutCardPosition({
       sourceBazisOrderNo: ' BZ-100 ',
       sourceBazisProjectName: ' BP-7 ',
       position: ' .01 ',
-    })).toBe('BZ-100.01');
+    })).toBe('.01');
   });
 });
 
 describe('buildBazisCutQrCode', () => {
   it.each([
-    ['1319', 'Кухня.01.00.07', '1319Кухня.01.00.07'],
-    ['1319', '', '1319'],
-    ['', 'Кухня.01.00.07', 'Кухня.01.00.07'],
-    ['', '', ''],
-  ])('joins Basis project and Position values', (project, position, expected) => {
+    ['1319', '', 'Кухня', '01.00.07', '1319Кухня.01.00.07'],
+    ['', '1320', '', '01.00.07', '1320.01.00.07'],
+    ['1319', '1320', '', '01.00.07', '1319.01.00.07'],
+    ['', '', '', '7', '.7'],
+  ])('joins Basis project/order, optional product, dot, and Position', (project, order, product, position, expected) => {
     expect(buildBazisCutQrCode({
       sourceBazisProjectName: project,
+      sourceBazisOrderNo: order,
+      sourceBazisProductName: product,
       position,
     })).toBe(expected);
   });
@@ -44,7 +46,9 @@ describe('buildBazisCutQrCode', () => {
   it('trims values without inserting blank fragments', () => {
     expect(buildBazisCutQrCode({
       sourceBazisProjectName: ' 1319 ',
-      position: ' Кухня.01.00.07 ',
+      sourceBazisOrderNo: ' 1320 ',
+      sourceBazisProductName: ' Кухня ',
+      position: ' 01.00.07 ',
     })).toBe('1319Кухня.01.00.07');
   });
 });

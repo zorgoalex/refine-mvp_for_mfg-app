@@ -56,8 +56,19 @@ export function buildBazisCutPosition(
   }
 
   const designation = source.basisDesignation?.trim() ?? '';
-  const hasBazisDocument = Boolean(source.bazisProject?.trim() || source.bazisOrder?.trim());
-  return designation && hasBazisDocument ? designation : String(source.detailNumber);
+  return designation && Boolean(source.bazisProject?.trim()) ? designation : String(source.detailNumber);
+}
+
+export function resolveErpOrderBazisLabels(input: {
+  detailBazisProject: string | null;
+  detailBazisProduct: string | null;
+}): BazisDocumentLabels {
+  const project = input.detailBazisProject?.trim() ?? '';
+  return {
+    sourceBazisProjectName: project,
+    sourceBazisOrderNo: '',
+    sourceBazisProductName: project ? input.detailBazisProduct?.trim() ?? '' : '',
+  };
 }
 
 export function resolveBazisDetailLabels(input: {

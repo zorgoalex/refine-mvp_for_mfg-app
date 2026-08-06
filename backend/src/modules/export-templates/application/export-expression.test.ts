@@ -35,6 +35,11 @@ describe('export expression', () => {
     ] }, detail, context)).toBe(5);
   });
 
+  it('uses raw Position and the canonical Basis QR identity in legacy fields', () => {
+    expect(evaluateExpression({ type: 'field', field: 'legacy.position' }, detail, context)).toBe('.07');
+    expect(evaluateExpression({ type: 'field', field: 'legacy.qr' }, detail, context)).toBe('BPШкаф..07');
+  });
+
   it('rejects locale decimals, divide-by-zero and unknown fields', () => {
     expect(() => evaluateExpression({ type: 'number_fn', fn: 'round', input: { type: 'constant', value: '1,5' } }, detail, context)).toThrow('Expected an invariant finite number');
     expect(() => evaluateExpression({ type: 'math', fn: 'divide', parts: [

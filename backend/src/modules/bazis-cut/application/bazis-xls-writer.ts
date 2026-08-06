@@ -12,6 +12,7 @@ import type {
   ExportTemplateColumn,
   ExportTemplateSnapshot,
 } from '../../export-templates/application/export-template.types';
+import { buildBazisCutQrCode } from './bazis-cut-identity';
 
 export const BAZIS_CUT_SHEET_NAME = 'Детали для раскроя';
 
@@ -146,7 +147,7 @@ export function bazisCutFieldsToRow(
   return [
       detail.cutEnabled ? 'Да' : 'Нет', detail.materialType, safeText(detail.materialName),
       safeText(detail.materialArticle), detail.thicknessMm, safeText(order),
-      safeText(detail.sourceBazisProductName ?? ''), safeText(`${order}${detail.position.trim()}`),
+      safeText(detail.sourceBazisProductName ?? ''), safeText(detail.position.trim()),
       buildBazisCutQrCode(detail),
       safeText(detail.partName), detail.finishedLengthMm, detail.finishedWidthMm,
       detail.cutLengthMm, detail.cutWidthMm, detail.quantity, safeText(detail.orientation),
@@ -158,12 +159,6 @@ export function bazisCutFieldsToRow(
       safeText(detail.customProperty), safeText(detail.glue), safeText(detail.milling),
       safeText(detail.route), safeText(detail.sourceBathCutNumber ?? ''), safeText(detail.film),
     ];
-}
-
-export function buildBazisCutQrCode(
-  detail: BazisCutXlsDetail,
-): string {
-  return `${detail.sourceBazisProjectName?.trim() ?? ''}${detail.position.trim()}`;
 }
 
 export type BazisCutXlsDetail = BazisCutDetailFields & {

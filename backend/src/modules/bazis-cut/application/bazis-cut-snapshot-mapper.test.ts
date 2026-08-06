@@ -4,6 +4,7 @@ import {
   buildBazisBathCutNumber,
   buildBazisCutPosition,
   mapBazisCutSnapshotFields,
+  resolveErpOrderBazisLabels,
 } from './bazis-cut-snapshot-mapper';
 
 describe('buildBazisBathCutNumber', () => {
@@ -54,11 +55,11 @@ const GOLDEN_1491: GoldenRow[] = [
 describe('buildBazisCutPosition', () => {
   it.each([
     ['BP-7', '', ' 01.00.07 ', '01.00.07'],
-    ['', 'BZ-100', ' 01.00.07 ', '01.00.07'],
+    ['', 'BZ-100', ' 01.00.07 ', '7'],
     ['BP-7', 'BZ-100', ' 01.00.07 ', '01.00.07'],
     ['', '', '01.00.07', '7'],
     ['BP-7', '', ' ', '7'],
-  ])('uses ERP Basis designation only with a Basis project or order',
+  ])('uses ERP Basis designation only with the ERP Basis project',
     (bazisProject, bazisOrder, basisDesignation, expected) => {
       expect(buildBazisCutPosition({
         detailNumber: 7,
@@ -106,6 +107,18 @@ describe('buildBazisCutPosition', () => {
   });
 });
 
+describe('resolveErpOrderBazisLabels', () => {
+  it.each([
+    [' 1319 ', ' Кухня ', { sourceBazisProjectName: '1319', sourceBazisOrderNo: '', sourceBazisProductName: 'Кухня' }],
+    [' 1319 ', ' ', { sourceBazisProjectName: '1319', sourceBazisOrderNo: '', sourceBazisProductName: '' }],
+    ['', ' Кухня ', { sourceBazisProjectName: '', sourceBazisOrderNo: '', sourceBazisProductName: '' }],
+    [null, null, { sourceBazisProjectName: '', sourceBazisOrderNo: '', sourceBazisProductName: '' }],
+  ])('maps only ERP detail Basis fields into a cut-set snapshot',
+    (detailBazisProject, detailBazisProduct, expected) => {
+      expect(resolveErpOrderBazisLabels({ detailBazisProject, detailBazisProduct })).toEqual(expected);
+    });
+});
+
 describe('1491 snapshot mapper golden', () => {
   it('reproduces all 37 export cells for all 28 positions from real XML source dimensions/orientation', () => {
     const rows = GOLDEN_1491.map(([position, name, sourceLength, sourceWidth, verticalTexture,
@@ -119,13 +132,13 @@ describe('1491 snapshot mapper golden', () => {
         quantity, note: null, milling, film, doweling: route === 'Присадка:', verticalTexture,
       });
       expect(fields).not.toBeNull();
-      return bazisCutFieldsToRow(fields!);
+      return bazisCutFieldsToRow({ ...fields!, sourceBazisProjectName: 'BP-1491' });
     });
     const expected = GOLDEN_1491.map(([position, name, _sourceLength, _sourceWidth, _vertical,
       length, width, quantity, milling, route, film]) => {
       const computedPosition = position;
       return [
-      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', '', computedPosition, computedPosition, name, length, width,
+      'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', '', computedPosition, `BP-1491.${computedPosition}`, name, length, width,
       Math.round(length * 10) / 10, Math.round(width * 10) / 10, quantity, 'Не задана', '',
       '', '', 0, '', '', 0, '', '', 0, '', '', 0, null, '', '', '', milling, route, '', film,
       ];
@@ -138,6 +151,6 @@ describe('1491 snapshot mapper golden', () => {
     expect(GOLDEN_1491.filter((row) => row[4])).toHaveLength(26);
     expect(rows.filter((row) => Number(row[10]) < Number(row[11]))).toHaveLength(9);
     expect(rows[0][7]).toBe('01.00.07');
-    expect(rows[0][8]).toBe('01.00.07');
+    expect(rows[0][8]).toBe('BP-1491.01.00.07');
   });
 });
