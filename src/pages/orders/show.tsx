@@ -2413,6 +2413,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         Изменить
                       </Button>
                     ) : null}
+                    {canUpdateOrders ? (
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={() => void handleRefreshOrder()}
+                        loading={isRefreshingOrder}
+                      >
+                        Обновить
+                      </Button>
+                    ) : null}
                     {canExportOrders ? (
                       <>
                         {productionPdfAction}
@@ -2444,6 +2453,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     {canEditOrderContent ? (
                       <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
                         Редактировать
+                      </Button>
+                    ) : null}
+                    {canUpdateOrders ? (
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={() => void handleRefreshOrder()}
+                        loading={isRefreshingOrder}
+                      >
+                        Обновить
                       </Button>
                     ) : null}
                     {canExportOrders ? (

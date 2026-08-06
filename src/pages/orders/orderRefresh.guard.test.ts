@@ -10,6 +10,14 @@ describe('order refresh UI wiring', () => {
 
     expect(show).toContain('ordersApi.refresh(orderId, { version: currentVersion })');
     expect(show).toContain('{canUpdateOrders && (');
+    const operationalHeader = show.slice(
+      show.indexOf('<OperationalPageHeader'),
+      show.indexOf('ref={orderShowSummaryTabsRef}'),
+    );
+    expect(operationalHeader).toContain('icon={<ReloadOutlined />}');
+    expect(operationalHeader).toContain('onClick={() => void handleRefreshOrder()}');
+    expect(operationalHeader).toContain('loading={isRefreshingOrder}');
+    expect(operationalHeader.match(/>\s*Обновить\s*<\/Button>/g)).toHaveLength(2);
     expect(show).not.toContain('handleRefreshPaymentStatus');
     expect(edit).toContain('ordersApi.refresh(orderId, { version: baseVersion })');
     expect(edit).toContain('icon={<ReloadOutlined />}');
