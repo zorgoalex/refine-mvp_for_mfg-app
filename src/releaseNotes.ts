@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-06",
+    title: "Реальные статусы в сводке заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В форме просмотра заказа сводный блок теперь показывает фактические статусы заказа и оплаты вместо условных значений «В работе» и процента оплаты.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-05",
     title: "Подбор деталей прямо в Базис-раскрое",
     services: ["ERP", "Cutting"],

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const showSource = readFileSync(fileURLToPath(new URL('./show.tsx', import.meta.url)), 'utf8');
 const headerSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderShowHeader.tsx', import.meta.url)), 'utf8');
 const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
+const operationalHeaderSource = headerSource.match(/if \(isOperational\) \{[\s\S]*?\n  \}\n\n  if \(compactSticky\)/)?.[0] ?? '';
 const compactHeaderSource = headerSource.match(/if \(compactSticky\) \{[\s\S]*?\n  \}\n\n  return \(/)?.[0] ?? '';
 const compactLineCss = appCss.match(/\.order-show-header__compact-line \{[\s\S]*?\n\}/)?.[0] ?? '';
 
@@ -22,6 +23,13 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('compactSticky={orderShowStickyEnabled && orderShowSummaryStuck}');
     expect(headerSource).toContain('order-show-header--compact-sticky');
     expect(headerSource).toContain('order-show-header__compact-line');
+  });
+
+  it('shows actual order and payment statuses in the operational summary', () => {
+    expect(operationalHeaderSource).toContain("{record?.order_status_name || 'Не назначен'}");
+    expect(operationalHeaderSource).toContain("{record?.payment_status_name || 'Не назначен'}");
+    expect(operationalHeaderSource).not.toContain("{isAtRisk ? 'Под риском' : 'В работе'}");
+    expect(operationalHeaderSource).not.toContain('`${paymentPercent}%`');
   });
 
   it('keeps the compact stuck summary dense enough to avoid horizontal scrolling', () => {
