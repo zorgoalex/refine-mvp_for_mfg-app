@@ -337,9 +337,10 @@ export const OrderHeaderSummary: React.FC = () => {
   if (isOperational) {
     const finalAmount = Number(header.final_amount) || Number(header.total_amount) || totals.total_amount || 0;
     const paidAmount = Number(header.paid_amount) || totals.total_paid || 0;
-    const paymentPercent = finalAmount > 0 ? Math.min(100, Math.round((paidAmount / finalAmount) * 100)) : 0;
     const deadlineAt = header.planned_completion_date ? dayjs(header.planned_completion_date) : null;
     const daysToDeadline = deadlineAt ? deadlineAt.startOf('day').diff(dayjs().startOf('day'), 'day') : null;
+    const orderStatusName = orderStatusData?.data?.order_status_name || 'Не назначен';
+    const paymentStatusName = paymentStatusData?.data?.payment_status_name || 'Не назначен';
 
     return (
       <>
@@ -347,13 +348,31 @@ export const OrderHeaderSummary: React.FC = () => {
           className="order-show-operational-summary"
           onContextMenu={handleContextMenu}
           title="ПКМ — изменить статусы"
-        >
+          >
           <div className="order-show-operational-summary__primary">
             <strong>{header.order_name || 'Новый заказ'}</strong>
-            <Tag color={daysToDeadline != null && daysToDeadline < 0 ? 'orange' : 'green'}>
-              {daysToDeadline != null && daysToDeadline < 0 ? 'Под риском' : 'В работе'}
+            <Tag
+              color={
+                orderStatusName === 'Готов к выдаче'
+                  ? '#059669'
+                  : orderStatusName === 'Предварительный'
+                    ? '#91caff'
+                    : '#4F46E5'
+              }
+            >
+              {orderStatusData?.data?.order_status_name || 'Не назначен'}
             </Tag>
-            <Tag>{`${paymentPercent}%`}</Tag>
+            <Tag
+              color={
+                paymentStatusName === 'Оплачен'
+                  ? '#059669'
+                  : paymentStatusName === 'Не оплачен'
+                    ? '#DC2626'
+                    : '#D97706'
+              }
+            >
+              {paymentStatusData?.data?.payment_status_name || 'Не назначен'}
+            </Tag>
           </div>
           <div className="order-show-operational-summary__metric">
             <strong>{clientData?.data?.client_name || '—'}</strong>

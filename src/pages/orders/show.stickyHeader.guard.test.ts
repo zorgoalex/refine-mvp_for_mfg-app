@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 
 const showSource = readFileSync(fileURLToPath(new URL('./show.tsx', import.meta.url)), 'utf8');
 const headerSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderShowHeader.tsx', import.meta.url)), 'utf8');
+const editHeaderSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderHeaderSummary.tsx', import.meta.url)), 'utf8');
 const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
 const operationalHeaderSource = headerSource.match(/if \(isOperational\) \{[\s\S]*?\n  \}\n\n  if \(compactSticky\)/)?.[0] ?? '';
+const operationalEditHeaderSource = editHeaderSource.match(/if \(isOperational\) \{[\s\S]*?\n  \}\n\n  return \(/)?.[0] ?? '';
 const compactHeaderSource = headerSource.match(/if \(compactSticky\) \{[\s\S]*?\n  \}\n\n  return \(/)?.[0] ?? '';
 const compactLineCss = appCss.match(/\.order-show-header__compact-line \{[\s\S]*?\n\}/)?.[0] ?? '';
 
@@ -30,6 +32,13 @@ describe('OrderShow sticky detail header guards', () => {
     expect(operationalHeaderSource).toContain("{record?.payment_status_name || 'Не назначен'}");
     expect(operationalHeaderSource).not.toContain("{isAtRisk ? 'Под риском' : 'В работе'}");
     expect(operationalHeaderSource).not.toContain('`${paymentPercent}%`');
+  });
+
+  it('shows the same actual statuses in the operational edit summary', () => {
+    expect(operationalEditHeaderSource).toContain("{orderStatusData?.data?.order_status_name || 'Не назначен'}");
+    expect(operationalEditHeaderSource).toContain("{paymentStatusData?.data?.payment_status_name || 'Не назначен'}");
+    expect(operationalEditHeaderSource).not.toContain("{daysToDeadline != null && daysToDeadline < 0 ? 'Под риском' : 'В работе'}");
+    expect(operationalEditHeaderSource).not.toContain('`${paymentPercent}%`');
   });
 
   it('keeps the compact stuck summary dense enough to avoid horizontal scrolling', () => {
