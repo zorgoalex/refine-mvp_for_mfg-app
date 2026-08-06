@@ -1,6 +1,7 @@
 export interface BazisCutQrCodeSource {
   sourceBazisProjectName?: string | null;
   sourceBazisOrderNo?: string | null;
+  sourceOrderName?: string | null;
   sourceBazisProductName?: string | null;
   position?: string | null;
 }
@@ -16,7 +17,9 @@ export function buildBazisCutCardPosition(source: BazisCutPositionSource): strin
 }
 
 export function buildBazisCutQrCode(source: BazisCutQrCodeSource): string {
-  const document = clean(source.sourceBazisProjectName) || clean(source.sourceBazisOrderNo);
+  const document = clean(source.sourceBazisProjectName)
+    || clean(source.sourceBazisOrderNo)
+    || clean(source.sourceOrderName);
   return `${document}${clean(source.sourceBazisProductName)}.${clean(source.position)}`;
 }
 

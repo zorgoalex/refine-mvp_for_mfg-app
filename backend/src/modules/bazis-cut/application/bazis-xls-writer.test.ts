@@ -35,15 +35,17 @@ describe('buildBazisCutXls', () => {
   });
 
   it.each([
-    ['', 'BZ-100', 'Кухня', '01.00.07', 'BZ-100Кухня.01.00.07'],
-    ['BP-7', '', 'Кухня', '01.00.07', 'BP-7Кухня.01.00.07'],
-    ['BP-7', 'BZ-100', '', '01.00.07', 'BP-7.01.00.07'],
-    ['', '', '', '7', '.7'],
-  ])('keeps Excel Position raw and builds QR from project/order, optional product, dot, and position',
-    (project, order, product, position, expectedQrCode) => {
+    ['', 'BZ-100', 'ERP-1491', 'Кухня', '01.00.07', 'BZ-100Кухня.01.00.07'],
+    ['BP-7', '', 'ERP-1491', 'Кухня', '01.00.07', 'BP-7Кухня.01.00.07'],
+    ['BP-7', 'BZ-100', 'ERP-1491', '', '01.00.07', 'BP-7.01.00.07'],
+    ['', '', 'ERP-1491', '', '7', 'ERP-1491.7'],
+    ['', '', '', '', '7', '.7'],
+  ])('keeps Excel Position raw and builds QR from project/order/source, optional product, dot, and position',
+    (project, order, sourceOrderName, product, position, expectedQrCode) => {
       const bytes = buildBazisCutXls([detail({
         sourceBazisProjectName: project,
         sourceBazisOrderNo: order,
+        sourceOrderName,
         sourceBazisProductName: product,
         position,
       })]);

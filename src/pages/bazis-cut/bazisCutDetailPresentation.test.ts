@@ -30,14 +30,16 @@ describe('buildBazisCutCardPosition', () => {
 
 describe('buildBazisCutQrCode', () => {
   it.each([
-    ['1319', '', 'Кухня', '01.00.07', '1319Кухня.01.00.07'],
-    ['', '1320', '', '01.00.07', '1320.01.00.07'],
-    ['1319', '1320', '', '01.00.07', '1319.01.00.07'],
-    ['', '', '', '7', '.7'],
-  ])('joins Basis project/order, optional product, dot, and Position', (project, order, product, position, expected) => {
+    ['1319', '', 'ERP-1491', 'Кухня', '01.00.07', '1319Кухня.01.00.07'],
+    ['', '1320', 'ERP-1491', '', '01.00.07', '1320.01.00.07'],
+    ['1319', '1320', 'ERP-1491', '', '01.00.07', '1319.01.00.07'],
+    ['', '', 'ERP-1491', '', '7', 'ERP-1491.7'],
+    ['', '', '', '', '7', '.7'],
+  ])('joins Basis project/order/source, optional product, dot, and Position', (project, order, sourceOrderName, product, position, expected) => {
     expect(buildBazisCutQrCode({
       sourceBazisProjectName: project,
       sourceBazisOrderNo: order,
+      sourceOrderName,
       sourceBazisProductName: product,
       position,
     })).toBe(expected);
@@ -47,6 +49,7 @@ describe('buildBazisCutQrCode', () => {
     expect(buildBazisCutQrCode({
       sourceBazisProjectName: ' 1319 ',
       sourceBazisOrderNo: ' 1320 ',
+      sourceOrderName: ' ERP-1491 ',
       sourceBazisProductName: ' Кухня ',
       position: ' 01.00.07 ',
     })).toBe('1319Кухня.01.00.07');

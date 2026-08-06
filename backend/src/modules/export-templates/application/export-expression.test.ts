@@ -10,6 +10,7 @@ const detail: BazisExportDetail = {
   w1Name: '', w1Designation: '', w1ThicknessMm: 0, w2Name: '', w2Designation: '', w2ThicknessMm: 0,
   priority: null, comment: '', customProperty: '', glue: '', milling: '', route: '', film: '',
   sourceBazisProjectName: 'BP', sourceBazisOrderNo: '42', sourceBazisProductName: 'Шкаф', sourceBathCutNumber: '10-2',
+  sourceOrderName: 'ERP-1491',
 };
 const context = { rowNumber: 3, exportedAt: new Date('2026-08-05T12:00:00Z'), templateName: 'Тест' };
 
@@ -38,6 +39,11 @@ describe('export expression', () => {
   it('uses raw Position and the canonical Basis QR identity in legacy fields', () => {
     expect(evaluateExpression({ type: 'field', field: 'legacy.position' }, detail, context)).toBe('.07');
     expect(evaluateExpression({ type: 'field', field: 'legacy.qr' }, detail, context)).toBe('BPШкаф..07');
+    expect(evaluateExpression({ type: 'field', field: 'legacy.qr' }, {
+      ...detail,
+      sourceBazisProjectName: '',
+      sourceBazisOrderNo: '',
+    }, context)).toBe('ERP-1491Шкаф..07');
   });
 
   it('rejects locale decimals, divide-by-zero and unknown fields', () => {

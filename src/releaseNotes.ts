@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "Источник в QR-коде Базис-раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Если в строке Базис-раскроя не заполнены «Базис-проект» и «Базис-заказ», QR-code использует поле «Источник»; приоритет Базис-проекта и Базис-заказа сохранён.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "Поля деталей и QR-код Базис-раскроя",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
