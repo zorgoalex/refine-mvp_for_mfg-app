@@ -133,10 +133,14 @@ describe('production order PDF document', () => {
     expect(html.indexOf('class="detail-separator"')).toBeLessThan(html.indexOf('Чёрная группа'));
   });
 
-  it('uses a repeating spreadsheet header on A4 landscape pages', () => {
+  it('uses a repeating spreadsheet header on white A4 portrait pages', () => {
     const html = buildOrderProductionPdfDocument(params);
 
-    expect(html).toContain('size: A4 landscape');
+    expect(html).toContain('size: A4 portrait');
+    expect(html).not.toContain('size: A4 landscape');
+    expect(html).toMatch(/th, td \{[\s\S]*?background: #fff;/);
+    expect(html).not.toContain('background: #e7e7e7');
+    expect(html).not.toContain('background: #e8e8e8');
     expect(html).toContain('thead { display: table-header-group; }');
     expect(html).toContain('break-inside: avoid');
     expect(html).toContain('font-variant-numeric: tabular-nums');

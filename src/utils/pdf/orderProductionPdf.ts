@@ -135,7 +135,7 @@ export function buildOrderProductionPdfDocument({
   <title>${escapeHtml(documentTitle)}</title>
   <style>
     @page {
-      size: A4 landscape;
+      size: A4 portrait;
       margin: 8mm;
     }
 
@@ -166,7 +166,6 @@ export function buildOrderProductionPdfDocument({
       text-align: center;
     }
     .excel-order-header th {
-      background: #e7e7e7;
       font-size: 7px;
       font-weight: 700;
       text-transform: lowercase;
@@ -184,19 +183,15 @@ export function buildOrderProductionPdfDocument({
       font-weight: 600;
       overflow-wrap: anywhere;
     }
-    .financial-value,
-    .financial-cell {
-      background: #fff;
-    }
     thead { display: table-header-group; }
     tr { break-inside: avoid; page-break-inside: avoid; }
     th, td {
+      background: #fff;
       border: 1px solid #555;
       padding: 3px 4px;
       vertical-align: middle;
     }
     th {
-      background: #e8e8e8;
       font-size: 8px;
       font-weight: 700;
       text-align: center;
