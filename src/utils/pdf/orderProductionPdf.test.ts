@@ -148,14 +148,12 @@ describe('production order PDF document', () => {
     expect(html).toContain('.excel-header-row-9 { height: 10.33pt; }');
   });
 
-  it('matches the XLS print header and 81 percent scale shown in the reference screenshot', () => {
+  it('matches the XLS scale without phone text in the print header', () => {
     const html = buildOrderProductionPdfDocument(params);
 
-    expect(html).toContain('class="excel-company-contacts"');
-    expect(html).toContain('<div>Наши телефоны:</div>');
-    expect(html).toContain('<div>8 701 032 4646, 8 777 032 4646</div>');
-    expect(html).toContain('margin: 16mm 6mm 9mm;');
-    expect(html).toContain('top: -15mm;');
+    expect(html).not.toContain('class="excel-company-contacts"');
+    expect(html).not.toContain('Наши телефоны:');
+    expect(html).not.toContain('8 701 032 4646, 8 777 032 4646');
     expect(html).toContain('.excel-header-row-1 { height: 10.65pt; }');
     expect(html).toContain('.excel-header-row-4 { height: 9.72pt; }');
     expect(html).toContain('.excel-header-row-9 { height: 10.33pt; }');
@@ -165,6 +163,18 @@ describe('production order PDF document', () => {
     expect(html).toContain('.excel-section-label { font-size: 8.91pt; font-style: italic;');
     expect(html).toContain('.excel-summary-label { font-size: 7.29pt; font-style: italic;');
     expect(html).toContain('.excel-material-value { font-size: 11.34pt; }');
+  });
+
+  it('uses only the order title and suppresses the browser URL footer', () => {
+    const html = buildOrderProductionPdfDocument(params);
+
+    expect(html).toContain('<title>Заказ Фасады &lt;Кухня &amp; бар&gt;</title>');
+    expect(html).not.toContain('Фасады &lt;Кухня &amp; бар&gt; — PDF для производства');
+    expect(html).toContain('margin: 16mm 6mm 0;');
+    expect(html).toContain('tfoot { display: table-footer-group; }');
+    expect(html).toContain('.excel-print-footer-space td {');
+    expect(html).toContain('height: 9mm;');
+    expect(html).toContain('class="excel-print-footer-space"');
   });
 
   it('keeps financial fields visible but empty and omits payment sections', () => {

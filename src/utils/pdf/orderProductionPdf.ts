@@ -95,7 +95,7 @@ export function buildOrderProductionPdfDocument({
   const totalArea = actualDetails.reduce((sum, detail) => sum + (roundArea(detail) ?? 0), 0);
   const totalQuantity = actualDetails.reduce((sum, detail) => sum + detail.quantity, 0);
   const orderYear = getYearLastTwoDigits(order.orderDate);
-  const documentTitle = `${order.orderName} — PDF для производства`;
+  const documentTitle = `Заказ ${order.orderName}`;
   const designer = order.prisadkaDesignerName
     ? `конструктор ${order.prisadkaDesignerName}`
     : null;
@@ -136,7 +136,7 @@ export function buildOrderProductionPdfDocument({
   <style>
     @page {
       size: A4 portrait;
-      margin: 16mm 6mm 9mm;
+      margin: 16mm 6mm 0;
     }
 
     * { box-sizing: border-box; }
@@ -154,15 +154,6 @@ export function buildOrderProductionPdfDocument({
       border-collapse: collapse;
       table-layout: fixed;
       width: 100%;
-    }
-    .excel-company-contacts {
-      font-size: 8.91pt;
-      line-height: 1.15;
-      position: fixed;
-      right: 0;
-      text-align: right;
-      top: -15mm;
-      white-space: nowrap;
     }
     .excel-order-header {
       margin-bottom: 1.82pt;
@@ -214,6 +205,7 @@ export function buildOrderProductionPdfDocument({
     .excel-phone-value { font-family: Arial, Helvetica, sans-serif; font-size: 11.34pt; font-weight: 700; }
     .excel-summary-value { font-size: 9.72pt; font-weight: 700; }
     thead { display: table-header-group; }
+    tfoot { display: table-footer-group; }
     tr { break-inside: avoid; page-break-inside: avoid; }
     th, td {
       background: #fff;
@@ -241,6 +233,11 @@ export function buildOrderProductionPdfDocument({
       height: 19px;
       padding: 0;
     }
+    .excel-print-footer-space td {
+      border: 0;
+      height: 9mm;
+      padding: 0;
+    }
     col:nth-child(1) { width: 3.06%; }
     col:nth-child(2) { width: 6.48%; }
     col:nth-child(3) { width: 6.36%; }
@@ -257,10 +254,6 @@ export function buildOrderProductionPdfDocument({
   </style>
 </head>
 <body>
-  <div class="excel-company-contacts" aria-label="Телефоны компании">
-    <div>Наши телефоны:</div>
-    <div>8 701 032 4646, 8 777 032 4646</div>
-  </div>
   <header>
     <table class="excel-order-header" aria-label="Шапка заказа">
       <colgroup>${'<col />'.repeat(13)}</colgroup>
@@ -340,6 +333,9 @@ export function buildOrderProductionPdfDocument({
         </tr>
       </thead>
       <tbody>${detailRows}</tbody>
+      <tfoot aria-hidden="true">
+        <tr class="excel-print-footer-space"><td colspan="13"></td></tr>
+      </tfoot>
     </table>
   </main>
 </body>
