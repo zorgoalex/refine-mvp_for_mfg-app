@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Spin, Alert, Button, Space, Segmented, Tooltip, message, Input, Card, Form, Row, Col, Select } from 'antd';
+import { Spin, Alert, Badge, Button, Space, Segmented, Tooltip, message, Input, Card, Form, Row, Col, Select } from 'antd';
 import {
+  AppstoreOutlined,
+  BarsOutlined,
   LeftOutlined,
   RightOutlined,
   CalendarOutlined,
@@ -11,6 +13,8 @@ import {
   SearchOutlined,
   FilterOutlined,
   ClearOutlined,
+  TableOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
@@ -55,6 +59,8 @@ import { cleanCalendarFilters } from '../utils/calendarFilters';
 interface CalendarBoardProps {
   filters: CalendarFilters;
   filtersOpen?: boolean;
+  activeFilterCount?: number;
+  onFiltersToggle?: () => void;
   onFiltersChange: (filters: CalendarFilters) => void;
 }
 
@@ -70,6 +76,8 @@ const statusOptions = (statuses: Array<{ id: number; name: string }>): CalendarF
 const CalendarBoard: React.FC<CalendarBoardProps> = ({
   filters,
   filtersOpen = false,
+  activeFilterCount = 0,
+  onFiltersToggle,
   onFiltersChange,
 }) => {
   const isOperational = useOperationalUi();
@@ -552,6 +560,24 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
       <div className="calendar-board" ref={containerRef}>
         {/* Навигация по календарю — AD-4: двухрядный layout на mobile */}
         <div className={`calendar-navigation${isMobile ? ' calendar-navigation--mobile' : ''}`}>
+        {onFiltersToggle ? (
+          <Badge
+            className="calendar-navigation__tablet-filter"
+            count={activeFilterCount}
+            size="small"
+            offset={[-4, 5]}
+          >
+            <Tooltip title={filtersOpen ? 'Скрыть фильтры' : 'Фильтры'}>
+              <Button
+                type={filtersOpen || activeFilterCount > 0 ? 'primary' : 'default'}
+                icon={<FilterOutlined />}
+                aria-label={filtersOpen ? 'Скрыть фильтры' : 'Открыть фильтры'}
+                aria-expanded={filtersOpen}
+                onClick={onFiltersToggle}
+              />
+            </Tooltip>
+          </Badge>
+        ) : null}
         {isMobile ? (
           <>
             {/* Row 1: навигация по дням (‹ Сегодня › Обновить).
@@ -636,17 +662,32 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
             />
             <Segmented
               options={[
-                { label: 'Неделя', value: 7 },
-                { label: '2 недели', value: 14 },
-                { label: 'Месяц', value: 30 },
+                {
+                  label: <span className="calendar-navigation__mode-label" aria-label="Неделя" title="Неделя"><CalendarOutlined /><span className="calendar-navigation__mode-text">Неделя</span></span>,
+                  value: 7,
+                },
+                {
+                  label: <span className="calendar-navigation__mode-label" aria-label="Две недели" title="Две недели"><AppstoreOutlined /><span className="calendar-navigation__mode-text">2 недели</span></span>,
+                  value: 14,
+                },
+                {
+                  label: <span className="calendar-navigation__mode-label" aria-label="Месяц" title="Месяц"><TableOutlined /><span className="calendar-navigation__mode-text">Месяц</span></span>,
+                  value: 30,
+                },
               ]}
               value={periodDays}
               onChange={(value) => setPeriodDays(value as 7 | 14 | 30)}
             />
             <Segmented
               options={[
-                { label: 'Комфортно', value: ViewMode.STANDARD },
-                { label: 'Компактно', value: ViewMode.COMPACT },
+                {
+                  label: <span className="calendar-navigation__mode-label" aria-label="Комфортно" title="Комфортно"><AppstoreOutlined /><span className="calendar-navigation__mode-text">Комфортно</span></span>,
+                  value: ViewMode.STANDARD,
+                },
+                {
+                  label: <span className="calendar-navigation__mode-label" aria-label="Компактно" title="Компактно"><BarsOutlined /><span className="calendar-navigation__mode-text">Компактно</span></span>,
+                  value: ViewMode.COMPACT,
+                },
               ]}
               value={viewMode === ViewMode.BRIEF ? ViewMode.COMPACT : viewMode}
               onChange={(value) => setViewMode(value as ViewMode)}
@@ -656,8 +697,9 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
               className={productionOnly ? 'calendar-navigation__production-filter is-active' : 'calendar-navigation__production-filter'}
               aria-pressed={productionOnly}
               onClick={() => setProductionOnly((active) => !active)}
+              icon={<ToolOutlined />}
             >
-              Только производство
+              <span>Только производство</span>
             </Button>
             <Tooltip title="Обновить данные">
               <Button
@@ -690,7 +732,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
             ) : null}
           </div>
         ) : (
-          <Space size="middle" wrap>
+          <Space className="calendar-navigation__legacy" size="middle" wrap>
             <Space size="small">
               <Button
                 icon={<LeftOutlined />}
@@ -713,7 +755,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
               >
                 Вперед
               </Button>
-              <Button onClick={() => refetch()} loading={isLoading || isMoving}>
+              <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading || isMoving}>
                 Обновить
               </Button>
             </Space>
@@ -730,9 +772,18 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
             {/* Переключатель режимов отображения */}
             <Segmented
               options={[
-                { label: 'Стандартный', value: ViewMode.STANDARD },
-                { label: 'Компактный', value: ViewMode.COMPACT },
-                { label: 'Краткий', value: ViewMode.BRIEF },
+                {
+                  label: <span className="calendar-navigation__mode-label" aria-label="Стандартный" title="Стандартный"><AppstoreOutlined /><span className="calendar-navigation__mode-text">Стандартный</span></span>,
+                  value: ViewMode.STANDARD,
+                },
+                {
+                  label: <span className="calendar-navigation__mode-label" aria-label="Компактный" title="Компактный"><BarsOutlined /><span className="calendar-navigation__mode-text">Компактный</span></span>,
+                  value: ViewMode.COMPACT,
+                },
+                {
+                  label: <span className="calendar-navigation__mode-label" aria-label="Краткий" title="Краткий"><TableOutlined /><span className="calendar-navigation__mode-text">Краткий</span></span>,
+                  value: ViewMode.BRIEF,
+                },
               ]}
               value={viewMode}
               onChange={(value) => setViewMode(value as ViewMode)}
@@ -762,7 +813,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
                     disabled={cardScale >= MAX_SCALE}
                   />
                 </Tooltip>
-                <span style={{ fontSize: '12px', color: '#8c8c8c', minWidth: '40px', textAlign: 'center' }}>
+                <span className="calendar-navigation__scale">
                   {Math.round(cardScale * 100)}%
                 </span>
               </Space>

@@ -74,6 +74,8 @@ export const CalendarList: React.FC = () => {
         <CalendarBoard
           filters={filters}
           filtersOpen={filtersOpen}
+          activeFilterCount={activeFilterCount}
+          onFiltersToggle={() => setFiltersOpen((open) => !open)}
           onFiltersChange={setFilters}
         />
       </div>

@@ -702,9 +702,35 @@
 
 /* Calendar, details, forms and major tablet workspaces. */
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-page-wrapper {
-  height: 100%;
+  height: auto;
+  min-height: 100%;
+  overflow: visible !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content.ant-layout-content.calendar-page-active {
+  height: auto;
+  overflow-x: auto !important;
+  overflow-y: auto !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-page-wrapper > .calendar-page-header {
+  position: relative;
+  height: 48px;
+  min-height: 48px;
+  flex: 0 0 48px;
+  padding: 0;
+  transition-property: height, min-height, opacity;
+  transition-duration: 160ms;
+  transition-timing-function: ease-out;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(
+  .calendar-page,
+  .calendar-board
+) {
+  height: auto;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-navigation {
@@ -717,9 +743,105 @@
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-grid {
   min-height: 0;
-  height: calc(100% - 108px);
-  overflow: auto;
+  height: auto;
+  max-height: none;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  overflow-y: visible;
   overscroll-behavior: contain;
+}
+
+/* Calendar owns the workspace scroll on tablet. After vertical scroll, the
+   title row collapses completely and its controls move into one 44px bar. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-page-wrapper > :where(
+  .operational-page-head,
+  .calendar-page-header
+) {
+  position: relative;
+  top: auto;
+  z-index: auto;
+  height: 0;
+  min-height: 0;
+  flex-basis: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  opacity: 0;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-navigation {
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  height: var(--tablet-sticky-row);
+  min-height: var(--tablet-sticky-row);
+  max-height: var(--tablet-sticky-row);
+  margin: 0 0 8px;
+  padding: 0 4px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  border-radius: 0 0 10px 10px;
+  box-shadow: 0 5px 14px rgba(23, 52, 61, 0.08);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-navigation::-webkit-scrollbar {
+  display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] :where(
+  .calendar-navigation__operational,
+  .calendar-navigation__legacy
+) {
+  width: max-content;
+  min-width: max-content;
+  flex-wrap: nowrap !important;
+  gap: 4px !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-navigation__tablet-filter {
+  display: inline-flex;
+  flex: 0 0 44px;
+  order: -1;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] :where(
+  .calendar-navigation__period,
+  .calendar-navigation__scale,
+  .calendar-navigation__mode-text
+) {
+  display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-navigation :where(
+  .ant-btn:has(.anticon),
+  .ant-segmented-item
+) {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding-inline: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-navigation .ant-btn:has(.anticon) {
+  overflow: hidden;
+  font-size: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-navigation .ant-btn:has(.anticon) .anticon {
+  margin: 0;
+  font-size: 16px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-navigation__quick-filter {
+  width: clamp(148px, 18vw, 220px);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="calendar"] .calendar-navigation input::placeholder {
+  color: transparent;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-row {

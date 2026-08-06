@@ -208,6 +208,68 @@ test.describe('Evolutionary tablet UI', () => {
         }
     });
 
+    test('collapses the tablet calendar header and toolbar into one unconstrained sticky row', async ({ page }, testInfo) => {
+        const db = createWorkflowMockDb();
+        seedTabletData(db);
+        const health = collectPageHealth(page);
+        await setupGeneralTabletMocks(page, db);
+
+        await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
+        await expectTabletShell(page, 'calendar');
+        await expect(page.locator('.calendar-board')).toBeVisible({ timeout: 30_000 });
+
+        const content = page.locator('.evolution-shell__content');
+        const wrapper = page.locator('.calendar-page-wrapper');
+        const pageHeader = wrapper.locator(':scope > .operational-page-head, :scope > .calendar-page-header').first();
+        const navigation = page.locator('.calendar-navigation');
+        const grid = page.locator('.calendar-grid');
+
+        await expect(pageHeader).toBeVisible();
+        await expect.poll(async () => Math.round((await pageHeader.boundingBox())?.height ?? 0)).toBe(48);
+        await expect(grid).toHaveCSS('max-height', 'none');
+        await expect(content).toHaveCSS('overflow-y', 'auto');
+
+        await page.locator('.day-column').first().evaluate((element) => {
+            element.style.minHeight = '1000px';
+        });
+        await expect.poll(async () => Math.round((await grid.boundingBox())?.height ?? 0)).toBeGreaterThanOrEqual(1000);
+        const contentBox = await content.boundingBox();
+        const wrapperBox = await wrapper.boundingBox();
+        expect(wrapperBox?.height ?? 0, 'calendar wrapper grows beyond the tablet viewport').toBeGreaterThan((contentBox?.height ?? 0) + 200);
+
+        await content.evaluate((element) => {
+            element.scrollTop = 160;
+            element.dispatchEvent(new Event('scroll', { bubbles: true }));
+        });
+        await expect(content).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect(page.locator('.evolution-shell')).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect.poll(async () => Math.round((await pageHeader.boundingBox())?.height ?? 0)).toBe(0);
+        await expect(navigation).toHaveCSS('position', 'sticky');
+        await expect.poll(async () => Math.round((await navigation.boundingBox())?.height ?? 0)).toBe(44);
+        const compactNavigationBox = await navigation.boundingBox();
+        const compactContentBox = await content.boundingBox();
+        expect(Math.abs((compactNavigationBox?.y ?? 0) - (compactContentBox?.y ?? 0))).toBeLessThanOrEqual(12);
+
+        const compactFilter = navigation.getByRole('button', { name: /фильтры/i });
+        await expect(compactFilter).toBeVisible();
+        expect(Math.round((await compactFilter.boundingBox())?.width ?? 0)).toBe(44);
+        await expect(navigation.getByRole('button', { name: 'Сегодня' })).toHaveCSS('font-size', '0px');
+        await expect(navigation.locator('.calendar-navigation__mode-text').first()).toHaveCSS('display', 'none');
+        await expect(navigation.locator('.calendar-navigation__scale').first()).toHaveCSS('display', 'none');
+        await captureTabletState(page, testInfo, '16-calendar-compact-header');
+
+        await content.evaluate((element) => {
+            element.scrollTop = 0;
+            element.dispatchEvent(new Event('scroll', { bubbles: true }));
+        });
+        await expect(content).toHaveAttribute('data-tablet-header-compact', 'false');
+        await expect.poll(async () => Math.round((await pageHeader.boundingBox())?.height ?? 0)).toBe(48);
+
+        expect(health.pageErrors, 'page errors').toEqual([]);
+        expect(health.consoleErrors, 'console errors').toEqual([]);
+        expect(health.serverErrors, 'HTTP 5xx responses').toEqual([]);
+    });
+
     test('moves order and production cards with real CDP touch input and keeps CNC drag-free', async ({ page, context }, testInfo) => {
         const db = createWorkflowMockDb();
         seedTabletData(db);
