@@ -213,6 +213,7 @@ interface RevisionProjectRow {
   client_name: string | null;
   design_engineer_id: number | string | null;
   design_engineer_name: string | null;
+  root_product_count: number | string;
 }
 
 interface DraftNodeLookupRow {
@@ -2478,7 +2479,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
     const referenceLookup = await this.loadPanelReferenceLookup(panels);
     const draftDetails = buildDraftDetails(panels, mappings, revision, referenceLookup);
-    const rootProductCount = await this.loadRootProductCount(command.revisionId);
+    const rootProductCount = revision.rootProductCount;
     const exportReferences = await this.loadCutExportReferences(draftDetails);
     const panelsById = new Map(panels.map((panel) => [panel.bazisNodeId, panel] as const));
     const invalidNodeIds: number[] = [];
@@ -2635,6 +2636,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     clientName: string | null;
     designEngineerId: number | null;
     designEngineerName: string | null;
+    rootProductCount: number;
   } | null> {
     const result = await this.database.query<RevisionProjectRow>(
       `
@@ -2646,7 +2648,14 @@ export class PgBazisRepository implements BazisRepositoryPort {
              p.client_id AS project_client_id,
              c.client_name,
              bp.design_engineer_id,
-             employee.full_name AS design_engineer_name
+             employee.full_name AS design_engineer_name,
+             (
+               SELECT COUNT(*)::int
+               FROM bazis_nodes root_product
+               WHERE root_product.revision_id = r.bazis_revision_id
+                 AND root_product.parent_node_id IS NULL
+                 AND root_product.node_kind = 'product'
+             ) AS root_product_count
       FROM bazis_project_revisions r
       JOIN bazis_projects bp ON bp.bazis_project_id = r.bazis_project_id
       LEFT JOIN projects p ON p.project_id = bp.project_id
@@ -2673,6 +2682,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       clientName: row.client_name,
       designEngineerId: nullableNumber(row.design_engineer_id),
       designEngineerName: row.design_engineer_name,
+      rootProductCount: Number(row.root_product_count ?? 0),
     };
   }
 
@@ -2948,20 +2958,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
       }
     }
     return lookup;
-  }
-
-  private async loadRootProductCount(revisionId: number): Promise<number> {
-    const result = await this.database.query<{ root_product_count: number | string }>(
-      `
-      SELECT COUNT(*)::int AS root_product_count
-      FROM bazis_nodes
-      WHERE revision_id = $1
-        AND parent_node_id IS NULL
-        AND node_kind = 'product'
-      `,
-      [revisionId],
-    );
-    return Number(result.rows[0]?.root_product_count ?? 0);
   }
 
   private async loadCutExportReferences(
@@ -3449,7 +3445,11 @@ function isForeignKeyViolation(error: unknown): boolean {
 
 function buildAddToOrderSaveDto(input: {
   order: OrderDto;
-  revision: { bazisProjectName: string; revisionBazisOrderNo: string | null };
+  revision: {
+    bazisProjectName: string;
+    revisionBazisOrderNo: string | null;
+    rootProductCount: number;
+  };
   command: AddToOrderCommand;
   panelsByNodeId: ReadonlyMap<
     number,
@@ -3568,7 +3568,12 @@ function buildAddToOrderSaveDto(input: {
 
 function buildOrderCreateDto(
   command: CreateOrderFromRevisionCommand,
-  revision: { projectId: number; bazisProjectName: string; revisionBazisOrderNo: string | null },
+  revision: {
+    projectId: number;
+    bazisProjectName: string;
+    revisionBazisOrderNo: string | null;
+    rootProductCount: number;
+  },
   panels: ReadonlyArray<{
     bazisNodeId: number;
     name: string | null;

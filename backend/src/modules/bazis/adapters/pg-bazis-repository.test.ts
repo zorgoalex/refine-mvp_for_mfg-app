@@ -1305,7 +1305,7 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
     expect(normalizedSql(database.queries)).toContain("UPDATE command_idempotency_keys SET status = 'failed'");
   });
 
-  it('uses revision bazis order number when product order number is empty', async () => {
+  it('uses revision bazis order number and leaves product empty for a single-product project', async () => {
     const database = createDatabase({
       createOrderState: {
         revisionRow: {
@@ -1315,6 +1315,7 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
           bazis_project_name: 'Шкаф Nova',
           revision_bazis_order_no: '1457',
           project_client_id: 5,
+          root_product_count: 1,
         },
         panelRows: [
           {
@@ -1350,7 +1351,7 @@ describe('PgBazisRepository.createOrderFromRevision', () => {
         expect(details).toHaveLength(1);
         expect(details[0]).toMatchObject({
           basisProject: '1457',
-          basisProduct: 'Шкаф',
+          basisProduct: null,
         });
 
         await command.postPersistHook?.(
@@ -3528,7 +3529,12 @@ function createDatabase(
           options.createOrderState?.revisionRow;
         return row
           ? {
-              rows: [{ design_engineer_id: 88, design_engineer_name: 'Конструктор Тест', ...row }],
+              rows: [{
+                design_engineer_id: 88,
+                design_engineer_name: 'Конструктор Тест',
+                root_product_count: 2,
+                ...row,
+              }],
               rowCount: 1,
             }
           : { rows: [], rowCount: 0 };
@@ -4285,6 +4291,7 @@ function baseRevisionRow() {
     client_name: 'ООО Клиент',
     design_engineer_id: 88,
     design_engineer_name: 'Конструктор Тест',
+    root_product_count: 2,
   };
 }
 
