@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "Позиции деталей в Базис-раскрое",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В колонке «Позиция» наборов Базис-раскроя детали из Базис-проекта показывают поле «Обозначение», а детали из ERP-заказа — «Базис обозн. детали» при наличии Базис-проекта/заказа или номер позиции ERP.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "Реальные статусы в сводке заказа",
     services: ["ERP"],
     repositories: ["repo_erp"],

@@ -103,19 +103,17 @@ integration('PgBazisCutRepository real PostgreSQL transaction harness', () => {
     ]));
   });
 
-  it('creates snapshots with Basis project/order parity and the conditional product prefix', async () => {
+  it('creates snapshots with Basis project/order parity and the linked node designation', async () => {
     const candidates = await pool.query<{
       order_id: string;
       detail_id: string;
-      basis_product: string | null;
-      basis_designation: string | null;
+      node_designation: string | null;
       root_product_count: string;
       revision_bazis_order_no: string | null;
       product_order_no: string | null;
     }>(`
       WITH mapped AS (
-        SELECT od.order_id, od.detail_id, od.basis_product, od.basis_designation,
-               bn.revision_id,
+        SELECT od.order_id, od.detail_id, bn.designation AS node_designation, bn.revision_id,
                COUNT(*) OVER (PARTITION BY od.detail_id) AS mapping_count
         FROM order_details od
         JOIN bazis_node_order_detail_map mapping ON mapping.order_detail_id=od.detail_id
@@ -152,7 +150,7 @@ integration('PgBazisCutRepository real PostgreSQL transaction harness', () => {
         WHERE mapped.mapping_count=1
       )
       SELECT DISTINCT ON (root_product_count > 1)
-             order_id::text, detail_id::text, basis_product, basis_designation,
+             order_id::text, detail_id::text, node_designation,
              root_product_count::text, revision_bazis_order_no, product_order_no
       FROM candidates
       ORDER BY (root_product_count > 1), detail_id
@@ -179,12 +177,9 @@ integration('PgBazisCutRepository real PostgreSQL transaction harness', () => {
       const bazisOrder = rootProductCount > 1
         ? ''
         : candidate.product_order_no ?? candidate.revision_bazis_order_no ?? '';
-      const product = candidate.basis_product?.trim() ?? '';
-      const designation = candidate.basis_designation?.trim() ?? '';
-
       expect(detail.sourceBazisProjectName).toBe(bazisProject);
       expect(detail.sourceBazisOrderNo).toBe(bazisOrder);
-      expect(detail.position).toBe(`${bazisProject ? product : ''}.${designation}`);
+      expect(detail.position).toBe(candidate.node_designation?.trim() ?? '');
     }
   });
 });

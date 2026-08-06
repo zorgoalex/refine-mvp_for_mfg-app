@@ -108,6 +108,7 @@ interface SourceRow extends QueryResultRow {
   exact_root_product_count: string | number | null;
   exact_product_order_no: string | null;
   exact_product_name: string | null;
+  exact_designation: string | null;
   exact_vertical: boolean | null;
   fallback_revision_id: string | number | null;
   fallback_bazis_project_id: string | number | null;
@@ -552,6 +553,7 @@ async function loadSnapshots(client: DatabaseClient, orderId: number | null, det
             exact_document.root_product_count AS exact_root_product_count,
             exact_document.product_order_no AS exact_product_order_no,
             exact_product.product_name AS exact_product_name,
+            exact.exact_designation,
             exact.exact_vertical,
             fallback.revision_id AS fallback_revision_id,
             fallback.bazis_project_id AS fallback_bazis_project_id,
@@ -577,6 +579,7 @@ async function loadSnapshots(client: DatabaseClient, orderId: number | null, det
               MIN(br.bazis_revision_id) AS exact_revision_id,
               MIN(bp.bazis_project_id) AS exact_bazis_project_id,
               MIN(NULLIF(btrim(br.bazis_order_no), '')) AS exact_revision_bazis_order_no,
+              MIN(NULLIF(btrim(bn.designation), '')) AS exact_designation,
               BOOL_OR(COALESCE(NULLIF(bn.texture_orientation,''), bn.raw_json->>'ОриентацияТекстуры')='Вертикальная') AS exact_vertical
        FROM bazis_node_order_detail_map bm
        JOIN bazis_nodes bn ON bn.bazis_node_id=bm.node_id
@@ -761,20 +764,13 @@ async function loadSnapshots(client: DatabaseClient, orderId: number | null, det
       detailBazisProject: row.detail_bazis_project,
       detailBazisProduct: sourceProductName,
     });
-    const ordinaryErpOrder = [
-      bazisLabels.sourceBazisProjectName,
-      bazisLabels.sourceBazisOrderNo,
-      bazisLabels.sourceBazisProductName,
-      row.detail_bazis_project,
-      row.detail_bazis_product,
-      row.basis_designation,
-      row.basis_data,
-    ].every((value) => !value?.trim());
     const snapshotSource = {
       materialName: row.material_name, thicknessMm: thickness!, detailNumber: row.detail_number,
-      orderName: row.order_name, ordinaryErpOrder,
+      importedFromBazisProject: exactMatch,
       bazisProject: bazisLabels.sourceBazisProjectName,
-      basisProduct: sourceProductName, basisDesignation: row.basis_designation,
+      bazisOrder: bazisLabels.sourceBazisOrderNo,
+      bazisNodeDesignation: exactMatch ? row.exact_designation : null,
+      basisDesignation: row.basis_designation,
       basisData: row.basis_data, detailName: row.detail_name,
       heightMm: height!, widthMm: width!, quantity: quantity!, note: row.note, milling: row.milling,
       film: row.film, doweling: row.doweling, verticalTexture: exactCount === 1 && row.exact_vertical === true,

@@ -36,6 +36,11 @@ describe('PgBazisCutRepository security and event contract', () => {
     expect(repositorySource).toContain("'source_bazis_product_name', 'source_bath_cut_number'");
   });
 
+  it('loads the exact Basis-node designation for source-aware positions', () => {
+    expect(repositorySource).toMatch(/MIN\(NULLIF\(btrim\(bn\.designation\), ''\)\) AS exact_designation/i);
+    expect(repositorySource).toContain('bazisNodeDesignation: exactMatch ? row.exact_designation : null');
+  });
+
   it('uses unprefixed ERP order numbers in the list', async () => {
     const query = vi.fn(async (_sql: string, _params?: readonly unknown[]) => result([]));
     const database = { query, transaction: vi.fn() } as unknown as DatabaseService;
@@ -180,6 +185,7 @@ describe('PgBazisCutRepository security and event contract', () => {
     const selectionToken = buildBazisCutPickerSelectionToken(criteriaHash, picker);
     const audit = vi.spyOn(auditService, 'record').mockResolvedValue('audit-created');
     let pickerOutboxPayload: Record<string, unknown> | undefined;
+    let insertedSnapshotPosition: unknown;
     const tx = { query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
       if (sql.includes('INSERT INTO command_idempotency_keys')) return result([{ idempotency_key: 'picker-key-123' }], 1);
       if (sql.includes('WITH eligible AS') && sql.includes('SELECT e.* FROM eligible e')) return result([picker]);
@@ -187,6 +193,11 @@ describe('PgBazisCutRepository security and event contract', () => {
       if (sql.includes('SELECT od.detail_id FROM order_details od') && sql.includes('FOR UPDATE')) return result([{ detail_id: 40 }]);
       if (sql.includes('SELECT od.detail_id, od.order_id, o.project_id')) return result([snapshotSourceRow()]);
       if (sql.includes('INSERT INTO bazis_cut_sets')) return result([{ bazis_cut_set_id: 10 }], 1);
+      if (sql.includes('INSERT INTO bazis_cut_set_details')) {
+        const columns = /INSERT INTO bazis_cut_set_details \(([^)]+)\)/.exec(sql)?.[1].split(',') ?? [];
+        insertedSnapshotPosition = params?.[columns.indexOf('position')];
+        return result([], 1);
+      }
       if (sql.includes('SELECT * FROM bazis_cut_sets WHERE')) return result([setRow(0)]);
       if (sql.includes('SELECT d.*, COALESCE(source_order.delete_flag')) return result([detailRow()]);
       if (sql.includes('INSERT INTO outbox_events')) {
@@ -203,6 +214,7 @@ describe('PgBazisCutRepository security and event contract', () => {
     });
 
     expect(response.addedCount).toBe(1);
+    expect(insertedSnapshotPosition).toBe('7');
     expect(audit).toHaveBeenCalledWith(tx, expect.objectContaining({
       event: 'bazis_cut_set.created', entityId: 10,
       metadata: expect.objectContaining({
@@ -293,7 +305,7 @@ function snapshotSourceRow() {
     detail_name: 'Бок', height: 100, width: 50, quantity: 2, note: null, milling: null, film: null,
     doweling: false, exact_count: 0, exact_node_id: null, exact_revision_id: null,
     exact_bazis_project_id: null, exact_revision_bazis_order_no: null, exact_root_product_count: null,
-    exact_product_order_no: null, exact_product_name: null, exact_vertical: null,
+    exact_product_order_no: null, exact_product_name: null, exact_designation: null, exact_vertical: null,
     fallback_revision_id: null, fallback_bazis_project_id: null, fallback_revision_bazis_order_no: null,
     fallback_root_product_count: null, fallback_product_order_no: null, inferred_revision_id: null,
     inferred_bazis_project_id: null, inferred_revision_bazis_order_no: null,

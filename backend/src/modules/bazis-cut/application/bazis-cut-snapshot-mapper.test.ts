@@ -3,7 +3,6 @@ import { bazisCutFieldsToRow } from './bazis-xls-writer';
 import {
   buildBazisBathCutNumber,
   buildBazisCutPosition,
-  buildOrdinaryErpPosition,
   mapBazisCutSnapshotFields,
 } from './bazis-cut-snapshot-mapper';
 
@@ -54,37 +53,56 @@ const GOLDEN_1491: GoldenRow[] = [
 
 describe('buildBazisCutPosition', () => {
   it.each([
-    ['BP-7', 'Кухня', '01.00.07', 'Кухня.01.00.07'],
-    ['BP-7', '', '01.00.07', '.01.00.07'],
-    ['', 'Кухня', '01.00.07', '.01.00.07'],
-    ['', 'Кухня', '', '.'],
-    ['', '', '', '.'],
-  ])('prepends the product only for a Basis project and always keeps the designation dot',
-    (project, product, designation, expected) => {
-      expect(buildBazisCutPosition(project, product, designation)).toBe(expected);
+    ['BP-7', '', ' 01.00.07 ', '01.00.07'],
+    ['', 'BZ-100', ' 01.00.07 ', '01.00.07'],
+    ['BP-7', 'BZ-100', ' 01.00.07 ', '01.00.07'],
+    ['', '', '01.00.07', '7'],
+    ['BP-7', '', ' ', '7'],
+  ])('uses ERP Basis designation only with a Basis project or order',
+    (bazisProject, bazisOrder, basisDesignation, expected) => {
+      expect(buildBazisCutPosition({
+        detailNumber: 7,
+        importedFromBazisProject: false,
+        bazisProject,
+        bazisOrder,
+        bazisNodeDesignation: null,
+        basisDesignation,
+      })).toBe(expected);
   });
 
-  it('trims all input values', () => {
-    expect(buildBazisCutPosition(' BP-7 ', ' Кухня ', ' 01.00.07 ')).toBe('Кухня.01.00.07');
+  it('uses the Basis node designation for a Basis-project import', () => {
+    expect(buildBazisCutPosition({
+      detailNumber: 7,
+      importedFromBazisProject: true,
+      bazisProject: 'BP-7',
+      bazisOrder: '',
+      bazisNodeDesignation: ' NODE-01 ',
+      basisDesignation: 'ERP-01',
+    })).toBe('NODE-01');
   });
 
-  it('does not truncate long source fields', () => {
-    expect(buildBazisCutPosition('BP', 'И'.repeat(1500), 'Д'.repeat(1500))).toHaveLength(3001);
+  it('keeps an empty Basis node designation empty without an ERP fallback', () => {
+    expect(buildBazisCutPosition({
+      detailNumber: 7,
+      importedFromBazisProject: true,
+      bazisProject: 'BP-7',
+      bazisOrder: '',
+      bazisNodeDesignation: ' ',
+      basisDesignation: 'ERP-01',
+    })).toBe('');
   });
 
-  it('builds the ordinary ERP position from the order and detail numbers', () => {
-    expect(buildOrdinaryErpPosition(' ERP-заказ 1491 ', 7)).toBe('ERP-заказ 1491.7');
-
+  it('maps an ordinary ERP detail to its detail number', () => {
     const fields = mapBazisCutSnapshotFields({
       materialName: 'ЛДСП', thicknessMm: 16, detailNumber: 1,
-      orderName: 'ERP-заказ 1491', ordinaryErpOrder: true,
-      bazisProject: null,
-      basisProduct: null, basisDesignation: null, basisData: null, detailName: 'Бок',
+      importedFromBazisProject: false,
+      bazisProject: null, bazisOrder: null, bazisNodeDesignation: null,
+      basisDesignation: null, basisData: null, detailName: 'Бок',
       heightMm: 100, widthMm: 50, quantity: 1, note: null, milling: null, film: null,
       doweling: false, verticalTexture: false,
     });
 
-    expect(fields?.position).toBe('ERP-заказ 1491.1');
+    expect(fields?.position).toBe('1');
   });
 });
 
@@ -94,9 +112,9 @@ describe('1491 snapshot mapper golden', () => {
       _length, _width, quantity, milling, route, film], index) => {
       const fields = mapBazisCutSnapshotFields({
         materialName: 'МДФ 16 мм', thicknessMm: 16, detailNumber: index + 1,
-        orderName: '1491', ordinaryErpOrder: false,
-        bazisProject: '',
-        basisProduct: 'Кухня', basisDesignation: position, basisData: null, detailName: name,
+        importedFromBazisProject: true,
+        bazisProject: 'BP-1491', bazisOrder: '', bazisNodeDesignation: position,
+        basisDesignation: `ERP-${position}`, basisData: null, detailName: name,
         heightMm: sourceLength, widthMm: sourceWidth,
         quantity, note: null, milling, film, doweling: route === 'Присадка:', verticalTexture,
       });
@@ -105,7 +123,7 @@ describe('1491 snapshot mapper golden', () => {
     });
     const expected = GOLDEN_1491.map(([position, name, _sourceLength, _sourceWidth, _vertical,
       length, width, quantity, milling, route, film]) => {
-      const computedPosition = `.${position}`;
+      const computedPosition = position;
       return [
       'Да', 'Площадной', 'МДФ 16 мм', '', 16, '', '', computedPosition, computedPosition, name, length, width,
       Math.round(length * 10) / 10, Math.round(width * 10) / 10, quantity, 'Не задана', '',
@@ -119,7 +137,7 @@ describe('1491 snapshot mapper golden', () => {
     expect(rows.reduce((sum, row) => sum + Number(row[14]), 0)).toBe(30);
     expect(GOLDEN_1491.filter((row) => row[4])).toHaveLength(26);
     expect(rows.filter((row) => Number(row[10]) < Number(row[11]))).toHaveLength(9);
-    expect(rows[0][7]).toBe('.01.00.07');
-    expect(rows[0][8]).toBe('.01.00.07');
+    expect(rows[0][7]).toBe('01.00.07');
+    expect(rows[0][8]).toBe('01.00.07');
   });
 });
