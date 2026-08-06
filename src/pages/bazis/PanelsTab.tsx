@@ -38,6 +38,7 @@ import {
   panelFilterPredicate,
   PANEL_FILTER_NONE,
   resolveBazisDocumentColumns,
+  resolveBazisProductDisplay,
   summarizeVisibleRows,
   type PanelFilterField,
   type PanelFilterOption,
@@ -262,7 +263,10 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
             filmName: normalizeText(node.filmName),
             paintName: normalizeText(node.paintName),
             pathTitle: nodePathTitle(ancestors),
-            productName: normalizeText(rootAncestor?.name),
+            productName: resolveBazisProductDisplay({
+              rootProductCount,
+              productName: rootAncestor?.name,
+            }).panelProductName,
             bazisProjectNo: documentColumns.bazisProjectNo,
             productOrderNo: documentColumns.productOrderNo,
           };

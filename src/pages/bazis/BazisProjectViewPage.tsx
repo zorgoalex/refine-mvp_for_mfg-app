@@ -23,6 +23,7 @@ import { MaterialsSummaryTab } from './MaterialsSummaryTab';
 import { NodeCard } from './NodeCard';
 import { OperationsTab } from './OperationsTab';
 import { PanelsTab } from './PanelsTab';
+import { resolveBazisProductDisplay } from './panelGrouping';
 import { NodeSearch } from './NodeSearch';
 import { RevisionOrdersTab } from './RevisionOrdersTab';
 import { buildSubtreeSummaries, useRevisionData } from './useRevisionData';
@@ -163,6 +164,16 @@ export const BazisProjectViewPage: React.FC = () => {
   }, [selectedRevisionId]);
 
   const revisionData = useRevisionData(selectedRevisionId ?? 0);
+  const rootProductCount = useMemo(
+    () => revisionData.nodes.filter(
+      (node) => node.parentNodeId === null && node.nodeKind === 'product',
+    ).length,
+    [revisionData.nodes],
+  );
+  const projectSummaryProductName = resolveBazisProductDisplay({
+    rootProductCount,
+    productName: selectedRevision?.productName,
+  }).projectSummaryProductName;
 
   // «Показать в дереве» из любых вкладок: переключаем вкладку и, когда
   // ViewerTree смонтирован (ref может появиться на следующих кадрах),
@@ -514,6 +525,9 @@ export const BazisProjectViewPage: React.FC = () => {
           column={{ xs: 1, sm: 1, md: 2, lg: 3, xl: 3, xxl: 3 }}
           style={{ marginBottom: 16 }}
         >
+          {projectSummaryProductName ? (
+            <Descriptions.Item label="Изделие">{projectSummaryProductName}</Descriptions.Item>
+          ) : null}
           <Descriptions.Item label="Конструктор">
             {canManage ? (
               <Space direction="vertical" size={2} style={{ width: 'min(420px, 100%)' }}>

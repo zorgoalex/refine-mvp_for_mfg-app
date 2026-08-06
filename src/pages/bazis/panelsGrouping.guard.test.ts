@@ -56,6 +56,12 @@ describe('bazis panels grouping UI guards', () => {
     expect(panelsTab).toContain('bazisProjectNo');
   });
 
+  it('одиночное Изделие переносится из колонки панелей в верхнюю сводку', () => {
+    expect(panelsTab).toContain('resolveBazisProductDisplay');
+    expect(viewPage).toContain('projectSummaryProductName');
+    expect(viewPage).toContain('<Descriptions.Item label="Изделие">');
+  });
+
   it('групповая строка показывает порядковый номер позиции, дети — нет', () => {
     expect(panelsTab).toContain('groupSeq');
   });

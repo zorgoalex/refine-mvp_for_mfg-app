@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "Базис-проекты: одно изделие в сводке",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Если XML содержит одно изделие, его название показывается отдельным полем в сводке Базис-проекта, а колонка «Изделие» у панелей остаётся пустой; для XML с несколькими изделиями названия по-прежнему различают панели.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "Номера раскроев в списке заказов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
