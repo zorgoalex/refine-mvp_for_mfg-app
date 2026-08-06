@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 describe('export templates editor layout', () => {
-  it('keeps the template list narrow and each export column on one row', () => {
+  it('keeps numbered template rows compact and wraps long formulas without horizontal scrolling', () => {
     const component = fs.readFileSync(path.resolve(__dirname, 'ExportTemplatesConfigTab.tsx'), 'utf8');
     const styles = fs.readFileSync(path.resolve(__dirname, 'ExportTemplatesConfigTab.css'), 'utf8');
 
@@ -11,9 +11,16 @@ describe('export templates editor layout', () => {
     expect(component).toContain('className="export-templates-editor-pane"');
     expect(styles).toContain('flex: 0 0 14.583333%');
     expect(styles).toContain('flex: 0 0 85.416667%');
+    expect(component).toContain('className="export-template-columns"');
     expect(component).toContain('className="export-template-column-row"');
-    expect(styles).toContain('grid-template-columns: 28px 220px minmax(420px, 1fr) auto');
-    expect(styles).toContain('flex-wrap: nowrap');
-    expect(styles).toContain('overflow-x: auto');
+    expect(component).toContain('className="export-template-column-index"');
+    expect(styles).toContain('--export-template-row-control-height: 28px');
+    expect(styles).toContain('row-gap: 2px');
+    expect(styles).toMatch(/\.export-template-column-row\s*\{[\s\S]*flex-wrap: wrap/);
+    expect(styles).toMatch(/\.export-template-column-expression\s*\{[\s\S]*min-width: 0/);
+    expect(styles).toMatch(/\.export-expression-editor-row[\s\S]*flex-wrap: wrap/);
+    expect(styles).not.toContain('overflow-x: auto');
+    expect(styles).not.toContain('width: max-content');
+    expect(styles).not.toContain('flex-wrap: nowrap');
   });
 });

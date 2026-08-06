@@ -121,7 +121,7 @@ export const ExportTemplatesConfigTab: React.FC = () => {
               onChange={(event) => setDraft({ ...draft, isActive: event.target.checked })}>Активен</Checkbox></Col>
           </Row>
         </Form>
-        <Space direction="vertical" size={12} style={{ width: '100%', marginTop: 20 }}>
+        <Space className="export-template-columns" direction="vertical" size={2} style={{ width: '100%' }}>
           <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}><Title level={5} style={{ margin: 0 }}>Колонки <Text type="secondary">({draft.columns.length})</Text></Title>
             <Button icon={<PlusOutlined />} disabled={!canManage || draft.columns.length >= 100} style={{ minHeight: 40 }}
               onClick={() => setDraft({ ...draft, columns: [...draft.columns, newColumn(draft.columns.length, catalog)] })}>Добавить колонку</Button></Space>
@@ -131,11 +131,11 @@ export const ExportTemplatesConfigTab: React.FC = () => {
               onChange={(event) => updateColumn(index, { ...column, header: event.target.value }, draft, setDraft)} />
             <div className="export-template-column-expression"><ExportExpressionEditor value={column.expression} catalog={catalog} disabled={!canManage}
               onChange={(expression) => updateColumn(index, { ...column, expression }, draft, setDraft)} /></div>
-            <Space className="export-template-column-actions" size={4}><Button aria-label="Поднять колонку" icon={<ArrowUpOutlined />} disabled={!canManage || index === 0} style={{ minWidth: 40, minHeight: 40 }}
+            <Space className="export-template-column-actions" size={2}><Button size="small" aria-label="Поднять колонку" icon={<ArrowUpOutlined />} disabled={!canManage || index === 0}
               onClick={() => setDraft({ ...draft, columns: moveColumn(draft.columns, index, index - 1) })} />
-              <Button aria-label="Опустить колонку" icon={<ArrowDownOutlined />} disabled={!canManage || index === draft.columns.length - 1} style={{ minWidth: 40, minHeight: 40 }}
+              <Button size="small" aria-label="Опустить колонку" icon={<ArrowDownOutlined />} disabled={!canManage || index === draft.columns.length - 1}
                 onClick={() => setDraft({ ...draft, columns: moveColumn(draft.columns, index, index + 1) })} />
-              <Button aria-label="Удалить колонку" danger icon={<DeleteOutlined />} disabled={!canManage || draft.columns.length === 1} style={{ minWidth: 40, minHeight: 40 }}
+              <Button size="small" aria-label="Удалить колонку" danger icon={<DeleteOutlined />} disabled={!canManage || draft.columns.length === 1}
                 onClick={() => setDraft({ ...draft, columns: draft.columns.filter((_, itemIndex) => itemIndex !== index) })} /></Space>
           </div>)}
           <Space wrap><Button onClick={() => void runPreview()} style={{ minHeight: 40 }}>Проверить и показать пример</Button>

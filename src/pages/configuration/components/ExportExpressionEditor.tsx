@@ -100,16 +100,16 @@ const PartsEditor: React.FC<{
     {expression.parts.map((part, index) => <div key={index} className="export-expression-part">
       <ExportExpressionEditor value={part} catalog={catalog} disabled={disabled} depth={depth + 1}
         onChange={(next) => onChange({ ...expression, parts: expression.parts.map((item, itemIndex) => itemIndex === index ? next : item) })} />
-      <Space className="export-expression-part-actions" size={4}>
-        <Button aria-label="Поднять часть" icon={<ArrowUpOutlined />} disabled={disabled || index === 0}
-          style={{ minWidth: 40, minHeight: 40 }} onClick={() => onChange({ ...expression, parts: move(expression.parts, index, index - 1) })} />
-        <Button aria-label="Опустить часть" icon={<ArrowDownOutlined />} disabled={disabled || index === expression.parts.length - 1}
-          style={{ minWidth: 40, minHeight: 40 }} onClick={() => onChange({ ...expression, parts: move(expression.parts, index, index + 1) })} />
-        <Button aria-label="Удалить часть" danger icon={<DeleteOutlined />} disabled={disabled || expression.parts.length <= 2}
-          style={{ minWidth: 40, minHeight: 40 }} onClick={() => onChange({ ...expression, parts: expression.parts.filter((_, itemIndex) => itemIndex !== index) })} />
+      <Space className="export-expression-part-actions" size={2}>
+        <Button size="small" aria-label="Поднять часть" icon={<ArrowUpOutlined />} disabled={disabled || index === 0}
+          onClick={() => onChange({ ...expression, parts: move(expression.parts, index, index - 1) })} />
+        <Button size="small" aria-label="Опустить часть" icon={<ArrowDownOutlined />} disabled={disabled || index === expression.parts.length - 1}
+          onClick={() => onChange({ ...expression, parts: move(expression.parts, index, index + 1) })} />
+        <Button size="small" aria-label="Удалить часть" danger icon={<DeleteOutlined />} disabled={disabled || expression.parts.length <= 2}
+          onClick={() => onChange({ ...expression, parts: expression.parts.filter((_, itemIndex) => itemIndex !== index) })} />
       </Space>
     </div>)}
-    <Button icon={<PlusOutlined />} disabled={disabled || expression.parts.length >= 20} style={{ minHeight: 40 }}
+    <Button size="small" icon={<PlusOutlined />} disabled={disabled || expression.parts.length >= 20}
       onClick={() => onChange({ ...expression, parts: [...expression.parts, { type: 'field', field: firstField }] })}>Добавить часть</Button>
   </div>;
 };
@@ -123,7 +123,7 @@ const ConstantEditor: React.FC<{ value: ExportScalar; disabled: boolean; onChang
     ]} onChange={(next) => onChange(next === 'string' ? '' : next === 'number' ? 0 : next === 'boolean' ? false : null)} />
     {kind === 'string' && <Input value={String(value ?? '')} disabled={disabled} maxLength={10_000} onChange={(event) => onChange(event.target.value)} />}
     {kind === 'number' && <InputNumber value={Number(value)} disabled={disabled} style={{ width: '100%' }} onChange={(next) => onChange(next ?? 0)} />}
-    {kind === 'boolean' && <div style={{ flex: 1, minHeight: 40, display: 'flex', alignItems: 'center', padding: '0 12px', border: '1px solid #d9d9d9' }}>
+    {kind === 'boolean' && <div className="export-expression-boolean">
       <Switch checked={Boolean(value)} disabled={disabled} checkedChildren="Да" unCheckedChildren="Нет" onChange={onChange} />
     </div>}
   </Space.Compact>;

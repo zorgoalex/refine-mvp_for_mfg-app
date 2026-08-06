@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-06",
+    title: "Компактные строки шаблонов экспорта",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Элементы строк во вкладке «Шаблоны экспорта» стали на 30% ниже и расположены почти без вертикальных промежутков; длинные формулы переносятся внутри своей нумерованной строки и больше не создают горизонтальную прокрутку.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-06",
     title: "XML-номер Базис-проекта в деталях заказа",
     services: ["ERP"],
     repositories: ["repo_erp"],
