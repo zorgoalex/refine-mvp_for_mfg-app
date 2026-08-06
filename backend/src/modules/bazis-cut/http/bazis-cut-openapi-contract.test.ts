@@ -25,6 +25,8 @@ describe('Bazis-cut OpenAPI contract', () => {
       'BazisCutSetId:', 'BazisCutSetDetailId:', "#/components/parameters/IdempotencyKey",
       'CreateBazisCutSetRequest', 'RenameBazisCutSetRequest', 'AddBazisCutDetailsRequest',
       'UpdateBazisCutDetailRequest', 'DeleteBazisCutDetailRequest', 'BazisCutMutationResult',
+      'BazisCutPickerCriteria', 'BazisCutPickerSearchResponse', 'CreateBazisCutSetFromPickerRequest',
+      'BazisCutOrderMemberships',
       'application/vnd.ms-excel', 'format: binary',
     ]) expect(contract).toContain(token);
     expect(contract.match(/name: setId/g)?.length).toBeGreaterThanOrEqual(1);
@@ -36,11 +38,11 @@ describe('Bazis-cut OpenAPI contract', () => {
   });
 
   it('keeps matching Swagger metadata on every command route', () => {
-    expect(controller.match(/@ApiHeader\(commandHeader\)/g)).toHaveLength(5);
+    expect(controller.match(/@ApiHeader\(commandHeader\)/g)).toHaveLength(6);
     expect(controller.match(/@ApiParam\(idParameter\)/g)).toHaveLength(6);
     expect(controller).toContain("@ApiProduces('application/vnd.ms-excel')");
     expect(controller).toContain("description: 'Strict full replacement: all 33 editable Basis fields plus expectedVersion'");
-    expect(controller.match(/@ApiQuery\(/g)).toHaveLength(4);
+    expect(controller.match(/@ApiQuery\(/g)).toHaveLength(7);
     expect(controller).toContain('additionalProperties: false');
     expect(controller).toContain("sourceBathCutNumber: { type: 'string' }");
   });
@@ -76,6 +78,17 @@ describe('Bazis-cut OpenAPI contract', () => {
       expect(position).not.toHaveProperty('minLength');
       expect(position).not.toHaveProperty('maxLength');
       expect(update?.responses?.['200']?.content?.['application/json']?.schema).toBeDefined();
+
+      const picker = document.paths['/bazis-cut-sets/picker/facets']?.get;
+      expect(picker?.parameters?.map((parameter) => 'name' in parameter ? parameter.name : '')).toEqual(
+        expect.arrayContaining(['dateFrom', 'dateTo']),
+      );
+      const fromPicker = document.paths['/bazis-cut-sets/from-picker']?.post;
+      const fromPickerSchema = fromPicker?.requestBody && 'content' in fromPicker.requestBody
+        ? fromPicker.requestBody.content['application/json']?.schema
+        : undefined;
+      expect(fromPickerSchema && 'required' in fromPickerSchema ? fromPickerSchema.required : [])
+        .toEqual(['criteria', 'criteriaHash', 'details']);
     } finally {
       await app.close();
     }

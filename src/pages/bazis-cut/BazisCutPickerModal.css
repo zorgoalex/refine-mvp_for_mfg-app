@@ -1,0 +1,53 @@
+.bazis-cut-picker-modal .ant-modal-body {
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+}
+
+.bazis-cut-picker-modal .ant-btn,
+.bazis-cut-picker-modal .ant-picker {
+  min-height: 40px;
+}
+
+.bazis-cut-picker-modal .ant-select-selector {
+  min-height: 40px !important;
+  align-items: center;
+}
+
+.bazis-cut-picker-period {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(280px, 420px) 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.bazis-cut-picker-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.bazis-cut-picker-number {
+  font-variant-numeric: tabular-nums;
+}
+
+.bazis-cut-picker-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface-muted);
+}
+
+@media (max-width: 768px) {
+  .bazis-cut-picker-period {
+    grid-template-columns: 1fr;
+  }
+
+  .bazis-cut-picker-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

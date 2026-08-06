@@ -4,6 +4,7 @@ import type {
   ExportFieldDefinition,
   ExportScalar,
 } from './export-template.types';
+import { buildBazisCutQrCode } from '../../bazis-cut/application/bazis-cut-identity';
 
 const DETAIL_FIELDS: ExportFieldDefinition[] = [
   ['cutEnabled', 'Кроить', 'boolean'], ['materialType', 'Тип материала', 'string'],
@@ -72,8 +73,8 @@ export function resolveExportField(
     case 'legacy.cutEnabled': return detail.cutEnabled ? 'Да' : 'Нет';
     case 'legacy.order': return order;
     case 'legacy.product': return detail.sourceBazisProductName ?? '';
-    case 'legacy.position': return `${order}${detail.position.trim()}`;
-    case 'legacy.qr': return `${detail.sourceBazisProjectName?.trim() ?? ''}${detail.position.trim()}`;
+    case 'legacy.position': return detail.position.trim();
+    case 'legacy.qr': return buildBazisCutQrCode(detail);
     case 'row.number': return context.rowNumber;
     case 'export.date': return context.exportedAt.toISOString().slice(0, 10);
     case 'export.datetime': return context.exportedAt.toISOString();

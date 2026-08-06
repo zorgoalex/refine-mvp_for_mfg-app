@@ -1,13 +1,8 @@
-.export-template-column-row {
-  display: grid;
-  grid-template-columns: 28px 220px minmax(420px, 1fr) auto;
-  align-items: start;
-  gap: 8px;
-  padding: 12px;
-  overflow-x: auto;
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
-  background: #fff;
+.export-templates-editor-pane.ant-col,
+.export-templates-editor-pane .ant-card,
+.export-templates-editor-pane .ant-card-body {
+  min-width: 0;
+  max-width: 100%;
 }
 
 @media (min-width: 1200px) {
@@ -22,88 +17,210 @@
   }
 }
 
+.export-template-columns {
+  --export-template-row-control-height: 28px;
+  width: 100%;
+  min-width: 0;
+  row-gap: 2px;
+  margin-top: 8px;
+}
+
+.export-template-columns > .ant-space-item {
+  width: 100%;
+  min-width: 0;
+}
+
+.export-template-column-row {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 4px 4px 32px;
+  border: 1px solid #f0f0f0;
+  border-radius: 4px;
+  background: #fff;
+}
+
 .export-template-column-index {
-  padding-top: 9px;
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-start: 4px;
+  width: 24px;
+  line-height: var(--export-template-row-control-height);
   text-align: center;
 }
 
 .export-template-column-header {
-  width: 220px;
+  flex: 0 1 220px;
+  width: auto;
+  min-width: 140px;
+  max-width: 220px;
 }
 
 .export-template-column-expression {
-  min-width: 420px;
-  overflow-x: auto;
-  scrollbar-gutter: stable;
+  flex: 1 1 420px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .export-template-column-actions,
-.export-expression-editor-row,
-.export-expression-editor-compound,
-.export-expression-parts,
-.export-expression-part,
 .export-expression-part-actions {
   display: flex;
-  flex-wrap: nowrap;
   align-items: flex-start;
-  gap: 8px;
+  gap: 2px;
 }
 
-.export-template-column-actions,
-.export-expression-part-actions {
-  gap: 4px;
+.export-template-column-actions {
+  flex: 0 0 auto;
 }
 
 .export-expression-editor {
-  display: inline-flex;
-  width: max-content;
-  padding: 8px;
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 4px;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 4px;
 }
 
-.export-template-column-expression > .export-expression-editor {
-  min-width: 100%;
+.export-expression-editor-row,
+.export-expression-editor-compound,
+.export-expression-parts,
+.export-expression-part {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.export-expression-editor-row {
+  align-items: center;
+}
+
+.export-expression-editor-compound,
+.export-expression-parts {
+  flex: 1 1 320px;
+}
+
+.export-expression-editor-compound > .export-expression-editor {
+  flex: 1 1 260px;
 }
 
 .export-expression-editor-type {
-  width: 200px;
-  flex: 0 0 200px;
+  flex: 1 1 150px;
+  width: auto;
+  min-width: min(150px, 100%);
+  max-width: 200px;
 }
 
 .export-expression-editor-value {
-  width: 300px;
-  flex: 0 0 300px;
+  flex: 2 1 220px;
+  width: auto;
+  min-width: min(170px, 100%);
+  max-width: 100%;
 }
 
 .export-expression-editor-function,
 .export-expression-editor-operator {
-  width: 190px;
-  flex: 0 0 190px;
+  flex: 1 1 150px;
+  width: auto;
+  min-width: min(130px, 100%);
+  max-width: 190px;
 }
 
 .export-expression-editor-number-function,
 .export-expression-constant {
-  width: 300px;
-  flex: 0 0 300px;
+  flex: 2 1 250px;
+  width: auto;
+  min-width: min(220px, 100%);
+  max-width: 100%;
 }
 
 .export-expression-editor-label {
-  padding-top: 9px;
-  white-space: nowrap;
+  line-height: var(--export-template-row-control-height);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .export-expression-part {
-  padding-left: 8px;
-  border-left: 1px solid #d9d9d9;
+  flex: 1 1 340px;
+  padding-inline-start: 4px;
+  border-inline-start: 1px solid #d9d9d9;
 }
 
-@media (max-width: 1199px) {
-  .export-template-column-row {
-    grid-template-columns: 28px 200px minmax(420px, 1fr) auto;
+.export-expression-part > .export-expression-editor {
+  flex: 1 1 250px;
+}
+
+.export-expression-part-actions {
+  flex: 0 0 auto;
+}
+
+.export-expression-boolean {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  height: var(--export-template-row-control-height);
+  padding-inline: 8px;
+  border: 1px solid #d9d9d9;
+}
+
+.export-template-column-row :where(.ant-input, .ant-input-number, .ant-btn),
+.export-template-column-row .ant-select-single,
+.export-template-column-row .ant-select-single .ant-select-selector {
+  min-height: var(--export-template-row-control-height);
+  height: var(--export-template-row-control-height);
+}
+
+.export-template-column-row .ant-input {
+  padding-block: 2px;
+}
+
+.export-template-column-row .ant-input-number-input {
+  height: calc(var(--export-template-row-control-height) - 2px);
+}
+
+.export-template-column-row .ant-select-single .ant-select-selector {
+  padding-inline: 7px;
+}
+
+.export-template-column-row .ant-select-single .ant-select-selection-item,
+.export-template-column-row .ant-select-single .ant-select-selection-placeholder {
+  line-height: calc(var(--export-template-row-control-height) - 2px);
+}
+
+.export-template-column-row .ant-btn {
+  padding-inline: 7px;
+}
+
+.export-template-column-row .ant-btn-icon-only {
+  width: var(--export-template-row-control-height);
+  min-width: var(--export-template-row-control-height);
+  padding-inline: 0;
+}
+
+@media (max-width: 720px) {
+  .export-template-column-header {
+    flex: 1 1 160px;
+    max-width: none;
   }
 
-  .export-template-column-header {
-    width: 200px;
+  .export-template-column-actions {
+    order: 2;
+  }
+
+  .export-template-column-expression {
+    order: 3;
+    flex-basis: 100%;
   }
 }

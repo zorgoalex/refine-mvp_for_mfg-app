@@ -38,6 +38,7 @@ export interface EvolutionHeaderUtilitiesProps {
   leadingClassName?: string;
   actionsClassName?: string;
   operational?: boolean;
+  tablet?: boolean;
 }
 
 export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> = ({
@@ -46,6 +47,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
   leadingClassName = '',
   actionsClassName = '',
   operational = false,
+  tablet = false,
 }) => {
   const { data: identity } = useGetIdentity<UserIdentity>();
   const { mutate: logout } = useLogout();
@@ -73,16 +75,18 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
             type="text"
           />
         ) : null}
-        <Button
-          aria-label="Открыть быстрый переход"
-          className="evolution-header__search"
-          icon={<SearchOutlined />}
-          onClick={() => query.toggle()}
-          type="default"
-        >
-          <span>{searchLabel}</span>
-          <kbd>Ctrl K</kbd>
-        </Button>
+        {!tablet ? (
+          <Button
+            aria-label="Открыть быстрый переход"
+            className="evolution-header__search"
+            icon={<SearchOutlined />}
+            onClick={() => query.toggle()}
+            type="default"
+          >
+            <span>{searchLabel}</span>
+            <kbd>Ctrl K</kbd>
+          </Button>
+        ) : null}
       </div>
 
       <Space align="center" className={actionsClass} size={8}>
@@ -92,7 +96,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
             Все изменения сохранены
           </span>
         ) : null}
-        {identity && canScan && !operational ? (
+        {identity && canScan && !operational && !tablet ? (
           <Tooltip title="Сканер бирок">
             <Button
               aria-label="Сканер бирок"
@@ -102,8 +106,8 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
             />
           </Tooltip>
         ) : null}
-        {identity ? <NotificationBell /> : null}
-        {identity && !operational ? (
+        {identity && !tablet ? <NotificationBell /> : null}
+        {identity && !operational && !tablet ? (
           <Tooltip title={mode === 'dark' ? 'Темная тема' : 'Светлая тема'}>
             <Switch
               aria-label="Переключить тему"
@@ -114,7 +118,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
             />
           </Tooltip>
         ) : null}
-        {identity ? (
+        {identity && !tablet ? (
           <Dropdown
             menu={{
               items: [

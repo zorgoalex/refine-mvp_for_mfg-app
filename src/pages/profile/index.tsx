@@ -1,5 +1,6 @@
 import React from "react";
-import { Card, Checkbox, Descriptions, Radio, Space, Typography } from "antd";
+import { Button, Card, Checkbox, Descriptions, Radio, Space, Typography, notification } from "antd";
+import { TabletOutlined } from "@ant-design/icons";
 import { useGetIdentity } from "@refinedev/core";
 import type { UserIdentity } from "../../types/auth";
 import { useAppTheme } from "../../theme/ThemeProvider";
@@ -7,6 +8,7 @@ import { featureFlags } from "../../config/featureFlags";
 import { WorkosLinkCard } from "./WorkosLinkCard";
 import { useUiVariantPreference } from "../../ui-variant/useUiVariantPreference";
 import { isModernUiVariant, type UiVariant } from "../../ui-variant/uiVariant";
+import { hasAnyDirty, useTabStore } from "../../stores/tabStore";
 import { TelegramNotificationsCard } from "./TelegramNotificationsCard";
 import {
   OperationalPageHeader,
@@ -33,7 +35,8 @@ const uiVariantOptions: Array<{ label: string; value: UiVariant }> = [
 export const ProfilePage: React.FC = () => {
   const isOperational = useOperationalUi();
   const { data: identity } = useGetIdentity<UserIdentity>();
-  const { mode, setMode, uiSize, setUiSize } = useAppTheme();
+  const { mode, setMode, uiSize, setUiSize, tabletMode, setTabletMode } = useAppTheme();
+  const [isTabletModeSaving, setIsTabletModeSaving] = React.useState(false);
   const {
     variant,
     modernUiAvailable,
@@ -41,6 +44,27 @@ export const ProfilePage: React.FC = () => {
     setVariant,
   } = useUiVariantPreference();
   const roleName = identity?.role ? roleNames[identity.role] ?? identity.role : "—";
+  const toggleTabletMode = async () => {
+    if (hasAnyDirty(useTabStore.getState().tabs)) {
+      notification.warning({
+        message: "Есть несохранённые изменения",
+        description: "Сохраните или отмените изменения во вкладках, затем переключите вид.",
+      });
+      return;
+    }
+
+    setIsTabletModeSaving(true);
+    try {
+      await setTabletMode(!tabletMode);
+    } catch {
+      notification.error({
+        message: "Не удалось переключить планшетный вид",
+        description: "Настройка не изменена. Попробуйте ещё раз.",
+      });
+    } finally {
+      setIsTabletModeSaving(false);
+    }
+  };
 
   return (
     <Space
@@ -85,6 +109,24 @@ export const ProfilePage: React.FC = () => {
           >
             Компактный интерфейс (уменьшенные элементы)
           </Checkbox>
+          <Space direction="vertical" size={4}>
+            <Button
+              aria-label={tabletMode ? "Отключить планшетный вид" : "Включить планшетный вид"}
+              aria-pressed={tabletMode}
+              icon={<TabletOutlined />}
+              loading={isTabletModeSaving}
+              onClick={() => void toggleTabletMode()}
+              style={{ minHeight: 44 }}
+              type={tabletMode ? "primary" : "default"}
+            >
+              Планшетный вид
+            </Button>
+            <Typography.Text type="secondary">
+              {tabletMode
+                ? "Принудительно включён для вашей учётной записи на любых устройствах и экранах."
+                : "Автоматически определяется по устройству. Включите, чтобы всегда использовать планшетный интерфейс."}
+            </Typography.Text>
+          </Space>
           <Space direction="vertical" size={4}>
             <Typography.Text strong>Дизайн интерфейса</Typography.Text>
             <Radio.Group

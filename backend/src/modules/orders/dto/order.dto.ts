@@ -33,6 +33,19 @@ export interface OrderResponseDto {
   order: OrderDto;
 }
 
+export interface OrderRefreshMetadataDto {
+  baseVersion: number;
+  version: number;
+  updatedDowelingDetailIds: number[];
+  auditId: string | null;
+  refreshedAt: string;
+  requestId: string;
+}
+
+export interface OrderRefreshResponseDto extends OrderRefreshMetadataDto {
+  order: OrderDto;
+}
+
 export interface DeleteOrderResponseDto {
   success: true;
   orderId: number;
@@ -115,6 +128,9 @@ export interface OrderListItemDto {
   materialIds: number[];
   materialNames: string[];
   basisProjects: string[];
+  bazisCutNumbers: string[];
+  cutNumbers: string[];
+  bathCutNumbers: string[];
   filmNames: string[];
   /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
   sheetMaterialTypeIds: number[];
@@ -141,7 +157,10 @@ export interface OrderListItemDto {
 export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   orderId: number;
   clientName: string | null;
+  orderStatusName: string;
   paymentStatusId: number;
+  paymentStatusName: string;
+  productionStatusName: string | null;
   totalAmount: number;
   finalAmount: number;
   paidAmount: number;
@@ -166,15 +185,24 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
 export type OrderDetailDto = CalculatedOrderDetailDto & {
   id: number;
   orderId: number;
+  bazisProjectId: number | null;
   // SP3: server-resolved COALESCE(sheet,material) display name (no sheet_materials.view needed).
   materialName?: string | null;
   cutJob?: OrderDetailCutJobRefDto | null;
   bathCutJob?: OrderDetailCutJobRefDto | null;
   bazisCutSets: OrderDetailBazisCutSetRefDto[];
+  bazisProjects: OrderDetailBazisProjectRefDto[];
 };
 
 export interface OrderDetailBazisCutSetRefDto {
   bazisCutSetId: number;
+  name: string;
+}
+
+export interface OrderDetailBazisProjectRefDto {
+  bazisProjectId: number;
+  bazisRevisionId: number;
+  revisionNo: number;
   name: string;
 }
 

@@ -49,11 +49,13 @@ describe('show.tsx detail grouping integration', () => {
     expect(src).toContain('detail-group-summary');
   });
   it('exports active detail grouping as blank rows between groups without summary rows', () => {
-    expect(src).toContain('const excelDetailRows = groupingActive && grouping.state.field');
+    expect(src).toContain('const buildOrderExportDetailRows = (): OrderExcelDetailRow[] =>');
+    expect(src).toContain('return groupingActive && grouping.state.field');
     expect(src).toContain('buildGroupedRows(details, grouping.state.field, { groupLabelOf })');
     expect(src).toContain("if (row.kind === 'separator') return [{ kind: 'blank' as const }]");
     expect(src).toContain("if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)]");
     expect(src).toContain('return [];');
+    expect(src).toContain('const excelDetailRows = buildOrderExportDetailRows()');
     expect(src).toContain('details: excelDetailRows');
   });
 });

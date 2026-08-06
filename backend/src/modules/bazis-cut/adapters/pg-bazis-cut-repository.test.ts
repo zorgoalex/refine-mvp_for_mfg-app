@@ -8,7 +8,14 @@ import {
   buildBazisCutSetName,
   PgBazisCutRepository,
   resolveBazisDetailLabels,
+  resolveErpOrderBazisLabels,
 } from './pg-bazis-cut-repository';
+import {
+  buildBazisCutPickerSelectionToken,
+  hashBazisCutPickerCriteria,
+  type PickerRow,
+} from './pg-bazis-cut-picker';
+import type { BazisCutPickerCriteria } from '../dto/bazis-cut.dto';
 
 const user: CurrentUser = {
   id: '7', username: 'manager', role: 'manager', roleId: 3,
@@ -23,11 +30,18 @@ describe('PgBazisCutRepository security and event contract', () => {
     expect(buildBazisCutSetName(42)).toBe('БР-42');
   });
 
-  it('snapshots the Basis root product and latest ready vacuum result number', () => {
-    expect(repositorySource).toMatch(/WITH RECURSIVE ancestry[\s\S]*ancestry\.node_kind='product'/);
+  it('snapshots the exact Basis orientation and latest ready vacuum result number', () => {
+    expect(repositorySource).toMatch(/BOOL_OR\([\s\S]*ОриентацияТекстуры[\s\S]*AS exact_vertical/i);
     expect(repositorySource).toMatch(/cj\.last_calc_params->>'layout_mode'[\s\S]*='vacuum_table'/);
     expect(repositorySource).toContain('sourceBathCutNumber: buildBazisBathCutNumber(');
     expect(repositorySource).toContain("'source_bazis_product_name', 'source_bath_cut_number'");
+  });
+
+  it('keeps exact Basis provenance but maps cut-set identity from ERP detail fields', () => {
+    expect(repositorySource).toContain('exact.exact_node_id');
+    expect(repositorySource).toContain('const bazisLabels = resolveErpOrderBazisLabels({');
+    expect(repositorySource).toContain('importedFromBazisProject: false');
+    expect(repositorySource).toContain('bazisNodeDesignation: null');
   });
 
   it('uses unprefixed ERP order numbers in the list', async () => {
@@ -67,6 +81,17 @@ describe('PgBazisCutRepository security and event contract', () => {
       detailBazisProduct: ' Кухня ',
     })).toEqual({
       sourceBazisProjectName: 'BP-7',
+      sourceBazisOrderNo: '',
+      sourceBazisProductName: 'Кухня',
+    });
+  });
+
+  it('maps ERP detail Basis fields without deriving labels from linked XML topology', () => {
+    expect(resolveErpOrderBazisLabels({
+      detailBazisProject: ' 1319 ',
+      detailBazisProduct: ' Кухня ',
+    })).toEqual({
+      sourceBazisProjectName: '1319',
       sourceBazisOrderNo: '',
       sourceBazisProductName: 'Кухня',
     });
@@ -166,6 +191,68 @@ describe('PgBazisCutRepository security and event contract', () => {
     expect(calls.findIndex((sql) => sql.includes('INSERT INTO outbox_events')))
       .toBeLessThan(calls.findIndex((sql) => sql.includes("status='completed'")));
   });
+
+  it('creates a multi-order picker set only after scope locks and a fresh token recheck', async () => {
+    const criteria = pickerCriteria();
+    const picker = pickerSourceRow();
+    const criteriaHash = hashBazisCutPickerCriteria(criteria);
+    const selectionToken = buildBazisCutPickerSelectionToken(criteriaHash, picker);
+    const audit = vi.spyOn(auditService, 'record').mockResolvedValue('audit-created');
+    let pickerOutboxPayload: Record<string, unknown> | undefined;
+    let insertedSnapshotPosition: unknown;
+    const tx = { query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
+      if (sql.includes('INSERT INTO command_idempotency_keys')) return result([{ idempotency_key: 'picker-key-123' }], 1);
+      if (sql.includes('WITH eligible AS') && sql.includes('SELECT e.* FROM eligible e')) return result([picker]);
+      if (sql.includes('SELECT o.order_id FROM orders o') && sql.includes('FOR UPDATE')) return result([{ order_id: 30 }]);
+      if (sql.includes('SELECT od.detail_id FROM order_details od') && sql.includes('FOR UPDATE')) return result([{ detail_id: 40 }]);
+      if (sql.includes('SELECT od.detail_id, od.order_id, o.project_id')) return result([snapshotSourceRow()]);
+      if (sql.includes('INSERT INTO bazis_cut_sets')) return result([{ bazis_cut_set_id: 10 }], 1);
+      if (sql.includes('INSERT INTO bazis_cut_set_details')) {
+        const columns = /INSERT INTO bazis_cut_set_details \(([^)]+)\)/.exec(sql)?.[1].split(',') ?? [];
+        insertedSnapshotPosition = params?.[columns.indexOf('position')];
+        return result([], 1);
+      }
+      if (sql.includes('SELECT * FROM bazis_cut_sets WHERE')) return result([setRow(0)]);
+      if (sql.includes('SELECT d.*, COALESCE(source_order.delete_flag')) return result([detailRow()]);
+      if (sql.includes('INSERT INTO outbox_events')) {
+        pickerOutboxPayload = JSON.parse(String(params?.[2])) as Record<string, unknown>;
+        return result([], 1);
+      }
+      return result([], 1);
+    }) } as unknown as TransactionClient;
+    const repository = new PgBazisCutRepository(fakeDatabase(tx));
+
+    const response = await repository.createFromPicker({
+      currentUser: user, requestId: 'picker-request', idempotencyKey: 'picker-key-123',
+      criteria, criteriaHash, details: [{ detailId: 40, selectionToken }],
+    });
+
+    expect(response.addedCount).toBe(1);
+    expect(insertedSnapshotPosition).toBe('7');
+    expect(audit).toHaveBeenCalledWith(tx, expect.objectContaining({
+      event: 'bazis_cut_set.created', entityId: 10,
+      metadata: expect.objectContaining({
+        creationSource: 'picker', criteriaHash, positionCount: 1, physicalQuantity: 2,
+      }),
+    }));
+    expect(pickerOutboxPayload).toMatchObject({
+      metadata: expect.objectContaining({
+        creationSource: 'picker', criteriaHash, positionCount: 1, physicalQuantity: 2,
+      }),
+    });
+    const calls = (tx.query as ReturnType<typeof vi.fn>).mock.calls.map(([sql]) => String(sql));
+    const pickerReads = calls.map((sql, index) => sql.includes('WITH eligible AS') ? index : -1).filter((index) => index >= 0);
+    expect(pickerReads).toHaveLength(2);
+    const orderLock = calls.findIndex((sql) => sql.includes('SELECT o.order_id FROM orders o') && sql.includes('FOR UPDATE'));
+    const detailLock = calls.findIndex((sql) => sql.includes('SELECT od.detail_id FROM order_details od') && sql.includes('FOR UPDATE'));
+    const snapshotRead = calls.findIndex((sql) => sql.includes('SELECT od.detail_id, od.order_id, o.project_id'));
+    expect(pickerReads[0]).toBeLessThan(orderLock);
+    expect(orderLock).toBeLessThan(detailLock);
+    expect(detailLock).toBeLessThan(pickerReads[1]);
+    expect(pickerReads[1]).toBeLessThan(snapshotRead);
+    expect(calls.findIndex((sql) => sql.includes('INSERT INTO outbox_events')))
+      .toBeLessThan(calls.findIndex((sql) => sql.includes("status='completed'")));
+  });
 });
 
 function fakeDatabase(tx: TransactionClient): DatabaseService {
@@ -200,5 +287,43 @@ function detailRow() {
     w1_name: '', w1_designation: '', w1_thickness_mm: 0, w2_name: '', w2_designation: '', w2_thickness_mm: 0,
     priority: null, comment: '', custom_property: '', glue: '', milling: '', route: '', film: '',
     created_at: new Date('2026-07-15T10:00:00Z'), updated_at: new Date('2026-07-15T10:00:00Z'),
+  };
+}
+
+function pickerCriteria(): BazisCutPickerCriteria {
+  return {
+    dateFrom: '2026-08-01', dateTo: '2026-08-05', orderIds: [], clientIds: [],
+    sheetMaterialTypeIds: [], millingTypeIds: [], bazisKeys: [], designEngineerIds: [],
+    dowelingOrderIds: [], excludedDetailIds: [],
+  };
+}
+
+function pickerSourceRow(): PickerRow {
+  return {
+    detail_id: 40, detail_number: 7, detail_version: 2, detail_updated_at: '2026-08-05T10:00:00.000Z',
+    order_id: 30, order_version: 3, order_name: '1', order_date: '2026-08-05', client_id: 2,
+    client_name: 'Клиент', project_id: 50, quantity: 2, height_mm: 100, width_mm: 50,
+    area_m2: '0.01', detail_name: 'Бок', note: '', doweling: false, sheet_material_type_id: 9,
+    material_name: 'ЛДСП', material_thickness_mm: 16, milling_type_id: null, milling_name: null,
+    film_id: null, basis_designation: null, basis_data: null, basis_project: null, basis_product: null,
+    bazis_key: null, bazis_label: null, bazis_type: null, doweling_order_id: null,
+    doweling_order_name: null, design_engineer_id: null, design_engineer_name: null, bazis_cut_sets: [],
+  } as PickerRow;
+}
+
+function snapshotSourceRow() {
+  return {
+    detail_id: 40, order_id: 30, project_id: 50, order_name: '1', order_full_number: 'P-1',
+    project_code: 'P', material_name: 'ЛДСП', thickness_mm: 16, detail_number: 7,
+    basis_designation: null, basis_data: null, detail_bazis_project: null, detail_bazis_product: null,
+    detail_name: 'Бок', height: 100, width: 50, quantity: 2, note: null, milling: null, film: null,
+    doweling: false, exact_count: 0, exact_node_id: null, exact_revision_id: null,
+    exact_bazis_project_id: null, exact_revision_bazis_order_no: null, exact_root_product_count: null,
+    exact_product_order_no: null, exact_product_name: null, exact_designation: null, exact_vertical: null,
+    fallback_revision_id: null, fallback_bazis_project_id: null, fallback_revision_bazis_order_no: null,
+    fallback_root_product_count: null, fallback_product_order_no: null, inferred_revision_id: null,
+    inferred_bazis_project_id: null, inferred_revision_bazis_order_no: null,
+    inferred_root_product_count: null, inferred_product_order_no: null,
+    bath_cut_job_id: null, bath_cut_result_no: null,
   };
 }

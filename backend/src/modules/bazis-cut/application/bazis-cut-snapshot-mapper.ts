@@ -4,10 +4,10 @@ export interface BazisCutSnapshotSource {
   materialName: string;
   thicknessMm: number;
   detailNumber: number;
-  orderName: string;
-  ordinaryErpOrder: boolean;
+  importedFromBazisProject: boolean;
   bazisProject: string | null;
-  basisProduct: string | null;
+  bazisOrder: string | null;
+  bazisNodeDesignation: string | null;
   basisDesignation: string | null;
   basisData: string | null;
   detailName: string | null;
@@ -33,9 +33,7 @@ export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): Bazis
   const fields: BazisCutDetailFields = {
     cutEnabled: true, materialType: 'Площадной', materialName: source.materialName.trim(),
     materialArticle: '', thicknessMm: source.thicknessMm,
-    position: source.ordinaryErpOrder
-      ? buildOrdinaryErpPosition(source.orderName, source.detailNumber)
-      : buildBazisCutPosition(source.bazisProject, source.basisProduct, source.basisDesignation),
+    position: buildBazisCutPosition(source),
     partName: firstNonEmpty(source.detailName, source.basisData?.split('/')[2], `Деталь ${source.detailNumber}`),
     finishedLengthMm: length, finishedWidthMm: width,
     cutLengthMm: roundTenth(length), cutWidthMm: roundTenth(width), quantity: source.quantity,
@@ -48,19 +46,29 @@ export function mapBazisCutSnapshotFields(source: BazisCutSnapshotSource): Bazis
   return bazisCutDetailFieldsSchema.safeParse(fields).success ? fields : null;
 }
 
-export function buildOrdinaryErpPosition(orderName: string, detailNumber: number): string {
-  return `${orderName.trim()}.${detailNumber}`;
+export function buildBazisCutPosition(
+  source: Pick<BazisCutSnapshotSource,
+    'detailNumber' | 'importedFromBazisProject' | 'bazisProject' | 'bazisOrder'
+    | 'bazisNodeDesignation' | 'basisDesignation'>,
+): string {
+  if (source.importedFromBazisProject) {
+    return source.bazisNodeDesignation?.trim() ?? '';
+  }
+
+  const designation = source.basisDesignation?.trim() ?? '';
+  return designation && Boolean(source.bazisProject?.trim()) ? designation : String(source.detailNumber);
 }
 
-export function buildBazisCutPosition(
-  bazisProject: string | null | undefined,
-  basisProduct: string | null | undefined,
-  basisDesignation: string | null | undefined,
-): string {
-  const project = bazisProject?.trim() ?? '';
-  const product = basisProduct?.trim() ?? '';
-  const designation = basisDesignation?.trim() ?? '';
-  return `${project ? product : ''}.${designation}`;
+export function resolveErpOrderBazisLabels(input: {
+  detailBazisProject: string | null;
+  detailBazisProduct: string | null;
+}): BazisDocumentLabels {
+  const project = input.detailBazisProject?.trim() ?? '';
+  return {
+    sourceBazisProjectName: project,
+    sourceBazisOrderNo: '',
+    sourceBazisProductName: project ? input.detailBazisProduct?.trim() ?? '' : '',
+  };
 }
 
 export function resolveBazisDetailLabels(input: {

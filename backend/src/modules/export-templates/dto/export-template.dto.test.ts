@@ -27,4 +27,19 @@ describe('export template endpoint DTOs', () => {
     expect(previewExportTemplateSchema.safeParse(body).success).toBe(true);
     expect(previewExportTemplateSchema.safeParse({ ...body, name: 'Лишнее поле' }).success).toBe(false);
   });
+
+  it('accepts a strict same-row column reference node', () => {
+    const body = {
+      targetScreen: 'bazis_cut_set' as const,
+      sourceType: 'bazis_cut_set_detail' as const,
+      format: 'xls_biff8' as const,
+      columns: [columns[0], {
+        columnKey: 'qr', header: 'QR-code', expression: { type: 'column_ref' as const, columnKey: 'position' },
+      }],
+    };
+    expect(previewExportTemplateSchema.safeParse(body).success).toBe(true);
+    expect(previewExportTemplateSchema.safeParse({ ...body, columns: [columns[0], {
+      ...body.columns[1], expression: { type: 'column_ref', columnKey: 'bad key' },
+    }] }).success).toBe(false);
+  });
 });

@@ -10,6 +10,7 @@ const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
 );
+const tabletCss = readFileSync('src/ui-evolution/styles/tablet.css', 'utf8');
 const columnSettings = readFileSync(
   'src/pages/orderStatusBoard/StatusBoardColumnSettings.tsx',
   'utf8',
@@ -24,6 +25,10 @@ const cutApi = readFileSync(
 );
 const interaction = readFileSync(
   'src/pages/orderStatusBoard/interaction.ts',
+  'utf8',
+);
+const touchDrag = readFileSync(
+  'src/pages/orderStatusBoard/useTouchBoardCardDrag.tsx',
   'utf8',
 );
 const detailedMachine = readFileSync(
@@ -47,11 +52,43 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(interaction).toContain('if (!confirmed)');
   });
 
-  it('keeps mobile drag-free and respects reduced motion', () => {
+  it('keeps desktop DnD and adds explicit, accessible touch drag without enabling CNC', () => {
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
     expect(page).toContain('canDrag: moveAvailable && finePointer');
+    expect(page).toContain('const touchBoardDragEnabled = useCoarsePointer()');
+    expect(page).toContain('touchDragEnabled={touchBoardDragEnabled}');
+    expect(page).toContain('touchDragEnabled={mutationsEnabled && touchDragEnabled}');
+    expect(page).toContain('touchDragEnabled = false');
+    expect(touchDrag).toContain("event.pointerType !== 'touch'");
+    expect(touchDrag).toContain('handle.setPointerCapture');
+    expect(touchDrag).toContain('navigator.vibrate?.(18)');
+    expect(touchDrag).toContain('document.elementFromPoint');
+    expect(page).toContain('data-status-board-column-key={column.key}');
+    expect(page).toContain('status-board-touch-drag-instructions');
+    expect(page).toContain('actionsVisible && (finePointer || touchDragEnabled)');
+    expect(page).not.toContain('touchDragEnabled={false}');
+    expect(css).toContain('.status-board-card__drag--touch');
+    expect(css).toContain('touch-action: none');
+    expect(css).toContain('.status-board-viewport--touch-dragging');
+    expect(css).toContain('scroll-snap-type: none');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     expect(css).toContain('scroll-snap-type: x mandatory');
+  });
+
+  it('keeps every tablet board action in the forced one-row toolbar', () => {
+    expect(page).toContain('className="status-board-toolbar__tablet-board-switch"');
+    expect(page).toContain('aria-label="Переключатель досок"');
+    expect(page).toContain('className="status-board-toolbar__tablet-refresh"');
+    expect(page).toContain('className="status-board-toolbar__cnc-card-mode-text"');
+    expect(tabletCss).toMatch(/data-modern-route="status-board"[^}]+\.status-board-toolbar \{[\s\S]*height: var\(--tablet-sticky-row\);/);
+    expect(tabletCss).toContain('.status-board-toolbar__tablet-board-switch .ant-segmented-item');
+    expect(tabletCss).toContain('.status-board-toolbar__cnc-card-mode-text');
+    expect(tabletCss).toContain('scrollbar-width: none');
+    expect(tabletCss).toContain('height: calc(100% - var(--tablet-sticky-row))');
+    expect(tabletCss).toMatch(/\.evolution-shell--tablet \.status-board-scrollbar \{\s*display: none;/);
+    expect(tabletCss).toContain('overscroll-behavior-x: auto');
+    expect(tabletCss).toContain('touch-action: pan-x pan-y');
+    expect(tabletCss).toContain('scroll-snap-type: x proximity');
   });
 
   it('keeps the upper scrollbar synchronized with the board viewport', () => {
@@ -63,7 +100,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
-  it('lets the MDF board grow to its tallest column without nested vertical scrolling', () => {
+  it('keeps desktop MDF auto-height but gives tablet a full-height pannable viewport', () => {
     expect(page).toContain("isCncToday ? ' status-board-page--cnc' : ''");
     expect(css).toMatch(
       /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
@@ -76,6 +113,17 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(css).toMatch(
       /\.status-board-page--cnc \.cnc-detailed-workspace\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: 100% !important;[^}]*overflow: hidden !important;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: calc\(100% - var\(--tablet-sticky-row\)\);[^}]*overflow-x: auto;/s,
+    );
+    expect(tabletCss).toContain('.status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
+    expect(tabletCss).toContain('clamp(240px, 24vw, 276px)');
+    expect(tabletCss).toMatch(
+      /\.status-board-columns--cnc > \.status-board-column\s*\{[^}]*width: auto !important;[^}]*min-width: 0 !important;/s,
     );
   });
 
@@ -755,7 +803,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_ICONS');
     expect(page).toContain('productionCardDisplayOptions');
     expect(page).toContain('placeholder={productionToolbarCompact ?');
-    expect(page).toContain('prefix={productionToolbarCompact ? <SearchOutlined /> : undefined}');
+    expect(page).toContain('prefix={<SearchOutlined />}');
     expect(page).toContain('status-board-columns--${activeBoard}');
     expect(page).toContain("cardDisplayMode !== 'standard' ? 'status-board-columns--narrow-cards' : ''");
     expect(css).toContain('.status-board-toolbar__display-mode');

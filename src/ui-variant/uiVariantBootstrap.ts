@@ -3,6 +3,8 @@ import { authSession } from '../api/authSession';
 import { profileApi } from '../api/profileApi';
 import { featureFlags } from '../config/featureFlags';
 import type { FrontendUiRuntimeConfig } from '../config/runtimeConfig';
+import { isTabletDevice } from '../hooks/useDeviceTier';
+import { getStoredTabletMode, setStoredTabletMode } from '../theme/themeStorage';
 import { authStorage } from '../utils/auth';
 import { isModernUiAvailable, isUiVariant, resolveUiVariant, type UiVariant } from './uiVariant';
 import { getStoredUiVariant, setStoredUiVariant } from './uiVariantStorage';
@@ -12,6 +14,7 @@ const DEFAULT_UI_VARIANT_BOOTSTRAP_TIMEOUT_MS = 2500;
 interface UiVariantPreferenceResponse {
   preferences?: {
     uiVariant?: unknown;
+    tabletMode?: unknown;
   };
 }
 
@@ -22,6 +25,9 @@ export interface UiVariantBootstrapDependencies {
   getPreferences: () => Promise<UiVariantPreferenceResponse>;
   getCached: (userId: string) => UiVariant | null;
   setCached: (userId: string, variant: UiVariant) => void;
+  getTabletModeCached: (userId: string) => boolean | null;
+  setTabletModeCached: (userId: string, enabled: boolean) => void;
+  isTabletDevice?: () => boolean;
   now?: () => number;
   timeoutMs?: number;
 }
@@ -31,6 +37,7 @@ export async function resolveInitialUiVariant(
   dependencies: UiVariantBootstrapDependencies = defaultDependencies(),
 ): Promise<UiVariant> {
   if (!isModernUiAvailable(config)) return resolveUiVariant(config);
+  if ((dependencies.isTabletDevice ?? isTabletDevice)()) return 'evolution';
 
   const now = dependencies.now ?? Date.now;
   const deadline = now() + (
@@ -49,6 +56,7 @@ export async function resolveInitialUiVariant(
   }
 
   const cached = dependencies.getCached(userId);
+  const cachedTabletMode = dependencies.getTabletModeCached(userId);
 
   try {
     const response = await withinDeadline(
@@ -57,6 +65,19 @@ export async function resolveInitialUiVariant(
       now,
     );
     const confirmed = response.preferences?.uiVariant;
+    const confirmedTabletMode = response.preferences?.tabletMode;
+    if (
+      dependencies.getCurrentUserId() === userId &&
+      typeof confirmedTabletMode === 'boolean'
+    ) {
+      dependencies.setTabletModeCached(userId, confirmedTabletMode);
+    }
+    if (
+      dependencies.getCurrentUserId() === userId &&
+      (confirmedTabletMode === true || (confirmedTabletMode === undefined && cachedTabletMode === true))
+    ) {
+      return 'evolution';
+    }
     if (
       dependencies.getCurrentUserId() === userId &&
       isUiVariant(confirmed)
@@ -74,6 +95,7 @@ export async function resolveInitialUiVariant(
   if (dependencies.getCurrentUserId() !== userId) {
     return resolveUiVariant(config);
   }
+  if (cachedTabletMode === true) return 'evolution';
   return resolveUiVariant(config, cached);
 }
 
@@ -97,6 +119,8 @@ function defaultDependencies(): UiVariantBootstrapDependencies {
     getPreferences: () => profileApi.getPreferences(),
     getCached: getStoredUiVariant,
     setCached: setStoredUiVariant,
+    getTabletModeCached: getStoredTabletMode,
+    setTabletModeCached: setStoredTabletMode,
   };
 }
 

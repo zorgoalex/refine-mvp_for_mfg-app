@@ -38,6 +38,7 @@ const generateTempId = (): number => {
   workshops: OrderWorkshop[];
   requirements: OrderResourceRequirement[];
   dowelingLinks: OrderDowelingLink[];
+  pdfImportCandidateTempIds: number[];
 
   // Deleted items (track for deletion on server)
   deletedDetails: number[];
@@ -71,6 +72,7 @@ const generateTempId = (): number => {
 
   // ========== ACTIONS: DETAILS ==========
   addDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
+  addPdfImportedDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
   insertDetailAfter: (afterTempId: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   updateDetail: (tempId: number, data: Partial<OrderDetail>) => void;
   updateDetailId: (tempId: number, detailId: number) => void; // Update detail_id after DB create
@@ -106,6 +108,7 @@ const generateTempId = (): number => {
   // ========== UTILITY ==========
   reset: () => void;
   loadOrder: (order: OrderFormValues) => void;
+  applyOrderRefresh: (details: OrderDetail[], version: number) => void;
   getFormValues: () => OrderFormValues;
     setDirty: (isDirty: boolean) => void;
     setInitializing: (isInitializing: boolean) => void;
@@ -131,6 +134,7 @@ const generateTempId = (): number => {
     workshops: [],
     requirements: [],
     dowelingLinks: [],
+    pdfImportCandidateTempIds: [],
     deletedDetails: [],
     deletedPayments: [],
     deletedWorkshops: [],
@@ -220,6 +224,36 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
             'addDetail'
           );
           // Recalculate financials after detail add
+          get().recalculateFinancials();
+        },
+
+        addPdfImportedDetail: (detail) => {
+          set(
+            (state) => {
+              const maxDetailNumber = state.details.reduce(
+                (max, current) => Math.max(max, current.detail_number || 0),
+                0,
+              );
+              const tempId = generateTempId();
+              return {
+                details: [
+                  ...state.details,
+                  {
+                    ...detail,
+                    temp_id: tempId,
+                    detail_number: maxDetailNumber + 1,
+                    priority: detail.priority || 100,
+                    quantity: detail.quantity,
+                    delete_flag: false,
+                  },
+                ],
+                pdfImportCandidateTempIds: [...state.pdfImportCandidateTempIds, tempId],
+                isDirty: true,
+              };
+            },
+            false,
+            'addPdfImportedDetail',
+          );
           get().recalculateFinancials();
         },
 
@@ -320,6 +354,9 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
               deletedDetails: detailId
                 ? [...state.deletedDetails, detailId]
                 : state.deletedDetails,
+              pdfImportCandidateTempIds: state.pdfImportCandidateTempIds.filter(
+                (candidateTempId) => candidateTempId !== tempId,
+              ),
               isDirty: true,
             }),
             false,
@@ -620,6 +657,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
               deletedWorkshops: [],
               deletedRequirements: [],
               deletedDowelingLinks: [],
+              pdfImportCandidateTempIds: [],
               isDirty: false,
               isInitializing: true, // Mark as initializing to prevent isDirty from being set during recalculations
               version: order.version || 0,
@@ -659,6 +697,17 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
             'loadOrder'
           ),
 
+        applyOrderRefresh: (details, version) =>
+          set(
+            (state) => ({
+              details,
+              version,
+              header: { ...state.header, version },
+            }),
+            false,
+            'applyOrderRefresh'
+          ),
+
         getFormValues: () => {
           const state = get();
           console.log('[orderFormStore] getFormValues - state.header:', state.header);
@@ -672,6 +721,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
             workshops: state.workshops,
             requirements: state.requirements,
             dowelingLinks: state.dowelingLinks,
+            pdfImportCandidateTempIds: state.pdfImportCandidateTempIds,
             deletedDetails: state.deletedDetails,
             deletedPayments: state.deletedPayments,
             deletedWorkshops: state.deletedWorkshops,
@@ -759,6 +809,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
               deletedWorkshops: [],
               deletedRequirements: [],
               deletedDowelingLinks: [],
+              pdfImportCandidateTempIds: [],
             }),
             false,
             'syncOriginals'

@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Delete, Get, Headers, Inject, Param, Patch, Post, Query, Req,
+  Body, Controller, Delete, Get, Headers, HttpCode, Inject, Param, Patch, Post, Query, Req,
   Res, StreamableFile,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiHeader, ApiOperation, ApiParam, ApiProduces, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -11,10 +11,14 @@ import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { BazisCutService } from '../application/bazis-cut.service';
 import {
   addBazisCutSetDetailsSchema,
+  bazisCutOrderMembershipsSchema,
+  bazisCutPickerPeriodSchema,
   createBazisCutSetSchema,
+  createBazisCutSetFromPickerSchema,
   deleteBazisCutSetDetailSchema,
   listBazisCutSetsSchema,
   renameBazisCutSetSchema,
+  searchBazisCutPickerSchema,
   updateBazisCutSetDetailSchema,
 } from '../dto/bazis-cut.dto';
 import { BazisCutRuntimeConfigService } from './bazis-cut-runtime-config.service';
@@ -118,6 +122,95 @@ export class BazisCutSetsController {
     this.assertEnabled();
     const parsed = parse(listBazisCutSetsSchema, query);
     return this.service.list({ currentUser: requireUser(request), requestId: request.requestId, ...parsed });
+  }
+
+  @ApiOperation({ operationId: 'listBazisCutPickerFacets', summary: 'List scoped detail-picker facets for a required period' })
+  @ApiQuery({ name: 'dateFrom', required: true, type: String, example: '2026-08-01' })
+  @ApiQuery({ name: 'dateTo', required: true, type: String, example: '2026-08-05' })
+  @ApiResponse({ status: 200, description: 'Dynamic picker facet values' })
+  @Get('picker/facets')
+  pickerFacets(@Req() request: RequestWithCurrentUser, @Query() query: unknown) {
+    this.assertEnabled();
+    const parsed = parse(bazisCutPickerPeriodSchema, query);
+    return this.service.pickerFacets({
+      currentUser: requireUser(request), requestId: request.requestId, ...parsed,
+    });
+  }
+
+  @ApiOperation({ operationId: 'searchBazisCutPickerDetails', summary: 'Search scoped exportable order details' })
+  @ApiBody({ schema: { type: 'object', additionalProperties: false,
+    required: ['dateFrom', 'dateTo'], properties: {
+      dateFrom: { type: 'string', format: 'date' }, dateTo: { type: 'string', format: 'date' },
+      orderIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+      clientIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+      sheetMaterialTypeIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+      millingTypeIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+      bazisKeys: { type: 'array', maxItems: 500, items: { type: 'string', maxLength: 200 } },
+      designEngineerIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+      dowelingOrderIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+      excludedDetailIds: { type: 'array', maxItems: 2000, items: { type: 'integer', minimum: 1 } },
+      page: { type: 'integer', minimum: 1, default: 1 },
+      pageSize: { type: 'integer', minimum: 1, maximum: 100, default: 25 },
+    } } })
+  @ApiResponse({ status: 200, description: 'Paginated details, totals, criteria hash, and stale tokens' })
+  @HttpCode(200)
+  @Post('picker/search')
+  pickerSearch(@Req() request: RequestWithCurrentUser, @Body() body: unknown) {
+    this.assertEnabled();
+    const parsed = parse(searchBazisCutPickerSchema, body);
+    const { page, pageSize, ...criteria } = parsed;
+    return this.service.pickerSearch({
+      currentUser: requireUser(request), requestId: request.requestId, criteria, page, pageSize,
+    });
+  }
+
+  @ApiOperation({ operationId: 'createBazisCutSetFromPicker', summary: 'Create one Basis-cut set from selected scoped details' })
+  @ApiHeader(commandHeader)
+  @ApiBody({ schema: { type: 'object', additionalProperties: false,
+    required: ['criteria', 'criteriaHash', 'details'], properties: {
+      criteria: { type: 'object', additionalProperties: false, required: ['dateFrom', 'dateTo'], properties: {
+        dateFrom: { type: 'string', format: 'date' }, dateTo: { type: 'string', format: 'date' },
+        orderIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+        clientIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+        sheetMaterialTypeIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+        millingTypeIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+        bazisKeys: { type: 'array', maxItems: 500, items: { type: 'string', maxLength: 200 } },
+        designEngineerIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+        dowelingOrderIds: { type: 'array', maxItems: 500, items: { type: 'integer', minimum: 1 } },
+        excludedDetailIds: { type: 'array', maxItems: 2000, items: { type: 'integer', minimum: 1 } },
+      } },
+      criteriaHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+      details: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'object',
+        additionalProperties: false, required: ['detailId', 'selectionToken'], properties: {
+          detailId: { type: 'integer', minimum: 1 },
+          selectionToken: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        } } },
+    } } })
+  @ApiResponse({ status: 201, description: 'Persistent set created atomically', schema: mutationResponseSchema })
+  @Post('from-picker')
+  createFromPicker(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('idempotency-key') key: string | string[] | undefined,
+    @Body() body: unknown,
+  ) {
+    this.assertEnabled();
+    const parsed = parse(createBazisCutSetFromPickerSchema, body);
+    return this.service.createFromPicker({
+      currentUser: requireUser(request), requestId: request.requestId,
+      idempotencyKey: parseIdempotencyKey(key), ...parsed,
+    });
+  }
+
+  @ApiOperation({ operationId: 'getBazisCutOrderMemberships', summary: 'Get Basis-cut memberships for one scoped order' })
+  @ApiQuery({ name: 'orderId', required: true, type: Number })
+  @ApiResponse({ status: 200, description: 'Memberships grouped by source order detail' })
+  @Get('order-memberships')
+  orderMemberships(@Req() request: RequestWithCurrentUser, @Query() query: unknown) {
+    this.assertEnabled();
+    const parsed = parse(bazisCutOrderMembershipsSchema, query);
+    return this.service.orderMemberships({
+      currentUser: requireUser(request), requestId: request.requestId, ...parsed,
+    });
   }
 
   @ApiOperation({ operationId: 'createBazisCutSet', summary: 'Create a Basis-cut set from order details' })

@@ -10,7 +10,7 @@ import {
   type ExportTemplateTarget,
 } from '../../../api/exportTemplatesApi';
 import { can } from '../../../utils/permissions';
-import { ExportExpressionEditor } from './ExportExpressionEditor';
+import { ExportExpressionEditor, expressionReferencesColumn } from './ExportExpressionEditor';
 import './ExportTemplatesConfigTab.css';
 
 const { Paragraph, Text, Title } = Typography;
@@ -121,7 +121,7 @@ export const ExportTemplatesConfigTab: React.FC = () => {
               onChange={(event) => setDraft({ ...draft, isActive: event.target.checked })}>Активен</Checkbox></Col>
           </Row>
         </Form>
-        <Space direction="vertical" size={12} style={{ width: '100%', marginTop: 20 }}>
+        <Space className="export-template-columns" direction="vertical" size={2} style={{ width: '100%' }}>
           <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}><Title level={5} style={{ margin: 0 }}>Колонки <Text type="secondary">({draft.columns.length})</Text></Title>
             <Button icon={<PlusOutlined />} disabled={!canManage || draft.columns.length >= 100} style={{ minHeight: 40 }}
               onClick={() => setDraft({ ...draft, columns: [...draft.columns, newColumn(draft.columns.length, catalog)] })}>Добавить колонку</Button></Space>
@@ -129,14 +129,15 @@ export const ExportTemplatesConfigTab: React.FC = () => {
             <Text type="secondary" className="export-template-column-index" style={{ fontVariantNumeric: 'tabular-nums' }}>{index + 1}</Text>
             <Input className="export-template-column-header" aria-label={`Название колонки ${index + 1}`} value={column.header} maxLength={200} disabled={!canManage}
               onChange={(event) => updateColumn(index, { ...column, header: event.target.value }, draft, setDraft)} />
-            <div className="export-template-column-expression"><ExportExpressionEditor value={column.expression} catalog={catalog} disabled={!canManage}
+            <div className="export-template-column-expression"><ExportExpressionEditor value={column.expression} catalog={catalog}
+              columns={draft.columns} currentColumnKey={column.columnKey} disabled={!canManage}
               onChange={(expression) => updateColumn(index, { ...column, expression }, draft, setDraft)} /></div>
-            <Space className="export-template-column-actions" size={4}><Button aria-label="Поднять колонку" icon={<ArrowUpOutlined />} disabled={!canManage || index === 0} style={{ minWidth: 40, minHeight: 40 }}
+            <Space className="export-template-column-actions" size={2}><Button size="small" aria-label="Поднять колонку" icon={<ArrowUpOutlined />} disabled={!canManage || index === 0}
               onClick={() => setDraft({ ...draft, columns: moveColumn(draft.columns, index, index - 1) })} />
-              <Button aria-label="Опустить колонку" icon={<ArrowDownOutlined />} disabled={!canManage || index === draft.columns.length - 1} style={{ minWidth: 40, minHeight: 40 }}
+              <Button size="small" aria-label="Опустить колонку" icon={<ArrowDownOutlined />} disabled={!canManage || index === draft.columns.length - 1}
                 onClick={() => setDraft({ ...draft, columns: moveColumn(draft.columns, index, index + 1) })} />
-              <Button aria-label="Удалить колонку" danger icon={<DeleteOutlined />} disabled={!canManage || draft.columns.length === 1} style={{ minWidth: 40, minHeight: 40 }}
-                onClick={() => setDraft({ ...draft, columns: draft.columns.filter((_, itemIndex) => itemIndex !== index) })} /></Space>
+              <Button size="small" aria-label="Удалить колонку" danger icon={<DeleteOutlined />} disabled={!canManage || draft.columns.length === 1}
+                onClick={() => removeColumn(index, draft, setDraft)} /></Space>
           </div>)}
           <Space wrap><Button onClick={() => void runPreview()} style={{ minHeight: 40 }}>Проверить и показать пример</Button>
             {selected && !selected.isDefault && <Button disabled={!canManage} style={{ minHeight: 40 }} onClick={() => void setDefault()}>Сделать по умолчанию</Button>}
@@ -168,6 +169,16 @@ function newColumn(index: number, catalog: ExportTemplateCatalog | null): Export
 }
 function updateColumn(index: number, column: ExportTemplateColumn, draft: ExportTemplateDraft, setDraft: (value: ExportTemplateDraft) => void) {
   setDraft({ ...draft, columns: draft.columns.map((item, itemIndex) => itemIndex === index ? column : item) });
+}
+function removeColumn(index: number, draft: ExportTemplateDraft, setDraft: (value: ExportTemplateDraft) => void) {
+  const column = draft.columns[index];
+  const referencedBy = draft.columns.filter((candidate) => candidate.columnKey !== column.columnKey
+    && expressionReferencesColumn(candidate.expression, column.columnKey));
+  if (referencedBy.length > 0) {
+    message.warning(`Колонка «${column.header}» используется: ${referencedBy.map((item) => `«${item.header}»`).join(', ')}`);
+    return;
+  }
+  setDraft({ ...draft, columns: draft.columns.filter((_, itemIndex) => itemIndex !== index) });
 }
 function moveColumn(columns: ExportTemplateColumn[], from: number, to: number): ExportTemplateColumn[] {
   const next = [...columns]; const [column] = next.splice(from, 1); next.splice(to, 0, column); return next;

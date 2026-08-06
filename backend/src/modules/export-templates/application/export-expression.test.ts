@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateExpression, validateExportColumns } from './export-expression';
-import type { BazisExportDetail, ExportExpression } from './export-template.types';
+import { evaluateExportRow, evaluateExpression, validateExportColumns } from './export-expression';
+import type { BazisExportDetail, ExportExpression, ExportTemplateColumn } from './export-template.types';
 
 const detail: BazisExportDetail = {
   cutEnabled: true, materialType: 'Площадной', materialName: 'ЛДСП', materialArticle: 'A-1', thicknessMm: 16,
@@ -10,6 +10,7 @@ const detail: BazisExportDetail = {
   w1Name: '', w1Designation: '', w1ThicknessMm: 0, w2Name: '', w2Designation: '', w2ThicknessMm: 0,
   priority: null, comment: '', customProperty: '', glue: '', milling: '', route: '', film: '',
   sourceBazisProjectName: 'BP', sourceBazisOrderNo: '42', sourceBazisProductName: 'Шкаф', sourceBathCutNumber: '10-2',
+  sourceOrderName: 'ERP-1491',
 };
 const context = { rowNumber: 3, exportedAt: new Date('2026-08-05T12:00:00Z'), templateName: 'Тест' };
 
@@ -33,6 +34,43 @@ describe('export expression', () => {
     expect(evaluateExpression({ type: 'math', fn: 'multiply', parts: [
       { type: 'field', field: 'detail.quantity' }, { type: 'constant', value: 2.5 },
     ] }, detail, context)).toBe(5);
+  });
+
+  it('uses raw Position and the canonical Basis QR identity in legacy fields', () => {
+    expect(evaluateExpression({ type: 'field', field: 'legacy.position' }, detail, context)).toBe('.07');
+    expect(evaluateExpression({ type: 'field', field: 'legacy.qr' }, detail, context)).toBe('BPШкаф..07');
+    expect(evaluateExpression({ type: 'field', field: 'legacy.qr' }, {
+      ...detail,
+      sourceBazisProjectName: '',
+      sourceBazisOrderNo: '',
+    }, context)).toBe('ERP-1491Шкаф..07');
+  });
+
+  it('evaluates forward references to computed columns in the same export row', () => {
+    const columns: ExportTemplateColumn[] = [
+      { columnKey: 'qr', header: 'QR-code', expression: { type: 'concat', parts: [
+        { type: 'column_ref', columnKey: 'order' }, { type: 'field', field: 'detail.position' },
+      ] } },
+      { columnKey: 'order', header: 'Заказ', expression: { type: 'concat', parts: [
+        { type: 'field', field: 'legacy.order' }, { type: 'constant', value: '-A' },
+      ] } },
+    ];
+
+    expect(validateExportColumns(columns)).toEqual([3, 3]);
+    expect(evaluateExportRow(columns, detail, context)).toEqual(['42-A.07', '42-A']);
+  });
+
+  it('rejects missing, self and indirect column dependencies', () => {
+    const column = (columnKey: string, referencedKey: string): ExportTemplateColumn => ({
+      columnKey, header: columnKey, expression: { type: 'column_ref', columnKey: referencedKey },
+    });
+
+    expect(() => validateExportColumns([column('qr', 'missing')])).toThrow('Export template validation failed');
+    expect(() => validateExportColumns([column('qr', 'qr')])).toThrow('Export template validation failed');
+    expect(() => validateExportColumns([column('order', 'qr'), column('qr', 'order')]))
+      .toThrow('Export template validation failed');
+    expect(() => evaluateExpression({ type: 'column_ref', columnKey: 'order' }, detail, context))
+      .toThrow('Column reference requires row evaluation context');
   });
 
   it('rejects locale decimals, divide-by-zero and unknown fields', () => {

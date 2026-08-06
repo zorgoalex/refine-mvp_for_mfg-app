@@ -248,6 +248,7 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   doweling: 'Присадка',
   cut_job: 'Раскрой',
   bath_cut_job: 'Расчет ванны',
+  bazis_cut_sets: 'Базис-раскрой',
 };
 
 const ORDER_FIELD_LABELS: Record<string, string> = {

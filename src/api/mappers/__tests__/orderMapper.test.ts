@@ -141,6 +141,19 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
       { bazisCutSetId: 8, name: 'БР-8' },
     ]);
   });
+
+  it('carries linked Basis-project id onto legacy details for view and edit links', () => {
+    const dtoWithBazisProject: OrderDto = {
+      ...dto,
+      details: [{
+        ...(dto.details[0] as any),
+        basisProject: '1491',
+        bazisProjectId: 41,
+      } as any],
+    } as any;
+    const values = mapOrderDtoToFormValues(dtoWithBazisProject);
+    expect((values.details[0] as any).bazis_project_id).toBe(41);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -168,6 +181,18 @@ describe('mapOrderListItemToLegacyRow — header-material fallback (critic R8)',
     });
     const row = mapOrderListItemToLegacyRow(item);
     expect(row.basis_projects).toEqual(['1491', '1492']);
+  });
+
+  it('maps backend production-number aggregates for orders-list columns', () => {
+    const item = makeListItem({
+      bazisCutNumbers: ['БР-8', 'БР-12'],
+      cutNumbers: ['42-3', '51-1'],
+      bathCutNumbers: ['70-2'],
+    });
+    const row = mapOrderListItemToLegacyRow(item);
+    expect(row.bazis_cut_numbers).toEqual(['БР-8', 'БР-12']);
+    expect(row.cut_numbers).toEqual(['42-3', '51-1']);
+    expect(row.bath_cut_numbers).toEqual(['70-2']);
   });
 
   it('maps backend detail filmNames for the orders list film column', () => {

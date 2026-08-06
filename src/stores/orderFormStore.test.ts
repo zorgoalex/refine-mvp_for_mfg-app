@@ -222,6 +222,32 @@ describe('orderFormStore per-order isolation', () => {
     expect(sessionStorage.getItem('order-form-storage:7')).toContain('"isDirty":true');
   });
 
+  it('keeps PDF-import candidate ids transient and clears them after save sync', () => {
+    const store = mod.getOrderDraftStore('pdf-import');
+    store.getState().addPdfImportedDetail({
+      detail_number: 1,
+      height: 500,
+      width: 300,
+      quantity: 1,
+      area: 0.15,
+      material_id: null,
+      sheet_material_type_id: 5,
+      milling_type_id: 1,
+      edge_type_id: 1,
+      detail_cost: 0,
+      priority: 100,
+    });
+
+    expect(store.getState().pdfImportCandidateTempIds).toHaveLength(1);
+    expect(store.getState().getFormValues().pdfImportCandidateTempIds).toHaveLength(1);
+    expect(sessionStorage.getItem('order-form-storage:pdf-import')).not.toContain(
+      'pdfImportCandidateTempIds',
+    );
+
+    store.getState().syncOriginals();
+    expect(store.getState().pdfImportCandidateTempIds).toEqual([]);
+  });
+
   it('destroyOrderDraftStore removes the registry entry and its sessionStorage', () => {
     const a = mod.getOrderDraftStore('9');
     a.getState().updateHeaderField('order_name', 'gone');

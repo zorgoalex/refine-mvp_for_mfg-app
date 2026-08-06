@@ -52,4 +52,14 @@ describe('per-user uiSize preference', () => {
     expect(profilePage).toContain('Компактный интерфейс');
     expect(profilePage).toContain('setUiSize');
   });
+
+  it('профиль: доступная кнопка принудительного планшетного вида', () => {
+    expect(themeStorage).toContain('tabletModeStorageKey');
+    expect(themeProvider).toContain('tabletMode');
+    expect(themeProvider).toContain('setTabletMode');
+    expect(themeProvider).toContain('profileApi.updatePreferences({ tabletMode: enabled })');
+    expect(profilePage).toContain('Планшетный вид');
+    expect(profilePage).toContain('aria-pressed={tabletMode}');
+    expect(profilePage).toContain('style={{ minHeight: 44 }}');
+  });
 });

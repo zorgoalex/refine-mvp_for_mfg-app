@@ -5,6 +5,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
 import { ROLE_POLICIES, type Scope } from '../../../permissions/policies/role-policies';
 import type { OrderQueryService } from '../application/order-query.service';
+import type { OrderRefreshService } from '../application/order-refresh.service';
 import type { OrderDetailTransferService } from '../application/order-detail-transfer.service';
 import type { OrderTransactionService } from '../application/order-transaction.service';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
@@ -1142,6 +1143,49 @@ describe('OrdersController write endpoints', () => {
       }),
     ).toThrow(ApiError);
   });
+
+  it('refreshes mutation metadata then performs a fresh masked query read', async () => {
+    const order = createOrderDto({ orderId: 42 });
+    const calls: string[] = [];
+    const controller = createController({
+      flags: { ordersEnabled: true, ordersReadOnly: false },
+      refresh: {
+        async refresh(command) {
+          calls.push(`refresh:${command.orderId}:${command.expectedVersion}:${command.idempotencyKey}`);
+          return {
+            baseVersion: command.expectedVersion,
+            version: 6,
+            updatedDowelingDetailIds: [10],
+            auditId: 'audit-refresh-1',
+            refreshedAt: '2026-08-06T09:00:00.000Z',
+            requestId: command.requestId ?? 'orders-refresh',
+          };
+        },
+      },
+      queries: {
+        async getById(command) {
+          calls.push(`read:${command.orderId}:${command.currentUser.id}`);
+          return { ...order, version: 7 };
+        },
+      },
+    });
+
+    await expect(controller.refresh(
+      { user: currentUser('manager-id'), requestId: 'request-refresh-1' },
+      '42',
+      '"5"',
+      'order-refresh-key-1',
+    )).resolves.toMatchObject({
+      order: { version: 7 },
+      baseVersion: 5,
+      version: 6,
+      updatedDowelingDetailIds: [10],
+    });
+    expect(calls).toEqual([
+      'refresh:42:5:order-refresh-key-1',
+      'read:42:manager-id',
+    ]);
+  });
 });
 
 function createController(options: {
@@ -1149,6 +1193,7 @@ function createController(options: {
   service?: Partial<OrderTransactionService>;
   queries?: Partial<OrderQueryService>;
   detailTransfer?: Partial<OrderDetailTransferService>;
+  refresh?: Partial<OrderRefreshService>;
   database?: ReturnType<typeof createDatabase>;
 }): OrdersController {
   const service = {
@@ -1190,6 +1235,12 @@ function createController(options: {
     },
     ...options.detailTransfer,
   } as unknown as OrderDetailTransferService;
+  const refresh = {
+    async refresh() {
+      throw new Error('refresh should not be called');
+    },
+    ...options.refresh,
+  } as unknown as OrderRefreshService;
   const runtimeConfig = {
     getFeatureFlags() {
       return options.flags;
@@ -1201,7 +1252,7 @@ function createController(options: {
     },
   }) as unknown as DatabaseService;
 
-  return new OrdersController(service, queries, detailTransfer, runtimeConfig, database);
+  return new OrdersController(service, queries, detailTransfer, refresh, runtimeConfig, database);
 }
 
 function currentUser(

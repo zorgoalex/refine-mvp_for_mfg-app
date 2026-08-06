@@ -114,6 +114,16 @@ describe('orderMapper', () => {
     expect(json).not.toContain('doweling_order_name');
   });
 
+  it('emits PDF-import intent only for marked new detail client keys', () => {
+    const values = createFormValues();
+    values.pdfImportCandidateTempIds = [101, 202, 999999];
+
+    const dto = mapOrderFormToSaveOrderDto(values);
+
+    expect(dto.bazisImportCandidateClientKeys).toEqual(['202']);
+    expect(JSON.stringify(dto.details)).not.toContain('pdfImportCandidateTempIds');
+  });
+
   it('maps operational child workflow collections to SaveOrderDto', () => {
     const values = createFormValues();
     values.details = [];

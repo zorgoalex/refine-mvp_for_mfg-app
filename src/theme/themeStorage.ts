@@ -37,3 +37,24 @@ export function setStoredUiSize(userId: string, size: UiSize): void {
   if (typeof localStorage === 'undefined') return;
   localStorage.setItem(uiSizeStorageKey(userId), size);
 }
+
+export function tabletModeStorageKey(userId: string): string {
+  return `erp.tabletMode.${userId}`;
+}
+
+export function isTabletMode(value: unknown): value is boolean {
+  return typeof value === 'boolean';
+}
+
+export function getStoredTabletMode(userId: string): boolean | null {
+  if (typeof localStorage === 'undefined') return null;
+  const value = localStorage.getItem(tabletModeStorageKey(userId));
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
+export function setStoredTabletMode(userId: string, enabled: boolean): void {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(tabletModeStorageKey(userId), String(enabled));
+}

@@ -9,6 +9,40 @@ import type {
   UpdateStatusAutomationRuleRequest,
 } from '../../../api/types/statusAutomationApi.types';
 
+export interface StatusAutomationEventSelectGroup {
+  label: string;
+  options: Array<{ value: StatusAutomationEventType; label: string }>;
+}
+
+const EVENT_GROUPS = [
+  { key: 'order', label: 'Заказ' },
+  { key: 'dates', label: 'Даты' },
+  { key: 'statuses', label: 'Статусы' },
+  { key: 'payments', label: 'Оплаты' },
+  { key: 'other', label: 'Другие' },
+] as const;
+
+const LEGACY_EVENT_GROUPS: Partial<Record<StatusAutomationEventType, Exclude<(typeof EVENT_GROUPS)[number]['key'], 'other'>>> = {
+  'order.created': 'order',
+  'order.updated': 'order',
+  'order.planned_completion_date_changed': 'dates',
+  'order.status_changed': 'statuses',
+  'order.production_status_changed': 'statuses',
+  'payment.created': 'payments',
+  'order.payment_status_changed': 'payments',
+};
+
+export function buildEventTypeSelectOptions(
+  eventTypes: readonly StatusAutomationEventTypeDto[],
+): StatusAutomationEventSelectGroup[] {
+  return EVENT_GROUPS.map((group) => ({
+    label: group.label,
+    options: eventTypes
+      .filter((eventType) => (eventType.group ?? LEGACY_EVENT_GROUPS[eventType.eventType] ?? 'other') === group.key)
+      .map((eventType) => ({ value: eventType.eventType, label: eventType.title })),
+  })).filter((group) => group.options.length > 0);
+}
+
 export interface StatusAutomationCatalogs {
   orderStatusNames: Map<number, string>;
   paymentStatusNames: Map<number, string>;

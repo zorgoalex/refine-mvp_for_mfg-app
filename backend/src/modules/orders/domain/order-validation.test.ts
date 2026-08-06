@@ -70,6 +70,41 @@ function validationErrors(error: unknown): string[] {
 }
 
 describe('validateSaveOrderDto', () => {
+  it('accepts candidate keys only for a new ERP detail imported from a Bazis PDF report', () => {
+    const valid = normalizeSaveOrderDto(createOrder({
+      details: [{
+        clientKey: 'pdf-1',
+        height: 550,
+        width: 200,
+        quantity: 2,
+        materialId: null,
+        sheetMaterialTypeId: 1001,
+        millingTypeId: 1001,
+        edgeTypeId: 1001,
+      }],
+      bazisImportCandidateClientKeys: ['pdf-1'],
+    }));
+    expect(() => validateSaveOrderDto(valid, { mode: 'create' })).not.toThrow();
+
+    const persisted = normalizeSaveOrderDto(createOrder({
+      bazisImportCandidateClientKeys: ['persisted'],
+      details: [{
+        id: 11,
+        clientKey: 'persisted',
+        height: 550,
+        width: 200,
+        quantity: 2,
+        materialId: null,
+        sheetMaterialTypeId: 1001,
+        millingTypeId: 1001,
+        edgeTypeId: 1001,
+      }],
+    }));
+    expect(() => validateSaveOrderDto(persisted, { mode: 'create' })).toThrow(
+      OrderValidationError,
+    );
+  });
+
   it('accepts a valid create order DTO without DB ownership checks', () => {
     const order = normalizeSaveOrderDto(createOrder());
 

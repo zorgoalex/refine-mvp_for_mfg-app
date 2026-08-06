@@ -65,6 +65,23 @@
   white-space: nowrap;
 }
 
+.orders-table td.orders-col--production-numbers {
+  font-size: 92%;
+}
+
+.orders-table .orders-production-number-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.orders-table .orders-production-number-list > span {
+  white-space: nowrap;
+}
+
 .orders-table td.col-order-id {
   font-size: 70%;
 }

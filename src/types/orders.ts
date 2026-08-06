@@ -124,6 +124,7 @@ export interface OrderDetail {
   // Additional
   note?: string | null;
   basis_project?: string | null;
+  bazis_project_id?: number | null;
   basis_product?: string | null;
   basis_data?: string | null;
   basis_designation?: string | null;
@@ -143,6 +144,12 @@ export interface OrderDetail {
   cut_job?: CutDetailLastReadyJobRef | null;
   bath_cut_job?: CutDetailLastReadyJobRef | null;
   bazis_cut_sets?: Array<{ bazisCutSetId: number; name: string }>;
+  bazis_projects?: Array<{
+    bazisProjectId: number;
+    bazisRevisionId: number;
+    revisionNo: number;
+    name: string;
+  }>;
 
   // Management
   delete_flag?: boolean;
@@ -298,6 +305,10 @@ export interface OrderFormValues {
   workshops: OrderWorkshop[];
   requirements: OrderResourceRequirement[];
   dowelingLinks: OrderDowelingLink[];
+
+  // Transient command intent: only rows added by PDF Basis import.
+  // Deliberately excluded from persisted draft storage and server responses.
+  pdfImportCandidateTempIds?: number[];
 
   // Deleted items (track for deletion on server)
   deletedDetails?: number[];

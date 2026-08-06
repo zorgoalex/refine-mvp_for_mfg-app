@@ -24,7 +24,7 @@ import type {
   OrderSaveAuditEvent,
   OrderStatusAuditEvent,
   OrderStatusAuditInfo,
-  OrderStatusOutboxEvent,
+  OrderAutomationSourceOutboxEvent,
   OrderTransactionManagerPort,
   RestoreOrderCommand,
   ProductionStatusAuditInfo,
@@ -32,6 +32,8 @@ import type {
   SaveContext,
   SheetReferenceValidationInput,
   StoredOrderSheetState,
+  ReconcileBazisPanelOrderLinksInput,
+  BazisPanelOrderLink,
 } from '../application/order-transaction.types';
 import { evaluateStatusAutomation } from '../../status-automation/application/status-automation-runtime';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
@@ -66,6 +68,7 @@ import {
   ProjectClientMismatchError,
   ProjectNotFoundError,
 } from '../../projects/errors/projects.errors';
+import { reconcileBazisPanelOrderLinks } from './pg-bazis-panel-order-link-reconciler';
 
 const CHILD_TABLES = {
   detail: { table: 'order_details', pk: 'detail_id' },
@@ -1191,6 +1194,12 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     return nextVersion;
   }
 
+  reconcileBazisPanelOrderLinks(
+    input: ReconcileBazisPanelOrderLinksInput,
+  ): Promise<BazisPanelOrderLink[]> {
+    return reconcileBazisPanelOrderLinks(this.tx, input);
+  }
+
   async softDeleteOrder(input: {
     orderId: number;
     previousVersion: number;
@@ -1311,7 +1320,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     });
   }
 
-  async enqueueStatusOutboxEvent(event: OrderStatusOutboxEvent): Promise<void> {
+  async enqueueAutomationSourceOutboxEvent(event: OrderAutomationSourceOutboxEvent): Promise<void> {
     await this.tx.query(
       `
       INSERT INTO outbox_events (

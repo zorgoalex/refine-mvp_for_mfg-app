@@ -27,6 +27,7 @@ export interface BazisDraftPanel {
 export interface BazisDraftRevision {
   bazisProjectName: string;
   revisionBazisOrderNo: string | null;
+  rootProductCount: number;
 }
 
 export interface BazisDraftMaterialMapping {
@@ -156,7 +157,10 @@ export function buildDraftDetails(
       priority: 100,
       basisProject:
         panel.productOrderNo ?? revision.revisionBazisOrderNo ?? revision.bazisProjectName,
-      basisProduct: panel.productName ?? null,
+      basisProduct:
+        revision.rootProductCount > 1
+          ? panel.productName?.trim() || null
+          : null,
       basisDesignation: panel.designation,
       basisData: `${panel.position ?? ''}/${panel.designation ?? ''}/${panel.name ?? ''}`,
       doweling: panelHasDrilling(panel.rawJson) || panelHasRoute(panel.rawJson),

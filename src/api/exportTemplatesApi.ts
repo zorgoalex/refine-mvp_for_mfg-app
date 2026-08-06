@@ -10,6 +10,7 @@ export type ExportConditionOperator = 'exists' | 'not_empty' | 'equals' | 'not_e
 
 export type ExportExpression =
   | { type: 'field'; field: string }
+  | { type: 'column_ref'; columnKey: string }
   | { type: 'constant'; value: ExportScalar }
   | { type: 'empty' }
   | { type: 'concat'; parts: ExportExpression[] }

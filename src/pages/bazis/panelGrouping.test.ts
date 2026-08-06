@@ -9,6 +9,7 @@ import {
   PANEL_FILTER_EMPTY,
   PANEL_FILTER_NONE,
   resolveBazisDocumentColumns,
+  resolveBazisProductDisplay,
   summarizePanelGroups,
   summarizeVisibleRows,
 } from './panelGrouping';
@@ -183,6 +184,23 @@ describe('groupPanelRows', () => {
       productOrderNo: ' BZ-100 ',
       revisionBazisOrderNo: ' BP-7 ',
     })).toEqual({ bazisProjectNo: 'BP-7', productOrderNo: null });
+  });
+
+  it('одно изделие показывает в сводке, несколько — в колонке панелей', () => {
+    expect(resolveBazisProductDisplay({
+      rootProductCount: 1,
+      productName: ' Кухня ',
+    })).toEqual({ panelProductName: null, projectSummaryProductName: 'Кухня' });
+
+    expect(resolveBazisProductDisplay({
+      rootProductCount: 2,
+      productName: ' Шкаф ',
+    })).toEqual({ panelProductName: 'Шкаф', projectSummaryProductName: null });
+
+    expect(resolveBazisProductDisplay({
+      rootProductCount: 0,
+      productName: ' Кухня ',
+    })).toEqual({ panelProductName: null, projectSummaryProductName: null });
   });
 
   it('сохраняет порядок первого появления группы и панелей внутри группы', () => {

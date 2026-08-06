@@ -7,6 +7,8 @@ import type {
 export interface StatusAutomationEventDescriptor {
   eventType: StatusAutomationEventType;
   title: string; // русское название для UI
+  group: 'order' | 'dates' | 'statuses' | 'payments';
+  description: string;
   allowedConditions: ReadonlyArray<keyof StatusAutomationConditions>;
   allowedActions: ReadonlyArray<StatusAutomationActionType>;
 }
@@ -32,30 +34,56 @@ export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescri
   {
     eventType: 'payment.created',
     title: 'Платёж создан',
+    group: 'payments',
+    description: 'После добавления нового платежа к заказу.',
     allowedConditions: [...BASE_CONDITIONS, 'firstPaymentOnly'],
     allowedActions: ALLOWED_ACTIONS,
   },
   {
     eventType: 'order.payment_status_changed',
     title: 'Изменился статус оплаты',
+    group: 'payments',
+    description: 'Когда изменился расчётный статус оплаты заказа.',
     allowedConditions: BASE_CONDITIONS,
     allowedActions: ALLOWED_ACTIONS,
   },
   {
     eventType: 'order.created',
     title: 'Заказ создан',
+    group: 'order',
+    description: 'После успешного создания заказа.',
+    allowedConditions: BASE_CONDITIONS,
+    allowedActions: ALLOWED_ACTIONS,
+  },
+  {
+    eventType: 'order.updated',
+    title: 'Заказ сохранён',
+    group: 'order',
+    description: 'После каждого успешного сохранения существующего заказа.',
+    allowedConditions: BASE_CONDITIONS,
+    allowedActions: ALLOWED_ACTIONS,
+  },
+  {
+    eventType: 'order.planned_completion_date_changed',
+    title: 'Изменилась плановая дата готовности',
+    group: 'dates',
+    description: 'Когда плановая дата готовности установлена, изменена или очищена.',
     allowedConditions: BASE_CONDITIONS,
     allowedActions: ALLOWED_ACTIONS,
   },
   {
     eventType: 'order.status_changed',
     title: 'Изменился статус заказа',
+    group: 'statuses',
+    description: 'Когда заказу назначен другой обычный статус.',
     allowedConditions: BASE_CONDITIONS,
     allowedActions: ALLOWED_ACTIONS,
   },
   {
     eventType: 'order.production_status_changed',
     title: 'Изменился статус производства',
+    group: 'statuses',
+    description: 'Когда заказу назначен другой производственный статус.',
     allowedConditions: BASE_CONDITIONS,
     allowedActions: ALLOWED_ACTIONS,
   },

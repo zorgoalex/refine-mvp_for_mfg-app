@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import { ApiError } from '../../../common/errors/api-error';
 import type { BazisCutDetailFields } from '../dto/bazis-cut.dto';
 import {
-  evaluateExpression,
+  evaluateExportRow,
   EXPORT_LIMITS,
   validateExportColumns,
 } from '../../export-templates/application/export-expression';
@@ -12,6 +12,7 @@ import type {
   ExportTemplateColumn,
   ExportTemplateSnapshot,
 } from '../../export-templates/application/export-template.types';
+import { buildBazisCutQrCode } from './bazis-cut-identity';
 
 export const BAZIS_CUT_SHEET_NAME = 'Детали для раскроя';
 
@@ -96,34 +97,25 @@ export function buildBazisCutXlsFromTemplate(
   const rows: unknown[][] = [template.columns.map((column) => column.header)];
   details.forEach((detail, detailIndex) => {
     const context = { rowNumber: detailIndex + 1, exportedAt, templateName: template.name };
-    const row = template.columns.map((column, columnIndex) => {
-      visitedCells += 1;
-      if (visitedCells % 256 === 0 && Date.now() - startedAt > EXPORT_LIMITS.maxElapsedMs) {
-        throw budgetError({ elapsedMs: Date.now() - startedAt });
+    let row: unknown[];
+    try {
+      row = evaluateExportRow(template.columns, detail, context);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw new ApiError(error.statusCode, error.code, error.message, {
+          ...(error.details ?? {}), rowNumber: detailIndex + 1,
+        });
       }
-      try {
-        const value = evaluateExpression(
-          column.expression,
-          detail,
-          context,
-          `columns.${columnIndex}.expression`,
-        );
-        if (typeof value === 'string') {
-          stringChars += value.length;
-          if (stringChars > EXPORT_LIMITS.maxStringChars) throw budgetError({ stringChars });
-        }
-        return value;
-      } catch (error) {
-        if (error instanceof ApiError) {
-          throw new ApiError(error.statusCode, error.code, error.message, {
-            ...(error.details ?? {}),
-            rowNumber: detailIndex + 1,
-            columnKey: column.columnKey,
-            columnHeader: column.header,
-          });
-        }
-        throw error;
-      }
+      throw error;
+    }
+    visitedCells += row.length;
+    if (visitedCells >= 256 && Date.now() - startedAt > EXPORT_LIMITS.maxElapsedMs) {
+      throw budgetError({ elapsedMs: Date.now() - startedAt });
+    }
+    row.forEach((value) => {
+      if (typeof value !== 'string') return;
+      stringChars += value.length;
+      if (stringChars > EXPORT_LIMITS.maxStringChars) throw budgetError({ stringChars });
     });
     rows.push(row);
   });
@@ -146,7 +138,7 @@ export function bazisCutFieldsToRow(
   return [
       detail.cutEnabled ? 'Да' : 'Нет', detail.materialType, safeText(detail.materialName),
       safeText(detail.materialArticle), detail.thicknessMm, safeText(order),
-      safeText(detail.sourceBazisProductName ?? ''), safeText(`${order}${detail.position.trim()}`),
+      safeText(detail.sourceBazisProductName ?? ''), safeText(detail.position.trim()),
       buildBazisCutQrCode(detail),
       safeText(detail.partName), detail.finishedLengthMm, detail.finishedWidthMm,
       detail.cutLengthMm, detail.cutWidthMm, detail.quantity, safeText(detail.orientation),
@@ -158,12 +150,6 @@ export function bazisCutFieldsToRow(
       safeText(detail.customProperty), safeText(detail.glue), safeText(detail.milling),
       safeText(detail.route), safeText(detail.sourceBathCutNumber ?? ''), safeText(detail.film),
     ];
-}
-
-export function buildBazisCutQrCode(
-  detail: BazisCutXlsDetail,
-): string {
-  return `${detail.sourceBazisProjectName?.trim() ?? ''}${detail.position.trim()}`;
 }
 
 export type BazisCutXlsDetail = BazisCutDetailFields & {

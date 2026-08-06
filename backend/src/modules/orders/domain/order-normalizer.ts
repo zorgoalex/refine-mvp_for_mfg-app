@@ -16,6 +16,7 @@ import type {
   SaveOrderWorkshopDto,
 } from '../dto/save-order.dto';
 import { OrderValidationError, type OrderFieldError } from '../errors/order.errors';
+import { noteRequiresDoweling } from './order-doweling';
 
 type RawRecord = Record<string, unknown>;
 
@@ -36,6 +37,11 @@ export function normalizeSaveOrderDto(input: SaveOrderDto): NormalizedSaveOrderD
   const dowelingLinks = normalizeRequiredArray<SaveOrderDowelingLinkDto>(
     raw.dowelingLinks,
     'dowelingLinks',
+    errors,
+  );
+  const bazisImportCandidateClientKeys = normalizeOptionalStringArray(
+    raw.bazisImportCandidateClientKeys,
+    'bazisImportCandidateClientKeys',
     errors,
   );
 
@@ -59,6 +65,7 @@ export function normalizeSaveOrderDto(input: SaveOrderDto): NormalizedSaveOrderD
     requirements: requirements.map(normalizeRequirement),
     dowelingLinks: dowelingLinks.map(normalizeDowelingLink),
     deleted: normalizeDeleted(raw.deleted as SaveOrderDeletedDto),
+    bazisImportCandidateClientKeys,
     version: optionalInteger(raw.version, 'version') ?? undefined,
     idempotencyKey: normalizeOptionalString(raw.idempotencyKey) ?? undefined,
   };
@@ -126,6 +133,7 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
 
 function normalizeDetail(detail: SaveOrderDetailDto): NormalizedSaveOrderDetailDto {
   const raw = detail as unknown as RawRecord;
+  const note = normalizeOptionalString(raw.note);
 
   return {
     id: optionalInteger(raw.id, 'details[].id') ?? undefined,
@@ -148,12 +156,12 @@ function normalizeDetail(detail: SaveOrderDetailDto): NormalizedSaveOrderDetailD
     priority: optionalNumber(raw.priority, 'details[].priority') ?? 100,
     productionStatusId: optionalInteger(raw.productionStatusId, 'details[].productionStatusId'),
     jointOrderId: optionalInteger(raw.jointOrderId, 'details[].jointOrderId'),
-    note: normalizeOptionalString(raw.note),
+    note,
     basisProject: normalizeOptionalString(raw.basisProject),
     basisProduct: normalizeOptionalString(raw.basisProduct),
     basisData: normalizeOptionalString(raw.basisData),
     basisDesignation: normalizeOptionalString(raw.basisDesignation),
-    doweling: optionalBoolean(raw.doweling, false),
+    doweling: noteRequiresDoweling(note) || optionalBoolean(raw.doweling, false),
     linkCuttingFile: normalizeOptionalString(raw.linkCuttingFile),
     linkCuttingImageFile: normalizeOptionalString(raw.linkCuttingImageFile),
     linkCadFile: normalizeOptionalString(raw.linkCadFile),
@@ -277,6 +285,19 @@ function normalizeRequiredArray<T>(
   }
 
   return value as T[];
+}
+
+function normalizeOptionalStringArray(
+  value: unknown,
+  field: string,
+  errors: OrderFieldError[],
+): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    errors.push({ field, message: `${field} must be an array` });
+    return [];
+  }
+  return value.map((item) => normalizeOptionalString(item) ?? '');
 }
 
 function normalizeClientKey(raw: RawRecord): string | undefined {

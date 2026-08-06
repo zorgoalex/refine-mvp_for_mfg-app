@@ -42,6 +42,59 @@ describe('UI variant bootstrap', () => {
     expect(restoreSession).not.toHaveBeenCalled();
   });
 
+  it('forces Evolution before preference lookup on a physical tablet', async () => {
+    const restoreSession = vi.fn(async () => undefined);
+    const getPreferences = vi.fn(async () => ({ preferences: { uiVariant: 'legacy' } }));
+    const dependencies = makeDependencies({
+      isTabletDevice: () => true,
+      restoreSession,
+      getPreferences,
+      getCached: () => 'air',
+    });
+
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      dependencies,
+    )).resolves.toBe('evolution');
+    expect(restoreSession).not.toHaveBeenCalled();
+    expect(getPreferences).not.toHaveBeenCalled();
+  });
+
+  it('keeps forceLegacy stronger than the tablet override', async () => {
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: true },
+      makeDependencies({ isTabletDevice: () => true }),
+    )).resolves.toBe('legacy');
+  });
+
+  it('forces Evolution from the confirmed cross-device tablet preference', async () => {
+    const setTabletModeCached = vi.fn();
+    const dependencies = makeDependencies({
+      getPreferences: async () => ({
+        preferences: { uiVariant: 'legacy', tabletMode: true },
+      }),
+      setTabletModeCached,
+    });
+
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      dependencies,
+    )).resolves.toBe('evolution');
+    expect(setTabletModeCached).toHaveBeenCalledWith('7', true);
+  });
+
+  it('uses the same-user tablet cache during a mixed frontend/backend rollout', async () => {
+    const dependencies = makeDependencies({
+      getPreferences: async () => ({ preferences: { uiVariant: 'legacy' } }),
+      getTabletModeCached: () => true,
+    });
+
+    await expect(resolveInitialUiVariant(
+      { evolutionEnabled: true, forceLegacy: false },
+      dependencies,
+    )).resolves.toBe('evolution');
+  });
+
   it('uses only the same-user confirmed cache when preferences are unavailable', async () => {
     const dependencies = makeDependencies({
       getPreferences: async () => {
@@ -108,6 +161,8 @@ function makeDependencies(
     getPreferences: async () => ({ preferences: { uiVariant: 'legacy' } }),
     getCached: () => null,
     setCached: () => undefined,
+    getTabletModeCached: () => null,
+    setTabletModeCached: () => undefined,
     timeoutMs: 50,
     ...overrides,
   };

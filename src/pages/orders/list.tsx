@@ -15,8 +15,9 @@ import {
   useSelect,
 } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge } from "antd";
+import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge, Segmented } from "antd";
 import {
+  AppstoreOutlined,
   EyeOutlined,
   EditOutlined,
   PlusOutlined,
@@ -28,9 +29,12 @@ import {
   DownloadOutlined,
   UploadOutlined,
   DatabaseOutlined,
+  ProjectOutlined,
+  TableOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
@@ -38,6 +42,7 @@ const { Text } = Typography;
 import { formatNumber } from "../../utils/numberFormat";
 import { OrderCreateModal } from "./components/OrderCreateModal";
 import { authStorage } from "../../utils/auth";
+import { authSession } from "../../api/authSession";
 import { getMaterialTextColor } from "../calendar/utils/statusColors";
 import { resolveDetailMaterialName } from "../../utils/materialDisplayName";
 import { ProductionStagesDisplay, getPassedCodesFromStatusName } from "../../components/ProductionStagesDisplay";
@@ -63,6 +68,12 @@ import { findOrderByName, countOrdersAfter } from "../../api/reports/ordersSearc
 import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { can } from "../../utils/permissions";
+import { canViewNavigationResource } from "../../utils/navigationPermissions";
+import {
+  canViewResourceByRoleVisibility,
+  getCurrentUserRoleKey,
+  normalizeRoleVisibilityMatrix,
+} from "../../utils/resourceVisibility";
 import {
   canManageOrderContent,
   filterOrderFinancialItems,
@@ -72,8 +83,19 @@ import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibi
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
-import { useIsMobile } from "../../hooks/useDeviceTier";
+import {
+  isTabletTier,
+  SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY,
+  useDeviceTier,
+} from "../../hooks/useDeviceTier";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { OrderCardList } from "./mobile/OrderCardList";
+import {
+  ordersViewStorageKey,
+  resolveOrdersViewMode,
+  setOrdersViewQuery,
+  type OrdersViewMode,
+} from './tablet/ordersViewMode';
 import {
   applyOrderDetailColumnSettings,
   OrderDetailColumnSettingsButton,
@@ -81,6 +103,7 @@ import {
   type OrderDetailColumnDefinition,
 } from "./components/tables/OrderDetailColumnSettings";
 import { resolveOrderListBasisProjectValues } from "./orderListBasisProjects";
+import { normalizeOrderListProductionNumbers } from "./orderListProductionNumbers";
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -88,6 +111,9 @@ const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'order_name', label: 'Заказ', lockVisible: true },
   ...(featureFlags.projects ? [{ key: 'project_code', label: '№ проекта' }] : []),
   { key: 'doweling_order_name', label: 'Базис-проект' },
+  { key: 'bazis_cut_numbers', label: 'Базис-раскрой' },
+  { key: 'cut_numbers', label: 'Раскрой' },
+  { key: 'bath_cut_numbers', label: 'Расчет ванны' },
   { key: 'groups', label: 'Группа' },
   { key: 'order_date', label: 'Дата заказа' },
   { key: 'client_name', label: 'Клиент' },
@@ -177,7 +203,30 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
   // hook is disabled so the cached list stops reacting to invalidateQueries.
   const { isActive } = useKeepAlive();
-  const { getSetting } = useAppSettings({ enabled: isActive });
+  const { getSetting, isLoading: appSettingsLoading } = useAppSettings({ enabled: isActive });
+  const navigationUser = featureFlags.useBackendPermissions
+    ? authSession.getUser()
+    : currentUser;
+  const roleVisibilityMatrix = useMemo(
+    () => normalizeRoleVisibilityMatrix(
+      getSetting(SETTING_KEYS.RESOURCE_VISIBILITY_BY_ROLE),
+    ),
+    [getSetting],
+  );
+  const canViewStatusBoard =
+    featureFlags.orderStatusBoard &&
+    !appSettingsLoading &&
+    canViewNavigationResource(
+      'order-status-board',
+      navigationUser,
+      featureFlags.useBackendPermissions,
+      canViewFinancials,
+    ) &&
+    canViewResourceByRoleVisibility(
+      'order-status-board',
+      getCurrentUserRoleKey(navigationUser),
+      roleVisibilityMatrix,
+    );
 
   const { tableProps, tableQueryResult, current, pageSize, setCurrent, setPageSize, sorters, setSorters, filters, setFilters } = useTable({
     syncWithLocation: true,
@@ -196,7 +245,70 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
 
   const invalidate = useInvalidate();
   const { show } = useNavigation();
-  const isMobile = useIsMobile();
+  const deviceTier = useDeviceTier();
+  const isMobile = deviceTier === 'phone';
+  const isTablet = isTabletTier(deviceTier);
+  const shortTabletLandscape = useMediaQuery(SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY);
+  const location = useLocation();
+  const routerNavigate = useNavigate();
+  const ordersViewKey = ordersViewStorageKey(currentUser?.id);
+  const ordersViewMode = useMemo(() => {
+    const queryValue = new URLSearchParams(location.search).get('view');
+    let storedValue: string | null = null;
+    if (ordersViewKey) {
+      try {
+        storedValue = window.localStorage.getItem(ordersViewKey);
+      } catch {
+        storedValue = null;
+      }
+    }
+    const resolved = resolveOrdersViewMode(queryValue, storedValue);
+    return resolved === 'board' && !canViewStatusBoard ? 'list' : resolved;
+  }, [canViewStatusBoard, location.search, ordersViewKey]);
+  const selectOrdersView = useCallback((nextMode: OrdersViewMode) => {
+    if (!isTablet) return;
+    if (nextMode === 'board') {
+      if (!canViewStatusBoard) return;
+      const returnMode = ordersViewMode === 'cards' ? 'cards' : 'list';
+      if (ordersViewKey) {
+        try {
+          window.localStorage.setItem(ordersViewKey, returnMode);
+        } catch {
+          // Query navigation remains the source of truth when storage is unavailable.
+        }
+      }
+      routerNavigate({
+        pathname: location.pathname,
+        search: setOrdersViewQuery(location.search, returnMode),
+      }, { replace: true });
+      routerNavigate('/order-status-board');
+      return;
+    }
+    if (ordersViewKey) {
+      try {
+        window.localStorage.setItem(ordersViewKey, nextMode);
+      } catch {
+        // Query navigation remains the source of truth when storage is unavailable.
+      }
+    }
+    routerNavigate({
+      pathname: location.pathname,
+      search: setOrdersViewQuery(location.search, nextMode),
+    });
+  }, [canViewStatusBoard, isTablet, location.pathname, location.search, ordersViewKey, ordersViewMode, routerNavigate]);
+
+  useEffect(() => {
+    if (!isTablet || appSettingsLoading) return;
+    if (new URLSearchParams(location.search).get('view') !== 'board') return;
+    if (canViewStatusBoard) {
+      routerNavigate('/order-status-board', { replace: true });
+      return;
+    }
+    routerNavigate({
+      pathname: location.pathname,
+      search: setOrdersViewQuery(location.search, 'list'),
+    }, { replace: true });
+  }, [appSettingsLoading, canViewStatusBoard, isTablet, location.pathname, location.search, routerNavigate]);
   const orderFilterFormSync = useMemo(
     () => buildOrderListFilterFormSync(filters, { useBackendOrdersRead, canViewUsers }),
     [filters, useBackendOrdersRead, canViewUsers],
@@ -680,7 +792,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
   const ordersCompactPagination = useMemo(() => ({
     ...(tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination : {}),
-    position: ['topRight', 'bottomRight'],
+    position: isTablet && shortTabletLandscape ? ['topRight'] : ['topRight', 'bottomRight'],
     size: 'small',
     simple: false,
     showTotal: () => (
@@ -703,7 +815,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         />
       </Space>
     ),
-  }), [orderListColumnDefinitions, orderListColumnSettings, orderListDefaultOrder, saveOrderListColumnSettings, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
+  }), [isTablet, orderListColumnDefinitions, orderListColumnSettings, orderListDefaultOrder, saveOrderListColumnSettings, shortTabletLandscape, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";
@@ -1156,6 +1268,29 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         ) : "—";
       },
     },
+    ...[
+      { dataIndex: "bazis_cut_numbers", title: "Базис-раскрой", width: 112 },
+      { dataIndex: "cut_numbers", title: "Раскрой", width: 96 },
+      { dataIndex: "bath_cut_numbers", title: "Расчет ванны", width: 108 },
+    ].map(({ dataIndex, title, width }) => ({
+      dataIndex,
+      key: dataIndex,
+      title,
+      width,
+      className: "orders-col orders-col--production-numbers",
+      render: (value: unknown) => {
+        const numbers = normalizeOrderListProductionNumbers(value);
+        if (numbers.length === 0) return "—";
+
+        return (
+          <span className="orders-production-number-list" title={numbers.join(", ")}>
+            {numbers.map((number, index) => (
+              <span key={number}>{number}{index < numbers.length - 1 ? "," : ""}</span>
+            ))}
+          </span>
+        );
+      },
+    })),
     ...(useBackendOrdersRead && featureFlags.useBackendGroups
       ? [{
           dataIndex: "groups",
@@ -1302,6 +1437,30 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         title="Заказы"
         headerButtons={({ createButtonProps }) => (
           <>
+            {isTablet && (
+              <Segmented
+                className="orders-tablet-view-switch"
+                aria-label="Вид заказов"
+                value={ordersViewMode}
+                onChange={(value) => selectOrdersView(value as OrdersViewMode)}
+                options={[
+                  {
+                    value: 'list',
+                    label: <Tooltip title="Таблица"><span aria-label="Таблица"><TableOutlined /></span></Tooltip>,
+                  },
+                  {
+                    value: 'cards',
+                    label: <Tooltip title="Карточки"><span aria-label="Карточки"><AppstoreOutlined /></span></Tooltip>,
+                  },
+                  ...(canViewStatusBoard
+                    ? [{
+                      value: 'board',
+                      label: <Tooltip title="Доска статусов"><span aria-label="Доска статусов"><ProjectOutlined /></span></Tooltip>,
+                    }]
+                    : []),
+                ]}
+              />
+            )}
             {createButtonProps && canCreateOrders && (
               <CreateButton {...createButtonProps}>Создать</CreateButton>
             )}
@@ -1576,21 +1735,23 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             </Form>
           </Card>
         )}
-        {isMobile ? (
-          <OrderCardList
-            rows={tableProps.dataSource ?? []}
-            loading={!!tableProps.loading}
-            pagination={tableProps.pagination ?? false}
-            onPaginationChange={(nextPage, nextPageSize) => {
-              if (nextPageSize !== pageSize) {
-                setPageSize(nextPageSize);
-                return;
-              }
-              setCurrent(nextPage);
-            }}
-            onOpen={(id) => show("orders_view", id, "push")}
-            showFinancials={canViewFinancials}
-          />
+        {isMobile || (isTablet && ordersViewMode === 'cards') ? (
+          <div className={isTablet ? 'order-card-list--tablet' : undefined}>
+            <OrderCardList
+              rows={tableProps.dataSource ?? []}
+              loading={!!tableProps.loading}
+              pagination={tableProps.pagination ?? false}
+              onPaginationChange={(nextPage, nextPageSize) => {
+                if (nextPageSize !== pageSize) {
+                  setPageSize(nextPageSize);
+                  return;
+                }
+                setCurrent(nextPage);
+              }}
+              onOpen={(id) => show("orders_view", id, "push")}
+              showFinancials={canViewFinancials}
+            />
+          </div>
         ) : (
           <Table
             {...tableProps}

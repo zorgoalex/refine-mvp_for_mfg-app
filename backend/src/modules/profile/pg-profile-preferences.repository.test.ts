@@ -11,6 +11,7 @@ describe('PgProfilePreferencesRepository', () => {
       themeMode: 'light',
       uiSize: 'default',
       uiVariant: 'evolution',
+      tabletMode: false,
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
@@ -28,6 +29,7 @@ describe('PgProfilePreferencesRepository', () => {
       themeMode: 'dark',
       uiSize: 'small',
       uiVariant: 'evolution',
+      tabletMode: false,
       orderDetailColumns: { orderShow: { order: ['height'], hidden: ['note'] } },
       recentReferences: {},
       pageSizePreferences: {},
@@ -43,6 +45,7 @@ describe('PgProfilePreferencesRepository', () => {
       themeMode: 'dark',
       uiSize: 'default',
       uiVariant: 'evolution',
+      tabletMode: false,
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
@@ -50,7 +53,7 @@ describe('PgProfilePreferencesRepository', () => {
     });
     expect(database.queries[0].text).toContain('INSERT INTO user_preferences');
     expect(database.queries[0].text).toContain('ON CONFLICT (user_id)');
-    expect(database.queries[0].params).toEqual([7, 'dark', null, null, null, null, null]);
+    expect(database.queries[0].params).toEqual([7, 'dark', null, null, null, null, null, null]);
   });
 
   it('upserts order detail column preferences without changing theme', async () => {
@@ -63,6 +66,7 @@ describe('PgProfilePreferencesRepository', () => {
       themeMode: 'light',
       uiSize: 'default',
       uiVariant: 'evolution',
+      tabletMode: false,
       orderDetailColumns: { orderEdit: { order: ['width'], hidden: [] } },
       recentReferences: {},
       pageSizePreferences: {},
@@ -74,6 +78,7 @@ describe('PgProfilePreferencesRepository', () => {
       null,
       null,
       JSON.stringify({ orderEdit: { order: ['width'], hidden: [] } }),
+      null,
       null,
       null,
     ]);
@@ -105,6 +110,7 @@ describe('PgProfilePreferencesRepository', () => {
       null,
       null,
       JSON.stringify(sidebarMenuOrder),
+      null,
     ]);
     expect(database.queries[0].text).toContain('sidebar_menu_order = COALESCE($7::jsonb, user_preferences.sidebar_menu_order)');
   });
@@ -117,12 +123,13 @@ describe('PgProfilePreferencesRepository', () => {
       themeMode: 'light',
       uiSize: 'small',
       uiVariant: 'evolution',
+      tabletMode: false,
       orderDetailColumns: {},
       recentReferences: {},
       pageSizePreferences: {},
       sidebarMenuOrder: { top: [], categories: [], resources: {} },
     });
-    expect(database.queries[0].params).toEqual([7, null, 'small', null, null, null, null]);
+    expect(database.queries[0].params).toEqual([7, null, 'small', null, null, null, null, null]);
 
     const garbage = new FakeDatabase([{ rows: [{ theme_mode: 'light', ui_size: 'huge', order_detail_columns: {} }] }]);
     await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7)).resolves.toMatchObject({
@@ -139,7 +146,7 @@ describe('PgProfilePreferencesRepository', () => {
 
     await expect(repository.updateUserPreferences(7, { uiVariant: 'line' }))
       .resolves.toMatchObject({ uiVariant: 'line' });
-    expect(database.queries[0].params).toEqual([7, null, null, 'line', null, null, null]);
+    expect(database.queries[0].params).toEqual([7, null, null, 'line', null, null, null, null]);
     expect(database.queries[0].text).toContain('ui_variant = COALESCE($4, user_preferences.ui_variant)');
 
     const air = new FakeDatabase([{
@@ -153,6 +160,19 @@ describe('PgProfilePreferencesRepository', () => {
     }]);
     await expect(new PgProfilePreferencesRepository(garbage).getUserPreferences(7))
       .resolves.toMatchObject({ uiVariant: 'evolution' });
+  });
+
+  it('upserts and returns the explicit tablet-mode override', async () => {
+    const database = new FakeDatabase([{
+      rows: [{ theme_mode: 'light', tablet_mode: true, order_detail_columns: {} }],
+    }]);
+    const repository = new PgProfilePreferencesRepository(database);
+
+    await expect(repository.updateUserPreferences(7, { tabletMode: true }))
+      .resolves.toMatchObject({ tabletMode: true });
+    expect(database.queries[0].params).toEqual([7, null, null, null, null, null, null, true]);
+    expect(database.queries[0].text)
+      .toContain('tablet_mode = COALESCE($8, user_preferences.tablet_mode)');
   });
 
   it('atomically merges one list page size without replacing other list preferences', async () => {
@@ -178,6 +198,7 @@ describe('PgProfilePreferencesRepository', () => {
       null,
       null,
       JSON.stringify({ 'refine:orders_view': 50 }),
+      null,
       null,
     ]);
     expect(database.queries[0].text).toContain('user_preferences.page_size_preferences || $6::jsonb');

@@ -8,6 +8,8 @@ const expectedEventTypes = [
   'payment.created',
   'order.payment_status_changed',
   'order.created',
+  'order.updated',
+  'order.planned_completion_date_changed',
   'order.status_changed',
   'order.production_status_changed',
 ] as const;
@@ -30,11 +32,23 @@ const actionTypes = [
 ] as const;
 
 describe('status automation event catalog', () => {
-  it('contains exactly the five supported events', () => {
-    expect(STATUS_AUTOMATION_EVENTS).toHaveLength(5);
+  it('contains exactly the seven supported events', () => {
+    expect(STATUS_AUTOMATION_EVENTS).toHaveLength(7);
     expect(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).toEqual(
       expectedEventTypes,
     );
+  });
+
+  it('exposes unique event types, groups, and user-facing descriptions', () => {
+    expect(new Set(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).size).toBe(7);
+    for (const descriptor of STATUS_AUTOMATION_EVENTS) {
+      expect(['order', 'dates', 'statuses', 'payments']).toContain(descriptor.group);
+      expect(descriptor.description.trim().length).toBeGreaterThan(10);
+    }
+    expect(getEventDescriptor('order.planned_completion_date_changed')).toMatchObject({
+      group: 'dates',
+      title: 'Изменилась плановая дата готовности',
+    });
   });
 
   it('allows firstPaymentOnly only for payment.created', () => {

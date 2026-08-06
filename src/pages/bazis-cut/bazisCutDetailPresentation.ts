@@ -1,5 +1,8 @@
 export interface BazisCutQrCodeSource {
   sourceBazisProjectName?: string | null;
+  sourceBazisOrderNo?: string | null;
+  sourceOrderName?: string | null;
+  sourceBazisProductName?: string | null;
   position?: string | null;
 }
 
@@ -10,12 +13,14 @@ export interface BazisCutPositionSource {
 }
 
 export function buildBazisCutCardPosition(source: BazisCutPositionSource): string {
-  const prefix = clean(source.sourceBazisOrderNo) || clean(source.sourceBazisProjectName);
-  return `${prefix}${clean(source.position)}`;
+  return clean(source.position);
 }
 
 export function buildBazisCutQrCode(source: BazisCutQrCodeSource): string {
-  return `${clean(source.sourceBazisProjectName)}${clean(source.position)}`;
+  const document = clean(source.sourceBazisProjectName)
+    || clean(source.sourceBazisOrderNo)
+    || clean(source.sourceOrderName);
+  return `${document}${clean(source.sourceBazisProductName)}.${clean(source.position)}`;
 }
 
 export function summarizeBazisCutDetails(details: readonly {

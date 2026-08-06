@@ -4,6 +4,7 @@ import { buildDraftDetails } from './bazis-order-draft';
 const revision = {
   bazisProjectName: 'project.xml',
   revisionBazisOrderNo: '1500',
+  rootProductCount: 1,
 };
 
 describe('buildDraftDetails panel dimensions', () => {

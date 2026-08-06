@@ -42,6 +42,8 @@ import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { CutJobVersionLines } from '../../CutJobVersionLines';
 import { cutJobDeepLink } from '../../cutColumnHelpers';
+import { featureFlags } from '../../../../config/featureFlags';
+import { can } from '../../../../utils/permissions';
 import {
   OrderSaveValidationContext,
   orderValidationDetailKey,
@@ -52,6 +54,7 @@ import {
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
+import { BasisProjectLink } from '../BasisProjectLink';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -166,6 +169,7 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'film_id', label: 'Пленка' },
   { key: 'cut_job', label: 'Раскрой' },
   { key: 'bath_cut_job', label: 'Расчет ванны' },
+  { key: 'bazis_cut_sets', label: 'Базис-раскрой' },
   { key: 'priority', label: 'Пр-т' },
   { key: 'production_status_id', label: 'Статус' },
   { key: 'basis_project', label: 'Базис проект' },
@@ -505,6 +509,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const shownValidationRef = useRef<typeof saveValidation>(null);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
+  const bazisCutLinkEnabled = featureFlags.bazisCut && can('cut.view');
+  const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
 
   // SP3: sheet picker gating (backend write + sheet_materials.view) + order-era
   // eligibility (create OR loaded order's sheet_eligible !== false).
@@ -1595,6 +1601,24 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           },
         ]
       : []),
+    ...(featureFlags.bazisCut
+      ? [{
+          title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Базис-раскрой</div>,
+          key: 'bazis_cut_sets',
+          width: 150,
+          onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+          render: (_: unknown, row: any) => {
+            const detail = asDetail(row);
+            const cutSets = detail?.bazis_cut_sets ?? [];
+            if (cutSets.length === 0) return '—';
+            return <Space wrap size={4}>{cutSets.map((cutSet) => bazisCutLinkEnabled
+              ? <Link key={cutSet.bazisCutSetId} to={`/bazis-cut/${cutSet.bazisCutSetId}`}
+                title={cutSet.name} style={{ fontVariantNumeric: 'tabular-nums' }}>{`БР-${cutSet.bazisCutSetId}`}</Link>
+              : <span key={cutSet.bazisCutSetId} title={cutSet.name}
+                style={{ fontVariantNumeric: 'tabular-nums' }}>{`БР-${cutSet.bazisCutSetId}`}</span>)}</Space>;
+          },
+        }]
+      : []),
     {
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Пр-т</div>,
       dataIndex: 'priority',
@@ -1666,12 +1690,18 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       render: (_: any, row: any) => {
         const d = asDetail(row);
         if (!d) return null;
+        const primaryBazisProject = d.bazis_projects?.[0];
         return isEditingField(d, 'basis_project') ? (
           <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
             <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
-          <span style={{ fontSize: '90%' }}>{getDisplayedField(d, 'basis_project') || ''}</span>
+          <BasisProjectLink
+            value={getDisplayedField(d, 'basis_project') || primaryBazisProject?.name}
+            bazisProjectId={getDisplayedField(d, 'bazis_project_id') ?? primaryBazisProject?.bazisProjectId}
+            enabled={bazisProjectLinkEnabled}
+            style={{ fontSize: '90%' }}
+          />
         );
       },
     },

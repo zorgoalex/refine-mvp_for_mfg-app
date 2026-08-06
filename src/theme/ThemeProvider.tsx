@@ -2,14 +2,25 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { profileApi } from '../api/profileApi';
 import { authSession } from '../api/authSession';
 import { authStorage } from '../utils/auth';
-import { getStoredThemeMode, getStoredUiSize, isUiSize, setStoredThemeMode, setStoredUiSize } from './themeStorage';
+import {
+  getStoredTabletMode,
+  getStoredThemeMode,
+  getStoredUiSize,
+  isTabletMode,
+  isUiSize,
+  setStoredTabletMode,
+  setStoredThemeMode,
+  setStoredUiSize,
+} from './themeStorage';
 import type { ThemeMode, UiSize } from './themeTypes';
 
 interface AppThemeContextValue {
   mode: ThemeMode;
   uiSize: UiSize;
+  tabletMode: boolean;
   setMode: (mode: ThemeMode) => Promise<void>;
   setUiSize: (size: UiSize) => Promise<void>;
+  setTabletMode: (enabled: boolean) => Promise<void>;
   toggleMode: () => Promise<void>;
 }
 
@@ -24,6 +35,10 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
   const [uiSize, setUiSizeState] = useState<UiSize>(() => {
     const userId = getCurrentUserId();
     return (userId ? getStoredUiSize(String(userId)) : null) ?? 'default';
+  });
+  const [tabletMode, setTabletModeState] = useState(() => {
+    const userId = getCurrentUserId();
+    return (userId ? getStoredTabletMode(String(userId)) : null) ?? false;
   });
 
   useEffect(() => {
@@ -50,6 +65,8 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
     // если старый backend (mixed deploy) не вернёт uiSize в ответе
     const cachedSize = userId ? getStoredUiSize(String(userId)) : null;
     setUiSizeState(cachedSize ?? 'default');
+    const cachedTabletMode = userId ? getStoredTabletMode(String(userId)) : null;
+    setTabletModeState(cachedTabletMode ?? false);
 
     let active = true;
     profileApi.getPreferences()
@@ -64,6 +81,13 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
         if (responseSize && getCurrentUserId() === userId) {
           setUiSizeState(responseSize);
           setStoredUiSize(userId, responseSize);
+        }
+        const responseTabletMode = isTabletMode(response.preferences.tabletMode)
+          ? response.preferences.tabletMode
+          : null;
+        if (responseTabletMode !== null && getCurrentUserId() === userId) {
+          setTabletModeState(responseTabletMode);
+          setStoredTabletMode(userId, responseTabletMode);
         }
         const refreshedUserId = getCurrentUserId();
         if (refreshedUserId) {
@@ -133,9 +157,27 @@ export const AppThemeProvider: React.FC<React.PropsWithChildren> = ({ children }
     [mode, setMode],
   );
 
+  const setTabletMode = useCallback(async (enabled: boolean) => {
+    const token = authStorage.getAccessToken();
+    const userId = getCurrentUserId();
+    if (!token || !userId) {
+      throw new Error('Authenticated user is required to change tablet mode');
+    }
+
+    const response = await profileApi.updatePreferences({ tabletMode: enabled });
+    if (getCurrentUserId() !== userId) return;
+
+    const confirmedMode = isTabletMode(response.preferences.tabletMode)
+      ? response.preferences.tabletMode
+      : enabled;
+    setTabletModeState(confirmedMode);
+    setStoredTabletMode(userId, confirmedMode);
+    window.location.reload();
+  }, []);
+
   const value = useMemo<AppThemeContextValue>(
-    () => ({ mode, uiSize, setMode, setUiSize, toggleMode }),
-    [mode, uiSize, setMode, setUiSize, toggleMode],
+    () => ({ mode, uiSize, tabletMode, setMode, setUiSize, setTabletMode, toggleMode }),
+    [mode, uiSize, tabletMode, setMode, setUiSize, setTabletMode, toggleMode],
   );
 
   return (

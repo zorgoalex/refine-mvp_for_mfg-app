@@ -78,6 +78,17 @@
   min-width: 0;
 }
 
+.calendar-navigation__tablet-filter {
+  display: none;
+}
+
+.calendar-navigation__mode-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 .calendar-navigation__period {
   display: grid;
   min-width: 120px;

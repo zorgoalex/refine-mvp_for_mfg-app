@@ -3,13 +3,19 @@ import { Button, Drawer, Menu, Typography } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { OrderCreateModal } from '../../pages/orders/components/OrderCreateModal';
 import { useEvolutionNavigation } from './useEvolutionNavigation';
+import { EvolutionTabletUtilities } from './EvolutionTabletUtilities';
 
 export interface EvolutionMobileNavigationProps {
   open: boolean;
   onClose: () => void;
+  tablet?: boolean;
 }
 
-export const EvolutionMobileNavigation: React.FC<EvolutionMobileNavigationProps> = ({ open, onClose }) => {
+export const EvolutionMobileNavigation: React.FC<EvolutionMobileNavigationProps> = ({
+  open,
+  onClose,
+  tablet = false,
+}) => {
   const { sider, isCreateModalOpen, setIsCreateModalOpen } = useEvolutionNavigation(onClose);
 
   return (
@@ -34,12 +40,15 @@ export const EvolutionMobileNavigation: React.FC<EvolutionMobileNavigationProps>
             Создать заказ
           </Button>
         ) : null}
-        <Menu
-          aria-label="Основная навигация"
-          items={[...sider.topMenuItems, ...sider.flatMenuItems]}
-          mode="inline"
-          selectedKeys={sider.selectedKey ? [sider.selectedKey] : []}
-        />
+        <div className="evolution-mobile-navigation__menu">
+          <Menu
+            aria-label="Основная навигация"
+            items={[...sider.topMenuItems, ...sider.flatMenuItems]}
+            mode="inline"
+            selectedKeys={sider.selectedKey ? [sider.selectedKey] : []}
+          />
+        </div>
+        {tablet ? <EvolutionTabletUtilities presentation="drawer" /> : null}
       </Drawer>
       <OrderCreateModal open={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />
     </>

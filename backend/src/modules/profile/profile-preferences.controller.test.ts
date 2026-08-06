@@ -24,7 +24,7 @@ describe('ProfilePreferencesController', () => {
     const controller = createController({
       async get(command) {
         calls.push(`get:${command.currentUser.id}`);
-        return { themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {}, sidebarMenuOrder: { top: [], categories: [], resources: {} } };
+        return { themeMode: 'light', uiSize: 'default', uiVariant: 'legacy', tabletMode: false, orderDetailColumns: {}, recentReferences: {}, pageSizePreferences: {}, sidebarMenuOrder: { top: [], categories: [], resources: {} } };
       },
       async update(command) {
         calls.push(`update:${command.currentUser.id}:${command.preferences.themeMode}:${Object.keys(command.preferences.orderDetailColumns ?? {}).join(',')}`);
@@ -32,6 +32,7 @@ describe('ProfilePreferencesController', () => {
           themeMode: 'dark',
           uiSize: 'default',
           uiVariant: command.preferences.uiVariant ?? 'legacy',
+          tabletMode: command.preferences.tabletMode ?? false,
           orderDetailColumns: command.preferences.orderDetailColumns ?? {},
           recentReferences: {},
           pageSizePreferences: command.preferences.pageSizePreferences ?? {},
@@ -44,6 +45,7 @@ describe('ProfilePreferencesController', () => {
           themeMode: 'dark',
           uiSize: 'default',
           uiVariant: 'legacy',
+          tabletMode: false,
           orderDetailColumns: {},
           recentReferences: { [command.resource]: [command.entityId] },
           pageSizePreferences: {},
@@ -57,6 +59,7 @@ describe('ProfilePreferencesController', () => {
         themeMode: 'light',
         uiSize: 'default',
         uiVariant: 'legacy',
+        tabletMode: false,
         orderDetailColumns: {},
         recentReferences: {},
         pageSizePreferences: {},
@@ -71,6 +74,7 @@ describe('ProfilePreferencesController', () => {
         themeMode: 'dark',
         uiSize: 'default',
         uiVariant: 'legacy',
+        tabletMode: false,
         orderDetailColumns: { orderEdit: { order: ['detail_number'], hidden: [] } },
         recentReferences: {},
         pageSizePreferences: {},
@@ -85,6 +89,7 @@ describe('ProfilePreferencesController', () => {
         themeMode: 'dark',
         uiSize: 'default',
         uiVariant: 'legacy',
+        tabletMode: false,
         orderDetailColumns: {},
         recentReferences: { sheet_material_types: [27] },
         pageSizePreferences: {},
@@ -129,6 +134,8 @@ describe('ProfilePreferencesController', () => {
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'evolution' })).toEqual({ uiVariant: 'evolution' });
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'line' })).toEqual({ uiVariant: 'line' });
     expect(parseUpdateUserPreferencesRequest({ uiVariant: 'air' })).toEqual({ uiVariant: 'air' });
+    expect(parseUpdateUserPreferencesRequest({ tabletMode: true })).toEqual({ tabletMode: true });
+    expect(parseUpdateUserPreferencesRequest({ tabletMode: false })).toEqual({ tabletMode: false });
     expect(parseUpdateUserPreferencesRequest({ pageSizePreferences: { 'refine:orders_view': 50 } }))
       .toEqual({ pageSizePreferences: { 'refine:orders_view': 50 } });
     expect(parseUpdateUserPreferencesRequest({
@@ -146,6 +153,7 @@ describe('ProfilePreferencesController', () => {
     });
     expect(() => parseUpdateUserPreferencesRequest({ uiSize: 'huge' })).toThrowError();
     expect(() => parseUpdateUserPreferencesRequest({ uiVariant: 'future' })).toThrow(ApiError);
+    expect(() => parseUpdateUserPreferencesRequest({ tabletMode: 'yes' })).toThrow(ApiError);
     expect(() => parseUpdateUserPreferencesRequest({ pageSizePreferences: { audit: 200 } })).toThrow(ApiError);
     expect(() => parseUpdateUserPreferencesRequest({
       sidebarMenuOrder: {

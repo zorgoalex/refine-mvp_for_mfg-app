@@ -104,6 +104,9 @@ interface OrderHeaderRow extends QueryResultRow {
   material_ids: unknown[] | null;
   material_names: unknown[] | null;
   basis_projects: unknown[] | null;
+  bazis_cut_numbers: unknown[] | null;
+  cut_numbers: unknown[] | null;
+  bath_cut_numbers: unknown[] | null;
   film_names: unknown[] | null;
   sheet_material_type_ids: unknown[] | null;
   material_id: string | number | null;
@@ -144,6 +147,7 @@ interface OrderDetailRow extends QueryResultRow {
   joint_order_id: string | number | null;
   note: string | null;
   basis_project: string | null;
+  bazis_project_id: string | number | null;
   basis_product: string | null;
   basis_data: string | null;
   basis_designation: string | null;
@@ -166,6 +170,7 @@ interface OrderDetailRow extends QueryResultRow {
   bath_cut_job_profile_name: string | null;
   bath_cut_job_profile_is_active: boolean | null;
   bazis_cut_sets: unknown;
+  bazis_projects: unknown;
 }
 
 interface OrderPaymentRow extends QueryResultRow {
@@ -434,6 +439,9 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         material_projection.material_ids,
         material_projection.material_names,
         basis_projection.basis_projects,
+        bazis_cut_projection.bazis_cut_numbers,
+        cut_projection.cut_numbers,
+        cut_projection.bath_cut_numbers,
         film_projection.film_names,
         material_projection.sheet_material_type_ids,
         milling_projection.milling_type_id,
@@ -477,6 +485,46 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           ORDER BY LOWER(BTRIM(od.basis_project)), od.detail_number, od.detail_id
         ) projects
       ) basis_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT ARRAY_AGG('БР-' || sets.bazis_cut_set_id::text ORDER BY sets.bazis_cut_set_id) AS bazis_cut_numbers
+        FROM (
+          SELECT DISTINCT detail.bazis_cut_set_id
+          FROM bazis_cut_set_details detail
+          WHERE detail.source_order_id = o.order_id
+        ) sets
+      ) bazis_cut_projection ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          ARRAY_AGG(cuts.cut_number ORDER BY cuts.cut_job_id)
+            FILTER (WHERE cuts.is_vacuum = false) AS cut_numbers,
+          ARRAY_AGG(cuts.cut_number ORDER BY cuts.cut_job_id)
+            FILTER (WHERE cuts.is_vacuum = true) AS bath_cut_numbers
+        FROM (
+          SELECT DISTINCT
+            cj.cut_job_id,
+            cr.result_no,
+            cj.cut_job_id::text || '-' || cr.result_no::text AS cut_number,
+            COALESCE(
+              cj.last_calc_params->>'layout_mode',
+              cpp.params->>'layout_mode',
+              cj.params->>'layout_mode'
+            ) = 'vacuum_table' AS is_vacuum
+          FROM cut_job_item cji
+          JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+          JOIN cut_result cr
+            ON cr.cut_result_id = cj.current_cut_result_id
+           AND cr.cut_job_id = cj.cut_job_id
+          LEFT JOIN cut_result_archive_state archived
+            ON archived.cut_job_id = cr.cut_job_id
+           AND archived.result_no = cr.result_no
+          LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
+          WHERE cji.order_id = o.order_id
+            AND cji.is_active = true
+            AND cj.status = 'ready'
+            AND cj.last_calc_basis IS NOT NULL
+            AND archived.cut_job_id IS NULL
+        ) cuts
+      ) cut_projection ON true
       LEFT JOIN LATERAL (
         SELECT ARRAY_AGG(films.film_name ORDER BY films.first_detail_number, films.first_detail_id) AS film_names
         FROM (
@@ -640,7 +688,46 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     // needs no sheet_materials.view; sheet_material_type_id carried for FE hydration.
     const details = await this.database.query<OrderDetailRow>(
       `
-      WITH cut_candidates AS (
+      WITH linked_bazis_project_candidates AS MATERIALIZED (
+        SELECT link.order_id,
+               project.bazis_project_id,
+               revision.bazis_revision_id,
+               revision.revision_no,
+               project.name,
+               substring(
+                 btrim(COALESCE(
+                   NULLIF(revision.bazis_order_no, ''),
+                   (
+                     SELECT NULLIF(btrim(root.raw_json->>'Заказ'), '')
+                     FROM bazis_nodes root
+                     WHERE root.revision_id = revision.bazis_revision_id
+                       AND root.parent_node_id IS NULL
+                     ORDER BY root.seq, root.bazis_node_id
+                     LIMIT 1
+                   ),
+                   project.name
+                 ))
+                 from '(?i)(?:№[[:space:]]*)?([0-9]+)'
+               ) AS project_no
+        FROM bazis_order_links link
+        JOIN bazis_project_revisions revision ON revision.bazis_revision_id = link.revision_id
+        JOIN bazis_projects project ON project.bazis_project_id = link.bazis_project_id
+        WHERE link.order_id = $1
+      ),
+      linked_bazis_projects AS MATERIALIZED (
+        SELECT candidate.*
+        FROM linked_bazis_project_candidates candidate
+        JOIN (
+          SELECT order_id, project_no
+          FROM linked_bazis_project_candidates
+          WHERE project_no IS NOT NULL
+          GROUP BY order_id, project_no
+          HAVING count(DISTINCT bazis_project_id) = 1
+        ) safe
+          ON safe.order_id = candidate.order_id
+         AND safe.project_no = candidate.project_no
+      ),
+      cut_candidates AS (
         SELECT cji.order_detail_id,
                cj.cut_job_id,
                cj.name,
@@ -690,16 +777,71 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
              bath.param_profile_id AS bath_cut_job_param_profile_id,
              bath.profile_name AS bath_cut_job_profile_name,
              bath.profile_is_active AS bath_cut_job_profile_is_active,
+             COALESCE(
+               (SELECT revision.bazis_project_id
+                FROM bazis_node_order_detail_map map
+                JOIN bazis_nodes node ON node.bazis_node_id = map.node_id
+                JOIN bazis_project_revisions revision ON revision.bazis_revision_id = node.revision_id
+                WHERE map.order_id = od.order_id
+                  AND map.order_detail_id = od.detail_id
+                ORDER BY map.created_at DESC, map.bazis_node_order_detail_map_id DESC
+                LIMIT 1),
+               (SELECT linked.bazis_project_id
+                FROM linked_bazis_projects linked
+                WHERE linked.order_id = od.order_id
+                  AND linked.project_no = substring(
+                    btrim(od.basis_project)
+                    from '(?i)(?:№[[:space:]]*)?([0-9]+)'
+                  )
+                ORDER BY linked.revision_no DESC, linked.bazis_project_id
+                LIMIT 1)
+             ) AS bazis_project_id,
              (SELECT jsonb_agg(jsonb_build_object(
                 'bazisCutSetId', refs.bazis_cut_set_id,
                 'name', refs.name
               ) ORDER BY refs.bazis_cut_set_id)
               FROM (
-                SELECT DISTINCT s.bazis_cut_set_id, s.name
+                SELECT s.bazis_cut_set_id, s.name
                 FROM bazis_cut_set_details d
                 JOIN bazis_cut_sets s ON s.bazis_cut_set_id = d.bazis_cut_set_id
                 WHERE d.source_order_detail_id = od.detail_id
+                UNION
+                SELECT s.bazis_cut_set_id, s.name
+                FROM bazis_node_order_detail_map detail_map
+                JOIN bazis_cut_set_details d ON d.source_bazis_node_id = detail_map.node_id
+                JOIN bazis_cut_sets s ON s.bazis_cut_set_id = d.bazis_cut_set_id
+                WHERE detail_map.order_id = od.order_id
+                  AND detail_map.order_detail_id = od.detail_id
               ) refs) AS bazis_cut_sets
+             ,(SELECT jsonb_agg(jsonb_build_object(
+                'bazisProjectId', refs.bazis_project_id,
+                'bazisRevisionId', refs.bazis_revision_id,
+                'revisionNo', refs.revision_no,
+                'name', refs.name
+              ) ORDER BY refs.bazis_project_id, refs.revision_no)
+              FROM (
+                SELECT DISTINCT project.bazis_project_id,
+                       revision.bazis_revision_id,
+                       revision.revision_no,
+                       project.name
+                FROM bazis_node_order_detail_map detail_map
+                JOIN bazis_nodes node ON node.bazis_node_id = detail_map.node_id
+                JOIN bazis_project_revisions revision ON revision.bazis_revision_id = node.revision_id
+                JOIN bazis_projects project ON project.bazis_project_id = revision.bazis_project_id
+                WHERE detail_map.order_id = od.order_id
+                  AND detail_map.order_detail_id = od.detail_id
+                UNION
+                SELECT linked.bazis_project_id,
+                       linked.bazis_revision_id,
+                       linked.revision_no,
+                       linked.name
+                FROM linked_bazis_projects linked
+                WHERE linked.order_id = od.order_id
+                  AND linked.project_no = substring(
+                    btrim(od.basis_project)
+                    from '(?i)(?:№[[:space:]]*)?([0-9]+)'
+                  )
+              ) refs) AS bazis_projects
       FROM order_details od
       ${detailMaterialJoin}
       ${detailSheetJoin}
@@ -1186,8 +1328,11 @@ function mapOrderDto(
       priority: toNumber(row.priority),
       managerId: toNullableNumber(row.manager_id),
       orderStatusId: toNumber(row.order_status_id),
+      orderStatusName: row.order_status_name ?? '',
       paymentStatusId: toNumber(row.payment_status_id),
+      paymentStatusName: row.payment_status_name ?? '',
       productionStatusId: toNullableNumber(row.production_status_id),
+      productionStatusName: row.production_status_name,
       productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
       plannedCompletionDate: toDateOnly(row.planned_completion_date),
       completionDate: toDateOnly(row.completion_date),
@@ -1286,6 +1431,9 @@ function mapListItem(row: OrderHeaderRow, includeDeleted: boolean = false): Orde
     materialIds: toNumberArray(row.material_ids),
     materialNames: toStringArray(row.material_names),
     basisProjects: toStringArray(row.basis_projects),
+    bazisCutNumbers: toStringArray(row.bazis_cut_numbers),
+    cutNumbers: toStringArray(row.cut_numbers),
+    bathCutNumbers: toStringArray(row.bath_cut_numbers),
     filmNames: toStringArray(row.film_names),
     sheetMaterialTypeIds: toNumberArray(row.sheet_material_type_ids),
     headerMaterialName: row.header_material_name ?? null,
@@ -1336,6 +1484,7 @@ function mapDetail(row: OrderDetailRow) {
     jointOrderId: toNullableNumber(row.joint_order_id),
     note: row.note,
     basisProject: row.basis_project,
+    bazisProjectId: toNullableNumber(row.bazis_project_id),
     basisProduct: row.basis_product,
     basisData: row.basis_data,
     basisDesignation: row.basis_designation,
@@ -1348,6 +1497,7 @@ function mapDetail(row: OrderDetailRow) {
     cutJob: mapDetailCutJob(row, 'cut'),
     bathCutJob: mapDetailCutJob(row, 'bath'),
     bazisCutSets: mapBazisCutSetRefs(row.bazis_cut_sets),
+    bazisProjects: mapBazisProjectRefs(row.bazis_projects),
   };
 }
 
@@ -1365,6 +1515,35 @@ function mapBazisCutSetRefs(value: unknown): Array<{ bazisCutSetId: number; name
       }];
     })
     .sort((left, right) => left.bazisCutSetId - right.bazisCutSetId);
+}
+
+function mapBazisProjectRefs(value: unknown): Array<{
+  bazisProjectId: number;
+  bazisRevisionId: number;
+  revisionNo: number;
+  name: string;
+}> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((entry) => {
+      if (entry == null || typeof entry !== 'object') return [];
+      const candidate = entry as Record<string, unknown>;
+      const bazisProjectId = Number(candidate.bazisProjectId);
+      const bazisRevisionId = Number(candidate.bazisRevisionId);
+      const revisionNo = Number(candidate.revisionNo);
+      if (
+        !Number.isInteger(bazisProjectId) || bazisProjectId <= 0 ||
+        !Number.isInteger(bazisRevisionId) || bazisRevisionId <= 0 ||
+        !Number.isInteger(revisionNo) || revisionNo <= 0
+      ) return [];
+      return [{
+        bazisProjectId,
+        bazisRevisionId,
+        revisionNo,
+        name: typeof candidate.name === 'string' ? candidate.name : '',
+      }];
+    })
+    .sort((left, right) => left.bazisProjectId - right.bazisProjectId || left.revisionNo - right.revisionNo);
 }
 
 function mapDetailCutJob(row: OrderDetailRow, kind: 'cut' | 'bath') {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 const calendarList = readFileSync(join(__dirname, 'index.tsx'), 'utf8');
 const board = readFileSync(join(__dirname, 'components/CalendarBoard.tsx'), 'utf8');
 const dataHook = readFileSync(join(__dirname, 'hooks/useCalendarData.ts'), 'utf8');
+const tabletStyles = readFileSync(join(__dirname, '../../ui-evolution/styles/tablet.css'), 'utf8');
 
 describe('calendar filters integration', () => {
   it('keeps one top quick filter for order/client and passes filters to the board', () => {
@@ -14,12 +15,24 @@ describe('calendar filters integration', () => {
     expect(calendarList).toContain('onFiltersChange={setFilters}');
     expect(calendarList).toContain('className="calendar-page-header"');
     expect(calendarList).toContain('filtersOpen={filtersOpen}');
+    expect(calendarList).toContain('activeFilterCount={activeFilterCount}');
+    expect(calendarList).toContain('onFiltersToggle={() => setFiltersOpen((open) => !open)}');
     expect(calendarList).not.toContain('filtersOpen={isOperational && filtersOpen}');
     expect(calendarList).not.toContain('Запланировать заказ');
     expect(calendarList).not.toContain("navigate('/orders/create')");
     expect(calendarList).not.toContain('PlusOutlined');
     expect(board).toContain('placeholder="Заказ / клиент"');
     expect(board).toContain('quickSearch');
+  });
+
+  it('uses workspace scrolling and one immediately compact icon-only sticky calendar bar on tablets', () => {
+    expect(board).toContain('className="calendar-navigation__tablet-filter"');
+    expect(board).toContain('className="calendar-navigation__mode-text"');
+    expect(tabletStyles).toMatch(/\.evolution-shell--tablet \.calendar-page-wrapper \{[\s\S]*height: auto;[\s\S]*overflow: visible !important;/);
+    expect(tabletStyles).toMatch(/\.evolution-shell--tablet \.calendar-grid \{[\s\S]*height: auto;[\s\S]*max-height: none;/);
+    expect(tabletStyles).toMatch(/data-modern-route="calendar"[^}]+\.calendar-navigation \{[\s\S]*position: sticky;[\s\S]*height: var\(--tablet-sticky-row\);/);
+    expect(tabletStyles).toContain('.calendar-navigation__tablet-filter');
+    expect(tabletStyles).toContain('.calendar-navigation__mode-text');
   });
 
   it('renders separate filter block fields requested for calendar', () => {

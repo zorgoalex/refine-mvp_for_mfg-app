@@ -3,6 +3,7 @@ import { Card, Checkbox, Space, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 import { buildDetailCardModel } from './detailCardModel';
 import type { DetailCardLookups } from './detailCardModel';
+import { BasisProjectLink } from '../components/BasisProjectLink';
 
 export const DetailCardList: React.FC<{
   rows: readonly Record<string, unknown>[];
@@ -13,7 +14,8 @@ export const DetailCardList: React.FC<{
   selectedIds?: readonly number[];
   onSelectionChange?: (ids: number[]) => void;
   bazisCutLinkEnabled?: boolean;
-}> = ({ rows, lookups, highlightDetailId = null, selectionEnabled = false, selectedIds = [], onSelectionChange, bazisCutLinkEnabled = false }) => {
+  bazisProjectLinkEnabled?: boolean;
+}> = ({ rows, lookups, highlightDetailId = null, selectionEnabled = false, selectedIds = [], onSelectionChange, bazisCutLinkEnabled = false, bazisProjectLinkEnabled = false }) => {
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -41,6 +43,23 @@ export const DetailCardList: React.FC<{
               return [{ bazisCutSetId, name: typeof ref.name === 'string' ? ref.name : '' }];
             })
           : [];
+        const bazisProjects = Array.isArray(row.bazis_projects)
+          ? row.bazis_projects.flatMap((entry) => {
+              if (entry == null || typeof entry !== 'object') return [];
+              const ref = entry as Record<string, unknown>;
+              const bazisProjectId = Number(ref.bazisProjectId);
+              const bazisRevisionId = Number(ref.bazisRevisionId);
+              const revisionNo = Number(ref.revisionNo);
+              if (!Number.isInteger(bazisProjectId) || bazisProjectId <= 0 || !Number.isInteger(bazisRevisionId) || bazisRevisionId <= 0) return [];
+              return [{ bazisProjectId, bazisRevisionId, revisionNo, name: typeof ref.name === 'string' ? ref.name : '' }];
+            })
+          : [];
+        const primaryBazisProject = bazisProjects[0];
+        const basisProjectValue = row.basis_project ?? row.basisProject ?? primaryBazisProject?.name;
+        const bazisProjectId = row.bazis_project_id ?? row.bazisProjectId ?? primaryBazisProject?.bazisProjectId;
+        const hasBasisProjectValue =
+          (typeof basisProjectValue === 'string' || typeof basisProjectValue === 'number') &&
+          String(basisProjectValue).trim().length > 0;
         return (
           <Card
             key={i}
@@ -66,6 +85,16 @@ export const DetailCardList: React.FC<{
             </Space>
             <Typography.Text style={{ display: 'block' }}>{m.material}</Typography.Text>
             <Typography.Text type="secondary" style={{ display: 'block' }}>{m.milling}</Typography.Text>
+            {hasBasisProjectValue && (
+              <Space wrap size={4}>
+                <Typography.Text type="secondary">Базис-проект:</Typography.Text>
+                <BasisProjectLink
+                  value={basisProjectValue}
+                  bazisProjectId={bazisProjectId}
+                  enabled={bazisProjectLinkEnabled}
+                />
+              </Space>
+            )}
             {bazisCutSets.length > 0 && (
               <Space wrap size={4}>
                 <Typography.Text type="secondary">Базис-раскрой:</Typography.Text>

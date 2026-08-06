@@ -100,6 +100,21 @@ export function resolveBazisDocumentColumns(input: {
   };
 }
 
+/** Одно изделие относится ко всей ревизии и показывается один раз в сводке.
+ * При нескольких изделиях название остаётся на каждой панели, потому что
+ * различает её корневой XML-контейнер. */
+export function resolveBazisProductDisplay(input: {
+  rootProductCount: number;
+  productName: string | null | undefined;
+}): { panelProductName: string | null; projectSummaryProductName: string | null } {
+  const productName = input.productName?.trim() || null;
+
+  return {
+    panelProductName: input.rootProductCount > 1 ? productName : null,
+    projectSummaryProductName: input.rootProductCount === 1 ? productName : null,
+  };
+}
+
 /** Ключ группы, содержащей панель (для авто-раскрытия выбранной панели). */
 export function findGroupKeyByPanelId(groups: PanelGroupRow[], bazisNodeId: number | null): string | null {
   if (bazisNodeId == null) {

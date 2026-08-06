@@ -254,10 +254,10 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
   ].filter(Boolean).join(' · ');
 
   if (isOperational) {
-    const paymentPercent = finalAmount > 0 ? Math.min(100, Math.round((paidAmount / finalAmount) * 100)) : 0;
     const deadlineAt = record?.planned_completion_date ? dayjs(record.planned_completion_date) : null;
-    const isAtRisk = deadlineAt?.isBefore(dayjs(), 'day') && record?.order_status_name !== 'Готов к выдаче';
     const daysToDeadline = deadlineAt ? deadlineAt.startOf('day').diff(dayjs().startOf('day'), 'day') : null;
+    const orderStatusName = record?.order_status_name || 'Не назначен';
+    const paymentStatusName = record?.payment_status_name || 'Не назначен';
 
     return (
       <div
@@ -266,8 +266,30 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
       >
         <div className="order-show-operational-summary__primary">
           <strong>{record?.order_name || 'Заказ'}</strong>
-          <Tag color={isAtRisk ? 'orange' : 'green'}>{isAtRisk ? 'Под риском' : 'В работе'}</Tag>
-          {showFinancials && <Tag>{`${paymentPercent}%`}</Tag>}
+          <Tag
+            color={
+              orderStatusName === 'Готов к выдаче'
+                ? '#059669'
+                : orderStatusName === 'Предварительный'
+                  ? '#91caff'
+                  : '#4F46E5'
+            }
+          >
+            {record?.order_status_name || 'Не назначен'}
+          </Tag>
+          {showFinancials && (
+            <Tag
+              color={
+                paymentStatusName === 'Оплачен'
+                  ? '#059669'
+                  : paymentStatusName === 'Не оплачен'
+                    ? '#DC2626'
+                    : '#D97706'
+              }
+            >
+              {record?.payment_status_name || 'Не назначен'}
+            </Tag>
+          )}
         </div>
         <div className="order-show-operational-summary__metric">
           <strong>{record?.client_name || '—'}</strong>

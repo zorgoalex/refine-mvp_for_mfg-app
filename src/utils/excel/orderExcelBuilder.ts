@@ -21,7 +21,7 @@ const FOOTER_MERGES = [
 ];
 
 // Типы для заказа, деталей и платежей
-interface OrderDetail {
+export interface OrderExcelDetail {
   detail_id: number;
   length: number | null;
   width: number | null;
@@ -40,7 +40,7 @@ export interface OrderExcelBlankRow {
   kind: 'blank';
 }
 
-export type OrderExcelDetailRow = OrderDetail | OrderExcelBlankRow;
+export type OrderExcelDetailRow = OrderExcelDetail | OrderExcelBlankRow;
 
 interface OrderPayment {
   payment_id: number;
@@ -281,8 +281,8 @@ export const buildOrderExcelBuffer = async ({
     // Заполняем только если значение одинаково для ВСЕХ деталей (умная агрегация)
 
     // Функция для получения общего значения (если одинаково для всех деталей)
-    const getCommonValue = (getValue: (detail: OrderDetail) => string | undefined | null): string => {
-      const realDetails = details.filter((detail): detail is OrderDetail => !isBlankDetailRow(detail));
+    const getCommonValue = (getValue: (detail: OrderExcelDetail) => string | undefined | null): string => {
+      const realDetails = details.filter((detail): detail is OrderExcelDetail => !isBlankDetailRow(detail));
       if (realDetails.length === 0) return '';
 
       const values = realDetails.map(getValue).filter(v => v); // Убрать null/undefined

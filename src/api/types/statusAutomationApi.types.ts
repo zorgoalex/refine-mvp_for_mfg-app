@@ -2,8 +2,12 @@ export type StatusAutomationEventType =
   | 'payment.created'
   | 'order.payment_status_changed'
   | 'order.created'
+  | 'order.updated'
+  | 'order.planned_completion_date_changed'
   | 'order.status_changed'
   | 'order.production_status_changed';
+
+export type StatusAutomationEventGroup = 'order' | 'dates' | 'statuses' | 'payments';
 
 export type StatusAutomationActionType =
   | 'change_order_status'
@@ -39,6 +43,8 @@ export interface StatusAutomationRuleDto {
 export interface StatusAutomationEventTypeDto {
   eventType: StatusAutomationEventType;
   title: string;
+  group?: StatusAutomationEventGroup;
+  description?: string;
   allowedConditions: string[];
   allowedActions: string[];
 }

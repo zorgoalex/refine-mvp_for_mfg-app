@@ -46,11 +46,71 @@ describe('PgProductionActionRepository', () => {
     expect(sql).toContain('UPDATE orders SET planned_completion_date = $2, version = version + 1');
     expect(sql).toContain('INSERT INTO audit_log');
     expect(sql).toContain('INSERT INTO outbox_events');
+    const outboxQueries = database.queries.filter((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO outbox_events'),
+    );
+    expect(outboxQueries.map((query) => [query.params[0], query.params[4]])).toEqual([
+      ['order.calendar_moved', 'move-key-1:order.calendar_moved'],
+      [
+        'order.planned_completion_date_changed',
+        'move-key-1:order.planned_completion_date_changed',
+      ],
+      ['deadline.order_sync_requested', 'move-key-1:deadline-sync'],
+    ]);
+    expect(JSON.parse(String(outboxQueries[1]?.params[3]))).toMatchObject({
+      plannedCompletionDateBefore: '2026-05-10',
+      plannedCompletionDateAfter: '2026-05-20',
+      scope: { source: 'calendar' },
+    });
+    expect(evaluateStatusAutomationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        eventType: 'order.planned_completion_date_changed',
+        plannedCompletionDateBefore: '2026-05-10',
+        plannedCompletionDateAfter: '2026-05-20',
+      }),
+    );
     expect(JSON.stringify(database.queries.map((query) => query.params))).toContain(
       'deadline.order_sync_requested',
     );
     expect(sql.indexOf('deadline.order_sync_requested')).toBe(-1);
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
+  });
+
+  it('does not emit canonical date event for a no-op calendar move', async () => {
+    const database = createDatabase({ plannedCompletionDate: '2026-05-20' });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await repository.moveCalendarDate({
+      currentUser: currentUser(),
+      orderId: 15,
+      dto: {
+        plannedCompletionDate: '2026-05-20',
+        version: 3,
+        idempotencyKey: 'move-noop-key',
+      },
+      requestId: 'request-move-noop',
+    });
+
+    expect(evaluateStatusAutomationMock).not.toHaveBeenCalled();
+    expect(normalizedSql(database.queries)).not.toContain('INSERT INTO outbox_events');
+  });
+
+  it('returns the post-automation order version after a calendar move', async () => {
+    const database = createDatabase({ readOrderVersion: 5 });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.moveCalendarDate({
+        currentUser: currentUser(),
+        orderId: 15,
+        dto: {
+          plannedCompletionDate: '2026-05-20',
+          version: 3,
+          idempotencyKey: 'move-version-key',
+        },
+      }),
+    ).resolves.toMatchObject({ order: { version: 5 } });
   });
 
   it('returns stored idempotent response only for the same versioned request', async () => {
@@ -1757,6 +1817,8 @@ function createDatabase(options: {
   /** Suffix appended to the fake order status name — used to inject a token for redaction tests */
   orderStatusNameOverride?: string;
   orderStatusName?: string;
+  plannedCompletionDate?: string | null;
+  readOrderVersion?: number;
 } = {}) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
   let lastRequestHash: unknown = 'hash';
@@ -1809,7 +1871,7 @@ function createDatabase(options: {
               order_id: 15,
               client_id: 969,
               order_date: '2026-05-01',
-              planned_completion_date: '2026-05-10',
+              planned_completion_date: options.plannedCompletionDate ?? '2026-05-10',
               order_status_id: options.orderStatusId ?? 5,
               payment_status_id: 1,
               production_status_id: options.orderProductionStatusId ?? 1,
@@ -1822,6 +1884,10 @@ function createDatabase(options: {
           ],
           rowCount: 1,
         };
+      }
+
+      if (normalized.startsWith('SELECT version FROM orders')) {
+        return { rows: [{ version: options.readOrderVersion ?? 4 }], rowCount: 1 };
       }
 
       if (normalized.startsWith('SELECT order_status_id, order_status_name')) {

@@ -32,6 +32,7 @@ const updatePreferencesSchema = z.object({
   themeMode: z.enum(['light', 'dark']).optional(),
   uiSize: z.enum(['default', 'small']).optional(),
   uiVariant: z.enum(UI_VARIANTS).optional(),
+  tabletMode: z.boolean().optional(),
   orderDetailColumns: z.record(
     z.string().min(1).max(80),
     z.object({

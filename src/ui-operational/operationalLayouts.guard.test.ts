@@ -26,8 +26,8 @@ describe('LINE/AIR operational layout parity', () => {
     const board = read('src/pages/calendar/components/CalendarBoard.tsx');
     expect(board).toContain('className="calendar-navigation__operational"');
     expect(board).toContain('value={periodDays}');
-    expect(board).toContain("{ label: '2 недели', value: 14 }");
-    expect(board).toContain("{ label: 'Месяц', value: 30 }");
+    expect(board).toMatch(/aria-label="Две недели"[\s\S]*?value: 14/);
+    expect(board).toMatch(/aria-label="Месяц"[\s\S]*?value: 30/);
     expect(styles).toMatch(/\.calendar-row\s*\{[\s\S]*flex-wrap:\s*nowrap/);
     expect(styles).toMatch(/\.day-column\s*\{[\s\S]*min-width:\s*164px/);
   });
@@ -104,9 +104,11 @@ describe('LINE/AIR operational layout parity', () => {
 
   it('maps unmocked list, show, form, and complex workspace routes to operational layouts', () => {
     const layout = read('src/ui-evolution/shell/EvolutionWorkspaceLayout.tsx');
-    expect(layout).toContain("pathname.startsWith('/orders/create')");
-    expect(layout).toContain("pathname.startsWith('/configuration')");
-    expect(layout).toContain("pathname.startsWith('/profile')");
+    const routeFamilies = read('src/ui-evolution/shell/tabletRouteFamily.ts');
+    expect(layout).toContain('resolveOperationalPageKind(location.pathname)');
+    expect(routeFamilies).toContain("pathname.startsWith('/orders/create')");
+    expect(routeFamilies).toContain("pathname.startsWith('/configuration')");
+    expect(routeFamilies).toContain("pathname.startsWith('/profile')");
     expect(styles).toContain('[data-operational-page-kind="list"]');
     expect(styles).toContain('[data-operational-page-kind="show"]');
     expect(styles).toContain('[data-operational-page-kind="form"]');

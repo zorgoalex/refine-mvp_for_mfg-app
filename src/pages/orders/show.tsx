@@ -1,4 +1,4 @@
-import { useShow, useList, useUpdate, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
+import { useShow, useList, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
@@ -11,8 +11,10 @@ import { resolveOrderTabLabel } from "../../utils/tabLabels";
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from "../../utils/materialDisplayName";
 import { formatNumber } from "../../utils/numberFormat";
 import { downloadOrderExcel } from "../../utils/excel/generateOrderExcel";
+import type { OrderExcelDetailRow } from "../../utils/excel/orderExcelBuilder";
 import { generateOrderFileName } from "../../utils/excel/fileNameGenerator";
 import { handleExcelError } from "../../utils/excel/excelErrorHandler";
+import { openOrderProductionPdfPreview } from "../../utils/pdf/orderProductionPdf";
 import { OrderPrintView } from "./components/print/OrderPrintView";
 import { OrderShowHeader } from "./components/sections/OrderShowHeader";
 import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
@@ -30,6 +32,7 @@ import { OrderDeadlinePanel } from "./deadlines/OrderDeadlinePanel";
 import { GroupLinksEditor } from "./components/groups/GroupLinksEditor";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { AddToBazisCutModal } from "../bazis-cut/AddToBazisCutModal";
+import { bazisCutApi } from '../../api/bazisCutApi';
 import { can, canAny } from "../../utils/permissions";
 import {
   filterOrderFinancialItems,
@@ -80,21 +83,17 @@ import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/Op
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
+import { BasisProjectLink } from "./components/BasisProjectLink";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
 
-const productionExcelIcon = (
-  <FileExcelOutlined
-    style={{ color: '#389e0d', fontSize: 18, filter: 'drop-shadow(0 1px 1px rgba(56, 158, 13, 0.18))' }}
-  />
-);
-
-const productionExcelButtonStyle: CSSProperties = {
+const productionPdfButtonStyle: CSSProperties = {
   minWidth: 40,
   minHeight: 40,
-  background: 'rgba(82, 196, 26, 0.08)',
-  borderColor: 'rgba(56, 158, 13, 0.32)',
+  background: 'rgba(82, 196, 26, 0.12)',
+  borderColor: 'rgba(82, 196, 26, 0.36)',
+  color: '#52c41a',
 };
 
 const orderInfoTabs: Array<{ key: OrderInfoPanelKey; label: string; color: string }> = [
@@ -716,10 +715,36 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     return map;
   }, [detailNamesData]);
 
-  const details = (
+  const rawDetails = (
     backendOrder?.details ??
     (detailsData?.data || []).sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0))
   );
+  const [legacyBazisCutSetsByDetailId, setLegacyBazisCutSetsByDetailId] = useState<Map<number, Array<{
+    bazisCutSetId: number;
+    name: string;
+  }>>>(() => new Map());
+  useEffect(() => {
+    let cancelled = false;
+    const orderId = Number(record?.order_id);
+    if (!featureFlags.bazisCut || useBackendOrdersRead || !Number.isInteger(orderId) || orderId <= 0) {
+      setLegacyBazisCutSetsByDetailId(new Map());
+      return () => { cancelled = true; };
+    }
+    void bazisCutApi.orderMemberships(orderId).then((response) => {
+      if (cancelled) return;
+      setLegacyBazisCutSetsByDetailId(new Map(response.details.map((detail) => [detail.detailId, detail.bazisCutSets])));
+    }).catch(() => {
+      if (!cancelled) setLegacyBazisCutSetsByDetailId(new Map());
+    });
+    return () => { cancelled = true; };
+  }, [record?.order_id, useBackendOrdersRead]);
+  const details = useMemo(() => {
+    if (useBackendOrdersRead) return rawDetails;
+    return rawDetails.map((detail: any) => ({
+      ...detail,
+      bazis_cut_sets: legacyBazisCutSetsByDetailId.get(Number(detail.detail_id)) ?? [],
+    }));
+  }, [legacyBazisCutSetsByDetailId, rawDetails, useBackendOrdersRead]);
   const showLoading = shouldShowOrderLoading({
     orderLoading: isLoading,
     detailsLoading,
@@ -1082,6 +1107,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const bazisCutVisible = featureFlags.bazisCut;
   const bazisCutManage = can('cut.manage');
   const bazisCutLinkEnabled = bazisCutVisible && can('cut.view');
+  const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
   const detailSelectionEnabled = cutEnabled || bazisCutVisible;
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
@@ -1358,11 +1384,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     [details, cutSelectedDetailIds, groupingActive, grouping.state.field, groupLabelOf],
   );
 
-  // Hook for updating order
-  const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
-
   // Загрузка платежей для расчёта статуса оплаты и экспорта
-  const { data: paymentsData, refetch: refetchPayments } = useList({
+  const { data: paymentsData } = useList({
     resource: 'payments',
     filters: [
       {
@@ -1405,56 +1428,26 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     (employeesData?.data || []).map((item: any) => [item.employee_id, item.full_name])
   );
 
-  // Функция обновления статуса оплаты
-  const handleRefreshPaymentStatus = async () => {
-    if (!record?.order_id) return;
-    if (useBackendOrdersRead) {
-      message.info('В backend-режиме статус оплаты обновляется через сохранение заказа');
-      return;
+  const [isRefreshingOrder, setIsRefreshingOrder] = useState(false);
+  const handleRefreshOrder = async () => {
+    const orderId = Number(record?.order_id);
+    const currentVersion = Number(backendOrder?.version ?? record?.version);
+    if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isInteger(currentVersion) || currentVersion < 0) return;
+    setIsRefreshingOrder(true);
+    try {
+      const response = await ordersApi.refresh(orderId, { version: currentVersion });
+      await queryResult.refetch();
+      message.success(
+        response.updatedDowelingDetailIds.length > 0
+          ? `Обновлено. Присадка установлена для ${response.updatedDowelingDetailIds.length} поз.`
+          : 'Заказ и связи с документами обновлены',
+      );
+    } catch (error) {
+      console.error('Order refresh failed:', error);
+      message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+    } finally {
+      setIsRefreshingOrder(false);
     }
-
-    // Refetch payments to get latest data
-    const { data: freshPaymentsData } = await refetchPayments();
-    const freshPayments = freshPaymentsData?.data || [];
-    const freshTotalAmount = freshPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-
-    const discountedAmount = record.final_amount || record.total_amount || 0;
-
-    // Calculate what payment status should be
-    let newPaymentStatusId: number;
-    if (freshTotalAmount === 0) {
-      newPaymentStatusId = 1; // Не оплачено
-    } else if (freshTotalAmount < discountedAmount) {
-      newPaymentStatusId = 2; // Частично оплачено
-    } else {
-      newPaymentStatusId = 3; // Оплачено
-    }
-
-    // Update paid_amount and payment_status_id in database
-    updateOrder(
-      {
-        resource: 'orders',
-        id: record.order_id,
-        values: {
-          paid_amount: freshTotalAmount,
-          payment_status_id: newPaymentStatusId,
-        },
-        meta: {
-          idColumnName: 'order_id',
-        },
-      },
-      {
-        onSuccess: () => {
-          message.success('Статус оплаты обновлён');
-          // Refetch order data
-          queryResult.refetch();
-        },
-        onError: (error) => {
-          message.error('Ошибка при обновлении статуса оплаты');
-          console.error('Update error:', error);
-        },
-      }
-    );
   };
 
   // Функция печати
@@ -1462,6 +1455,55 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     contentRef: printRef,
     documentTitle: `Заказ-${record?.order_id}`,
   });
+
+  const buildOrderExportDetailRows = (): OrderExcelDetailRow[] => {
+    const mapDetailToExcelRow = (detail: any) => ({
+      detail_id: detail.detail_id,
+      length: detail.height, // ⚠️ В БД height = длина детали
+      width: detail.width,
+      quantity: detail.quantity,
+      area: detail.area,
+      milling_cost_per_sqm: detail.milling_cost_per_sqm,
+      detail_cost: detail.detail_cost,
+      notes: detail.note,
+      milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
+      edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
+      film: { film_name: filmsMap.get(detail.film_id) || '' },
+      material: { material_name: resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '' },
+    });
+
+    return groupingActive && grouping.state.field
+      ? buildGroupedRows(details, grouping.state.field, { groupLabelOf }).flatMap((row) => {
+        if (row.kind === 'separator') return [{ kind: 'blank' as const }];
+        if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)];
+        return [];
+      })
+      : details.map(mapDetailToExcelRow);
+  };
+
+  const handleProductionPdf = () => {
+    if (!record || details.length === 0 || isClientResolving) return;
+
+    const firstDoweling = dowelingLinks[0]?.doweling_order;
+    const opened = openOrderProductionPdfPreview({
+      order: {
+        orderId: record.order_id,
+        orderName: record.order_name,
+        orderDate: record.order_date,
+        clientName: resolvedClientName,
+        clientPhone,
+        prisadkaName: firstDoweling?.doweling_order_name || '',
+        prisadkaDesignerName: firstDoweling?.design_engineer_id
+          ? employeesMap.get(firstDoweling.design_engineer_id) || ''
+          : '',
+      },
+      details: buildOrderExportDetailRows(),
+    });
+
+    if (!opened) {
+      message.error('Не удалось открыть PDF для производства');
+    }
+  };
 
   // Функция экспорта в Excel
   const handleExportExcel = async (exportMode: OrderExcelExportMode = 'full') => {
@@ -1491,27 +1533,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         const dateB = b.payment_date ? new Date(b.payment_date).getTime() : 0;
         return dateA - dateB;
       });
-      const mapDetailToExcelRow = (detail: any) => ({
-        detail_id: detail.detail_id,
-        length: detail.height, // ⚠️ В БД height = длина детали
-        width: detail.width,
-        quantity: detail.quantity,
-        area: detail.area,
-        milling_cost_per_sqm: detail.milling_cost_per_sqm,
-        detail_cost: detail.detail_cost,
-        notes: detail.note,
-        milling_type: { milling_type_name: millingTypesMap.get(detail.milling_type_id) || '' },
-        edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
-        film: { film_name: filmsMap.get(detail.film_id) || '' },
-        material: { material_name: resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '' },
-      });
-      const excelDetailRows = groupingActive && grouping.state.field
-        ? buildGroupedRows(details, grouping.state.field, { groupLabelOf }).flatMap((row) => {
-          if (row.kind === 'separator') return [{ kind: 'blank' as const }];
-          if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)];
-          return [];
-        })
-        : details.map(mapDetailToExcelRow);
+      const excelDetailRows = buildOrderExportDetailRows();
 
       // Генерация и скачивание Excel
       await downloadOrderExcel(
@@ -1809,7 +1831,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       dataIndex: 'basis_project',
       key: 'basis_project',
       width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
-      render: (value) => value || '—',
+      render: (value, row) => {
+        const projects = row.bazis_projects ?? [];
+        return (
+          <BasisProjectLink
+            value={value || projects[0]?.name}
+            bazisProjectId={row.bazis_project_id ?? projects[0]?.bazisProjectId}
+            enabled={bazisProjectLinkEnabled}
+            fallback="—"
+          />
+        );
+      },
     },
     {
       title: 'Базис-раскрой',
@@ -2029,6 +2061,46 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const activeOrderInfoLabel = isOperational
     ? visibleOrderInfoTabs.find((tab) => tab.key === activeOperationalTab)?.label
     : visibleOrderInfoTabs.find((tab) => tab.panel === activeInfoPanel)?.label;
+  const productionPdfDisabled = !record || details.length === 0 || isClientResolving;
+  const productionExcelDisabled = productionPdfDisabled || isAnyExcelExporting;
+  const productionPdfAction = canExportOrders ? (
+    <Tooltip title="PDF для производства">
+      <Button
+        aria-label="PDF для производства"
+        icon={<FilePdfOutlined />}
+        style={productionPdfButtonStyle}
+        onClick={handleProductionPdf}
+        disabled={productionPdfDisabled}
+      />
+    </Tooltip>
+  ) : null;
+  const productionExcelOverflowAction = canExportOrders ? (
+    <Dropdown
+      trigger={['click']}
+      menu={{
+        items: [{
+          key: 'excel-without-prices',
+          icon: <FileExcelOutlined />,
+          label: 'Excel для производства',
+          disabled: productionExcelDisabled,
+        }],
+        onClick: ({ key }) => {
+          if (key === 'excel-without-prices') {
+            void handleExportExcel('without-prices');
+          }
+        },
+      }}
+    >
+      <Tooltip title="Ещё действия">
+        <Button
+          aria-label="Ещё действия"
+          icon={<EllipsisOutlined />}
+          loading={isPriceFreeExporting}
+          disabled={!record}
+        />
+      </Tooltip>
+    </Dropdown>
+  ) : null;
 
   return (
     <Show
@@ -2056,11 +2128,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 trigger={['click']}
                 menu={{
                   items: [
-                    ...(canViewFinancials ? [{
+                    ...(canUpdateOrders ? [{
                       key: 'refresh',
                       icon: <ReloadOutlined />,
                       label: 'Обновить',
-                      disabled: isUpdating,
+                      disabled: isRefreshingOrder,
                     }] : []),
                     ...(canExportOrders ? [
                       ...(canViewFinancials ? [{
@@ -2075,6 +2147,12 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         label: 'Экспорт в Excel',
                         disabled: !record || details.length === 0 || isClientResolving || isAnyExcelExporting,
                       }] : []),
+                      {
+                        key: 'pdf-production',
+                        icon: <FilePdfOutlined />,
+                        label: 'PDF для производства',
+                        disabled: productionPdfDisabled,
+                      },
                       {
                         key: 'excel-without-prices',
                         icon: <FileExcelOutlined />,
@@ -2117,13 +2195,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   ],
                   onClick: ({ key }) => {
                     if (key === 'refresh') {
-                      void handleRefreshPaymentStatus();
+                      void handleRefreshOrder();
                     }
                     if (key === 'print') {
                       handlePrint();
                     }
                     if (key === 'excel') {
                       void handleExportExcel();
+                    }
+                    if (key === 'pdf-production') {
+                      handleProductionPdf();
                     }
                     if (key === 'excel-without-prices') {
                       void handleExportExcel('without-prices');
@@ -2146,11 +2227,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           ) : (
             <>
               {canEditOrderContent && <EditButton>Изменить</EditButton>}
-              {canViewFinancials && (
+              {canUpdateOrders && (
                 <Button
                   icon={<ReloadOutlined />}
-                  onClick={handleRefreshPaymentStatus}
-                  loading={isUpdating}
+                  onClick={() => void handleRefreshOrder()}
+                  loading={isRefreshingOrder}
                 >
                   Обновить
                 </Button>
@@ -2178,23 +2259,24 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       </Tooltip>
                     </>
                   )}
-                  <Tooltip title="Excel для производства">
-                    <Button
-                      aria-label="Excel для производства"
-                      icon={productionExcelIcon}
-                      style={productionExcelButtonStyle}
-                      onClick={() => void handleExportExcel('without-prices')}
-                      loading={isPriceFreeExporting}
-                      disabled={!record || details.length === 0 || isClientResolving || isAnyExcelExporting}
-                    />
-                  </Tooltip>
+                  {productionPdfAction}
                 </>
               ) : null}
-              {(canExportOrders && canViewFinancials) || canMoveOrderProject || canDeleteOrder ? (
+              {canExportOrders || canMoveOrderProject || canDeleteOrder ? (
                 <Dropdown
                   trigger={['click']}
                   menu={{
                     items: [
+                      ...(canExportOrders
+                        ? [
+                            {
+                              key: 'excel-without-prices',
+                              icon: <FileExcelOutlined />,
+                              label: 'Excel для производства',
+                              disabled: productionExcelDisabled,
+                            },
+                          ]
+                        : []),
                       ...(canExportOrders && canViewFinancials
                         ? [
                             {
@@ -2211,7 +2293,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                             },
                           ]
                         : []),
-                      ...(canExportOrders && canViewFinancials && (canMoveOrderProject || canDeleteOrder)
+                      ...(canExportOrders && (canMoveOrderProject || canDeleteOrder)
                         ? [
                             {
                               type: 'divider' as const,
@@ -2239,6 +2321,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         : []),
                     ],
                     onClick: ({ key }) => {
+                      if (key === 'excel-without-prices') {
+                        void handleExportExcel('without-prices');
+                      }
                       if (key === 'pdf') {
                         handlePrint();
                       }
@@ -2304,18 +2389,19 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         Изменить
                       </Button>
                     ) : null}
+                    {canUpdateOrders ? (
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={() => void handleRefreshOrder()}
+                        loading={isRefreshingOrder}
+                      >
+                        Обновить
+                      </Button>
+                    ) : null}
                     {canExportOrders ? (
                       <>
-                        <Tooltip title="Excel для производства">
-                          <Button
-                            aria-label="Excel для производства"
-                            icon={productionExcelIcon}
-                            style={productionExcelButtonStyle}
-                            onClick={() => void handleExportExcel('without-prices')}
-                            loading={isPriceFreeExporting}
-                            disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
-                          />
-                        </Tooltip>
+                        {productionPdfAction}
+                        {productionExcelOverflowAction}
                         {canViewFinancials && (
                           <>
                             <Button icon={<DownloadOutlined />} onClick={handlePrint}>
@@ -2345,17 +2431,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         Редактировать
                       </Button>
                     ) : null}
+                    {canUpdateOrders ? (
+                      <Button
+                        icon={<ReloadOutlined />}
+                        onClick={() => void handleRefreshOrder()}
+                        loading={isRefreshingOrder}
+                      >
+                        Обновить
+                      </Button>
+                    ) : null}
                     {canExportOrders ? (
-                      <Tooltip title="Excel для производства">
-                        <Button
-                          aria-label="Excel для производства"
-                          icon={productionExcelIcon}
-                          style={productionExcelButtonStyle}
-                          onClick={() => void handleExportExcel('without-prices')}
-                          loading={isPriceFreeExporting}
-                          disabled={details.length === 0 || isClientResolving || isAnyExcelExporting}
-                        />
-                      </Tooltip>
+                      <>
+                        {productionPdfAction}
+                        {productionExcelOverflowAction}
+                      </>
                     ) : null}
                     {canUpdateOrders ? (
                       <Button
@@ -2895,7 +2984,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             {isMobile ? (
               <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}
                 selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}
-                onSelectionChange={setCutSelectedDetailIds} bazisCutLinkEnabled={bazisCutLinkEnabled} />
+                onSelectionChange={setCutSelectedDetailIds}
+                bazisCutLinkEnabled={bazisCutLinkEnabled}
+                bazisProjectLinkEnabled={bazisProjectLinkEnabled} />
             ) : (
             <TableTopScroll className="order-show-details-table-wrap">
             <MemoizedOrderShowTable

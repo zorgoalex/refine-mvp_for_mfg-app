@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, Input, Space, Table, Typography, message } from 'antd';
+import { Button, Card, Input, Space, Table, Typography, message } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto, type BazisCutSourceRefDto } from '../../api/bazisCutApi';
 import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
+import { can } from '../../utils/permissions';
+import { BazisCutPickerModal } from './BazisCutPickerModal';
 
 const { Title, Text } = Typography;
 
@@ -17,6 +20,8 @@ export const BazisCutListPage: React.FC = () => {
   const { pageSize, setPageSize } = usePageSizePreference('bazis-cut:list', 25);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const canManage = can('cut.manage');
 
   useEffect(() => { const id = window.setTimeout(() => { setDebounced(search.trim()); setPage(1); }, 300); return () => clearTimeout(id); }, [search]);
   const load = useCallback(async () => {
@@ -52,13 +57,23 @@ export const BazisCutListPage: React.FC = () => {
       setPage(next);
     } };
   return <div className="bazis-cut-list-modern"><Space direction="vertical" size="middle" style={{ width: '100%' }}>
-    <Title level={3} style={{ margin: 0 }}>Базис-раскрой</Title>
+    <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
+      <Title level={3} style={{ margin: 0 }}>Базис-раскрой</Title>
+      {canManage && <Button type="primary" icon={<PlusOutlined />} style={{ minHeight: 40 }}
+        onClick={() => setPickerOpen(true)}>Подобрать детали</Button>}
+    </Space>
     <Card><Input.Search allowClear value={search} onChange={(event) => setSearch(event.target.value)}
       placeholder="Набор, заказ или Базис-проект" style={{ maxWidth: 420 }} /></Card>
     <Table rowKey="bazisCutSetId" columns={columns} dataSource={items} loading={loading} pagination={pagination}
       locale={{ emptyText: search ? 'Ничего не найдено' : 'Наборы ещё не сформированы' }}
       rowClassName={(row) => orderDeletedReferenceClassName(hasDeletedOrderReference(row.orders))}
       onRow={(row) => ({ onClick: () => navigate(`/bazis-cut/${row.bazisCutSetId}`), style: { cursor: 'pointer' } })} />
+    <BazisCutPickerModal open={pickerOpen} onCancel={() => setPickerOpen(false)}
+      onCreated={async (createdSetId) => {
+        setPickerOpen(false);
+        await load();
+        navigate(`/bazis-cut/${createdSetId}`);
+      }} />
   </Space></div>;
 };
 

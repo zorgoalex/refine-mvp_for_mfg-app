@@ -20,6 +20,7 @@ describe('PgBazisRepository.exportCutXls', () => {
           revision_bazis_order_no: 'BP-7',
           project_client_id: 5,
           client_name: 'Тест Клиент',
+          root_product_count: 2,
         }]);
       }
       if (sql.startsWith('SELECT bazis_node_id, object_type FROM bazis_nodes')) {
@@ -59,9 +60,6 @@ describe('PgBazisRepository.exportCutXls', () => {
           { reference_kind: 'milling', reference_id: 4, name: 'модерн' },
           { reference_kind: 'film', reference_id: 9, name: 'пвх белая' },
         ]);
-      }
-      if (sql.startsWith('SELECT COUNT(*)::int AS root_product_count')) {
-        return rows([{ root_product_count: 2 }]);
       }
       if (sql.includes("SELECT 'sheet'::text AS reference_kind")) {
         expect(params).toEqual([[3], [4], [9]]);
@@ -113,12 +111,12 @@ describe('PgBazisRepository.exportCutXls', () => {
     const sheet = workbook.Sheets[workbook.SheetNames[0]]!;
     const data = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null });
     expect(data[1]?.slice(0, 15)).toEqual([
-      'Да', 'Площадной', 'ЛДСП Белый', '', 16, 'BP-7', 'Кухня', 'BP-7Кухня.01.00.01',
+      'Да', 'Площадной', 'ЛДСП Белый', '', 16, 'BP-7', 'Кухня', '01.00.01',
       'BP-7Кухня.01.00.01', 'Панель 101', 500, 1000, 500, 1000, 2,
     ]);
     expect(data[1]?.slice(33, 37)).toEqual(['Модерн', 'Присадка:', '', 'ПВХ белая']);
     expect(data[1]?.slice(37, 43)).toEqual([77, 7, 12, 101, null, null]);
-    expect(data[2]?.[7]).toBe('BP-7Шкаф.02.00.01');
+    expect(data[2]?.slice(7, 9)).toEqual(['02.00.01', 'BP-7Шкаф.02.00.01']);
     expect(data[2]?.slice(37, 43)).toEqual([77, 7, 12, 102, null, null]);
     expect(resolveForExport).toHaveBeenCalledWith(expect.objectContaining({
       templateId: 55,

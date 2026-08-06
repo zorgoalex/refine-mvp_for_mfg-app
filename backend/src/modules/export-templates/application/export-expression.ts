@@ -22,8 +22,10 @@ export const EXPORT_LIMITS = {
   maxBytes: 64 * 1024 * 1024,
 } as const;
 
+type ExportColumnResolver = (columnKey: string, path: string) => ExportScalar;
+type ColumnDependency = { columnKey: string; path: string };
+
 export function validateExportColumns(columns: readonly ExportTemplateColumn[]): number[] {
-  const counts: number[] = [];
   if (columns.length < 1 || columns.length > EXPORT_LIMITS.maxColumns) {
     throw validationError('columns', `Columns must contain 1..${EXPORT_LIMITS.maxColumns} items`);
   }
@@ -31,12 +33,29 @@ export function validateExportColumns(columns: readonly ExportTemplateColumn[]):
   columns.forEach((column, index) => {
     if (keys.has(column.columnKey)) throw validationError(`columns.${index}.columnKey`, 'Column key must be unique');
     keys.add(column.columnKey);
-    counts.push(validateExpression(column.expression, `columns.${index}.expression`));
   });
+
+  const dependencies = new Map<string, ColumnDependency[]>();
+  const counts = columns.map((column, index) => {
+    const refs: ColumnDependency[] = [];
+    dependencies.set(column.columnKey, refs);
+    return validateExpressionInternal(column.expression, `columns.${index}.expression`, keys,
+      (columnKey, path) => refs.push({ columnKey, path }));
+  });
+  validateColumnDependencyGraph(columns, dependencies);
   return counts;
 }
 
 export function validateExpression(expression: ExportExpression, path = 'expression'): number {
+  return validateExpressionInternal(expression, path);
+}
+
+function validateExpressionInternal(
+  expression: ExportExpression,
+  path: string,
+  columnKeys?: ReadonlySet<string>,
+  onColumnRef?: (columnKey: string, path: string) => void,
+): number {
   let nodes = 0;
   const visit = (node: ExportExpression, depth: number, nodePath: string): void => {
     nodes += 1;
@@ -45,6 +64,12 @@ export function validateExpression(expression: ExportExpression, path = 'express
     switch (node.type) {
       case 'field':
         if (!EXPORT_FIELD_KEYS.has(node.field)) throw validationError(`${nodePath}.field`, `Unknown field: ${node.field}`);
+        return;
+      case 'column_ref':
+        if (!columnKeys?.has(node.columnKey)) {
+          throw validationError(`${nodePath}.columnKey`, `Unknown column: ${node.columnKey}`);
+        }
+        onColumnRef?.(node.columnKey, `${nodePath}.columnKey`);
         return;
       case 'constant':
       case 'empty': return;
@@ -74,28 +99,99 @@ export function validateExpression(expression: ExportExpression, path = 'express
   return nodes;
 }
 
+function validateColumnDependencyGraph(
+  columns: readonly ExportTemplateColumn[],
+  dependencies: ReadonlyMap<string, readonly ColumnDependency[]>,
+): void {
+  const state = new Map<string, 'visiting' | 'visited'>();
+  const stack: string[] = [];
+  const visit = (columnKey: string): void => {
+    state.set(columnKey, 'visiting');
+    stack.push(columnKey);
+    for (const dependency of dependencies.get(columnKey) ?? []) {
+      if (state.get(dependency.columnKey) === 'visiting') {
+        const cycleStart = stack.indexOf(dependency.columnKey);
+        const cycle = [...stack.slice(cycleStart), dependency.columnKey].join(' -> ');
+        throw validationError(dependency.path, `Cyclic column reference: ${cycle}`);
+      }
+      if (state.get(dependency.columnKey) !== 'visited') visit(dependency.columnKey);
+    }
+    stack.pop();
+    state.set(columnKey, 'visited');
+  };
+  columns.forEach((column) => {
+    if (!state.has(column.columnKey)) visit(column.columnKey);
+  });
+}
+
+export function evaluateExportRow(
+  columns: readonly ExportTemplateColumn[],
+  detail: BazisExportDetail,
+  context: ExportEvaluationContext,
+): ExportScalar[] {
+  const columnIndexes = new Map(columns.map((column, index) => [column.columnKey, index]));
+  const values = new Map<string, ExportScalar>();
+  const evaluating = new Set<string>();
+
+  const evaluateColumn = (index: number): ExportScalar => {
+    const column = columns[index];
+    if (values.has(column.columnKey)) return values.get(column.columnKey)!;
+    if (evaluating.has(column.columnKey)) {
+      throw evaluationError(`columns.${index}.expression`, `Cyclic column reference at runtime: ${column.columnKey}`);
+    }
+    evaluating.add(column.columnKey);
+    try {
+      const value = evaluateExpression(column.expression, detail, context, `columns.${index}.expression`,
+        (columnKey, path) => {
+          const referencedIndex = columnIndexes.get(columnKey);
+          if (referencedIndex === undefined) throw evaluationError(path, `Unknown column: ${columnKey}`);
+          return evaluateColumn(referencedIndex);
+        });
+      values.set(column.columnKey, value);
+      return value;
+    } catch (error) {
+      if (error instanceof ApiError && error.details?.columnKey === undefined) {
+        throw new ApiError(error.statusCode, error.code, error.message, {
+          ...(error.details ?? {}), columnKey: column.columnKey, columnHeader: column.header,
+        });
+      }
+      throw error;
+    } finally {
+      evaluating.delete(column.columnKey);
+    }
+  };
+
+  return columns.map((_, index) => evaluateColumn(index));
+}
+
 export function evaluateExpression(
   expression: ExportExpression,
   detail: BazisExportDetail,
   context: ExportEvaluationContext,
   path = 'expression',
+  resolveColumn?: ExportColumnResolver,
 ): ExportScalar {
+  const evaluate = (child: ExportExpression, childPath: string) =>
+    evaluateExpression(child, detail, context, childPath, resolveColumn);
   switch (expression.type) {
     case 'field': return resolveExportField(expression.field, detail, context);
+    case 'column_ref':
+      if (!resolveColumn) throw evaluationError(path, 'Column reference requires row evaluation context');
+      return resolveColumn(expression.columnKey, `${path}.columnKey`);
     case 'constant': return expression.value;
     case 'empty': return null;
     case 'concat': return checkedString(expression.parts.map((part, index) =>
-      toText(evaluateExpression(part, detail, context, `${path}.parts.${index}`))).join(''), path);
-    case 'if_else': return evaluateCondition(expression.when, detail, context, `${path}.when`)
-      ? evaluateExpression(expression.then, detail, context, `${path}.then`)
-      : evaluateExpression(expression.else, detail, context, `${path}.else`);
+      toText(evaluate(part, `${path}.parts.${index}`))).join(''), path);
+    case 'if_else': return evaluateCondition(expression.when, detail, context, `${path}.when`, resolveColumn)
+      ? evaluate(expression.then, `${path}.then`)
+      : evaluate(expression.else, `${path}.else`);
     case 'string_fn': {
-      const value = toText(evaluateExpression(expression.input, detail, context, `${path}.input`));
+      const value = toText(evaluate(expression.input, `${path}.input`));
       const result = expression.fn === 'trim' ? value.trim() : expression.fn === 'upper' ? value.toUpperCase() : value.toLowerCase();
       return checkedString(result, path);
     }
     case 'number_fn': {
-      const raw = evaluateExpression(expression.input, detail, context, `${path}.input`);
+      const raw = evaluate(expression.input, `${path}.input`);
       if (isBlank(raw)) return null;
       const value = toNumber(raw, path);
       let result: number;
@@ -109,7 +205,7 @@ export function evaluateExpression(
     }
     case 'math': {
       const values = expression.parts.map((part, index) => {
-        const value = evaluateExpression(part, detail, context, `${path}.parts.${index}`);
+        const value = evaluate(part, `${path}.parts.${index}`);
         return isBlank(value) ? null : toNumber(value, `${path}.parts.${index}`);
       });
       if (values.some((value) => value === null)) return null;
@@ -134,11 +230,12 @@ function evaluateCondition(
   detail: BazisExportDetail,
   context: ExportEvaluationContext,
   path: string,
+  resolveColumn?: ExportColumnResolver,
 ): boolean {
-  const left = evaluateExpression(condition.left, detail, context, `${path}.left`);
+  const left = evaluateExpression(condition.left, detail, context, `${path}.left`, resolveColumn);
   if (condition.op === 'exists') return left !== null && left !== undefined;
   if (condition.op === 'not_empty') return !isBlank(left);
-  const right = evaluateExpression(condition.right!, detail, context, `${path}.right`);
+  const right = evaluateExpression(condition.right!, detail, context, `${path}.right`, resolveColumn);
   if (condition.op === 'equals' || condition.op === 'not_equals') {
     const equal = left === null || right === null
       ? left === right

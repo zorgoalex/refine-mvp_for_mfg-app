@@ -9,6 +9,13 @@ describe('evolution shell behavior preservation', () => {
   const operationalStyles = readFileSync('src/ui-operational/operational.css', 'utf8');
   const tabs = readFileSync('src/ui-evolution/shell/EvolutionWorkspaceTabs.tsx', 'utf8');
   const navigation = readFileSync('src/ui-evolution/shell/useEvolutionNavigation.tsx', 'utf8');
+  const tabletNavigation = readFileSync('src/ui-evolution/shell/EvolutionTabletNavigation.tsx', 'utf8');
+  const tabletUtilities = readFileSync('src/ui-evolution/shell/EvolutionTabletUtilities.tsx', 'utf8');
+  const headerUtilities = readFileSync('src/ui-evolution/shell/EvolutionHeaderUtilities.tsx', 'utf8');
+  const mobileNavigation = readFileSync('src/ui-evolution/shell/EvolutionMobileNavigation.tsx', 'utf8');
+  const notificationBell = readFileSync('src/components/NotificationBell.tsx', 'utf8');
+  const tabletStyles = readFileSync('src/ui-evolution/styles/tablet.css', 'utf8');
+  const routeFamily = readFileSync('src/ui-evolution/shell/tabletRouteFamily.ts', 'utf8');
 
   it('keeps tab sync, unload guards, keep-alive routes, and table scrollbars', () => {
     expect(layout).toContain('useTabSync()');
@@ -18,6 +25,54 @@ describe('evolution shell behavior preservation', () => {
       /<React\.Suspense fallback={<EvolutionRouteSkeleton \/>}>[\s\S]*<KeepAliveOutlet \/>[\s\S]*<\/React\.Suspense>/,
     );
     expect(layout).toContain('aria-label="Загрузка страницы"');
+  });
+
+  it('mounts the tablet rail, device marker and scroll-aware header state', () => {
+    expect(layout).toContain('<EvolutionTabletNavigation');
+    expect(layout).toContain('data-device-tier={deviceTier}');
+    expect(layout).toContain('data-tablet-header-compact');
+    expect(layout).toContain('onScrollCapture={handleTabletScrollCapture}');
+    expect(tabletNavigation).toContain('width={68}');
+    expect(tabletNavigation).toContain('aria-label="Планшетная навигация"');
+    expect(tabletNavigation).toContain('sider.categorizedResources');
+    expect(tabletNavigation).toContain('sider.topMenuItems');
+    expect(tabletNavigation).toContain("permittedTopKeys.has('orders_view')");
+    expect(tabletNavigation).toContain("permittedTopKeys.has('calendar')");
+    expect(tabletNavigation).toContain("permittedTopKeys.has('order-status-board')");
+    expect(tabletStyles).toContain('--tablet-sticky-row: 44px');
+    expect(tabletStyles).toContain('.evolution-shell--tablet[data-tablet-header-compact="true"] .evolution-workspace-tabs.workspace-tabs');
+    expect(tabletStyles).toMatch(/data-tablet-header-compact="true"[^}]+\.ant-page-header-heading,[\s\S]+position: sticky;/);
+  });
+
+  it('forces board workspaces into compact tablet headers before any scroll', () => {
+    expect(layout).toContain('const forceTabletCompactHeader = isTablet');
+    expect(layout).toContain("routeFamily === 'status-board'");
+    expect(layout).toContain("routeFamily === 'calendar'");
+    expect(layout).toContain('SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY');
+    expect(layout).toContain('shortTabletLandscape');
+    expect(layout).toContain('forceTabletCompactHeader || tabletHeaderCompact');
+    expect(layout).toContain('if (!isTablet || forceTabletCompactHeader) return undefined');
+    expect(layout).toContain('if (!isTablet || forceTabletCompactHeader || !(event.target instanceof HTMLElement)) return');
+    expect(layout).toContain("data-tablet-header-compact={tabletHeaderIsCompact ? 'true' : 'false'}");
+  });
+
+  it('moves tablet personal utilities out of the header and into the rail or drawer footer', () => {
+    expect(layout).toContain('!isAirDesktop && !isTabletLandscape');
+    expect(layout).toContain('tablet={isTabletPortrait}');
+    expect(headerUtilities).toContain('{!tablet ? (');
+    expect(headerUtilities).toContain('identity && !tablet ? <NotificationBell />');
+    expect(tabletNavigation).toContain('<EvolutionTabletUtilities presentation="rail" />');
+    expect(mobileNavigation).toContain('<EvolutionTabletUtilities presentation="drawer" />');
+    expect(tabletUtilities).toContain('aria-label="Персональные действия"');
+    expect(tabletUtilities).toContain('aria-label="Сканер бирок"');
+    expect(tabletUtilities).toContain("canViewNavigationResource('scan', identity");
+    expect(tabletUtilities).toContain('className="evolution-tablet-utility evolution-tablet-utility--theme"');
+    expect(tabletUtilities).toContain('className="evolution-tablet-utility evolution-tablet-utility--avatar"');
+    expect(notificationBell).toContain('aria-label="Уведомления"');
+    expect(notificationBell).toContain('<Button');
+    expect(tabletStyles).toContain('.evolution-tablet-utilities--rail');
+    expect(tabletStyles).toContain('.evolution-tablet-utilities--drawer');
+    expect(tabletStyles).toContain('--tablet-shell-header: 48px');
   });
 
   it('keeps dirty-tab confirmation and discard semantics', () => {
@@ -83,7 +138,8 @@ describe('evolution shell behavior preservation', () => {
   });
 
   it('renders the standalone MDF board with the status-board workspace layout', () => {
-    expect(layout).toContain("pathname.startsWith('/mdf-work-board')");
-    expect(layout).toMatch(/mdf-work-board'[\s\S]*return 'status-board'/);
+    expect(layout).toContain('resolveModernRouteFamily(location.pathname)');
+    expect(routeFamily).toContain("pathname.startsWith('/mdf-work-board')");
+    expect(routeFamily).toMatch(/mdf-work-board'[\s\S]*return 'status-board'/);
   });
 });

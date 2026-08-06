@@ -176,6 +176,29 @@ export interface OrderSaveAuditMetadata {
       productionStatusId: number;
     }>;
   };
+  bazisPanelLinks?: BazisPanelOrderLink[];
+}
+
+export type BazisPanelOrderLinkSource =
+  | 'pdf_import'
+  | 'historical_backfill'
+  | 'revision_reprojection';
+
+export interface BazisPanelOrderLink {
+  nodeId: number;
+  orderDetailId: number | null;
+  bazisProjectId: number;
+  revisionId: number;
+  projectLinkCreated: boolean;
+}
+
+export interface ReconcileBazisPanelOrderLinksInput {
+  orderId: number;
+  candidateDetailIds: number[];
+  source: BazisPanelOrderLinkSource;
+  currentUser: CurrentUser;
+  requestId: string;
+  idempotencyKey: string;
 }
 
 export interface OrderSaveAuditEvent {
@@ -214,8 +237,8 @@ export interface OrderStatusAuditEvent {
   metadata?: Record<string, unknown> | null;
 }
 
-export interface OrderStatusOutboxEvent {
-  eventType: 'order.status_changed' | 'order.production_status_changed';
+export interface OrderAutomationSourceOutboxEvent {
+  eventType: StatusAutomationEvent['eventType'];
   orderId: number;
   clientId: number | null;
   actorUserId: string;
@@ -390,6 +413,9 @@ export interface OrderWriteUnitOfWork {
     previousVersion: number | null;
     currentUser: CurrentUser;
   }): Promise<number>;
+  reconcileBazisPanelOrderLinks(
+    input: ReconcileBazisPanelOrderLinksInput,
+  ): Promise<BazisPanelOrderLink[]>;
   softDeleteOrder(input: {
     orderId: number;
     previousVersion: number;
@@ -403,7 +429,7 @@ export interface OrderWriteUnitOfWork {
   }): Promise<number>;
   writeAuditEvent(event: OrderSaveAuditEvent): Promise<void>;
   writeStatusAuditEvent(event: OrderStatusAuditEvent): Promise<void>;
-  enqueueStatusOutboxEvent(event: OrderStatusOutboxEvent): Promise<void>;
+  enqueueAutomationSourceOutboxEvent(event: OrderAutomationSourceOutboxEvent): Promise<void>;
   evaluateStatusAutomation(event: StatusAutomationEvent): Promise<void>;
   writeOrderDeleteAudit(input: OrderDeleteAuditInput): Promise<string>;
   enqueueOrderDeleteOutbox(input: OrderDeleteOutboxInput): Promise<void>;

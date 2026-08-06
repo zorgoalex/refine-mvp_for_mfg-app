@@ -23,6 +23,7 @@ const panel = (rawJson: Record<string, unknown> | null) => ({
 const revision = {
   bazisProjectName: 'proj.xml',
   revisionBazisOrderNo: '1457',
+  rootProductCount: 1,
 };
 
 const filmMapping = (filmId: number): BazisDraftMaterialMapping => ({

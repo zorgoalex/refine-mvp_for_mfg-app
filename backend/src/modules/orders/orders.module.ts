@@ -22,6 +22,7 @@ import { PgOrderStatusBoardRepository } from './adapters/pg-order-status-board-r
 import { PgOrderSnapshot } from './adapters/pg-order-snapshot';
 import { PgOrderGroupLinkRepository, UnavailableOrderGroupLinkRepository } from './adapters/pg-order-group-link-repository';
 import { PgOrderTransactionManager } from './adapters/pg-order-transaction-manager';
+import { assertBazisPanelOrderLinkSchema } from './adapters/pg-bazis-panel-order-link-reconciler';
 import { UnavailableOrderExporter } from './adapters/unavailable-order-exporter';
 import { UnavailableOrderReadRepository } from './adapters/unavailable-order-read-repository';
 import { UnavailableOrderStatusBoardRepository } from './adapters/unavailable-order-status-board-repository';
@@ -32,6 +33,7 @@ import { OrderSnapshotService } from './application/order-snapshot.service';
 import { OrderDetailTransferService } from './application/order-detail-transfer.service';
 import { OrderTransactionService } from './application/order-transaction.service';
 import { OrderQueryService } from './application/order-query.service';
+import { OrderRefreshService } from './application/order-refresh.service';
 import { OrderResourceDemandService } from './application/order-resource-demand.service';
 import { OrderStatusBoardService } from './application/order-status-board.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
@@ -75,8 +77,15 @@ export function shouldEnableOrderDeadlineSync(input: {
     GroupsRuntimeConfigService,
     {
       provide: OrderTransactionService,
-      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
-        new OrderTransactionService({
+      useFactory: async (database: DatabaseService, config: ConfigService<BackendEnv, true>) => {
+        if (
+          database.isConfigured &&
+          config.get('BACKEND_ENABLE_ORDERS', { infer: true }) &&
+          !config.get('BACKEND_ORDERS_READ_ONLY', { infer: true })
+        ) {
+          await assertBazisPanelOrderLinkSchema(database);
+        }
+        return new OrderTransactionService({
           transactions: database.isConfigured
             ? new PgOrderTransactionManager(
                 database,
@@ -123,7 +132,8 @@ export function shouldEnableOrderDeadlineSync(input: {
                 },
               }
             : undefined,
-        }),
+        });
+      },
       inject: [DatabaseService, ConfigService],
     },
     {
@@ -156,6 +166,11 @@ export function shouldEnableOrderDeadlineSync(input: {
               : undefined,
         }),
       inject: [DatabaseService, ConfigService],
+    },
+    {
+      provide: OrderRefreshService,
+      useFactory: (database: DatabaseService) => new OrderRefreshService({ database }),
+      inject: [DatabaseService],
     },
     {
       provide: OrderResourceDemandService,

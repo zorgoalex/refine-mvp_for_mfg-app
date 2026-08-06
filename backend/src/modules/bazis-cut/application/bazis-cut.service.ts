@@ -32,6 +32,26 @@ export class BazisCutService {
     return this.repository.create(input);
   }
 
+  async pickerFacets(input: Parameters<BazisCutRepositoryPort['pickerFacets']>[0]) {
+    await this.require(input.currentUser, 'cut.view', 'picker_facets', input.requestId);
+    return this.repository.pickerFacets(input);
+  }
+
+  async pickerSearch(input: Parameters<BazisCutRepositoryPort['pickerSearch']>[0]) {
+    await this.require(input.currentUser, 'cut.view', 'picker_search', input.requestId);
+    return this.repository.pickerSearch(input);
+  }
+
+  async createFromPicker(input: Parameters<BazisCutRepositoryPort['createFromPicker']>[0]) {
+    await this.require(input.currentUser, 'cut.manage', 'create_from_picker', input.requestId);
+    return this.repository.createFromPicker(input);
+  }
+
+  async orderMemberships(input: Parameters<BazisCutRepositoryPort['orderMemberships']>[0]) {
+    await this.require(input.currentUser, 'orders.view', 'order_memberships', input.requestId);
+    return this.repository.orderMemberships(input);
+  }
+
   async rename(input: Parameters<BazisCutRepositoryPort['rename']>[0]) {
     await this.require(input.currentUser, 'cut.manage', 'rename', input.requestId, input.setId);
     return this.repository.rename(input);

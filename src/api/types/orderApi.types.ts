@@ -12,6 +12,7 @@ export interface SaveOrderDto {
   requirements: SaveOrderRequirementDto[];
   dowelingLinks: SaveOrderDowelingLinkDto[];
   deleted: DeletedOrderChildrenDto;
+  bazisImportCandidateClientKeys?: string[];
   idempotencyKey?: string;
   version?: number;
 }
@@ -22,6 +23,21 @@ export interface SaveOrderResponse {
 
 export interface OrderResponse {
   order: OrderDto;
+}
+
+export interface OrderRefreshRequest {
+  version: number;
+  idempotencyKey?: string;
+}
+
+export interface OrderRefreshResponse {
+  order: OrderDto;
+  baseVersion: number;
+  version: number;
+  updatedDowelingDetailIds: number[];
+  auditId: string | null;
+  refreshedAt: IsoDateTimeString;
+  requestId: string;
 }
 
 export interface OrderListResponse {
@@ -577,6 +593,7 @@ export interface OrderDetailDto {
   jointOrderId?: number | null;
   note?: string | null;
   basisProject?: string | null;
+  bazisProjectId: number | null;
   basisProduct?: string | null;
   basisData?: string | null;
   basisDesignation?: string | null;
@@ -589,10 +606,18 @@ export interface OrderDetailDto {
   cutJob?: CutDetailLastReadyJobRef | null;
   bathCutJob?: CutDetailLastReadyJobRef | null;
   bazisCutSets?: OrderDetailBazisCutSetRefDto[];
+  bazisProjects?: OrderDetailBazisProjectRefDto[];
 }
 
 export interface OrderDetailBazisCutSetRefDto {
   bazisCutSetId: number;
+  name: string;
+}
+
+export interface OrderDetailBazisProjectRefDto {
+  bazisProjectId: number;
+  bazisRevisionId: number;
+  revisionNo: number;
   name: string;
 }
 
@@ -711,6 +736,12 @@ export interface OrderListItemDto {
   materialNames?: string[];
   /** Unique non-empty detail basisProject values in first-detail order. */
   basisProjects?: string[];
+  /** Canonical Basis-cut numbers (БР-<set id>) containing order details. */
+  bazisCutNumbers?: string[];
+  /** Current non-vacuum cut result numbers containing order details. */
+  cutNumbers?: string[];
+  /** Current vacuum-table cut result numbers containing order details. */
+  bathCutNumbers?: string[];
   filmNames?: string[];
   /** Variant B: aggregated sheet material type IDs from order details (authoritative post-034). */
   sheetMaterialTypeIds?: number[];

@@ -54,6 +54,7 @@ export interface UserPreferencesDto {
   themeMode: ThemeMode;
   uiSize: UiSize;
   uiVariant: UiVariant;
+  tabletMode: boolean;
   orderDetailColumns: OrderDetailColumnPreferencesDto;
   recentReferences: RecentReferenceEntitiesDto;
   pageSizePreferences: PageSizePreferencesDto;

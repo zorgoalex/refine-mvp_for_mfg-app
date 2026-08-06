@@ -32,6 +32,11 @@ describe('notification event registry', () => {
     expect(isEngineOwnedEvent('nope.unknown')).toBe(false);
   });
 
+  it('keeps order doweling refresh as integration-only without user notifications', () => {
+    expect(getEventDefinition('order.details_doweling_auto_set')).toBeUndefined();
+    expect(isEngineOwnedEvent('order.details_doweling_auto_set')).toBe(false);
+  });
+
   it('exposes workshop_head and direction_head resolvers for order events', () => {
     for (const eventType of [
       'order.status_changed',

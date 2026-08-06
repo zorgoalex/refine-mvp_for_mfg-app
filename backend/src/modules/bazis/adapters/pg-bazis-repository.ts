@@ -8,6 +8,7 @@ import type { OrderTransactionService } from '../../orders/application/order-tra
 import type { OrderDto } from '../../orders/dto/order.dto';
 import type { SaveOrderDetailDto, SaveOrderDto } from '../../orders/dto/save-order.dto';
 import { PgOrderReadRepository } from '../../orders/adapters/pg-order-read-repository';
+import { reconcileBazisPanelOrderLinks } from '../../orders/adapters/pg-bazis-panel-order-link-reconciler';
 import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../../bazis-cut/application/bazis-xls-writer';
 import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
 import {
@@ -213,6 +214,7 @@ interface RevisionProjectRow {
   client_name: string | null;
   design_engineer_id: number | string | null;
   design_engineer_name: string | null;
+  root_product_count: number | string;
 }
 
 interface DraftNodeLookupRow {
@@ -589,6 +591,53 @@ export class PgBazisRepository implements BazisRepositoryPort {
         `,
         [revisionId, bazisProjectId],
       );
+
+      // Project links are durable provenance. When a new current revision is
+      // imported, project its already-linked ERP orders onto exact panels of
+      // this revision before retention considers old revisions.
+      const linkedOrderCandidates = await tx.query<{
+        order_id: string | number;
+        detail_ids: Array<string | number>;
+      }>(
+        `
+        SELECT link.order_id,
+               array_agg(detail.detail_id ORDER BY detail.detail_id) AS detail_ids
+        FROM bazis_order_links link
+        JOIN orders erp_order
+          ON erp_order.order_id = link.order_id
+         AND erp_order.delete_flag = false
+        JOIN order_details detail
+          ON detail.order_id = link.order_id
+         AND detail.delete_flag = false
+        WHERE link.bazis_project_id = $1
+          AND NULLIF(btrim(detail.basis_project), '') IS NOT NULL
+          AND NULLIF(btrim(COALESCE(
+            NULLIF(detail.basis_product, ''),
+            CASE
+              WHEN position('/' in detail.basis_project) > 0
+                THEN regexp_replace(detail.basis_project, '^[^/]*/[[:space:]]*', '')
+              ELSE NULL
+            END
+          )), '') IS NOT NULL
+          AND NULLIF(btrim(detail.basis_designation), '') IS NOT NULL
+          AND NULLIF(btrim(detail.basis_data), '') IS NOT NULL
+          AND NULLIF(btrim(detail.detail_name), '') IS NOT NULL
+        GROUP BY link.order_id
+        ORDER BY link.order_id
+        `,
+        [bazisProjectId],
+      );
+      for (const linkedOrder of linkedOrderCandidates.rows) {
+        const orderId = Number(linkedOrder.order_id);
+        await reconcileBazisPanelOrderLinks(tx, {
+          orderId,
+          candidateDetailIds: linkedOrder.detail_ids.map(Number),
+          source: 'revision_reprojection',
+          currentUser: command.currentUser,
+          requestId,
+          idempotencyKey: `bazis-revision-${revisionId}-order-${orderId}-panel-links`,
+        });
+      }
 
       const lookup = command.parsed.materials.filter((material) => material.kindGuess !== 'hardware');
       const mapped = lookup.length
@@ -1455,7 +1504,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
               FROM bazis_node_order_detail_map m
               JOIN orders o ON o.order_id = m.order_id
               WHERE m.node_id = n.bazis_node_id
-                AND m.order_detail_id IS NOT NULL) AS linked_orders,
+                AND (m.order_detail_id IS NOT NULL OR m.mapping_kind = 'imported')
+                AND m.mapping_kind <> 'ignored') AS linked_orders,
              (SELECT jsonb_agg(jsonb_build_object(
                 'bazisCutSetId', refs.bazis_cut_set_id,
                 'name', refs.name
@@ -1505,7 +1555,8 @@ export class PgBazisRepository implements BazisRepositoryPort {
               FROM bazis_node_order_detail_map m
               JOIN orders o ON o.order_id = m.order_id
               WHERE m.node_id = n.bazis_node_id
-                AND m.order_detail_id IS NOT NULL) AS linked_orders,
+                AND (m.order_detail_id IS NOT NULL OR m.mapping_kind = 'imported')
+                AND m.mapping_kind <> 'ignored') AS linked_orders,
              (SELECT jsonb_agg(jsonb_build_object(
                 'bazisCutSetId', refs.bazis_cut_set_id,
                 'name', refs.name
@@ -2141,7 +2192,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
       }
       assertBazisProjectHasDesignEngineer(revision);
 
-      const order = sanitizeDraftOrder(command.order, revision.projectId);
+      const order = sanitizeDraftOrder(command.order, revision.projectId, {
+        rootProductCount: revision.rootProductCount,
+        panelClientKeys: new Set(command.nodes.map((node) => node.clientKey)),
+      });
       if (revision.projectClientId !== order.header.clientId) {
         await this.failCreateOrderIdempotency(command);
         throw new ApiError(
@@ -2302,6 +2356,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
               DELETE FROM bazis_node_order_detail_map
               WHERE order_id = $1
                 AND order_detail_id = $2
+                AND mapping_kind <> 'imported'
               `,
               [command.orderId, pair.orderDetailId],
             );
@@ -2478,7 +2533,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
 
     const referenceLookup = await this.loadPanelReferenceLookup(panels);
     const draftDetails = buildDraftDetails(panels, mappings, revision, referenceLookup);
-    const rootProductCount = await this.loadRootProductCount(command.revisionId);
+    const rootProductCount = revision.rootProductCount;
     const exportReferences = await this.loadCutExportReferences(draftDetails);
     const panelsById = new Map(panels.map((panel) => [panel.bazisNodeId, panel] as const));
     const invalidNodeIds: number[] = [];
@@ -2513,10 +2568,10 @@ export class PgBazisRepository implements BazisRepositoryPort {
         materialName: sheet.reference_name,
         thicknessMm,
         detailNumber: index + 1,
-        orderName: labels.sourceBazisOrderNo || labels.sourceBazisProjectName,
-        ordinaryErpOrder: false,
+        importedFromBazisProject: true,
         bazisProject: labels.sourceBazisProjectName,
-        basisProduct: detail.basisProduct,
+        bazisOrder: labels.sourceBazisOrderNo,
+        bazisNodeDesignation: panel.designation,
         basisDesignation: detail.basisDesignation,
         basisData: detail.basisData,
         detailName: detail.detailName,
@@ -2635,6 +2690,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
     clientName: string | null;
     designEngineerId: number | null;
     designEngineerName: string | null;
+    rootProductCount: number;
   } | null> {
     const result = await this.database.query<RevisionProjectRow>(
       `
@@ -2646,7 +2702,14 @@ export class PgBazisRepository implements BazisRepositoryPort {
              p.client_id AS project_client_id,
              c.client_name,
              bp.design_engineer_id,
-             employee.full_name AS design_engineer_name
+             employee.full_name AS design_engineer_name,
+             (
+               SELECT COUNT(*)::int
+               FROM bazis_nodes root_product
+               WHERE root_product.revision_id = r.bazis_revision_id
+                 AND root_product.parent_node_id IS NULL
+                 AND root_product.node_kind = 'product'
+             ) AS root_product_count
       FROM bazis_project_revisions r
       JOIN bazis_projects bp ON bp.bazis_project_id = r.bazis_project_id
       LEFT JOIN projects p ON p.project_id = bp.project_id
@@ -2673,6 +2736,7 @@ export class PgBazisRepository implements BazisRepositoryPort {
       clientName: row.client_name,
       designEngineerId: nullableNumber(row.design_engineer_id),
       designEngineerName: row.design_engineer_name,
+      rootProductCount: Number(row.root_product_count ?? 0),
     };
   }
 
@@ -2948,20 +3012,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
       }
     }
     return lookup;
-  }
-
-  private async loadRootProductCount(revisionId: number): Promise<number> {
-    const result = await this.database.query<{ root_product_count: number | string }>(
-      `
-      SELECT COUNT(*)::int AS root_product_count
-      FROM bazis_nodes
-      WHERE revision_id = $1
-        AND parent_node_id IS NULL
-        AND node_kind = 'product'
-      `,
-      [revisionId],
-    );
-    return Number(result.rows[0]?.root_product_count ?? 0);
   }
 
   private async loadCutExportReferences(
@@ -3449,7 +3499,11 @@ function isForeignKeyViolation(error: unknown): boolean {
 
 function buildAddToOrderSaveDto(input: {
   order: OrderDto;
-  revision: { bazisProjectName: string; revisionBazisOrderNo: string | null };
+  revision: {
+    bazisProjectName: string;
+    revisionBazisOrderNo: string | null;
+    rootProductCount: number;
+  };
   command: AddToOrderCommand;
   panelsByNodeId: ReadonlyMap<
     number,
@@ -3568,7 +3622,12 @@ function buildAddToOrderSaveDto(input: {
 
 function buildOrderCreateDto(
   command: CreateOrderFromRevisionCommand,
-  revision: { projectId: number; bazisProjectName: string; revisionBazisOrderNo: string | null },
+  revision: {
+    projectId: number;
+    bazisProjectName: string;
+    revisionBazisOrderNo: string | null;
+    rootProductCount: number;
+  },
   panels: ReadonlyArray<{
     bazisNodeId: number;
     name: string | null;
@@ -3621,13 +3680,26 @@ function buildOrderCreateDto(
   };
 }
 
-function sanitizeDraftOrder(order: SaveOrderDto, projectId: number): SaveOrderDto {
+function sanitizeDraftOrder(
+  order: SaveOrderDto,
+  projectId: number,
+  basisProductMapping: {
+    rootProductCount: number;
+    panelClientKeys: ReadonlySet<string>;
+  },
+): SaveOrderDto {
   return {
     ...order,
     header: {
       ...order.header,
       projectId,
     },
+    details: order.details.map((detail) =>
+      basisProductMapping.rootProductCount <= 1
+        && typeof detail.clientKey === 'string'
+        && basisProductMapping.panelClientKeys.has(detail.clientKey)
+        ? { ...detail, basisProduct: null }
+        : detail),
     idempotencyKey: undefined,
   };
 }
@@ -3783,15 +3855,38 @@ async function detectAddToOrderConflicts(input: {
   replaces: ReadonlyArray<{ bazisNodeId: number; orderDetailId: number }>;
   skips: ReadonlyArray<{ bazisNodeId: number; orderDetailId: number }>;
 }): Promise<Record<string, unknown> | null> {
+  const selectedNodeIds = uniqueNumbers([
+    ...input.adds,
+    ...input.replaces.map((pair) => pair.bazisNodeId),
+    ...input.skips.map((pair) => pair.bazisNodeId),
+  ]);
   const freshPairs = await computeTargetOrderDuplicates(input.db, {
     bazisProjectId: input.bazisProjectId,
     orderId: input.orderId,
-    nodeIds: uniqueNumbers([
-      ...input.adds,
-      ...input.replaces.map((pair) => pair.bazisNodeId),
-      ...input.skips.map((pair) => pair.bazisNodeId),
-    ]),
+    nodeIds: selectedNodeIds,
   });
+  const protectedImportedResult = await input.db.query<{
+    node_id: string | number;
+    order_detail_id: string | number | null;
+  }>(
+    `
+    SELECT node_id, order_detail_id
+    FROM bazis_node_order_detail_map
+    WHERE order_id = $1
+      AND mapping_kind = 'imported'
+      AND (
+        node_id = ANY($2::bigint[])
+        OR order_detail_id = ANY($3::bigint[])
+      )
+    ORDER BY node_id, order_detail_id NULLS LAST
+    FOR KEY SHARE
+    `,
+    [input.orderId, selectedNodeIds, input.replaces.map((pair) => pair.orderDetailId)],
+  );
+  const protectedImportedMappings = protectedImportedResult.rows.map((row) => ({
+    bazisNodeId: Number(row.node_id),
+    orderDetailId: row.order_detail_id === null ? null : Number(row.order_detail_id),
+  }));
   const actualPairKeys = new Set(freshPairs.map(pairKey));
   const expectedPairs = [...input.replaces, ...input.skips];
   const expectedPairKeys = new Set(expectedPairs.map(pairKey));
@@ -3819,7 +3914,8 @@ async function detectAddToOrderConflicts(input: {
     missingPairs.length === 0 &&
     unexpectedPairs.length === 0 &&
     addNodeIdsWithDuplicates.length === 0 &&
-    ambiguousPairs.length === 0
+    ambiguousPairs.length === 0 &&
+    protectedImportedMappings.length === 0
   ) {
     return null;
   }
@@ -3829,6 +3925,7 @@ async function detectAddToOrderConflicts(input: {
     unexpectedPairs,
     addNodeIdsWithDuplicates,
     ambiguousPairs,
+    protectedImportedMappings,
     freshPairs,
   };
 }
@@ -3837,7 +3934,7 @@ async function upsertBazisNodeOrderDetailMap(
   tx: TransactionClient,
   input: { bazisNodeId: number; orderDetailId: number; orderId: number },
 ): Promise<void> {
-  await tx.query(
+  const result = await tx.query(
     `
     INSERT INTO bazis_node_order_detail_map (node_id, order_detail_id, order_id, mapping_kind)
     VALUES ($1, $2, $3, 'created')
@@ -3845,9 +3942,18 @@ async function upsertBazisNodeOrderDetailMap(
     DO UPDATE
     SET order_detail_id = EXCLUDED.order_detail_id,
         mapping_kind = 'created'
+    WHERE bazis_node_order_detail_map.mapping_kind <> 'imported'
+    RETURNING node_id
     `,
     [input.bazisNodeId, input.orderDetailId, input.orderId],
   );
+  if (result.rows.length === 0) {
+    throw new BazisAddToOrderConflictError({
+      protectedImportedMappings: [
+        { bazisNodeId: input.bazisNodeId, orderDetailId: input.orderDetailId },
+      ],
+    });
+  }
 }
 
 function validationErrorForField(field: string, message: string): ApiError {

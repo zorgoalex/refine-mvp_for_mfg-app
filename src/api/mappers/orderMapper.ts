@@ -65,6 +65,10 @@ const FRONTEND_ONLY_FIELDS = new Set([
 export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDto {
   const header = values.header;
   const version = optionalNonNegativeInteger(values.version ?? header.version);
+  const details = normalizeDetails(values.details ?? []);
+  const candidateClientKeys = new Set(
+    (values.pdfImportCandidateTempIds ?? []).map((tempId) => toClientKey(tempId)),
+  );
   const dto: SaveOrderDto = {
     header: {
       orderName: requiredString(header.order_name, 'header.order_name'),
@@ -107,7 +111,15 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       notes: normalizeOptionalString(header.notes),
       refKey1c: normalizeOptionalString(header.ref_key_1c),
     },
-    details: normalizeDetails(values.details ?? []),
+    details,
+    bazisImportCandidateClientKeys: details
+      .filter(
+        (detail) =>
+          detail.id === undefined &&
+          detail.clientKey !== undefined &&
+          candidateClientKeys.has(detail.clientKey),
+      )
+      .map((detail) => detail.clientKey as string),
     payments: normalizePayments(values.payments ?? []),
     workshops: normalizeWorkshops(values.workshops ?? []),
     requirements: normalizeRequirements(values.requirements ?? []),
@@ -270,6 +282,9 @@ export function mapOrderListItemToLegacyRow(item: OrderListItemDto): LegacyOrder
         ? (item.materialNames ?? []).join(', ')
         : (item.headerMaterialName ?? null),
     basis_projects: item.basisProjects ?? [],
+    bazis_cut_numbers: item.bazisCutNumbers ?? [],
+    cut_numbers: item.cutNumbers ?? [],
+    bath_cut_numbers: item.bathCutNumbers ?? [],
     film_names: item.filmNames ?? [],
     film_name: (item.filmNames ?? []).length > 0 ? (item.filmNames ?? []).join(', ') : null,
     milling_type_id: item.millingTypeId ?? null,
@@ -519,6 +534,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     production_status_id: detail.productionStatusId ?? null,
     joint_order_id: detail.jointOrderId ?? null,
     basis_project: detail.basisProject ?? null,
+    bazis_project_id: detail.bazisProjectId ?? null,
     basis_product: detail.basisProduct ?? null,
     basis_data: detail.basisData ?? null,
     basis_designation: detail.basisDesignation ?? null,
@@ -531,6 +547,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     cut_job: detail.cutJob ?? null,
     bath_cut_job: detail.bathCutJob ?? null,
     bazis_cut_sets: detail.bazisCutSets ?? [],
+    bazis_projects: detail.bazisProjects ?? [],
   }));
 }
 

@@ -11,7 +11,8 @@ import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
 import { MinimizedModalChip } from '../../components/MinimizedModalChip';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
-import { createBackendSelectProps, useOrderFormData, type ReferenceOption } from '../../hooks/useOrderFormData';
+import { resolveDefaultNewOrderStatusId } from '../../domain/orderStatusDefaults';
+import { createBackendSelectProps, useOrderFormData } from '../../hooks/useOrderFormData';
 import { RevisionTree } from './RevisionTree';
 
 const { Text } = Typography;
@@ -77,7 +78,7 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
 
   const fallbackOrderStatus = useBackendReferences
     ? orderFormData.references.defaultOrderStatus
-    : firstNumericOptionValue(orderStatusSelectProps.options);
+    : resolveDefaultNewOrderStatusId(orderStatusSelectProps.options);
 
   useEffect(() => {
     if (!isTabActive && open && !minimized) {
@@ -107,6 +108,16 @@ export const CreateOrderModal: React.FC<CreateOrderModalProps> = ({
     orderFormData.references.defaultOrderStatus,
     selectedNodeIds,
   ]);
+
+  useEffect(() => {
+    if (
+      open
+      && fallbackOrderStatus != null
+      && form.getFieldValue('orderStatusId') == null
+    ) {
+      form.setFieldValue('orderStatusId', fallbackOrderStatus);
+    }
+  }, [fallbackOrderStatus, form, open]);
 
   const referenceErrorText = useMemo(() => {
     if (useBackendReferences && orderFormData.error) {
@@ -382,10 +393,6 @@ function buildNextOrderName(items: OrderListItemDto[]): string | null {
   }
 
   return String(Math.max(...numbers) + 1);
-}
-
-function firstNumericOptionValue(options: ReferenceOption[] | undefined): number | undefined {
-  return options?.find((option) => typeof option.value === 'number')?.value;
 }
 
 function createUuid(): string {

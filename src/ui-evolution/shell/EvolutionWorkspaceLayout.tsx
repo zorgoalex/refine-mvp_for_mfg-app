@@ -4,7 +4,12 @@ import { useLocation } from 'react-router-dom';
 import { AppFooter } from '../../components/AppFooter';
 import { GlobalTableTopScrollbars } from '../../components/GlobalTableTopScrollbars';
 import { KeepAliveOutlet } from '../../components/workspace/KeepAliveOutlet';
-import { useIsMobile } from '../../hooks/useDeviceTier';
+import {
+  isTabletTier,
+  SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY,
+  useDeviceTier,
+} from '../../hooks/useDeviceTier';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useTabSync } from '../../hooks/useTabSync';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { useUiVariant } from '../../ui-variant/UiVariantProvider';
@@ -12,9 +17,13 @@ import { EvolutionAirNavigation } from './EvolutionAirNavigation';
 import { EvolutionHeader } from './EvolutionHeader';
 import { EvolutionMobileNavigation } from './EvolutionMobileNavigation';
 import { EvolutionSider } from './EvolutionSider';
+import { EvolutionTabletNavigation } from './EvolutionTabletNavigation';
 import { EvolutionWorkspaceTabs } from './EvolutionWorkspaceTabs';
+import { nextTabletHeaderCompactState } from './tabletHeaderScroll';
+import { resolveModernRouteFamily, resolveOperationalPageKind } from './tabletRouteFamily';
 import '../styles/evolution.css';
 import '../../ui-operational/operational.css';
+import '../styles/tablet.css';
 
 const SIDEBAR_STORAGE_KEY = 'erp.ui.evolution.sidebar.collapsed';
 
@@ -49,59 +58,88 @@ const getInitialCollapsed = (): boolean => {
   }
 };
 
-function resolveModernRouteFamily(pathname: string): string {
-  if (pathname.startsWith('/calendar')) return 'calendar';
-  if (pathname.startsWith('/orders/show')) return 'order-detail';
-  if (pathname.startsWith('/orders/edit')) return 'order-edit';
-  if (pathname.startsWith('/orders/create')) return 'order-edit';
-  if (pathname.startsWith('/orders')) return 'orders';
-  if (pathname.startsWith('/cut-jobs') || pathname.startsWith('/cut')) return 'cut';
-  if (pathname.startsWith('/bazis-cut')) return 'bazis-cut';
-  if (pathname.startsWith('/bazis')) return 'bazis';
-  if (
-    pathname.startsWith('/order-status-board')
-    || pathname.startsWith('/mdf-work-board')
-  ) return 'status-board';
-  if (pathname.startsWith('/configuration')) return 'configuration';
-  if (pathname.startsWith('/profile')) return 'profile';
-  if (pathname.startsWith('/scan')) return 'scan';
-  return 'crud';
-}
-
-function resolveOperationalPageKind(pathname: string): 'list' | 'show' | 'form' | 'workspace' {
-  if (
-    pathname.startsWith('/orders/create') ||
-    pathname.startsWith('/orders/edit') ||
-    pathname.startsWith('/configuration') ||
-    pathname.startsWith('/profile') ||
-    pathname.startsWith('/scan') ||
-    pathname.startsWith('/groups')
-  ) return 'workspace';
-  if (/\/(?:show\/|projects\/|bazis-cut\/\d+)/.test(pathname)) return 'show';
-  if (/\/(?:create|edit\/)/.test(pathname)) return 'form';
-  if (
-    pathname.startsWith('/calendar') ||
-    pathname.startsWith('/cut') ||
-    pathname.startsWith('/order-status-board') ||
-    pathname.startsWith('/mdf-work-board')
-  ) return 'workspace';
-  return 'list';
-}
-
 export const EvolutionWorkspaceLayout: React.FC = () => {
-  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = React.useState(false);
+  const [isNavigationOpen, setIsNavigationOpen] = React.useState(false);
+  const [tabletHeaderCompact, setTabletHeaderCompact] = React.useState(false);
+  const tabletHeaderScrollTargetRef = React.useRef<HTMLElement | null>(null);
   const [collapsed, setCollapsed] = React.useState(getInitialCollapsed);
-  const isMobile = useIsMobile();
+  const deviceTier = useDeviceTier();
+  const shortTabletLandscape = useMediaQuery(SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY);
+  const isMobile = deviceTier === 'phone';
+  const isTablet = isTabletTier(deviceTier);
+  const isTabletLandscape = deviceTier === 'tablet-landscape';
+  const isTabletPortrait = deviceTier === 'tablet';
   const { variant } = useUiVariant();
   const location = useLocation();
   const routeFamily = resolveModernRouteFamily(location.pathname);
   const pageKind = resolveOperationalPageKind(location.pathname);
+  const forceTabletCompactHeader = isTablet && (
+    routeFamily === 'status-board' ||
+    routeFamily === 'calendar' ||
+    shortTabletLandscape
+  );
+  const tabletHeaderIsCompact = isTablet && (
+    forceTabletCompactHeader || tabletHeaderCompact
+  );
   const isOperational = variant === 'line' || variant === 'air';
-  const isAirDesktop = variant === 'air' && !isMobile;
+  const isAirDesktop = variant === 'air' && !isMobile && !isTablet;
   const effectiveCollapsed = isOperational ? false : collapsed;
 
   useTabSync();
   useGlobalUnloadGuard();
+
+  React.useEffect(() => {
+    tabletHeaderScrollTargetRef.current = null;
+    setTabletHeaderCompact(false);
+  }, [location.pathname, location.search, deviceTier]);
+
+  React.useEffect(() => {
+    if (!isTablet || forceTabletCompactHeader) return undefined;
+    const handleWindowScroll = () => {
+      const target = document.documentElement;
+      setTabletHeaderCompact((current) => {
+        if (current && tabletHeaderScrollTargetRef.current !== null && tabletHeaderScrollTargetRef.current !== target) {
+          return current;
+        }
+        const next = nextTabletHeaderCompactState(current, {
+          scrollTop: window.scrollY,
+          scrollHeight: target.scrollHeight,
+          clientHeight: window.innerHeight,
+        });
+        if (!current && next) tabletHeaderScrollTargetRef.current = target;
+        if (current && !next) tabletHeaderScrollTargetRef.current = null;
+        return next;
+      });
+    };
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleWindowScroll);
+  }, [forceTabletCompactHeader, isTablet]);
+
+  const handleTabletScrollCapture: React.UIEventHandler<HTMLElement> = (event) => {
+    if (!isTablet || forceTabletCompactHeader || !(event.target instanceof HTMLElement)) return;
+    const target = event.target;
+    const horizontalOnly = target.matches([
+      '.app-table-top-scrollbar',
+      '.ant-table-content',
+      '.status-board-scrollbar',
+      '.status-board-viewport',
+    ].join(','));
+    if (horizontalOnly) return;
+    setTabletHeaderCompact((current) => {
+      const owner = tabletHeaderScrollTargetRef.current;
+      if (current && owner !== null && owner !== target && owner.isConnected) {
+        return current;
+      }
+      const next = nextTabletHeaderCompactState(current, {
+        scrollTop: target.scrollTop,
+        scrollHeight: target.scrollHeight,
+        clientHeight: target.clientHeight,
+      });
+      if (!current && next) tabletHeaderScrollTargetRef.current = target;
+      if (current && !next) tabletHeaderScrollTargetRef.current = null;
+      return next;
+    });
+  };
 
   const handleCollapse = (next: boolean) => {
     setCollapsed(next);
@@ -118,12 +156,19 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
     isOperational ? 'evolution-shell--operational' : '',
     effectiveCollapsed && !isAirDesktop ? 'evolution-shell--collapsed' : '',
     isAirDesktop ? 'evolution-shell--air-desktop' : '',
+    isTablet ? 'evolution-shell--tablet' : '',
   ].filter(Boolean).join(' ');
 
   return (
-    <Layout className={shellClassName}>
+    <Layout
+      className={shellClassName}
+      data-device-tier={deviceTier}
+      data-tablet-header-compact={tabletHeaderIsCompact ? 'true' : 'false'}
+    >
       <a className="evolution-skip-link" href="#evolution-main-content">Перейти к содержимому</a>
-      {!isMobile ? (
+      {isTabletLandscape ? (
+        <EvolutionTabletNavigation onOpenDrawer={() => setIsNavigationOpen(true)} />
+      ) : !isMobile && !isTabletPortrait ? (
         isAirDesktop ? (
           <EvolutionAirNavigation />
         ) : (
@@ -135,10 +180,11 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         )
       ) : null}
       <Layout className="evolution-shell__main">
-        {!isAirDesktop ? (
+        {!isAirDesktop && !isTabletLandscape ? (
           <EvolutionHeader
-            onOpenSider={isMobile ? () => setIsMobileNavigationOpen(true) : undefined}
+            onOpenSider={isMobile || isTabletPortrait ? () => setIsNavigationOpen(true) : undefined}
             operational={isOperational}
+            tablet={isTabletPortrait}
           />
         ) : null}
         {!isOperational ? <EvolutionWorkspaceTabs /> : null}
@@ -146,7 +192,9 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
           className="evolution-shell__content"
           data-modern-route={routeFamily}
           data-operational-page-kind={pageKind}
+          data-tablet-header-compact={tabletHeaderIsCompact ? 'true' : 'false'}
           id="evolution-main-content"
+          onScrollCapture={handleTabletScrollCapture}
           tabIndex={-1}
         >
           <GlobalTableTopScrollbars />
@@ -158,10 +206,11 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         </Layout.Content>
         <AppFooter />
       </Layout>
-      {isMobile ? (
+      {isMobile || isTablet ? (
         <EvolutionMobileNavigation
-          onClose={() => setIsMobileNavigationOpen(false)}
-          open={isMobileNavigationOpen}
+          onClose={() => setIsNavigationOpen(false)}
+          open={isNavigationOpen}
+          tablet={isTablet}
         />
       ) : null}
     </Layout>
