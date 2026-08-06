@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateExpression, validateExportColumns } from './export-expression';
-import type { BazisExportDetail, ExportExpression } from './export-template.types';
+import { evaluateExportRow, evaluateExpression, validateExportColumns } from './export-expression';
+import type { BazisExportDetail, ExportExpression, ExportTemplateColumn } from './export-template.types';
 
 const detail: BazisExportDetail = {
   cutEnabled: true, materialType: 'Площадной', materialName: 'ЛДСП', materialArticle: 'A-1', thicknessMm: 16,
@@ -44,6 +44,33 @@ describe('export expression', () => {
       sourceBazisProjectName: '',
       sourceBazisOrderNo: '',
     }, context)).toBe('ERP-1491Шкаф..07');
+  });
+
+  it('evaluates forward references to computed columns in the same export row', () => {
+    const columns: ExportTemplateColumn[] = [
+      { columnKey: 'qr', header: 'QR-code', expression: { type: 'concat', parts: [
+        { type: 'column_ref', columnKey: 'order' }, { type: 'field', field: 'detail.position' },
+      ] } },
+      { columnKey: 'order', header: 'Заказ', expression: { type: 'concat', parts: [
+        { type: 'field', field: 'legacy.order' }, { type: 'constant', value: '-A' },
+      ] } },
+    ];
+
+    expect(validateExportColumns(columns)).toEqual([3, 3]);
+    expect(evaluateExportRow(columns, detail, context)).toEqual(['42-A.07', '42-A']);
+  });
+
+  it('rejects missing, self and indirect column dependencies', () => {
+    const column = (columnKey: string, referencedKey: string): ExportTemplateColumn => ({
+      columnKey, header: columnKey, expression: { type: 'column_ref', columnKey: referencedKey },
+    });
+
+    expect(() => validateExportColumns([column('qr', 'missing')])).toThrow('Export template validation failed');
+    expect(() => validateExportColumns([column('qr', 'qr')])).toThrow('Export template validation failed');
+    expect(() => validateExportColumns([column('order', 'qr'), column('qr', 'order')]))
+      .toThrow('Export template validation failed');
+    expect(() => evaluateExpression({ type: 'column_ref', columnKey: 'order' }, detail, context))
+      .toThrow('Column reference requires row evaluation context');
   });
 
   it('rejects locale decimals, divide-by-zero and unknown fields', () => {

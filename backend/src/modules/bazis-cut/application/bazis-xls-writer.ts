@@ -2,7 +2,7 @@ import * as XLSX from 'xlsx';
 import { ApiError } from '../../../common/errors/api-error';
 import type { BazisCutDetailFields } from '../dto/bazis-cut.dto';
 import {
-  evaluateExpression,
+  evaluateExportRow,
   EXPORT_LIMITS,
   validateExportColumns,
 } from '../../export-templates/application/export-expression';
@@ -97,34 +97,25 @@ export function buildBazisCutXlsFromTemplate(
   const rows: unknown[][] = [template.columns.map((column) => column.header)];
   details.forEach((detail, detailIndex) => {
     const context = { rowNumber: detailIndex + 1, exportedAt, templateName: template.name };
-    const row = template.columns.map((column, columnIndex) => {
-      visitedCells += 1;
-      if (visitedCells % 256 === 0 && Date.now() - startedAt > EXPORT_LIMITS.maxElapsedMs) {
-        throw budgetError({ elapsedMs: Date.now() - startedAt });
+    let row: unknown[];
+    try {
+      row = evaluateExportRow(template.columns, detail, context);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw new ApiError(error.statusCode, error.code, error.message, {
+          ...(error.details ?? {}), rowNumber: detailIndex + 1,
+        });
       }
-      try {
-        const value = evaluateExpression(
-          column.expression,
-          detail,
-          context,
-          `columns.${columnIndex}.expression`,
-        );
-        if (typeof value === 'string') {
-          stringChars += value.length;
-          if (stringChars > EXPORT_LIMITS.maxStringChars) throw budgetError({ stringChars });
-        }
-        return value;
-      } catch (error) {
-        if (error instanceof ApiError) {
-          throw new ApiError(error.statusCode, error.code, error.message, {
-            ...(error.details ?? {}),
-            rowNumber: detailIndex + 1,
-            columnKey: column.columnKey,
-            columnHeader: column.header,
-          });
-        }
-        throw error;
-      }
+      throw error;
+    }
+    visitedCells += row.length;
+    if (visitedCells >= 256 && Date.now() - startedAt > EXPORT_LIMITS.maxElapsedMs) {
+      throw budgetError({ elapsedMs: Date.now() - startedAt });
+    }
+    row.forEach((value) => {
+      if (typeof value !== 'string') return;
+      stringChars += value.length;
+      if (stringChars > EXPORT_LIMITS.maxStringChars) throw budgetError({ stringChars });
     });
     rows.push(row);
   });

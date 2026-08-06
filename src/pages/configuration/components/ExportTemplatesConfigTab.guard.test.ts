@@ -14,6 +14,8 @@ describe('export templates editor layout', () => {
     expect(component).toContain('className="export-template-columns"');
     expect(component).toContain('className="export-template-column-row"');
     expect(component).toContain('className="export-template-column-index"');
+    expect(component).toContain('columns={draft.columns} currentColumnKey={column.columnKey}');
+    expect(component).toContain('removeColumn(index, draft, setDraft)');
     expect(styles).toContain('--export-template-row-control-height: 28px');
     expect(styles).toContain('row-gap: 2px');
     expect(styles).toMatch(/\.export-template-column-row\s*\{[\s\S]*flex-wrap: wrap/);

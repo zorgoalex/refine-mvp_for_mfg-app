@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import { BAZIS_CUT_HEADERS, BAZIS_CUT_SHEET_NAME, LEGACY_BAZIS_CUT_COLUMNS, buildBazisCutXls, buildBazisCutXlsFromTemplate } from './bazis-xls-writer';
 import type { BazisCutSetDetailDto } from '../dto/bazis-cut.dto';
-import type { ExportTemplateSnapshot } from '../../export-templates/application/export-template.types';
+import type { ExportTemplateColumn, ExportTemplateSnapshot } from '../../export-templates/application/export-template.types';
 
 describe('buildBazisCutXls', () => {
   it('writes a real BIFF8 workbook with exact columns and typed cells', () => {
@@ -78,6 +78,22 @@ describe('buildBazisCutXls', () => {
     expect(row[5]).toBe('BP-100');
     expect(row[7]).toBe('01');
     expect(row[8]).toBe('BP-7Кухня.01');
+  });
+
+  it('writes formulas that reference another computed column in the same row', () => {
+    const columns: ExportTemplateColumn[] = [
+      { columnKey: 'qr', header: 'QR-code', expression: { type: 'concat', parts: [
+        { type: 'column_ref', columnKey: 'order' }, { type: 'constant', value: ':' },
+        { type: 'field', field: 'detail.position' },
+      ] } },
+      { columnKey: 'order', header: 'Заказ', expression: { type: 'concat', parts: [
+        { type: 'field', field: 'legacy.order' }, { type: 'constant', value: '-CUSTOM' },
+      ] } },
+    ];
+    const workbook = XLSX.read(buildBazisCutXlsFromTemplate([detail()], template(columns)), { type: 'buffer' });
+    const row = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[BAZIS_CUT_SHEET_NAME], { header: 1, raw: true })[1];
+
+    expect(row).toEqual(['BZ-100-CUSTOM:01.00.01', 'BZ-100-CUSTOM']);
   });
 
   it('rejects a custom template above the total cell budget before rendering', () => {

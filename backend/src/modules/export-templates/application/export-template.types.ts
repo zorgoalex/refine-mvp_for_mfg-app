@@ -29,6 +29,7 @@ export interface ExportCondition {
 
 export type ExportExpression =
   | { type: 'field'; field: string }
+  | { type: 'column_ref'; columnKey: string }
   | { type: 'constant'; value: ExportScalar }
   | { type: 'empty' }
   | { type: 'concat'; parts: ExportExpression[] }

@@ -12,7 +12,7 @@ import {
   type CreateExportTemplateInput,
   type UpdateExportTemplateInput,
 } from '../dto/export-template.dto';
-import { EXPORT_LIMITS, evaluateExpression, validateExportColumns } from './export-expression';
+import { EXPORT_LIMITS, evaluateExportRow, validateExportColumns } from './export-expression';
 import { EXPORT_FIELD_CATALOG } from './export-template-fields';
 import {
   EXPORT_TEMPLATE_SCHEMA_VERSION,
@@ -149,8 +149,9 @@ export class ExportTemplatesService {
     validateExportColumns(input.columns);
     const sample = sampleDetail(input.targetScreen);
     const context = { rowNumber: 1, exportedAt: new Date('2026-08-05T12:34:56.000Z'), templateName: 'Предпросмотр' };
-    return input.columns.map((column) => {
-      const value = evaluateExpression(column.expression, sample, context);
+    const values = evaluateExportRow(input.columns, sample, context);
+    return input.columns.map((column, index) => {
+      const value = values[index];
       return { columnKey: column.columnKey, header: column.header, value, valueType: value === null ? 'blank' : typeof value };
     });
   }

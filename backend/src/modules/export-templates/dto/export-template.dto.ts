@@ -8,12 +8,15 @@ import {
 } from '../application/export-template.types';
 
 const scalarSchema = z.union([z.string().max(10_000), z.number().finite(), z.boolean(), z.null()]);
+const columnKeySchema = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/);
 const fieldSchema = z.object({ type: z.literal('field'), field: z.string().trim().min(1).max(200) }).strict();
+const columnRefSchema = z.object({ type: z.literal('column_ref'), columnKey: columnKeySchema }).strict();
 const constantSchema = z.object({ type: z.literal('constant'), value: scalarSchema }).strict();
 const emptySchema = z.object({ type: z.literal('empty') }).strict();
 
 export const exportExpressionSchema: z.ZodType<ExportExpression> = z.lazy(() => z.discriminatedUnion('type', [
   fieldSchema,
+  columnRefSchema,
   constantSchema,
   emptySchema,
   z.object({
@@ -49,7 +52,7 @@ export const exportExpressionSchema: z.ZodType<ExportExpression> = z.lazy(() => 
 ])) as z.ZodType<ExportExpression>;
 
 export const exportTemplateColumnSchema = z.object({
-  columnKey: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/),
+  columnKey: columnKeySchema,
   header: z.string().trim().min(1).max(200),
   expression: exportExpressionSchema,
 }).strict();

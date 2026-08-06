@@ -12243,9 +12243,9 @@ components:
     ExportExpression:
       type: object
       required: [type]
-      description: Strict recursive AST; accepted nodes are field, constant, empty, concat, if_else, string_fn, number_fn and math. Arbitrary code is never evaluated.
+      description: Strict recursive AST; accepted nodes are field, column_ref, constant, empty, concat, if_else, string_fn, number_fn and math. column_ref addresses another output column by stable columnKey; dependency cycles are rejected. Arbitrary code is never evaluated.
       properties:
-        type: { type: string, enum: [field, constant, empty, concat, if_else, string_fn, number_fn, math] }
+        type: { type: string, enum: [field, column_ref, constant, empty, concat, if_else, string_fn, number_fn, math] }
       additionalProperties: true
     ExportTemplateColumn:
       type: object
