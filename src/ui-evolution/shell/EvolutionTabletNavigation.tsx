@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons';
 import { OrderCreateModal } from '../../pages/orders/components/OrderCreateModal';
 import { useEvolutionNavigation } from './useEvolutionNavigation';
+import { EvolutionTabletUtilities } from './EvolutionTabletUtilities';
 
 interface EvolutionTabletNavigationProps {
   onOpenDrawer: () => void;
@@ -97,6 +98,7 @@ export const EvolutionTabletNavigation: React.FC<EvolutionTabletNavigationProps>
               />
             </Tooltip>
           ) : null}
+          <EvolutionTabletUtilities presentation="rail" />
         </div>
       </Layout.Sider>
       <OrderCreateModal open={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />

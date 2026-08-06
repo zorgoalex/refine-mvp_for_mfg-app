@@ -461,6 +461,7 @@ export async function setupWorkflowMockApi(
                     'clients.update',
                     'production.actions',
                     'settings.view',
+                    'labels.view',
                     'sheet_materials.view',
                     'sheet_materials.manage',
                 ],
@@ -506,6 +507,7 @@ export async function setupWorkflowMockApi(
                         'clients.update',
                         'production.actions',
                         'settings.view',
+                        'labels.view',
                         // Variant B: admin has sheet_materials.view so the sheet picker renders.
                         'sheet_materials.view',
                         'sheet_materials.manage',
@@ -540,6 +542,7 @@ export async function setupWorkflowMockApi(
                         'clients.update',
                         'production.actions',
                         'settings.view',
+                        'labels.view',
                         // Variant B: admin has sheet_materials.view so the sheet picker renders.
                         'sheet_materials.view',
                         'sheet_materials.manage',

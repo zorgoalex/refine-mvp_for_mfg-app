@@ -1,9 +1,9 @@
 /* Evolutionary tablet shell. Activation is runtime device-tier driven, never width-only. */
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet {
   --tablet-rail-width: 68px;
-  --tablet-shell-header: 56px;
+  --tablet-shell-header: 48px;
   --tablet-shell-tabs: 44px;
-  --tablet-sticky-row: 52px;
+  --tablet-sticky-row: 44px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   height: 100dvh;
@@ -46,6 +46,10 @@
   min-height: 44px;
 }
 
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-header__actions:empty {
+  display: none;
+}
+
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-workspace-tabs.workspace-tabs {
   position: relative;
   top: auto;
@@ -66,13 +70,30 @@
   padding: 6px 10px !important;
 }
 
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet[data-tablet-header-compact="true"] .evolution-workspace-tabs.workspace-tabs {
+  height: 0;
+  min-height: 0;
+  flex-basis: 0;
+  padding-block: 0;
+  overflow: hidden;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet[data-device-tier="tablet"][data-tablet-header-compact="true"] .evolution-header.ant-layout-header {
+  height: var(--tablet-sticky-row);
+  min-height: var(--tablet-sticky-row);
+  flex-basis: var(--tablet-sticky-row);
+}
+
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content.ant-layout-content {
   width: 100%;
   height: auto;
   min-height: 0;
   flex: 1 1 auto;
   margin: 0 !important;
-  padding: 12px 14px;
+  padding: 8px 12px;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -100,6 +121,12 @@
   overflow: hidden;
   background: var(--evo-sidebar) !important;
   box-shadow: 2px 0 10px rgba(9, 35, 42, 0.1);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-tablet-rail .ant-layout-sider-children {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .evolution-tablet-rail__brand {
@@ -134,10 +161,14 @@
 
 .evolution-tablet-rail__nav {
   display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-content: start;
   justify-items: center;
   gap: 4px;
-  padding: 10px 7px 72px;
+  padding: 10px 7px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .evolution-tablet-rail__button.ant-btn,
@@ -174,18 +205,95 @@
 }
 
 .evolution-tablet-rail__bottom {
-  position: absolute;
-  right: 0;
-  bottom: 12px;
-  left: 0;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 7px 10px;
 }
 
 .evolution-tablet-rail__create.ant-btn {
   background: var(--evo-primary);
   color: #fff;
   box-shadow: var(--evo-button-shadow);
+}
+
+.evolution-tablet-utilities--rail {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  width: 52px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--evo-sidebar-border);
+}
+
+.evolution-tablet-utility.ant-btn {
+  display: inline-flex;
+  width: 52px;
+  min-width: 52px;
+  height: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  color: var(--evo-sidebar-text);
+  font-size: 19px;
+  transition-property: color, background-color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.evolution-tablet-utility.ant-btn:hover,
+.evolution-tablet-utility.ant-btn:focus-visible {
+  background: var(--evo-sidebar-hover);
+  color: var(--evo-sidebar-hover-text);
+}
+
+.evolution-tablet-utility.ant-btn:active {
+  transform: scale(0.96);
+}
+
+.evolution-tablet-utility--avatar.ant-btn .ant-avatar {
+  background: var(--evo-primary);
+  color: #fff;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-mobile-navigation .ant-drawer-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.evolution-mobile-navigation__menu {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.evolution-tablet-utilities--drawer {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--evo-border);
+}
+
+.evolution-tablet-utilities--drawer .evolution-tablet-utility.ant-btn {
+  width: 44px;
+  min-width: 44px;
+  color: var(--evo-text);
+}
+
+.evolution-tablet-utilities--drawer .evolution-tablet-utility.ant-btn:hover,
+.evolution-tablet-utilities--drawer .evolution-tablet-utility.ant-btn:focus-visible {
+  background: var(--evo-surface-muted);
+  color: var(--evo-text);
 }
 
 /* Touch targets: visual icons stay compact, hit areas stay at least 44px. */
@@ -241,23 +349,29 @@
 }
 
 /* Compact, sticky page heading. Content remains in normal flow; no row is covered. */
-:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-breadcrumb {
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet :where(
+  .ant-page-header-breadcrumb,
+  .evolution-screen-frame .ant-breadcrumb
+) {
   display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header {
+  padding: 0 !important;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-heading,
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .operational-page-head,
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-page-header {
-  position: sticky;
-  top: 0;
-  z-index: 22;
-  min-height: 56px;
+  position: relative;
+  min-height: 48px;
+  height: 48px;
   align-items: center;
   margin: 0;
-  padding: 4px 0 8px;
+  padding: 0;
   border-bottom: 1px solid transparent;
-  background: color-mix(in srgb, var(--evo-canvas) 96%, transparent);
-  backdrop-filter: blur(10px);
+  background: var(--evo-canvas);
+  transition: height 160ms ease-out, min-height 160ms ease-out, box-shadow 160ms ease-out;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-heading-left {
@@ -268,7 +382,7 @@
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .operational-page-head h1.ant-typography,
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-page-header h1.ant-typography {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 780;
   line-height: 1.2;
 }
@@ -294,7 +408,7 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-page-header-content {
-  padding-top: 6px;
+  padding-top: 0;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .operational-breadcrumbs,
@@ -308,9 +422,12 @@
   .operational-page-head,
   .evolution-page-header
 ) {
+  position: sticky;
+  top: 0;
+  z-index: 22;
   min-height: var(--tablet-sticky-row);
   height: var(--tablet-sticky-row);
-  padding-block: 4px;
+  padding-block: 0;
   border-bottom-color: var(--evo-border);
   background: color-mix(in srgb, var(--evo-surface) 96%, transparent);
   box-shadow: 0 5px 14px rgba(23, 52, 61, 0.08);
@@ -359,6 +476,17 @@
 ) .ant-btn:has(.anticon) .anticon {
   margin: 0;
   font-size: 16px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"] :where(
+  .ant-page-header-heading-extra,
+  .operational-page-head__actions,
+  .evolution-page-header__actions
+) .ant-checkbox-wrapper > span:last-child {
+  max-width: 0;
+  padding-inline: 0;
+  overflow: hidden;
+  font-size: 0;
 }
 
 /* Dense tablet tables and card view. */
@@ -460,9 +588,14 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page__header {
-  min-height: 56px;
+  min-height: 48px;
+  height: 48px;
   flex: 0 0 auto;
   align-items: center;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page__header > div:first-child > .ant-typography-secondary {
+  display: none;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page__header h3.ant-typography {
@@ -533,7 +666,38 @@
   position: sticky;
   top: 0;
   z-index: 22;
+  min-height: var(--tablet-sticky-row);
+  height: var(--tablet-sticky-row);
+  flex-basis: var(--tablet-sticky-row);
+  padding-block: 0;
+  border-radius: 8px;
   box-shadow: 0 5px 14px rgba(23, 52, 61, 0.08);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
+  .status-board-toolbar__checkbox,
+  .status-board-toolbar__switch
+) {
+  width: 44px;
+  min-width: 44px;
+  justify-content: center;
+  gap: 0;
+  padding-inline: 0;
+  overflow: hidden;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__label,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__display-mode-label {
+  display: none;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__search {
+  width: 132px;
+  flex-basis: 132px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar__search input::placeholder {
+  color: transparent;
 }
 
 /* Calendar, details, forms and major tablet workspaces. */

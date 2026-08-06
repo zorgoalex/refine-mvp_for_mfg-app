@@ -54,8 +54,8 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('keeps desktop DnD and adds explicit, accessible touch drag without enabling CNC', () => {
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
     expect(page).toContain('canDrag: moveAvailable && finePointer');
-    expect(page).toContain('const tabletTouchDragEnabled = isTabletTier(deviceTier)');
-    expect(page).toContain('touchDragEnabled={tabletTouchDragEnabled}');
+    expect(page).toContain('const touchBoardDragEnabled = useCoarsePointer()');
+    expect(page).toContain('touchDragEnabled={touchBoardDragEnabled}');
     expect(page).toContain('touchDragEnabled={mutationsEnabled && touchDragEnabled}');
     expect(page).toContain('touchDragEnabled = false');
     expect(touchDrag).toContain("event.pointerType !== 'touch'");
@@ -775,7 +775,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_ICONS');
     expect(page).toContain('productionCardDisplayOptions');
     expect(page).toContain('placeholder={productionToolbarCompact ?');
-    expect(page).toContain('prefix={productionToolbarCompact ? <SearchOutlined /> : undefined}');
+    expect(page).toContain('prefix={<SearchOutlined />}');
     expect(page).toContain('status-board-columns--${activeBoard}');
     expect(page).toContain("cardDisplayMode !== 'standard' ? 'status-board-columns--narrow-cards' : ''");
     expect(css).toContain('.status-board-toolbar__display-mode');

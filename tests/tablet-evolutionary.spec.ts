@@ -62,6 +62,22 @@ test.describe('Evolutionary tablet UI', () => {
         if (!process.env.TABLET_SCREEN) {
             await page.goto('/orders?view=list');
             await expectTabletShell(page, 'orders');
+            await expect(page.locator('.evolution-header')).toHaveCount(0);
+            const landscapeContentBox = await page.locator('.evolution-shell__content').boundingBox();
+            expect(landscapeContentBox?.height ?? 0, 'landscape content uses height freed by shell header').toBeGreaterThanOrEqual(748);
+            await expect(page.getByRole('button', { name: 'Открыть быстрый переход' })).toHaveCount(0);
+            const personalUtilities = page.getByRole('group', { name: 'Персональные действия' });
+            await expect(personalUtilities).toBeVisible();
+            await expect(personalUtilities.getByRole('button', { name: 'Уведомления' })).toBeVisible();
+            await expect(personalUtilities.getByRole('button', { name: 'Сканер бирок' })).toBeVisible();
+            const darkThemeButton = personalUtilities.getByRole('button', { name: 'Включить темную тему' });
+            await darkThemeButton.click();
+            await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+            await personalUtilities.getByRole('button', { name: 'Включить светлую тему' }).click();
+            await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+            await personalUtilities.getByRole('button', { name: 'Меню пользователя admin' }).click();
+            await expect(page.getByRole('menuitem', { name: 'Личный кабинет' })).toBeVisible();
+            await page.keyboard.press('Escape');
             const viewSwitch = page.locator('.orders-tablet-view-switch');
             await expect(viewSwitch).toBeVisible();
             await viewSwitch.locator('.ant-segmented-item').nth(1).click();
@@ -75,6 +91,13 @@ test.describe('Evolutionary tablet UI', () => {
             await expectTabletShell(page, 'client-detail');
             await expect(page.getByText('Базовый клиент', { exact: false }).first()).toBeVisible({ timeout: 30_000 });
             const content = page.locator('.evolution-shell__content');
+            const shell = page.locator('.evolution-shell');
+            const workspaceTabs = page.locator('.evolution-workspace-tabs');
+            const pageHeading = page.locator('.ant-page-header-heading, .operational-page-head, .evolution-page-header').first();
+            await expect(pageHeading).toBeVisible();
+            await expect.poll(async () => Math.round((await pageHeading.boundingBox())?.height ?? 0)).toBeLessThanOrEqual(48);
+            await expect(pageHeading).toHaveCSS('position', 'relative');
+            await expect(workspaceTabs).toBeVisible();
             await content.evaluate((element) => {
                 const spacer = document.createElement('div');
                 spacer.dataset.tabletE2eVerticalContent = 'true';
@@ -97,6 +120,16 @@ test.describe('Evolutionary tablet UI', () => {
             });
             expect(didScroll, 'client detail exposes a real vertical scroll surface').toBe(true);
             await expect(content).toHaveAttribute('data-tablet-header-compact', 'true');
+            await expect(shell).toHaveAttribute('data-tablet-header-compact', 'true');
+            await expect.poll(async () => Math.round((await pageHeading.boundingBox())?.height ?? 0)).toBe(44);
+            await expect(pageHeading).toHaveCSS('position', 'sticky');
+            await expect(pageHeading.locator('.ant-page-header-heading-left, .operational-page-head__title, .evolution-page-header__copy').first()).toHaveCSS('opacity', '0');
+            await expect.poll(async () => Math.round((await workspaceTabs.boundingBox())?.height ?? 0)).toBe(0);
+            const compactIconAction = pageHeading.locator('.ant-page-header-heading-extra .ant-btn:has(.anticon), .operational-page-head__actions .ant-btn:has(.anticon), .evolution-page-header__actions .ant-btn:has(.anticon)').first();
+            await expect(compactIconAction).toBeVisible();
+            await expect(compactIconAction).toHaveCSS('font-size', '0px');
+            expect(Math.round((await compactIconAction.boundingBox())?.width ?? 0)).toBe(44);
+            await captureTabletState(page, testInfo, '15-client-detail-compact-header');
             await content.evaluate((element) => {
                 const target = element.dataset.tabletE2eScrollTarget === 'true'
                     ? element
@@ -108,6 +141,8 @@ test.describe('Evolutionary tablet UI', () => {
                 element.querySelector('[data-tablet-e2e-vertical-content="true"]')?.remove();
             });
             await expect(content).toHaveAttribute('data-tablet-header-compact', 'false');
+            await expect(shell).toHaveAttribute('data-tablet-header-compact', 'false');
+            await expect(workspaceTabs).toBeVisible();
         }
 
         expect(health.pageErrors, 'page errors').toEqual([]);
@@ -115,7 +150,7 @@ test.describe('Evolutionary tablet UI', () => {
         expect(health.serverErrors, 'HTTP 5xx responses').toEqual([]);
     });
 
-    test('adapts shell and content across tablet viewports without regressing landscape phones', async ({ page }) => {
+    test('adapts shell and content across tablet and landscape-phone viewports', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedTabletData(db);
         db.app_settings.push({
@@ -150,9 +185,12 @@ test.describe('Evolutionary tablet UI', () => {
             await expectNoDocumentOverflow(page);
             if (viewport.tier === 'tablet') {
                 await expect(page.locator('.evolution-tablet-rail')).toHaveCount(0);
+                await expect(page.locator('.evolution-header')).toBeVisible();
+                await expect(page.getByRole('button', { name: 'Открыть быстрый переход' })).toHaveCount(0);
                 await expect(page.getByRole('button', { name: /Открыть меню/i })).toBeVisible();
                 expect(await page.locator('.evolution-shell__main').evaluate((element) => getComputedStyle(element).marginLeft)).toBe('0px');
             } else {
+                await expect(page.locator('.evolution-header')).toHaveCount(0);
                 const rail = page.locator('.evolution-tablet-rail');
                 await expect(rail).toBeVisible();
                 expect(Math.round((await rail.boundingBox())?.width ?? 0)).toBe(68);
@@ -179,6 +217,32 @@ test.describe('Evolutionary tablet UI', () => {
         await page.goto('/order-status-board');
         await expectTabletShell(page, 'status-board');
         await expect(page.locator('[data-status-board-order-id="15"]')).toBeVisible({ timeout: 30_000 });
+        const boardContent = page.locator('.evolution-shell__content');
+        const boardCards = page.locator('.status-board-column__cards').first();
+        const boardDidScroll = await boardCards.evaluate((element) => {
+            const spacer = document.createElement('div');
+            spacer.dataset.tabletBoardScrollSpacer = 'true';
+            spacer.style.height = '900px';
+            spacer.style.minHeight = '900px';
+            spacer.style.flex = '0 0 900px';
+            element.append(spacer);
+            element.scrollTop = 80;
+            element.dispatchEvent(new Event('scroll', { bubbles: true }));
+            return element.scrollTop >= 32;
+        });
+        expect(boardDidScroll, 'status-board column exposes vertical scrolling').toBe(true);
+        await expect(boardContent).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect(page.locator('.status-board-page__header')).toBeHidden();
+        await expect(page.locator('.status-board-tabs')).toBeHidden();
+        await expect.poll(async () => Math.round((await page.locator('.status-board-toolbar').boundingBox())?.height ?? 0)).toBe(44);
+        await expect(page.locator('.status-board-toolbar__label').first()).toBeHidden();
+        await captureTabletState(page, testInfo, '03a-order-board-compact-header');
+        await boardCards.evaluate((element) => {
+            element.scrollTop = 0;
+            element.dispatchEvent(new Event('scroll', { bubbles: true }));
+            element.querySelector('[data-tablet-board-scroll-spacer="true"]')?.remove();
+        });
+        await expect(boardContent).toHaveAttribute('data-tablet-header-compact', 'false');
         await touchDragCard(context, page, 'Tablet QA 015', 'order-2');
         await expect.poll(() => boardMock.orderStatusBodies.length).toBe(1);
         expect(boardMock.orderStatusBodies[0]).toMatchObject({ orderStatusId: 2, version: 3 });
@@ -210,7 +274,7 @@ test.describe('Evolutionary tablet UI', () => {
         await page.goto('/order-status-board');
         await expect(page.locator('.evolution-shell')).toHaveCount(0);
         await expect(page.locator('[data-status-board-order-id="15"]')).toBeVisible({ timeout: 30_000 });
-        await expect(page.locator('.status-board-card__drag--touch')).toHaveCount(0);
+        await expect(page.locator('.status-board-card__drag--touch')).toBeVisible();
     });
 });
 
@@ -222,6 +286,7 @@ async function setupGeneralTabletMocks(page: Page, db: WorkflowMockDb) {
             backendCut: true,
             backendOrdersRead: true,
             backendProductionActions: false,
+            labels: true,
             orderStatusBoard: false,
         },
     });
@@ -230,7 +295,7 @@ async function setupGeneralTabletMocks(page: Page, db: WorkflowMockDb) {
         const raw = localStorage.getItem('user');
         if (!raw) return;
         const user = JSON.parse(raw);
-        user.permissions = Array.from(new Set([...(user.permissions ?? []), 'cut.view']));
+        user.permissions = Array.from(new Set([...(user.permissions ?? []), 'cut.view', 'labels.view']));
         localStorage.setItem('user', JSON.stringify(user));
     }, LOCAL_MOCK_MARKER);
     await setupSharedReadMocks(page);
@@ -244,6 +309,7 @@ async function setupBoardTabletMocks(page: Page, db: WorkflowMockDb) {
         runtimeConfig: {
             backendOrdersRead: true,
             backendProductionActions: true,
+            labels: true,
             orderStatusBoard: true,
             cncTelegram: true,
         },

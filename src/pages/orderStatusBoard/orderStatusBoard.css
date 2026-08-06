@@ -1111,6 +1111,15 @@
     min-width: 44px;
     height: 44px;
     min-height: 44px;
+    border: 1px solid color-mix(in srgb, #1677ff 34%, transparent);
+    background: color-mix(in srgb, #1677ff 10%, var(--app-surface));
+    color: #1677ff;
+  }
+
+  .status-board-card__drag--touch.ant-btn:active,
+  .status-board-card__drag--touch.ant-btn[data-touch-drag-active="true"] {
+    background: color-mix(in srgb, #1677ff 20%, var(--app-surface));
+    box-shadow: 0 0 0 3px color-mix(in srgb, #1677ff 16%, transparent);
   }
 }
 

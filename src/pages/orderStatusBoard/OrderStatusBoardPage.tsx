@@ -81,7 +81,7 @@ import type {
 import { featureFlags } from '../../config/featureFlags';
 import { SETTING_KEYS, useAppSettings } from '../../hooks/useAppSettings';
 import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
-import { isTabletTier, useDeviceTier } from '../../hooks/useDeviceTier';
+import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
@@ -231,8 +231,7 @@ interface OrderStatusBoardPageProps {
 
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
   const isOperational = useOperationalUi();
-  const deviceTier = useDeviceTier();
-  const tabletTouchDragEnabled = isTabletTier(deviceTier);
+  const touchBoardDragEnabled = useCoarsePointer();
   const { canViewFinancials } = useOrderFinancialVisibility();
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -1194,7 +1193,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             <Input
               allowClear
               className="status-board-toolbar__search"
-              prefix={productionToolbarCompact ? <SearchOutlined /> : undefined}
+              prefix={<SearchOutlined />}
               placeholder={productionToolbarCompact ? '' : 'Номер заказа или клиент'}
               value={searchDraft}
               onChange={(event) => setSearchDraft(event.target.value)}
@@ -1224,7 +1223,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                     updateViewState({ onlyMyOrders: event.target.checked })
                   }
                 >
-                  Связанные со мной
+                  <UserOutlined aria-hidden="true" />
+                  <span className="status-board-toolbar__label">Связанные со мной</span>
                 </Checkbox>
                 <Checkbox
                   className="status-board-toolbar__checkbox"
@@ -1233,7 +1233,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                     updateViewState({ overdueOnly: event.target.checked })
                   }
                 >
-                  Плановая дата прошла
+                  <ClockCircleOutlined aria-hidden="true" />
+                  <span className="status-board-toolbar__label">Плановая дата прошла</span>
                 </Checkbox>
               </>
             )}
@@ -1251,7 +1252,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               format={DATE_FORMAT}
               allowEmpty={[true, true]}
               placeholder={productionToolbarCompact ? ['', ''] : ['План с', 'План по']}
-              suffixIcon={productionToolbarCompact ? <CalendarOutlined /> : undefined}
+              suffixIcon={<CalendarOutlined />}
               onChange={(dates) =>
                 updateViewState({
                   plannedFrom: dates?.[0]?.format('YYYY-MM-DD'),
@@ -1273,7 +1274,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   checked={viewState.hideEmpty}
                   onChange={(checked) => updateViewState({ hideEmpty: checked })}
                 />
-                Скрыть пустые
+                <FilterOutlined aria-hidden="true" />
+                <span className="status-board-toolbar__label">Скрыть пустые</span>
               </label>
             )}
             <div
@@ -1289,11 +1291,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               <Segmented
                 size="small"
                 value={cardDisplayMode}
-                options={
-                  productionToolbarCompact
-                    ? productionCardDisplayOptions
-                    : STATUS_BOARD_CARD_DISPLAY_OPTIONS
-                }
+                options={productionCardDisplayOptions}
                 onChange={(value) =>
                   setCardDisplayMode(value as StatusBoardCardDisplayMode)
                 }
@@ -1577,7 +1575,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   column={column}
                   allColumns={userVisibleBoardColumns}
                   finePointer={finePointer}
-                  touchDragEnabled={tabletTouchDragEnabled}
+                  touchDragEnabled={touchBoardDragEnabled}
                   mutationsEnabled={
                     featureFlags.useBackendProductionActions &&
                     !stale &&

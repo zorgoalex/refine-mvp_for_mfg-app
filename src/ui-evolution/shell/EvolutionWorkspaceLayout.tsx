@@ -56,6 +56,7 @@ const getInitialCollapsed = (): boolean => {
 export const EvolutionWorkspaceLayout: React.FC = () => {
   const [isNavigationOpen, setIsNavigationOpen] = React.useState(false);
   const [tabletHeaderCompact, setTabletHeaderCompact] = React.useState(false);
+  const tabletHeaderScrollTargetRef = React.useRef<HTMLElement | null>(null);
   const [collapsed, setCollapsed] = React.useState(getInitialCollapsed);
   const deviceTier = useDeviceTier();
   const isMobile = deviceTier === 'phone';
@@ -74,17 +75,27 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   useGlobalUnloadGuard();
 
   React.useEffect(() => {
+    tabletHeaderScrollTargetRef.current = null;
     setTabletHeaderCompact(false);
   }, [location.pathname, location.search, deviceTier]);
 
   React.useEffect(() => {
     if (!isTablet) return undefined;
     const handleWindowScroll = () => {
-      setTabletHeaderCompact((current) => nextTabletHeaderCompactState(current, {
-        scrollTop: window.scrollY,
-        scrollHeight: document.documentElement.scrollHeight,
-        clientHeight: window.innerHeight,
-      }));
+      const target = document.documentElement;
+      setTabletHeaderCompact((current) => {
+        if (current && tabletHeaderScrollTargetRef.current !== null && tabletHeaderScrollTargetRef.current !== target) {
+          return current;
+        }
+        const next = nextTabletHeaderCompactState(current, {
+          scrollTop: window.scrollY,
+          scrollHeight: target.scrollHeight,
+          clientHeight: window.innerHeight,
+        });
+        if (!current && next) tabletHeaderScrollTargetRef.current = target;
+        if (current && !next) tabletHeaderScrollTargetRef.current = null;
+        return next;
+      });
     };
     window.addEventListener('scroll', handleWindowScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleWindowScroll);
@@ -99,12 +110,21 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
       '.status-board-scrollbar',
       '.status-board-viewport',
     ].join(','));
-    setTabletHeaderCompact((current) => nextTabletHeaderCompactState(current, {
-      scrollTop: target.scrollTop,
-      scrollHeight: target.scrollHeight,
-      clientHeight: target.clientHeight,
-      horizontalOnly,
-    }));
+    if (horizontalOnly) return;
+    setTabletHeaderCompact((current) => {
+      const owner = tabletHeaderScrollTargetRef.current;
+      if (current && owner !== null && owner !== target && owner.isConnected) {
+        return current;
+      }
+      const next = nextTabletHeaderCompactState(current, {
+        scrollTop: target.scrollTop,
+        scrollHeight: target.scrollHeight,
+        clientHeight: target.clientHeight,
+      });
+      if (!current && next) tabletHeaderScrollTargetRef.current = target;
+      if (current && !next) tabletHeaderScrollTargetRef.current = null;
+      return next;
+    });
   };
 
   const handleCollapse = (next: boolean) => {
@@ -126,7 +146,11 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   ].filter(Boolean).join(' ');
 
   return (
-    <Layout className={shellClassName} data-device-tier={deviceTier}>
+    <Layout
+      className={shellClassName}
+      data-device-tier={deviceTier}
+      data-tablet-header-compact={isTablet && tabletHeaderCompact ? 'true' : 'false'}
+    >
       <a className="evolution-skip-link" href="#evolution-main-content">Перейти к содержимому</a>
       {isTabletLandscape ? (
         <EvolutionTabletNavigation onOpenDrawer={() => setIsNavigationOpen(true)} />
@@ -142,10 +166,11 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         )
       ) : null}
       <Layout className="evolution-shell__main">
-        {!isAirDesktop ? (
+        {!isAirDesktop && !isTabletLandscape ? (
           <EvolutionHeader
             onOpenSider={isMobile || isTabletPortrait ? () => setIsNavigationOpen(true) : undefined}
             operational={isOperational}
+            tablet={isTabletPortrait}
           />
         ) : null}
         {!isOperational ? <EvolutionWorkspaceTabs /> : null}
@@ -171,6 +196,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
         <EvolutionMobileNavigation
           onClose={() => setIsNavigationOpen(false)}
           open={isNavigationOpen}
+          tablet={isTablet}
         />
       ) : null}
     </Layout>
