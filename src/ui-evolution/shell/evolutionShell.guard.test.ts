@@ -46,7 +46,10 @@ describe('evolution shell behavior preservation', () => {
 
   it('forces board workspaces into compact tablet headers before any scroll', () => {
     expect(layout).toContain('const forceTabletCompactHeader = isTablet');
-    expect(layout).toContain("routeFamily === 'status-board' || routeFamily === 'calendar'");
+    expect(layout).toContain("routeFamily === 'status-board'");
+    expect(layout).toContain("routeFamily === 'calendar'");
+    expect(layout).toContain('SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY');
+    expect(layout).toContain('shortTabletLandscape');
     expect(layout).toContain('forceTabletCompactHeader || tabletHeaderCompact');
     expect(layout).toContain('if (!isTablet || forceTabletCompactHeader) return undefined');
     expect(layout).toContain('if (!isTablet || forceTabletCompactHeader || !(event.target instanceof HTMLElement)) return');

@@ -83,7 +83,12 @@ import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibi
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
-import { isTabletTier, useDeviceTier } from "../../hooks/useDeviceTier";
+import {
+  isTabletTier,
+  SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY,
+  useDeviceTier,
+} from "../../hooks/useDeviceTier";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { OrderCardList } from "./mobile/OrderCardList";
 import {
   ordersViewStorageKey,
@@ -243,6 +248,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const deviceTier = useDeviceTier();
   const isMobile = deviceTier === 'phone';
   const isTablet = isTabletTier(deviceTier);
+  const shortTabletLandscape = useMediaQuery(SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY);
   const location = useLocation();
   const routerNavigate = useNavigate();
   const ordersViewKey = ordersViewStorageKey(currentUser?.id);
@@ -786,7 +792,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
   const ordersCompactPagination = useMemo(() => ({
     ...(tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination : {}),
-    position: ['topRight', 'bottomRight'],
+    position: isTablet && shortTabletLandscape ? ['topRight'] : ['topRight', 'bottomRight'],
     size: 'small',
     simple: false,
     showTotal: () => (
@@ -809,7 +815,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         />
       </Space>
     ),
-  }), [orderListColumnDefinitions, orderListColumnSettings, orderListDefaultOrder, saveOrderListColumnSettings, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
+  }), [isTablet, orderListColumnDefinitions, orderListColumnSettings, orderListDefaultOrder, saveOrderListColumnSettings, shortTabletLandscape, tableProps?.pagination, useBackendCut, selectedCutOrderIds]);
 
   const formatDate = (date: string | null) => {
     if (!date) return "—";

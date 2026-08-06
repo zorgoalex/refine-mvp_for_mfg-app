@@ -8,6 +8,7 @@ import {
 } from './helpers/mockWorkflowApi';
 
 const PRIMARY_VIEWPORT = { width: 1340, height: 800 };
+const REAL_87_TABLET_CSS_VIEWPORT = { width: 1012, height: 429 };
 const LOCAL_MOCK_MARKER = 'tablet-touch-local-mock-v1';
 const ORDER_ID = 15;
 
@@ -150,7 +151,55 @@ test.describe('Evolutionary tablet UI', () => {
         expect(health.serverErrors, 'HTTP 5xx responses').toEqual([]);
     });
 
-    test('adapts shell and content across tablet and landscape-phone viewports', async ({ page }) => {
+    test('renders every reference screen in the real 8.7-inch CSS viewport', async ({ page }, testInfo) => {
+        test.setTimeout(300_000);
+        await page.setViewportSize(REAL_87_TABLET_CSS_VIEWPORT);
+        const db = createWorkflowMockDb();
+        seedTabletData(db);
+        const health = collectPageHealth(page);
+        await setupGeneralTabletMocks(page, db);
+
+        const states = [
+            { name: 'orders-list', path: '/orders?view=list&pageSize=100', family: 'orders', ready: '.orders-table' },
+            { name: 'orders-cards', path: '/orders?view=cards', family: 'orders', ready: '.order-card-list--tablet .ant-card' },
+            { name: 'order-detail', path: `/orders/show/${ORDER_ID}`, family: 'order-detail', readyText: 'Tablet QA 015' },
+            { name: 'order-create', path: '/orders/create', family: 'order-edit', readyText: 'Создание заказа' },
+            { name: 'calendar', path: '/calendar', family: 'calendar', ready: '.calendar-board' },
+            { name: 'clients', path: '/clients', family: 'clients-list', ready: '.ant-table' },
+            { name: 'client-detail', path: '/clients/show/1', family: 'client-detail', readyText: 'Основная информация' },
+            { name: 'payments', path: '/payments', family: 'payments-list', ready: '.ant-table' },
+            { name: 'materials', path: '/materials', family: 'materials-list', ready: '.ant-table' },
+            { name: 'cut', path: '/cut', family: 'cut', ready: '.cut-page-modern' },
+            { name: 'configuration', path: '/configuration', family: 'configuration', ready: '.configuration-tabs-wrap' },
+        ] as const;
+
+        for (const [index, state] of states.entries()) {
+            await test.step(state.name, async () => {
+                await page.goto(state.path, { waitUntil: 'domcontentloaded' });
+                await expectTabletShell(page, state.family);
+                if ('ready' in state) await expect(page.locator(state.ready).first()).toBeVisible({ timeout: 30_000 });
+                if ('readyText' in state) await expect(page.getByText(state.readyText, { exact: false }).first()).toBeVisible({ timeout: 30_000 });
+                await expect(page.locator('.evolution-shell__content')).toHaveAttribute('data-tablet-header-compact', 'true');
+                await expect(page.locator('.evolution-shell')).toHaveAttribute('data-tablet-header-compact', 'true');
+                const workspaceTabs = page.locator('.evolution-workspace-tabs');
+                await expect(workspaceTabs).toHaveCSS('height', '0px', { timeout: 30_000 });
+                expect(Math.round((await workspaceTabs.boundingBox())?.height ?? 0)).toBe(0);
+                await expectNoDocumentOverflow(page);
+                await expectRepresentativeTouchTargets(page);
+                await captureTabletState(
+                    page,
+                    testInfo,
+                    `19-real-87-${String(index + 1).padStart(2, '0')}-${state.name}`,
+                );
+            });
+        }
+
+        expect(health.pageErrors, 'page errors').toEqual([]);
+        expect(health.consoleErrors, 'console errors').toEqual([]);
+        expect(health.serverErrors, 'HTTP 5xx responses').toEqual([]);
+    });
+
+    test('adapts shell and content across tablet and landscape-phone viewports', async ({ page }, testInfo) => {
         const db = createWorkflowMockDb();
         seedTabletData(db);
         db.app_settings.push({
@@ -196,6 +245,34 @@ test.describe('Evolutionary tablet UI', () => {
                 expect(Math.round((await rail.boundingBox())?.width ?? 0)).toBe(68);
             }
         }
+
+        await page.setViewportSize(REAL_87_TABLET_CSS_VIEWPORT);
+        await page.goto('/orders?view=list&pageSize=100');
+        await expectTabletShell(page, 'orders');
+        await expect(page.locator('.evolution-shell__content')).toHaveAttribute('data-tablet-header-compact', 'true');
+        await expect.poll(async () => Math.round((await page.locator('.evolution-workspace-tabs').boundingBox())?.height ?? 0)).toBe(0);
+        await expect(page.locator('.orders-table .ant-table-pagination')).toHaveCount(1);
+        const ordersBodyMaxHeight = await page.locator('.orders-table .ant-table-body').evaluate((element) =>
+            Number.parseFloat(getComputedStyle(element).maxHeight),
+        );
+        expect(ordersBodyMaxHeight).toBeGreaterThanOrEqual(250);
+        const railNavigationMetrics = await page.locator('.evolution-tablet-rail__nav').evaluate((element) => ({
+            clientHeight: element.clientHeight,
+            scrollHeight: element.scrollHeight,
+            buttonCount: element.querySelectorAll('.evolution-tablet-rail__button').length,
+        }));
+        expect(railNavigationMetrics.buttonCount).toBeGreaterThan(3);
+        expect(railNavigationMetrics.scrollHeight).toBeGreaterThan(railNavigationMetrics.clientHeight);
+        const personalUtilities = page.getByRole('group', { name: 'Персональные действия' });
+        await expect(personalUtilities).toBeVisible();
+        await expect(personalUtilities.getByRole('button', { name: 'Уведомления' })).toBeVisible();
+        await expect(personalUtilities.getByRole('button', { name: 'Сканер бирок' })).toBeVisible();
+        await expect(personalUtilities.getByRole('button', { name: 'Включить темную тему' })).toBeVisible();
+        await expect(personalUtilities.getByRole('button', { name: 'Меню пользователя admin' })).toBeVisible();
+        const utilityBottom = await personalUtilities.evaluate((element) => element.getBoundingClientRect().bottom);
+        expect(utilityBottom).toBeLessThanOrEqual(REAL_87_TABLET_CSS_VIEWPORT.height);
+        await expectNoDocumentOverflow(page);
+        await captureTabletState(page, testInfo, '17-real-87-tablet-orders');
 
         for (const viewport of [{ width: 844, height: 390 }, { width: 932, height: 430 }]) {
             await page.setViewportSize(viewport);
@@ -323,6 +400,26 @@ test.describe('Evolutionary tablet UI', () => {
         await expect(page.locator('.status-board-columns--cnc .status-board-column')).toHaveCount(5);
         await expect(page.locator('.status-board-card__drag--touch')).toHaveCount(0);
         await captureTabletState(page, testInfo, '05-cnc-board');
+
+        await page.setViewportSize(REAL_87_TABLET_CSS_VIEWPORT);
+        await page.goto('/mdf-work-board');
+        await expectTabletShell(page, 'status-board');
+        await expectSingleLineBoardToolbar(page);
+        await expectFullHeightBoardViewport(page);
+        await expectNoDocumentOverflow(page);
+        const cncColumnBoxes = await page.locator('.status-board-columns--cnc .status-board-column').evaluateAll((columns) =>
+            columns.map((column) => {
+                const box = column.getBoundingClientRect();
+                return { left: box.left, right: box.right, width: box.width };
+            }),
+        );
+        expect(cncColumnBoxes).toHaveLength(5);
+        for (let index = 1; index < cncColumnBoxes.length; index += 1) {
+            expect(cncColumnBoxes[index].left).toBeGreaterThanOrEqual(cncColumnBoxes[index - 1].right - 1);
+            expect(cncColumnBoxes[index].width).toBeGreaterThanOrEqual(239);
+        }
+        await touchPanBoardFromMiddle(context, page);
+        await captureTabletState(page, testInfo, '18-real-87-tablet-cnc-board');
 
         expect(boardMock.unexpectedWrites, 'unmocked writes must fail closed').toEqual([]);
         expect(health.pageErrors, 'page errors').toEqual([]);
@@ -853,7 +950,8 @@ async function expectSingleLineBoardToolbar(page: Page) {
 }
 
 async function captureTabletState(page: Page, testInfo: TestInfo, name: string) {
-    const path = testInfo.outputPath('tablet-screens', `${name}-1340x800.png`);
+    const viewport = page.viewportSize() ?? PRIMARY_VIEWPORT;
+    const path = testInfo.outputPath('tablet-screens', `${name}-${viewport.width}x${viewport.height}.png`);
     await mkdir(dirname(path), { recursive: true });
     await page.screenshot({ path, fullPage: false });
     await testInfo.attach(name, { path, contentType: 'image/png' });

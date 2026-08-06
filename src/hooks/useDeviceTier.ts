@@ -6,6 +6,7 @@ export type DeviceTier = 'phone' | 'tablet' | 'tablet-landscape' | 'desktop';
 
 export const PHONE_MEDIA_QUERY = '(max-width: 767px)';
 export const PHONE_LANDSCAPE_MEDIA_QUERY = '(pointer: coarse) and (max-height: 599px) and (max-width: 999px), (any-pointer: coarse) and (max-height: 599px) and (max-width: 999px)';
+export const SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY = '(min-width: 1000px) and (max-width: 1399px) and (max-height: 599px) and (orientation: landscape)';
 export const TABLET_MEDIA_QUERY = [
   '(pointer: coarse) and (min-width: 768px) and (max-width: 899px) and (min-height: 600px)',
   '(any-pointer: coarse) and (min-width: 768px) and (max-width: 899px) and (min-height: 600px)',
@@ -15,6 +16,8 @@ export const TABLET_MEDIA_QUERY = [
 export const TABLET_LANDSCAPE_MEDIA_QUERY = [
   '(pointer: coarse) and (min-width: 900px) and (max-width: 1399px) and (min-height: 600px) and (orientation: landscape)',
   '(any-pointer: coarse) and (min-width: 900px) and (max-width: 1399px) and (min-height: 600px) and (orientation: landscape)',
+  `(pointer: coarse) and ${SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY}`,
+  `(any-pointer: coarse) and ${SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY}`,
 ].join(', ');
 export const COARSE_POINTER_QUERY = '(pointer: coarse), (any-pointer: coarse)';
 export const LANDSCAPE_MEDIA_QUERY = '(orientation: landscape)';

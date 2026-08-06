@@ -644,7 +644,7 @@
   scrollbar-gutter: auto;
 }
 
-:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column {
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns:not(.status-board-columns--cnc) > .status-board-column {
   width: 288px;
   min-width: 288px;
   height: 100%;
@@ -664,6 +664,53 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column__cards {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-x: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-x pan-y;
+}
+
+/* CNC is a horizontal tablet board too. Keep tracks wide, but never let a
+   generic column width escape its grid track and overlap the next column. */
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page.status-board-page--cnc {
+  height: 100% !important;
+  min-height: 0 !important;
+  gap: 0;
+  overflow: hidden !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-viewport {
+  height: calc(100% - var(--tablet-sticky-row));
+  min-height: 0;
+  flex: 1 1 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x pan-y;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-columns--cnc {
+  height: 100%;
+  min-height: 100%;
+  padding: 4px 2px 8px;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) {
+  width: max-content;
+  min-width: 100%;
+  grid-template-columns: repeat(
+    var(--status-board-cnc-column-count, 5),
+    clamp(240px, 24vw, 276px)
+  );
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns--cnc > .status-board-column {
+  width: auto !important;
+  min-width: 0 !important;
+  height: 100% !important;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-column__cards {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior-x: auto;
@@ -1026,7 +1073,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column,
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns:not(.status-board-columns--cnc) > .status-board-column,
   :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column {
     width: 276px !important;
     min-width: 276px !important;
@@ -1072,7 +1119,7 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-column,
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns:not(.status-board-columns--cnc) > .status-board-column,
   :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-column {
     width: calc(100vw - 32px) !important;
     min-width: calc(100vw - 32px) !important;
@@ -1093,6 +1140,55 @@
 
   :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .ant-col {
     max-width: 100%;
+  }
+}
+
+/* Galaxy Tab A9 class: 1340x800 physical pixels become roughly 1012x429 CSS
+   pixels after DPR and visible Chrome/Samsung bars. Spend that short viewport
+   on work, keep every personal action reachable, and avoid duplicate paging. */
+@media (min-width: 1000px) and (max-width: 1399px) and (max-height: 599px) and (orientation: landscape) {
+  .evolution-tablet-rail__brand {
+    height: 44px;
+    min-height: 44px;
+    padding: 2px 6px;
+  }
+
+  .evolution-tablet-rail__brand > span:first-child {
+    height: 28px;
+  }
+
+  .evolution-tablet-rail__nav {
+    gap: 2px;
+    padding: 4px 7px;
+    scrollbar-width: none;
+  }
+
+  .evolution-tablet-rail__nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .evolution-tablet-rail__button.ant-btn,
+  .evolution-tablet-rail__create.ant-btn {
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .evolution-tablet-rail__bottom {
+    padding: 2px 7px 4px;
+  }
+
+  .evolution-tablet-utilities--rail {
+    gap: 2px;
+    margin-top: 4px;
+    padding-top: 4px;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .orders-table .ant-table-body {
+    max-height: calc(100dvh - 178px) !important;
+  }
+
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .orders-table .ant-table-pagination {
+    margin-block: 4px;
   }
 }
 

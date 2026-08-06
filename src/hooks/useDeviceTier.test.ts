@@ -9,6 +9,7 @@ import {
   TABLET_MEDIA_QUERY,
   COARSE_POINTER_QUERY,
   LANDSCAPE_MEDIA_QUERY,
+  SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY,
   readDeviceTier,
 } from './useDeviceTier';
 
@@ -46,6 +47,9 @@ describe('media query constants', () => {
     expect(TABLET_LANDSCAPE_MEDIA_QUERY).toContain('(pointer: coarse)');
     expect(TABLET_LANDSCAPE_MEDIA_QUERY).toContain('(any-pointer: coarse)');
     expect(TABLET_LANDSCAPE_MEDIA_QUERY).toContain('(orientation: landscape)');
+    expect(TABLET_LANDSCAPE_MEDIA_QUERY).toContain(SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY);
+    expect(SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY).toContain('(min-width: 1000px)');
+    expect(SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY).toContain('(max-height: 599px)');
     expect(COARSE_POINTER_QUERY).toBe('(pointer: coarse), (any-pointer: coarse)');
     expect(LANDSCAPE_MEDIA_QUERY).toBe('(orientation: landscape)');
   });
@@ -53,6 +57,13 @@ describe('media query constants', () => {
   it('detects a hybrid tablet with a fine primary pointer and coarse touch input', () => {
     const matchMedia = ((query: string) => ({
       matches: query === TABLET_LANDSCAPE_MEDIA_QUERY,
+    })) as typeof globalThis.matchMedia;
+    expect(readDeviceTier(matchMedia)).toBe('tablet-landscape');
+  });
+
+  it('detects an 8.7-inch 1340x800 tablet after DPR and browser chrome reduce its CSS viewport', () => {
+    const matchMedia = ((query: string) => ({
+      matches: query === TABLET_LANDSCAPE_MEDIA_QUERY || query === LANDSCAPE_MEDIA_QUERY,
     })) as typeof globalThis.matchMedia;
     expect(readDeviceTier(matchMedia)).toBe('tablet-landscape');
   });

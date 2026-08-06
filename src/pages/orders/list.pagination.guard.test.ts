@@ -3,11 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 describe('orders list pagination', () => {
-  it('renders pagination above and below the orders table in compact mode', () => {
+  it('keeps one pagination row on short tablet landscape and two elsewhere', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'list.tsx'), 'utf8');
 
     expect(source).toContain('ordersCompactPagination');
-    expect(source).toContain("position: ['topRight', 'bottomRight']");
+    expect(source).toContain("isTablet && shortTabletLandscape ? ['topRight'] : ['topRight', 'bottomRight']");
+    expect(source).toContain('SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY');
     expect(source).toContain("size: 'small'");
     expect(source).toContain('simple: false');
   });

@@ -4,7 +4,12 @@ import { useLocation } from 'react-router-dom';
 import { AppFooter } from '../../components/AppFooter';
 import { GlobalTableTopScrollbars } from '../../components/GlobalTableTopScrollbars';
 import { KeepAliveOutlet } from '../../components/workspace/KeepAliveOutlet';
-import { isTabletTier, useDeviceTier } from '../../hooks/useDeviceTier';
+import {
+  isTabletTier,
+  SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY,
+  useDeviceTier,
+} from '../../hooks/useDeviceTier';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useTabSync } from '../../hooks/useTabSync';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { useUiVariant } from '../../ui-variant/UiVariantProvider';
@@ -59,6 +64,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const tabletHeaderScrollTargetRef = React.useRef<HTMLElement | null>(null);
   const [collapsed, setCollapsed] = React.useState(getInitialCollapsed);
   const deviceTier = useDeviceTier();
+  const shortTabletLandscape = useMediaQuery(SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY);
   const isMobile = deviceTier === 'phone';
   const isTablet = isTabletTier(deviceTier);
   const isTabletLandscape = deviceTier === 'tablet-landscape';
@@ -68,7 +74,9 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const routeFamily = resolveModernRouteFamily(location.pathname);
   const pageKind = resolveOperationalPageKind(location.pathname);
   const forceTabletCompactHeader = isTablet && (
-    routeFamily === 'status-board' || routeFamily === 'calendar'
+    routeFamily === 'status-board' ||
+    routeFamily === 'calendar' ||
+    shortTabletLandscape
   );
   const tabletHeaderIsCompact = isTablet && (
     forceTabletCompactHeader || tabletHeaderCompact

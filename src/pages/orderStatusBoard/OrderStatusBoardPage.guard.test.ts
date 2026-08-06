@@ -100,7 +100,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
-  it('lets the MDF board grow to its tallest column without nested vertical scrolling', () => {
+  it('keeps desktop MDF auto-height but gives tablet a full-height pannable viewport', () => {
     expect(page).toContain("isCncToday ? ' status-board-page--cnc' : ''");
     expect(css).toMatch(
       /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
@@ -113,6 +113,17 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(css).toMatch(
       /\.status-board-page--cnc \.cnc-detailed-workspace\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: 100% !important;[^}]*overflow: hidden !important;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: calc\(100% - var\(--tablet-sticky-row\)\);[^}]*overflow-x: auto;/s,
+    );
+    expect(tabletCss).toContain('.status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
+    expect(tabletCss).toContain('clamp(240px, 24vw, 276px)');
+    expect(tabletCss).toMatch(
+      /\.status-board-columns--cnc > \.status-board-column\s*\{[^}]*width: auto !important;[^}]*min-width: 0 !important;/s,
     );
   });
 
