@@ -24,6 +24,21 @@ export interface OrderResponse {
   order: OrderDto;
 }
 
+export interface OrderRefreshRequest {
+  version: number;
+  idempotencyKey?: string;
+}
+
+export interface OrderRefreshResponse {
+  order: OrderDto;
+  baseVersion: number;
+  version: number;
+  updatedDowelingDetailIds: number[];
+  auditId: string | null;
+  refreshedAt: IsoDateTimeString;
+  requestId: string;
+}
+
 export interface OrderListResponse {
   data: OrderListItemDto[];
   pagination: Pagination;
@@ -590,10 +605,18 @@ export interface OrderDetailDto {
   cutJob?: CutDetailLastReadyJobRef | null;
   bathCutJob?: CutDetailLastReadyJobRef | null;
   bazisCutSets?: OrderDetailBazisCutSetRefDto[];
+  bazisProjects?: OrderDetailBazisProjectRefDto[];
 }
 
 export interface OrderDetailBazisCutSetRefDto {
   bazisCutSetId: number;
+  name: string;
+}
+
+export interface OrderDetailBazisProjectRefDto {
+  bazisProjectId: number;
+  bazisRevisionId: number;
+  revisionNo: number;
   name: string;
 }
 

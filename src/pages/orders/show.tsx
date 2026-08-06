@@ -1,4 +1,4 @@
-import { useShow, useList, useUpdate, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
+import { useShow, useList, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
@@ -1387,11 +1387,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     [details, cutSelectedDetailIds, groupingActive, grouping.state.field, groupLabelOf],
   );
 
-  // Hook for updating order
-  const { mutate: updateOrder, isLoading: isUpdating } = useUpdate();
-
   // Загрузка платежей для расчёта статуса оплаты и экспорта
-  const { data: paymentsData, refetch: refetchPayments } = useList({
+  const { data: paymentsData } = useList({
     resource: 'payments',
     filters: [
       {
@@ -1434,56 +1431,26 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     (employeesData?.data || []).map((item: any) => [item.employee_id, item.full_name])
   );
 
-  // Функция обновления статуса оплаты
-  const handleRefreshPaymentStatus = async () => {
-    if (!record?.order_id) return;
-    if (useBackendOrdersRead) {
-      message.info('В backend-режиме статус оплаты обновляется через сохранение заказа');
-      return;
+  const [isRefreshingOrder, setIsRefreshingOrder] = useState(false);
+  const handleRefreshOrder = async () => {
+    const orderId = Number(record?.order_id);
+    const currentVersion = Number(backendOrder?.version ?? record?.version);
+    if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isInteger(currentVersion) || currentVersion < 0) return;
+    setIsRefreshingOrder(true);
+    try {
+      const response = await ordersApi.refresh(orderId, { version: currentVersion });
+      await queryResult.refetch();
+      message.success(
+        response.updatedDowelingDetailIds.length > 0
+          ? `Обновлено. Присадка установлена для ${response.updatedDowelingDetailIds.length} поз.`
+          : 'Заказ и связи с документами обновлены',
+      );
+    } catch (error) {
+      console.error('Order refresh failed:', error);
+      message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+    } finally {
+      setIsRefreshingOrder(false);
     }
-
-    // Refetch payments to get latest data
-    const { data: freshPaymentsData } = await refetchPayments();
-    const freshPayments = freshPaymentsData?.data || [];
-    const freshTotalAmount = freshPayments.reduce((sum: number, p: any) => sum + (p.amount || 0), 0);
-
-    const discountedAmount = record.final_amount || record.total_amount || 0;
-
-    // Calculate what payment status should be
-    let newPaymentStatusId: number;
-    if (freshTotalAmount === 0) {
-      newPaymentStatusId = 1; // Не оплачено
-    } else if (freshTotalAmount < discountedAmount) {
-      newPaymentStatusId = 2; // Частично оплачено
-    } else {
-      newPaymentStatusId = 3; // Оплачено
-    }
-
-    // Update paid_amount and payment_status_id in database
-    updateOrder(
-      {
-        resource: 'orders',
-        id: record.order_id,
-        values: {
-          paid_amount: freshTotalAmount,
-          payment_status_id: newPaymentStatusId,
-        },
-        meta: {
-          idColumnName: 'order_id',
-        },
-      },
-      {
-        onSuccess: () => {
-          message.success('Статус оплаты обновлён');
-          // Refetch order data
-          queryResult.refetch();
-        },
-        onError: (error) => {
-          message.error('Ошибка при обновлении статуса оплаты');
-          console.error('Update error:', error);
-        },
-      }
-    );
   };
 
   // Функция печати
@@ -1838,14 +1805,41 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       dataIndex: 'basis_project',
       key: 'basis_project',
       width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
-      render: (value, detail) => (
-        <BasisProjectLink
-          value={value}
-          bazisProjectId={detail.bazis_project_id}
-          enabled={bazisProjectLinkEnabled}
-          fallback="—"
-        />
-      ),
+      render: (value, row) => {
+        const projects = row.bazis_projects ?? [];
+        if (projects.length === 0) {
+          return (
+            <BasisProjectLink
+              value={value}
+              bazisProjectId={row.bazis_project_id}
+              enabled={bazisProjectLinkEnabled}
+              fallback="—"
+            />
+          );
+        }
+        return (
+          <Space wrap size={4}>
+            {projects.map((project: {
+              bazisProjectId: number;
+              bazisRevisionId: number;
+              revisionNo: number;
+              name: string;
+            }) => bazisProjectLinkEnabled ? (
+              <Link
+                key={`${project.bazisProjectId}:${project.bazisRevisionId}`}
+                to={`/bazis/projects/${project.bazisProjectId}?revision=${project.bazisRevisionId}`}
+                title={`${project.name}, рев. ${project.revisionNo}`}
+              >
+                {`БП-${project.bazisProjectId}`}
+              </Link>
+            ) : (
+              <span key={`${project.bazisProjectId}:${project.bazisRevisionId}`} title={project.name}>
+                {`БП-${project.bazisProjectId}`}
+              </span>
+            ))}
+          </Space>
+        );
+      },
     },
     {
       title: 'Базис-раскрой',
@@ -2092,11 +2086,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 trigger={['click']}
                 menu={{
                   items: [
-                    ...(canViewFinancials ? [{
+                    ...(canUpdateOrders ? [{
                       key: 'refresh',
                       icon: <ReloadOutlined />,
                       label: 'Обновить',
-                      disabled: isUpdating,
+                      disabled: isRefreshingOrder,
                     }] : []),
                     ...(canExportOrders ? [
                       ...(canViewFinancials ? [{
@@ -2153,7 +2147,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   ],
                   onClick: ({ key }) => {
                     if (key === 'refresh') {
-                      void handleRefreshPaymentStatus();
+                      void handleRefreshOrder();
                     }
                     if (key === 'print') {
                       handlePrint();
@@ -2182,11 +2176,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           ) : (
             <>
               {canEditOrderContent && <EditButton>Изменить</EditButton>}
-              {canViewFinancials && (
+              {canUpdateOrders && (
                 <Button
                   icon={<ReloadOutlined />}
-                  onClick={handleRefreshPaymentStatus}
-                  loading={isUpdating}
+                  onClick={() => void handleRefreshOrder()}
+                  loading={isRefreshingOrder}
                 >
                   Обновить
                 </Button>
@@ -2931,7 +2925,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             {isMobile ? (
               <DetailCardList rows={details} lookups={detailCardLookups} highlightDetailId={highlightDetail}
                 selectionEnabled={cutSelectMode} selectedIds={cutSelectedDetailIds}
-                onSelectionChange={setCutSelectedDetailIds} bazisCutLinkEnabled={bazisCutLinkEnabled} />
+                onSelectionChange={setCutSelectedDetailIds}
+                bazisCutLinkEnabled={bazisCutLinkEnabled}
+                bazisProjectLinkEnabled={bazisProjectLinkEnabled} />
             ) : (
             <TableTopScroll className="order-show-details-table-wrap">
             <MemoizedOrderShowTable

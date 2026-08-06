@@ -170,6 +170,7 @@ interface OrderDetailRow extends QueryResultRow {
   bath_cut_job_profile_name: string | null;
   bath_cut_job_profile_is_active: boolean | null;
   bazis_cut_sets: unknown;
+  bazis_projects: unknown;
 }
 
 interface OrderPaymentRow extends QueryResultRow {
@@ -750,11 +751,36 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
                 'name', refs.name
               ) ORDER BY refs.bazis_cut_set_id)
               FROM (
-                SELECT DISTINCT s.bazis_cut_set_id, s.name
+                SELECT s.bazis_cut_set_id, s.name
                 FROM bazis_cut_set_details d
                 JOIN bazis_cut_sets s ON s.bazis_cut_set_id = d.bazis_cut_set_id
                 WHERE d.source_order_detail_id = od.detail_id
+                UNION
+                SELECT s.bazis_cut_set_id, s.name
+                FROM bazis_node_order_detail_map detail_map
+                JOIN bazis_cut_set_details d ON d.source_bazis_node_id = detail_map.node_id
+                JOIN bazis_cut_sets s ON s.bazis_cut_set_id = d.bazis_cut_set_id
+                WHERE detail_map.order_id = od.order_id
+                  AND detail_map.order_detail_id = od.detail_id
               ) refs) AS bazis_cut_sets
+             ,(SELECT jsonb_agg(jsonb_build_object(
+                'bazisProjectId', refs.bazis_project_id,
+                'bazisRevisionId', refs.bazis_revision_id,
+                'revisionNo', refs.revision_no,
+                'name', refs.name
+              ) ORDER BY refs.bazis_project_id, refs.revision_no)
+              FROM (
+                SELECT DISTINCT project.bazis_project_id,
+                       revision.bazis_revision_id,
+                       revision.revision_no,
+                       project.name
+                FROM bazis_node_order_detail_map detail_map
+                JOIN bazis_nodes node ON node.bazis_node_id = detail_map.node_id
+                JOIN bazis_project_revisions revision ON revision.bazis_revision_id = node.revision_id
+                JOIN bazis_projects project ON project.bazis_project_id = revision.bazis_project_id
+                WHERE detail_map.order_id = od.order_id
+                  AND detail_map.order_detail_id = od.detail_id
+              ) refs) AS bazis_projects
       FROM order_details od
       ${detailMaterialJoin}
       ${detailSheetJoin}
@@ -1410,6 +1436,7 @@ function mapDetail(row: OrderDetailRow) {
     cutJob: mapDetailCutJob(row, 'cut'),
     bathCutJob: mapDetailCutJob(row, 'bath'),
     bazisCutSets: mapBazisCutSetRefs(row.bazis_cut_sets),
+    bazisProjects: mapBazisProjectRefs(row.bazis_projects),
   };
 }
 
@@ -1427,6 +1454,35 @@ function mapBazisCutSetRefs(value: unknown): Array<{ bazisCutSetId: number; name
       }];
     })
     .sort((left, right) => left.bazisCutSetId - right.bazisCutSetId);
+}
+
+function mapBazisProjectRefs(value: unknown): Array<{
+  bazisProjectId: number;
+  bazisRevisionId: number;
+  revisionNo: number;
+  name: string;
+}> {
+  if (!Array.isArray(value)) return [];
+  return value
+    .flatMap((entry) => {
+      if (entry == null || typeof entry !== 'object') return [];
+      const candidate = entry as Record<string, unknown>;
+      const bazisProjectId = Number(candidate.bazisProjectId);
+      const bazisRevisionId = Number(candidate.bazisRevisionId);
+      const revisionNo = Number(candidate.revisionNo);
+      if (
+        !Number.isInteger(bazisProjectId) || bazisProjectId <= 0 ||
+        !Number.isInteger(bazisRevisionId) || bazisRevisionId <= 0 ||
+        !Number.isInteger(revisionNo) || revisionNo <= 0
+      ) return [];
+      return [{
+        bazisProjectId,
+        bazisRevisionId,
+        revisionNo,
+        name: typeof candidate.name === 'string' ? candidate.name : '',
+      }];
+    })
+    .sort((left, right) => left.bazisProjectId - right.bazisProjectId || left.revisionNo - right.revisionNo);
 }
 
 function mapDetailCutJob(row: OrderDetailRow, kind: 'cut' | 'bath') {

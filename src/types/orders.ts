@@ -144,6 +144,12 @@ export interface OrderDetail {
   cut_job?: CutDetailLastReadyJobRef | null;
   bath_cut_job?: CutDetailLastReadyJobRef | null;
   bazis_cut_sets?: Array<{ bazisCutSetId: number; name: string }>;
+  bazis_projects?: Array<{
+    bazisProjectId: number;
+    bazisRevisionId: number;
+    revisionNo: number;
+    name: string;
+  }>;
 
   // Management
   delete_flag?: boolean;

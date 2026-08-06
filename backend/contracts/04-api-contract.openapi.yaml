@@ -1224,6 +1224,45 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/orders/{orderId}/refresh:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    post:
+      tags:
+        - Orders
+      operationId: refreshOrder
+      summary: Обновить производные флаги и связи заказа
+      security:
+        - bearerAuth: []
+      x-permissions:
+        - orders.view
+        - orders.update
+      x-transactional: true
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatchVersion'
+      responses:
+        '200':
+          description: Заказ и актуальные связи с производственными документами обновлены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderRefreshResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/OrderNotFound'
+        '409':
+          $ref: '#/components/responses/OrderVersionConflict'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /api/v1/orders/{orderId}/restore:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -15195,6 +15234,39 @@ components:
         order:
           $ref: '#/components/schemas/OrderDto'
 
+    OrderRefreshResponse:
+      type: object
+      required:
+        - order
+        - baseVersion
+        - version
+        - updatedDowelingDetailIds
+        - auditId
+        - refreshedAt
+        - requestId
+      properties:
+        order:
+          $ref: '#/components/schemas/OrderDto'
+        baseVersion:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 0
+        updatedDowelingDetailIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+        auditId:
+          type: string
+          nullable: true
+        refreshedAt:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+
     SaveOrderResponse:
       type: object
       required:
@@ -15391,6 +15463,7 @@ components:
         - edgeTypeId
         - detailCost
         - bazisCutSets
+        - bazisProjects
       properties:
         id:
           type: integer
@@ -15480,6 +15553,27 @@ components:
               name:
                 type: string
           description: Наборы Базис-раскроя, содержащие деталь заказа
+        bazisProjects:
+          type: array
+          items:
+            type: object
+            required:
+              - bazisProjectId
+              - bazisRevisionId
+              - revisionNo
+              - name
+            properties:
+              bazisProjectId:
+                type: integer
+                format: int64
+              bazisRevisionId:
+                type: integer
+                format: int64
+              revisionNo:
+                type: integer
+              name:
+                type: string
+          description: Базис-проекты, связанные с деталью через карту узлов
 
     PaymentDto:
       type: object

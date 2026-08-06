@@ -32,6 +32,7 @@ import { OrderSnapshotService } from './application/order-snapshot.service';
 import { OrderDetailTransferService } from './application/order-detail-transfer.service';
 import { OrderTransactionService } from './application/order-transaction.service';
 import { OrderQueryService } from './application/order-query.service';
+import { OrderRefreshService } from './application/order-refresh.service';
 import { OrderResourceDemandService } from './application/order-resource-demand.service';
 import { OrderStatusBoardService } from './application/order-status-board.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
@@ -156,6 +157,11 @@ export function shouldEnableOrderDeadlineSync(input: {
               : undefined,
         }),
       inject: [DatabaseService, ConfigService],
+    },
+    {
+      provide: OrderRefreshService,
+      useFactory: (database: DatabaseService) => new OrderRefreshService({ database }),
+      inject: [DatabaseService],
     },
     {
       provide: OrderResourceDemandService,

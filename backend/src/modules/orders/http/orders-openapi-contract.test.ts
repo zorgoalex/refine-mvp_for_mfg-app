@@ -13,6 +13,28 @@ const backendRoot = existsSync(resolve(process.cwd(), 'backend/contracts'))
   : process.cwd();
 
 describe('orders OpenAPI contract', () => {
+  it('documents stale-safe POST refresh with current relation projections', () => {
+    const contract = readOpenApiContract();
+    const refreshSection = sectionBetween(
+      contract,
+      '  /api/v1/orders/{orderId}/refresh:',
+      '  /api/v1/orders/{orderId}/restore:',
+    );
+    const refreshSchema = sectionBetween(
+      contract,
+      '    OrderRefreshResponse:',
+      '    SaveOrderResponse:',
+    );
+
+    expect(refreshSection).toContain('operationId: refreshOrder');
+    expect(refreshSection).toContain('- orders.view');
+    expect(refreshSection).toContain('- orders.update');
+    expect(refreshSection).toContain("$ref: '#/components/parameters/IdempotencyKey'");
+    expect(refreshSection).toContain("$ref: '#/components/parameters/IfMatchVersion'");
+    expect(refreshSchema).toContain('- updatedDowelingDetailIds');
+    expect(refreshSchema).toContain('- refreshedAt');
+    expect(contract).toContain('bazisProjects:');
+  });
   it('documents stale-safe idempotent DELETE /api/v1/orders/{orderId}', () => {
     const contract = readOpenApiContract();
     const deleteSection = sectionBetween(

@@ -106,6 +106,7 @@ const generateTempId = (): number => {
   // ========== UTILITY ==========
   reset: () => void;
   loadOrder: (order: OrderFormValues) => void;
+  applyOrderRefresh: (details: OrderDetail[], version: number) => void;
   getFormValues: () => OrderFormValues;
     setDirty: (isDirty: boolean) => void;
     setInitializing: (isInitializing: boolean) => void;
@@ -657,6 +658,17 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
             },
             false,
             'loadOrder'
+          ),
+
+        applyOrderRefresh: (details, version) =>
+          set(
+            (state) => ({
+              details,
+              version,
+              header: { ...state.header, version },
+            }),
+            false,
+            'applyOrderRefresh'
           ),
 
         getFormValues: () => {

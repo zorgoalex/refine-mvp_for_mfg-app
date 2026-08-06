@@ -49,6 +49,7 @@ export const apiRoutes = {
     resourceDemands: backendApiPath('/orders/resource-demands'),
     statusBoard: backendApiPath('/orders/status-board'),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
+    refresh: (orderId: number) => backendApiPath(`/orders/${orderId}/refresh`),
     detailLiveState: (orderId: number) =>
       backendApiPath(`/orders/${orderId}/detail-live-state`),
     liveEvents: (orderId: number) => backendApiPath(`/orders/${orderId}/live-events`),

@@ -15,6 +15,8 @@ import type {
   OrderResourceDemandResponse,
   OrderTransferTargetsResponse,
   OrderResponse,
+  OrderRefreshRequest,
+  OrderRefreshResponse,
   RestoreOrderRequest,
   RestoreOrderResponse,
   SaveOrderDto,
@@ -65,6 +67,20 @@ export const ordersApi = {
     );
     emitOrderDataChanged(response.order.header.orderId);
     return response;
+  },
+
+  refresh(orderId: number, request: OrderRefreshRequest): Promise<OrderRefreshResponse> {
+    const version = validateOrderVersion(request.version);
+    return httpClient.request<OrderRefreshResponse>(
+      apiRoutes.orders.refresh(validateOrderId(orderId)),
+      {
+        method: 'POST',
+        headers: {
+          'If-Match': `"${version}"`,
+          'Idempotency-Key': request.idempotencyKey ?? createOrderRefreshIdempotencyKey(),
+        },
+      },
+    );
   },
 
   changeStatus(
@@ -274,6 +290,15 @@ export function createOrderTransferIdempotencyKey(): string {
       : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   return `order-detail-transfer:${uuid}`;
+}
+
+export function createOrderRefreshIdempotencyKey(): string {
+  const uuid =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  return `order-refresh:${uuid}`;
 }
 
 function saveBlob(blob: Blob, fileName: string): void {

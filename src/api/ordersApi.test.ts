@@ -121,6 +121,30 @@ describe('ordersApi', () => {
     expect(init?.body).toBe(JSON.stringify(dto));
   });
 
+  it('refreshes an order with If-Match and Idempotency-Key', async () => {
+    const response = {
+      order: createOrderDto(),
+      baseVersion: 4,
+      version: 5,
+      updatedDowelingDetailIds: [10],
+      auditId: 'audit-refresh-1',
+      refreshedAt: '2026-08-06T09:00:00.000Z',
+      requestId: 'request-refresh-1',
+    };
+    const fetchMock = mockFetch(response);
+
+    await expect(ordersApi.refresh(15, {
+      version: 4,
+      idempotencyKey: 'order-refresh-key-1',
+    })).resolves.toEqual(response);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/15/refresh');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    const headers = fetchMock.mock.calls[0][1]?.headers as Headers;
+    expect(headers.get('If-Match')).toBe('"4"');
+    expect(headers.get('Idempotency-Key')).toBe('order-refresh-key-1');
+  });
+
   it('changes status and deletes by order id', async () => {
     const fetchMock = mockFetch(
       { order: createOrderDto() },

@@ -13,7 +13,8 @@ export const DetailCardList: React.FC<{
   selectedIds?: readonly number[];
   onSelectionChange?: (ids: number[]) => void;
   bazisCutLinkEnabled?: boolean;
-}> = ({ rows, lookups, highlightDetailId = null, selectionEnabled = false, selectedIds = [], onSelectionChange, bazisCutLinkEnabled = false }) => {
+  bazisProjectLinkEnabled?: boolean;
+}> = ({ rows, lookups, highlightDetailId = null, selectionEnabled = false, selectedIds = [], onSelectionChange, bazisCutLinkEnabled = false, bazisProjectLinkEnabled = false }) => {
   const highlightRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -41,6 +42,17 @@ export const DetailCardList: React.FC<{
               return [{ bazisCutSetId, name: typeof ref.name === 'string' ? ref.name : '' }];
             })
           : [];
+        const bazisProjects = Array.isArray(row.bazis_projects)
+          ? row.bazis_projects.flatMap((entry) => {
+              if (entry == null || typeof entry !== 'object') return [];
+              const ref = entry as Record<string, unknown>;
+              const bazisProjectId = Number(ref.bazisProjectId);
+              const bazisRevisionId = Number(ref.bazisRevisionId);
+              const revisionNo = Number(ref.revisionNo);
+              if (!Number.isInteger(bazisProjectId) || bazisProjectId <= 0 || !Number.isInteger(bazisRevisionId) || bazisRevisionId <= 0) return [];
+              return [{ bazisProjectId, bazisRevisionId, revisionNo, name: typeof ref.name === 'string' ? ref.name : '' }];
+            })
+          : [];
         return (
           <Card
             key={i}
@@ -66,6 +78,24 @@ export const DetailCardList: React.FC<{
             </Space>
             <Typography.Text style={{ display: 'block' }}>{m.material}</Typography.Text>
             <Typography.Text type="secondary" style={{ display: 'block' }}>{m.milling}</Typography.Text>
+            {bazisProjects.length > 0 && (
+              <Space wrap size={4}>
+                <Typography.Text type="secondary">Базис-проект:</Typography.Text>
+                {bazisProjects.map((project) => bazisProjectLinkEnabled ? (
+                  <Link
+                    key={`${project.bazisProjectId}:${project.bazisRevisionId}`}
+                    to={`/bazis/projects/${project.bazisProjectId}?revision=${project.bazisRevisionId}`}
+                    title={`${project.name}, рев. ${project.revisionNo}`}
+                  >
+                    {`БП-${project.bazisProjectId}`}
+                  </Link>
+                ) : (
+                  <Typography.Text key={`${project.bazisProjectId}:${project.bazisRevisionId}`} title={project.name}>
+                    {`БП-${project.bazisProjectId}`}
+                  </Typography.Text>
+                ))}
+              </Space>
+            )}
             {bazisCutSets.length > 0 && (
               <Space wrap size={4}>
                 <Typography.Text type="secondary">Базис-раскрой:</Typography.Text>

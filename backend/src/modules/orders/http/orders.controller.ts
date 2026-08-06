@@ -31,6 +31,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { ROLE_POLICIES, type Scope } from '../../../permissions/policies/role-policies';
 import { allowsScope } from '../../../permissions/policies/scope';
 import { OrderQueryService } from '../application/order-query.service';
+import { OrderRefreshService } from '../application/order-refresh.service';
 import {
   ORDER_LIST_SORT_FIELDS,
   type OrderListQuery,
@@ -50,6 +51,7 @@ import type {
   OrderDto,
   OrderListResponseDto,
   OrderResponseDto,
+  OrderRefreshResponseDto,
   RestoreOrderResponseDto,
 } from '../dto/order.dto';
 import type { OrderFormDataResponseDto } from '../dto/order-form-data.dto';
@@ -248,6 +250,17 @@ const orderDetailBazisCutSetRefSwaggerSchema = {
   },
 } as const;
 
+const orderDetailBazisProjectRefSwaggerSchema = {
+  type: 'object',
+  required: ['bazisProjectId', 'bazisRevisionId', 'revisionNo', 'name'],
+  properties: {
+    bazisProjectId: { type: 'integer' },
+    bazisRevisionId: { type: 'integer' },
+    revisionNo: { type: 'integer' },
+    name: { type: 'string' },
+  },
+} as const;
+
 // Exported for generated-swagger-document testing only (orders-openapi-contract.test.ts).
 export const orderDetailResponseSwaggerSchema = {
   type: 'object',
@@ -283,6 +296,7 @@ export const orderDetailResponseSwaggerSchema = {
     'linkPdfFile',
     'refKey1c',
     'bazisCutSets',
+    'bazisProjects',
   ],
   properties: {
     id: { type: 'integer' },
@@ -320,6 +334,7 @@ export const orderDetailResponseSwaggerSchema = {
     cutJob: { ...orderDetailCutJobRefSwaggerSchema, nullable: true },
     bathCutJob: { ...orderDetailCutJobRefSwaggerSchema, nullable: true },
     bazisCutSets: { type: 'array', items: orderDetailBazisCutSetRefSwaggerSchema },
+    bazisProjects: { type: 'array', items: orderDetailBazisProjectRefSwaggerSchema },
   },
 } as const;
 
@@ -613,6 +628,28 @@ const orderResponseSwaggerSchema = {
   required: ['order'],
   properties: {
     order: orderSwaggerSchema,
+  },
+} as const;
+
+const orderRefreshResponseSwaggerSchema = {
+  type: 'object',
+  required: [
+    'order',
+    'baseVersion',
+    'version',
+    'updatedDowelingDetailIds',
+    'auditId',
+    'refreshedAt',
+    'requestId',
+  ],
+  properties: {
+    order: orderSwaggerSchema,
+    baseVersion: { type: 'integer' },
+    version: { type: 'integer' },
+    updatedDowelingDetailIds: { type: 'array', items: { type: 'integer' } },
+    auditId: { type: 'string', nullable: true },
+    refreshedAt: { type: 'string', format: 'date-time' },
+    requestId: { type: 'string' },
   },
 } as const;
 
@@ -939,6 +976,8 @@ export class OrdersController {
     private readonly orderQueries: OrderQueryService,
     @Inject(OrderDetailTransferService)
     private readonly detailTransfer: OrderDetailTransferService,
+    @Inject(OrderRefreshService)
+    private readonly orderRefresh: OrderRefreshService,
     @Inject(OrdersRuntimeConfigService)
     private readonly runtimeConfig: OrdersRuntimeConfigService,
     @Inject(DatabaseService)
@@ -1105,6 +1144,49 @@ export class OrdersController {
     }
 
     return { order };
+  }
+
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiHeader({
+    name: 'If-Match',
+    required: true,
+    description: 'Current order version/ETag version is required.',
+    schema: { type: 'string' },
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'Idempotency key for a safe order refresh retry.',
+    schema: { type: 'string', minLength: 8, maxLength: 200 },
+  })
+  @ApiResponse({ status: 200, description: 'Refreshed order and document relations', schema: swaggerSchema(orderRefreshResponseSwaggerSchema) })
+  @ApiResponse({ status: 400, description: 'Missing or invalid refresh request headers' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions or row scope' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 409, description: 'Stale version or idempotency conflict' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'refreshOrder', summary: 'Refresh order-derived flags and document relations' })
+  @Post(':orderId/refresh')
+  @HttpCode(200)
+  async refresh(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+    @Headers('if-match') ifMatchHeader: string | string[] | undefined,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
+  ): Promise<OrderRefreshResponseDto> {
+    this.assertOrdersWriteEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const orderId = parseOrderId(orderIdParam);
+    const metadata = await this.orderRefresh.refresh({
+      currentUser,
+      orderId,
+      expectedVersion: parseIfMatchVersion(ifMatchHeader),
+      idempotencyKey: parseIdempotencyKeyHeader(idempotencyKeyHeader),
+      requestId: request.requestId,
+    });
+    const order = await this.orderQueries.getById({ currentUser, orderId });
+    return { order, ...metadata };
   }
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })

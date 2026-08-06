@@ -16,6 +16,7 @@ import type {
   SaveOrderWorkshopDto,
 } from '../dto/save-order.dto';
 import { OrderValidationError, type OrderFieldError } from '../errors/order.errors';
+import { noteRequiresDoweling } from './order-doweling';
 
 type RawRecord = Record<string, unknown>;
 
@@ -126,6 +127,7 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
 
 function normalizeDetail(detail: SaveOrderDetailDto): NormalizedSaveOrderDetailDto {
   const raw = detail as unknown as RawRecord;
+  const note = normalizeOptionalString(raw.note);
 
   return {
     id: optionalInteger(raw.id, 'details[].id') ?? undefined,
@@ -148,12 +150,12 @@ function normalizeDetail(detail: SaveOrderDetailDto): NormalizedSaveOrderDetailD
     priority: optionalNumber(raw.priority, 'details[].priority') ?? 100,
     productionStatusId: optionalInteger(raw.productionStatusId, 'details[].productionStatusId'),
     jointOrderId: optionalInteger(raw.jointOrderId, 'details[].jointOrderId'),
-    note: normalizeOptionalString(raw.note),
+    note,
     basisProject: normalizeOptionalString(raw.basisProject),
     basisProduct: normalizeOptionalString(raw.basisProduct),
     basisData: normalizeOptionalString(raw.basisData),
     basisDesignation: normalizeOptionalString(raw.basisDesignation),
-    doweling: optionalBoolean(raw.doweling, false),
+    doweling: noteRequiresDoweling(note) || optionalBoolean(raw.doweling, false),
     linkCuttingFile: normalizeOptionalString(raw.linkCuttingFile),
     linkCuttingImageFile: normalizeOptionalString(raw.linkCuttingImageFile),
     linkCadFile: normalizeOptionalString(raw.linkCadFile),

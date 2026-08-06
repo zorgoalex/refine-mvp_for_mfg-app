@@ -150,6 +150,46 @@ describe('normalizeSaveOrderDto', () => {
     ]);
   });
 
+  it('forces doweling when the normalized detail note contains the separate trigger word', () => {
+    const normalized = normalizeSaveOrderDto(createRawOrder({
+      details: [
+        {
+          detailNumber: 1,
+          height: 100,
+          width: 100,
+          quantity: 1,
+          sheetMaterialTypeId: 1,
+          millingTypeId: 1,
+          edgeTypeId: 1,
+          note: 'Нужна Присадка.',
+          doweling: false,
+        },
+      ],
+    }));
+
+    expect(normalized.details[0].doweling).toBe(true);
+  });
+
+  it('does not force doweling for a word fragment', () => {
+    const normalized = normalizeSaveOrderDto(createRawOrder({
+      details: [
+        {
+          detailNumber: 1,
+          height: 100,
+          width: 100,
+          quantity: 1,
+          sheetMaterialTypeId: 1,
+          millingTypeId: 1,
+          edgeTypeId: 1,
+          note: 'неприсадка',
+          doweling: false,
+        },
+      ],
+    }));
+
+    expect(normalized.details[0].doweling).toBe(false);
+  });
+
   it('rejects missing required aggregate arrays', () => {
     const invalid = {
       ...createRawOrder(),

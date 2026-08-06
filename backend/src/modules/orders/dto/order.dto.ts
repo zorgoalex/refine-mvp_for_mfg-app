@@ -33,6 +33,19 @@ export interface OrderResponseDto {
   order: OrderDto;
 }
 
+export interface OrderRefreshMetadataDto {
+  baseVersion: number;
+  version: number;
+  updatedDowelingDetailIds: number[];
+  auditId: string | null;
+  refreshedAt: string;
+  requestId: string;
+}
+
+export interface OrderRefreshResponseDto extends OrderRefreshMetadataDto {
+  order: OrderDto;
+}
+
 export interface DeleteOrderResponseDto {
   success: true;
   orderId: number;
@@ -178,10 +191,18 @@ export type OrderDetailDto = CalculatedOrderDetailDto & {
   cutJob?: OrderDetailCutJobRefDto | null;
   bathCutJob?: OrderDetailCutJobRefDto | null;
   bazisCutSets: OrderDetailBazisCutSetRefDto[];
+  bazisProjects: OrderDetailBazisProjectRefDto[];
 };
 
 export interface OrderDetailBazisCutSetRefDto {
   bazisCutSetId: number;
+  name: string;
+}
+
+export interface OrderDetailBazisProjectRefDto {
+  bazisProjectId: number;
+  bazisRevisionId: number;
+  revisionNo: number;
   name: string;
 }
 

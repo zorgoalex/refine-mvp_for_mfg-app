@@ -535,6 +535,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     cut_job: detail.cutJob ?? null,
     bath_cut_job: detail.bathCutJob ?? null,
     bazis_cut_sets: detail.bazisCutSets ?? [],
+    bazis_projects: detail.bazisProjects ?? [],
   }));
 }
 

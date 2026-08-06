@@ -7,7 +7,7 @@ import {
   PlusOutlined,
   DeleteOutlined,
   ThunderboltOutlined,
-  CalculatorOutlined,
+  ReloadOutlined,
   EditOutlined,
   CheckOutlined,
   CloseOutlined,
@@ -40,6 +40,8 @@ import { buildCutJobLinkMapsFromDetails, mergeCutJobLinkMaps } from '../../cutCo
 import { OrderDetailTransferModal } from '../OrderDetailTransferModal';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 import type { TransferOrderDetailsResponse } from '../../../../api/types/orderApi.types';
+import { ordersApi } from '../../../../api/ordersApi';
+import { mergeOrderRefreshDetails } from '../../orderRefresh';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -96,6 +98,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     isDirty,
     version,
     loadOrder,
+    applyOrderRefresh,
   } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
 
@@ -122,6 +125,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   );
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -135,6 +139,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const [addToCutOpen, setAddToCutOpen] = useState(false);
   const bazisCutVisible = featureFlags.bazisCut;
   const bazisCutManage = can('cut.manage');
+  const canRefreshOrder = !featureFlags.useBackendPermissions || can('orders.update');
   const [addToBazisCutOpen, setAddToBazisCutOpen] = useState(false);
   const selectedPersistedDetailIds = useMemo(
     () => selectedDetailIds(details as any[], selectedRowKeys),
@@ -485,7 +490,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   };
 
   // Handle recalculate all areas and sums
-  const handleRecalculateSums = () => {
+  const recalculateSums = () => {
     if (details.length === 0) {
       message.warning('Нет позиций для пересчёта');
       return;
@@ -560,6 +565,51 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         `Пересчитано: площадь ${areaUpdatedCount} поз., стоимость ${costUpdatedCount} поз. ` +
         `Площадь: ${totalArea.toLocaleString('ru-RU')} м², Сумма: ${totalAmount.toLocaleString('ru-RU')} ₸`
       );
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (details.length === 0) {
+      message.warning('Нет позиций для обновления');
+      return;
+    }
+    const orderId = Number(header.order_id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      message.warning('Сначала сохраните заказ');
+      return;
+    }
+
+    recalculateSums();
+    const afterRecalculate = storeApi.getState();
+    applyOrderRefresh(
+      mergeOrderRefreshDetails(afterRecalculate.details, []),
+      afterRecalculate.version,
+    );
+
+    setIsRefreshing(true);
+    try {
+      const baseVersion = storeApi.getState().version;
+      const response = await ordersApi.refresh(orderId, { version: baseVersion });
+      if (response.order.version !== response.version) {
+        message.error('Заказ изменён другим пользователем. Перезагрузите карточку перед сохранением.');
+        return;
+      }
+      const serverDetails = mapOrderDtoToFormValues(response.order).details;
+      const currentDetails = storeApi.getState().details;
+      applyOrderRefresh(
+        mergeOrderRefreshDetails(currentDetails, serverDetails),
+        response.version,
+      );
+      message.success(
+        response.updatedDowelingDetailIds.length > 0
+          ? `Обновлено. Присадка установлена для ${response.updatedDowelingDetailIds.length} поз.`
+          : 'Заказ и связи с документами обновлены',
+      );
+    } catch (error) {
+      console.error('Order refresh failed:', error);
+      message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -776,13 +826,16 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                   </AccessibleToolbarTooltip>
                 );
               })()}
-              <AccessibleToolbarTooltip title="Пересчитать суммы" disabled={details.length === 0}>
+              <AccessibleToolbarTooltip title="Обновить" disabled={details.length === 0 || isSaving || isRefreshing || !canRefreshOrder}>
                 <Button
-                  icon={<CalculatorOutlined />}
-                  onClick={handleRecalculateSums}
-                  disabled={details.length === 0}
-                  aria-label="Пересчитать суммы"
-                />
+                  icon={<ReloadOutlined />}
+                  onClick={() => void handleRefresh()}
+                  disabled={details.length === 0 || isSaving || isRefreshing || !canRefreshOrder}
+                  loading={isRefreshing}
+                  aria-label="Обновить"
+                >
+                  <OrderToolbarLabel>Обновить</OrderToolbarLabel>
+                </Button>
               </AccessibleToolbarTooltip>
               {dragSelectionState && dragSelectionState.pendingKeys.length > 0 && (
                 <>

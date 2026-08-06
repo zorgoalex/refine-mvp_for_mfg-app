@@ -293,7 +293,7 @@ describe('PgOrderReadRepository', () => {
     });
   });
 
-  it('reads linked Basis-cut sets by source order detail with stable numeric order', async () => {
+  it('reads linked Basis-cut sets by direct/order and indirect/node provenance plus Basis projects', async () => {
     const database = createDatabase();
     const repository = new PgOrderReadRepository(database.service);
 
@@ -305,6 +305,11 @@ describe('PgOrderReadRepository', () => {
     const detailQuery = database.queries.find((query) => query.text.includes('FROM order_details od'))?.text ?? '';
     expect(detailQuery).toContain('FROM bazis_cut_set_details d');
     expect(detailQuery).toContain('d.source_order_detail_id = od.detail_id');
+    expect(detailQuery).toContain('d.source_bazis_node_id = detail_map.node_id');
+    expect(detailQuery).toContain('FROM bazis_node_order_detail_map detail_map');
+    expect(detailQuery).toContain('JOIN bazis_project_revisions revision');
+    expect(detailQuery).toContain('JOIN bazis_projects project');
+    expect(detailQuery).toContain('AS bazis_projects');
     expect(detailQuery).toContain('ORDER BY refs.bazis_cut_set_id');
   });
 
