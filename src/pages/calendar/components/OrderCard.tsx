@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Checkbox, Tag, Tooltip } from 'antd';
-import { EditOutlined } from '@ant-design/icons';
+import { EditOutlined, HolderOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDrag, useDragDropManager } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
@@ -52,6 +52,11 @@ const OrderCard: React.FC<OrderCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
+  const dragFromHandleOnly =
+    typeof window !== 'undefined' &&
+    ('ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0) &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(pointer: coarse)').matches;
 
   // AD-mobile: double-tap on the card opens the context menu. We use
   // touchstart/touchend (not `click`) so the gesture works even when
@@ -59,7 +64,13 @@ const OrderCard: React.FC<OrderCardProps> = ({
   // starts. The handler ignores gestures where the finger moved more
   // than TAP_MAX_MOVE_PX, so a drag-in-progress never becomes a tap.
   const lastTapRef = useRef<{ t: number; x: number; y: number } | null>(null);
-  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
+  const touchStartRef = useRef<{
+    x: number;
+    y: number;
+    t: number;
+    onNumber: boolean;
+    onDragHandle: boolean;
+  } | null>(null);
 
   // AD-mobile: custom long-press state. A longPressTimer ref is set on
   // touchstart; if the finger moves more than LONG_PRESS_MAX_MOVE_PX or
@@ -77,23 +88,28 @@ const OrderCard: React.FC<OrderCardProps> = ({
     isLongPressDraggingRef.current = false;
   };
 
-  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+  const handleTouchStart = (e: React.TouchEvent<HTMLElement>) => {
     const t = e.touches[0];
     if (!t) return;
     // Clicks on the order-number link navigate; never start a long
     // press or a tap from such a touch.
     const target = e.target as HTMLElement;
     const onNumber = !!target.closest('.order-card__number');
+    const onDragHandle = !!target.closest('.calendar-order-card__drag-handle');
+    if (onDragHandle && (e.currentTarget as HTMLElement).classList.contains('order-card')) {
+      return;
+    }
     touchStartRef.current = {
       x: t.clientX,
       y: t.clientY,
       t: Date.now(),
       onNumber,
+      onDragHandle,
     };
     // Schedule the long-press drag start. beginDrag is only called if
     // the user has not lifted the finger and has not moved more than
     // LONG_PRESS_MAX_MOVE_PX by the time the timer fires.
-    if (onNumber) return;
+    if (!onDragHandle) return;
     longPressTimerRef.current = setTimeout(() => {
       longPressTimerRef.current = null;
       const start = touchStartRef.current;
@@ -112,12 +128,12 @@ const OrderCard: React.FC<OrderCardProps> = ({
       dndManager.getActions().beginDrag([handlerId] as any, {
         clientOffset,
         getSourceClientOffset: getSourceClientOffset as any,
-        publishSource: false,
+        publishSource: true,
       } as any);
       isLongPressDraggingRef.current = true;
     }, LONG_PRESS_MS);
   };
-  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+  const handleTouchMove = (e: React.TouchEvent<HTMLElement>) => {
     const start = touchStartRef.current;
     if (!start) return;
     const t = e.touches[0];
@@ -134,7 +150,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
       cancelLongPress();
     }
   };
-  const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+  const handleTouchEnd = (e: React.TouchEvent<HTMLElement>) => {
     const wasLongPress = isLongPressDraggingRef.current;
     cancelLongPress();
     const start = touchStartRef.current;
@@ -149,7 +165,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
     }
     const t = e.changedTouches[0];
     if (!t) return;
-    if (start.onNumber) {
+    if (start.onNumber || start.onDragHandle) {
       lastTapRef.current = null;
       return;
     }
@@ -228,11 +244,15 @@ const OrderCard: React.FC<OrderCardProps> = ({
   const isDragging = collected.isDragging;
   const handlerId = collected.handlerId;
 
-  // Combined ref callback: react-dnd connector + our own DOM ref so we
-  // can compute the source-node bounding rect for getSourceClientOffset.
+  // A coarse touch pointer gets a dedicated DnD handle, leaving the card
+  // body as a native pan surface. Desktop keeps the established behavior:
+  // the entire card remains an HTML5 drag source.
   const setCardRef = (node: HTMLDivElement | null) => {
     cardNodeRef.current = node;
-    dragRef(node);
+    if (!dragFromHandleOnly) dragRef(node);
+  };
+  const setDragHandleRef = (node: HTMLButtonElement | null) => {
+    if (dragFromHandleOnly) dragRef(node);
   };
 
   // Вычисляем фрезеровку из деталей заказа
@@ -305,7 +325,6 @@ const OrderCard: React.FC<OrderCardProps> = ({
       className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${borderClass}`}
       style={{
         backgroundColor,
-        cursor: 'move',
         opacity: isDragging ? 0.5 : 1,
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
@@ -318,6 +337,22 @@ const OrderCard: React.FC<OrderCardProps> = ({
       onTouchCancel={handleTouchCancel}
       onClick={handleCardClick}
     >
+      <button
+        ref={setDragHandleRef}
+        type="button"
+        className="calendar-order-card__drag-handle"
+        aria-label={`Удерживайте и перетащите заказ ${order.order_name}`}
+        title="Удерживайте и перетащите"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
+        onClick={(event) => event.stopPropagation()}
+        onContextMenu={(event) => event.stopPropagation()}
+      >
+        <HolderOutlined aria-hidden="true" />
+      </button>
+
       {/* Строка 1: Чекбокс | Номер | Материалы | Карандашик (если отрисован) */}
       <div className="order-card__header">
         <Checkbox
