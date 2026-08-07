@@ -98,7 +98,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|109_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -129,6 +129,11 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
   it('pins migrations 103/104/105 Bazis product and panel-link end states', () => {
     expect(probeFn).toContain('103_bazis_cut_position_sources*');
     expect(probeFn).toContain('bazis-cut-position-v4:');
+    const migration103Probe = probeFn.slice(
+      probeFn.indexOf('103_bazis_cut_position_sources*'),
+      probeFn.indexOf('104_bazis_order_detail_product_mapping*'),
+    );
+    expect(migration103Probe).toContain('manual snapshot edits are preserved by migration 107');
     expect(probeFn).toContain('104_bazis_order_detail_product_mapping*');
     expect(probeFn).toContain('Basis product name from the panel-level Product column');
     expect(probeFn).toContain('104_bazis_panel_order_links*');
@@ -136,8 +141,21 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(probeFn).toContain('q_con_hash_on bazis_node_order_detail_map_mapping_kind_check');
     expect(probeFn).toContain("q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'");
     expect(probeFn).toContain('v104 exact current-revision Basis PDF detail to Bazis panel reconciliation');
+    expect(probeFn).toContain('d4f7e31052321242dfea61056bae41e7');
+    expect(probeFn).toContain('v109 exact current-revision panel reconciliation with one-product NULL product support');
     expect(probeFn).toContain('105_bazis_order_detail_product_link_fallback*');
     expect(probeFn).toContain("products.root_product_count <= 1");
+  });
+
+  it('pins migration 109 and lets its function supersede the migration 104 marker', () => {
+    expect(probeFn).toContain('109_bazis_single_product_reprojection*');
+    expect(probeFn).toContain("q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7");
+    const migration104Probe = probeFn.slice(
+      probeFn.indexOf('104_bazis_panel_order_links*'),
+      probeFn.indexOf('105_bazis_order_detail_product_link_fallback*'),
+    );
+    expect(migration104Probe).toContain('14cfb20b020779a070e7ee2ba070ba0d');
+    expect(migration104Probe).toContain('d4f7e31052321242dfea61056bae41e7');
   });
 });
 

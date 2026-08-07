@@ -936,12 +936,18 @@ probe_file() {
                          AND pg_get_constraintdef(oid) LIKE 'FOREIGN KEY (design_engineer_id) REFERENCES employees(employee_id)%ON DELETE SET NULL%'
                      );" ;;
     103_bazis_cut_position_sources*) probe_all \
-                     "SELECT col_description(
+                     "SELECT COALESCE(col_description(
                        'bazis_cut_set_details'::regclass,
                        (SELECT attnum FROM pg_attribute
                         WHERE attrelid='bazis_cut_set_details'::regclass
                           AND attname='position')
-                     ) LIKE 'bazis-cut-position-v4:%';" ;;
+                     ) LIKE 'bazis-cut-position-v4:%', false)
+                     OR col_description(
+                       'bazis_cut_set_details'::regclass,
+                       (SELECT attnum FROM pg_attribute
+                        WHERE attrelid='bazis_cut_set_details'::regclass
+                          AND attname='position')
+                     ) = 'ERP Basis designation when basis_project is filled; otherwise ERP detail_number; manual snapshot edits are preserved by migration 107';" ;;
     104_bazis_order_detail_product_mapping*) probe_all \
                      "SELECT col_description(
                        'order_details'::regclass,
@@ -956,11 +962,17 @@ probe_file() {
                      "$(q_con_hash_on bazis_node_order_detail_map_mapping_kind_check bazis_node_order_detail_map e972b603d9254aa8bdaed8dd0d485166)" \
                      "$(q_con_hash_on bazis_node_order_detail_map_imported_provenance_check bazis_node_order_detail_map 628f04bad23b7d05e30440ec0b12f5f0)" \
                      "$(q_idx bazis_node_map_import_source_idx)" \
-                     "$(q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' 14cfb20b020779a070e7ee2ba070ba0d)" \
-                     "SELECT obj_description(
-                       'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'::regprocedure,
-                       'pg_proc'
-                     ) = 'v104 exact current-revision Basis PDF detail to Bazis panel reconciliation';" ;;
+                     "SELECT COALESCE((
+                       SELECT (
+                         md5(pg_get_functiondef(oid)) = '14cfb20b020779a070e7ee2ba070ba0d'
+                         AND obj_description(oid, 'pg_proc') = 'v104 exact current-revision Basis PDF detail to Bazis panel reconciliation'
+                       ) OR (
+                         md5(pg_get_functiondef(oid)) = 'd4f7e31052321242dfea61056bae41e7'
+                         AND obj_description(oid, 'pg_proc') = 'v109 exact current-revision panel reconciliation with one-product NULL product support'
+                       )
+                       FROM pg_proc
+                       WHERE oid = to_regprocedure('reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)')
+                     ), false);" ;;
     105_bazis_order_detail_product_link_fallback*) probe_all "SELECT NOT EXISTS (
                        WITH revision_products AS (
                          SELECT revision.bazis_revision_id AS revision_id,
@@ -1018,6 +1030,12 @@ probe_file() {
                         WHERE attrelid='bazis_cut_set_details'::regclass
                           AND attname='position')
                      ) = 'ERP Basis designation when basis_project is filled; otherwise ERP detail_number; manual snapshot edits are preserved by migration 107';" ;;
+    109_bazis_single_product_reprojection*) probe_all \
+                     "$(q_fun_hash 'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)' d4f7e31052321242dfea61056bae41e7)" \
+                     "SELECT obj_description(
+                       'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'::regprocedure,
+                       'pg_proc'
+                     ) = 'v109 exact current-revision panel reconciliation with one-product NULL product support';" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1029,7 +1047,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|109_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

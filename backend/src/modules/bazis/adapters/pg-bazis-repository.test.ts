@@ -250,6 +250,10 @@ describe('PgBazisRepository.importRevision', () => {
         'SELECT node_id, order_detail_id, bazis_project_id, revision_id, project_link_created FROM reconcile_bazis_panel_order_links',
       ),
     );
+    const candidateQuery = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('SELECT link.order_id,'),
+    );
+    expect(candidateQuery?.text).not.toContain('NULLIF(detail.basis_product');
     const retentionIndex = database.queries.findIndex((query) =>
       normalizeSql(query.text).includes('prune_keep'),
     );

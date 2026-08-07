@@ -611,14 +611,6 @@ export class PgBazisRepository implements BazisRepositoryPort {
          AND detail.delete_flag = false
         WHERE link.bazis_project_id = $1
           AND NULLIF(btrim(detail.basis_project), '') IS NOT NULL
-          AND NULLIF(btrim(COALESCE(
-            NULLIF(detail.basis_product, ''),
-            CASE
-              WHEN position('/' in detail.basis_project) > 0
-                THEN regexp_replace(detail.basis_project, '^[^/]*/[[:space:]]*', '')
-              ELSE NULL
-            END
-          )), '') IS NOT NULL
           AND NULLIF(btrim(detail.basis_designation), '') IS NOT NULL
           AND NULLIF(btrim(detail.basis_data), '') IS NOT NULL
           AND NULLIF(btrim(detail.detail_name), '') IS NOT NULL
