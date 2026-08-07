@@ -202,7 +202,11 @@ export class LabelsService {
 
   async previewOrderLabels(command: PreviewOrderLabelsCommand): Promise<OrderLabelsPreviewDto> {
     await this.require(command, [VIEW, GENERATE, MANAGE_TEMPLATES], command.orderId, 'order');
-    if (command.input.cutMapSelections !== undefined || command.input.cutMapSource !== undefined) {
+    if (
+      command.input.cutMapSelections !== undefined
+      || command.input.cutMapSource !== undefined
+      || command.input.telegramCutMapFallbackVersion !== undefined
+    ) {
       await this.require(command, [CUT_VIEW], command.orderId, 'order');
     }
     return this.repo.previewOrderLabels(command);
@@ -210,7 +214,11 @@ export class LabelsService {
 
   async generateOrderLabels(command: GenerateOrderLabelsCommand): Promise<OrderLabelGenerationDto> {
     await this.require(command, [GENERATE], command.orderId, 'order');
-    if (command.input.cutMapSelections !== undefined || command.input.cutMapSource !== undefined) {
+    if (
+      command.input.cutMapSelections !== undefined
+      || command.input.cutMapSource !== undefined
+      || command.input.telegramCutMapFallbackVersion !== undefined
+    ) {
       await this.require(command, [CUT_VIEW], command.orderId, 'order');
     }
     return this.repo.generateOrderLabels(command);
@@ -228,16 +236,22 @@ export class LabelsService {
 
   async getLatestOrderLabelsPreview(query: ExportOrderLabelsQuery): Promise<LatestOrderLabelsPreviewDto> {
     await this.require(query, [VIEW, GENERATE], query.orderId, 'order');
-    return this.repo.getLatestOrderLabelsPreview(query);
+    const descriptor = await this.repo.getOrderLabelGenerationAccessDescriptor(query);
+    if (descriptor.usesCutMap) await this.require(query, [CUT_VIEW], query.orderId, 'order');
+    return this.repo.getLatestOrderLabelsPreview({ ...query, generationId: descriptor.generationId });
   }
 
   async exportOrderLabels(query: ExportOrderLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }> {
     await this.require(query, [GENERATE], query.orderId, 'order');
-    return this.repo.exportOrderLabels(query);
+    const descriptor = await this.repo.getOrderLabelGenerationAccessDescriptor(query);
+    if (descriptor.usesCutMap) await this.require(query, [CUT_VIEW], query.orderId, 'order');
+    return this.repo.exportOrderLabels({ ...query, generationId: descriptor.generationId });
   }
 
   async exportDetailLabels(query: ExportDetailLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }> {
     await this.require(query, [GENERATE]);
+    const descriptor = await this.repo.getDetailLabelGenerationAccessDescriptor(query);
+    if (descriptor.usesCutMap) await this.require(query, [CUT_VIEW]);
     return this.repo.exportDetailLabels(query);
   }
 

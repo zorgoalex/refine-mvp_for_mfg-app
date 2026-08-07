@@ -79,9 +79,12 @@ export const labelsApi = {
     return httpClient.post<OrderLabelGeneration>(apiRoutes.labels.orderGenerate(validateId(orderId, 'orderId')), input);
   },
 
-  listOrderCutMapOptions(orderId: number): Promise<OrderLabelCutMapOptions> {
+  listOrderCutMapOptions(orderId: number, telegramCutMapFallbackVersion?: 'v1'): Promise<OrderLabelCutMapOptions> {
+    const query = telegramCutMapFallbackVersion
+      ? `?telegramCutMapFallbackVersion=${telegramCutMapFallbackVersion}`
+      : '';
     return httpClient.get<OrderLabelCutMapOptions>(
-      apiRoutes.labels.orderCutMapOptions(validateId(orderId, 'orderId')),
+      `${apiRoutes.labels.orderCutMapOptions(validateId(orderId, 'orderId'))}${query}`,
       { cache: 'no-store' },
     );
   },

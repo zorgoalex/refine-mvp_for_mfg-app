@@ -33,7 +33,12 @@ import { LabelsRuntimeConfigService } from './http/labels-runtime-config.service
       provide: LabelsService,
       useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
         new LabelsService({
-          repo: database.isConfigured ? new PgLabelsRepository(database) : new UnavailableLabelsRepository(),
+          repo: database.isConfigured
+            ? new PgLabelsRepository(database, {
+              telegramMediaDir: config.get('CNC_TELEGRAM_MEDIA_DIR', { infer: true }),
+              telegramFallbackEnabled: config.get('LABEL_TELEGRAM_CUT_MAP_FALLBACK_ENABLED', { infer: true }),
+            })
+            : new UnavailableLabelsRepository(),
           ocr: createOcrClientFromEnv(config.get('OCR_SERVICE_BASE_URL', { infer: true })),
         }),
       inject: [DatabaseService, ConfigService],

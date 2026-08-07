@@ -11,7 +11,7 @@ import {
   buildOrderCutMapLabelRows,
   buildOrderCutMapSelectionForSource,
   buildOrderCutMapSelections,
-  filterOrderCutMapRowOptions,
+  filterOrderCutMapRowsForSource,
   missingOrderCutMapRows,
   orderCutMapRawOptionMatchesSource,
   orderCutMapSourceCutNumbers,
@@ -83,7 +83,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   const hasCutMap = Boolean(selectedTemplate?.elements.some((element) => element.kind === 'cut_map'));
   const cutMapRows = useMemo(() => buildOrderCutMapLabelRows(cutMapOptions), [cutMapOptions]);
   const sourceCutMapRows = useMemo(
-    () => cutMapRows.map((row) => ({ ...row, options: filterOrderCutMapRowOptions(row, cutMapSource) })),
+    () => filterOrderCutMapRowsForSource(cutMapRows, cutMapSource),
     [cutMapRows, cutMapSource],
   );
   const cutMapSourceOptions = useMemo(() => {
@@ -126,7 +126,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     [sourceCutMapRows, staleCutMapRowKeys],
   );
   const labelsWithoutCutMap = sourceCutMapRows.filter(
-    (row) => row.options.length === 0 && !staleCutMapRowKeys.has(row.key),
+    (row) => row.options.length === 0 && row.telegramFallback === null && !staleCutMapRowKeys.has(row.key),
   ).length;
   const staleCutMapCount = sourceCutMapRows.filter((row) => staleCutMapRowKeys.has(row.key)).length;
   const previewCutMapSelections = useMemo(
@@ -222,7 +222,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     setCutMapSource('regular');
     setCutMapSelection({});
     setCutMapOptionsLoading(true);
-    labelsApi.listOrderCutMapOptions(orderId)
+    labelsApi.listOrderCutMapOptions(orderId, 'v1')
       .then((next) => {
         if (!active) return;
         const rows = buildOrderCutMapLabelRows(next);
@@ -274,6 +274,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         useBasisFields,
         cutMapSource: hasCutMap ? cutMapSource : undefined,
         cutMapSelections: previewCutMapSelections,
+        telegramCutMapFallbackVersion: hasCutMap ? 'v1' : undefined,
       });
       if (previewRequestRef.current === requestId) {
         setPreview(nextPreview);
@@ -304,6 +305,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         useBasisFields,
         cutMapSource: hasCutMap ? cutMapSource : undefined,
         cutMapSelections: generationCutMapSelections,
+        telegramCutMapFallbackVersion: hasCutMap ? 'v1' : undefined,
       });
       const generation = await labelsApi.generateOrderLabels(orderId, {
         templateId: selectedTemplate.labelTemplateId,
@@ -313,6 +315,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         useBasisFields,
         cutMapSource: hasCutMap ? cutMapSource : undefined,
         cutMapSelections: generationCutMapSelections,
+        telegramCutMapFallbackVersion: hasCutMap ? 'v1' : undefined,
         idempotencyKey: `order-labels-generate-${orderId}-${Date.now()}`,
       });
       const downloaded = await labelsApi.downloadGeneration(orderId, generation.generationId);
@@ -483,6 +486,18 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
                       <Space direction="vertical" size={8} style={{ width: '100%' }}>
                         {sourceCutMapRows.map((row) => {
                           const hasOptions = row.options.length > 0;
+                          const telegramLabel = row.telegramFallback === 'svg'
+                            ? 'SVG Telegram · деталь подсвечена'
+                            : row.telegramFallback === 'image'
+                              ? 'Скрин Telegram · без подсветки детали'
+                              : null;
+                          const telegramUnavailableLabel = row.telegramUnavailableReason === 'request_limit_exceeded'
+                            ? 'Скрин Telegram недоступен: превышен лимит изображений'
+                            : row.telegramUnavailableReason === 'ambiguous_evidence'
+                              ? 'Скрин Telegram недоступен: неоднозначное соответствие детали'
+                              : row.telegramUnavailableReason === 'invalid_media'
+                                ? 'Скрин Telegram недоступен: повреждённый файл'
+                                : null;
                           const hasStaleCutMap = staleCutMapRowKeys.has(row.key);
                           const hasValidSelection = row.options.some(
                             (option) => option.cutResultPlacementId === cutMapSelection[row.key],
@@ -497,6 +512,10 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
                                 status={(hasOptions && !hasValidSelection) || hasStaleCutMap ? 'warning' : undefined}
                                 placeholder={hasOptions
                                   ? 'Выберите раскрой'
+                                  : telegramLabel
+                                    ? telegramLabel
+                                  : telegramUnavailableLabel
+                                    ? telegramUnavailableLabel
                                   : hasStaleCutMap
                                     ? 'Деталь изменена — выполните новый раскрой'
                                     : 'Нет раскроя — бирка будет без миниатюры'}

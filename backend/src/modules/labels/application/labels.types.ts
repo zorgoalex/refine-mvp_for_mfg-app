@@ -161,6 +161,20 @@ export interface OrderLabelCutMapDetailOptionsDto {
   cutJobCutNumber: string | null;
   bathCutJobCutNumber: string | null;
   options: LabelCutMapOptionDto[];
+  telegramSvgFallbackInstances: Array<{
+    copyIndex: number;
+    packetId: string;
+    sourceMessageId: number | null;
+  }>;
+  telegramImageFallbackInstances: Array<{
+    copyIndex: number;
+    packetId: string;
+    sourceMessageId: number | null;
+  }>;
+  telegramImageUnavailableInstances: Array<{
+    copyIndex: number;
+    reason: 'request_limit_exceeded' | 'invalid_media' | 'ambiguous_evidence';
+  }>;
 }
 
 export interface OrderLabelCutMapOptionsDto {
@@ -169,6 +183,7 @@ export interface OrderLabelCutMapOptionsDto {
 }
 
 export type LabelCutMapSource = 'regular' | 'bath';
+export type TelegramCutMapFallbackVersion = 'v1';
 
 export interface PreviewOrderLabelsInput {
   templateId: number;
@@ -177,6 +192,7 @@ export interface PreviewOrderLabelsInput {
   useBasisFields?: boolean;
   cutMapSource?: LabelCutMapSource;
   cutMapSelections?: LabelCutMapSelectionInput[];
+  telegramCutMapFallbackVersion?: TelegramCutMapFallbackVersion;
 }
 
 export interface PreviewDetailLabelsInput {
@@ -364,6 +380,12 @@ export interface PreviewOrderLabelsCommand extends LabelsContext {
 
 export interface ListOrderLabelCutMapOptionsQuery extends LabelsContext {
   orderId: number;
+  telegramCutMapFallbackVersion?: TelegramCutMapFallbackVersion;
+}
+
+export interface LabelGenerationAccessDescriptor {
+  generationId: number;
+  usesCutMap: boolean;
 }
 
 export interface GenerateOrderLabelsCommand extends LabelsContext {
@@ -491,6 +513,8 @@ export interface LabelsPort {
   getLatestOrderLabelsPreview(query: ExportOrderLabelsQuery): Promise<LatestOrderLabelsPreviewDto>;
   exportOrderLabels(query: ExportOrderLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }>;
   exportDetailLabels(query: ExportDetailLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }>;
+  getOrderLabelGenerationAccessDescriptor(query: ExportOrderLabelsQuery): Promise<LabelGenerationAccessDescriptor>;
+  getDetailLabelGenerationAccessDescriptor(query: ExportDetailLabelsQuery): Promise<LabelGenerationAccessDescriptor>;
   recordPermissionDenied(input: LabelsPermissionDeniedInput): Promise<void>;
   listQrTemplates(query: ListLabelQrTemplatesQuery): Promise<LabelQrTemplateDto[]>;
   createQrTemplate(command: CreateLabelQrTemplateCommand): Promise<LabelQrTemplateDto>;

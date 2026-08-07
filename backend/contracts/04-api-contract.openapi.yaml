@@ -9649,6 +9649,7 @@ paths:
         - Labels
       operationId: previewOrderLabels
       summary: Preview order labels
+      description: Supplying `telegramCutMapFallbackVersion` additionally requires `cut.view` permission.
       security:
         - bearerAuth: []
       x-permissions-any:
@@ -9667,6 +9668,11 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                telegramCutMapFallbackVersion:
+                  type: string
+                  enum: [v1]
+                  description: Enables the versioned Telegram SVG/image fallback for regular cut-map thumbnails.
       responses:
         '200':
           description: Label preview
@@ -9703,6 +9709,12 @@ paths:
           required: true
           schema:
             type: integer
+        - name: telegramCutMapFallbackVersion
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [v1]
       responses:
         '200':
           description: Exact immutable cut-result placements grouped by order detail
@@ -9718,7 +9730,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [detailId, detailNumber, detailName, quantity, options]
+                      required: [detailId, detailNumber, detailName, quantity, options, telegramSvgFallbackInstances, telegramImageFallbackInstances, telegramImageUnavailableInstances]
                       properties:
                         detailId: { type: integer }
                         detailNumber: { type: string, nullable: true }
@@ -9766,6 +9778,32 @@ paths:
                               isArchived: { type: boolean }
                               isVacuum: { type: boolean }
                               dimensionsMatch: { type: boolean }
+                        telegramSvgFallbackInstances:
+                          type: array
+                          items:
+                            type: object
+                            required: [copyIndex, packetId, sourceMessageId]
+                            properties:
+                              copyIndex: { type: integer, minimum: 1 }
+                              packetId: { type: string, format: uuid }
+                              sourceMessageId: { type: integer, nullable: true }
+                        telegramImageFallbackInstances:
+                          type: array
+                          items:
+                            type: object
+                            required: [copyIndex, packetId, sourceMessageId]
+                            properties:
+                              copyIndex: { type: integer, minimum: 1 }
+                              packetId: { type: string, format: uuid }
+                              sourceMessageId: { type: integer, nullable: true }
+                        telegramImageUnavailableInstances:
+                          type: array
+                          items:
+                            type: object
+                            required: [copyIndex, reason]
+                            properties:
+                              copyIndex: { type: integer, minimum: 1 }
+                              reason: { type: string, enum: [request_limit_exceeded, invalid_media, ambiguous_evidence] }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -9784,6 +9822,7 @@ paths:
       description: |
         Export format `emf` follows observed Bazis samples: BMP bytes with
         `.emf` filename extension. True vector EMF is out of MVP scope.
+        Supplying `telegramCutMapFallbackVersion` additionally requires `cut.view` permission.
       security:
         - bearerAuth: []
       x-permission: labels.generate
@@ -9799,6 +9838,11 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                telegramCutMapFallbackVersion:
+                  type: string
+                  enum: [v1]
+                  description: Enables the versioned Telegram SVG/image fallback for regular cut-map thumbnails.
       responses:
         '200':
           description: Label generation
@@ -10130,7 +10174,7 @@ paths:
       summary: Serve a stored CNC Telegram media preview
       security:
         - bearerAuth: []
-      x-permission: orders.view
+      x-permission: cut.view
       parameters:
         - name: storageKey
           in: path
@@ -10146,6 +10190,10 @@ paths:
                 type: string
                 format: binary
             image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
               schema:
                 type: string
                 format: binary

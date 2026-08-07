@@ -39,4 +39,18 @@ describe('CNC Telegram OpenAPI contract', () => {
       expect(section).toContain(`'${status}':`);
     }
   });
+
+  it('documents cut.view and every supported raster type for raw Telegram media', () => {
+    const start = contract.indexOf('  /api/v1/cnc-telegram/media/{storageKey}:');
+    const end = contract.indexOf('\n  /api/v1/', start + 1);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    const section = contract.slice(start, end < 0 ? undefined : end);
+    expect(section).toContain('operationId: getCncTelegramMedia');
+    expect(section).toContain('x-permission: cut.view');
+    expect(section).not.toContain('x-permission: orders.view');
+    expect(section).toContain('image/jpeg:');
+    expect(section).toContain('image/png:');
+    expect(section).toContain('image/webp:');
+  });
 });

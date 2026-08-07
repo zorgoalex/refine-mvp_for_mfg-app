@@ -131,6 +131,16 @@ describe('LabelsService', () => {
       ...preview,
       currentUser: { ...manager, permissions: [...manager.permissions, 'cut.view'] },
     })).resolves.toBeUndefined();
+
+    await expect(service.previewOrderLabels({
+      ...query,
+      input: {
+        templateId: 1,
+        templateVersion: 1,
+        cutMapSource: 'regular',
+        telegramCutMapFallbackVersion: 'v1',
+      },
+    })).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
   });
 
   it('rejects unsupported field bindings before repository writes', async () => {
@@ -502,6 +512,29 @@ describe('LabelsService', () => {
     expect(repo.recordPermissionDenied).toHaveBeenLastCalledWith(expect.objectContaining({ targetEntityType: 'order' }));
   });
 
+  it('pins historical generation access and requires cut.view when its snapshot has a cut map', async () => {
+    const repo = fakeRepo();
+    vi.mocked(repo.getOrderLabelGenerationAccessDescriptor).mockResolvedValue({ generationId: 77, usesCutMap: true });
+    const service = new LabelsService({ repo });
+    const query = {
+      currentUser: { ...manager, permissions: ['labels.view'] },
+      requestId: 'req-history-cut',
+      orderId: 42,
+    };
+
+    await expect(service.getLatestOrderLabelsPreview(query)).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+    });
+    expect(repo.getLatestOrderLabelsPreview).not.toHaveBeenCalled();
+
+    await service.getLatestOrderLabelsPreview({
+      ...query,
+      currentUser: { ...query.currentUser, permissions: ['labels.view', 'cut.view'] },
+    });
+    expect(repo.getLatestOrderLabelsPreview).toHaveBeenCalledWith(expect.objectContaining({ generationId: 77 }));
+  });
+
   it('supports labels preview/generate/export for explicit details across orders', async () => {
     const repo = fakeRepo();
     const service = new LabelsService({ repo });
@@ -634,6 +667,14 @@ function fakeRepo(): LabelsPort {
       filename: 'labels-generation-9.zip',
       contentType: 'application/zip',
       body: Buffer.from('zip'),
+    })),
+    getOrderLabelGenerationAccessDescriptor: vi.fn(async (query) => ({
+      generationId: query.generationId ?? 1,
+      usesCutMap: false,
+    })),
+    getDetailLabelGenerationAccessDescriptor: vi.fn(async (query) => ({
+      generationId: query.generationId,
+      usesCutMap: false,
     })),
     recordPermissionDenied: vi.fn(async () => undefined),
   };

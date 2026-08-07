@@ -11,7 +11,8 @@
     "test": "vitest run",
     "crm-sync:backfill": "tsx scripts/crm-sync-backfill.ts",
     "cut-results:backfill": "tsx scripts/backfill-cut-result-history.ts",
-    "telegram-notifications:webhook": "tsx scripts/configure-telegram-notification-webhook.ts"
+    "telegram-notifications:webhook": "tsx scripts/configure-telegram-notification-webhook.ts",
+    "telegram-label-maps:backfill": "tsx scripts/backfill-cnc-telegram-label-maps.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.19",
@@ -32,6 +33,7 @@
     "redis": "^4.7.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sharp": "^0.34.4",
     "svg-to-pdfkit": "^0.1.8",
     "swagger-ui-express": "^5.0.1",
     "xlsx": "^0.18.5",

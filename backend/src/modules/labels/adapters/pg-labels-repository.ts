@@ -5,7 +5,15 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient } from '../../../database/database.types';
 import { DatabaseService } from '../../../database/database.service';
 import { actorId } from '../application/labels.service';
-import { buildLabelRows, hashLabelRows, type LabelRow, type LabelRowCutMapSnapshot } from '../application/label-row-builder';
+import {
+  buildLabelRows,
+  hashLabelRows,
+  type CutResultLabelRowCutMapSnapshot,
+  type LabelRow,
+  type LabelRowCutMapSnapshot,
+  type TelegramImageLabelRowCutMapSnapshot,
+  type TelegramSvgLabelRowCutMapSnapshot,
+} from '../application/label-row-builder';
 import {
   renderLabelsZip,
   renderSvgPages,
@@ -56,6 +64,15 @@ import type {
   UpdateOrderLabelDataCommand,
   UpdateLabelTemplateCommand,
 } from '../application/labels.types';
+import {
+  closePreparedTelegramImages,
+  normalizeTelegramMediaContentType,
+  prepareTelegramImage,
+  TELEGRAM_IMAGE_LIMITS,
+  validateTelegramImage,
+  verifyPreparedTelegramImage,
+  type PreparedTelegramImage,
+} from '../../cnc-telegram/application/telegram-media-reader';
 import { assertRenderableTemplateShape, LABEL_RENDERER_CAPABILITIES } from '../application/label-template-advanced';
 import {
   DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD,
@@ -252,6 +269,42 @@ interface ResolvedCutMapRow extends QueryResultRow {
   vacuum_cut_number: string | null;
 }
 
+interface TelegramSvgCandidateRow extends QueryResultRow {
+  telegram_label_sheet_map_id: string | number;
+  telegram_label_placement_id: string | number;
+  packet_id: string;
+  source_version: string | number;
+  source_message_id: string | number | null;
+  layout_digest: string;
+  order_id: string | number;
+  order_detail_id: string | number;
+  instance: string | number;
+  sheet_width_mm: string | number;
+  sheet_height_mm: string | number;
+  base_svg: string;
+  x_mm: string | number;
+  y_mm: string | number;
+  width_mm: string | number;
+  height_mm: string | number;
+}
+
+interface TelegramImageCandidateRow extends QueryResultRow {
+  packet_id: string;
+  source_version: string | number;
+  source_message_id: string | number | null;
+  order_id: string | number;
+  order_detail_id: string | number;
+  instance: string | number;
+  sheet_image_storage_key: string;
+  sheet_image_content_type: string | null;
+  sheet_image_size_bytes: string | number | null;
+  evidence_quantity: string | number;
+  evidence_eligible: boolean;
+}
+
+type TelegramImageUnavailableReason = 'request_limit_exceeded' | 'invalid_media' | 'ambiguous_evidence';
+type TelegramImageAvailability = { packetId: string; sourceMessageId: number | null };
+
 const TEMPLATE_COLUMNS = `label_template_id, name, description, version, is_active,
   canvas_width_mm, canvas_height_mm, dpi, default_export_formats, custom_field_schema, field_catalog_snapshot`;
 
@@ -359,8 +412,19 @@ function ocrAuditShape(dto: LabelOcrTemplateDto): Record<string, unknown> {
   };
 }
 
+export interface PgLabelsRepositoryOptions {
+  telegramMediaDir?: string;
+  telegramFallbackEnabled?: boolean;
+}
+
 export class PgLabelsRepository implements LabelsPort {
-  constructor(private readonly database: DatabaseService) {}
+  private readonly telegramMediaDir: string;
+  private readonly telegramFallbackEnabled: boolean;
+
+  constructor(private readonly database: DatabaseService, options: PgLabelsRepositoryOptions = {}) {
+    this.telegramMediaDir = options.telegramMediaDir ?? process.env.CNC_TELEGRAM_MEDIA_DIR ?? '/data/cnc-telegram-media';
+    this.telegramFallbackEnabled = options.telegramFallbackEnabled ?? false;
+  }
 
   async listDetailFieldColumns(): Promise<DetailFieldColumnDto[]> {
     const result = await this.database.query<{ column_name: string; data_type: string }>(
@@ -1152,6 +1216,9 @@ export class PgLabelsRepository implements LabelsPort {
         cutJobCutNumber: row.regular_cut_number,
         bathCutJobCutNumber: row.vacuum_cut_number,
         options: [],
+        telegramSvgFallbackInstances: [],
+        telegramImageFallbackInstances: [],
+        telegramImageUnavailableInstances: [],
       };
       if (
         row.cut_result_placement_id !== null
@@ -1187,6 +1254,9 @@ export class PgLabelsRepository implements LabelsPort {
       }
       details.set(detailId, detail);
     }
+    if (this.telegramFallbackEnabled && query.telegramCutMapFallbackVersion === 'v1') {
+      await addTelegramFallbackOptions(this.database, query.orderId, details, this.telegramMediaDir);
+    }
     return { orderId: query.orderId, details: [...details.values()] };
   }
 
@@ -1211,58 +1281,117 @@ export class PgLabelsRepository implements LabelsPort {
       command.input.cutMapSelections,
       command.orderId,
       cutMapSource,
+      {
+        enabled: this.telegramFallbackEnabled,
+        capability: command.input.telegramCutMapFallbackVersion,
+        mediaDir: this.telegramMediaDir,
+      },
     );
-    const rows = resolved.rows;
-    const rowHash = hashLabelRows(rows);
-    const svgPages = renderSvgPages(template, rows, resolved.assets).pages;
-    return {
-      orderId: command.orderId,
-      templateId: template.labelTemplateId,
-      templateVersion: template.version,
-      labelCount: rows.length,
-      rows,
-      svgPages,
-      previewToken: encodePreviewToken({
+    try {
+      const rows = resolved.rows;
+      const rowHash = hashLabelRows(rows);
+      const svgPages = renderSvgPages(template, rows, resolved.assets).pages;
+      assertTelegramSvgPagesLimit(rows, svgPages);
+      return {
         orderId: command.orderId,
         templateId: template.labelTemplateId,
         templateVersion: template.version,
-        detailIds,
-        useBasisFields,
-        cutMapSource,
-        rowHash,
-      }),
-    };
+        labelCount: rows.length,
+        rows,
+        svgPages,
+        previewToken: encodePreviewToken({
+          orderId: command.orderId,
+          templateId: template.labelTemplateId,
+          templateVersion: template.version,
+          detailIds,
+          useBasisFields,
+          cutMapSource,
+          telegramCutMapFallbackVersion: command.input.telegramCutMapFallbackVersion,
+          rowHash,
+        }),
+      };
+    } finally {
+      await closePreparedTelegramImages(resolved.preparedImages.values());
+    }
   }
 
   async generateOrderLabels(command: GenerateOrderLabelsCommand): Promise<OrderLabelGenerationDto> {
-    return this.database.transaction(async (tx) => {
+    const detailIds = command.input.detailFilters?.detailIds ?? [];
+    const useBasisFields = command.input.useBasisFields ?? true;
+    const cutMapSource = command.input.cutMapSource;
+    const token = decodePreviewToken(command.input.previewToken);
+    if (
+      token.orderId !== command.orderId
+      || token.templateId !== command.input.templateId
+      || token.templateVersion !== command.input.templateVersion
+      || JSON.stringify(token.detailIds ?? []) !== JSON.stringify(detailIds)
+      || (token.useBasisFields ?? true) !== useBasisFields
+      || (token.cutMapSource ?? null) !== (cutMapSource ?? null)
+      || (token.telegramCutMapFallbackVersion ?? null) !== (command.input.telegramCutMapFallbackVersion ?? null)
+    ) {
+      throw new ApiError(409, 'LABEL_PREVIEW_TOKEN_STALE', 'Label preview token is stale');
+    }
+    const requestHash = hashRequest({
+      orderId: command.orderId,
+      templateId: command.input.templateId,
+      templateVersion: command.input.templateVersion,
+      detailIds,
+      useBasisFields,
+      cutMapSource,
+      telegramCutMapFallbackVersion: command.input.telegramCutMapFallbackVersion,
+      rowHash: token.rowHash,
+      exportFormats: command.input.exportFormats,
+      ...(command.input.cutMapSelections !== undefined
+        ? { cutMapSelections: canonicalCutMapSelections(command.input.cutMapSelections) }
+        : {}),
+    });
+    const shouldPrepareTelegramImages = this.telegramFallbackEnabled
+      && command.input.telegramCutMapFallbackVersion === 'v1'
+      && command.input.cutMapSource === 'regular';
+    if (shouldPrepareTelegramImages) {
+      const replay = await readIdempotencyReplay<OrderLabelGenerationDto>(
+        this.database,
+        command.input.idempotencyKey,
+        requestHash,
+      );
+      if (replay) return replay;
+    }
+
+    const generationPreparedImages = new Map<string, PreparedTelegramImage>();
+    if (shouldPrepareTelegramImages) {
+      const template = await this.readTemplate(this.database, command.input.templateId, true);
+      assertTemplateVersion(template.version, command.input.templateVersion);
+      await assertOrderExists(this.database, command.orderId);
       const detailIds = command.input.detailFilters?.detailIds ?? [];
-      const useBasisFields = command.input.useBasisFields ?? true;
-      const cutMapSource = command.input.cutMapSource;
-      const token = decodePreviewToken(command.input.previewToken);
-      if (
-        token.orderId !== command.orderId
-        || token.templateId !== command.input.templateId
-        || token.templateVersion !== command.input.templateVersion
-        || JSON.stringify(token.detailIds ?? []) !== JSON.stringify(detailIds)
-        || (token.useBasisFields ?? true) !== useBasisFields
-        || (token.cutMapSource ?? null) !== (cutMapSource ?? null)
-      ) {
-        throw new ApiError(409, 'LABEL_PREVIEW_TOKEN_STALE', 'Label preview token is stale');
-      }
-      const requestHash = hashRequest({
-        orderId: command.orderId,
-        templateId: command.input.templateId,
-        templateVersion: command.input.templateVersion,
+      await assertDetailsBelongToOrder(this.database, command.orderId, detailIds);
+      const orderFields = await readOrderFields(this.database, command.orderId);
+      const details = filterDetails(
+        await readOrderLabelDetails(this.database, command.orderId, template.labelTemplateId, template.customFieldSchema),
         detailIds,
-        useBasisFields,
-        cutMapSource,
-        rowHash: token.rowHash,
-        exportFormats: command.input.exportFormats,
-        ...(command.input.cutMapSelections !== undefined
-          ? { cutMapSelections: canonicalCutMapSelections(command.input.cutMapSelections) }
-          : {}),
-      });
+      );
+      const preparedResolution = await resolveLabelCutMaps(
+        this.database,
+        template,
+        buildLabelRows({
+          orderName: readOrderNameFromFields(orderFields),
+          orderFields,
+          template,
+          details,
+          useBasisFields: command.input.useBasisFields ?? true,
+        }),
+        command.input.cutMapSelections,
+        command.orderId,
+        command.input.cutMapSource,
+        {
+          enabled: true,
+          capability: 'v1',
+          mediaDir: this.telegramMediaDir,
+        },
+      );
+      for (const [key, image] of preparedResolution.preparedImages) generationPreparedImages.set(key, image);
+    }
+    try {
+      return await this.database.transaction(async (tx) => {
       const existing = await claimIdempotency<OrderLabelGenerationDto>(
         tx,
         command.input.idempotencyKey,
@@ -1291,6 +1420,12 @@ export class PgLabelsRepository implements LabelsPort {
         command.input.cutMapSelections,
         command.orderId,
         cutMapSource,
+        {
+          enabled: this.telegramFallbackEnabled,
+          capability: command.input.telegramCutMapFallbackVersion,
+          mediaDir: this.telegramMediaDir,
+          preparedImages: generationPreparedImages,
+        },
       );
       const rows = resolved.rows;
       const rowHash = hashLabelRows(rows);
@@ -1315,7 +1450,12 @@ export class PgLabelsRepository implements LabelsPort {
           command.input.idempotencyKey,
           requestHash,
           sha256(command.input.previewToken),
-          JSON.stringify({ detailIds, useBasisFields, cutMapSource }),
+          JSON.stringify({
+            detailIds,
+            useBasisFields,
+            cutMapSource,
+            telegramCutMapFallbackVersion: command.input.telegramCutMapFallbackVersion,
+          }),
           JSON.stringify(template),
           JSON.stringify(rows),
           rows.length,
@@ -1326,8 +1466,15 @@ export class PgLabelsRepository implements LabelsPort {
       );
       const generation = mapGenerationRow(inserted.rows[0]);
       await insertGenerationCutPlacements(tx, generation.generationId, rows);
-      const cutResultIds = [...new Set(rows.flatMap((row) => row.cutMap ? [row.cutMap.cutResultId] : []))];
-      const cutJobIds = [...new Set(rows.flatMap((row) => row.cutMap ? [row.cutMap.cutJobId] : []))];
+      await insertGenerationTelegramSources(tx, generation.generationId, rows, resolved.preparedImages);
+      const cutResultIds = [...new Set(rows.flatMap((row) => isCutResultCutMap(row.cutMap) ? [row.cutMap.cutResultId] : []))];
+      const cutJobIds = [...new Set(rows.flatMap((row) => isCutResultCutMap(row.cutMap) ? [row.cutMap.cutJobId] : []))];
+      const telegramRows = rows.filter((row): row is LabelRow & {
+        cutMap: TelegramSvgLabelRowCutMapSnapshot | TelegramImageLabelRowCutMapSnapshot;
+      } => isTelegramCutMap(row.cutMap));
+      const telegramPacketIds = [...new Set(telegramRows.map((row) => row.cutMap.packetId))];
+      const telegramSourceMessageIds = [...new Set(telegramRows.flatMap((row) => row.cutMap.sourceMessageId === null ? [] : [row.cutMap.sourceMessageId]))];
+      const telegramAssetKeys = [...new Set(telegramRows.map((row) => row.cutMap.assetKey))];
       await auditService.record(tx, {
         event: 'order_labels.generated',
         entityType: 'order_label_generation',
@@ -1339,9 +1486,9 @@ export class PgLabelsRepository implements LabelsPort {
         source: 'backend.labels',
         relatedOrderId: command.orderId,
         before: null,
-        after: { ...generation, exportFormats: command.input.exportFormats, cutResultIds },
+        after: { ...generation, exportFormats: command.input.exportFormats, cutResultIds, telegramPacketIds },
         diff: { labelCount: generation.labelCount },
-        metadata: { idempotencyKey: command.input.idempotencyKey },
+        metadata: { idempotencyKey: command.input.idempotencyKey, telegramSourceMessageIds, telegramAssetKeys },
         relatedEntities: [
           { entityType: 'order_label_generation', entityId: generation.generationId },
           ...details.map((detail) => ({ entityType: 'order_detail', entityId: detail.detailId })),
@@ -1355,13 +1502,24 @@ export class PgLabelsRepository implements LabelsPort {
          ON CONFLICT (idempotency_key) DO NOTHING`,
         [
           command.orderId,
-          JSON.stringify({ ...generation, templateId: template.labelTemplateId, cutResultIds, cutJobIds }),
+          JSON.stringify({
+            ...generation,
+            templateId: template.labelTemplateId,
+            cutResultIds,
+            cutJobIds,
+            telegramPacketIds,
+            telegramSourceMessageIds,
+            telegramAssetKeys,
+          }),
           `${command.input.idempotencyKey}:order_labels.generated`,
         ],
       );
       await completeIdempotency(tx, command.input.idempotencyKey, generation);
       return generation;
-    });
+      });
+    } finally {
+      await closePreparedTelegramImages(new Set(generationPreparedImages.values()));
+    }
   }
 
   async previewDetailLabels(command: PreviewDetailLabelsCommand): Promise<DetailLabelsPreviewDto> {
@@ -1502,7 +1660,7 @@ export class PgLabelsRepository implements LabelsPort {
       rows: generation.rows,
       formats: generation.exportFormats,
       generatedAt: generation.generatedAt,
-      cutMapAssets: await loadCutMapAssets(this.database, generation.rows),
+      cutMapAssets: await loadCutMapAssets(this.database, generation.rows, generation.generationId),
     });
     const orderName = readOrderNameFromFields(await readOrderFields(this.database, query.orderId));
     return {
@@ -1510,6 +1668,40 @@ export class PgLabelsRepository implements LabelsPort {
       contentType: 'application/zip',
       body,
     };
+  }
+
+  async getOrderLabelGenerationAccessDescriptor(query: ExportOrderLabelsQuery) {
+    const result = await this.database.query<{
+      order_label_generation_id: string | number;
+      uses_cut_map: boolean;
+    }>(
+      `SELECT order_label_generation_id,
+              jsonb_path_exists(rows_snapshot, '$[*].cutMap') AS uses_cut_map
+       FROM order_label_generations
+       WHERE order_id=$1 AND ($2::bigint IS NULL OR order_label_generation_id=$2)
+       ORDER BY order_label_generation_id DESC
+       LIMIT 1`,
+      [query.orderId, query.generationId ?? null],
+    );
+    const row = result.rows[0];
+    if (!row) throw new ApiError(404, 'ORDER_LABEL_GENERATION_NOT_FOUND', 'Label generation not found');
+    return { generationId: Number(row.order_label_generation_id), usesCutMap: row.uses_cut_map === true };
+  }
+
+  async getDetailLabelGenerationAccessDescriptor(query: ExportDetailLabelsQuery) {
+    const result = await this.database.query<{
+      order_label_generation_id: string | number;
+      uses_cut_map: boolean;
+    }>(
+      `SELECT order_label_generation_id,
+              jsonb_path_exists(rows_snapshot, '$[*].cutMap') AS uses_cut_map
+       FROM order_label_generations
+       WHERE order_label_generation_id=$1 AND generation_scope='details'`,
+      [query.generationId],
+    );
+    const row = result.rows[0];
+    if (!row) throw new ApiError(404, 'DETAIL_LABEL_GENERATION_NOT_FOUND', 'Label generation not found');
+    return { generationId: Number(row.order_label_generation_id), usesCutMap: row.uses_cut_map === true };
   }
 
   async exportDetailLabels(query: ExportDetailLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }> {
@@ -1521,7 +1713,7 @@ export class PgLabelsRepository implements LabelsPort {
       rows: generation.rows,
       formats: generation.exportFormats,
       generatedAt: generation.generatedAt,
-      cutMapAssets: await loadCutMapAssets(this.database, generation.rows),
+      cutMapAssets: await loadCutMapAssets(this.database, generation.rows, generation.generationId),
     });
     return {
       filename: `labels-generation-${generation.generationId}.zip`,
@@ -1532,11 +1724,13 @@ export class PgLabelsRepository implements LabelsPort {
 
   async getLatestOrderLabelsPreview(query: ExportOrderLabelsQuery): Promise<LatestOrderLabelsPreviewDto> {
     await assertOrderExists(this.database, query.orderId);
-    const generation = await readLatestGeneration(this.database, query.orderId);
+    const generation = query.generationId
+      ? await readGeneration(this.database, query.orderId, query.generationId)
+      : await readLatestGeneration(this.database, query.orderId);
     const svgPages = renderSvgPages(
       generation.template,
       generation.rows,
-      await loadCutMapAssets(this.database, generation.rows),
+      await loadCutMapAssets(this.database, generation.rows, generation.generationId),
     ).pages;
     return {
       generationId: generation.generationId,
@@ -1794,15 +1988,28 @@ export async function resolveLabelCutMaps(
   selections: LabelCutMapSelectionInput[] | undefined,
   orderId?: number,
   cutMapSource?: LabelCutMapSource,
-): Promise<{ rows: LabelRow[]; assets: LabelCutMapAssets }> {
+  telegram?: {
+    enabled: boolean;
+    capability?: 'v1';
+    mediaDir: string;
+    preparedImages?: Map<string, PreparedTelegramImage>;
+    imageMode?: 'prepare' | 'validate';
+  },
+): Promise<{
+  rows: LabelRow[];
+  assets: LabelCutMapAssets;
+  preparedImages: Map<string, PreparedTelegramImage>;
+  unavailable: Map<string, TelegramImageUnavailableReason>;
+  imageCandidates: Map<string, TelegramImageAvailability>;
+}> {
   const usesCutMap = template.elements.some((element) => element.kind === 'cut_map');
   if (!usesCutMap) {
     if ((selections?.length ?? 0) > 0) {
       throw new ApiError(422, 'LABEL_CUT_MAP_NOT_IN_TEMPLATE', 'Шаблон не содержит миниатюру раскроя');
     }
-    return { rows, assets: new Map() };
+    return { rows, assets: new Map(), preparedImages: new Map(), unavailable: new Map(), imageCandidates: new Map() };
   }
-  if (rows.length === 0) return { rows, assets: new Map() };
+  if (rows.length === 0) return { rows, assets: new Map(), preparedImages: new Map(), unavailable: new Map(), imageCandidates: new Map() };
 
   const selectionByCopy = new Map<string, LabelCutMapSelectionInput>();
   const placementIds = new Set<number>();
@@ -1906,7 +2113,9 @@ export async function resolveLabelCutMaps(
       }
     }
   }
-  if (placementIds.size === 0) return { rows, assets: new Map() };
+  if (placementIds.size === 0) {
+    return resolveTelegramFallbackRows(client, rows, new Map(), orderId, cutMapSource, telegram);
+  }
 
   const result = await client.query<ResolvedCutMapRow>(
     `SELECT p.cut_result_placement_id, p.cut_result_sheet_map_id,
@@ -1973,7 +2182,7 @@ export async function resolveLabelCutMaps(
     }
   }
 
-  const assets = new Map<number, LabelCutMapAsset>();
+  const assets = new Map<string | number, LabelCutMapAsset>();
   const resolvedRows = rows.map((row): LabelRow => {
     const selection = selectionByCopy.get(`${row.detailId}:${row.copyIndex}`);
     if (!selection) return row;
@@ -2012,7 +2221,7 @@ export async function resolveLabelCutMaps(
       widthMm: toNumber(placement.width_mm),
       heightMm: toNumber(placement.height_mm),
     };
-    assets.set(cutResultSheetMapId, {
+    assets.set(`cut_result:${cutResultSheetMapId}`, {
       svg: placement.base_svg,
       isVacuum: placement.is_vacuum === true,
     });
@@ -2028,7 +2237,469 @@ export async function resolveLabelCutMaps(
       },
     };
   });
-  return { rows: resolvedRows, assets };
+  return resolveTelegramFallbackRows(client, resolvedRows, assets, orderId, cutMapSource, telegram);
+}
+
+async function resolveTelegramFallbackRows(
+  client: DatabaseClient,
+  rows: LabelRow[],
+  initialAssets: LabelCutMapAssets,
+  orderId: number | undefined,
+  cutMapSource: LabelCutMapSource | undefined,
+  telegram: {
+    enabled: boolean;
+    capability?: 'v1';
+    mediaDir: string;
+    preparedImages?: Map<string, PreparedTelegramImage>;
+    imageMode?: 'prepare' | 'validate';
+  } | undefined,
+): Promise<{
+  rows: LabelRow[];
+  assets: LabelCutMapAssets;
+  preparedImages: Map<string, PreparedTelegramImage>;
+  unavailable: Map<string, TelegramImageUnavailableReason>;
+  imageCandidates: Map<string, TelegramImageAvailability>;
+}> {
+  const assets = new Map(initialAssets);
+  const preparedImages = new Map<string, PreparedTelegramImage>();
+  const unavailable = new Map<string, TelegramImageUnavailableReason>();
+  const imageCandidates = new Map<string, TelegramImageAvailability>();
+  if (!telegram?.enabled || telegram.capability !== 'v1' || cutMapSource !== 'regular' || orderId === undefined) {
+    return { rows, assets, preparedImages, unavailable, imageCandidates };
+  }
+  const targets = rows.filter((row) => row.cutMap === undefined);
+  if (targets.length === 0) return { rows, assets, preparedImages, unavailable, imageCandidates };
+  const params = [
+    targets.map((row) => row.orderId),
+    targets.map((row) => row.detailId),
+    targets.map((row) => row.copyIndex),
+  ];
+  const svgResult = await client.query<TelegramSvgCandidateRow>(
+    `WITH requested AS (
+       SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::integer[])
+         AS value(order_id, detail_id, instance)
+     ), requested_details AS (
+       SELECT DISTINCT order_id, detail_id FROM requested
+     ), svg_candidates AS (
+       SELECT DISTINCT
+       map.telegram_label_sheet_map_id,
+       packet.packet_id, packet.source_version, packet.source_message_id, map.layout_digest,
+       placement.order_id, placement.order_detail_id,
+       map.sheet_width_mm, map.sheet_height_mm, map.base_svg,
+       COALESCE(packet.completed_at, packet.source_updated_at, packet.source_created_at, packet.updated_at) AS candidate_at
+       FROM requested_details
+       JOIN cnc_telegram_label_placement placement
+         ON placement.order_id=requested_details.order_id
+        AND placement.order_detail_id=requested_details.detail_id
+       JOIN cnc_telegram_label_sheet_map map
+         ON map.telegram_label_sheet_map_id=placement.telegram_label_sheet_map_id
+       JOIN cnc_telegram_packets packet
+         ON packet.packet_id=map.packet_id AND packet.source_version=map.source_version
+       JOIN cnc_telegram_packet_evidence_set evidence_set
+         ON evidence_set.packet_id=packet.packet_id
+        AND evidence_set.source_version=packet.source_version
+        AND evidence_set.payload_hash=packet.payload_hash
+       WHERE packet.parse_status IN ('parsed','needs_review')
+         AND packet.rework=false
+         AND (packet.completion_status='completed' OR packet.thumbs_up=true)
+         AND packet.cut_layout_json->>'status'='valid'
+     ), ranked_svg_candidates AS (
+       SELECT candidate.*,
+       row_number() OVER (
+         PARTITION BY candidate.order_id, candidate.order_detail_id
+         ORDER BY candidate.candidate_at DESC, candidate.source_version DESC,
+                  candidate.source_message_id DESC NULLS LAST, candidate.packet_id DESC
+       ) AS candidate_rank
+       FROM svg_candidates candidate
+     )
+     SELECT candidate.telegram_label_sheet_map_id, placement.telegram_label_placement_id,
+       candidate.packet_id, candidate.source_version, candidate.source_message_id, candidate.layout_digest,
+       requested.order_id, requested.detail_id AS order_detail_id, requested.instance,
+       candidate.sheet_width_mm, candidate.sheet_height_mm, candidate.base_svg,
+       placement.x_mm, placement.y_mm, placement.width_mm, placement.height_mm
+     FROM requested
+     JOIN ranked_svg_candidates candidate
+      ON candidate.order_id=requested.order_id
+      AND candidate.order_detail_id=requested.detail_id
+      AND candidate.candidate_rank=1
+     JOIN cnc_telegram_label_placement placement
+       ON placement.telegram_label_sheet_map_id=candidate.telegram_label_sheet_map_id
+      AND placement.order_id=requested.order_id
+      AND placement.order_detail_id=requested.detail_id
+      AND placement.instance=requested.instance
+     JOIN order_details detail
+       ON detail.detail_id=requested.detail_id
+      AND detail.order_id=requested.order_id
+      AND detail.delete_flag=false
+     JOIN orders order_row ON order_row.order_id=detail.order_id AND order_row.delete_flag=false
+     WHERE requested.instance <= detail.quantity
+       AND (
+         (abs(placement.source_width_mm-detail.width) <= placement.tolerance_mm
+          AND abs(placement.source_height_mm-detail.height) <= placement.tolerance_mm)
+         OR
+         (abs(placement.source_width_mm-detail.height) <= placement.tolerance_mm
+          AND abs(placement.source_height_mm-detail.width) <= placement.tolerance_mm)
+       )`,
+    params,
+  );
+  const svgByCopy = new Map(svgResult.rows.map((row) => [
+    `${Number(row.order_id)}:${Number(row.order_detail_id)}:${Number(row.instance)}`,
+    row,
+  ]));
+  let resolvedRows = rows.map((row): LabelRow => {
+    if (row.cutMap) return row;
+    const candidate = svgByCopy.get(`${row.orderId}:${row.detailId}:${row.copyIndex}`);
+    if (!candidate) return row;
+    const sheetMapId = Number(candidate.telegram_label_sheet_map_id);
+    const assetKey = `telegram_svg:${sheetMapId}`;
+    assets.set(assetKey, { kind: 'svg', svg: candidate.base_svg, isVacuum: false });
+    const cutMap: LabelRowCutMapSnapshot = {
+      source: 'telegram_svg',
+      assetKey,
+      telegramLabelSheetMapId: sheetMapId,
+      telegramLabelPlacementId: Number(candidate.telegram_label_placement_id),
+      packetId: candidate.packet_id,
+      sourceVersion: Number(candidate.source_version),
+      sourceMessageId: nullableNumber(candidate.source_message_id),
+      sourceDigest: candidate.layout_digest,
+      cutNumber: 'Telegram',
+      cutJobName: candidate.source_message_id === null ? 'Telegram SVG' : `Telegram SVG · ${candidate.source_message_id}`,
+      variant: 'telegram',
+      sheetIndex: 0,
+      sheetNumber: 1,
+      sheetWidthMm: Number(candidate.sheet_width_mm),
+      sheetHeightMm: Number(candidate.sheet_height_mm),
+      xMm: Number(candidate.x_mm),
+      yMm: Number(candidate.y_mm),
+      widthMm: Number(candidate.width_mm),
+      heightMm: Number(candidate.height_mm),
+    };
+    return withCutMap(row, cutMap);
+  });
+
+  const imageTargets = resolvedRows.filter((row) => row.cutMap === undefined);
+  if (imageTargets.length === 0) return { rows: resolvedRows, assets, preparedImages, unavailable, imageCandidates };
+  const imageResult = await client.query<TelegramImageCandidateRow>(
+    `WITH requested AS (
+       SELECT * FROM unnest($1::bigint[], $2::bigint[], $3::integer[])
+         AS value(order_id, detail_id, instance)
+     ), requested_details AS (
+       SELECT DISTINCT order_id, detail_id FROM requested
+     ), evidence_by_detail AS (
+       SELECT evidence.packet_id, evidence.source_version, evidence.payload_hash,
+              evidence.match_order_id AS order_id, evidence.match_detail_id AS detail_id,
+              min(evidence.quantity)::integer AS quantity,
+              min(evidence.width_mm) AS width_mm, min(evidence.height_mm) AS height_mm,
+              min(evidence.source) AS source,
+              count(*)=1 AND bool_and(evidence.match_status='matched') AS evidence_eligible
+       FROM cnc_telegram_packet_item_evidence evidence
+       JOIN cnc_telegram_packet_evidence_set evidence_set
+         ON evidence_set.packet_id=evidence.packet_id
+        AND evidence_set.source_version=evidence.source_version
+        AND evidence_set.payload_hash=evidence.payload_hash
+       WHERE evidence.match_order_id IS NOT NULL AND evidence.match_detail_id IS NOT NULL
+       GROUP BY evidence.packet_id, evidence.source_version, evidence.payload_hash,
+                evidence.match_order_id, evidence.match_detail_id
+     ), ranked_candidates AS (
+       SELECT evidence.order_id, evidence.detail_id, evidence.quantity AS evidence_quantity,
+              evidence.width_mm, evidence.height_mm, evidence.source, evidence.evidence_eligible,
+              packet.packet_id, packet.source_version, packet.source_message_id,
+              packet.sheet_image_storage_key, packet.sheet_image_content_type, packet.sheet_image_size_bytes,
+              row_number() OVER (
+                PARTITION BY evidence.order_id, evidence.detail_id
+                ORDER BY COALESCE(packet.completed_at, packet.source_updated_at, packet.source_created_at, packet.updated_at) DESC,
+                         packet.source_version DESC, packet.source_message_id DESC NULLS LAST, packet.packet_id DESC
+              ) AS candidate_rank
+       FROM requested_details
+       JOIN evidence_by_detail evidence
+         ON evidence.order_id=requested_details.order_id AND evidence.detail_id=requested_details.detail_id
+       JOIN cnc_telegram_packets packet
+         ON packet.packet_id=evidence.packet_id
+        AND packet.source_version=evidence.source_version
+        AND packet.payload_hash=evidence.payload_hash
+       WHERE packet.parse_status IN ('parsed','needs_review')
+         AND packet.rework=false
+         AND (packet.completion_status='completed' OR packet.thumbs_up=true)
+         AND packet.sheet_image_storage_key IS NOT NULL
+         AND (packet.cut_layout_json IS NULL OR packet.cut_layout_json->>'status' IS DISTINCT FROM 'valid')
+     )
+     SELECT candidate.packet_id, candidate.source_version, candidate.source_message_id,
+       requested.order_id, requested.detail_id AS order_detail_id, requested.instance,
+       candidate.sheet_image_storage_key, candidate.sheet_image_content_type, candidate.sheet_image_size_bytes,
+       candidate.evidence_quantity, candidate.evidence_eligible
+     FROM requested
+     JOIN ranked_candidates candidate
+       ON candidate.order_id=requested.order_id
+      AND candidate.detail_id=requested.detail_id
+      AND candidate.candidate_rank=1
+     JOIN order_details detail
+       ON detail.detail_id=candidate.detail_id AND detail.order_id=candidate.order_id AND detail.delete_flag=false
+     JOIN orders order_row ON order_row.order_id=detail.order_id AND order_row.delete_flag=false
+     WHERE candidate.width_mm IS NOT NULL AND candidate.height_mm IS NOT NULL
+       AND (
+         (abs(candidate.width_mm-detail.width) <= CASE WHEN candidate.source='ocr' THEN 3 ELSE 0.01 END
+          AND abs(candidate.height_mm-detail.height) <= CASE WHEN candidate.source='ocr' THEN 3 ELSE 0.01 END)
+         OR
+         (abs(candidate.width_mm-detail.height) <= CASE WHEN candidate.source='ocr' THEN 3 ELSE 0.01 END
+          AND abs(candidate.height_mm-detail.width) <= CASE WHEN candidate.source='ocr' THEN 3 ELSE 0.01 END)
+       )
+     ORDER BY requested.order_id, requested.detail_id, requested.instance`,
+    [
+      imageTargets.map((row) => row.orderId),
+      imageTargets.map((row) => row.detailId),
+      imageTargets.map((row) => row.copyIndex),
+    ],
+  );
+  const imageByCopy = new Map(imageResult.rows.map((row) => [
+    `${Number(row.order_id)}:${Number(row.order_detail_id)}:${Number(row.instance)}`,
+    row,
+  ]));
+  const preparedByStorageKey = new Map<string, PreparedTelegramImage>();
+  for (const prepared of telegram.preparedImages?.values() ?? []) {
+    preparedByStorageKey.set(prepared.storageKey, prepared);
+  }
+  const unavailableByStorageKey = new Map<string, TelegramImageUnavailableReason>();
+  const validatedByStorageKey = new Map<string, Pick<PreparedTelegramImage, 'contentType' | 'sizeBytes'>>();
+  const acceptedImageCopyKeys = new Set<string>();
+  const attemptedStorageKeys = new Set<string>();
+  const openedPreparedImages = new Set<PreparedTelegramImage>();
+  let rawTotal = 0;
+  for (const candidate of imageResult.rows) {
+    const key = candidate.sheet_image_storage_key;
+    const copyKey = `${Number(candidate.order_id)}:${Number(candidate.order_detail_id)}:${Number(candidate.instance)}`;
+    if (!candidate.evidence_eligible) {
+      unavailable.set(copyKey, 'ambiguous_evidence');
+      continue;
+    }
+    if (Number(candidate.instance) > Number(candidate.evidence_quantity)) continue;
+    const cachedPrepared = preparedByStorageKey.get(key);
+    if (cachedPrepared) {
+      if (telegramImageCandidateMatchesMedia(candidate, cachedPrepared)) acceptedImageCopyKeys.add(copyKey);
+      else unavailable.set(copyKey, 'invalid_media');
+      continue;
+    }
+    const cachedValidated = validatedByStorageKey.get(key);
+    if (cachedValidated) {
+      if (telegramImageCandidateMatchesMedia(candidate, cachedValidated)) acceptedImageCopyKeys.add(copyKey);
+      else unavailable.set(copyKey, 'invalid_media');
+      continue;
+    }
+    const cachedUnavailable = unavailableByStorageKey.get(key);
+    if (cachedUnavailable) {
+      unavailable.set(copyKey, cachedUnavailable);
+      continue;
+    }
+    if (!attemptedStorageKeys.has(key) && attemptedStorageKeys.size >= 16) {
+      unavailable.set(copyKey, 'request_limit_exceeded');
+      continue;
+    }
+    attemptedStorageKeys.add(key);
+    const declared = nullableNumber(candidate.sheet_image_size_bytes) ?? TELEGRAM_IMAGE_LIMITS.maxSourceBytes;
+    if (declared > TELEGRAM_IMAGE_LIMITS.maxSourceBytes) {
+      unavailable.set(copyKey, 'invalid_media');
+      continue;
+    }
+    if (rawTotal + declared > 32 * 1024 * 1024) {
+      unavailable.set(copyKey, 'request_limit_exceeded');
+      continue;
+    }
+    if (telegram.preparedImages !== undefined) {
+      unavailableByStorageKey.set(key, 'invalid_media');
+      unavailable.set(copyKey, 'invalid_media');
+      continue;
+    }
+    try {
+      const metadata = {
+        storageKey: key,
+        contentType: null,
+        sizeBytes: null,
+      };
+      if (telegram.imageMode === 'validate') {
+        const opened = await validateTelegramImage(telegram.mediaDir, metadata);
+        if (rawTotal + opened.sizeBytes > 32 * 1024 * 1024) {
+          await opened.handle.close();
+          unavailableByStorageKey.set(key, 'request_limit_exceeded');
+          unavailable.set(copyKey, 'request_limit_exceeded');
+          continue;
+        }
+        rawTotal += opened.sizeBytes;
+        validatedByStorageKey.set(key, opened);
+        await opened.handle.close();
+        if (telegramImageCandidateMatchesMedia(candidate, opened)) acceptedImageCopyKeys.add(copyKey);
+        else unavailable.set(copyKey, 'invalid_media');
+      } else {
+        const prepared = await prepareTelegramImage(telegram.mediaDir, metadata);
+        if (rawTotal + prepared.sizeBytes > 32 * 1024 * 1024) {
+          await prepared.handle.close();
+          unavailableByStorageKey.set(key, 'request_limit_exceeded');
+          unavailable.set(copyKey, 'request_limit_exceeded');
+          continue;
+        }
+        rawTotal += prepared.sizeBytes;
+        openedPreparedImages.add(prepared);
+        preparedByStorageKey.set(key, prepared);
+        if (telegramImageCandidateMatchesMedia(candidate, prepared)) acceptedImageCopyKeys.add(copyKey);
+        else unavailable.set(copyKey, 'invalid_media');
+      }
+    } catch {
+      unavailableByStorageKey.set(key, 'invalid_media');
+      unavailable.set(copyKey, 'invalid_media');
+    }
+  }
+  resolvedRows = resolvedRows.map((row): LabelRow => {
+    if (row.cutMap) return row;
+    const candidate = imageByCopy.get(`${row.orderId}:${row.detailId}:${row.copyIndex}`);
+    if (!candidate) return row;
+    if (!candidate.evidence_eligible) return row;
+    if (row.copyIndex > Number(candidate.evidence_quantity)) return row;
+    const copyKey = `${row.orderId}:${row.detailId}:${row.copyIndex}`;
+    if (!acceptedImageCopyKeys.has(copyKey)) return row;
+    if (telegram.imageMode === 'validate') {
+      imageCandidates.set(copyKey, {
+        packetId: candidate.packet_id,
+        sourceMessageId: nullableNumber(candidate.source_message_id),
+      });
+      return row;
+    }
+    const prepared = preparedByStorageKey.get(candidate.sheet_image_storage_key);
+    if (!prepared) return row;
+    const assetKey = `telegram_image:${candidate.packet_id}:${candidate.source_version}:${prepared.rawSha256}:${prepared.normalizedSha256}`;
+    preparedImages.set(assetKey, prepared);
+    assets.set(assetKey, { kind: 'image', dataUri: prepared.dataUri });
+    const cutMap: LabelRowCutMapSnapshot = {
+      source: 'telegram_image',
+      assetKey,
+      packetId: candidate.packet_id,
+      sourceVersion: Number(candidate.source_version),
+      sourceMessageId: nullableNumber(candidate.source_message_id),
+      sourceDigest: `sha256:${prepared.rawSha256}`,
+      rawSha256: prepared.rawSha256,
+      normalizedSha256: prepared.normalizedSha256,
+      cutNumber: 'Telegram',
+      cutJobName: candidate.source_message_id === null ? 'Скрин Telegram' : `Скрин Telegram · ${candidate.source_message_id}`,
+      variant: 'telegram',
+      sheetIndex: 0,
+      sheetNumber: 1,
+    };
+    return withCutMap(row, cutMap);
+  });
+  const usedPreparedImages = new Set(preparedImages.values());
+  await closePreparedTelegramImages(
+    [...openedPreparedImages].filter((prepared) => !usedPreparedImages.has(prepared)),
+  );
+  const uniqueNormalizedBytes = [...new Set(preparedImages.values())]
+    .reduce((sum, prepared) => sum + prepared.normalized.length, 0);
+  const expandedBytes = resolvedRows.reduce((sum, row) => {
+    if (row.cutMap?.source !== 'telegram_image') return sum;
+    const prepared = preparedImages.get(row.cutMap.assetKey);
+    return sum + (prepared ? 4 * Math.ceil(prepared.normalized.length / 3) : 0);
+  }, 0);
+  if (uniqueNormalizedBytes > 8 * 1024 * 1024 || expandedBytes > 64 * 1024 * 1024) {
+    await closePreparedTelegramImages(new Set(preparedImages.values()));
+    throw new ApiError(422, 'LABEL_TELEGRAM_IMAGE_LIMIT_EXCEEDED', 'Telegram label image request exceeds limits');
+  }
+  return { rows: resolvedRows, assets, preparedImages, unavailable, imageCandidates };
+}
+
+function telegramImageCandidateMatchesMedia(
+  candidate: Pick<TelegramImageCandidateRow, 'sheet_image_content_type' | 'sheet_image_size_bytes'>,
+  media: { contentType: PreparedTelegramImage['contentType']; sizeBytes: number },
+): boolean {
+  const storedSize = nullableNumber(candidate.sheet_image_size_bytes);
+  if (storedSize !== null && storedSize !== media.sizeBytes) return false;
+  if (
+    candidate.sheet_image_content_type !== null
+    && normalizeTelegramMediaContentType(candidate.sheet_image_content_type) !== media.contentType
+  ) return false;
+  return true;
+}
+
+function withCutMap(row: LabelRow, cutMap: LabelRowCutMapSnapshot): LabelRow {
+  return {
+    ...row,
+    cutMap,
+    values: {
+      ...row.values,
+      'cut.number': cutMap.cutNumber,
+      'cut.job_name': cutMap.cutJobName,
+      'cut.sheet_number': cutMap.sheetNumber,
+      'cut.variant': cutMap.variant,
+    },
+  };
+}
+
+function assertTelegramSvgPagesLimit(rows: LabelRow[], pages: string[]): void {
+  if (!rows.some((row) => row.cutMap?.source === 'telegram_image')) return;
+  const bytes = pages.reduce((sum, page) => sum + Buffer.byteLength(page, 'utf8'), 0);
+  if (bytes > 96 * 1024 * 1024) {
+    throw new ApiError(422, 'LABEL_TELEGRAM_IMAGE_LIMIT_EXCEEDED', 'Rendered Telegram label pages exceed limits');
+  }
+}
+
+async function addTelegramFallbackOptions(
+  client: DatabaseClient,
+  orderId: number,
+  details: Map<number, OrderLabelCutMapOptionsDto['details'][number]>,
+  mediaDir: string,
+): Promise<void> {
+  const rows: LabelRow[] = [];
+  for (const detail of details.values()) {
+    for (let copyIndex = 1; copyIndex <= detail.quantity; copyIndex += 1) {
+      const hasRegularCutEvidence = detail.options.some((option) => (
+        option.instance === copyIndex
+        && !option.isArchived
+        && option.isVacuum !== true
+        && detail.cutJobCutNumber !== null
+        && option.cutNumber === detail.cutJobCutNumber
+      ));
+      if (hasRegularCutEvidence) continue;
+      rows.push({
+        rowIndex: rows.length + 1,
+        orderId,
+        detailId: detail.detailId,
+        copyIndex,
+        copyCount: detail.quantity,
+        values: {},
+      });
+    }
+  }
+  const resolved = await resolveTelegramFallbackRows(
+    client,
+    rows,
+    new Map(),
+    orderId,
+    'regular',
+    { enabled: true, capability: 'v1', mediaDir, imageMode: 'validate' },
+  );
+  try {
+    for (const row of resolved.rows) {
+      const detail = details.get(row.detailId);
+      if (!detail || !row.cutMap) continue;
+      if (row.cutMap.source === 'telegram_svg') {
+        detail.telegramSvgFallbackInstances.push({
+          copyIndex: row.copyIndex,
+          packetId: row.cutMap.packetId,
+          sourceMessageId: row.cutMap.sourceMessageId,
+        });
+      }
+    }
+    for (const row of rows) {
+      const candidate = resolved.imageCandidates.get(`${row.orderId}:${row.detailId}:${row.copyIndex}`);
+      if (candidate) {
+        details.get(row.detailId)?.telegramImageFallbackInstances.push({
+          copyIndex: row.copyIndex,
+          packetId: candidate.packetId,
+          sourceMessageId: candidate.sourceMessageId,
+        });
+      }
+      const reason = resolved.unavailable.get(`${row.orderId}:${row.detailId}:${row.copyIndex}`);
+      if (reason) {
+        details.get(row.detailId)?.telegramImageUnavailableInstances.push({ copyIndex: row.copyIndex, reason });
+      }
+    }
+  } finally {
+    await closePreparedTelegramImages(new Set(resolved.preparedImages.values()));
+  }
 }
 
 function cutMapSourceMatches(isVacuum: boolean, source: LabelCutMapSource): boolean {
@@ -2056,7 +2727,7 @@ async function insertGenerationCutPlacements(
   generationId: number,
   rows: LabelRow[],
 ): Promise<void> {
-  const mapped = rows.filter((row): row is LabelRow & { cutMap: LabelRowCutMapSnapshot } => row.cutMap !== undefined);
+  const mapped = rows.filter((row): row is LabelRow & { cutMap: CutResultLabelRowCutMapSnapshot } => isCutResultCutMap(row.cutMap));
   if (mapped.length === 0) return;
   await client.query(
     `INSERT INTO label_generation_cut_placement
@@ -2074,27 +2745,166 @@ async function insertGenerationCutPlacements(
   );
 }
 
-async function loadCutMapAssets(client: DatabaseClient, rows: LabelRow[]): Promise<LabelCutMapAssets> {
-  const ids = [...new Set(rows.flatMap((row) => row.cutMap ? [row.cutMap.cutResultSheetMapId] : []))];
-  if (ids.length === 0) return new Map();
-  const result = await client.query<{
+export async function insertGenerationTelegramSources(
+  client: DatabaseClient,
+  generationId: number,
+  rows: LabelRow[],
+  preparedImages: Map<string, PreparedTelegramImage>,
+): Promise<void> {
+  const mapped = rows.filter((row): row is LabelRow & {
+    cutMap: TelegramSvgLabelRowCutMapSnapshot | TelegramImageLabelRowCutMapSnapshot;
+  } => isTelegramCutMap(row.cutMap));
+  const frozenAssetKeys = new Set<string>();
+  for (const row of mapped) {
+    const cutMap = row.cutMap;
+    if (cutMap.source === 'telegram_image' && !frozenAssetKeys.has(cutMap.assetKey)) {
+      const prepared = preparedImages.get(cutMap.assetKey);
+      if (!prepared) throw new ApiError(409, 'LABEL_TELEGRAM_MEDIA_STALE', 'Prepared Telegram image is missing');
+      const packet = await client.query<{
+        source_version: string | number;
+        sheet_image_storage_key: string | null;
+        sheet_image_content_type: string | null;
+        sheet_image_size_bytes: string | number | null;
+      }>(
+        `SELECT source_version, sheet_image_storage_key, sheet_image_content_type, sheet_image_size_bytes
+         FROM cnc_telegram_packets WHERE packet_id=$1::uuid FOR UPDATE`,
+        [cutMap.packetId],
+      );
+      const current = packet.rows[0];
+      if (
+        !current
+        || Number(current.source_version) !== cutMap.sourceVersion
+        || current.sheet_image_storage_key !== prepared.storageKey
+        || (
+          current.sheet_image_content_type !== null
+          && normalizeTelegramMediaContentType(current.sheet_image_content_type) !== prepared.contentType
+        )
+        || (
+          current.sheet_image_size_bytes !== null
+          && nullableNumber(current.sheet_image_size_bytes) !== prepared.sizeBytes
+        )
+      ) {
+        throw new ApiError(409, 'LABEL_TELEGRAM_MEDIA_STALE', 'Telegram image changed after preview');
+      }
+      await verifyPreparedTelegramImage(prepared);
+      await client.query(
+        `INSERT INTO label_generation_media_asset
+           (order_label_generation_id, asset_key, content_type, content_bytes, content_sha256, byte_count)
+         VALUES ($1,$2,'image/png',$3,$4,$5)
+         ON CONFLICT (order_label_generation_id, asset_key) DO NOTHING`,
+        [generationId, cutMap.assetKey, prepared.normalized, cutMap.normalizedSha256, prepared.normalized.length],
+      );
+      frozenAssetKeys.add(cutMap.assetKey);
+    }
+    await client.query(
+      `INSERT INTO label_generation_telegram_source
+         (order_label_generation_id, row_index, detail_id, copy_index, source_kind,
+          packet_id, source_version, source_message_id, asset_key, media_asset_key, source_digest,
+          telegram_label_sheet_map_id, telegram_label_placement_id)
+       VALUES ($1,$2,$3,$4,$5,$6::uuid,$7,$8,$9,$10,$11,$12,$13)`,
+      [
+        generationId,
+        row.rowIndex,
+        row.detailId,
+        row.copyIndex,
+        cutMap.source,
+        cutMap.packetId,
+        cutMap.sourceVersion,
+        cutMap.sourceMessageId,
+        cutMap.assetKey,
+        cutMap.source === 'telegram_image' ? cutMap.assetKey : null,
+        cutMap.sourceDigest,
+        cutMap.source === 'telegram_svg' ? cutMap.telegramLabelSheetMapId : null,
+        cutMap.source === 'telegram_svg' ? cutMap.telegramLabelPlacementId : null,
+      ],
+    );
+  }
+}
+
+function isCutResultCutMap(
+  value: LabelRowCutMapSnapshot | undefined,
+): value is CutResultLabelRowCutMapSnapshot {
+  return value !== undefined && (value.source === undefined || value.source === 'cut_result');
+}
+
+function isTelegramCutMap(
+  value: LabelRowCutMapSnapshot | undefined,
+): value is TelegramSvgLabelRowCutMapSnapshot | TelegramImageLabelRowCutMapSnapshot {
+  return value?.source === 'telegram_svg' || value?.source === 'telegram_image';
+}
+
+async function loadCutMapAssets(
+  client: DatabaseClient,
+  rows: LabelRow[],
+  generationId?: number,
+): Promise<LabelCutMapAssets> {
+  const assets = new Map<string | number, LabelCutMapAsset | { kind: 'image'; dataUri: string }>();
+  const ids = [...new Set(rows.flatMap((row) => isCutResultCutMap(row.cutMap) ? [row.cutMap.cutResultSheetMapId] : []))];
+  if (ids.length > 0) {
+    const result = await client.query<{
     cut_result_sheet_map_id: string | number;
     base_svg: string;
     is_vacuum: boolean;
-  }>(
-    `SELECT s.cut_result_sheet_map_id, s.base_svg,
+    }>(
+      `SELECT s.cut_result_sheet_map_id, s.base_svg,
             ${CUT_RESULT_SHEET_IS_VACUUM_SQL} AS is_vacuum
-     FROM cut_result_sheet_map s
-     JOIN cut_result r ON r.cut_result_id = s.cut_result_id
-     JOIN cut_job j ON j.cut_job_id = s.cut_job_id
-     LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = j.param_profile_id
-     WHERE s.cut_result_sheet_map_id = ANY($1::bigint[])`,
-    [ids],
-  );
-  return new Map(result.rows.map((row) => [
-    toNumber(row.cut_result_sheet_map_id),
-    { svg: row.base_svg, isVacuum: row.is_vacuum === true },
-  ]));
+       FROM cut_result_sheet_map s
+       JOIN cut_result r ON r.cut_result_id = s.cut_result_id
+       JOIN cut_job j ON j.cut_job_id = s.cut_job_id
+       LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = j.param_profile_id
+       WHERE s.cut_result_sheet_map_id = ANY($1::bigint[])`,
+      [ids],
+    );
+    for (const row of result.rows) {
+      const id = toNumber(row.cut_result_sheet_map_id);
+      assets.set(`cut_result:${id}`, { kind: 'svg', svg: row.base_svg, isVacuum: row.is_vacuum === true });
+    }
+  }
+  const svgMaps = rows.flatMap((row) => row.cutMap?.source === 'telegram_svg' ? [row.cutMap] : []);
+  const svgIds = [...new Set(svgMaps.map((map) => map.telegramLabelSheetMapId))];
+  if (svgIds.length > 0) {
+    const result = await client.query<{
+      telegram_label_sheet_map_id: string | number;
+      base_svg: string;
+      layout_digest: string;
+    }>(
+      `SELECT telegram_label_sheet_map_id, base_svg, layout_digest
+       FROM cnc_telegram_label_sheet_map
+       WHERE telegram_label_sheet_map_id=ANY($1::bigint[])`,
+      [svgIds],
+    );
+    const expected = new Map(svgMaps.map((map) => [map.telegramLabelSheetMapId, map.sourceDigest]));
+    for (const row of result.rows) {
+      const id = Number(row.telegram_label_sheet_map_id);
+      if (expected.get(id) !== row.layout_digest) throw new Error(`Telegram SVG digest mismatch ${id}`);
+      assets.set(`telegram_svg:${id}`, { kind: 'svg', svg: row.base_svg, isVacuum: false });
+    }
+  }
+  const imageKeys = [...new Set(rows.flatMap((row) => row.cutMap?.source === 'telegram_image' ? [row.cutMap.assetKey] : []))];
+  if (imageKeys.length > 0) {
+    if (!generationId) throw new Error('Generation id required for frozen Telegram images');
+    const result = await client.query<{
+      asset_key: string;
+      content_bytes: Buffer;
+      content_sha256: string;
+      byte_count: string | number;
+    }>(
+      `SELECT asset_key, content_bytes, content_sha256, byte_count
+       FROM label_generation_media_asset
+       WHERE order_label_generation_id=$1 AND asset_key=ANY($2::text[])`,
+      [generationId, imageKeys],
+    );
+    for (const row of result.rows) {
+      if (row.content_bytes.length !== Number(row.byte_count) || sha256Buffer(row.content_bytes) !== row.content_sha256) {
+        throw new Error(`Telegram image digest mismatch ${row.asset_key}`);
+      }
+      assets.set(row.asset_key, { kind: 'image', dataUri: `data:image/png;base64,${row.content_bytes.toString('base64')}` });
+    }
+  }
+  if (assets.size !== ids.length + svgIds.length + imageKeys.length) {
+    throw new Error('Missing frozen cut-map assets');
+  }
+  return assets;
 }
 
 interface PreviewTokenPayload {
@@ -2105,6 +2915,7 @@ interface PreviewTokenPayload {
   detailIds: number[];
   useBasisFields?: boolean;
   cutMapSource?: LabelCutMapSource;
+  telegramCutMapFallbackVersion?: 'v1';
   rowHash: string;
 }
 
@@ -2166,6 +2977,10 @@ function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function sha256Buffer(value: Buffer): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 function hashRequest(value: unknown): string {
   return sha256(JSON.stringify(value));
 }
@@ -2176,6 +2991,26 @@ function canonicalCutMapSelections(selections: LabelCutMapSelectionInput[]): Lab
     || a.copyIndex - b.copyIndex
     || a.cutResultPlacementId - b.cutResultPlacementId
   ));
+}
+
+async function readIdempotencyReplay<T>(
+  client: DatabaseClient,
+  idempotencyKey: string,
+  requestHash: string,
+): Promise<T | null> {
+  const existing = await client.query<{ request_hash: string; response_json: T | null; status: string }>(
+    `SELECT request_hash, response_json, status
+     FROM command_idempotency_keys
+     WHERE idempotency_key=$1`,
+    [idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) return null;
+  if (row.request_hash !== requestHash) {
+    throw new ApiError(409, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was reused with a different request');
+  }
+  if (row.status === 'completed' && row.response_json !== null) return row.response_json;
+  throw new ApiError(409, 'IDEMPOTENCY_IN_PROGRESS', 'Idempotent command is still processing');
 }
 
 async function claimIdempotency<T>(

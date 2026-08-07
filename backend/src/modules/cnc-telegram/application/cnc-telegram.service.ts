@@ -37,6 +37,14 @@ export class CncTelegramService {
     return this.ports.packets.listToday(command);
   }
 
+  assertCanViewMedia(currentUser: ListCncTelegramTodayCommand['currentUser']): void {
+    if (!this.permissions.canUser(currentUser, 'cut.view')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра изображения раскроя', {
+        requiredPermissions: ['cut.view'],
+      });
+    }
+  }
+
   async listOrderCuttingSequences(
     command: ListCncTelegramOrderCuttingSequencesCommand,
   ): Promise<CncTelegramOrderCuttingSequencesResponseDto> {
