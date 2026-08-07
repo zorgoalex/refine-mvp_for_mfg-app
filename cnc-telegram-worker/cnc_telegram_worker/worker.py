@@ -6,6 +6,7 @@ import json
 import mimetypes
 import re
 import shutil
+import os
 import uuid
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from telethon import TelegramClient
+from PIL import Image, ImageOps
 
 from .cleanup import cleanup_temp_dir
 from .audit import (
@@ -55,6 +57,10 @@ from .vector import layout_to_dict, parse_svg_cut_layout
 
 
 IMAGE_STORAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+SHEET_PREVIEW_DIRECTORY = "previews"
+SHEET_PREVIEW_SIZE = (360, 240)
+SHEET_PREVIEW_MAX_SOURCE_PIXELS = 40_000_000
+SHEET_ORIGINAL_MAX_BYTES = 12 * 1024 * 1024
 CUTTING_SEQUENCE_REPLY_RE = re.compile(
     r"(?<!\w)раскро[ий]\s*(?:файла\s*станка\s*)?[№#]?\s*(\d{1,6})(?!\d)",
     re.IGNORECASE,
@@ -101,6 +107,7 @@ class CncTelegramWorker:
         self.config.require_worker_enabled()
         self.config.require_telegram()
         self.config.require_backend_auth()
+        backfill_sheet_previews(self.config.media_dir)
         audit_spool = AuditSpool(
             self.config.audit_spool_path,
             allow_unsafe_path=self.config.audit_allow_unsafe_path,
@@ -127,6 +134,7 @@ class CncTelegramWorker:
             entity = await client.get_entity(parse_chat_ref(self.config.telegram_chat))
             chat_id = peer_id(entity)
             assert_allowed_chat(chat_id, self.config.telegram_allowed_chat_ids)
+            await self.process_media_restore_requests(client, entity, chat_id)
             me = await client.get_me()
             session_user_id = str(me.id) if getattr(me, "id", None) is not None else None
             reconciled_replies = await reconcile_pending_replies(
@@ -157,7 +165,50 @@ class CncTelegramWorker:
                 self.config.temp_dir,
                 min(self.config.temp_ttl_hours, self.config.attachment_ttl_hours),
             )
-            cleanup_temp_dir(self.config.media_dir, self.config.attachment_ttl_hours)
+            cleanup_temp_dir(
+                self.config.media_dir,
+                self.config.attachment_ttl_hours,
+                excluded_relative_dirs=frozenset({SHEET_PREVIEW_DIRECTORY}),
+            )
+
+    async def process_media_restore_requests(self, client: Any, entity: Any, chat_id: str) -> None:
+        claim = await self.erp.claim_media_restores()
+        if claim.get("capability") != "cnc_telegram_media_restore_v1":
+            raise RuntimeError("backend does not expose cnc_telegram_media_restore_v1")
+        for task in claim.get("tasks") or []:
+            request_id = str(task.get("requestId") or "")
+            try:
+                task_chat_id = str(task.get("sourceChatId") or "")
+                message_id = int(task.get("sourceMessageId") or 0)
+                if task_chat_id != chat_id:
+                    raise RuntimeError("restore task targets a different Telegram chat")
+                if message_id <= 0:
+                    raise RuntimeError("restore task has invalid Telegram message id")
+                message = await client.get_messages(entity, ids=message_id)
+                if message is None or not is_image_message(message):
+                    raise RuntimeError("Telegram screenshot message is unavailable")
+                restore_dir = self.config.temp_dir / f"restore-{request_id}"
+                restore_dir.mkdir(parents=True, exist_ok=True)
+                image_path = await download_media(message, restore_dir, "sheet")
+                if image_path is None:
+                    raise RuntimeError("Telegram returned no screenshot file")
+                media = persist_sheet_image(
+                    self.config.media_dir,
+                    task_chat_id,
+                    message_id,
+                    image_path,
+                    require_preview=True,
+                )
+                if storage_key_identity(media["storageKey"]) != storage_key_identity(str(task.get("storageKey") or "")):
+                    raise RuntimeError("restored screenshot storage key does not match packet")
+                await self.erp.complete_media_restore(request_id, media)
+            except Exception as exc:
+                error_message = sanitize_text(str(exc), 500) or "Telegram screenshot restore failed"
+                try:
+                    await self.erp.fail_media_restore(request_id, error_message)
+                except Exception as report_exc:
+                    print(f"restore {request_id} failure delivery deferred: {report_exc}", flush=True)
+                print(f"restore {request_id} failed: {error_message}", flush=True)
 
     async def run_daemon(self, days: int | None = None) -> None:
         if not self.config.enabled:
@@ -1087,12 +1138,34 @@ async def download_media(message: Any, run_dir: Path, prefix: str) -> Path | Non
     return Path(result) if result else None
 
 
-def persist_sheet_image(media_dir: Path, chat_id: str, message_id: int, image_path: Path) -> dict[str, Any]:
+def persist_sheet_image(
+    media_dir: Path,
+    chat_id: str,
+    message_id: int,
+    image_path: Path,
+    *,
+    require_preview: bool = False,
+) -> dict[str, Any]:
     media_dir.mkdir(parents=True, exist_ok=True)
     suffix = normalize_image_suffix(image_path.suffix)
+    if require_preview:
+        validate_restored_sheet_image(image_path, suffix)
     key = sheet_image_key(chat_id, message_id, suffix)
     target = media_dir / key
-    shutil.copy2(image_path, target)
+    temporary = media_dir / f".{key}.{uuid.uuid4().hex}.tmp"
+    try:
+        shutil.copy2(image_path, temporary)
+        try:
+            persist_sheet_preview(media_dir, key, temporary)
+        except Exception as exc:
+            if require_preview:
+                raise
+            # Preview creation must not turn an otherwise valid packet ingest into a
+            # failure. The next worker run backfills missing previews.
+            print(f"preview creation deferred for {key}: {sanitize_text(str(exc), 300)}", flush=True)
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
     content_type = mimetypes.guess_type(target.name)[0] or "image/jpeg"
     return {
         "storageKey": key,
@@ -1122,6 +1195,68 @@ def sheet_image_key_prefix(chat_id: str, message_id: int) -> str:
 def normalize_image_suffix(value: str) -> str:
     suffix = value.lower()
     return suffix if suffix in IMAGE_STORAGE_EXTENSIONS else ".jpg"
+
+
+def validate_restored_sheet_image(image_path: Path, suffix: str) -> None:
+    size = image_path.stat().st_size
+    if size <= 0 or size > SHEET_ORIGINAL_MAX_BYTES:
+        raise ValueError("Telegram screenshot exceeds the original size limit")
+    with image_path.open("rb") as source:
+        header = source.read(12)
+    normalized_suffix = suffix.lower()
+    is_jpeg = header.startswith(b"\xff\xd8\xff") and normalized_suffix in {".jpg", ".jpeg"}
+    is_png = header.startswith(b"\x89PNG\r\n\x1a\n") and normalized_suffix == ".png"
+    is_webp = header.startswith(b"RIFF") and header[8:12] == b"WEBP" and normalized_suffix == ".webp"
+    if not (is_jpeg or is_png or is_webp):
+        raise ValueError("Telegram screenshot content does not match its file extension")
+
+
+def persist_sheet_preview(media_dir: Path, storage_key: str, image_path: Path) -> Path:
+    preview_dir = media_dir / SHEET_PREVIEW_DIRECTORY
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = preview_dir / sheet_preview_key(storage_key)
+    temporary = preview_dir / f".{preview_path.name}.{uuid.uuid4().hex}.tmp"
+    try:
+        with Image.open(image_path) as source:
+            width, height = source.size
+            if width <= 0 or height <= 0 or width > 16_384 or height > 16_384 or width * height > SHEET_PREVIEW_MAX_SOURCE_PIXELS:
+                raise ValueError("Telegram screenshot dimensions exceed preview limits")
+            normalized = ImageOps.exif_transpose(source).convert("RGB")
+            normalized.thumbnail(SHEET_PREVIEW_SIZE, Image.Resampling.LANCZOS)
+            normalized.save(temporary, format="JPEG", quality=72, optimize=True, progressive=True)
+        os.replace(temporary, preview_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return preview_path
+
+
+def backfill_sheet_previews(media_dir: Path) -> int:
+    media_dir.mkdir(parents=True, exist_ok=True)
+    created = 0
+    for path in media_dir.iterdir():
+        if not path.is_file() or path.suffix.lower() not in IMAGE_STORAGE_EXTENSIONS:
+            continue
+        preview = media_dir / SHEET_PREVIEW_DIRECTORY / sheet_preview_key(path.name)
+        if preview.is_file():
+            continue
+        try:
+            persist_sheet_preview(media_dir, path.name, path)
+            created += 1
+        except Exception as exc:
+            print(f"skip preview backfill {path.name}: {sanitize_text(str(exc), 300)}", flush=True)
+    return created
+
+
+def sheet_preview_key(storage_key: str) -> str:
+    path = Path(storage_key)
+    if path.name != storage_key or path.suffix.lower() not in IMAGE_STORAGE_EXTENSIONS:
+        raise ValueError("invalid screenshot storage key")
+    return f"{path.stem}.preview.jpg"
+
+
+def storage_key_identity(storage_key: str) -> str:
+    path = Path(storage_key)
+    return path.stem if path.name == storage_key and path.suffix.lower() in IMAGE_STORAGE_EXTENSIONS else ""
 
 
 def parse_chat_ref(value: str) -> int | str:

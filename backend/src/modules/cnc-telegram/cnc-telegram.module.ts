@@ -11,12 +11,22 @@ import type { BackendEnv } from '../../config/env.validation';
 import { PgCncTelegramWorkerAuditRepository } from './adapters/pg-cnc-telegram-worker-audit-repository';
 import { CncTelegramWorkerAuditService } from './application/cnc-telegram-worker-audit.service';
 import { CncTelegramWorkerAuditController } from './http/cnc-telegram-worker-audit.controller';
+import { PgCncTelegramMediaRepository } from './adapters/pg-cnc-telegram-media-repository';
+import { CncTelegramMediaService } from './application/cnc-telegram-media.service';
+import { CncTelegramMediaController } from './http/cnc-telegram-media.controller';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [CncTelegramController, CncTelegramWorkerAuditController],
+  controllers: [CncTelegramController, CncTelegramWorkerAuditController, CncTelegramMediaController],
   providers: [
     CncTelegramRuntimeConfigService,
+    {
+      provide: CncTelegramMediaService,
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) => (
+        new CncTelegramMediaService(new PgCncTelegramMediaRepository(database), config)
+      ),
+      inject: [DatabaseService, ConfigService],
+    },
     {
       provide: CncTelegramWorkerAuditService,
       useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) => {

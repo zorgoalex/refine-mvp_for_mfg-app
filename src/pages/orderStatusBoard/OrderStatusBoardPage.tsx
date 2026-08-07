@@ -88,6 +88,7 @@ import { SETTING_KEYS, useAppSettings } from '../../hooks/useAppSettings';
 import { useOrderFinancialVisibility } from '../../hooks/useOrderFinancialVisibility';
 import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
+import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
 import {
   classifyOrderStatusBoardMoveFailure,
@@ -95,6 +96,7 @@ import {
   isCncPreviewRequestCurrent,
   releaseCncPreviewLoadKey,
   reserveOrderStatusBoardMutation,
+  revealOrderStatusBoardCard,
   restoreOrderStatusBoardFocus,
   syncCncBathSelectedDetail,
 } from './interaction';
@@ -508,15 +510,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               `[data-status-board-order-id="${focusOrderId}"]`,
             );
             if (revealTouchMovedCard && movedCard) {
-              movedCard.focus({ preventScroll: true });
-              movedCard.scrollIntoView({
-                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-                  ? 'auto'
-                  : 'smooth',
-                block: 'nearest',
-                inline: 'center',
-              });
-              return;
+              const cards = movedCard.closest<HTMLElement>('.status-board-column__cards');
+              if (
+                revealOrderStatusBoardCard(
+                  movedCard,
+                  boardViewportRef.current,
+                  cards,
+                  window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+                )
+              ) {
+                return;
+              }
             }
             restoreOrderStatusBoardFocus(
               focusOrderId,
@@ -3289,11 +3293,17 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
 
   useEffect(() => {
     setObjectUrl(null);
     setError(null);
+    setPrintPreviewOpen(false);
   }, [imageUrl]);
+
+  useEffect(() => {
+    if (!open) setPrintPreviewOpen(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open || objectUrl) return;
@@ -3327,26 +3337,47 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   if (!open) return null;
 
   return (
-    <div
-      className="cnc-packet-card__sheet-panel"
-      onClick={stopCncCardClickPropagation}
-    >
-      <div className="cnc-packet-card__sheet-body">
-        {loading && (
-          <div className="cnc-packet-card__sheet-loading">
-            <Spin size="small" />
-          </div>
-        )}
-        {error && <Alert type="warning" showIcon message={error} />}
-        {objectUrl && (
-          <img
-            className="cnc-packet-card__sheet-image"
-            src={objectUrl}
-            alt={`Скрин листа ${title}`}
-          />
-        )}
+    <>
+      <div
+        className="cnc-packet-card__sheet-panel"
+        onClick={stopCncCardClickPropagation}
+      >
+        <div className="cnc-packet-card__sheet-actions">
+          <Button
+            icon={<PrinterOutlined />}
+            disabled={!objectUrl}
+            aria-haspopup="dialog"
+            onClick={() => setPrintPreviewOpen(true)}
+          >
+            Печать
+          </Button>
+        </div>
+        <div className="cnc-packet-card__sheet-body">
+          {loading && (
+            <div className="cnc-packet-card__sheet-loading">
+              <Spin size="small" />
+            </div>
+          )}
+          {error && <Alert type="warning" showIcon message={error} />}
+          {objectUrl && (
+            <img
+              className="cnc-packet-card__sheet-image"
+              src={objectUrl}
+              alt={`Скрин листа ${title}`}
+            />
+          )}
+        </div>
       </div>
-    </div>
+      <ImagePrintPreviewModal
+        open={printPreviewOpen}
+        imageUrl={objectUrl}
+        title={`Скрин раскроя · ${title}`}
+        status="Скрин из Telegram-чата"
+        alt={`Скрин листа ${title}`}
+        printTitle={`Раскрой Telegram ${title}`}
+        onClose={() => setPrintPreviewOpen(false)}
+      />
+    </>
   );
 };
 

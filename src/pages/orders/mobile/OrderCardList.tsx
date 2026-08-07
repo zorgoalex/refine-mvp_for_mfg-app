@@ -2,7 +2,12 @@ import React from 'react';
 import { Card, List, Tag, Typography } from 'antd';
 import { StarFilled } from '@ant-design/icons';
 import type { TablePaginationConfig } from 'antd';
-import { buildOrderCardModel } from './orderCardModel';
+import {
+  buildOrderCardModel,
+  getOrderCardStatusTextColor,
+  type OrderCardStatusColorMaps,
+  type OrderCardStatusKind,
+} from './orderCardModel';
 
 export interface OrderCardListProps {
   rows: readonly Record<string, unknown>[];
@@ -11,7 +16,23 @@ export interface OrderCardListProps {
   onPaginationChange: (page: number, pageSize: number) => void;
   onOpen: (id: number) => void;
   showFinancials?: boolean;
+  statusColors?: Partial<OrderCardStatusColorMaps>;
 }
+
+const statusTag = (kind: OrderCardStatusKind, label: string, backgroundColor: string) => (
+  <Tag
+    data-order-card-status={kind}
+    style={{
+      marginInlineEnd: 0,
+      backgroundColor,
+      borderColor: backgroundColor,
+      color: getOrderCardStatusTextColor(backgroundColor),
+      fontWeight: 600,
+    }}
+  >
+    {label}
+  </Tag>
+);
 
 export const buildOrderCardPagination = (
   pagination: TablePaginationConfig | false,
@@ -32,14 +53,14 @@ export const buildOrderCardPagination = (
   };
 };
 
-export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPaginationChange, onOpen, showFinancials = true }) => (
+export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pagination, onPaginationChange, onOpen, showFinancials = true, statusColors }) => (
   <List
     dataSource={rows as Record<string, unknown>[]}
     loading={loading}
     pagination={buildOrderCardPagination(pagination, onPaginationChange)}
     rowKey={(r) => String(r.order_id)}
     renderItem={(row) => {
-      const m = buildOrderCardModel(row, { showFinancials });
+      const m = buildOrderCardModel(row, { showFinancials, statusColors });
       return (
         <Card
           size="small"
@@ -59,9 +80,9 @@ export const OrderCardList: React.FC<OrderCardListProps> = ({ rows, loading, pag
             <Typography.Text type="secondary" style={{ display: 'block' }}>{m.dates}</Typography.Text>
           </div>
           <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {m.statusTag && <Tag>{m.statusTag}</Tag>}
-            {m.paymentTag && <Tag>{m.paymentTag}</Tag>}
-            {m.productionTag && <Tag>{m.productionTag}</Tag>}
+            {m.statusTag && statusTag('order', m.statusTag, m.statusTagColor)}
+            {m.paymentTag && statusTag('payment', m.paymentTag, m.paymentTagColor)}
+            {m.productionTag && statusTag('production', m.productionTag, m.productionTagColor)}
           </div>
           {m.amountLine && (
             <Typography.Text strong style={{ display: 'block', marginTop: 6 }}>{m.amountLine}</Typography.Text>

@@ -197,6 +197,43 @@ export interface CncTelegramOrderCuttingSequencesResponse {
   sequences: CncTelegramOrderCuttingSequence[];
 }
 
+export type CncTelegramMediaRestoreStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface CncTelegramOrderScreenshot {
+  packetId: string;
+  sourceMessageId: number;
+  sourceCreatedAt: string;
+  programName: string | null;
+  materialName: string;
+  matchedDetailCount: number;
+  itemQuantityTotal: number;
+  previewUrl: string;
+  imageUrl: string;
+  originalAvailable: boolean;
+  availableUntil: string;
+  restore: {
+    requestId: string;
+    status: CncTelegramMediaRestoreStatus;
+    requestedAt: string;
+    error: string | null;
+  } | null;
+}
+
+export interface CncTelegramOrderScreenshotsResponse {
+  orderId: number;
+  generatedAt: string;
+  originalRetentionDays: 30;
+  screenshots: CncTelegramOrderScreenshot[];
+}
+
+export interface CncTelegramMediaRestoreResponse {
+  requestId: string;
+  packetId: string;
+  status: CncTelegramMediaRestoreStatus;
+  requestedAt: string;
+  availableUntil: string | null;
+}
+
 export interface CncAutoCutStatusConfigureResponse {
   settingEnabled: boolean;
   requestId: string;

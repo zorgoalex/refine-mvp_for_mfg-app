@@ -1844,6 +1844,16 @@
   padding: 8px;
 }
 
+.cnc-packet-card__sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.cnc-packet-card__sheet-actions .ant-btn {
+  min-height: 40px;
+}
+
 .status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__collapse .ant-collapse-header,
 .status-board-columns--cnc-detailed .cnc-today-column--completed .cnc-packet-card__collapse .ant-collapse-header,
 .status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__sheet .ant-collapse-header,

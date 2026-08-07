@@ -4,6 +4,7 @@
 import React from 'react';
 import { Typography } from 'antd';
 import { LinkOutlined } from '@ant-design/icons';
+import { OrderTelegramScreenshots } from './OrderTelegramScreenshots';
 
 const { Text, Link } = Typography;
 
@@ -66,6 +67,7 @@ export const OrderFilesBlock: React.FC<OrderFilesBlockProps> = ({ record, compac
           {renderLink(record?.link_pdf_file)}
         </div>
       </div>
+      <OrderTelegramScreenshots orderId={Number(record?.order_id)} compact={compact} />
     </div>
   );
 };

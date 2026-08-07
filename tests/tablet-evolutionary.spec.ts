@@ -54,6 +54,7 @@ test.describe('Evolutionary tablet UI', () => {
                 await expectTabletShell(page, state.family);
                 if ('ready' in state) await expect(page.locator(state.ready).first()).toBeVisible({ timeout: 30_000 });
                 if ('readyText' in state) await expect(page.getByText(state.readyText, { exact: false }).first()).toBeVisible({ timeout: 30_000 });
+                if (state.name === '02-orders-cards') await expectConfiguredOrderCardStatusColors(page);
                 await expectNoDocumentOverflow(page);
                 await expectRepresentativeTouchTargets(page);
                 await captureTabletState(page, testInfo, state.name);
@@ -173,12 +174,18 @@ test.describe('Evolutionary tablet UI', () => {
             { name: 'configuration', path: '/configuration', family: 'configuration', ready: '.configuration-tabs-wrap' },
         ] as const;
 
-        for (const [index, state] of states.entries()) {
+        const requestedStates = new Set((process.env.TABLET_SCREEN ?? '').split(',').filter(Boolean));
+        const selectedStates = requestedStates.size > 0
+            ? states.filter((state) => requestedStates.has(state.name))
+            : states;
+
+        for (const [index, state] of selectedStates.entries()) {
             await test.step(state.name, async () => {
                 await page.goto(state.path, { waitUntil: 'domcontentloaded' });
                 await expectTabletShell(page, state.family);
                 if ('ready' in state) await expect(page.locator(state.ready).first()).toBeVisible({ timeout: 30_000 });
                 if ('readyText' in state) await expect(page.getByText(state.readyText, { exact: false }).first()).toBeVisible({ timeout: 30_000 });
+                if (state.name === 'orders-cards') await expectConfiguredOrderCardStatusColors(page);
                 await expect(page.locator('.evolution-shell__content')).toHaveAttribute('data-tablet-header-compact', 'true');
                 await expect(page.locator('.evolution-shell')).toHaveAttribute('data-tablet-header-compact', 'true');
                 const workspaceTabs = page.locator('.evolution-workspace-tabs');
@@ -1123,6 +1130,27 @@ async function expectNoDocumentOverflow(page: Page) {
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
 }
 
+async function expectConfiguredOrderCardStatusColors(page: Page) {
+    const firstCard = page.locator('.order-card-list--tablet .ant-card').first();
+    const expectedBadges = [
+        { kind: 'order', background: 'rgb(22, 119, 255)', foreground: 'rgb(0, 0, 0)' },
+        { kind: 'payment', background: 'rgb(250, 140, 22)', foreground: 'rgb(0, 0, 0)' },
+        { kind: 'production', background: 'rgb(114, 46, 209)', foreground: 'rgb(255, 255, 255)' },
+    ] as const;
+
+    for (const badge of expectedBadges) {
+        const tag = firstCard.locator(`[data-order-card-status="${badge.kind}"]`);
+        await expect(tag).toBeVisible();
+        await expect(tag).toHaveCSS('background-color', badge.background);
+        await expect(tag).toHaveCSS('color', badge.foreground);
+    }
+
+    const backgrounds = await firstCard.locator('[data-order-card-status]').evaluateAll((tags) => (
+        tags.map((tag) => getComputedStyle(tag).backgroundColor)
+    ));
+    expect(new Set(backgrounds).size, backgrounds.join(', ')).toBe(3);
+}
+
 async function expectRepresentativeTouchTargets(page: Page) {
     const sizes = await page.locator('.evolution-shell__content .ant-btn:visible').evaluateAll((buttons) =>
         buttons.slice(0, 8).map((button) => {
@@ -1219,6 +1247,13 @@ function assertLocalMockBaseUrl() {
 }
 
 function seedTabletData(db: WorkflowMockDb) {
+    const orderStatus = db.order_statuses.find((row) => row.order_status_id === 1);
+    const paymentStatus = db.payment_statuses.find((row) => row.payment_status_id === 2);
+    const productionStatus = db.production_statuses.find((row) => row.production_status_id === 1);
+    if (orderStatus) orderStatus.color = '#1677FF';
+    if (paymentStatus) paymentStatus.color = '#FA8C16';
+    if (productionStatus) productionStatus.color = '#722ED1';
+
     for (let phoneId = 2; phoneId <= 14; phoneId += 1) {
         db.client_phones.push({
             phone_id: phoneId,

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildOrderCardModel } from './orderCardModel';
+import {
+  buildOrderCardModel,
+  buildOrderCardStatusColorMap,
+  getOrderCardStatusTextColor,
+  resolveOrderCardStatusColor,
+} from './orderCardModel';
 
 const row = {
   order_id: 11372,
@@ -10,6 +15,9 @@ const row = {
   issue_date: null,
   order_status_name: 'Предварительный',
   payment_status_name: 'Не оплачен',
+  order_status_id: 11,
+  payment_status_id: 22,
+  production_status_id: 33,
   production_status_name: 'Не назначен',
   final_amount: 391419,
   paid_amount: 0,
@@ -52,5 +60,38 @@ describe('buildOrderCardModel', () => {
 
     expect(model.paymentTag).toBe('');
     expect(model.amountLine).toBe('');
+  });
+
+  it('maps every badge to its configured status color by id', () => {
+    const model = buildOrderCardModel(row, {
+      statusColors: {
+        order: new Map([[11, '#0050B3']]),
+        payment: new Map([[22, '#FA8C16']]),
+        production: new Map([[33, '#722ED1']]),
+      },
+    });
+
+    expect(model.statusTagColor).toBe('#0050B3');
+    expect(model.paymentTagColor).toBe('#FA8C16');
+    expect(model.productionTagColor).toBe('#722ED1');
+  });
+
+  it('normalizes configured hex, supports legacy preset colors, and falls back safely', () => {
+    expect(buildOrderCardStatusColorMap([
+      { order_status_id: 1, color: ' #ff5733 ' },
+      { order_status_id: 2, color: 'cyan' },
+      { order_status_id: 3, color: 'not-a-color' },
+    ], 'order_status_id')).toEqual(new Map([
+      [1, '#FF5733'],
+      [2, '#13C2C2'],
+      [3, '#1677FF'],
+    ]));
+    expect(resolveOrderCardStatusColor(undefined)).toBe('#1677FF');
+  });
+
+  it('uses readable foreground text for both light and dark configured colors', () => {
+    expect(getOrderCardStatusTextColor('#FAAD14')).toBe('#000000');
+    expect(getOrderCardStatusTextColor('#1677FF')).toBe('#000000');
+    expect(getOrderCardStatusTextColor('#0050B3')).toBe('#FFFFFF');
   });
 });

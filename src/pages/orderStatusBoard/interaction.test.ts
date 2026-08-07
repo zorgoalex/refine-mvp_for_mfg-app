@@ -7,6 +7,7 @@ import {
   isCncPreviewRequestCurrent,
   releaseCncPreviewLoadKey,
   reserveOrderStatusBoardMutation,
+  revealOrderStatusBoardCard,
   restoreOrderStatusBoardFocus,
   syncCncBathSelectedDetail,
 } from './interaction';
@@ -125,6 +126,61 @@ describe('order status board interactions', () => {
       ),
     ).toBe('title');
     expect(titleFocus).toHaveBeenCalledOnce();
+  });
+
+  it('reveals a touch-moved card by scrolling nested board axes independently', () => {
+    const focus = vi.fn();
+    const scrollBoard = vi.fn();
+    const scrollCards = vi.fn();
+
+    expect(
+      revealOrderStatusBoardCard(
+        {
+          focus,
+          getBoundingClientRect: () => ({
+            left: 1300,
+            top: 1100,
+            width: 240,
+            height: 100,
+          }),
+        },
+        {
+          clientWidth: 800,
+          clientHeight: 600,
+          scrollWidth: 2400,
+          scrollHeight: 600,
+          scrollLeft: 100,
+          scrollTop: 0,
+          scrollTo: scrollBoard,
+          getBoundingClientRect: () => ({
+            left: 100,
+            top: 0,
+            width: 800,
+            height: 600,
+          }),
+        },
+        {
+          clientWidth: 240,
+          clientHeight: 600,
+          scrollWidth: 240,
+          scrollHeight: 1800,
+          scrollLeft: 0,
+          scrollTop: 200,
+          scrollTo: scrollCards,
+          getBoundingClientRect: () => ({
+            left: 1300,
+            top: 100,
+            width: 240,
+            height: 600,
+          }),
+        },
+        false,
+      ),
+    ).toBe(true);
+
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(scrollBoard).toHaveBeenCalledWith({ left: 1020, behavior: 'smooth' });
+    expect(scrollCards).toHaveBeenCalledWith({ top: 950, behavior: 'smooth' });
   });
 
   it('updates the selected bath detail marker in the rendered SVG without rebuilding it', () => {
