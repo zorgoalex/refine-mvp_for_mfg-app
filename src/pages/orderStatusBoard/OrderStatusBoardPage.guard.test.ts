@@ -108,6 +108,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toContain('clamp(480px, 48vw, 552px)');
   });
 
+  it('passes horizontal phone swipes from card lists to the board viewport', () => {
+    expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-column__cards \{[^}]*overscroll-behavior-x: auto;[^}]*overscroll-behavior-y: contain;[^}]*touch-action: pan-x pan-y;/,
+    );
+    expect(css).toContain('.status-board-card__drag--touch');
+    expect(css).toContain('touch-action: none');
+  });
+
   it('keeps only tabs and the settings disclosure in the mobile board header', () => {
     expect(page).toContain('label="Настройки доски"');
     expect(page).toContain('label="Настройки МДФ"');

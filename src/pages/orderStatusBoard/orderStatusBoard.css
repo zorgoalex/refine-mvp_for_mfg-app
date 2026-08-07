@@ -2541,6 +2541,12 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  .status-board-column__cards {
+    overscroll-behavior-x: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-x pan-y;
+  }
+
   .status-board-columns:not(.status-board-columns--cnc) .status-board-column {
     width: calc(100vw - 48px);
     min-width: calc(100vw - 48px);

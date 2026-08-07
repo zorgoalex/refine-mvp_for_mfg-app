@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Горизонтальный свайп по всей мобильной доске",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "На мобильном экране «Доски статусов» горизонтальная прокрутка между колонками теперь работает свайпом по карточкам и пустой области колонки, а не только по заголовкам.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Присадка в деталях заказа и Excel",
     services: ["ERP"],
     repositories: ["repo_erp"],
