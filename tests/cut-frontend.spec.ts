@@ -28,12 +28,15 @@ function jobBase() {
     name: 'E2E-Тест раскрой',
     status: 'draft',
     source: 'manual',
+    createdAt: '2026-08-07T00:00:00.000Z',
     version: 0,
     pdfPrewarmState: 'pending',
     pdfTemplate: 'standard',
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
     groups: [],
+    rotationAllowed: true,
+    textureDirection: 'none',
   };
 }
 

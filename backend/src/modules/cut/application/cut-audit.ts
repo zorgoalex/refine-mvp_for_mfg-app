@@ -28,6 +28,8 @@ export const CUT_AUDIT_EVENTS = {
   sheetMaterialChanged: 'cut_job.sheet_material_changed',
   combineFilmsChanged: 'cut_job.combine_films_changed',
   splitByMaterialChanged: 'cut_job.split_by_material_changed',
+  rotationAllowedChanged: 'cut_job.rotation_allowed_changed',
+  textureDirectionChanged: 'cut_job.texture_direction_changed',
   nameChanged: 'cut_job.name_changed',
   manualLayoutSaved: 'cut_job.manual_layout_saved',
 } as const;

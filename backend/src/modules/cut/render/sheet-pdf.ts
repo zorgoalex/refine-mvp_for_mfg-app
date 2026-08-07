@@ -33,6 +33,8 @@ export interface PdfSheetInput {
   cutJobId?: number;
   cutNumber?: string;
   currentCutNumber?: string;
+  jobName?: string;
+  textureDirection?: string;
   filmRequirementLinearMeters?: number | null;
 }
 
@@ -710,9 +712,10 @@ function buildSheetFieldValues(sheet: PdfSheetInput): Record<string, LabelCustom
   const sheetArea = (sheet.sheetWidthMm * sheet.sheetHeightMm) / 1_000_000;
   const utilization = sheetArea > 0 ? (detailsArea / sheetArea) * 100 : null;
   return {
-    'job.name': '',
+    'job.name': sheet.jobName ?? '',
     'job.number': sheet.cutJobId ?? null,
     'job.pdf_template': sheet.template ?? '',
+    'job.texture_direction': sheet.textureDirection ?? '',
     'cut.number': sheet.cutNumber ?? '',
     'cut.current_version': sheet.currentCutNumber ?? '',
     'group.number': '',

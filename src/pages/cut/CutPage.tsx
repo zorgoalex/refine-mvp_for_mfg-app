@@ -84,7 +84,9 @@ import { CutJobVersionLines } from '../orders/CutJobVersionLines';
 import type {
   CutGroupDto,
   CutJobDto,
+  CutJobListFilters,
   CutJobItemDto,
+  CutTextureDirection,
   CutResultSummary,
   EligibleDetailDto,
   SheetPlacements,
@@ -105,7 +107,6 @@ import {
   cutJobCounts,
   cutJobSourceLabel,
   cutJobStatusLabel,
-  distinctOrderIdsFromItems,
   filterJobsByProfile,
   filterJobsByStatus,
   formatGroupSummary,
@@ -146,6 +147,12 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
   { value: 'bath_profiles', label: 'Профили ванны' },
 ];
 
+const CUT_TEXTURE_DIRECTION_OPTIONS: Array<{ value: CutTextureDirection; label: string }> = [
+  { value: 'vertical', label: 'Вертикальное' },
+  { value: 'horizontal', label: 'Горизонтальное' },
+  { value: 'none', label: 'Отсутствует' },
+];
+
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
 
@@ -171,6 +178,12 @@ type CutFilmSelectOption = {
   label: string;
   title: string;
   searchText: string;
+};
+
+type CutJobOrderRef = {
+  orderId: number;
+  orderName: string | null;
+  orderDeleted: boolean;
 };
 
 type CutPreviewSummaryRow = {
@@ -345,6 +358,20 @@ function editableSheetsForGroup(group: CutGroupDto): { sheetIndex: number; place
     : group.sheets.map((sheet) => ({ sheetIndex: sheet.sheetIndex, placements: sheet.placements }));
 }
 
+function cloneEmptySheet(base: SheetPlacements, sheetIndex: number): { sheetIndex: number; placements: SheetPlacements } {
+  return {
+    sheetIndex,
+    placements: {
+      ...base,
+      pieces: [],
+    },
+  };
+}
+
+function nextSheetIndex(sheets: ReadonlyArray<{ sheetIndex: number }>): number {
+  return sheets.reduce((max, sheet) => Math.max(max, sheet.sheetIndex), -1) + 1;
+}
+
 /** Revoke every blob object URL in a key->url map (leak guard on reset/unmount). */
 const revokeObjectUrls = (map: Record<string, string>): void => {
   Object.values(map).forEach((url) => URL.revokeObjectURL(url));
@@ -421,6 +448,66 @@ function cutJobOrderOptions(job: CutJobDto | null): CutOrderSelectOption[] {
   return [...byId.values()];
 }
 
+function cutJobOrderRefs(items: readonly CutJobItemDto[]): CutJobOrderRef[] {
+  const byId = new Map<number, CutJobOrderRef>();
+  for (const item of items) {
+    const label = item.orderName?.trim() || null;
+    const existing = byId.get(item.orderId);
+    if (existing) {
+      if (!existing.orderName && label) existing.orderName = label;
+      existing.orderDeleted = existing.orderDeleted || item.orderDeleted === true;
+      continue;
+    }
+    byId.set(item.orderId, {
+      orderId: item.orderId,
+      orderName: label,
+      orderDeleted: item.orderDeleted === true,
+    });
+  }
+  return [...byId.values()].sort((a, b) => {
+    const left = a.orderName ?? `#${a.orderId}`;
+    const right = b.orderName ?? `#${b.orderId}`;
+    return left.localeCompare(right, 'ru', { numeric: true });
+  });
+}
+
+function cutJobOrderLabel(ref: CutJobOrderRef): string {
+  return ref.orderName?.trim() || `#${ref.orderId}`;
+}
+
+function formatCutJobCreatedDate(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = dayjs(value);
+  return date.isValid() ? date.format('DD.MM.YYYY') : '—';
+}
+
+function formatCutJobCreatedDateTime(value: string | null | undefined): string {
+  if (!value) return '—';
+  const date = dayjs(value);
+  return date.isValid() ? date.format('DD.MM.YYYY HH:mm') : '—';
+}
+
+function cutJobCreatedAtInRange(value: string | null | undefined, range: CutOrderDateRangeValue): boolean {
+  const from = range?.[0];
+  const to = range?.[1];
+  if (!from && !to) return true;
+  const createdAt = dayjs(value);
+  if (!createdAt.isValid()) return false;
+  if (from && createdAt.isBefore(from.startOf('day'))) return false;
+  if (to && createdAt.isAfter(to.endOf('day'))) return false;
+  return true;
+}
+
+function cutJobMatchesOrderFilter(job: CutJobDto, query: string): boolean {
+  const needle = query.trim().toLocaleLowerCase('ru-RU');
+  if (!needle) return true;
+  return cutJobOrderRefs(job.items).some((ref) =>
+    `${ref.orderId} ${ref.orderName ?? ''}`
+      .toLocaleLowerCase('ru-RU')
+      .includes(needle),
+  );
+}
+
 function CutOrderReference({
   orderId,
   orderName,
@@ -440,6 +527,32 @@ function CutOrderReference({
       </Button>
       <OrderDeletedTag deleted={orderDeleted} />
     </Space>
+  );
+}
+
+function CutJobOrderLinks({
+  items,
+  onOpen,
+}: {
+  items: readonly CutJobItemDto[];
+  onOpen: (orderId: number) => void;
+}): JSX.Element {
+  const refs = cutJobOrderRefs(items);
+  if (refs.length === 0) return <Text type="secondary">—</Text>;
+  return (
+    <span className="cut-job-order-links">
+      {refs.map((ref, index) => (
+        <React.Fragment key={ref.orderId}>
+          {index > 0 ? <span className="cut-job-order-links__separator">, </span> : null}
+          <CutOrderReference
+            orderId={ref.orderId}
+            orderName={ref.orderName}
+            orderDeleted={ref.orderDeleted}
+            onOpen={() => onOpen(ref.orderId)}
+          />
+        </React.Fragment>
+      ))}
+    </span>
   );
 }
 
@@ -899,9 +1012,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
   const [profileFilter, setProfileFilter] = useState<CutJobProfileFilter>();
   const [jobSearch, setJobSearch] = useState('');
+  const [jobOrderSearch, setJobOrderSearch] = useState('');
+  const [appliedJobOrderSearch, setAppliedJobOrderSearch] = useState('');
+  const [appliedCutListDateRange, setAppliedCutListDateRange] = useState<CutOrderDateRangeValue>(undefined);
   const [operationalSheetFilter, setOperationalSheetFilter] = useState<number | undefined>();
   const [operationalFilmFilter, setOperationalFilmFilter] = useState<number | undefined>();
-  const [cutListDateRange, setCutListDateRange] = useState<CutOrderDateRangeValue>(defaultOrderDateRange);
+  const [cutListDateRange, setCutListDateRange] = useState<CutOrderDateRangeValue>(undefined);
+  const listFiltersRef = useRef<CutJobListFilters>({});
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -1162,11 +1279,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     orderDateTo,
   ]);
 
-  const loadJobs = useCallback(async () => {
+  const buildOperationalListFilters = useCallback(
+    (orderSearch: string, dateRange: CutOrderDateRangeValue): CutJobListFilters => ({
+      ...(orderSearch.trim() ? { orderSearch: orderSearch.trim() } : {}),
+      ...(dateRange?.[0] ? { createdFrom: dateRange[0].format('YYYY-MM-DD') } : {}),
+      ...(dateRange?.[1] ? { createdTo: dateRange[1].format('YYYY-MM-DD') } : {}),
+    }),
+    [],
+  );
+
+  const loadJobs = useCallback(async (filtersOverride?: CutJobListFilters) => {
     setJobsLoading(true);
     try {
+      const filters = filtersOverride ?? (isEmbeddedOrder ? {} : listFiltersRef.current);
       const [nextJobs, placements] = await Promise.all([
-        cutApi.list(),
+        cutApi.list(filters),
         isEmbeddedOrder ? cutApi.listPlacements({ orderIds: [embeddedOrderId!] }) : Promise.resolve(null),
       ]);
       setJobs(nextJobs);
@@ -1176,7 +1303,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } finally {
       setJobsLoading(false);
     }
-  }, [embeddedOrderId, handleError, isEmbeddedOrder]);
+  }, [
+    embeddedOrderId,
+    handleError,
+    isEmbeddedOrder,
+  ]);
 
   useEffect(() => {
     if (!isEmbeddedOrder) return;
@@ -1260,6 +1391,42 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         void loadJobs();
       } catch (error) {
         handleError(error, 'Не удалось изменить объединение плёнок');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyPdfTemplateState, job, handleError, loadJobs],
+  );
+
+  const setJobRotationAllowed = useCallback(
+    async (rotationAllowed: boolean) => {
+      if (!job) return;
+      setBusy(true);
+      try {
+        const updated = await cutApi.setRotationAllowed(job.cutJobId, rotationAllowed, job.version);
+        setJob(updated);
+        applyPdfTemplateState(updated);
+        void loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось изменить разрешение поворота');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyPdfTemplateState, job, handleError, loadJobs],
+  );
+
+  const setJobTextureDirection = useCallback(
+    async (textureDirection: CutTextureDirection) => {
+      if (!job) return;
+      setBusy(true);
+      try {
+        const updated = await cutApi.setTextureDirection(job.cutJobId, textureDirection, job.version);
+        setJob(updated);
+        applyPdfTemplateState(updated);
+        void loadJobs();
+      } catch (error) {
+        handleError(error, 'Не удалось сохранить направление текстуры');
       } finally {
         setBusy(false);
       }
@@ -1742,6 +1909,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     }
   }, [job, criteriaFromForm, handleError]);
 
+  const closeEligibleDetails = useCallback(() => {
+    setEligible(null);
+    setNoSheetSpecCount(0);
+    setSelected([]);
+  }, []);
+
   const addToBasket = useCallback(async () => {
     if (!job || selected.length === 0) return;
     setBusy(true);
@@ -1751,6 +1924,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       applyPdfTemplateState(updated);
       emitCutJobUpdate(updated, job);
       message.success('Детали добавлены в раскрой');
+      setEligible(null);
+      setNoSheetSpecCount(0);
+      setSelected([]);
       await loadJobs();
     } catch (error) {
       handleError(error, 'Не удалось добавить детали');
@@ -2136,6 +2312,38 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [applyEditorSheets, workingSheets],
   );
 
+  const addEditorSheet = useCallback(() => {
+    const base = workingSheets[0]?.placements;
+    if (!base) return;
+    const sheetIndex = nextSheetIndex(workingSheets);
+    const next = [...workingSheets, cloneEmptySheet(base, sheetIndex)];
+    setEditorHistory((h) => pushHistory(h, workingSheets));
+    setEditorSheetRotations((current) => ({ ...current, [sheetIndex]: 0 }));
+    setEditorSheetMirrors((current) => ({ ...current, [sheetIndex]: { horizontal: false, vertical: false } }));
+    applyEditorSheets(next);
+  }, [applyEditorSheets, workingSheets]);
+
+  const removeEditorSheet = useCallback(
+    (sheetIndex: number) => {
+      const target = workingSheets.find((sheet) => sheet.sheetIndex === sheetIndex);
+      if (!target || target.placements.pieces.length > 0 || workingSheets.length <= 1) return;
+      const next = workingSheets.filter((sheet) => sheet.sheetIndex !== sheetIndex);
+      setEditorHistory((h) => pushHistory(h, workingSheets));
+      setEditorSheetRotations((current) => {
+        const nextRotations = { ...current };
+        delete nextRotations[sheetIndex];
+        return nextRotations;
+      });
+      setEditorSheetMirrors((current) => {
+        const nextMirrors = { ...current };
+        delete nextMirrors[sheetIndex];
+        return nextMirrors;
+      });
+      applyEditorSheets(next);
+    },
+    [applyEditorSheets, workingSheets],
+  );
+
   /** Undo the last committed drag/rotate (up to EDITOR_UNDO_LIMIT steps). */
   const undoEditorStep = useCallback(() => {
     if (editorHistory.length === 0) return;
@@ -2212,6 +2420,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       candidate.items?.some((item) => item.orderId === embeddedOrderId),
     );
     const query = jobSearch.trim().toLocaleLowerCase('ru-RU');
+    const useOperationalListFilters = !isEmbeddedOrder && isOperational;
     return scoped.filter((candidate) => {
       if (
         query &&
@@ -2219,6 +2428,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           .toLocaleLowerCase('ru-RU')
           .includes(query)
       ) {
+        return false;
+      }
+      if (useOperationalListFilters && !cutJobMatchesOrderFilter(candidate, appliedJobOrderSearch)) {
+        return false;
+      }
+      if (useOperationalListFilters && !cutJobCreatedAtInRange(candidate.createdAt, appliedCutListDateRange)) {
         return false;
       }
       if (
@@ -2238,7 +2453,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }, [
     embeddedJobIds,
     embeddedOrderId,
+    appliedCutListDateRange,
+    appliedJobOrderSearch,
     isEmbeddedOrder,
+    isOperational,
     jobSearch,
     jobs,
     operationalFilmFilter,
@@ -2273,14 +2491,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }), [jobs]);
   const exportJobs = useCallback(() => {
     const cells = [
-      ['#', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Материал'],
+      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Материал'],
       ...filteredJobs.map((candidate) => [
         candidate.cutJobId,
+        formatCutJobCreatedDate(candidate.createdAt),
         candidate.name,
         cutJobStatusLabel(candidate.status),
         cutJobSourceLabel(candidate.source),
         candidate.totals.positions,
-        distinctOrderIdsFromItems(candidate.items).length,
+        cutJobOrderRefs(candidate.items).map(cutJobOrderLabel).join(', '),
         candidate.totals.details,
         candidate.totals.area,
         candidate.status === 'ready' ? candidate.totals.sheets : '',
@@ -2357,10 +2576,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     () => [
       { title: '#', dataIndex: 'cutJobId', key: 'id', width: 70 },
       {
+        title: 'Дата',
+        dataIndex: 'createdAt',
+        key: 'createdAt',
+        width: 92,
+        render: (value: string) => (
+          <Tooltip title={formatCutJobCreatedDateTime(value)}>
+            <span>{formatCutJobCreatedDate(value)}</span>
+          </Tooltip>
+        ),
+      },
+      {
         title: 'Название',
         dataIndex: 'name',
         key: 'name',
-        width: isOperational ? 320 : 360,
+        width: isOperational ? 300 : 340,
         className: 'cut-jobs-name-cell',
         render: (value: string) => isOperational ? (
           <span className="cut-jobs-name">
@@ -2399,8 +2629,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       {
         title: 'Заказы',
         key: 'orders',
-        width: 63,
-        render: (_: unknown, row: CutJobDto) => distinctOrderIdsFromItems(row.items).length,
+        width: 180,
+        render: (_: unknown, row: CutJobDto) => (
+          <CutJobOrderLinks
+            items={row.items}
+            onOpen={(orderId) => show('orders_view', orderId, 'push')}
+          />
+        ),
       },
       ...(!isOperational ? [{
         title: 'Группы',
@@ -2482,7 +2717,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ),
       },
     ],
-    [busy, canManage, openJob, archiveJob, profiles, cutSettings, isOperational],
+    [busy, canManage, openJob, archiveJob, profiles, cutSettings, isOperational, show],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
@@ -3004,20 +3239,31 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       {isOperational && !isEmbeddedOrder && !job ? (
         <section className="cut-operational-filters operational-panel" aria-label="Фильтры заданий на раскрой">
           <label className="cut-operational-filter cut-operational-filter--period">
-            <span>Период</span>
+            <span>Дата создания</span>
             <RangePicker
-              allowClear={false}
+              allowClear
               format="DD.MM.YYYY"
-              value={cutListDateRange}
+              value={cutListDateRange ?? null}
+              placeholder={['Создано от', 'Создано до']}
               onChange={(value) => setCutListDateRange(value)}
             />
           </label>
           <label className="cut-operational-filter cut-operational-filter--search">
-            <span>Заказ или название</span>
+            <span>Номер заказа</span>
             <Input
               allowClear
               prefix={<SearchOutlined />}
-              placeholder="2700, ванна, пленка"
+              placeholder="2700"
+              value={jobOrderSearch}
+              onChange={(event) => setJobOrderSearch(event.target.value)}
+            />
+          </label>
+          <label className="cut-operational-filter cut-operational-filter--search">
+            <span>Название или материал</span>
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="ванна, пленка"
               value={jobSearch}
               onChange={(event) => setJobSearch(event.target.value)}
             />
@@ -3060,8 +3306,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           <Button
             icon={<FilterOutlined />}
             onClick={() => {
-              setJobSearch((value) => value.trim());
-              void loadJobs();
+              const trimmedJobSearch = jobSearch.trim();
+              const trimmedOrderSearch = jobOrderSearch.trim();
+              const filters = buildOperationalListFilters(trimmedOrderSearch, cutListDateRange);
+              setJobSearch(trimmedJobSearch);
+              setJobOrderSearch(trimmedOrderSearch);
+              setAppliedJobOrderSearch(trimmedOrderSearch);
+              setAppliedCutListDateRange(cutListDateRange);
+              listFiltersRef.current = filters;
+              void loadJobs(filters);
             }}
           >
             Применить
@@ -3446,7 +3699,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 <div className="cut-results-operational-summary">
                   <Text strong>Сводка</Text>
                   <dl>
-                    <div><dt>Заказов</dt><dd>{distinctOrderIdsFromItems(job.items).length}</dd></div>
+                    <div><dt>Заказы</dt><dd><CutJobOrderLinks items={job.items} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></dd></div>
                     <div><dt>Материалов</dt><dd>{job.totals.materialsCount}</dd></div>
                     <div><dt>Плёнок</dt><dd>{job.totals.filmsCount}</dd></div>
                     <div><dt>Автор</dt><dd>{authSession.getUser()?.username ?? '—'}</dd></div>
@@ -3529,7 +3782,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <>
                 <Space className="cut-job-operational-stats" size="large" style={{ marginBottom: 12 }} wrap>
                   <span>Позиции: <b>{job.totals.positions}</b></span>
-                  <span>Заказы: <b>{distinctOrderIdsFromItems(job.items).length}</b></span>
+                  <span>Заказы: <CutJobOrderLinks items={job.items} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></span>
                   <span>Деталей: <b>{job.totals.details}</b></span>
                   <span>Материалов: <b>{job.totals.materialsCount}</b></span>
                   <span>Плёнок: <b>{job.totals.filmsCount}</b></span>
@@ -3664,6 +3917,30 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                       </Checkbox>
                     </Tooltip>
                   </div>
+                  <div>
+                    <Tooltip title="если выключено, расчёт раскроя запрещает поворот всех деталей на 90°; применится после команды «Рассчитать»">
+                      <Checkbox
+                        checked={job.rotationAllowed}
+                        onChange={(e) => void setJobRotationAllowed(e.target.checked)}
+                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                      >
+                        Поворот разрешён
+                      </Checkbox>
+                    </Tooltip>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Text type="secondary">Направление текстуры</Text>
+                    <Tooltip title="Информационное поле для карт раскроя PDF. На расчёт не влияет.">
+                      <Select<CutTextureDirection>
+                        size="small"
+                        style={{ width: 160 }}
+                        value={job.textureDirection ?? 'none'}
+                        options={CUT_TEXTURE_DIRECTION_OPTIONS}
+                        onChange={(value) => void setJobTextureDirection(value)}
+                        disabled={!canManage || busy || job.status === 'calculating' || isArchivedJob}
+                      />
+                    </Tooltip>
+                  </div>
                 </div>
                 {isOperational && operationalManualMode ? (
                   <div className="cut-job-operational-comparison">
@@ -3769,20 +4046,36 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       {!isCreationPreview && noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
 
       {eligible && !isCreationPreview && (
-        <Table<EligibleDetailDto>
+        <Card
           className="cut-page-modern__eligible"
           size="small"
-          rowKey="orderDetailId"
-          columns={eligibleColumns}
-          dataSource={eligible}
-          pagination={false}
-          scroll={{ x: eligibleTableScrollX }}
-          rowSelection={{
-            selectedRowKeys: selected,
-            onChange: (keys) => setSelected(keys.map(Number)),
-            getCheckboxProps: (row) => ({ disabled: !row.eligible }),
-          }}
-        />
+          title={`Подходящие детали (${eligible.length})`}
+          extra={(
+            <Space size="small">
+              <Text type="secondary">Выбрано: {selected.length}</Text>
+              <Button size="small" type="primary" onClick={addToBasket} disabled={!canManage || selected.length === 0 || isArchivedJob} loading={busy}>
+                Добавить выбранные
+              </Button>
+              <Button size="small" icon={<CloseOutlined />} onClick={closeEligibleDetails} disabled={busy}>
+                Закрыть
+              </Button>
+            </Space>
+          )}
+        >
+          <Table<EligibleDetailDto>
+            size="small"
+            rowKey="orderDetailId"
+            columns={eligibleColumns}
+            dataSource={eligible}
+            pagination={false}
+            scroll={{ x: eligibleTableScrollX }}
+            rowSelection={{
+              selectedRowKeys: selected,
+              onChange: (keys) => setSelected(keys.map(Number)),
+              getCheckboxProps: (row) => ({ disabled: !row.eligible }),
+            }}
+          />
+        </Card>
       )}
 
       {job && job.groups.length > 0 && (
@@ -4085,6 +4378,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   >
                     Отменить редактирование
                   </Button>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={addEditorSheet}
+                    disabled={busy || workingSheets.length === 0}
+                    data-testid="add-manual-sheet-btn"
+                  >
+                    Добавить лист
+                  </Button>
                   {violations.length > 0 && (
                     <Text type="danger">{violations.length} нарушений геометрии — исправьте перед сохранением</Text>
                   )}
@@ -4114,6 +4416,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   originTopLeft={effectiveSheetOrigin(workingSheets[0]?.placements, sheetOriginTopLeft, sheetAxisOrigin)}
                   axisOrigin={sheetAxisOrigin}
                   onChange={handleEditorChange}
+                  onRemoveSheet={removeEditorSheet}
                   violations={violations}
                   splitByMaterial={job.splitByMaterial}
                   combineFilms={job.combineFilms}

@@ -651,11 +651,13 @@ export function manualSetMatchesAuto(args: {
 /**
  * Rebuilds authoritative sheet placements from the auto layout + client moves.
  *
- * - Rejects any sheetIndex NOT in the auto layout's actual persisted sheet_index
- *   value set (Codex R20 MAJOR #3 — may be sparse/non-zero; NOT a dense 0..N-1 range).
+ * - Existing stock sheetIndex values are taken from the auto layout's persisted
+ *   sheet_index set (Codex R20 MAJOR #3 — may be sparse/non-zero; NOT a dense
+ *   0..N-1 range). A higher operator-created sheetIndex is allowed and uses the
+ *   same stock geometry/trim as the group.
  * - Uses authoritative intrinsic dims from autoPieces (swapped when rotated).
- * - Returns exactly the auto layout's stock sheets (same sheetIndex values), even
- *   empty ones — never renumbers or drops stock sheets (Codex R14 MAJOR #4).
+ * - Returns surviving non-empty sheets only. Never renumbers surviving sheetIndex
+ *   values, including operator-created sheets.
  * - Client width/height values are never read.
  */
 export function reconstructManualSheets(args: {
@@ -668,23 +670,29 @@ export function reconstructManualSheets(args: {
   error?: { code: 'foreign_sheet' | 'set_mismatch' | 'grain_unknown'; message: string };
 } {
   const specByKey = new Map(args.autoPieces.map((p) => [moveKey(p.itemId, p.instance), p]));
+  const template = args.autoSheets[0];
   // Authoritative stock = the EXACT persisted sheet_index VALUES of the auto layout
   // (Codex R20 MAJOR #3 — NOT a synthetic dense 0..N-1 range).
   const byIndex = new Map<number, GeomSheet>();
+  const buildEmptySheet = (a: AutoSheetSpec): GeomSheet => ({
+    ...(a.coordinate_contract ? { coordinate_contract: a.coordinate_contract } : {}),
+    trim_mm: args.trim,
+    sheet_width_mm: a.sheet_width_mm,
+    sheet_height_mm: a.sheet_height_mm,
+    pieces: [],
+  });
   for (const a of args.autoSheets) {
-    byIndex.set(a.sheetIndex, {
-      ...(a.coordinate_contract ? { coordinate_contract: a.coordinate_contract } : {}),
-      trim_mm: args.trim,
-      sheet_width_mm: a.sheet_width_mm,
-      sheet_height_mm: a.sheet_height_mm,
-      pieces: [],
-    });
+    byIndex.set(a.sheetIndex, buildEmptySheet(a));
   }
   for (const m of args.moves) {
-    // Reject any sheetIndex not present in the auto layout's persisted sheet_index set
-    // (Codex R20 MAJOR #3 — checked FIRST, before any set-completeness concern).
-    if (!byIndex.has(m.sheetIndex)) {
+    if (!Number.isInteger(m.sheetIndex) || m.sheetIndex < 0) {
       return { sheets: [], error: { code: 'foreign_sheet', message: `Недопустимый лист ${m.sheetIndex}` } };
+    }
+    if (!byIndex.has(m.sheetIndex)) {
+      if (!template) {
+        return { sheets: [], error: { code: 'foreign_sheet', message: `Недопустимый лист ${m.sheetIndex}` } };
+      }
+      byIndex.set(m.sheetIndex, buildEmptySheet({ ...template, sheetIndex: m.sheetIndex }));
     }
     const spec = specByKey.get(moveKey(m.itemId, m.instance));
     if (!spec) {

@@ -9,12 +9,15 @@ import {
   parseCreateCutJobRequest,
   parseCutJobId,
   parseEligibleCriteria,
+  parseListCutJobsQuery,
   parseSetProfileBody,
   parseSetSheetMaterialBody,
   parseSetCombineFilmsBody,
   parseSetNameBody,
   parseSetPdfTemplateBody,
+  parseSetRotationAllowedBody,
   parseSetSplitByMaterialBody,
+  parseSetTextureDirectionBody,
   parseSaveManualLayoutBody,
   parseVariant,
   parseOriginTopLeft,
@@ -45,6 +48,7 @@ function jobDto(): CutJobDto {
     name: 'J',
     status: 'draft',
     source: 'manual',
+    createdAt: '2026-08-07T00:00:00.000Z',
     version: 0,
     pdfPrewarmState: 'pending',
     failureCode: null,
@@ -54,6 +58,8 @@ function jobDto(): CutJobDto {
     pdfTemplate: 'standard',
     combineFilms: false,
     splitByMaterial: true,
+    rotationAllowed: true,
+    textureDirection: 'none',
     materialNames: [],
     totals: { positions: 0, details: 0, area: 0, sheets: 0, materialsCount: 0, filmsCount: 0 },
     items: [],
@@ -111,6 +117,35 @@ describe('CutController', () => {
       statusCode: 401,
       code: 'AUTH_REQUIRED',
     } satisfies Partial<ApiError>);
+  });
+
+  it('parses and delegates backend-side cut job list filters', async () => {
+    expect(parseListCutJobsQuery({
+      orderSearch: ' 2700 ',
+      createdFrom: '2026-08-01',
+      createdTo: '2026-08-07',
+    })).toEqual({
+      orderSearch: '2700',
+      createdFrom: '2026-08-01',
+      createdTo: '2026-08-07',
+    });
+    expect(() => parseListCutJobsQuery({ createdFrom: '08.01.2026' })).toThrow();
+
+    const listJobs = vi.fn(async () => [jobDto()]);
+    const controller = createController({ service: { listJobs } });
+    await controller.list(
+      { user: currentUser(), requestId: 'req-list' } as never,
+      { orderSearch: '2700', createdFrom: '2026-08-01', createdTo: '2026-08-07' },
+    );
+
+    expect(listJobs).toHaveBeenCalledWith(expect.objectContaining({
+      filters: {
+        orderSearch: '2700',
+        createdFrom: '2026-08-01',
+        createdTo: '2026-08-07',
+      },
+      requestId: 'req-list',
+    }));
   });
 
   it('blocks mutations (503) when read-only mode is on', async () => {
@@ -662,6 +697,58 @@ it('PATCH setSplitByMaterial delegates parsed args to CutService.setSplitByMater
   const dto = await controller.setSplitByMaterial(request, '42', { splitByMaterial: false, version: 3 });
   expect(service.setSplitByMaterial).toHaveBeenCalledWith(expect.objectContaining({
     cutJobId: 42, splitByMaterial: false, version: 3, requestId: 'req-split',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSetRotationAllowedBody', () => {
+  it('accepts a boolean + version', () => {
+    expect(parseSetRotationAllowedBody({ rotationAllowed: false, version: 2 })).toEqual({ rotationAllowed: false, version: 2 });
+  });
+  it('rejects a non-boolean rotationAllowed', () => {
+    expect(() => parseSetRotationAllowedBody({ rotationAllowed: 'no', version: 0 })).toThrow();
+  });
+  it('rejects unknown keys (strict)', () => {
+    expect(() => parseSetRotationAllowedBody({ rotationAllowed: true, version: 0, extra: 1 })).toThrow();
+  });
+});
+
+it('PATCH setRotationAllowed delegates parsed args to CutService.setRotationAllowed', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setRotationAllowed: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-rotation' } as never;
+  const dto = await controller.setRotationAllowed(request, '42', { rotationAllowed: false, version: 3 });
+  expect(service.setRotationAllowed).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, rotationAllowed: false, version: 3, requestId: 'req-rotation',
+  }));
+  expect(dto).toBe(serviceReturn);
+});
+
+describe('parseSetTextureDirectionBody', () => {
+  it('accepts a texture direction + version', () => {
+    expect(parseSetTextureDirectionBody({ textureDirection: 'vertical', version: 2 })).toEqual({ textureDirection: 'vertical', version: 2 });
+  });
+  it('rejects an unknown texture direction', () => {
+    expect(() => parseSetTextureDirectionBody({ textureDirection: 'diagonal', version: 0 })).toThrow();
+  });
+  it('rejects unknown keys (strict)', () => {
+    expect(() => parseSetTextureDirectionBody({ textureDirection: 'none', version: 0, extra: 1 })).toThrow();
+  });
+});
+
+it('PATCH setTextureDirection delegates parsed args to CutService.setTextureDirection', async () => {
+  const serviceReturn = jobDto();
+  const service = {
+    setTextureDirection: vi.fn(async () => serviceReturn),
+  };
+  const controller = createController({ service });
+  const request = { user: currentUser(), requestId: 'req-texture' } as never;
+  const dto = await controller.setTextureDirection(request, '42', { textureDirection: 'horizontal', version: 3 });
+  expect(service.setTextureDirection).toHaveBeenCalledWith(expect.objectContaining({
+    cutJobId: 42, textureDirection: 'horizontal', version: 3, requestId: 'req-texture',
   }));
   expect(dto).toBe(serviceReturn);
 });

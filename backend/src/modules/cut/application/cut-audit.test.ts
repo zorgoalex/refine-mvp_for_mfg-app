@@ -20,6 +20,8 @@ describe('cut audit contract (§11)', () => {
       currentResultChanged: 'cut_job.current_result_changed',
       calculateFailed: 'cut_job.calculate_failed',
       permissionDenied: 'cut_job.permission_denied',
+      rotationAllowedChanged: 'cut_job.rotation_allowed_changed',
+      textureDirectionChanged: 'cut_job.texture_direction_changed',
       nameChanged: 'cut_job.name_changed',
     });
   });

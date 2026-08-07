@@ -169,6 +169,8 @@ export interface CutJobTotals {
   filmUsage?: CutFilmUsageDto[];
 }
 
+export type CutTextureDirection = 'vertical' | 'horizontal' | 'none';
+
 export interface CutSheetFitWarningDto {
   orderDetailId: number;
   orderId: number;
@@ -190,6 +192,8 @@ export interface CutJobDto {
   name: string;
   status: string;
   source: string;
+  /** cut_job.created_at — creation timestamp for list/card display. */
+  createdAt: string;
   version: number;
   pdfPrewarmState: string;
   /** Stable failure code when status === 'failed' (else null). */
@@ -208,6 +212,10 @@ export interface CutJobDto {
    *  the sheet override only fills no-sheet details). false = all details in one
    *  group. */
   splitByMaterial: boolean;
+  /** true (default) = calculation may rotate details 90° when profile/grain rules allow it. */
+  rotationAllowed: boolean;
+  /** Informational material/film texture direction for PDF maps; does not affect calculation. */
+  textureDirection: CutTextureDirection;
   /** Unique detail material names in active job items. Uses per-detail sheet/material names, not job sheet override. */
   materialNames: string[];
   totals: CutJobTotals;

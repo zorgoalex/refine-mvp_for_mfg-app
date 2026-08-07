@@ -77,6 +77,8 @@ import type {
   SetCutJobPdfTemplateCommand,
   SetCutJobNameCommand,
   SetCutJobSplitByMaterialCommand,
+  SetCutJobRotationAllowedCommand,
+  SetCutJobTextureDirectionCommand,
   SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
@@ -92,6 +94,7 @@ import type {
   CutJobDto,
   CutJobRefDto,
   CutJobTotals,
+  CutTextureDirection,
   CutResultDto,
   CutResultKind,
   CutResultSummaryDto,
@@ -202,6 +205,11 @@ interface PdfRenderIdentity {
   currentCutNumber: string | null;
 }
 
+interface PdfRenderJobFields {
+  jobName: string;
+  textureDirection: string;
+}
+
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
 interface CalcRelatedDimensions {
   orderIds: number[];
@@ -229,6 +237,8 @@ interface CutJobLockRow extends QueryResultRow {
   pdf_template_code: string | null;
   combine_films: boolean | null;
   split_by_material: boolean | null;
+  rotation_allowed: boolean | null;
+  texture_direction: string | null;
 }
 
 interface CutResultRow extends QueryResultRow {
@@ -310,6 +320,7 @@ interface BasisInputs {
   grainRules: import('../application/cut-config').CutGrainRules;
   combineFilms: boolean;
   splitByMaterial: boolean;
+  rotationAllowed: boolean;
   sheetOverride: { sheetMaterialTypeId: number; widthMm: number; heightMm: number } | null;
   items: BasisInputItem[];
   sheetTypes: BasisSheetType[];
@@ -341,6 +352,7 @@ function basisOf(inputs: BasisInputs): string {
     g: inputs.grainRules,
     cf: inputs.combineFilms,
     sbm: inputs.splitByMaterial,
+    ra: inputs.rotationAllowed,
     so: inputs.sheetOverride,
     items: [...inputs.items]
       .sort((a, b) => a.orderDetailId - b.orderDetailId)
@@ -375,6 +387,18 @@ export function combineFilmsChangedOutboxKey(cutJobId: number, requestId: string
  *  rule: stable per (job, request), version fallback. */
 export function splitByMaterialChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
   return `${CUT_AUDIT_EVENTS.splitByMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for the rotation-allowed-changed outbox event. Same stability
+ *  rule: stable per (job, request), version fallback. */
+export function rotationAllowedChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.rotationAllowedChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for the texture-direction-changed outbox event. Same
+ *  stability rule: stable per (job, request), version fallback. */
+export function textureDirectionChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.textureDirectionChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 /** Idempotency key for cut-job rename events. Stable per (job, request), version fallback. */
@@ -975,6 +999,9 @@ export class PgCutRepository implements CutRepositoryPort {
           includeSvg: false,
           nativePortrait: this.nativePortraitWriter,
         });
+        if (!job.rotationAllowed) {
+          request.items = request.items.map((item) => ({ ...item, rotation: 'forbid' }));
+        }
         // Per-group pre-call guards (a fan-out group can independently exceed limits).
         assertWithinInstanceLimit(freecutItems);
         assertWithinBodyLimit(request);
@@ -1025,6 +1052,7 @@ export class PgCutRepository implements CutRepositoryPort {
         grainRules,
         combineFilms: job.combineFilms,
         splitByMaterial: job.splitByMaterial,
+        rotationAllowed: job.rotationAllowed,
         sheetOverride: sheetOverrideForBasis,
         items: basisItems,
         sheetTypes: basisSheetTypes,
@@ -1608,10 +1636,11 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async getResult(query: GetCutResultQuery): Promise<CutResultDto> {
-    const result = await this.database.query<CutResultRow & { snapshot_digest: string; computed_digest: string }>(
+    const result = await this.database.query<CutResultRow & { snapshot_digest: string; computed_digest: string; job_created_at: Date | string }>(
       `SELECT r.cut_result_id, r.cut_job_id, r.result_no, r.revision_no, r.result_kind,
               r.source_job_version, r.based_on_result_id, r.totals_snapshot,
               r.created_by, r.created_by_name_snapshot, r.created_at,
+              j.created_at AS job_created_at,
               r.snapshot_job, r.snapshot_digest,
               cut_result_snapshot_digest(r.snapshot_job) AS computed_digest,
               (current_result.result_no = r.result_no AND archive.archived_at IS NULL) AS is_current,
@@ -1641,6 +1670,9 @@ export class PgCutRepository implements CutRepositoryPort {
       ...summary,
       job: {
         ...row.snapshot_job,
+        createdAt: row.snapshot_job.createdAt ?? dateTimeIso(row.job_created_at),
+        rotationAllowed: row.snapshot_job.rotationAllowed ?? true,
+        textureDirection: row.snapshot_job.textureDirection ?? 'none',
         totals: normalizeCutJobTotals(row.snapshot_job.totals),
         currentCutResult: summary,
         cutResults: undefined,
@@ -2327,8 +2359,9 @@ export class PgCutRepository implements CutRepositoryPort {
       sheet_material_type_id: string | number | null;
       combine_films: boolean | null;
       split_by_material: boolean | null;
+      rotation_allowed: boolean | null;
     }>(
-      `SELECT params, param_profile_id, sheet_material_type_id, combine_films, split_by_material
+      `SELECT params, param_profile_id, sheet_material_type_id, combine_films, split_by_material, rotation_allowed
        FROM cut_job WHERE cut_job_id = $1`,
       [cutJobId],
     );
@@ -2337,6 +2370,7 @@ export class PgCutRepository implements CutRepositoryPort {
 
     const combineFilms = job.combine_films === true;
     const splitByMaterial = job.split_by_material !== false;
+    const rotationAllowed = job.rotation_allowed !== false;
 
     let items = await loadCalcItems(this.database, cutJobId);
 
@@ -2419,22 +2453,50 @@ export class PgCutRepository implements CutRepositoryPort {
       })),
     );
 
-    return { params, grainRules, combineFilms, splitByMaterial, sheetOverride, items: basisItems, sheetTypes };
+    return { params, grainRules, combineFilms, splitByMaterial, rotationAllowed, sheetOverride, items: basisItems, sheetTypes };
   }
 
   async listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]> {
-    const conditions: string[] = ['status <> $1'];
-    const params: unknown[] = ['archived'];
+    const conditions: string[] = [];
+    const params: unknown[] = [];
     if (query.filters?.status) {
       params.push(query.filters.status);
-      conditions.push(`status = $${params.length}`);
+      conditions.push(`j.status = $${params.length}`);
+    } else {
+      params.push('archived');
+      conditions.push(`j.status <> $${params.length}`);
     }
     if (query.filters?.createdBy) {
       params.push(query.filters.createdBy);
-      conditions.push(`created_by = $${params.length}`);
+      conditions.push(`j.created_by = $${params.length}`);
+    }
+    if (query.filters?.createdFrom) {
+      params.push(query.filters.createdFrom);
+      conditions.push(`j.created_at >= $${params.length}::date`);
+    }
+    if (query.filters?.createdTo) {
+      params.push(query.filters.createdTo);
+      conditions.push(`j.created_at < ($${params.length}::date + INTERVAL '1 day')`);
+    }
+    const orderSearch = query.filters?.orderSearch?.trim();
+    if (orderSearch) {
+      params.push(`%${escapeLikePattern(orderSearch)}%`);
+      conditions.push(`
+        EXISTS (
+          SELECT 1
+          FROM cut_job_item cji
+          LEFT JOIN orders o ON o.order_id = cji.order_id
+          WHERE cji.cut_job_id = j.cut_job_id
+            AND cji.is_active = true
+            AND (
+              cji.order_id::text ILIKE $${params.length} ESCAPE '\\'
+              OR o.order_name ILIKE $${params.length} ESCAPE '\\'
+            )
+        )
+      `);
     }
     const result = await this.database.query<{ cut_job_id: string | number }>(
-      `SELECT cut_job_id FROM cut_job WHERE ${conditions.join(' AND ')} ORDER BY cut_job_id DESC LIMIT 200`,
+      `SELECT j.cut_job_id FROM cut_job j WHERE ${conditions.join(' AND ')} ORDER BY j.cut_job_id DESC LIMIT 200`,
       params,
     );
     const ids = result.rows.map((row) => toNum(row.cut_job_id));
@@ -2933,6 +2995,7 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, 0);
     }
     const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
+    const pdfJobFields = await this.loadPdfRenderJobFields(query.cutJobId, query.cutGroupId);
     const pdfSheets = printableSheets.map((s, index) => ({
         svg: s.svg,
         bathSvg: s.bathSvg,
@@ -2947,6 +3010,8 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId: pdfIdentity.cutJobId ?? undefined,
         cutNumber: pdfIdentity.cutNumber ?? undefined,
         currentCutNumber: pdfIdentity.currentCutNumber ?? undefined,
+        jobName: pdfJobFields.jobName,
+        textureDirection: pdfJobFields.textureDirection,
         filmRequirementLinearMeters: s.filmRequirementLinearMeters,
       }));
     return frozenContext && !templateSelection.usesCurrentLayout
@@ -2989,6 +3054,7 @@ export class PgCutRepository implements CutRepositoryPort {
       ? await this.loadPdfTemplateLayout(pdfTemplate)
       : null;
     const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
+    const pdfJobFields = await this.loadPdfRenderJobFields(query.cutJobId);
     const groupIds = frozen
       ? frozen.job.groups.map((group) => group.cutGroupId)
       : (await this.database.query<{ cut_group_id: string | number }>(
@@ -3051,6 +3117,8 @@ export class PgCutRepository implements CutRepositoryPort {
           cutJobId: pdfIdentity.cutJobId ?? undefined,
           cutNumber: pdfIdentity.cutNumber ?? undefined,
           currentCutNumber: pdfIdentity.currentCutNumber ?? undefined,
+          jobName: pdfJobFields.jobName,
+          textureDirection: pdfJobFields.textureDirection,
           filmRequirementLinearMeters: sheet.filmRequirementLinearMeters,
         });
         sheetNumber += 1;
@@ -3083,6 +3151,31 @@ export class PgCutRepository implements CutRepositoryPort {
       cutJobId,
       cutNumber: resultNo === null ? null : `${cutJobId}-${resultNo}`,
       currentCutNumber: currentResultNo === null ? null : `${cutJobId}-${currentResultNo}`,
+    };
+  }
+
+  private async loadPdfRenderJobFields(cutJobId: number | undefined, cutGroupId?: number): Promise<PdfRenderJobFields> {
+    const fallback: PdfRenderJobFields = { jobName: '', textureDirection: '' };
+    if (cutJobId === undefined && cutGroupId === undefined) return fallback;
+    const row = await this.database.query<{ name: string; texture_direction: string | null }>(
+      cutJobId === undefined
+        ? `SELECT j.name, j.texture_direction
+           FROM cut_group g
+           JOIN cut_job j ON j.cut_job_id = g.cut_job_id
+           WHERE g.cut_group_id = $1`
+        : `SELECT name, texture_direction
+           FROM cut_job
+           WHERE cut_job_id = $1`,
+      [cutJobId ?? cutGroupId],
+    );
+    const job = row.rows[0];
+    if (!job) {
+      if (cutJobId !== undefined) throw new CutJobNotFoundError(cutJobId);
+      return fallback;
+    }
+    return {
+      jobName: job.name,
+      textureDirection: cutTextureDirectionLabel(job.texture_direction),
     };
   }
 
@@ -3996,6 +4089,127 @@ export class PgCutRepository implements CutRepositoryPort {
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
+  async setRotationAllowed(command: SetCutJobRotationAllowedCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; rotation_allowed: boolean | null }>(
+        `SELECT status, version, rotation_allowed FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      const before = row.rotation_allowed !== false;
+
+      if (before === command.rotationAllowed) {
+        return;
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET rotation_allowed = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.rotationAllowed],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.rotationAllowedChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { rotationAllowed: before },
+        after: { rotationAllowed: command.rotationAllowed },
+        metadata: { beforeRotationAllowed: before, afterRotationAllowed: command.rotationAllowed },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.rotationAllowedChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeRotationAllowed: before,
+            afterRotationAllowed: command.rotationAllowed,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          rotationAllowedChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
+  async setTextureDirection(command: SetCutJobTextureDirectionCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; texture_direction: string | null }>(
+        `SELECT status, version, texture_direction FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      const before = normalizeCutTextureDirection(row.texture_direction);
+      const after = command.textureDirection;
+
+      if (before === after) {
+        return;
+      }
+
+      await tx.query(
+        `UPDATE cut_job
+            SET texture_direction = $2,
+                version = version + 1,
+                pdf_prewarm_state = 'pending',
+                pdf_prewarm_failure_reason = NULL,
+                updated_at = now()
+          WHERE cut_job_id = $1`,
+        [command.cutJobId, after],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.textureDirectionChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { textureDirection: before },
+        after: { textureDirection: after },
+        metadata: { beforeTextureDirection: before, afterTextureDirection: after },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.textureDirectionChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeTextureDirection: before,
+            afterTextureDirection: after,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          textureDirectionChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
   async setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto> {
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
@@ -4663,9 +4877,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   sheetMaterialTypeId: number | null;
   combineFilms: boolean;
   splitByMaterial: boolean;
+  rotationAllowed: boolean;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films, split_by_material, rotation_allowed, texture_direction FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -4683,6 +4898,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     sheetMaterialTypeId: row.sheet_material_type_id === null || row.sheet_material_type_id === undefined ? null : toNum(row.sheet_material_type_id),
     combineFilms: row.combine_films === true,
     splitByMaterial: row.split_by_material !== false,
+    rotationAllowed: row.rotation_allowed !== false,
   };
 }
 
@@ -4711,6 +4927,7 @@ interface JobRow extends QueryResultRow {
   status: string;
   source: string;
   version: string | number;
+  created_at: Date | string;
   pdf_prewarm_state: string;
   failure_code: string | null;
   failure_reason: string | null;
@@ -4719,6 +4936,8 @@ interface JobRow extends QueryResultRow {
   pdf_template_code: string | null;
   combine_films: boolean | null;
   split_by_material: boolean | null;
+  rotation_allowed: boolean | null;
+  texture_direction: string | null;
   last_calc_params: FreecutParams | null;
 }
 
@@ -4966,9 +5185,9 @@ interface ItemRow extends QueryResultRow {
   link_cutting_image_file?: string | null;
   link_cad_file?: string | null;
   link_pdf_file?: string | null;
-  /** Present only on the enriched path (ENRICHED_ITEMS_QUERY). */
+  /** Present on enriched and light read paths. */
   order_name?: string | null;
-  /** Present only on the enriched path (ENRICHED_ITEMS_QUERY). */
+  /** Present on enriched and light read paths. */
   order_delete_flag?: boolean | null;
 }
 
@@ -5022,11 +5241,21 @@ const ENRICHED_FROZEN_ITEMS_QUERY = ENRICHED_ITEMS_QUERY.replace(
     )`,
 );
 
-const LIGHT_ITEMS_QUERY = `SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item WHERE cut_job_id = $1 AND is_active = true ORDER BY cut_job_item_id`;
-const LIGHT_FROZEN_ITEMS_QUERY = `
-  SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id
+const LIGHT_ITEMS_QUERY = `
+  SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
+         o.order_name AS order_name,
+         o.delete_flag AS order_delete_flag
   FROM cut_job_item i
-  WHERE cut_job_id = $1
+  LEFT JOIN orders o ON o.order_id = i.order_id
+  WHERE i.cut_job_id = $1 AND i.is_active = true
+  ORDER BY i.cut_job_item_id`;
+const LIGHT_FROZEN_ITEMS_QUERY = `
+  SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
+         o.order_name AS order_name,
+         o.delete_flag AS order_delete_flag
+  FROM cut_job_item i
+  LEFT JOIN orders o ON o.order_id = i.order_id
+  WHERE i.cut_job_id = $1
     AND (
       i.is_active = true
       OR EXISTS (
@@ -5035,7 +5264,7 @@ const LIGHT_FROZEN_ITEMS_QUERY = `
           AND frozen_group.cut_job_id = i.cut_job_id
       )
     )
-  ORDER BY cut_job_item_id`;
+  ORDER BY i.cut_job_item_id`;
 
 function mapItemDetail(row: ItemRow): CutDetailInfoDto | null {
   // Existence keyed off the joined PK, not user data: NULL means the LEFT JOIN
@@ -5294,6 +5523,21 @@ async function computeMaterialNames(client: DatabaseClient, cutJobIds: number[])
   return out;
 }
 
+function normalizeCutTextureDirection(value: string | null | undefined): CutTextureDirection {
+  return value === 'vertical' || value === 'horizontal' ? value : 'none';
+}
+
+function cutTextureDirectionLabel(value: string | null | undefined): string {
+  switch (normalizeCutTextureDirection(value)) {
+    case 'vertical':
+      return 'Вертикальное';
+    case 'horizontal':
+      return 'Горизонтальное';
+    default:
+      return 'Отсутствует';
+  }
+}
+
 async function loadJob(
   client: DatabaseClient,
   cutJobId: number,
@@ -5305,7 +5549,7 @@ async function loadJob(
   const jobResult = await client.query<JobRow>(
     `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason,
             param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material,
-            last_calc_params
+            rotation_allowed, texture_direction, created_at, last_calc_params
        FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
@@ -5356,8 +5600,11 @@ async function loadJob(
     qty: toNum(row.qty),
     cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
     detail: includeItemDetails ? mapItemDetail(row) : null,
-    // orderName/orderDeleted are only present on the enriched (single-job) path; undefined on the light/list path.
-    ...(includeItemDetails ? { orderName: row.order_name ?? null, orderDeleted: row.order_delete_flag === true } : {}),
+    // orderName/orderDeleted are present on both list and enriched paths so
+    // list/card order references can show names and stale deleted markers.
+    ...(row.order_name !== undefined || row.order_delete_flag !== undefined
+      ? { orderName: row.order_name ?? null, orderDeleted: row.order_delete_flag === true }
+      : {}),
   }));
   const resolvedMaterialNames = materialNames ?? uniqueSorted(
     itemDtos.map((item) => item.detail?.materialName ?? null),
@@ -5407,6 +5654,7 @@ async function loadJob(
     name: jobRow.name,
     status: jobRow.status,
     source: jobRow.source,
+    createdAt: jobRow.created_at instanceof Date ? jobRow.created_at.toISOString() : String(jobRow.created_at),
     version: toNum(jobRow.version),
     pdfPrewarmState: jobRow.pdf_prewarm_state,
     failureCode: jobRow.failure_code,
@@ -5416,6 +5664,8 @@ async function loadJob(
     pdfTemplate: jobRow.pdf_template_code ?? 'standard',
     combineFilms: jobRow.combine_films === true,
     splitByMaterial: jobRow.split_by_material !== false,
+    rotationAllowed: jobRow.rotation_allowed !== false,
+    textureDirection: normalizeCutTextureDirection(jobRow.texture_direction),
     materialNames: resolvedMaterialNames,
     totals: resolvedTotals,
     items: itemDtos,
@@ -5650,6 +5900,10 @@ function uniqueSorted(values: Array<string | null | undefined>): string[] {
   );
 }
 
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
 async function setSessionUser(tx: TransactionClient, userId: string | number): Promise<void> {
   await tx.query('SELECT set_session_user($1)', [String(userId)]);
 }
@@ -5667,6 +5921,10 @@ function numOrNull(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function dateTimeIso(value: string | Date): string {
+  return value instanceof Date ? value.toISOString() : String(value);
 }
 
 function dateOnly(value: string | Date | null | undefined): string | null {

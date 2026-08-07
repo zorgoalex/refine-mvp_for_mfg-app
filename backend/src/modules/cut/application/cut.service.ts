@@ -31,6 +31,8 @@ import type {
   SetCutJobPdfTemplateCommand,
   SetCutJobNameCommand,
   SetCutJobSplitByMaterialCommand,
+  SetCutJobRotationAllowedCommand,
+  SetCutJobTextureDirectionCommand,
   SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
   GetRenderCacheTokenArgs,
@@ -212,6 +214,16 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
   async setSplitByMaterial(command: SetCutJobSplitByMaterialCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.setSplitByMaterial(command);
+  }
+
+  async setRotationAllowed(command: SetCutJobRotationAllowedCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.setRotationAllowed(command);
+  }
+
+  async setTextureDirection(command: SetCutJobTextureDirectionCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.setTextureDirection(command);
   }
 
   async setJobPdfTemplate(command: SetCutJobPdfTemplateCommand) {

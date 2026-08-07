@@ -164,6 +164,7 @@ const CUT_SPECIFIC_FIELD_CATALOG: CutPdfFieldCatalogItem[] = [
   { id: 'job.name', source: 'job', sourceColumn: null, label: 'Название задания', category: 'Задание раскроя', type: 'string' },
   { id: 'job.number', source: 'job', sourceColumn: null, label: 'Номер задания на раскрой', category: 'Задание раскроя', type: 'number' },
   { id: 'job.pdf_template', source: 'job', sourceColumn: null, label: 'Шаблон PDF', category: 'Задание раскроя', type: 'string' },
+  { id: 'job.texture_direction', source: 'job', sourceColumn: null, label: 'Направление текстуры', category: 'Задание раскроя', type: 'string' },
   { id: 'cut.number', source: 'cut', sourceColumn: null, label: 'Номер раскроя', category: 'Раскрой', type: 'string' },
   { id: 'cut.current_version', source: 'cut', sourceColumn: null, label: 'Текущая/актуальная версия Карты раскроя', category: 'Раскрой', type: 'string' },
   { id: 'group.number', source: 'group', sourceColumn: null, label: 'Номер группы', category: 'Группа раскроя', type: 'number' },

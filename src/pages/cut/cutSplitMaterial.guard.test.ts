@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const cutPage = readFileSync(new URL('./CutPage.tsx', import.meta.url), 'utf8');
 const sheetPreview = readFileSync(new URL('./SheetPreview.tsx', import.meta.url), 'utf8');
+const sheetEditor = readFileSync(new URL('./SheetEditor.tsx', import.meta.url), 'utf8');
 
 describe('CutPage split-by-material toggle wiring', () => {
   it('renders the split Checkbox (default-driven by job.splitByMaterial) bound to setJobSplitByMaterial', () => {
@@ -27,5 +28,15 @@ describe('Enlarged sheet preview is ~2× larger', () => {
   });
   it('full-view image cap is doubled (1800)', () => {
     expect(sheetPreview).toMatch(/maxWidth: 1800/);
+  });
+});
+
+describe('Manual sheet editor sheet management', () => {
+  it('wires add/remove sheet controls through CutPage and SheetEditor', () => {
+    expect(cutPage).toMatch(/add-manual-sheet-btn/);
+    expect(cutPage).toMatch(/addEditorSheet/);
+    expect(cutPage).toMatch(/onRemoveSheet=\{removeEditorSheet\}/);
+    expect(sheetEditor).toMatch(/Удалить пустой лист/);
+    expect(sheetEditor).toMatch(/DeleteOutlined/);
   });
 });

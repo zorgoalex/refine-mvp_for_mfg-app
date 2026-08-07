@@ -10,6 +10,7 @@ import type {
   CutDetailPlacementsResponseDto,
   CutFilmOptionDto,
   CutJobDto,
+  CutTextureDirection,
   CutResultDto,
   CutResultSummaryDto,
   CutSelectionCriteriaDto,
@@ -82,6 +83,20 @@ const setSplitByMaterialBodySchema = z
   })
   .strict();
 
+const setRotationAllowedBodySchema = z
+  .object({
+    rotationAllowed: z.boolean(),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const setTextureDirectionBodySchema = z
+  .object({
+    textureDirection: z.enum(['vertical', 'horizontal', 'none']),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
+
 const setPdfTemplateBodySchema = z
   .object({
     pdfTemplate: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
@@ -146,9 +161,16 @@ export class CutController {
 
   @ApiOperation({ operationId: 'listCutJobs', summary: 'List active cut jobs' })
   @Get()
-  async list(@Req() request: RequestWithCurrentUser): Promise<CutJobDto[]> {
+  async list(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, string | undefined> = {},
+  ): Promise<CutJobDto[]> {
     const currentUser = this.requireRead(request);
-    return this.cut.listJobs({ currentUser, requestId: request.requestId });
+    return this.cut.listJobs({
+      currentUser,
+      filters: parseListCutJobsQuery(query),
+      requestId: request.requestId,
+    });
   }
 
   @ApiOperation({
@@ -600,6 +622,42 @@ export class CutController {
     });
   }
 
+  @ApiOperation({ operationId: 'setCutJobRotationAllowed', summary: 'Toggle 90-degree detail rotation for a job calculation' })
+  @Patch(':cutJobId/rotation-allowed')
+  async setRotationAllowed(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { rotationAllowed, version } = parseSetRotationAllowedBody(body);
+    return this.cut.setRotationAllowed({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      rotationAllowed,
+      version,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'setCutJobTextureDirection', summary: 'Set informational material/film texture direction for PDF maps' })
+  @Patch(':cutJobId/texture-direction')
+  async setTextureDirection(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const { textureDirection, version } = parseSetTextureDirectionBody(body);
+    return this.cut.setTextureDirection({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      textureDirection,
+      version,
+      requestId: request.requestId,
+    });
+  }
+
   @ApiOperation({ operationId: 'setCutJobPdfTemplate', summary: 'Set the PDF template for a whole cut job export' })
   @Patch(':cutJobId/pdf-template')
   async setJobPdfTemplate(
@@ -947,6 +1005,19 @@ export function parseCreateCutJobRequest(body: unknown) {
   return parse(createCutJobRequestSchema, body);
 }
 
+export function parseListCutJobsQuery(query: Record<string, string | undefined>) {
+  const orderSearch = parseOptionalSearch(query.orderSearch, 'orderSearch');
+  return {
+    ...(query.status ? { status: query.status.trim() } : {}),
+    ...(query.createdBy && Number.isInteger(Number(query.createdBy)) && Number(query.createdBy) > 0
+      ? { createdBy: Number(query.createdBy) }
+      : {}),
+    ...(orderSearch ? { orderSearch } : {}),
+    ...(parseOptionalDateOnly(query.createdFrom, 'createdFrom') ? { createdFrom: parseOptionalDateOnly(query.createdFrom, 'createdFrom') } : {}),
+    ...(parseOptionalDateOnly(query.createdTo, 'createdTo') ? { createdTo: parseOptionalDateOnly(query.createdTo, 'createdTo') } : {}),
+  };
+}
+
 export function parseAddItemsRequest(body: unknown) {
   return parse(addItemsRequestSchema, body);
 }
@@ -973,6 +1044,14 @@ export function parseSetCombineFilmsBody(body: unknown): { combineFilms: boolean
 
 export function parseSetSplitByMaterialBody(body: unknown): { splitByMaterial: boolean; version: number } {
   return parse(setSplitByMaterialBodySchema, body);
+}
+
+export function parseSetRotationAllowedBody(body: unknown): { rotationAllowed: boolean; version: number } {
+  return parse(setRotationAllowedBodySchema, body);
+}
+
+export function parseSetTextureDirectionBody(body: unknown): { textureDirection: CutTextureDirection; version: number } {
+  return parse(setTextureDirectionBodySchema, body);
 }
 
 export function parseSetPdfTemplateBody(body: unknown): { pdfTemplate: string } {
@@ -1016,6 +1095,17 @@ function parseOptionalDateOnly(value: string | undefined, field: string): string
     });
   }
   return value;
+}
+
+function parseOptionalSearch(value: string | undefined, field: string): string | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  if (text.length > 100) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Cut job payload validation failed', {
+      errors: [{ field, message: `${field} must be at most 100 characters` }],
+    });
+  }
+  return text;
 }
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {

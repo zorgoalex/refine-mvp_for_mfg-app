@@ -560,6 +560,8 @@ describe('buildSheetsPdf', () => {
         cutJobId: 42,
         cutNumber: '42-3',
         currentCutNumber: '42-4',
+        jobName: 'Задание ванна',
+        textureDirection: 'Вертикальное',
         filmRequirementLinearMeters: 2.1,
         templateLayout: {
           version: 3,
@@ -569,6 +571,7 @@ describe('buildSheetsPdf', () => {
             { id: 'cut', type: 'field', source: 'cut.number', x: 10, y: 20, w: 40, h: 8 },
             { id: 'current-cut', type: 'field', source: 'cut.current_version', x: 10, y: 30, w: 40, h: 8 },
             { id: 'film', type: 'field', source: 'sheet.film_requirement', x: 10, y: 40, w: 60, h: 8 },
+            { id: 'texture', type: 'field', source: 'job.texture_direction', x: 10, y: 50, w: 60, h: 8 },
           ],
         },
       },
@@ -579,6 +582,7 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('42-3');
     expect(rendered).toContain('42-4');
     expect(rendered).toContain('2,1 пог. м');
+    expect(rendered).toContain('Вертикальное');
   });
 
   it('renders v3 sheet thumbnail layouts on the configured PDF page size', async () => {

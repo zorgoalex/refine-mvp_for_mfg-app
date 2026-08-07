@@ -210,6 +210,11 @@ describe('cut PDF CNC enrichment contract', () => {
 });
 
 describe('cut result archive/current contract', () => {
+  it('backfills required job createdAt for historical result snapshots', () => {
+    expect(repositorySource).toContain('j.created_at AS job_created_at');
+    expect(repositorySource).toContain('createdAt: row.snapshot_job.createdAt ?? dateTimeIso(row.job_created_at)');
+  });
+
   it('stores result archive state outside append-only cut_result and exposes it in history reads', () => {
     expect(repositorySource).toContain('LEFT JOIN cut_result_archive_state archive');
     expect(repositorySource).toContain('archive.archived_at');
@@ -321,9 +326,9 @@ function createDatabase(options: FakeDbOptions = {}) {
       return { rows: [], rowCount: 1 };
     }
 
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params,')) {
       const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
-      return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null, sheet_material_type_id: options.cutJob?.sheet_material_type_id ?? null, combine_films: options.cutJob?.combine_films ?? false, split_by_material: options.cutJob?.split_by_material ?? true }], rowCount: 1 };
+      return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null, sheet_material_type_id: options.cutJob?.sheet_material_type_id ?? null, combine_films: options.cutJob?.combine_films ?? false, split_by_material: options.cutJob?.split_by_material ?? true, rotation_allowed: options.cutJob?.rotation_allowed ?? true, texture_direction: options.cutJob?.texture_direction ?? 'none' }], rowCount: 1 };
     }
 
     if (sql.startsWith('SELECT cut_job_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
@@ -476,8 +481,8 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason, param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material, last_calc_params FROM cut_job WHERE cut_job_id = $1')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: jobVersion, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true, last_calc_params: lastCalcParams }], rowCount: 1 };
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason,')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: jobVersion, created_at: new Date('2026-08-07T00:00:00Z'), pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true, rotation_allowed: true, texture_direction: 'none', last_calc_params: lastCalcParams }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) {
       return { rows: [{ cut_job_id: 42, positions: 0, details: 0, area: 0 }], rowCount: 1 };
@@ -485,7 +490,7 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('SELECT g.cut_job_id')) {
       return { rows: [{ cut_job_id: 42, sheets: 0 }], rowCount: 1 };
     }
-    if (sql.startsWith('SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item')) {
+    if (sql.startsWith('SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id')) {
       const rows = (options.calcItems ?? []).map((item) => ({
         cut_job_item_id: item.cut_job_item_id,
         order_detail_id: item.order_detail_id,
@@ -587,10 +592,10 @@ function createDatabase(options: FakeDbOptions = {}) {
       };
     }
     if (sql.startsWith('SELECT snapshot_job, snapshot_manifest, snapshot_digest')) {
-      return storedResult ? { rows: [{ ...storedResult, computed_digest: storedResult.snapshot_digest }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      return storedResult ? { rows: [{ ...storedResult, job_created_at: new Date('2026-08-07T00:00:00Z'), computed_digest: storedResult.snapshot_digest }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
     if (sql.startsWith('SELECT DISTINCT ON (r.result_no)') || sql.startsWith('SELECT r.cut_result_id')) {
-      return storedResult ? { rows: [{ ...storedResult, computed_digest: storedResult.snapshot_digest, is_current: currentResultId === 900 }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      return storedResult ? { rows: [{ ...storedResult, job_created_at: new Date('2026-08-07T00:00:00Z'), computed_digest: storedResult.snapshot_digest, is_current: currentResultId === 900 }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
 
     if (sql.startsWith('SELECT DISTINCT od.film_id')) {
@@ -1539,6 +1544,36 @@ describe('PgCutRepository', () => {
     expect(normalize(filmQuery?.text ?? '')).not.toContain('od.production_status_id = ANY');
     expect(filmQuery?.params).toContain('2026-07-01');
     expect(filmQuery?.params).toContain('2026-07-31');
+  });
+
+  it('pushes cut job order/date filters into SQL before the 200-row list limit', async () => {
+    const db = createDatabase();
+    const repo = new PgCutRepository(db.service, fakeFreecut(happyResponse));
+
+    await expect(repo.listJobs({
+      currentUser: currentUser(),
+      filters: {
+        orderSearch: '2700',
+        createdFrom: '2026-08-01',
+        createdTo: '2026-08-07',
+      },
+      requestId: 'r-list',
+    })).resolves.toEqual([]);
+
+    const listQuery = db.queries.find((q) => normalize(q.text).startsWith('SELECT j.cut_job_id FROM cut_job j'));
+    const sql = normalize(listQuery?.text ?? '');
+    expect(sql).toContain('j.created_at >= $');
+    expect(sql).toContain("j.created_at < ($");
+    expect(sql).toContain('EXISTS ( SELECT 1 FROM cut_job_item cji LEFT JOIN orders o');
+    expect(sql).toContain('cji.order_id::text ILIKE $');
+    expect(sql).toContain('o.order_name ILIKE $');
+    expect(sql.indexOf('EXISTS')).toBeLessThan(sql.indexOf('ORDER BY j.cut_job_id DESC LIMIT 200'));
+    expect(listQuery?.params).toEqual([
+      'archived',
+      '2026-08-01',
+      '2026-08-07',
+      '%2700%',
+    ]);
   });
 });
 
