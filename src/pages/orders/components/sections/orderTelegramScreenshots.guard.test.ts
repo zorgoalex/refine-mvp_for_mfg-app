@@ -18,6 +18,9 @@ describe('order Telegram screenshot UI wiring', () => {
 
   it('opens fullscreen viewer with zoom, print, close and authenticated blob cleanup', () => {
     expect(component).toContain('width="calc(100vw - 24px)"');
+    expect(component).toContain('const DEFAULT_SCALE = 0.25;');
+    expect(component).toMatch(/useState\(DEFAULT_SCALE\)/);
+    expect(component.match(/setScale\(DEFAULT_SCALE\)/g)).toHaveLength(3);
     expect(component).toContain('ZoomOutOutlined');
     expect(component).toContain('ZoomInOutlined');
     expect(component).toContain('Печать');

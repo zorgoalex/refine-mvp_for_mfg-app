@@ -16,7 +16,8 @@ import type {
 } from '../../../../api/types/cncTelegramApi.types';
 
 const { Text } = Typography;
-const MIN_SCALE = 0.25;
+const DEFAULT_SCALE = 0.25;
+const MIN_SCALE = DEFAULT_SCALE;
 const MAX_SCALE = 3;
 const SCALE_STEP = 0.25;
 const RESTORE_POLL_MS = 2_500;
@@ -40,7 +41,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
   const [originalLoading, setOriginalLoading] = useState(false);
   const [restorePolling, setRestorePolling] = useState(false);
   const [viewerError, setViewerError] = useState<string | null>(null);
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(DEFAULT_SCALE);
 
   const selected = useMemo(
     () => response?.screenshots.find((item) => item.packetId === selectedPacketId) ?? null,
@@ -165,7 +166,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
     replaceOriginalUrl(null);
     setSelectedPacketId(item.packetId);
     setSelectedPreviewUrl(previewUrl);
-    setScale(1);
+    setScale(DEFAULT_SCALE);
     setViewerError(null);
     setRestorePolling(false);
     if (item.originalAvailable) void loadOriginal(item);
@@ -179,7 +180,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
     setRestorePolling(false);
     setViewerError(null);
     setOriginalLoading(false);
-    setScale(1);
+    setScale(DEFAULT_SCALE);
     replaceOriginalUrl(null);
   }, [replaceOriginalUrl]);
 
@@ -246,7 +247,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
               <Tooltip title="Уменьшить">
                 <Button aria-label="Уменьшить изображение" icon={<ZoomOutOutlined />} disabled={scale <= MIN_SCALE} onClick={() => setScale((value) => clampScale(value - SCALE_STEP))} />
               </Tooltip>
-              <Button className="order-telegram-viewer__scale" onClick={() => setScale(1)} aria-label="Сбросить масштаб">
+              <Button className="order-telegram-viewer__scale" onClick={() => setScale(DEFAULT_SCALE)} aria-label="Сбросить масштаб">
                 {Math.round(scale * 100)}%
               </Button>
               <Tooltip title="Увеличить">
