@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Автоподгрузка заказов в колонках доски",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Следующие карточки на «Доске статусов» теперь загружаются автоматически при приближении к низу колонки; кнопка остаётся только для повтора после ошибки или старого браузера.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Настраиваемая сортировка карточек на досках статусов",
     services: ["ERP"],
     repositories: ["repo_erp"],

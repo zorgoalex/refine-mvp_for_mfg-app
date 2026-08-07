@@ -149,6 +149,19 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
+  it('loads the next column page before vertical scroll reaches the bottom', () => {
+    expect(page).toContain('const loadSentinelRef = useRef<HTMLDivElement | null>(null)');
+    expect(page).toContain("rootMargin: '0px 0px 320px 0px'");
+    expect(page).toContain('root,');
+    expect(page).toContain('observer.observe(sentinel)');
+    expect(page).toContain('requestedCursorRef.current === cursor');
+    expect(page).toContain('aria-busy={loadingMore}');
+    expect(page).toContain('Загружаем следующие заказы…');
+    expect(page).toContain("autoLoadFailed ? 'Повторить загрузку' : 'Загрузить ещё'");
+    expect(css).toContain('.status-board-column__load-sentinel');
+    expect(css).toContain('font-variant-numeric: tabular-nums');
+  });
+
   it('keeps desktop MDF auto-height but gives tablet a full-height pannable viewport', () => {
     expect(page).toContain("isCncToday ? ' status-board-page--cnc' : ''");
     expect(css).toMatch(

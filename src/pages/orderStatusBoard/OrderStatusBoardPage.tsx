@@ -574,19 +574,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   }, [fetchInitial, stale]);
 
   const loadMore = useCallback(
-    async (column: OrderStatusBoardColumn) => {
+    async (column: OrderStatusBoardColumn): Promise<boolean> => {
       if (
         stale ||
         !column.nextCursor ||
         loadingColumnTokensRef.current.has(column.key)
       ) {
-        return;
+        return !stale;
       }
       const current = boardRef.current;
-      if (!current) return;
+      if (!current) return false;
       const revision = datasetRevisionRef.current;
       const expectedFilterKey = current.filterKey;
       const requestToken = Symbol(column.key);
+      let loaded = true;
       loadingColumnTokensRef.current.set(column.key, requestToken);
       setLoadingColumns((value) => new Set(value).add(column.key));
       try {
@@ -596,9 +597,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             cursor: column.nextCursor,
           }),
         );
-        if (datasetRevisionRef.current !== revision) return;
+        if (datasetRevisionRef.current !== revision) return true;
         const latest = boardRef.current;
-        if (!latest) return;
+        if (!latest) return true;
         const merged = mergeOrderStatusBoardColumnPage(
           latest,
           response,
@@ -607,7 +608,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         if (merged.kind === 'anomaly') {
           message.warning('Данные колонки изменились. Доска будет обновлена полностью.');
           void fetchInitial({ preserveLoading: true });
-          return;
+          return true;
         }
         if (merged.kind === 'applied') {
           boardRef.current = merged.board;
@@ -615,6 +616,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         }
       } catch (error) {
         if (datasetRevisionRef.current === revision) {
+          loaded = false;
           message.error(errorMessage(error, 'Не удалось догрузить колонку.'));
         }
       } finally {
@@ -627,6 +629,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           });
         }
       }
+      return loaded;
     },
     [fetchInitial, stale],
   );
@@ -4270,7 +4273,7 @@ interface StatusBoardColumnViewProps {
   pendingOrders: Set<number>;
   cardDisplayMode: StatusBoardCardDisplayMode;
   loadingMore: boolean;
-  onLoadMore: (column: OrderStatusBoardColumn) => void;
+  onLoadMore: (column: OrderStatusBoardColumn) => Promise<boolean>;
   onMove: (
     card: OrderStatusBoardCard,
     statusId: number,
@@ -4299,6 +4302,11 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
   onOpenOrder,
   showFinancials,
 }) => {
+  const cardsRef = useRef<HTMLDivElement | null>(null);
+  const loadSentinelRef = useRef<HTMLDivElement | null>(null);
+  const requestedCursorRef = useRef<string | null>(null);
+  const [autoLoadFailed, setAutoLoadFailed] = useState(false);
+  const [observerUnavailable, setObserverUnavailable] = useState(false);
   const destination = column.status.id !== null && column.status.isActive;
   const currentUser = authSession.getUser();
   const packerDestinationAllowed =
@@ -4331,6 +4339,59 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
     }),
   });
 
+  useEffect(() => {
+    requestedCursorRef.current = null;
+    setAutoLoadFailed(false);
+    setObserverUnavailable(false);
+  }, [column.key, column.nextCursor]);
+
+  const requestNextPage = useCallback(async () => {
+    if (!column.nextCursor || loadingMore) return;
+    requestedCursorRef.current = column.nextCursor;
+    setAutoLoadFailed(false);
+    const loaded = await onLoadMore(column);
+    if (!loaded) setAutoLoadFailed(true);
+  }, [column, loadingMore, onLoadMore]);
+
+  useEffect(() => {
+    const root = cardsRef.current;
+    const sentinel = loadSentinelRef.current;
+    const cursor = column.nextCursor;
+    if (!root || !sentinel || !cursor || loadingMore || autoLoadFailed) return;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setObserverUnavailable(true);
+      return;
+    }
+
+    let cancelled = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          !entries.some((entry) => entry.isIntersecting) ||
+          requestedCursorRef.current === cursor
+        ) {
+          return;
+        }
+        requestedCursorRef.current = cursor;
+        observer.disconnect();
+        void onLoadMore(column).then((loaded) => {
+          if (!cancelled && !loaded) setAutoLoadFailed(true);
+        });
+      },
+      {
+        root,
+        rootMargin: '0px 0px 320px 0px',
+        threshold: 0,
+      },
+    );
+    observer.observe(sentinel);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [autoLoadFailed, column, loadingMore, onLoadMore]);
+
   return (
     <article
       ref={(node) => dropRef(node)}
@@ -4359,7 +4420,11 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
         />
       </header>
 
-      <div className="status-board-column__cards">
+      <div
+        ref={cardsRef}
+        className="status-board-column__cards"
+        aria-busy={loadingMore}
+      >
         {column.cards.length === 0 ? (
           <div className="status-board-column__empty">В этой колонке пока нет заказов</div>
         ) : (
@@ -4383,13 +4448,32 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
           ))
         )}
         {column.nextCursor && (
+          <div
+            ref={loadSentinelRef}
+            className={`status-board-column__load-sentinel${
+              loadingMore ? ' status-board-column__load-sentinel--loading' : ''
+            }`}
+            data-testid={`status-board-column-load-sentinel-${column.key}`}
+            role="status"
+            aria-live="polite"
+          >
+            {loadingMore ? (
+              <>
+                <Spin size="small" />
+                <span>Загружаем следующие заказы…</span>
+              </>
+            ) : null}
+          </div>
+        )}
+        {column.nextCursor && (autoLoadFailed || observerUnavailable) && (
           <Button
             block
             className="status-board-column__more"
             loading={loadingMore}
-            onClick={() => onLoadMore(column)}
+            onClick={() => void requestNextPage()}
           >
-            Загрузить ещё · {column.cards.length} из {column.total}
+            {autoLoadFailed ? 'Повторить загрузку' : 'Загрузить ещё'} ·{' '}
+            {column.cards.length} из {column.total}
           </Button>
         )}
       </div>

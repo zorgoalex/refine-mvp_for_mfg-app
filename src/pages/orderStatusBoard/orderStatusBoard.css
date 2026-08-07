@@ -926,6 +926,24 @@
 .status-board-column__more {
   min-height: 40px;
   flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-board-column__load-sentinel {
+  min-height: 40px;
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.status-board-column__load-sentinel--loading {
+  color: var(--app-text-secondary);
 }
 
 .status-board-card {
