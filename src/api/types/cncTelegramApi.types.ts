@@ -91,6 +91,7 @@ export interface CncTelegramPacket {
   svgCutResultNo?: number | null;
   svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
   svgCutImportNote?: string | null;
+  allLinkedOrderDetailsPackedOrLater: boolean;
   itemCount: number;
   itemQuantityTotal: number;
   updatedAt: string;
