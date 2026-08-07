@@ -1293,7 +1293,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           <StatusBoardToolbarDisclosure
             contentId="status-board-toolbar-controls"
             expanded={mobileToolbarExpanded}
-            label="Фильтры и вид"
+            label="Настройки доски"
             summary={cardDisplayModeLabel}
             onToggle={() => setMobileToolbarExpanded((current) => !current)}
           >
@@ -1449,7 +1449,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           <StatusBoardToolbarDisclosure
             contentId="status-board-toolbar-controls"
             expanded={mobileToolbarExpanded}
-            label="Фильтры МДФ"
+            label="Настройки МДФ"
             summary={`${cncSelectedDate?.format(DATE_FORMAT) ?? 'Сегодня'} · ${cncCardDisplayModeLabel}`}
             onToggle={() => setMobileToolbarExpanded((current) => !current)}
           >
@@ -1494,6 +1494,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               onClick={() => updateCncWorkday(dayjs())}
             >
               Сегодня
+            </Button>
+            <Button
+              type="primary"
+              size="small"
+              className="status-board-toolbar__mobile-add-bath"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/cut')}
+            >
+              Добавить карту ванны
             </Button>
             <Select
               size="small"

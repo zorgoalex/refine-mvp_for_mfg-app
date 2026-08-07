@@ -67,7 +67,8 @@
 }
 
 .status-board-toolbar__tablet-board-switch,
-.status-board-toolbar__tablet-refresh {
+.status-board-toolbar__tablet-refresh,
+.status-board-toolbar__mobile-add-bath {
   display: none;
 }
 
@@ -2341,14 +2342,9 @@
     min-height: calc(100vh - 116px);
   }
 
-  .status-board-page__header {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .status-board-page__updated {
-    justify-content: space-between;
+  .status-board-page > .operational-page-head,
+  .status-board-page > .status-board-page__header {
+    display: none;
   }
 
   .status-board-toolbar-disclosure {
@@ -2485,8 +2481,29 @@
   }
 
   .status-board-toolbar__settings-button.ant-btn {
-    width: 40px;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
     margin-left: auto;
+  }
+
+  .status-board-toolbar__tablet-refresh.ant-btn,
+  .status-board-toolbar__mobile-add-bath.ant-btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .status-board-toolbar__tablet-refresh.ant-btn {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding-inline: 0;
+  }
+
+  .status-board-tabs .ant-tabs-tab {
+    min-height: 44px;
   }
 
   .status-board-toolbar__display-mode .ant-segmented-group {
@@ -2500,7 +2517,8 @@
   .status-board-toolbar--production {
     align-items: center;
     flex-wrap: nowrap;
-    overflow-x: visible;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .status-board-toolbar--production .status-board-toolbar__search {

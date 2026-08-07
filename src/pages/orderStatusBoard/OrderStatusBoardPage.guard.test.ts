@@ -108,6 +108,19 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toContain('clamp(480px, 48vw, 552px)');
   });
 
+  it('keeps only tabs and the settings disclosure in the mobile board header', () => {
+    expect(page).toContain('label="Настройки доски"');
+    expect(page).toContain('label="Настройки МДФ"');
+    expect(page.match(/className="status-board-toolbar__tablet-refresh"/g)).toHaveLength(2);
+    expect(page).toContain('className="status-board-toolbar__mobile-add-bath"');
+    expect(css).toContain('.status-board-page > .operational-page-head');
+    expect(css).toContain('.status-board-page > .status-board-page__header');
+    expect(css).toMatch(/\.status-board-page > \.status-board-page__header\s*\{\s*display: none;/);
+    expect(css).toContain('.status-board-toolbar__tablet-refresh.ant-btn');
+    expect(css).toContain('.status-board-toolbar__mobile-add-bath.ant-btn');
+    expect(css).toContain('.status-board-tabs .ant-tabs-tab');
+  });
+
   it('keeps the upper scrollbar synchronized with the board viewport', () => {
     expect(page).toContain('topScrollbarTrack.style.width');
     expect(page).toContain('scrollBoardFromTop');
