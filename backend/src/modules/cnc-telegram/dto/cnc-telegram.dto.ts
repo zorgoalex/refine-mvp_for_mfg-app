@@ -140,6 +140,26 @@ export interface CncTelegramBathCardDto {
   sheets: CncTelegramBathSheetDto[];
 }
 
+export interface CncTelegramBazisCutSetItemDto {
+  orderId: number | null;
+  orderName: string;
+  orderDeleted: boolean;
+  detailId: number | null;
+  detailNumber: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  quantity: number;
+}
+
+export interface CncTelegramBazisCutSetCardDto {
+  bazisCutSetId: number;
+  name: string;
+  orderCount: number;
+  positionCount: number;
+  itemQuantityTotal: number;
+  items: CncTelegramBazisCutSetItemDto[];
+}
+
 export interface CncTelegramTodayColumnDto {
   key:
     | 'parsed'
@@ -152,6 +172,7 @@ export interface CncTelegramTodayColumnDto {
   total: number;
   packets: CncTelegramPacketDto[];
   baths: CncTelegramBathCardDto[];
+  bazisCutSets: CncTelegramBazisCutSetCardDto[];
 }
 
 export interface CncTelegramTodayResponseDto {

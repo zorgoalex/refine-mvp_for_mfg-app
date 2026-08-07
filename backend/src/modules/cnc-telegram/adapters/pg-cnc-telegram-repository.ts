@@ -32,6 +32,8 @@ import type {
   CncTelegramBathCardDto,
   CncTelegramBathItemDto,
   CncTelegramBathSheetDto,
+  CncTelegramBazisCutSetCardDto,
+  CncTelegramBazisCutSetItemDto,
   CncTelegramCutLayoutDto,
   CncTelegramCutLayoutItemDto,
   CncTelegramDowelingLinkDto,
@@ -211,6 +213,20 @@ interface BathJoinedRow extends QueryResultRow {
   sheet_height_mm: string | number | null;
 }
 
+interface BazisCutSetJoinedRow extends QueryResultRow {
+  bazis_cut_set_id: string | number;
+  name: string;
+  sort_order: string | number;
+  source_order_detail_id: string | number | null;
+  source_order_id: string | number | null;
+  source_order_name: string | null;
+  source_order_deleted: boolean | null;
+  detail_number: string | number | null;
+  width_mm: string | number | null;
+  height_mm: string | number | null;
+  quantity: string | number;
+}
+
 interface OrderCuttingSequenceRow extends QueryResultRow {
   packet_id: string;
   external_packet_key: string;
@@ -262,10 +278,11 @@ export class PgCncTelegramRepository
     );
     const packets = mapPacketRows(rows.rows);
     const baths = await loadBathCards(this.database, workdayFrom, workdayTo);
+    const bazisCutSets = await loadBathBazisCutSetCards(this.database, baths);
     return {
       workday: workdayTo,
       generatedAt: new Date().toISOString(),
-      columns: buildTodayColumns(packets, baths),
+      columns: buildTodayColumns(packets, baths, bazisCutSets),
     };
   }
 
@@ -3370,6 +3387,7 @@ async function loadBathCards(
 function buildTodayColumns(
   packets: CncTelegramPacketDto[],
   baths: CncTelegramBathCardDto[],
+  bazisCutSets: CncTelegramBazisCutSetCardDto[],
 ): CncTelegramTodayColumnDto[] {
   const definitions: Array<Pick<CncTelegramTodayColumnDto, 'key' | 'title'>> = [
     { key: 'parsed', title: 'Файлы на станке' },
@@ -3377,11 +3395,13 @@ function buildTodayColumns(
   ];
   const packetColumns = definitions.map((definition) => {
     const columnPackets = packets.filter((packet) => packetColumnKey(packet) === definition.key);
+    const columnBazisCutSets = definition.key === 'parsed' ? bazisCutSets : [];
     return {
       ...definition,
-      total: columnPackets.length,
+      total: columnPackets.length + columnBazisCutSets.length,
       packets: columnPackets,
       baths: [],
+      bazisCutSets: columnBazisCutSets,
     };
   });
 
@@ -3399,6 +3419,7 @@ function buildTodayColumns(
       total: pendingBaths.length,
       packets: [],
       baths: pendingBaths,
+      bazisCutSets: [],
     },
     {
       key: 'baths_ready',
@@ -3406,6 +3427,7 @@ function buildTodayColumns(
       total: readyBaths.length,
       packets: [],
       baths: readyBaths,
+      bazisCutSets: [],
     },
     {
       key: 'completed_laminated',
@@ -3413,6 +3435,7 @@ function buildTodayColumns(
       total: laminatedPackets.length,
       packets: laminatedPackets,
       baths: [],
+      bazisCutSets: [],
     },
     {
       key: 'baths_laminated',
@@ -3420,8 +3443,109 @@ function buildTodayColumns(
       total: laminatedBaths.length,
       packets: [],
       baths: laminatedBaths,
+      bazisCutSets: [],
     },
   ];
+}
+
+async function loadBathBazisCutSetCards(
+  database: DatabaseClient,
+  baths: readonly CncTelegramBathCardDto[],
+): Promise<CncTelegramBazisCutSetCardDto[]> {
+  const bathDetailIds = Array.from(new Set(
+    baths.flatMap((bath) => bath.items.map((item) => item.detailId)),
+  )).sort((left, right) => left - right);
+  if (bathDetailIds.length === 0) return [];
+
+  const result = await database.query<BazisCutSetJoinedRow>(
+    `
+    WITH target_bazis_cut_sets AS (
+      SELECT DISTINCT detail.bazis_cut_set_id
+      FROM bazis_cut_set_details detail
+      WHERE detail.source_order_detail_id = ANY($1::bigint[])
+    )
+    SELECT
+      cut_set.bazis_cut_set_id,
+      cut_set.name,
+      detail.sort_order,
+      detail.source_order_detail_id,
+      COALESCE(detail.source_order_id, source_detail.order_id) AS source_order_id,
+      COALESCE(
+        NULLIF(btrim(detail.source_order_name), ''),
+        NULLIF(btrim(source_order.order_name), ''),
+        'Без заказа'
+      ) AS source_order_name,
+      COALESCE(source_order.delete_flag, false) AS source_order_deleted,
+      source_detail.detail_number,
+      COALESCE(source_detail.width, detail.finished_width_mm) AS width_mm,
+      COALESCE(source_detail.height, detail.finished_length_mm) AS height_mm,
+      detail.quantity
+    FROM target_bazis_cut_sets target
+    JOIN bazis_cut_sets cut_set
+      ON cut_set.bazis_cut_set_id = target.bazis_cut_set_id
+    JOIN bazis_cut_set_details detail
+      ON detail.bazis_cut_set_id = cut_set.bazis_cut_set_id
+    LEFT JOIN order_details source_detail
+      ON source_detail.detail_id = detail.source_order_detail_id
+    LEFT JOIN orders source_order
+      ON source_order.order_id = COALESCE(detail.source_order_id, source_detail.order_id)
+    ORDER BY cut_set.bazis_cut_set_id, detail.sort_order, detail.bazis_cut_set_detail_id
+    `,
+    [bathDetailIds],
+  );
+  return mapBathBazisCutSetRows(result.rows);
+}
+
+function mapBathBazisCutSetRows(
+  rows: readonly BazisCutSetJoinedRow[],
+): CncTelegramBazisCutSetCardDto[] {
+  const cards = new Map<number, {
+    card: CncTelegramBazisCutSetCardDto;
+    orderKeys: Set<string>;
+  }>();
+
+  for (const row of rows) {
+    const bazisCutSetId = toPositiveInteger(row.bazis_cut_set_id);
+    if (bazisCutSetId === null) continue;
+    let accumulator = cards.get(bazisCutSetId);
+    if (!accumulator) {
+      accumulator = {
+        card: {
+          bazisCutSetId,
+          name: normalizeOptional(row.name) ?? `БР-${bazisCutSetId}`,
+          orderCount: 0,
+          positionCount: 0,
+          itemQuantityTotal: 0,
+          items: [],
+        },
+        orderKeys: new Set(),
+      };
+      cards.set(bazisCutSetId, accumulator);
+    }
+
+    const orderId = toPositiveInteger(row.source_order_id);
+    const orderName = normalizeOptional(row.source_order_name) ?? 'Без заказа';
+    const quantity = Math.max(0, toNumber(row.quantity));
+    const item: CncTelegramBazisCutSetItemDto = {
+      orderId,
+      orderName,
+      orderDeleted: row.source_order_deleted === true,
+      detailId: toPositiveInteger(row.source_order_detail_id),
+      detailNumber: toNullableNumber(row.detail_number),
+      widthMm: toNullableNumber(row.width_mm),
+      heightMm: toNullableNumber(row.height_mm),
+      quantity,
+    };
+    accumulator.card.items.push(item);
+    accumulator.card.positionCount += 1;
+    accumulator.card.itemQuantityTotal += quantity;
+    accumulator.orderKeys.add(orderId === null ? `name:${orderName}` : `id:${orderId}`);
+  }
+
+  return Array.from(cards.values()).map(({ card, orderKeys }) => ({
+    ...card,
+    orderCount: orderKeys.size,
+  }));
 }
 
 function allItemsLaminatedOrLater(

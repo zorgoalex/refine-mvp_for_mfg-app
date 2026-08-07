@@ -9,6 +9,7 @@ import type { CutResultDto } from '../../api/types/cutApi.types';
 import {
   CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM,
   buildCncDetailedMachineSources,
+  cncBathDetailHasMachineFile,
   cncPacketHasOtherMaterialMarker,
   selectCncMachineResultSheets,
 } from './cncDetailedMachine';
@@ -63,6 +64,8 @@ describe('CNC detailed machine sources', () => {
       'packet-review',
     ]);
     expect(sources[0]).toMatchObject({ matchKind: 'exact', previewKind: 'svg' });
+    expect(cncBathDetailHasMachineFile(machineColumns([exact]), bath(), 7001)).toBe(true);
+    expect(cncBathDetailHasMachineFile(machineColumns([partial]), bath(), 7001)).toBe(false);
   });
 
   it('uses server-compatible orientation-normalized OCR tolerance of 3 mm', () => {

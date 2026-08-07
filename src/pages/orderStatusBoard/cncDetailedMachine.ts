@@ -73,6 +73,19 @@ export function buildCncDetailedMachineSources({
   return sources;
 }
 
+export function cncBathDetailHasMachineFile(
+  columns: CncTelegramTodayColumn[],
+  bath: CncTelegramBathCard,
+  detailId: number,
+): boolean {
+  return buildCncDetailedMachineSources({
+    columns,
+    bath,
+    selectedDetailId: detailId,
+    canViewCut: false,
+  }).some((source) => source.matchKind !== 'order');
+}
+
 export function selectCncMachineResultSheets(
   result: CutResultDto,
   selectedDetailId: number | null,

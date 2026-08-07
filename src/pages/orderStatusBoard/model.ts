@@ -1,6 +1,7 @@
 import type {
   CncTelegramTodayColumn,
 } from '../../api/types/cncTelegramApi.types';
+import { cncBathDetailHasMachineFile } from './cncDetailedMachine';
 import type {
   OrderStatusBoardCard,
   OrderStatusBoardColumn,
@@ -182,6 +183,11 @@ export function buildCncOrderFilterOptions(
         addCncOrderFilterOption(orderNamesByKey, item.orderName);
       }
     }
+    for (const bazisCutSet of column.bazisCutSets ?? []) {
+      for (const item of bazisCutSet.items) {
+        addCncOrderFilterOption(orderNamesByKey, item.orderName);
+      }
+    }
   }
   return Array.from(orderNamesByKey.values()).sort(compareCncOrderNames);
 }
@@ -204,10 +210,40 @@ export function filterCncTodayColumnsByOrders(
     const packets = (column.packets ?? []).filter((packet) =>
       packet.items.some((item) => orderKeys.has(normalizeCncOrderKey(item.orderName))),
     );
+    const bazisCutSets = (column.bazisCutSets ?? []).filter((set) =>
+      set.items.some((item) => orderKeys.has(normalizeCncOrderKey(item.orderName))),
+    );
     const total = isCncBathColumnKey(column.key)
       ? baths.length
-      : packets.length;
-    return { ...column, baths, packets, total };
+      : packets.length + bazisCutSets.length;
+    return { ...column, baths, packets, bazisCutSets, total };
+  });
+}
+
+export function filterCncBazisCutSetsByMissingBathDetails(
+  columns: CncTelegramTodayColumn[],
+): CncTelegramTodayColumn[] {
+  const missingBathDetailIds = new Set<number>();
+  for (const column of columns) {
+    for (const bath of column.baths ?? []) {
+      for (const item of bath.items) {
+        if (!cncBathDetailHasMachineFile(columns, bath, item.detailId)) {
+          missingBathDetailIds.add(item.detailId);
+        }
+      }
+    }
+  }
+
+  return columns.map((column) => {
+    const bazisCutSets = (column.bazisCutSets ?? []).filter((set) =>
+      set.items.some((item) =>
+        item.detailId !== null && missingBathDetailIds.has(item.detailId),
+      ),
+    );
+    const total = column.key === 'parsed'
+      ? (column.packets ?? []).length + bazisCutSets.length
+      : column.total;
+    return { ...column, bazisCutSets, total };
   });
 }
 
@@ -223,6 +259,12 @@ export function filterCncBathColumnsByMachineOrderMatches(
     ) continue;
     for (const packet of column.packets ?? []) {
       for (const item of packet.items) {
+        const key = normalizeCncOrderKey(item.orderName);
+        if (key) machineOrderKeys.add(key);
+      }
+    }
+    for (const bazisCutSet of column.bazisCutSets ?? []) {
+      for (const item of bazisCutSet.items) {
         const key = normalizeCncOrderKey(item.orderName);
         if (key) machineOrderKeys.add(key);
       }
@@ -360,6 +402,11 @@ export function collectCncOrderIds(columns: CncTelegramTodayColumn[]): number[] 
     }
     for (const bath of column.baths ?? []) {
       for (const item of bath.items) {
+        addCncOrderId(orderIds, item.orderId);
+      }
+    }
+    for (const bazisCutSet of column.bazisCutSets ?? []) {
+      for (const item of bazisCutSet.items) {
         addCncOrderId(orderIds, item.orderId);
       }
     }

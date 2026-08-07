@@ -10,6 +10,7 @@ import {
   buildCncOrderFilterOptions,
   collectCncOrderIds,
   filterBoardColumns,
+  filterCncBazisCutSetsByMissingBathDetails,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
@@ -222,6 +223,7 @@ describe('order status board model', () => {
         total: 1,
         packets: [cncPacket('p-2706', ['2706'])],
         baths: [],
+        bazisCutSets: [cncBazisCutSet(8, [{ orderName: '3000', orderId: 3000, detailId: 8001 }])],
       },
       {
         key: 'completed',
@@ -248,8 +250,51 @@ describe('order status board model', () => {
     expect(filtered[2]?.baths.map((bath) => bath.bathCardId)).toEqual([
       'b-2706',
       'b-2712',
+      'b-3000',
     ]);
-    expect(filtered[2]?.total).toBe(2);
+    expect(filtered[2]?.total).toBe(3);
+  });
+
+  it('keeps Basis-cut cards only for bath details missing from machine files', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 2,
+        packets: [cncPacket('p-2712', ['2712'], [2712], [2712], [7002])],
+        baths: [],
+        bazisCutSets: [
+          cncBazisCutSet(8, [{ orderName: '2706', orderId: 2706, detailId: 7001 }]),
+          cncBazisCutSet(9, [{ orderName: '2712', orderId: 2712, detailId: 7002 }]),
+        ],
+      },
+      {
+        key: 'baths',
+        title: 'Карты ванн',
+        total: 1,
+        packets: [],
+        baths: [{
+          ...cncBath('b-2706', ['2706'], [2706]),
+          items: [{
+            bathItemId: 'b-2706-7001',
+            orderName: '2706',
+            orderId: 2706,
+            detailId: 7001,
+          }, {
+            bathItemId: 'b-2706-7002',
+            orderName: '2712',
+            orderId: 2712,
+            detailId: 7002,
+          }],
+        }],
+        bazisCutSets: [],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const filtered = filterCncBazisCutSetsByMissingBathDetails(columns);
+
+    expect(filtered[0]?.bazisCutSets?.map((card) => card.bazisCutSetId)).toEqual([8]);
+    expect(filtered[0]?.total).toBe(2);
   });
 
   it('collects unique ERP order ids from visible CNC cards', () => {
@@ -262,6 +307,7 @@ describe('order status board model', () => {
           cncPacket('p-2706', ['2706', '2712'], [2706, null], [null, 2712]),
         ],
         baths: [],
+        bazisCutSets: [cncBazisCutSet(8, [{ orderName: '2800', orderId: 2800, detailId: 8001 }])],
       },
       {
         key: 'baths',
@@ -272,7 +318,7 @@ describe('order status board model', () => {
       },
     ] as CncTelegramTodayColumn[];
 
-    expect(collectCncOrderIds(columns)).toEqual([2700, 2706, 2712]);
+    expect(collectCncOrderIds(columns)).toEqual([2700, 2706, 2712, 2800]);
   });
 
   it('hides MDF orders for default production names until explicit setting exists', () => {
@@ -559,14 +605,22 @@ function cncPacket(
   orderNames: string[],
   orderIds: Array<number | null> = [],
   matchOrderIds: Array<number | null> = [],
+  matchDetailIds: Array<number | null> = [],
 ) {
   return {
     packetId,
+    externalPacketKey: packetId,
+    programName: null,
+    materialName: 'МДФ',
+    comments: [],
+    completionStatus: 'pending',
+    thumbsUp: false,
     items: orderNames.map((orderName, index) => ({
       packetItemId: `${packetId}-${index}`,
       orderName,
       orderId: orderIds[index] ?? null,
       matchOrderId: matchOrderIds[index] ?? null,
+      matchDetailId: matchDetailIds[index] ?? null,
     })),
   };
 }
@@ -582,6 +636,27 @@ function cncBath(
       bathItemId: `${bathCardId}-${index}`,
       orderName,
       orderId: orderIds[index] ?? Number(orderName),
+    })),
+  };
+}
+
+function cncBazisCutSet(
+  bazisCutSetId: number,
+  items: Array<{ orderName: string; orderId: number | null; detailId: number | null }>,
+) {
+  return {
+    bazisCutSetId,
+    name: `БР-${bazisCutSetId}`,
+    orderCount: new Set(items.map((item) => item.orderId)).size,
+    positionCount: items.length,
+    itemQuantityTotal: items.length,
+    items: items.map((item) => ({
+      ...item,
+      orderDeleted: false,
+      detailNumber: null,
+      widthMm: null,
+      heightMm: null,
+      quantity: 1,
     })),
   };
 }

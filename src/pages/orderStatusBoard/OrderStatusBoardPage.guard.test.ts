@@ -237,6 +237,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('dateTo: displayRange.dateTo');
     expect(page).toContain('datasetKey');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
+    expect(page).toContain('CncBazisCutSetCardView');
+    expect(page).toContain('Итоги по ERP-заказам набора');
+    expect(page).toContain('Открыть Базис-раскрой');
+    expect(page).toContain('getCncBazisCutSetDisplayState(card, relationContext, detailedContext)');
+    expect(page).toContain('buildCncBazisCutSetFingerprint');
+    expect(css).toContain('.cnc-bazis-cut-card');
     expect(page).not.toContain('buildCncDetailedDisplayColumns(columns)');
     expect(page).toContain("getCncBathRelationState(bath, relationContext) !== 'dimmed'");
     expect(page).toContain("getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed'");
