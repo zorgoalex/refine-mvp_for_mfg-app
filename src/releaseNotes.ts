@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Фокус следует за карточкой при touch-переносе",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "После переноса карточки touch-жестом на мобильной доске фокус и видимая область переходят к карточке в новой колонке; системная настройка уменьшения движения учитывается.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Горизонтальный свайп по всей мобильной доске",
     services: ["ERP"],
     repositories: ["repo_erp"],

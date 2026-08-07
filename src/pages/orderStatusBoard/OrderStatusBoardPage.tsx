@@ -329,6 +329,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const datasetRevisionRef = useRef(0);
   const actionFocusRef = useRef<HTMLElement | null>(null);
   const focusOrderRef = useRef<number | null>(null);
+  const revealTouchMovedCardRef = useRef(false);
   const topScrollbarRef = useRef<HTMLDivElement | null>(null);
   const topScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const boardViewportRef = useRef<HTMLElement | null>(null);
@@ -460,14 +461,27 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         const focusOrderId = focusOrderRef.current;
         if (focusOrderId !== null) {
           focusOrderRef.current = null;
+          const revealTouchMovedCard = revealTouchMovedCardRef.current;
+          revealTouchMovedCardRef.current = false;
           window.requestAnimationFrame(() => {
+            const movedCard = document.querySelector<HTMLElement>(
+              `[data-status-board-order-id="${focusOrderId}"]`,
+            );
+            if (revealTouchMovedCard && movedCard) {
+              movedCard.focus({ preventScroll: true });
+              movedCard.scrollIntoView({
+                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                  ? 'auto'
+                  : 'smooth',
+                block: 'nearest',
+                inline: 'center',
+              });
+              return;
+            }
             restoreOrderStatusBoardFocus(
               focusOrderId,
               actionFocusRef.current,
-              (orderId) =>
-                document.querySelector<HTMLElement>(
-                  `[data-status-board-order-id="${orderId}"]`,
-                ),
+              () => movedCard,
               () => document.getElementById('status-board-title'),
             );
           });
@@ -583,6 +597,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       targetStatusId: number,
       targetName: string,
       trigger: HTMLElement | null,
+      revealTouchMovedCard = false,
     ) => {
       if (
         stale ||
@@ -613,6 +628,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       if (!nextPending) return;
 
       actionFocusRef.current = trigger;
+      revealTouchMovedCardRef.current = revealTouchMovedCard;
       const idempotencyKey = createProductionActionIdempotencyKey(
         boardType === 'order'
           ? 'status-board-order'
@@ -649,6 +665,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
 
         if (result.kind === 'cancelled') {
           commandInFlightRef.current = false;
+          revealTouchMovedCardRef.current = false;
           const withoutOrder = new Set(pendingRef.current);
           withoutOrder.delete(card.orderId);
           replacePending(withoutOrder);
@@ -3977,6 +3994,7 @@ interface StatusBoardColumnViewProps {
     statusId: number,
     statusName: string,
     trigger: HTMLElement | null,
+    revealTouchMovedCard?: boolean,
   ) => void;
   onAnnounce: (message: string) => void;
   onOpenOrder: (orderId: number) => void;
@@ -4220,7 +4238,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     ),
     onAnnounce,
     onDrop: (destination, trigger) => {
-      onMove(card, destination.statusId, destination.statusName, trigger);
+      onMove(card, destination.statusId, destination.statusName, trigger, true);
     },
   });
   const showCompactDetails = displayMode !== 'minimal';

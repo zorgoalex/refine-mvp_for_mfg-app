@@ -116,6 +116,17 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('touch-action: none');
   });
 
+  it('focuses and reveals a card after a successful touch move', () => {
+    expect(page).toContain('const revealTouchMovedCardRef = useRef(false)');
+    expect(page).toContain('revealTouchMovedCardRef.current = revealTouchMovedCard');
+    expect(page).toContain('onMove(card, destination.statusId, destination.statusName, trigger, true)');
+    expect(page).toContain('movedCard.focus({ preventScroll: true })');
+    expect(page).toContain('movedCard.scrollIntoView({');
+    expect(page).toContain("window.matchMedia('(prefers-reduced-motion: reduce)').matches");
+    expect(page).toContain("inline: 'center'");
+    expect(css).toMatch(/@media \(max-width: 768px\) \{[\s\S]*?\.status-board-card:focus \{[^}]*outline: 2px solid #1677ff;/);
+  });
+
   it('keeps only tabs and the settings disclosure in the mobile board header', () => {
     expect(page).toContain('label="Настройки доски"');
     expect(page).toContain('label="Настройки МДФ"');
