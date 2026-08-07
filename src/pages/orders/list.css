@@ -20,6 +20,10 @@
   flex-wrap: wrap;
 }
 
+.ant-page-header-heading:has(.orders-mobile-header-disclosure--mobile) .ant-page-header-heading-left {
+  display: none;
+}
+
 .ant-page-header-heading-extra:has(.orders-mobile-header-disclosure--mobile) {
   width: 100%;
   min-width: 0;

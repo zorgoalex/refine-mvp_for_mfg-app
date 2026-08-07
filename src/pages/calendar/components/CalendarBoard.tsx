@@ -12,6 +12,7 @@ import {
   ReloadOutlined,
   SearchOutlined,
   FilterOutlined,
+  DownOutlined,
   ClearOutlined,
   TableOutlined,
   ToolOutlined,
@@ -63,6 +64,55 @@ interface CalendarBoardProps {
   onFiltersToggle?: () => void;
   onFiltersChange: (filters: CalendarFilters) => void;
 }
+
+interface MobileCalendarDisclosureProps {
+  children: React.ReactNode;
+  mobile: boolean;
+  expanded: boolean;
+  activeFilterCount: number;
+  onToggle: () => void;
+}
+
+const MobileCalendarDisclosure: React.FC<MobileCalendarDisclosureProps> = ({
+  children,
+  mobile,
+  expanded,
+  activeFilterCount,
+  onToggle,
+}) => {
+  if (!mobile) return <>{children}</>;
+
+  return (
+    <section
+      className={[
+        'calendar-mobile-disclosure',
+        expanded ? 'calendar-mobile-disclosure--expanded' : '',
+      ].filter(Boolean).join(' ')}
+    >
+      <button
+        type="button"
+        className="calendar-mobile-disclosure__toggle"
+        aria-expanded={expanded}
+        aria-controls="calendar-mobile-controls"
+        onClick={onToggle}
+      >
+        <span className="calendar-mobile-disclosure__label">
+          <FilterOutlined aria-hidden="true" />
+          Настройки календаря
+        </span>
+        <span className="calendar-mobile-disclosure__summary">
+          {activeFilterCount > 0 ? `Фильтров: ${activeFilterCount}` : 'Навигация и фильтры'}
+        </span>
+        <DownOutlined className="calendar-mobile-disclosure__chevron" aria-hidden="true" />
+      </button>
+      <div id="calendar-mobile-controls" className="calendar-mobile-disclosure__content">
+        <div className="calendar-mobile-disclosure__content-inner">
+          {children}
+        </div>
+      </div>
+    </section>
+  );
+};
 
 const selectFilterOption = (input: string, option?: { label?: React.ReactNode }) =>
   (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase());
@@ -123,6 +173,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     responsive.isMobile ? ViewMode.BRIEF : ViewMode.STANDARD,
   );
+  const [mobileControlsExpanded, setMobileControlsExpanded] = useState(false);
   const [periodDays, setPeriodDays] = useState<7 | 14 | 30>(7);
   const [productionOnly, setProductionOnly] = useState(true);
   // Масштабирование карточек: 1.0 = дефолт (100%), диапазон от 0.7 (70%) до 1.5 (150%)
@@ -558,6 +609,12 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
       }
     >
       <div className="calendar-board" ref={containerRef}>
+        <MobileCalendarDisclosure
+          mobile={isMobile}
+          expanded={mobileControlsExpanded}
+          activeFilterCount={activeFilterCount}
+          onToggle={() => setMobileControlsExpanded((expanded) => !expanded)}
+        >
         {/* Навигация по календарю — AD-4: двухрядный layout на mobile */}
         <div className={`calendar-navigation${isMobile ? ' calendar-navigation--mobile' : ''}`}>
         {onFiltersToggle ? (
@@ -574,7 +631,9 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
                 aria-label={filtersOpen ? 'Скрыть фильтры' : 'Открыть фильтры'}
                 aria-expanded={filtersOpen}
                 onClick={onFiltersToggle}
-              />
+              >
+                {isMobile ? (filtersOpen ? 'Скрыть фильтры' : 'Фильтры') : null}
+              </Button>
             </Tooltip>
           </Badge>
         ) : null}
@@ -896,6 +955,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
           </Form>
         </Card>
       ) : null}
+        </MobileCalendarDisclosure>
 
       {/* Индикатор загрузки */}
       {isLoading && (

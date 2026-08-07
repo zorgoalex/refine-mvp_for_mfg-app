@@ -50,6 +50,8 @@ describe('orders list phone rendering', () => {
     expect(src).toContain('Действия и фильтры');
     expect(src).toContain('if (!next) setFiltersVisible(false)');
     expect(css).toContain('.orders-mobile-header-disclosure--mobile');
+    expect(css).toContain('.ant-page-header-heading-left');
+    expect(css).toMatch(/\.ant-page-header-heading:has\(\.orders-mobile-header-disclosure--mobile\) \.ant-page-header-heading-left \{\s*display: none;/);
     expect(css).toContain('min-height: 44px');
     expect(css).toContain('grid-template-rows: 0fr');
     expect(css).toContain('transition-property: grid-template-rows, opacity, visibility');

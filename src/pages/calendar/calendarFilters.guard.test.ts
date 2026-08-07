@@ -5,6 +5,7 @@ import { join } from 'node:path';
 const calendarList = readFileSync(join(__dirname, 'index.tsx'), 'utf8');
 const board = readFileSync(join(__dirname, 'components/CalendarBoard.tsx'), 'utf8');
 const dataHook = readFileSync(join(__dirname, 'hooks/useCalendarData.ts'), 'utf8');
+const mobileStyles = readFileSync(join(__dirname, 'styles/calendar-mobile.css'), 'utf8');
 const tabletStyles = readFileSync(join(__dirname, '../../ui-evolution/styles/tablet.css'), 'utf8');
 
 describe('calendar filters integration', () => {
@@ -33,6 +34,21 @@ describe('calendar filters integration', () => {
     expect(tabletStyles).toMatch(/data-modern-route="calendar"[^}]+\.calendar-navigation \{[\s\S]*position: sticky;[\s\S]*height: var\(--tablet-sticky-row\);/);
     expect(tabletStyles).toContain('.calendar-navigation__tablet-filter');
     expect(tabletStyles).toContain('.calendar-navigation__mode-text');
+  });
+
+  it('collapses every phone calendar control under one disclosure and hides the page title', () => {
+    expect(board).toContain('const MobileCalendarDisclosure');
+    expect(board).toContain('mobile={isMobile}');
+    expect(board).toContain('aria-controls="calendar-mobile-controls"');
+    expect(board).toContain('Настройки календаря');
+    expect(board).toContain("filtersOpen ? 'Скрыть фильтры' : 'Фильтры'");
+    expect(mobileStyles).toContain('.calendar-page-wrapper > .operational-page-head');
+    expect(mobileStyles).toContain('.calendar-page-wrapper > .calendar-page-header');
+    expect(mobileStyles).toContain('.calendar-mobile-disclosure__toggle');
+    expect(mobileStyles).toContain('min-height: 44px');
+    expect(mobileStyles).toContain('grid-template-rows: 0fr');
+    expect(mobileStyles).toContain('transition-property: grid-template-rows, opacity, visibility');
+    expect(mobileStyles).not.toContain('transition: all');
   });
 
   it('renders separate filter block fields requested for calendar', () => {
