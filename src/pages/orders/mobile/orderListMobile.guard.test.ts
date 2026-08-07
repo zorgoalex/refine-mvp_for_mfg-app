@@ -15,6 +15,8 @@ describe('orders list phone rendering', () => {
   it('OrderCardList uses card model and List pagination, no Table', () => {
     const src = read('pages/orders/mobile/OrderCardList.tsx');
     expect(src).toContain('buildOrderCardModel');
+    expect(src).toContain('data-order-card-status={kind}');
+    expect(src).toContain('getOrderCardStatusTextColor(backgroundColor)');
     expect(src).not.toContain('<Table');
     expect(src).toContain('onOpen');
   });

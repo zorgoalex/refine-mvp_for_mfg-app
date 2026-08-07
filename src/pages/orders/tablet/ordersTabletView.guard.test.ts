@@ -25,6 +25,10 @@ describe('tablet orders view integration', () => {
     expect(list).toContain("(isMobile || isTablet) && ordersViewMode === 'cards'");
     expect(list).toContain("'order-card-list--tablet'");
     expect(cards).toContain('buildOrderCardModel');
+    expect(cards).toContain("statusTag('order'");
+    expect(cards).toContain("statusTag('payment'");
+    expect(cards).toContain("statusTag('production'");
+    expect(list).toContain('statusColors={orderCardStatusColors}');
     expect(tabletCss).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
     expect(tabletCss).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
     expect(tabletCss).toContain('grid-template-columns: minmax(0, 1fr)');

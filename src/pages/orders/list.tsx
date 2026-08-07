@@ -91,6 +91,7 @@ import {
 } from "../../hooks/useDeviceTier";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { OrderCardList } from "./mobile/OrderCardList";
+import { buildOrderCardStatusColorMap } from "./mobile/orderCardModel";
 import {
   ordersViewStorageKey,
   resolveOrdersViewMode,
@@ -1039,6 +1040,34 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     queryOptions: { enabled: isActive && canViewProductionReferences, refetchOnWindowFocus: false },
   });
 
+  const orderCardCatalogEnabled = isActive && (isMobile || isTablet) && ordersViewMode === 'cards';
+  const { data: orderCardOrderStatusesData } = useList({
+    resource: "order_statuses",
+    pagination: { pageSize: 100 },
+    filters: [{ field: "is_active", operator: "in", value: [true, false] }],
+    queryOptions: { enabled: orderCardCatalogEnabled, refetchOnWindowFocus: false },
+  });
+  const { data: orderCardPaymentStatusesData } = useList({
+    resource: "payment_statuses",
+    pagination: { pageSize: 100 },
+    filters: [{ field: "is_active", operator: "in", value: [true, false] }],
+    queryOptions: { enabled: orderCardCatalogEnabled && canViewFinancials, refetchOnWindowFocus: false },
+  });
+  const orderCardStatusColors = useMemo(() => ({
+    order: buildOrderCardStatusColorMap(
+      (orderCardOrderStatusesData?.data || []) as Record<string, unknown>[],
+      'order_status_id',
+    ),
+    payment: buildOrderCardStatusColorMap(
+      (orderCardPaymentStatusesData?.data || []) as Record<string, unknown>[],
+      'payment_status_id',
+    ),
+    production: buildOrderCardStatusColorMap(
+      (productionStatusesData?.data || []) as Record<string, unknown>[],
+      'production_status_id',
+    ),
+  }), [orderCardOrderStatusesData, orderCardPaymentStatusesData, productionStatusesData]);
+
   // Загружаем сотрудников для lookup конструктора
   const { data: employeesData } = useList({
     resource: "employees",
@@ -1825,6 +1854,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
               }}
               onOpen={(id) => show("orders_view", id, "push")}
               showFinancials={canViewFinancials}
+              statusColors={orderCardStatusColors}
             />
           </div>
         ) : (

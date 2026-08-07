@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Цветные статусы в карточках заказов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В карточном виде заказов бейджи статуса заказа, оплаты и производства используют собственные цвета из настроек справочников; цвет текста автоматически сохраняет читаемый контраст.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Точный переход к перенесённой карточке на планшете",
     services: ["ERP"],
     repositories: ["repo_erp"],
