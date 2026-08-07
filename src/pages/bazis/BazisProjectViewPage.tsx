@@ -64,7 +64,6 @@ export const BazisProjectViewPage: React.FC = () => {
   const [selectedPanelNodeIds, setSelectedPanelNodeIds] = useState<number[]>([]);
   const [exportingCutXls, setExportingCutXls] = useState(false);
   const [exportTemplateId, setExportTemplateId] = useState<number>();
-  const [exportTemplatesReady, setExportTemplatesReady] = useState(false);
   const canManage = can('bazis.manage');
   const canExportBazisXls = canManage;
   const canViewBazisCut = can('cut.view');
@@ -300,7 +299,7 @@ export const BazisProjectViewPage: React.FC = () => {
   };
 
   const exportSelectedPanelsXls = async (nodeIds: number[]) => {
-    if (!selectedRevision || !projectCard || nodeIds.length === 0 || exportingCutXls || !exportTemplatesReady) return;
+    if (!selectedRevision || !projectCard || nodeIds.length === 0 || exportingCutXls) return;
     const picker = (window as PickerWindow).showSaveFilePicker;
     try {
       await saveBazisCutFile({
@@ -460,7 +459,7 @@ export const BazisProjectViewPage: React.FC = () => {
                 <Space wrap>
                 <ExportTemplateSelect targetScreen="bazis_project_card" sourceType="bazis_project_panel"
                   value={exportTemplateId} disabled={exportingCutXls || !canExportBazisXls}
-                  onChange={setExportTemplateId} onReadyChange={setExportTemplatesReady} />
+                  onChange={setExportTemplateId} />
                 <Tooltip
                   title={!canExportBazisXls
                     ? 'Доступно менеджеру и выше'
@@ -472,7 +471,7 @@ export const BazisProjectViewPage: React.FC = () => {
                     <Button
                       icon={<DownloadOutlined />}
                       loading={exportingCutXls}
-                      disabled={!canExportBazisXls || selectedPanelNodeIds.length === 0 || !exportTemplatesReady}
+                      disabled={!canExportBazisXls || selectedPanelNodeIds.length === 0}
                       onClick={() => void exportSelectedPanelsXls(selectedPanelNodeIds)}
                     >
                       Экспорт XLS
@@ -584,7 +583,7 @@ export const BazisProjectViewPage: React.FC = () => {
                     onGoToTree={goToTree}
                     onSelectionChange={setSelectedPanelNodeIds}
                     onExportXls={featureFlags.bazisCut ? exportSelectedPanelsXls : undefined}
-                    canExportXls={canExportBazisXls && exportTemplatesReady}
+                    canExportXls={canExportBazisXls}
                     exportingXls={exportingCutXls}
                     canViewBazisCut={featureFlags.bazisCut && canViewBazisCut}
                   />
