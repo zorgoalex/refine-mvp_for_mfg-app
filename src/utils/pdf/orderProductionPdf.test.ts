@@ -198,6 +198,24 @@ describe('production order PDF document', () => {
     expect(html).not.toContain('Сумма оплаты');
   });
 
+  it('puts the doweling marker on the first note line without duplication', () => {
+    const html = buildOrderProductionPdfDocument({
+      ...params,
+      details: [
+        { ...params.details[0], doweling: true, notes: 'Сверлить по карте\r\nПроверить размер' },
+        { ...params.details[2], doweling: true, notes: 'пРИСАДКА:\nСверлить по карте' },
+        { ...params.details[3], doweling: true, notes: null },
+        { ...params.details[3], detail_id: 104, doweling: false, notes: 'Обычное примечание' },
+      ],
+    });
+
+    expect(html).toContain('<td>Присадка\nСверлить по карте\nПроверить размер</td>');
+    expect(html).toContain('<td>пРИСАДКА:\nСверлить по карте</td>');
+    expect(html).toContain('<td>Присадка</td>');
+    expect(html).toContain('<td>Обычное примечание</td>');
+    expect(html).toContain('white-space: pre-wrap');
+  });
+
   it('always groups details by film with exactly one blank row between groups', () => {
     const grouped = groupOrderProductionDetailsByFilm(params.details);
     expect(grouped.map((row) => ('kind' in row ? row.kind : row.detail_id))).toEqual([

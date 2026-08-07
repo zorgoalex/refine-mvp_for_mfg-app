@@ -85,7 +85,7 @@ const isBlankDetailRow = (detail: OrderExcelDetailRow): detail is OrderExcelBlan
   'kind' in detail && detail.kind === 'blank'
 );
 
-export function formatOrderExcelDetailNote(
+export function formatOrderExportDetailNote(
   notes: string | null | undefined,
   doweling: boolean | undefined,
 ): string {
@@ -352,7 +352,7 @@ export const buildOrderExcelBuffer = async ({
       row.getCell(6).value = detail.milling_type?.milling_type_name || ''; // F: Тип фрезеровки ⚠️
       row.getCell(7).value = detail.edge_type?.edge_type_name || ''; // G: Обкат/кромка
       const noteCell = row.getCell(8);
-      const note = formatOrderExcelDetailNote(detail.notes, detail.doweling);
+      const note = formatOrderExportDetailNote(detail.notes, detail.doweling);
       noteCell.value = note; // H: Примечание
       noteCell.alignment = { ...noteCell.alignment, wrapText: true };
       const noteLineCount = note === '' ? 1 : note.split('\n').length;
