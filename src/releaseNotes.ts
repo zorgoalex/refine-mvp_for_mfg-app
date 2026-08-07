@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Экспорт XLS из Базис-проекта — для менеджеров",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Кнопка «Экспорт XLS» в карточке Базис-проекта теперь доступна менеджеру и вышестоящим ролям и больше не зависит от отдельного права просмотра раскроя.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Мобильные заказы: компактная шапка и выбор вида",
     services: ["ERP"],
     repositories: ["repo_erp"],

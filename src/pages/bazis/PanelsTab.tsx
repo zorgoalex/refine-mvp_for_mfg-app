@@ -980,7 +980,7 @@ export const PanelsTab: React.FC<PanelsTabProps> = ({
                 {selectionStats.excludedBusy > 0 ? ` · исключено ${selectionStats.excludedBusy}` : ''}
               </Text>
               {onExportXls ? (
-                <Tooltip title={!canExportXls ? 'Нужно право cut.view' : selectionStats.panels === 0 ? 'Выберите панели' : undefined}>
+                <Tooltip title={!canExportXls ? 'Доступно менеджеру и выше' : selectionStats.panels === 0 ? 'Выберите панели' : undefined}>
                   <span>
                     <Button
                       icon={<DownloadOutlined />}

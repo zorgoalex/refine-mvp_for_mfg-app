@@ -279,7 +279,7 @@ export class BazisService {
 
   async exportCutXls(command: ExportBazisCutXlsCommand) {
     await this.requirePermission(command.currentUser, 'bazis.view', 'export_cut_xls', command.requestId);
-    await this.requirePermission(command.currentUser, 'cut.view', 'export_cut_xls', command.requestId);
+    await this.requirePermission(command.currentUser, 'bazis.manage', 'export_cut_xls', command.requestId);
     return this.ports.repository.exportCutXls(command);
   }
 

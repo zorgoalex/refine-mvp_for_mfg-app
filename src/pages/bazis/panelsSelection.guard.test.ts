@@ -62,6 +62,6 @@ describe('bazis panels selection UI guards', () => {
     expect(panelsTab).toContain('onSelectionChange?.(selectedNodeIds)');
     expect(panelsTab).toContain('onExportXls(selectedNodeIds)');
     expect(panelsTab).toContain('Экспорт XLS');
-    expect(panelsTab).toContain("Нужно право cut.view");
+    expect(panelsTab).toContain('Доступно менеджеру и выше');
   });
 });

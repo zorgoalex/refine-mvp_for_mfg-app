@@ -174,7 +174,7 @@ describe('BazisService', () => {
     });
   });
 
-  it('requires both bazis.view and cut.view for direct XLS export', async () => {
+  it('requires both bazis.view and bazis.manage for direct XLS export', async () => {
     const repository = createRepository();
     const service = createService(repository);
     const command = {
@@ -186,7 +186,7 @@ describe('BazisService', () => {
     await expect(service.exportCutXls({ ...command, currentUser: viewerUser() }))
       .rejects.toMatchObject({
         statusCode: 403,
-        details: { requiredPermissions: ['cut.view'] },
+        details: { requiredPermissions: ['bazis.manage'] },
       } satisfies Partial<ApiError>);
     await expect(service.exportCutXls({ ...command, currentUser: cutOnlyUser() }))
       .rejects.toMatchObject({
@@ -194,6 +194,11 @@ describe('BazisService', () => {
         details: { requiredPermissions: ['bazis.view'] },
       } satisfies Partial<ApiError>);
     await expect(service.exportCutXls({ ...command, currentUser: bazisCutViewer() }))
+      .rejects.toMatchObject({
+        statusCode: 403,
+        details: { requiredPermissions: ['bazis.manage'] },
+      } satisfies Partial<ApiError>);
+    await expect(service.exportCutXls({ ...command, currentUser: bazisManager() }))
       .resolves.toMatchObject({ revisionId: 82, positionCount: 2 });
     expect(repository.exportCutXls).toHaveBeenCalledTimes(1);
   });
