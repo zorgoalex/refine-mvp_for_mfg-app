@@ -115,6 +115,7 @@ interface PacketJoinedRow extends QueryResultRow {
   match_status: CncTelegramMatchStatus | null;
   review_note: string | null;
   laminated_or_later: boolean | null;
+  all_linked_order_details_packed_or_later: boolean | null;
 }
 
 interface PacketReplayRow extends QueryResultRow {
@@ -698,7 +699,11 @@ function packetSelectSql(whereSql: string): string {
           AND laminated_status.sort_order IS NOT NULL
           THEN detail_status.sort_order >= laminated_status.sort_order
         ELSE false
-      END AS laminated_or_later
+      END AS laminated_or_later,
+      linked_order.order_id IS NOT NULL
+        AND linked_order.delete_flag = false
+        AND COALESCE(linked_order_status.all_details_packed_or_later, false)
+        AS all_linked_order_details_packed_or_later
     FROM cnc_telegram_packets p
     LEFT JOIN cut_result svg_result
       ON svg_result.cut_job_id = p.svg_cut_job_id
@@ -716,6 +721,8 @@ function packetSelectSql(whereSql: string): string {
     ) item_order
       ON item_order.order_key = lower(trim(i.order_name))
     LEFT JOIN orders matched_order ON matched_order.order_id = i.match_order_id
+    LEFT JOIN orders linked_order
+      ON linked_order.order_id = COALESCE(i.match_order_id, item_order.order_id)
     LEFT JOIN order_details matched_detail
       ON matched_detail.detail_id = i.match_detail_id
      AND matched_detail.delete_flag = false
@@ -732,6 +739,31 @@ function packetSelectSql(whereSql: string): string {
       ) AS sort_order
       FROM production_statuses ps
     ) laminated_status ON true
+    LEFT JOIN LATERAL (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'packed'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'упакован'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ) packed_status ON true
+    LEFT JOIN LATERAL (
+      SELECT
+        COUNT(linked_detail.detail_id) > 0
+          AND BOOL_AND(
+            linked_detail_status.sort_order IS NOT NULL
+            AND packed_status.sort_order IS NOT NULL
+            AND linked_detail_status.sort_order >= packed_status.sort_order
+          ) AS all_details_packed_or_later
+      FROM order_details linked_detail
+      LEFT JOIN production_statuses linked_detail_status
+        ON linked_detail_status.production_status_id = linked_detail.production_status_id
+      WHERE linked_detail.order_id = linked_order.order_id
+        AND linked_detail.delete_flag = false
+    ) linked_order_status ON true
     WHERE ${whereSql}
     ORDER BY p.updated_at DESC, p.packet_id, i.order_name ASC NULLS LAST, i.detail_number ASC NULLS LAST
   `;
@@ -3739,7 +3771,7 @@ function packetColumnKey(
   packet: CncTelegramPacketDto,
 ): 'parsed' | 'completed' | 'completed_laminated' {
   if (packet.completionStatus === 'completed' || packet.thumbsUp) {
-    return allItemsLaminatedOrLater(packet.items) ? 'completed_laminated' : 'completed';
+    return packet.allLinkedOrderDetailsPackedOrLater ? 'completed_laminated' : 'completed';
   }
   return 'parsed';
 }
@@ -3800,6 +3832,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         svgCutResultNo: toNullableNumber(row.svg_cut_result_no),
         svgCutImportStatus: row.svg_cut_import_status ?? 'none',
         svgCutImportNote: row.svg_cut_import_note,
+        allLinkedOrderDetailsPackedOrLater: false,
         itemCount: 0,
         itemQuantityTotal: 0,
         updatedAt: toIso(row.updated_at),
@@ -3809,6 +3842,10 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
     }
 
     if (row.packet_item_id) {
+      packet.allLinkedOrderDetailsPackedOrLater = packet.itemCount === 0
+        ? row.all_linked_order_details_packed_or_later === true
+        : packet.allLinkedOrderDetailsPackedOrLater
+          && row.all_linked_order_details_packed_or_later === true;
       const item: CncTelegramPacketItemDto = {
         packetItemId: row.packet_item_id,
         sourceItemKey: row.source_item_key ?? '',

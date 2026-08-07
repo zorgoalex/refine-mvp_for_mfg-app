@@ -207,7 +207,7 @@ describe('PgCncTelegramRepository', () => {
     });
   });
 
-  it('archives a completed machine file only when every matched detail is laminated or later', async () => {
+  it('archives a completed machine file only when every detail of every linked order is packed or later', async () => {
     const database = {
       query: vi.fn(async (text: string) => {
         if (/latest_vacuum_results/i.test(text)) return { rows: [] };
@@ -217,12 +217,21 @@ describe('PgCncTelegramRepository', () => {
               packetRow({
                 packet_id: '00000000-0000-0000-0000-000000000031',
                 packet_item_id: '00000000-0000-0000-0000-000000000041',
-                laminated_or_later: true,
+                all_linked_order_details_packed_or_later: true,
+              }),
+              packetRow({
+                packet_id: '00000000-0000-0000-0000-000000000031',
+                packet_item_id: '00000000-0000-0000-0000-000000000046',
+                order_name: '2690',
+                item_order_id: 2690,
+                match_order_id: 2690,
+                match_detail_id: 3201,
+                all_linked_order_details_packed_or_later: true,
               }),
               packetRow({
                 packet_id: '00000000-0000-0000-0000-000000000032',
                 packet_item_id: '00000000-0000-0000-0000-000000000042',
-                laminated_or_later: true,
+                all_linked_order_details_packed_or_later: true,
               }),
               packetRow({
                 packet_id: '00000000-0000-0000-0000-000000000032',
@@ -230,19 +239,21 @@ describe('PgCncTelegramRepository', () => {
                 source_item_key: '2689:32:497x477',
                 detail_number: 32,
                 match_detail_id: 3102,
-                laminated_or_later: false,
+                all_linked_order_details_packed_or_later: false,
               }),
               packetRow({
                 packet_id: '00000000-0000-0000-0000-000000000033',
                 packet_item_id: '00000000-0000-0000-0000-000000000044',
                 match_status: 'conflict',
-                laminated_or_later: true,
+                item_order_id: null,
+                match_order_id: null,
+                all_linked_order_details_packed_or_later: false,
               }),
               packetRow({
                 packet_id: '00000000-0000-0000-0000-000000000034',
                 packet_item_id: '00000000-0000-0000-0000-000000000045',
                 match_status: 'needs_review',
-                laminated_or_later: true,
+                all_linked_order_details_packed_or_later: false,
               }),
             ],
           };
@@ -257,8 +268,17 @@ describe('PgCncTelegramRepository', () => {
     expect(result.columns.find((column) => column.key === 'completed')?.packets)
       .toHaveLength(3);
     expect(result.columns.find((column) => column.key === 'completed_laminated')?.packets)
-      .toMatchObject([{ packetId: '00000000-0000-0000-0000-000000000031' }]);
-    expect(database.query.mock.calls[0]?.[0]).toContain("i.match_status = 'matched'");
+      .toMatchObject([{
+        packetId: '00000000-0000-0000-0000-000000000031',
+        allLinkedOrderDetailsPackedOrLater: true,
+    }]);
+    expect(database.query.mock.calls[0]?.[0]).toContain("= 'packed'");
+    expect(database.query.mock.calls[0]?.[0]).toContain('FROM order_details linked_detail');
+    expect(database.query.mock.calls[0]?.[0]).toContain('COUNT(linked_detail.detail_id) > 0');
+    expect(database.query.mock.calls[0]?.[0]).toContain(
+      'linked_detail_status.sort_order >= packed_status.sort_order',
+    );
+    expect(database.query.mock.calls[0]?.[0]).toContain('linked_detail.delete_flag = false');
   });
 
   it('lists stored machine-file cutting sequence numbers for an order card', async () => {
@@ -2262,6 +2282,7 @@ function packetRowBase() {
     match_status: 'matched',
     review_note: null,
     laminated_or_later: false,
+    all_linked_order_details_packed_or_later: false,
   };
 }
 

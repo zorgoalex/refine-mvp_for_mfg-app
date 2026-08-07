@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Автоперенос распиленных файлов MDF",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Завершённая карточка файлов станка переходит из «Распилено» в «Распиленные файлы», когда все детали каждого связанного заказа получили производственный статус «Упакован» или более поздний.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Цветные статусы в карточках заказов",
     services: ["ERP"],
     repositories: ["repo_erp"],
