@@ -35,6 +35,10 @@ const detailedMachine = readFileSync(
   'src/pages/orderStatusBoard/cncDetailedMachine.ts',
   'utf8',
 );
+const imagePrintPreview = readFileSync(
+  'src/components/ImagePrintPreviewModal.tsx',
+  'utf8',
+);
 
 describe('OrderStatusBoardPage UX guards', () => {
   it('keeps keyboard move, live announcements and focus restoration', () => {
@@ -859,6 +863,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('open: boolean;');
     expect(sheetPreview).toContain('if (!open) return null;');
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-panel"');
+    expect(sheetPreview).toContain('className="cnc-packet-card__sheet-actions"');
+    expect(sheetPreview).toContain('aria-haspopup="dialog"');
+    expect(sheetPreview).toContain('<ImagePrintPreviewModal');
+    expect(sheetPreview).toContain('status="Скрин из Telegram-чата"');
+    expect(imagePrintPreview).toContain('export const DEFAULT_IMAGE_PREVIEW_SCALE = 0.25;');
+    expect(imagePrintPreview).toContain('ZoomOutOutlined');
+    expect(imagePrintPreview).toContain('ZoomInOutlined');
+    expect(imagePrintPreview).toContain('Печать скрина');
+    expect(imagePrintPreview).toMatch(/frame\.contentWindow\?\.print\(\)/);
     expect(css).toMatch(
       /\.cnc-packet-card__tabs\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/s,
     );
@@ -868,6 +881,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-packet-card__tab.ant-btn[aria-pressed="true"]');
     expect(css).toContain('.cnc-packet-card__items-panel');
     expect(css).toContain('.cnc-packet-card__sheet-panel');
+    expect(css).toMatch(/\.cnc-packet-card__sheet-actions \.ant-btn\s*\{[^}]*min-height: 40px;/s);
   });
 
   it('shows the bath cut job name only inside detail and PDF preview headers', () => {
