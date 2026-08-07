@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Предупреждение о деталях, не помещающихся на лист раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В задании на раскрой под выбранным листом теперь показывается красное предупреждение с конкретными деталями, которые превышают рабочий размер листа или помещаются только при запрещённом повороте.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Мобильные шапки календаря и заказов",
     services: ["ERP"],
     repositories: ["repo_erp"],

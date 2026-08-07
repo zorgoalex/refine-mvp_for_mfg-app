@@ -3588,6 +3588,37 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                             message="«Разделять по материалу» выключено: все детали разных материалов будут раскроены на одном выбранном листе"
                           />
                         )}
+                        {(job.sheetFitWarnings?.length ?? 0) > 0 && (
+                          <div
+                            data-testid="cut-sheet-fit-warning"
+                            role="alert"
+                            aria-live="polite"
+                            style={{
+                              color: token.colorError,
+                              fontSize: 12,
+                              lineHeight: 1.35,
+                              marginTop: 6,
+                              maxWidth: 520,
+                            }}
+                          >
+                            <strong>
+                              На выбранный лист {job.sheetFitWarnings![0].sheetWidthMm}×{job.sheetFitWarnings![0].sheetHeightMm} мм
+                              {' '}(рабочее поле {job.sheetFitWarnings![0].usableWidthMm}×{job.sheetFitWarnings![0].usableHeightMm} мм)
+                              {' '}не помещаются детали: {job.sheetFitWarnings!.length}.
+                            </strong>
+                            <ul style={{ margin: '3px 0 0', paddingInlineStart: 18 }}>
+                              {job.sheetFitWarnings!.map((warning) => (
+                                <li key={warning.orderDetailId}>
+                                  Заказ {warning.orderId}, деталь {warning.detailNumber ?? `#${warning.orderDetailId}`}
+                                  {warning.detailName ? ` «${warning.detailName}»` : ''}, {warning.widthMm}×{warning.heightMm} мм —{' '}
+                                  {warning.reason === 'orientation'
+                                    ? 'помещается только после поворота на 90°, но расчёт запрещает поворот'
+                                    : 'превышает рабочий размер листа даже с поворотом'}.
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}

@@ -160,6 +160,22 @@ export interface CutJobTotals {
   filmUsage?: CutFilmUsage[];
 }
 
+export interface CutSheetFitWarningDto {
+  orderDetailId: number;
+  orderId: number;
+  detailNumber: number | null;
+  detailName: string | null;
+  reason: 'dimensions' | 'orientation';
+  rotationForbidden: boolean;
+  widthMm: number;
+  heightMm: number;
+  sheetMaterialTypeId: number;
+  sheetWidthMm: number;
+  sheetHeightMm: number;
+  usableWidthMm: number;
+  usableHeightMm: number;
+}
+
 /** Per-job editor geometry params (trim is read from placements.trim_mm). */
 export interface CutEditorParams {
   kerfMm: number;
@@ -231,6 +247,8 @@ export interface CutJobDto {
   /** Geometry check of stored automatic sheets; invalid legacy layouts require
    * recalculation before manual editing. Present on single-job GET. */
   autoLayoutValidation?: { valid: boolean };
+  /** Backend-authoritative selected-sheet fit preflight. Single-job GET only. */
+  sheetFitWarnings?: CutSheetFitWarningDto[];
   /** Opaque render token for cache-busting render endpoints (present on single-job GET). */
   renderToken?: string;
   currentCutResult?: CutResultSummary | null;
