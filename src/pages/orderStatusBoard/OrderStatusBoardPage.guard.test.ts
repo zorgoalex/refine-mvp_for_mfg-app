@@ -196,6 +196,20 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('height: 32px');
   });
 
+  it('offers persistent server-side card sorting for both status boards', () => {
+    expect(page).toContain('Сортировка карточек');
+    expect(page).toContain('Сортировать по');
+    expect(page).toContain("value: 'orderNumber'");
+    expect(page).toContain("value: 'plannedDate'");
+    expect(page).toContain("value: 'updatedAt'");
+    expect(page).toContain('sortBy: viewState.sortBy');
+    expect(page).toContain('sortOrder: viewState.sortOrder');
+    expect(page).toContain('window.localStorage');
+    expect(page).toContain('status-board-toolbar__sort-settings');
+    expect(page).toContain('switchStatusBoardView');
+    expect(page).toContain('readStatusBoardSortPreference(currentUser?.id, view)');
+  });
+
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');

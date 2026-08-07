@@ -249,6 +249,30 @@
   border-bottom: 1px solid var(--app-border-soft);
 }
 
+.status-board-toolbar__sort-settings {
+  gap: 12px;
+}
+
+.status-board-toolbar__sort-row {
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: minmax(132px, 0.8fr) minmax(180px, 1.2fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.status-board-toolbar__sort-row .ant-select,
+.status-board-toolbar__sort-row .ant-segmented {
+  width: 100%;
+}
+
+@media (max-width: 480px) {
+  .status-board-toolbar__sort-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}
+
 .status-board-settings__modes .status-board-toolbar__switch {
   width: 100%;
   min-height: 40px;

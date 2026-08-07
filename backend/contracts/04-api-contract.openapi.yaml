@@ -948,6 +948,22 @@ paths:
           schema:
             type: string
             pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'
+        - name: sortBy
+          in: query
+          required: false
+          description: Поле серверной сортировки карточек внутри каждой колонки.
+          schema:
+            type: string
+            enum: [priority, orderNumber, plannedDate, updatedAt]
+            default: priority
+        - name: sortOrder
+          in: query
+          required: false
+          description: Направление серверной сортировки карточек.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
       responses:
         '200':
           description: Доска статусов

@@ -72,6 +72,8 @@ import type {
   OrderStatusBoardCard,
   OrderStatusBoardColumn,
   OrderStatusBoardResponse,
+  OrderStatusBoardSortBy,
+  OrderStatusBoardSortOrder,
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
 import type {
@@ -101,6 +103,7 @@ import {
   buildCncOrderFilterOptions,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
+  DEFAULT_ORDER_STATUS_BOARD_SORT,
   filterBoardColumns,
   filterCncBazisCutSetsByMissingBathDetails,
   filterCncBathColumnsByMachineOrderMatches,
@@ -225,6 +228,16 @@ const STATUS_BOARD_CARD_DISPLAY_ICONS: Record<StatusBoardCardDisplayMode, React.
   compact: <CompressOutlined />,
   minimal: <FileTextOutlined />,
 };
+const STATUS_BOARD_SORT_STORAGE_PREFIX = 'erp.status-board.card-sort';
+const STATUS_BOARD_SORT_FIELD_OPTIONS: Array<{
+  label: string;
+  value: OrderStatusBoardSortBy;
+}> = [
+  { label: 'Приоритет', value: 'priority' },
+  { label: 'Номер заказа', value: 'orderNumber' },
+  { label: 'Плановая дата', value: 'plannedDate' },
+  { label: 'Последнее изменение', value: 'updatedAt' },
+];
 
 interface BoardDragItem {
   card: OrderStatusBoardCard;
@@ -292,12 +305,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const currentUser = authSession.getUser();
+  const sortPreferenceBoard: OrderStatusBoardType =
+    fixedView === 'production' || (!fixedView && searchParams.get('board') === 'production')
+      ? 'production'
+      : 'order';
+  const defaultSort = useMemo(
+    () => readStatusBoardSortPreference(currentUser?.id, sortPreferenceBoard),
+    [currentUser?.id, sortPreferenceBoard],
+  );
   const viewState = useMemo(() => {
     const parsed = parseOrderStatusBoardViewState(searchParams, {
       cncTelegram: featureFlags.cncTelegram,
+      ...(defaultSort ? { defaultSort } : {}),
     });
     return fixedView ? { ...parsed, view: fixedView } : parsed;
-  }, [fixedView, searchParams]);
+  }, [defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
   const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
   const mdfBoardHiddenStatusesSetting =
@@ -355,8 +378,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     useState<string | null>(null);
   const [activeCncDetailedDetail, setActiveCncDetailedDetail] =
     useState<CncDetailedDetailTarget | null>(null);
-  const currentUser = authSession.getUser();
   const isPacker = isPackerUser(currentUser);
+
+  useEffect(() => {
+    if (viewState.view === 'cnc_today') return;
+    writeStatusBoardSortPreference(currentUser?.id, viewState.view, {
+      sortBy: viewState.sortBy,
+      sortOrder: viewState.sortOrder,
+    });
+  }, [currentUser?.id, viewState.sortBy, viewState.sortOrder, viewState.view]);
 
   useEffect(() => {
     boardRef.current = board;
@@ -385,12 +415,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     },
     [setSearchParams, viewState],
   );
+  const switchStatusBoardView = useCallback(
+    (view: OrderStatusBoardType) => {
+      const savedSort = readStatusBoardSortPreference(currentUser?.id, view)
+        ?? DEFAULT_ORDER_STATUS_BOARD_SORT;
+      updateViewState({ view, ...savedSort });
+    },
+    [currentUser?.id, updateViewState],
+  );
 
   useEffect(() => {
     if (!fixedView && isPacker && viewState.view !== 'order') {
-      updateViewState({ view: 'order' });
+      switchStatusBoardView('order');
     }
-  }, [fixedView, isPacker, updateViewState, viewState.view]);
+  }, [fixedView, isPacker, switchStatusBoardView, viewState.view]);
 
   useEffect(() => {
     if (searchDraft.trim() === viewState.search) return;
@@ -1165,6 +1203,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const cardDisplayModeLabel = STATUS_BOARD_CARD_DISPLAY_OPTIONS.find(
     (option) => option.value === cardDisplayMode,
   )?.label ?? 'Компактный';
+  const sortFieldLabel = STATUS_BOARD_SORT_FIELD_OPTIONS.find(
+    (option) => option.value === viewState.sortBy,
+  )?.label ?? 'Приоритет';
+  const sortDirectionOptions = statusBoardSortDirectionOptions(viewState.sortBy);
+  const sortDirectionLabel = sortDirectionOptions.find(
+    (option) => option.value === viewState.sortOrder,
+  )?.label ?? 'Сначала срочные';
   const cncCardDisplayModeLabel = CNC_CARD_DISPLAY_OPTIONS.find(
     (option) => option.value === cncCardDisplayMode,
   )?.label ?? 'Стандартные';
@@ -1218,6 +1263,37 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         >
           Закатан/выдан
         </Checkbox>
+      </div>
+    </section>
+  );
+  const cardSortSettingsContent = (
+    <section
+      className="status-board-settings__modes status-board-toolbar__sort-settings"
+      aria-label="Сортировка карточек"
+    >
+      <strong>Сортировка карточек</strong>
+      <span className="status-board-settings__hint">
+        Применяется ко всем колонкам этой доски и сохраняется в текущем браузере.
+      </span>
+      <div className="status-board-toolbar__sort-row">
+        <Typography.Text>Сортировать по</Typography.Text>
+        <Select<OrderStatusBoardSortBy>
+          value={viewState.sortBy}
+          options={STATUS_BOARD_SORT_FIELD_OPTIONS}
+          onChange={(sortBy) => updateViewState({ sortBy })}
+          aria-label="Поле сортировки карточек"
+        />
+      </div>
+      <div className="status-board-toolbar__sort-row">
+        <Typography.Text>Показывать сначала</Typography.Text>
+        <Segmented
+          value={viewState.sortOrder}
+          options={sortDirectionOptions}
+          onChange={(sortOrder) =>
+            updateViewState({ sortOrder: sortOrder as OrderStatusBoardSortOrder })
+          }
+          aria-label="Направление сортировки карточек"
+        />
       </div>
     </section>
   );
@@ -1303,11 +1379,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           <Tabs
             className="status-board-tabs"
             activeKey={isPacker && viewState.view !== 'order' ? 'order' : viewState.view}
-            onChange={(key) =>
-              updateViewState({
-                view: key as typeof viewState.view,
-              })
-            }
+            onChange={(key) => switchStatusBoardView(key as OrderStatusBoardType)}
             items={statusBoardTabItems}
           />
         )}
@@ -1317,7 +1389,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             contentId="status-board-toolbar-controls"
             expanded={mobileToolbarExpanded}
             label="Настройки доски"
-            summary={cardDisplayModeLabel}
+            summary={`${cardDisplayModeLabel} · ${sortFieldLabel}: ${sortDirectionLabel}`}
             onToggle={() => setMobileToolbarExpanded((current) => !current)}
           >
           <div
@@ -1337,7 +1409,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   size="small"
                   value={viewState.view}
                   options={tabletBoardSwitchOptions}
-                  onChange={(value) => updateViewState({ view: value as OrderStatusBoardType })}
+                  onChange={(value) => switchStatusBoardView(value as OrderStatusBoardType)}
                 />
               </div>
             )}
@@ -1464,6 +1536,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               definitions={activeColumnDefinitions}
               settings={activeColumnPreferences.settings}
               onChange={activeColumnPreferences.saveSettings}
+              extraContent={cardSortSettingsContent}
             />
           </div>
           </StatusBoardToolbarDisclosure>
@@ -5585,4 +5658,80 @@ function cncItemQuantityWarningTitle(item: CncTelegramPacket['items'][number]): 
     return 'Низкая уверенность распознавания';
   }
   return '';
+}
+
+function statusBoardSortDirectionOptions(
+  sortBy: OrderStatusBoardSortBy,
+): Array<{ label: string; value: OrderStatusBoardSortOrder }> {
+  switch (sortBy) {
+    case 'orderNumber':
+      return [
+        { label: 'Меньшие', value: 'asc' },
+        { label: 'Большие', value: 'desc' },
+      ];
+    case 'plannedDate':
+      return [
+        { label: 'Ранние', value: 'asc' },
+        { label: 'Поздние', value: 'desc' },
+      ];
+    case 'updatedAt':
+      return [
+        { label: 'Старые', value: 'asc' },
+        { label: 'Новые', value: 'desc' },
+      ];
+    case 'priority':
+      return [
+        { label: 'Срочные', value: 'asc' },
+        { label: 'Обычные', value: 'desc' },
+      ];
+  }
+}
+
+function readStatusBoardSortPreference(
+  userId: string | undefined,
+  board: OrderStatusBoardType,
+): { sortBy: OrderStatusBoardSortBy; sortOrder: OrderStatusBoardSortOrder } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(statusBoardSortPreferenceKey(userId, board));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const sortBy = value.sortBy;
+    const sortOrder = value.sortOrder;
+    if (
+      (sortBy === 'priority'
+        || sortBy === 'orderNumber'
+        || sortBy === 'plannedDate'
+        || sortBy === 'updatedAt')
+      && (sortOrder === 'asc' || sortOrder === 'desc')
+    ) {
+      return { sortBy, sortOrder };
+    }
+  } catch {
+    // Invalid or unavailable browser storage falls back to the safe server default.
+  }
+  return null;
+}
+
+function writeStatusBoardSortPreference(
+  userId: string | undefined,
+  board: OrderStatusBoardType,
+  value: { sortBy: OrderStatusBoardSortBy; sortOrder: OrderStatusBoardSortOrder },
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      statusBoardSortPreferenceKey(userId, board),
+      JSON.stringify(value),
+    );
+  } catch {
+    // The URL still carries the current choice when browser storage is unavailable.
+  }
+}
+
+function statusBoardSortPreferenceKey(
+  userId: string | undefined,
+  board: OrderStatusBoardType,
+): string {
+  return `${STATUS_BOARD_SORT_STORAGE_PREFIX}.${userId ?? 'anonymous'}.${board}`;
 }
