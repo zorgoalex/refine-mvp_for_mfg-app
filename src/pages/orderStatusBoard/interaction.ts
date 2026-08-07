@@ -129,6 +129,66 @@ export function restoreOrderStatusBoardFocus(
   return 'none';
 }
 
+interface StatusBoardElementRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface StatusBoardRevealTarget {
+  focus: (options?: FocusOptions) => void;
+  getBoundingClientRect: () => StatusBoardElementRect;
+}
+
+export interface StatusBoardScrollContainer {
+  clientWidth: number;
+  clientHeight: number;
+  scrollWidth: number;
+  scrollHeight: number;
+  scrollLeft: number;
+  scrollTop: number;
+  scrollTo: (options: ScrollToOptions) => void;
+  getBoundingClientRect: () => StatusBoardElementRect;
+}
+
+export function revealOrderStatusBoardCard(
+  card: StatusBoardRevealTarget,
+  viewport: StatusBoardScrollContainer | null,
+  cards: StatusBoardScrollContainer | null,
+  reducedMotion: boolean,
+): boolean {
+  if (!viewport || !cards) return false;
+
+  const cardRect = card.getBoundingClientRect();
+  const viewportRect = viewport.getBoundingClientRect();
+  const cardsRect = cards.getBoundingClientRect();
+  const behavior: ScrollBehavior = reducedMotion ? 'auto' : 'smooth';
+  const targetLeft = clampStatusBoardScroll(
+    viewport.scrollLeft
+      + cardRect.left
+      - viewportRect.left
+      - (viewport.clientWidth - cardRect.width) / 2,
+    viewport.scrollWidth - viewport.clientWidth,
+  );
+  const targetTop = clampStatusBoardScroll(
+    cards.scrollTop
+      + cardRect.top
+      - cardsRect.top
+      - (cards.clientHeight - cardRect.height) / 2,
+    cards.scrollHeight - cards.clientHeight,
+  );
+
+  card.focus({ preventScroll: true });
+  viewport.scrollTo({ left: targetLeft, behavior });
+  cards.scrollTo({ top: targetTop, behavior });
+  return true;
+}
+
+function clampStatusBoardScroll(value: number, maximum: number): number {
+  return Math.max(0, Math.min(Math.max(0, maximum), value));
+}
+
 export function syncCncBathSelectedDetail(
   root: HTMLElement | null,
   selectedDetailId: number | null,
