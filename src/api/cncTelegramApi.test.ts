@@ -73,6 +73,34 @@ describe('cncTelegramApi', () => {
     );
   });
 
+  it('downloads the detailed worker audit JSON with bounded filters', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"format":"erp.cnc-telegram-worker-audit"}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Disposition': 'attachment; filename="telegram-worker-audit_2026-08-01_2026-08-06.json"',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await cncTelegramApi.exportWorkerLogs({
+      dateFrom: '2026-08-01',
+      dateTo: '2026-08-06',
+      status: 'failed',
+      messageType: 'svg',
+      reasonCode: 'backend_ingest_failed',
+      search: 'layout.svg',
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/cnc-telegram/worker-logs/export?dateFrom=2026-08-01&dateTo=2026-08-06&status=failed&messageType=svg&reasonCode=backend_ingest_failed&search=layout.svg',
+    );
+    expect(result.fileName).toBe('telegram-worker-audit_2026-08-01_2026-08-06.json');
+    await expect(result.blob.text()).resolves.toContain('erp.cnc-telegram-worker-audit');
+  });
+
   it('configures auto-cut status with an idempotency header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

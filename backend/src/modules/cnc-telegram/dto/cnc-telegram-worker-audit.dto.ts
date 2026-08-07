@@ -243,11 +243,14 @@ export interface WorkerAuditListQueryDto {
   dateTo: string;
   page: number;
   pageSize: number;
+  sortDirection: 'asc' | 'desc';
   status?: string;
   messageType?: string;
   reasonCode?: string;
   search?: string;
 }
+
+export type WorkerAuditExportQueryDto = Omit<WorkerAuditListQueryDto, 'page' | 'pageSize' | 'sortDirection'>;
 
 export function parseWorkerAuditBatch(value: unknown): WorkerAuditBatchDto {
   const parsed = workerAuditBatchSchema.safeParse(value);
@@ -260,20 +263,37 @@ export function parseWorkerAuditBatch(value: unknown): WorkerAuditBatchDto {
 }
 
 export function parseWorkerAuditListQuery(value: Record<string, unknown>): WorkerAuditListQueryDto {
+  return parseWorkerAuditQuery(value, true) as WorkerAuditListQueryDto;
+}
+
+export function parseWorkerAuditExportQuery(value: Record<string, unknown>): WorkerAuditExportQueryDto {
+  return parseWorkerAuditQuery(value, false) as WorkerAuditExportQueryDto;
+}
+
+function parseWorkerAuditQuery(
+  value: Record<string, unknown>,
+  paginated: boolean,
+): WorkerAuditListQueryDto | WorkerAuditExportQueryDto {
   const today = new Date();
   const defaultTo = today.toISOString().slice(0, 10);
   const defaultFromDate = new Date(today);
   defaultFromDate.setUTCDate(defaultFromDate.getUTCDate() - 6);
-  const schema = z.object({
+  const filterShape = {
     dateFrom: dateOnly.default(defaultFromDate.toISOString().slice(0, 10)),
     dateTo: dateOnly.default(defaultTo),
-    page: z.coerce.number().int().positive().default(1),
-    pageSize: z.coerce.number().int().positive().max(100).default(50),
     status: z.enum(['observed', 'used', 'ingested', 'skipped', 'failed']).optional(),
     messageType: z.enum(['svg', 'dxf', 'image', 'gcode', 'bot_reply', 'text', 'other']).optional(),
     reasonCode: workerAuditReasonCodeSchema.optional(),
     search: z.string().trim().min(1).max(200).optional(),
-  }).strict();
+  };
+  const schema = paginated
+    ? z.object({
+      ...filterShape,
+      page: z.coerce.number().int().positive().default(1),
+      pageSize: z.coerce.number().int().positive().max(100).default(50),
+      sortDirection: z.enum(['asc', 'desc']).default('desc'),
+    }).strict()
+    : z.object(filterShape).strict();
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new ApiError(422, 'INVALID_AUDIT_QUERY', 'Некорректные фильтры журнала Telegram-бота');
   if (parsed.data.search && /^-?[0-9]+$/.test(parsed.data.search) && !telegramId.safeParse(parsed.data.search).success) {

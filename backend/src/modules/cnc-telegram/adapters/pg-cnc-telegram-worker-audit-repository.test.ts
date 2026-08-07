@@ -90,6 +90,60 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     expect(replaySql).toContain('classification_code=$9');
     expect(replaySql).toContain('decision_code IS NOT DISTINCT FROM $10');
   });
+
+  it('exports every stored evidence layer with bounded parameterized filters', async () => {
+    const database = fakeDatabase(() => []);
+    const repository = new PgCncTelegramWorkerAuditRepository(database.service);
+
+    await expect(repository.exportDetailed({
+      dateFrom: '2026-08-01',
+      dateTo: '2026-08-06',
+      status: 'failed',
+      messageType: 'svg',
+      reasonCode: 'backend_ingest_failed',
+      search: 'layout.svg',
+    })).resolves.toEqual({ scans: [], messages: [] });
+
+    const messageIndex = database.sql.findIndex((sql) => sql.includes('FROM cnc_telegram_worker_message_logs m'));
+    const messageSql = database.sql[messageIndex] ?? '';
+    expect(messageSql).toContain('m.raw_source_digest AS "rawSourceDigest"');
+    expect(messageSql).toContain('m.last_decision_at AS "lastDecisionAt"');
+    expect(messageSql).toContain("'observationId', o.observation_id");
+    expect(messageSql).toContain("'operationKey', op.operation_key");
+    expect(messageSql).toContain("'steps', p.steps_json");
+    expect(messageSql).toContain("'responses', p.responses_json");
+    expect(messageSql).toContain('m.status = $3');
+    expect(messageSql).toContain('m.message_type = $4');
+    expect(messageSql).toContain('m.reason_code = $5');
+    expect(messageSql).toContain("plainto_tsquery('simple', $6)");
+    expect(messageSql).toContain('LIMIT $7');
+    expect(database.params[messageIndex]?.at(-1)).toBe(50_001);
+
+    const scanSql = database.sql.find((sql) => sql.includes('FROM cnc_telegram_worker_scans')) ?? '';
+    expect(scanSql).toContain('writer_user_id::text AS "writerUserId"');
+    expect(scanSql).toContain('created_at AS "createdAt"');
+    expect(scanSql).toContain('LIMIT $3');
+  });
+
+  it('filters and sorts message rows by the timestamp shown in the When column', async () => {
+    const database = fakeDatabase(() => []);
+    const repository = new PgCncTelegramWorkerAuditRepository(database.service);
+
+    await repository.list({
+      dateFrom: '2026-08-01',
+      dateTo: '2026-08-06',
+      page: 1,
+      pageSize: 50,
+      sortDirection: 'asc',
+    });
+
+    const messageSql = database.sql.find((sql) =>
+      sql.includes('FROM cnc_telegram_worker_message_logs m') && sql.includes('LIMIT'),
+    ) ?? '';
+    expect(messageSql).toContain("m.source_created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Almaty')");
+    expect(messageSql).toContain("m.source_created_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Almaty')");
+    expect(messageSql).toContain('ORDER BY m.source_created_at ASC, m.source_message_id ASC, m.log_id ASC');
+  });
 });
 
 function batch(options: { operation?: boolean; observation?: boolean } = {}): WorkerAuditBatchDto {
@@ -131,10 +185,19 @@ function defaultRows(sql: string): QueryResultRow[] {
   return [];
 }
 
-function fakeDatabase(rowsFor: (sql: string) => QueryResultRow[]): { service: DatabaseService; sql: string[] } {
+function fakeDatabase(rowsFor: (sql: string) => QueryResultRow[]): {
+  service: DatabaseService;
+  sql: string[];
+  params: (readonly unknown[] | undefined)[];
+} {
   const sql: string[] = [];
-  const query = async <T extends QueryResultRow>(text: string): Promise<QueryResult<T>> => {
+  const params: (readonly unknown[] | undefined)[] = [];
+  const query = async <T extends QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>> => {
     sql.push(text);
+    params.push(values);
     const rows = rowsFor(text) as T[];
     return { rows, rowCount: rows.length, command: 'SELECT', oid: 0, fields: [] };
   };
@@ -143,5 +206,5 @@ function fakeDatabase(rowsFor: (sql: string) => QueryResultRow[]): { service: Da
     query,
     transaction: async <T>(handler: (client: TransactionClient) => Promise<T>): Promise<T> => handler(transactionClient),
   } as unknown as DatabaseService;
-  return { service, sql };
+  return { service, sql, params };
 }

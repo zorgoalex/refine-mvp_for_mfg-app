@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, Row, Select, Space, Statistic, Table, Tag, Timeline, Typography } from 'antd';
-import { ReloadOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, message, Row, Select, Space, Statistic, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
+import { DownloadOutlined, ReloadOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
-import type { TelegramWorkerAuditQuery, TelegramWorkerMessageLog, TelegramWorkerMessageStatus, TelegramWorkerMessageType, TelegramWorkerOperation, TelegramWorkerScan } from '../../api/types/cncTelegramWorkerAudit.types';
+import type { TelegramWorkerAuditExportQuery, TelegramWorkerAuditQuery, TelegramWorkerMessageLog, TelegramWorkerMessageStatus, TelegramWorkerMessageType, TelegramWorkerOperation, TelegramWorkerScan } from '../../api/types/cncTelegramWorkerAudit.types';
 import { ApiError } from '../../api/httpClient';
 
 const { Text } = Typography;
@@ -28,8 +28,20 @@ export function buildTelegramWorkerAuditQuery(values: FilterValues, pageSize = 5
   const period = values.period ?? [dayjs().subtract(6, 'day'), dayjs()];
   return {
     dateFrom: period[0].format('YYYY-MM-DD'), dateTo: period[1].format('YYYY-MM-DD'),
-    page: 1, pageSize, status: values.status, messageType: values.messageType,
+    page: 1, pageSize, sortDirection: 'desc', status: values.status, messageType: values.messageType,
     reasonCode: values.reasonCode?.trim() || undefined, search: values.search?.trim() || undefined,
+  };
+}
+
+export function buildTelegramWorkerAuditExportQuery(values: FilterValues): TelegramWorkerAuditExportQuery {
+  const query = buildTelegramWorkerAuditQuery(values);
+  return {
+    dateFrom: query.dateFrom,
+    dateTo: query.dateTo,
+    status: query.status,
+    messageType: query.messageType,
+    reasonCode: query.reasonCode,
+    search: query.search,
   };
 }
 
@@ -121,6 +133,7 @@ export const TelegramWorkerAudit: React.FC = () => {
   const [scans, setScans] = useState<TelegramWorkerScan[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 50, total: 0 });
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => dayjs());
 
@@ -134,6 +147,29 @@ export const TelegramWorkerAudit: React.FC = () => {
       setError(caught instanceof ApiError && caught.statusCode === 403 ? 'Нет права audit.view.' : caught instanceof Error ? caught.message : 'Не удалось загрузить журнал.');
     } finally { setLoading(false); }
   }, [query]);
+  const exportDetailed = useCallback(async () => {
+    const exportQuery = buildTelegramWorkerAuditExportQuery(form.getFieldsValue());
+    setExporting(true);
+    setError(null);
+    try {
+      const result = await cncTelegramApi.exportWorkerLogs(exportQuery);
+      saveBlob(
+        result.blob,
+        result.fileName ?? `telegram-worker-audit_${exportQuery.dateFrom}_${exportQuery.dateTo}.json`,
+      );
+      message.success('Подробный JSON-журнал выгружен');
+    } catch (caught) {
+      setError(
+        caught instanceof ApiError && caught.statusCode === 403
+          ? 'Нет права audit.view.'
+          : caught instanceof Error
+            ? caught.message
+            : 'Не удалось выгрузить JSON-журнал.',
+      );
+    } finally {
+      setExporting(false);
+    }
+  }, [form]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(dayjs()), 15_000);
@@ -153,7 +189,17 @@ export const TelegramWorkerAudit: React.FC = () => {
           <Form.Item name="messageType"><Select allowClear placeholder="Тип" style={{ width: 145 }} options={Object.entries(TYPE_LABELS).map(([value, label]) => ({ value, label }))} /></Form.Item>
           <Form.Item name="reasonCode"><Input allowClear placeholder="Код причины" style={{ width: 180 }} /></Form.Item>
           <Form.Item name="search"><Input allowClear prefix={<SearchOutlined />} placeholder="ID, файл или текст" style={{ width: 220 }} /></Form.Item>
-          <Form.Item><Space><Button type="primary" htmlType="submit">Показать</Button><Button icon={<ReloadOutlined />} onClick={() => void load()}>Обновить</Button></Space></Form.Item>
+          <Form.Item>
+            <Space wrap>
+              <Button type="primary" htmlType="submit">Показать</Button>
+              <Button icon={<ReloadOutlined />} onClick={() => void load()}>Обновить</Button>
+              <Tooltip title="Полный JSON: все поля сканов, сообщений, наблюдений, операций, шагов и ответов за выбранный период с учётом фильтров">
+                <Button icon={<DownloadOutlined />} loading={exporting} onClick={() => void exportDetailed()}>
+                  Выгрузить JSON
+                </Button>
+              </Tooltip>
+            </Space>
+          </Form.Item>
         </Form>
       </Card>
       <Row gutter={12} style={{ marginBottom: 12 }}>
@@ -162,8 +208,16 @@ export const TelegramWorkerAudit: React.FC = () => {
         <Col xs={12} md={6}><Statistic title="На странице: пропущено" value={data.filter((item) => item.status === 'skipped').length} /></Col>
         <Col xs={12} md={6}><Statistic title="На странице: ошибки" value={data.filter((item) => item.status === 'failed').length} /></Col>
       </Row>
-      <Table<TelegramWorkerMessageLog> rowKey="logId" size="middle" loading={loading} dataSource={data} scroll={{ x: 1040 }} locale={{ emptyText: <Empty description="За период сообщений нет" /> }} expandable={{ expandedRowRender: (record) => <ExpandedEvidence record={record} />, rowExpandable: (record) => record.operations.length > 0 || record.observations.length > 0 }} pagination={{ current: pagination.page, pageSize: pagination.pageSize, total: pagination.total, showSizeChanger: true }} onChange={(next) => setQuery((current) => ({ ...current, page: next.current ?? 1, pageSize: next.pageSize ?? 50 }))}>
-        <Table.Column<TelegramWorkerMessageLog> title="Когда" width={150} render={(_, record) => <Text className="tg-audit-num">{formatDateTime(record.sourceCreatedAt)}</Text>} />
+      <Table<TelegramWorkerMessageLog> rowKey="logId" size="middle" loading={loading} dataSource={data} scroll={{ x: 1040 }} locale={{ emptyText: <Empty description="За период сообщений нет" /> }} expandable={{ expandedRowRender: (record) => <ExpandedEvidence record={record} />, rowExpandable: (record) => record.operations.length > 0 || record.observations.length > 0 }} pagination={{ current: pagination.page, pageSize: pagination.pageSize, total: pagination.total, showSizeChanger: true }} onChange={(next, _filters, sorter, extra) => {
+        const activeSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+        setQuery((current) => ({
+          ...current,
+          page: extra.action === 'sort' ? 1 : next.current ?? 1,
+          pageSize: next.pageSize ?? 50,
+          sortDirection: activeSorter?.order === 'ascend' ? 'asc' : 'desc',
+        }));
+      }}>
+        <Table.Column<TelegramWorkerMessageLog> dataIndex="sourceCreatedAt" key="sourceCreatedAt" title="Когда" width={150} sorter={true} sortOrder={query.sortDirection === 'asc' ? 'ascend' : 'descend'} render={(value) => <Text className="tg-audit-num">{formatDateTime(value)}</Text>} />
         <Table.Column<TelegramWorkerMessageLog> title="Telegram" width={190} render={(_, record) => <div><Text strong className="tg-audit-num">Сообщение #{record.sourceMessageId}</Text><br /><Text type="secondary" className="tg-audit-num">Отправитель #{record.senderUserId ?? '—'} · {record.outgoing ? 'исх.' : 'вх.'}</Text></div>} />
         <Table.Column<TelegramWorkerMessageLog> title="Тип" width={105} render={(_, record) => <Tag>{TYPE_LABELS[record.messageType] ?? record.messageType}</Tag>} />
         <Table.Column<TelegramWorkerMessageLog> title="Файл / текст" width={260} render={(_, record) => <div><Text strong={Boolean(record.filename)}>{record.filename || 'Без файла'}</Text>{record.messageText && <Text type="secondary" ellipsis={{ tooltip: record.messageText }} style={{ display: 'block', maxWidth: 240 }}>{record.messageText}</Text>}</div>} />
@@ -173,3 +227,14 @@ export const TelegramWorkerAudit: React.FC = () => {
     </div>
   );
 };
+
+function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
