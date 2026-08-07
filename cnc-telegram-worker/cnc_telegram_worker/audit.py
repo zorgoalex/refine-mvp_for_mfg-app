@@ -325,6 +325,7 @@ class AuditSpool:
 class ScanAudit:
     spool: AuditSpool
     scan: dict[str, Any]
+    business_timezone: Any = timezone.utc
     messages: dict[str, dict[str, Any]] = field(default_factory=dict)
     operations: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -337,6 +338,7 @@ class ScanAudit:
         session_user_id: str | None,
         parser_version: str,
         can_write_chat: bool,
+        business_timezone: Any = timezone.utc,
     ) -> "ScanAudit":
         scan = {
             "scanId": str(uuid.uuid4()), "sourceChatId": str(chat_id), "workday": workday.isoformat(),
@@ -352,7 +354,7 @@ class ScanAudit:
         with spool.transaction():
             spool.save_scan(scan)
             spool.enqueue(empty_batch(scan), outbox_id=f"scan-running:{scan['scanId']}")
-        return cls(spool=spool, scan=scan)
+        return cls(spool=spool, scan=scan, business_timezone=business_timezone)
 
     async def observe(self, message: Any, read_source: str, ordinal: int, *, decision_code: str | None = None) -> None:
         record = self.record_for(message)
@@ -551,7 +553,8 @@ class ScanAudit:
         record["status"] = status
 
     def record_for(self, message: Any) -> dict[str, Any]:
-        record = telegram_message_record(message, self.scan["sourceChatId"], self.scan["workday"])
+        message_workday = message_datetime(message).astimezone(self.business_timezone).date().isoformat()
+        record = telegram_message_record(message, self.scan["sourceChatId"], message_workday)
         existing = self.messages.get(record["logKey"])
         if existing is not None:
             return existing

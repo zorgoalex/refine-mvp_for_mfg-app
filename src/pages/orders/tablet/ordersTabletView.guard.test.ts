@@ -14,15 +14,15 @@ describe('tablet orders view integration', () => {
     expect(list).toContain('featureFlags.orderStatusBoard');
     expect(list).toContain('canViewNavigationResource(');
     expect(list).toContain('canViewResourceByRoleVisibility(');
-    expect(list).toContain('...(canViewStatusBoard');
-    expect(list).toContain("if (!canViewStatusBoard) return");
+    expect(list).toContain('...(isTablet && canViewStatusBoard');
+    expect(list).toContain("if (!isTablet || !canViewStatusBoard) return");
     expect(list).toContain('orders-tablet-view-switch');
     expect(list).toContain('aria-label="Вид заказов"');
     expect(list).not.toContain("tab=production");
   });
 
   it('reuses the honest mobile card mapper in the tablet grid', () => {
-    expect(list).toContain("isTablet && ordersViewMode === 'cards'");
+    expect(list).toContain("(isMobile || isTablet) && ordersViewMode === 'cards'");
     expect(list).toContain("'order-card-list--tablet'");
     expect(cards).toContain('buildOrderCardModel');
     expect(tabletCss).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');

@@ -31,6 +31,9 @@ export const StatusBoardColumnSettingsButton: React.FC<
     [definitionByKey, settings.order],
   );
   const hasHiddenColumns = settings.hidden.length > 0;
+  const settingsLabel = extraContent
+    ? `Настроить доску «${boardLabel}»`
+    : `Настроить колонки доски «${boardLabel}»`;
 
   const save = useCallback(
     async (next: OrderDetailColumnPreference) => {
@@ -64,13 +67,13 @@ export const StatusBoardColumnSettingsButton: React.FC<
       <Tooltip
         title={
           hasHiddenColumns
-            ? `Настроить колонки доски «${boardLabel}» — есть скрытые`
-            : `Настроить колонки доски «${boardLabel}»`
+            ? `${settingsLabel} — есть скрытые`
+            : settingsLabel
         }
       >
         <Button
           className="status-board-toolbar__settings-button"
-          aria-label={`Настроить колонки доски «${boardLabel}»`}
+          aria-label={settingsLabel}
           icon={
             <SettingOutlined
               style={{ color: hasHiddenColumns ? '#1677ff' : undefined }}

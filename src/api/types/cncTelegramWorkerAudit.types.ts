@@ -145,8 +145,11 @@ export interface TelegramWorkerAuditQuery {
   dateTo?: string;
   page?: number;
   pageSize?: number;
+  sortDirection?: 'asc' | 'desc';
   status?: TelegramWorkerMessageStatus;
   messageType?: TelegramWorkerMessageType;
   reasonCode?: string;
   search?: string;
 }
+
+export type TelegramWorkerAuditExportQuery = Omit<TelegramWorkerAuditQuery, 'page' | 'pageSize' | 'sortDirection'>;

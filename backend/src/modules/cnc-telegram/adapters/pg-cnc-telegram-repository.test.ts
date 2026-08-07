@@ -520,6 +520,92 @@ describe('PgCncTelegramRepository', () => {
     });
   });
 
+  it('returns Basis-cut set cards for ERP details present in bath cards', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/latest_vacuum_results/i.test(text)) {
+          return { rows: [bathPlacementRow({ order_detail_id: 3101 })] };
+        }
+        if (/target_bazis_cut_sets/i.test(text)) {
+          return {
+            rows: [
+              {
+                bazis_cut_set_id: 8,
+                name: 'Набор МДФ',
+                sort_order: 0,
+                source_order_detail_id: 3101,
+                source_order_id: 2689,
+                source_order_name: '2689',
+                source_order_deleted: false,
+                detail_number: 31,
+                width_mm: 497,
+                height_mm: 477,
+                quantity: 2,
+              },
+              {
+                bazis_cut_set_id: 8,
+                name: 'Набор МДФ',
+                sort_order: 1,
+                source_order_detail_id: 3201,
+                source_order_id: 2701,
+                source_order_name: '2701',
+                source_order_deleted: false,
+                detail_number: 41,
+                width_mm: 600,
+                height_mm: 400,
+                quantity: 3,
+              },
+            ],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) return { rows: [] };
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+    const parsed = result.columns.find((column) => column.key === 'parsed');
+    const basisQuery = queries.find((query) => /target_bazis_cut_sets/i.test(query.text));
+
+    expect(basisQuery?.params).toEqual([[3101]]);
+    expect(basisQuery?.text).toContain('detail.source_order_detail_id = ANY($1::bigint[])');
+    expect(parsed?.total).toBe(1);
+    expect(parsed?.bazisCutSets).toEqual([
+      {
+        bazisCutSetId: 8,
+        name: 'Набор МДФ',
+        orderCount: 2,
+        positionCount: 2,
+        itemQuantityTotal: 5,
+        items: [
+          {
+            orderId: 2689,
+            orderName: '2689',
+            orderDeleted: false,
+            detailId: 3101,
+            detailNumber: 31,
+            widthMm: 497,
+            heightMm: 477,
+            quantity: 2,
+          },
+          {
+            orderId: 2701,
+            orderName: '2701',
+            orderDeleted: false,
+            detailId: 3201,
+            detailNumber: 41,
+            widthMm: 600,
+            heightMm: 400,
+            quantity: 3,
+          },
+        ],
+      },
+    ]);
+  });
+
   it('archives a ready bath only when every detail is laminated or later', async () => {
     const database = {
       query: vi.fn(async (text: string) => {

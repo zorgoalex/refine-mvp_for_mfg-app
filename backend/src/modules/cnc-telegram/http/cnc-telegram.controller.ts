@@ -1,6 +1,3 @@
-import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { extname, resolve } from 'node:path';
 import { Body, Controller, Get, Headers, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -25,10 +22,10 @@ import type {
   CncTelegramTodayResponseDto,
 } from '../dto/cnc-telegram.dto';
 import { CncTelegramRuntimeConfigService } from './cnc-telegram-runtime-config.service';
+import { openTelegramMedia } from '../application/telegram-media-reader';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const STORAGE_KEY_RE = /^[A-Za-z0-9._-]{1,220}$/;
-const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
 const toolSchema = z.object({
   toolNumber: z.number().int().positive().max(999),
@@ -282,34 +279,19 @@ export class CncTelegramController {
     @Res() response: Response,
   ): Promise<void> {
     this.assertEnabled();
-    this.requireCurrentUser(request);
-    const safeKey = parseStorageKey(storageKey);
+    const currentUser = this.requireCurrentUser(request);
+    this.cncTelegram.assertCanViewMedia(currentUser);
     const mediaDir = this.config.get('CNC_TELEGRAM_MEDIA_DIR', { infer: true });
-    const absoluteDir = resolve(mediaDir);
-    const absolutePath = resolve(absoluteDir, safeKey);
-    if (!absolutePath.startsWith(`${absoluteDir}/`)) {
-      throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid CNC Telegram media key', {
-        field: 'storageKey',
-      });
-    }
-    let fileStat;
+    const media = await openTelegramMedia(mediaDir, { storageKey, contentType: null, sizeBytes: null });
     try {
-      fileStat = await stat(absolutePath);
-    } catch {
-      throw new ApiError(404, 'NOT_FOUND', 'CNC Telegram media file not found', {
-        storageKey: safeKey,
-      });
+      response.setHeader('Content-Type', media.contentType);
+      response.setHeader('Cache-Control', 'private, max-age=300');
+      response.setHeader('Content-Length', String(media.raw.length));
+      response.setHeader('Content-Disposition', `inline; filename="${storageKey}"`);
+      response.end(media.raw);
+    } finally {
+      await media.handle.close();
     }
-    if (!fileStat.isFile()) {
-      throw new ApiError(404, 'NOT_FOUND', 'CNC Telegram media file not found', {
-        storageKey: safeKey,
-      });
-    }
-    response.setHeader('Content-Type', contentTypeForStorageKey(safeKey));
-    response.setHeader('Cache-Control', 'private, max-age=300');
-    response.setHeader('Content-Length', String(fileStat.size));
-    response.setHeader('Content-Disposition', `inline; filename="${safeKey}"`);
-    createReadStream(absolutePath).pipe(response);
   }
 
   private assertEnabled(): void {
@@ -421,25 +403,4 @@ function isValidDateOnly(value: string): boolean {
   const timestamp = Date.parse(`${value}T00:00:00.000Z`);
   return Number.isFinite(timestamp) &&
     new Date(timestamp).toISOString().slice(0, 10) === value;
-}
-
-function parseStorageKey(value: string): string {
-  const key = value.trim();
-  if (!STORAGE_KEY_RE.test(key) || !IMAGE_EXTENSIONS.has(extname(key).toLowerCase())) {
-    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid CNC Telegram media key', {
-      field: 'storageKey',
-    });
-  }
-  return key;
-}
-
-function contentTypeForStorageKey(storageKey: string): string {
-  switch (extname(storageKey).toLowerCase()) {
-    case '.png':
-      return 'image/png';
-    case '.webp':
-      return 'image/webp';
-    default:
-      return 'image/jpeg';
-  }
 }

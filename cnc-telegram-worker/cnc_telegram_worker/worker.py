@@ -190,6 +190,7 @@ class CncTelegramWorker:
         audit = ScanAudit.start(
             audit_spool, chat_id, workday, session_user_id,
             self.config.parser_version, self.config.can_write_chat,
+            business_timezone=self.config.business_timezone,
         )
         await audit_spool.flush(self.erp.audit_batch)
         try:
@@ -989,12 +990,10 @@ async def collect_cutting_sequence_reply_search_index(
     async for message in client.iter_messages(entity, search="Раскрой", limit=1000):
         ordinal += 1
         reply_to = message_reply_to_id(message)
+        if reply_to is None or reply_to not in source_message_ids:
+            continue
         number = parse_cutting_sequence_reply(message_text(message))
-        if reply_to is None:
-            decision = "reply_unrelated"
-        elif reply_to not in source_message_ids:
-            decision = "reply_wrong_target"
-        elif number is None:
+        if number is None:
             decision = "reply_invalid_number"
         elif workday is not None and business_timezone is not None and message_datetime(message).astimezone(business_timezone).date() < workday:
             decision = "reply_outside_business_window"

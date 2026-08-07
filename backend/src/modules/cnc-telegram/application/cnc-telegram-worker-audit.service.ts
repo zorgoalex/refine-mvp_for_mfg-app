@@ -8,6 +8,7 @@ import type { CncTelegramDeniedAuditPort } from './cnc-telegram.types';
 import {
   parseWorkerAuditBatch,
   type WorkerAuditBatchDto,
+  type WorkerAuditExportQueryDto,
   type WorkerAuditListQueryDto,
 } from '../dto/cnc-telegram-worker-audit.dto';
 
@@ -60,12 +61,75 @@ export class CncTelegramWorkerAuditService {
   }
 
   list(currentUser: CurrentUser, query: WorkerAuditListQueryDto): Promise<Record<string, unknown>> {
+    this.assertViewer(currentUser);
+    return this.repository.list(query);
+  }
+
+  async exportDetailed(
+    currentUser: CurrentUser,
+    query: WorkerAuditExportQueryDto,
+  ): Promise<{ fileName: string; content: string }> {
+    this.assertViewer(currentUser);
+    const data = await this.repository.exportDetailed(query);
+    const operations = data.messages.flatMap((message) => arrayField(message, 'operations'));
+    const payload = {
+      format: 'erp.cnc-telegram-worker-audit',
+      schemaVersion: 1,
+      detailLevel: 'full',
+      exportedAt: new Date().toISOString(),
+      exportedBy: {
+        userId: currentUser.id,
+        username: currentUser.username,
+        role: currentUser.role,
+      },
+      period: {
+        dateFrom: query.dateFrom,
+        dateTo: query.dateTo,
+        messageDateField: 'sourceCreatedAt',
+        messageTimezone: 'Asia/Almaty',
+        scanDateField: 'workday',
+        inclusive: true,
+      },
+      filters: {
+        status: query.status ?? null,
+        messageType: query.messageType ?? null,
+        reasonCode: query.reasonCode ?? null,
+        search: query.search ?? null,
+      },
+      totals: {
+        scans: data.scans.length,
+        messages: data.messages.length,
+        observations: data.messages.reduce(
+          (total, message) => total + arrayField(message, 'observations').length,
+          0,
+        ),
+        operations: operations.length,
+        steps: operations.reduce((total, operation) => total + arrayField(operation, 'steps').length, 0),
+        responses: operations.reduce((total, operation) => total + arrayField(operation, 'responses').length, 0),
+      },
+      includes: [
+        'all_stored_scan_fields',
+        'all_stored_message_fields',
+        'all_stored_observation_fields',
+        'all_stored_operation_fields',
+        'operation_steps',
+        'operation_responses',
+      ],
+      scans: data.scans,
+      messages: data.messages,
+    };
+    return {
+      fileName: `telegram-worker-audit_${query.dateFrom}_${query.dateTo}.json`,
+      content: `${JSON.stringify(payload, null, 2)}\n`,
+    };
+  }
+
+  private assertViewer(currentUser: CurrentUser): void {
     if (!this.permissions.canUser(currentUser, 'audit.view')) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для журнала Telegram-бота', {
         requiredPermissions: ['audit.view'],
       });
     }
-    return this.repository.list(query);
   }
 
   private async assertWriter(currentUser: CurrentUser, requestId?: string): Promise<void> {
@@ -204,4 +268,11 @@ function sanitizeString(value: string): string {
 
 function sanitizeOptional(value: string | null | undefined): string | null | undefined {
   return typeof value === 'string' ? sanitizeString(value) : value;
+}
+
+function arrayField(value: Record<string, unknown>, key: string): Record<string, unknown>[] {
+  const field = value[key];
+  return Array.isArray(field)
+    ? field.filter((item): item is Record<string, unknown> => isRecord(item))
+    : [];
 }

@@ -86,6 +86,25 @@ class AuditSpoolTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await second.flush(sender), 0)
             second.close()
 
+    async def test_message_workday_uses_message_timestamp_not_historical_scan_day(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            spool = AuditSpool(Path(temp) / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(
+                spool, "-100123", date(2026, 7, 27), "77", "v1", False,
+                business_timezone=timezone.utc,
+            )
+            future = FakeMessage(10862, created_at=datetime(2026, 8, 7, 10, 56, tzinfo=timezone.utc))
+
+            await audit.observe(future, "reply_search", 1, decision_code="reply_wrong_target")
+
+            payload = json.loads(spool.connection.execute(
+                "SELECT payload_json FROM audit_outbox WHERE outbox_id NOT LIKE 'scan-running:%' "
+                "ORDER BY created_at DESC, outbox_id DESC LIMIT 1",
+            ).fetchone()[0])
+            self.assertEqual(payload["scan"]["workday"], "2026-07-27")
+            self.assertEqual(payload["messages"][0]["workday"], "2026-08-07")
+            spool.close()
+
     def test_startup_selftest_never_enters_deliverable_outbox(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             spool = AuditSpool(Path(temp) / "audit.sqlite3", allow_unsafe_path=True)

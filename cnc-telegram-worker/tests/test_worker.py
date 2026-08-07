@@ -15,7 +15,7 @@ telethon_stub.TelegramClient = object
 telethon_stub.utils = types.SimpleNamespace(get_peer_id=lambda entity: entity)
 sys.modules.setdefault("telethon", telethon_stub)
 
-from cnc_telegram_worker.telegram_source import is_image_message, is_vector_message
+from cnc_telegram_worker.telegram_source import collect_day_messages, is_image_message, is_vector_message
 from cnc_telegram_worker.audit import (
     AuditSpool,
     ScanAudit,
@@ -324,6 +324,30 @@ class WorkerFingerprintTest(unittest.TestCase):
         self.assertEqual(groups[0].comments, ["2700 весь"])
 
 
+class WorkerDayHistoryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_observer_never_records_previous_workday_boundary_message(self) -> None:
+        current = FakeMessage(101, text="current")
+        current.date = datetime(2026, 7, 24, 12, 0, tzinfo=timezone.utc)
+        previous = FakeMessage(100, text="previous")
+        previous.date = datetime(2026, 7, 23, 23, 59, tzinfo=timezone.utc)
+        observed: list[tuple[int, int]] = []
+
+        async def observe(message: FakeMessage, ordinal: int) -> None:
+            observed.append((int(message.id), ordinal))
+
+        messages = await collect_day_messages(
+            FakeTelegramClient([current, previous]),
+            object(),
+            date(2026, 7, 24),
+            timezone.utc,
+            100,
+            observer=observe,
+        )
+
+        self.assertEqual([message.id for message in messages], [101])
+        self.assertEqual(observed, [(101, 1)])
+
+
 class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
     async def test_collects_cutting_sequence_reply_numbers_with_one_search(self) -> None:
         image_a = FakeMessage(100, text="2700", mime_type="image/jpeg")
@@ -350,6 +374,28 @@ class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(groups[1].cutting_sequence_no, 8)
         self.assertEqual(len(client.iter_messages_calls), 1)
         self.assertEqual(client.iter_messages_calls[0], {"search": "Раскрой", "limit": 1000})
+
+    async def test_does_not_audit_search_results_for_other_source_messages(self) -> None:
+        decisions: list[tuple[int, str]] = []
+        selected = FakeMessage(903, text="Раскрой №7", reply_to=100)
+        selected.out = True
+
+        async def observe(message: FakeMessage, _ordinal: int, decision: str) -> None:
+            decisions.append((int(message.id), decision))
+
+        index = await collect_cutting_sequence_reply_search_index(
+            FakeTelegramClient([
+                FakeMessage(901, text="Раскрой №9"),
+                FakeMessage(902, text="Раскрой №8", reply_to=999),
+                selected,
+            ]),
+            object(),
+            {100},
+            observer=observe,
+        )
+
+        self.assertEqual(index, {100: 7})
+        self.assertEqual(decisions, [(903, "reply_selected")])
 
     async def test_excludes_out_of_window_reply_and_records_exact_decisions(self) -> None:
         stale = FakeMessage(900, text="Раскрой №99", reply_to=100)

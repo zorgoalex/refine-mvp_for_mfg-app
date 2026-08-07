@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import { useTabStore } from '../stores/tabStore';
+import { syncWorkspaceTabsForCurrentUser, useTabStore } from '../stores/tabStore';
 import { resolveTabLabel, resourceFromPath, shouldPreserveTabLabel } from '../utils/tabLabels';
 
 const IGNORED = new Set(['/', '/login']);
@@ -10,6 +10,7 @@ export const useTabSync = (): void => {
   const openTab = useTabStore((s) => s.openTab);
   useEffect(() => {
     if (IGNORED.has(location.pathname)) return; // phantom-tab guard
+    syncWorkspaceTabsForCurrentUser();
     openTab({
       key: location.pathname,
       path: `${location.pathname}${location.search}`,

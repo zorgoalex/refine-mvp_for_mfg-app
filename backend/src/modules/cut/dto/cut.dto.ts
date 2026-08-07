@@ -169,6 +169,22 @@ export interface CutJobTotals {
   filmUsage?: CutFilmUsageDto[];
 }
 
+export interface CutSheetFitWarningDto {
+  orderDetailId: number;
+  orderId: number;
+  detailNumber: number | null;
+  detailName: string | null;
+  reason: 'dimensions' | 'orientation';
+  rotationForbidden: boolean;
+  widthMm: number;
+  heightMm: number;
+  sheetMaterialTypeId: number;
+  sheetWidthMm: number;
+  sheetHeightMm: number;
+  usableWidthMm: number;
+  usableHeightMm: number;
+}
+
 export interface CutJobDto {
   cutJobId: number;
   name: string;
@@ -206,6 +222,9 @@ export interface CutJobDto {
    * frozen calculation params are available; invalid legacy layouts must be
    * recalculated before entering manual editing. */
   autoLayoutValidation?: { valid: boolean };
+  /** Selected-sheet preflight, resolved with the same profile/grain/orientation
+   * rules as calculate. Present on single-job GET; empty without an override. */
+  sheetFitWarnings?: CutSheetFitWarningDto[];
   /** Opaque browser-cache token for render endpoints; absent on list. */
   renderToken?: string;
   /** Latest immutable completed cut result; absent on mixed-deploy old schema. */

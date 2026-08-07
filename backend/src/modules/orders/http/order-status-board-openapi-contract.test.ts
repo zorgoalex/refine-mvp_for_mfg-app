@@ -24,6 +24,10 @@ describe('order status board OpenAPI contract', () => {
     expect(route).toContain('maximum: 60');
     expect(route).toContain('- name: includeDone');
     expect(route).toContain('- name: orderIds');
+    expect(route).toContain('- name: sortBy');
+    expect(route).toContain('enum: [priority, orderNumber, plannedDate, updatedAt]');
+    expect(route).toContain('- name: sortOrder');
+    expect(route).toContain('enum: [asc, desc]');
     expect(route).toContain('CSV-список ID заказов');
     expect(route).toContain('только для production');
     expect(route).toContain("$ref: '#/components/schemas/OrderStatusBoardResponse'");

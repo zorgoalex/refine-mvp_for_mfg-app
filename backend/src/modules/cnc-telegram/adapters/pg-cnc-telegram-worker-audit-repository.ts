@@ -1,9 +1,19 @@
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
-import type { WorkerAuditBatchDto, WorkerAuditListQueryDto } from '../dto/cnc-telegram-worker-audit.dto';
+import type {
+  WorkerAuditBatchDto,
+  WorkerAuditExportQueryDto,
+  WorkerAuditListQueryDto,
+} from '../dto/cnc-telegram-worker-audit.dto';
 
 type Writer = { id: string };
+const MAX_DETAILED_EXPORT_ROWS = 50_000;
+
+export interface WorkerAuditDetailedExportData {
+  scans: Record<string, unknown>[];
+  messages: Record<string, unknown>[];
+}
 
 export class PgCncTelegramWorkerAuditRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -156,22 +166,8 @@ export class PgCncTelegramWorkerAuditRepository {
   }
 
   async list(query: WorkerAuditListQueryDto): Promise<Record<string, unknown>> {
-    const params: unknown[] = [query.dateFrom, query.dateTo];
-    const where = ['m.workday >= $1::date', 'm.workday <= $2::date'];
-    const add = (sql: string, value: unknown) => {
-      params.push(value);
-      where.push(sql.replace('?', `$${params.length}`));
-    };
-    if (query.status) add('m.status = ?', query.status);
-    if (query.messageType) add('m.message_type = ?', query.messageType);
-    if (query.reasonCode) add('m.reason_code = ?', query.reasonCode);
-    if (query.search) {
-      if (/^-?[0-9]{1,20}$/.test(query.search)) {
-        add('m.source_message_id = ?::bigint', query.search);
-      } else {
-        add("to_tsvector('simple', COALESCE(m.filename, '') || ' ' || COALESCE(m.message_text, '')) @@ plainto_tsquery('simple', ?)", query.search);
-      }
-    }
+    const { params, where } = buildMessageFilter(query);
+    const sortDirection = query.sortDirection === 'asc' ? 'ASC' : 'DESC';
     const countResult = await this.database.query<{ total: string }>(
       `SELECT count(*)::text AS total FROM cnc_telegram_worker_message_logs m WHERE ${where.join(' AND ')}`,
       params,
@@ -223,7 +219,7 @@ export class PgCncTelegramWorkerAuditRepository {
           FROM cnc_telegram_worker_operations p WHERE p.log_id=m.log_id), '[]'::jsonb) AS operations
       FROM cnc_telegram_worker_message_logs m
       WHERE ${where.join(' AND ')}
-      ORDER BY m.last_observed_at DESC, m.source_message_id DESC
+      ORDER BY m.source_created_at ${sortDirection}, m.source_message_id ${sortDirection}, m.log_id ${sortDirection}
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `, params);
     const scans = await this.database.query<Record<string, unknown>>(`
@@ -247,6 +243,103 @@ export class PgCncTelegramWorkerAuditRepository {
       scans: scans.rows,
       pagination: { page: query.page, pageSize: query.pageSize, total: Number(countResult.rows[0]?.total ?? 0) },
     };
+  }
+
+  async exportDetailed(query: WorkerAuditExportQueryDto): Promise<WorkerAuditDetailedExportData> {
+    const { params, where } = buildMessageFilter(query);
+    const messageParams = [...params, MAX_DETAILED_EXPORT_ROWS + 1];
+    const messages = await this.database.query<Record<string, unknown>>(`
+      SELECT
+        m.log_id AS "logId", m.log_key AS "logKey",
+        m.raw_source_digest AS "rawSourceDigest", m.sanitizer_version AS "sanitizerVersion",
+        m.source_chat_id::text AS "sourceChatId", m.source_message_id::text AS "sourceMessageId",
+        m.source_thread_id::text AS "sourceThreadId", m.reply_to_message_id::text AS "replyToMessageId",
+        m.sender_user_id::text AS "senderUserId", m.source_created_at AS "sourceCreatedAt",
+        m.source_edited_at AS "sourceEditedAt", m.workday::text AS workday,
+        m.message_type AS "messageType", m.filename, m.mime_type AS "mimeType",
+        m.message_text AS "messageText", m.outgoing, m.status,
+        m.reason_code AS "reasonCode", m.reason_message AS "reasonMessage",
+        m.error_code AS "errorCode", m.error_message AS "errorMessage",
+        m.related_source_message_id::text AS "relatedSourceMessageId",
+        m.external_packet_key AS "externalPacketKey", m.source_version::text AS "sourceVersion",
+        m.packet_id AS "packetId", m.cut_job_id::text AS "cutJobId",
+        m.cut_result_no AS "cutResultNo", m.cutting_sequence_no AS "cuttingSequenceNo",
+        m.backend_applied AS "backendApplied", m.backend_stale AS "backendStale",
+        m.ever_ingested AS "everIngested", m.first_observed_at AS "firstObservedAt",
+        m.last_observed_at AS "lastObservedAt", m.last_decision_at AS "lastDecisionAt",
+        m.last_scan_id AS "lastScanId", m.observed_count AS "observedCount",
+        m.attempt_count AS "attemptCount", m.created_at AS "createdAt", m.updated_at AS "updatedAt",
+        COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'observationId', o.observation_id, 'scanId', o.scan_id, 'logId', o.log_id,
+          'operationId', o.operation_id, 'operationKey', op.operation_key,
+          'sourceChatId', o.source_chat_id::text, 'sourceMessageId', o.source_message_id::text,
+          'observedAt', o.observed_at, 'readSource', o.read_source, 'readOrdinal', o.read_ordinal,
+          'classificationCode', o.classification_code, 'decisionCode', o.decision_code,
+          'relatedSourceMessageId', o.related_source_message_id::text
+        ) ORDER BY o.observed_at, o.read_ordinal, o.observation_id)
+          FROM cnc_telegram_worker_message_observations o
+          LEFT JOIN cnc_telegram_worker_operations op ON op.operation_id=o.operation_id
+          WHERE o.log_id=m.log_id), '[]'::jsonb) AS observations,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'operationId', p.operation_id, 'operationKey', p.operation_key,
+          'scanId', p.scan_id, 'logId', p.log_id,
+          'operationType', p.operation_type, 'status', p.status,
+          'plannedAt', p.planned_at, 'finishedAt', p.finished_at,
+          'reasonCode', p.reason_code, 'reasonMessage', p.reason_message,
+          'errorCode', p.error_code, 'errorMessage', p.error_message,
+          'externalPacketKey', p.external_packet_key, 'sourceVersion', p.source_version::text,
+          'packetId', p.packet_id, 'cutJobId', p.cut_job_id::text,
+          'cutResultNo', p.cut_result_no, 'cuttingSequenceNo', p.cutting_sequence_no,
+          'backendApplied', p.backend_applied, 'backendStale', p.backend_stale,
+          'replyText', p.reply_text, 'replyToMessageId', p.reply_to_message_id::text,
+          'sessionSenderUserId', p.session_sender_user_id::text,
+          'sentTelegramMessageId', p.sent_telegram_message_id::text,
+          'reconciliationYieldedCount', p.reconciliation_yielded_count,
+          'reconciliationExhausted', p.reconciliation_exhausted,
+          'reconciliationTruncated', p.reconciliation_truncated,
+          'reconciliationErrorCode', p.reconciliation_error_code,
+          'reconciliationWindowFrom', p.reconciliation_window_from,
+          'reconciliationWindowTo', p.reconciliation_window_to,
+          'steps', p.steps_json, 'responses', p.responses_json,
+          'createdAt', p.created_at, 'updatedAt', p.updated_at
+        ) ORDER BY p.planned_at, p.operation_id)
+          FROM cnc_telegram_worker_operations p
+          WHERE p.log_id=m.log_id), '[]'::jsonb) AS operations
+      FROM cnc_telegram_worker_message_logs m
+      WHERE ${where.join(' AND ')}
+      ORDER BY m.workday, m.source_created_at, m.source_message_id, m.log_id
+      LIMIT $${messageParams.length}
+    `, messageParams);
+    if (messages.rows.length > MAX_DETAILED_EXPORT_ROWS) {
+      throw exportTooLarge('сообщений');
+    }
+
+    const scans = await this.database.query<Record<string, unknown>>(`
+      SELECT
+        scan_id AS "scanId", source_chat_id::text AS "sourceChatId", workday::text AS workday,
+        status, started_at AS "startedAt", finished_at AS "finishedAt",
+        session_user_id::text AS "sessionUserId", day_yielded_count AS "dayYieldedCount",
+        day_exhausted AS "dayExhausted", day_truncated AS "dayTruncated",
+        day_error_code AS "dayErrorCode", reply_search_yielded_count AS "replySearchYieldedCount",
+        reply_search_exhausted AS "replySearchExhausted",
+        reply_search_truncated AS "replySearchTruncated",
+        reply_search_error_code AS "replySearchErrorCode", svg_count AS "svgCount",
+        processed_count AS "processedCount", ingested_count AS "ingestedCount",
+        skipped_count AS "skippedCount", failed_count AS "failedCount",
+        parser_version AS "parserVersion", worker_version AS "workerVersion",
+        can_write_chat AS "canWriteChat", error_code AS "errorCode",
+        error_message AS "errorMessage", writer_user_id::text AS "writerUserId",
+        created_at AS "createdAt", updated_at AS "updatedAt"
+      FROM cnc_telegram_worker_scans
+      WHERE workday >= $1::date AND workday <= $2::date
+      ORDER BY workday, started_at, scan_id
+      LIMIT $3
+    `, [query.dateFrom, query.dateTo, MAX_DETAILED_EXPORT_ROWS + 1]);
+    if (scans.rows.length > MAX_DETAILED_EXPORT_ROWS) {
+      throw exportTooLarge('сканирований');
+    }
+
+    return { scans: scans.rows, messages: messages.rows };
   }
 
   private async upsertScan(client: TransactionClient, dto: WorkerAuditBatchDto, writer: Writer): Promise<void> {
@@ -466,4 +559,41 @@ export class PgCncTelegramWorkerAuditRepository {
     `, [logId]);
     return result.rows[0].operation_id;
   }
+}
+
+function buildMessageFilter(
+  query: WorkerAuditListQueryDto | WorkerAuditExportQueryDto,
+): { params: unknown[]; where: string[] } {
+  const params: unknown[] = [query.dateFrom, query.dateTo];
+  const where = [
+    "m.source_created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Almaty')",
+    "m.source_created_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Almaty')",
+  ];
+  const add = (sql: string, value: unknown) => {
+    params.push(value);
+    where.push(sql.replace('?', `$${params.length}`));
+  };
+  if (query.status) add('m.status = ?', query.status);
+  if (query.messageType) add('m.message_type = ?', query.messageType);
+  if (query.reasonCode) add('m.reason_code = ?', query.reasonCode);
+  if (query.search) {
+    if (/^-?[0-9]{1,20}$/.test(query.search)) {
+      add('m.source_message_id = ?::bigint', query.search);
+    } else {
+      add(
+        "to_tsvector('simple', COALESCE(m.filename, '') || ' ' || COALESCE(m.message_text, '')) @@ plainto_tsquery('simple', ?)",
+        query.search,
+      );
+    }
+  }
+  return { params, where };
+}
+
+function exportTooLarge(entity: string): ApiError {
+  return new ApiError(
+    413,
+    'AUDIT_EXPORT_TOO_LARGE',
+    `В выбранном периоде больше ${MAX_DETAILED_EXPORT_ROWS} ${entity}. Уменьшите период экспорта`,
+    { maxRows: MAX_DETAILED_EXPORT_ROWS },
+  );
 }

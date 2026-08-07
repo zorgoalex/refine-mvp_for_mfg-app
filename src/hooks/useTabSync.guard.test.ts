@@ -11,4 +11,8 @@ describe('useTabSync guards', () => {
   it('preserves query in the stored path', () => {
     expect(src).toContain('location.search');
   });
+  it('rehydrates the authenticated user before opening the current route', () => {
+    expect(src.indexOf('syncWorkspaceTabsForCurrentUser();')).toBeGreaterThan(-1);
+    expect(src.indexOf('syncWorkspaceTabsForCurrentUser();')).toBeLessThan(src.indexOf('openTab({'));
+  });
 });

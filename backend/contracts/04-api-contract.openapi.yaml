@@ -948,6 +948,22 @@ paths:
           schema:
             type: string
             pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'
+        - name: sortBy
+          in: query
+          required: false
+          description: Поле серверной сортировки карточек внутри каждой колонки.
+          schema:
+            type: string
+            enum: [priority, orderNumber, plannedDate, updatedAt]
+            default: priority
+        - name: sortOrder
+          in: query
+          required: false
+          description: Направление серверной сортировки карточек.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
       responses:
         '200':
           description: Доска статусов
@@ -9633,6 +9649,7 @@ paths:
         - Labels
       operationId: previewOrderLabels
       summary: Preview order labels
+      description: Supplying `telegramCutMapFallbackVersion` additionally requires `cut.view` permission.
       security:
         - bearerAuth: []
       x-permissions-any:
@@ -9651,6 +9668,11 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                telegramCutMapFallbackVersion:
+                  type: string
+                  enum: [v1]
+                  description: Enables the versioned Telegram SVG/image fallback for regular cut-map thumbnails.
       responses:
         '200':
           description: Label preview
@@ -9687,6 +9709,12 @@ paths:
           required: true
           schema:
             type: integer
+        - name: telegramCutMapFallbackVersion
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [v1]
       responses:
         '200':
           description: Exact immutable cut-result placements grouped by order detail
@@ -9702,7 +9730,7 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [detailId, detailNumber, detailName, quantity, options]
+                      required: [detailId, detailNumber, detailName, quantity, options, telegramSvgFallbackInstances, telegramImageFallbackInstances, telegramImageUnavailableInstances]
                       properties:
                         detailId: { type: integer }
                         detailNumber: { type: string, nullable: true }
@@ -9750,6 +9778,32 @@ paths:
                               isArchived: { type: boolean }
                               isVacuum: { type: boolean }
                               dimensionsMatch: { type: boolean }
+                        telegramSvgFallbackInstances:
+                          type: array
+                          items:
+                            type: object
+                            required: [copyIndex, packetId, sourceMessageId]
+                            properties:
+                              copyIndex: { type: integer, minimum: 1 }
+                              packetId: { type: string, format: uuid }
+                              sourceMessageId: { type: integer, nullable: true }
+                        telegramImageFallbackInstances:
+                          type: array
+                          items:
+                            type: object
+                            required: [copyIndex, packetId, sourceMessageId]
+                            properties:
+                              copyIndex: { type: integer, minimum: 1 }
+                              packetId: { type: string, format: uuid }
+                              sourceMessageId: { type: integer, nullable: true }
+                        telegramImageUnavailableInstances:
+                          type: array
+                          items:
+                            type: object
+                            required: [copyIndex, reason]
+                            properties:
+                              copyIndex: { type: integer, minimum: 1 }
+                              reason: { type: string, enum: [request_limit_exceeded, invalid_media, ambiguous_evidence] }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -9768,6 +9822,7 @@ paths:
       description: |
         Export format `emf` follows observed Bazis samples: BMP bytes with
         `.emf` filename extension. True vector EMF is out of MVP scope.
+        Supplying `telegramCutMapFallbackVersion` additionally requires `cut.view` permission.
       security:
         - bearerAuth: []
       x-permission: labels.generate
@@ -9783,6 +9838,11 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                telegramCutMapFallbackVersion:
+                  type: string
+                  enum: [v1]
+                  description: Enables the versioned Telegram SVG/image fallback for regular cut-map thumbnails.
       responses:
         '200':
           description: Label generation
@@ -9944,6 +10004,14 @@ paths:
             type: integer
             minimum: 1
             maximum: 100
+        - name: sortDirection
+          in: query
+          required: false
+          description: Sort direction for the displayed Telegram message timestamp
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
         - name: status
           in: query
           required: false
@@ -9978,6 +10046,72 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/v1/cnc-telegram/worker-logs/export:
+    get:
+      tags:
+        - CncTelegramWorkerAudit
+      operationId: exportCncTelegramWorkerAudit
+      summary: Export the complete Telegram worker audit evidence for a selected period
+      security:
+        - bearerAuth: []
+      x-permission: audit.view
+      parameters:
+        - name: dateFrom
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [observed, used, ingested, skipped, failed]
+        - name: messageType
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [svg, dxf, image, gcode, bot_reply, text, other]
+        - name: reasonCode
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        '200':
+          description: UTF-8 JSON file with complete scans, messages, observations, operations, steps, and responses
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/ValidationError'
 
@@ -10114,7 +10248,7 @@ paths:
       summary: Serve a stored CNC Telegram media preview
       security:
         - bearerAuth: []
-      x-permission: orders.view
+      x-permission: cut.view
       parameters:
         - name: storageKey
           in: path
@@ -10130,6 +10264,10 @@ paths:
                 type: string
                 format: binary
             image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
               schema:
                 type: string
                 format: binary

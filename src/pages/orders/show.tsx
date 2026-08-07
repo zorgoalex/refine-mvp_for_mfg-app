@@ -190,6 +190,7 @@ const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'detail_cost', label: 'Сумма' },
   { key: 'film', label: 'Пленка' },
   { key: 'production_status_id', label: 'Статус' },
+  { key: 'doweling', label: 'Присадка', defaultAfter: 'production_status_id' },
   { key: 'cut_job', label: 'Раскрой' },
   { key: 'basis_project', label: 'Базис проект' },
   { key: 'bazis_cut_sets', label: 'Базис-раскрой' },
@@ -1470,6 +1471,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       edge_type: { edge_type_name: edgeTypesMap.get(detail.edge_type_id) || '' },
       film: { film_name: filmsMap.get(detail.film_id) || '' },
       material: { material_name: resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '' },
+      doweling: detail.doweling === true,
     });
 
     return groupingActive && grouping.state.field
@@ -1797,6 +1799,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           />
         );
       },
+    },
+    {
+      title: 'Присадка',
+      dataIndex: 'doweling',
+      key: 'doweling',
+      width: 72,
+      align: 'center',
+      render: (value) => value === true
+        ? <CheckOutlined style={{ color: '#1890ff' }} />
+        : null,
     },
     ...(cutColumnEnabled
       ? [

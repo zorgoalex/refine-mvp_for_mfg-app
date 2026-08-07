@@ -1,14 +1,27 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { authSession } from '../api/authSession';
 
 let mod: typeof import('./tabStore');
+const TEST_USER = { id: '7', username: 'manager', role: 'manager' };
 
 describe('tabStore', () => {
   beforeAll(async () => {
+    vi.stubGlobal('localStorage', createMemoryStorage());
     vi.stubGlobal('sessionStorage', createMemoryStorage());
+    authSession.setUser(TEST_USER);
     mod = await import('./tabStore');
   });
-  afterEach(() => mod.useTabStore.setState({ tabs: [] }, false));
-  afterAll(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    authSession.setUser(null);
+    localStorage.clear();
+    sessionStorage.clear();
+    authSession.setUser(TEST_USER);
+    mod.syncWorkspaceTabsForCurrentUser();
+  });
+  afterAll(() => {
+    authSession.setUser(null);
+    vi.unstubAllGlobals();
+  });
 
   it('openTab keeps a custom label set via setTabTitle (location re-sync must not clobber it)', () => {
     const s = mod.useTabStore.getState();
@@ -65,12 +78,55 @@ describe('tabStore', () => {
     expect(mod.hasAnyDirty([{ key: '/a', path: '/a', label: 'a', resource: 'a', dirty: true }])).toBe(true);
   });
 
-  it('persists {key,path,label,resource} (not dirty) to sessionStorage', () => {
+  it('persists {key,path,label,resource} (not dirty) to user-scoped localStorage', () => {
     mod.useTabStore.getState().openTab({ key: '/orders', path: '/orders', label: 'Заказы', resource: 'orders_view' });
     mod.useTabStore.getState().setDirty('/orders', true);
-    const raw = sessionStorage.getItem('workspace-tabs') || '';
+    const raw = localStorage.getItem(mod.workspaceTabsStorageKey(TEST_USER.id)) || '';
     expect(raw).toContain('/orders');
     expect(raw).not.toContain('"dirty":true');
+    expect(sessionStorage.getItem(mod.LEGACY_WORKSPACE_TABS_STORAGE_KEY)).toBeNull();
+  });
+
+  it('migrates the legacy sessionStorage payload once for the current user', () => {
+    const legacy = JSON.stringify({
+      state: {
+        tabs: [{ key: '/cut', path: '/cut', label: 'Раскрой', resource: 'cut', dirty: false }],
+      },
+      version: 1,
+    });
+    authSession.setUser(null);
+    localStorage.clear();
+    sessionStorage.setItem(mod.LEGACY_WORKSPACE_TABS_STORAGE_KEY, legacy);
+
+    authSession.setUser(TEST_USER);
+    mod.syncWorkspaceTabsForCurrentUser();
+
+    expect(mod.useTabStore.getState().tabs.map((tab) => tab.key)).toEqual(['/cut']);
+    expect(localStorage.getItem(mod.workspaceTabsStorageKey(TEST_USER.id))).toBe(legacy);
+    expect(sessionStorage.getItem(mod.LEGACY_WORKSPACE_TABS_STORAGE_KEY)).toBeNull();
+  });
+
+  it('isolates and restores open tabs for each authenticated user', () => {
+    mod.useTabStore.getState().openTab({
+      key: '/orders',
+      path: '/orders?status=1',
+      label: 'Заказы',
+      resource: 'orders_view',
+    });
+
+    authSession.setUser({ id: '8', username: 'operator', role: 'operator' });
+    mod.syncWorkspaceTabsForCurrentUser();
+    expect(mod.useTabStore.getState().tabs).toEqual([]);
+    mod.useTabStore.getState().openTab({
+      key: '/calendar',
+      path: '/calendar',
+      label: 'Календарь',
+      resource: 'calendar',
+    });
+
+    authSession.setUser(TEST_USER);
+    mod.syncWorkspaceTabsForCurrentUser();
+    expect(mod.useTabStore.getState().tabs.map((tab) => tab.path)).toEqual(['/orders?status=1']);
   });
 
   it('migration removes legacy stale labels from persisted tabs', () => {

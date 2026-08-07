@@ -40,4 +40,32 @@ describe('orders list phone rendering', () => {
     const src = read('pages/orders/mobile/OrderCardList.tsx');
     expect(src).not.toContain('cutSelect');
   });
+
+  it('collapses phone header actions into an accessible one-row disclosure', () => {
+    const src = read('pages/orders/list.tsx');
+    const css = read('pages/orders/list.css');
+    expect(src).toContain('const OrdersMobileHeaderDisclosure');
+    expect(src).toContain('aria-expanded={expanded}');
+    expect(src).toContain('aria-controls="orders-mobile-header-controls"');
+    expect(src).toContain('Действия и фильтры');
+    expect(src).toContain('if (!next) setFiltersVisible(false)');
+    expect(css).toContain('.orders-mobile-header-disclosure--mobile');
+    expect(css).toContain('.ant-page-header-heading-left');
+    expect(css).toMatch(/\.ant-page-header-heading:has\(\.orders-mobile-header-disclosure--mobile\) \.ant-page-header-heading-left \{\s*display: none;/);
+    expect(css).toContain('min-height: 44px');
+    expect(css).toContain('grid-template-rows: 0fr');
+    expect(css).toContain('transition-property: grid-template-rows, opacity, visibility');
+    expect(css).toContain('transform: scale(0.96)');
+    expect(css).not.toContain('transition: all');
+  });
+
+  it('offers persistent list and card modes on phones', () => {
+    const src = read('pages/orders/list.tsx');
+    expect(src).toContain('(isTablet || isMobile) && (');
+    expect(src).toContain("isMobile ? 'cards' : 'list'");
+    expect(src).toContain("(isMobile || isTablet) && ordersViewMode === 'cards'");
+    expect(src).toContain("'order-card-list--mobile'");
+    expect(src).toContain("{isMobile ? ' Список' : ''}");
+    expect(src).toContain("{isMobile ? ' Карточки' : ''}");
+  });
 });

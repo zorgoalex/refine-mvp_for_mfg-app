@@ -1,4 +1,8 @@
-import type { OrderExcelDetail, OrderExcelDetailRow } from '../excel/orderExcelBuilder';
+import {
+  formatOrderExportDetailNote,
+  type OrderExcelDetail,
+  type OrderExcelDetailRow,
+} from '../excel/orderExcelBuilder';
 import { formatDate, getYearLastTwoDigits } from '../printFormat';
 
 export interface OrderProductionPdfParams {
@@ -115,7 +119,7 @@ export function buildOrderProductionPdfDocument({
       <td class="number">${formatExcelDecimal(roundArea(detail))}</td>
       <td>${formatExcelCell(detail.milling_type?.milling_type_name)}</td>
       <td>${formatExcelCell(detail.edge_type?.edge_type_name)}</td>
-      <td>${formatExcelCell(detail.notes)}</td>
+      <td>${formatExcelCell(formatOrderExportDetailNote(detail.notes, detail.doweling))}</td>
       <td class="number financial-cell"></td>
       <td class="number financial-cell"></td>
       <td colspan="3">${formatExcelCell(detail.film?.film_name)}</td>

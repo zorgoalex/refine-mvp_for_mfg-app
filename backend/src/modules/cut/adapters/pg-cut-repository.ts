@@ -38,6 +38,7 @@ import {
   validateFreecutResponseContract,
 } from '../application/cut-freecut-mapping';
 import { applyEngineSelection } from '../application/cut-engine-selection';
+import { computeSelectedSheetFitWarnings } from '../application/cut-sheet-fit-warning';
 import { computeRequestHash } from '../application/cut-request-hash';
 import {
   describeCutFailure,
@@ -1501,6 +1502,26 @@ export class PgCutRepository implements CutRepositoryPort {
         }
       : undefined;
 
+    const itemByDetailId = new Map(base.items.map((item) => [item.orderDetailId, item]));
+    const sheetFitWarnings = basisInputs === null
+      ? []
+      : computeSelectedSheetFitWarnings({
+          selectedSheet: basisInputs.sheetOverride,
+          items: basisInputs.items,
+          params: basisInputs.params,
+          grainRules: basisInputs.grainRules,
+          nativePortrait: this.nativePortraitWriter,
+        }).flatMap((warning) => {
+          const jobItem = itemByDetailId.get(warning.orderDetailId);
+          if (!jobItem) return [];
+          return [{
+            ...warning,
+            orderId: jobItem.orderId,
+            detailNumber: jobItem.detail?.detailNumber ?? null,
+            detailName: jobItem.detail?.detailName ?? null,
+          }];
+        });
+
     // Read group_key for each cut_group (extra query scoped to single job).
     const groupKeyResult = await this.database.query<{ cut_group_id: string | number; group_key: string | null }>(
       `SELECT cut_group_id, group_key FROM cut_group WHERE cut_job_id = $1`,
@@ -1555,6 +1576,7 @@ export class PgCutRepository implements CutRepositoryPort {
       editorParams,
       requiresRecalc,
       autoLayoutValidation,
+      sheetFitWarnings,
       renderToken: jobRenderToken,
       currentCutResult: cutResults.find((result) => result.isCurrent) ?? null,
       cutResults,

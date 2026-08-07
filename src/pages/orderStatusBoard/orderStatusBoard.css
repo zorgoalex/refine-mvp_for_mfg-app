@@ -51,13 +51,24 @@
   background: var(--app-surface);
 }
 
+.status-board-toolbar-disclosure,
+.status-board-toolbar-disclosure__content,
+.status-board-toolbar-disclosure__content-inner {
+  display: contents;
+}
+
+.status-board-toolbar-disclosure__toggle {
+  display: none;
+}
+
 .status-board-toolbar__search {
   width: min(160px, 100%);
   flex: 0 0 160px;
 }
 
 .status-board-toolbar__tablet-board-switch,
-.status-board-toolbar__tablet-refresh {
+.status-board-toolbar__tablet-refresh,
+.status-board-toolbar__mobile-add-bath {
   display: none;
 }
 
@@ -236,6 +247,30 @@
 .status-board-settings__modes {
   padding-bottom: 16px;
   border-bottom: 1px solid var(--app-border-soft);
+}
+
+.status-board-toolbar__sort-settings {
+  gap: 12px;
+}
+
+.status-board-toolbar__sort-row {
+  min-height: 40px;
+  display: grid;
+  grid-template-columns: minmax(132px, 0.8fr) minmax(180px, 1.2fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.status-board-toolbar__sort-row .ant-select,
+.status-board-toolbar__sort-row .ant-segmented {
+  width: 100%;
+}
+
+@media (max-width: 480px) {
+  .status-board-toolbar__sort-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
 }
 
 .status-board-settings__modes .status-board-toolbar__switch {
@@ -891,6 +926,24 @@
 .status-board-column__more {
   min-height: 40px;
   flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-board-column__load-sentinel {
+  min-height: 40px;
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+.status-board-column__load-sentinel--loading {
+  color: var(--app-text-secondary);
 }
 
 .status-board-card {
@@ -968,6 +1021,36 @@
     0 2px 8px var(--app-shadow);
 }
 
+.cnc-bazis-cut-card {
+  border-style: dashed;
+  border-color: color-mix(in srgb, #d46b08 55%, var(--app-border-soft));
+}
+
+.cnc-bazis-cut-card__actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.cnc-bazis-cut-card__badge.ant-btn {
+  margin-inline-end: 0;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 7px;
+  color: #ad4e00;
+  border: 1px solid color-mix(in srgb, #d46b08 45%, var(--app-border-soft));
+  border-radius: 6px;
+  background: color-mix(in srgb, #fa8c16 12%, var(--app-surface));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cnc-bazis-cut-card__tabs {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .cnc-relation-card--dimmed {
   background: color-mix(in srgb, var(--app-surface) 80%, var(--app-bg));
   opacity: 0.62;
@@ -985,7 +1068,8 @@
 .cnc-relation-card--dimmed .status-board-card__number,
 .cnc-relation-card--dimmed .status-board-card__standard-cell,
 .cnc-relation-card--dimmed .status-board-card__footer,
-.cnc-relation-card--dimmed .cnc-packet-card__order-link {
+.cnc-relation-card--dimmed .cnc-packet-card__order-link,
+.cnc-relation-card--dimmed .cnc-bazis-cut-card__badge {
   color: var(--app-text-muted) !important;
 }
 
@@ -2331,14 +2415,116 @@
     min-height: calc(100vh - 116px);
   }
 
-  .status-board-page__header {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
+  .status-board-page > .operational-page-head,
+  .status-board-page > .status-board-page__header {
+    display: none;
   }
 
-  .status-board-page__updated {
-    justify-content: space-between;
+  .status-board-toolbar-disclosure {
+    position: sticky;
+    top: 0;
+    z-index: 22;
+    min-width: 0;
+    display: block;
+    flex: 0 0 auto;
+    overflow: clip;
+    border: 1px solid var(--app-border-soft);
+    border-radius: 10px;
+    background: var(--app-surface);
+    box-shadow: var(--app-shadow-border);
+  }
+
+  .status-board-toolbar-disclosure__toggle {
+    width: 100%;
+    min-height: 44px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: var(--app-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .status-board-toolbar-disclosure__toggle:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: -2px;
+  }
+
+  .status-board-toolbar-disclosure__label {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 1 auto;
+    overflow: hidden;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .status-board-toolbar-disclosure__summary {
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-board-toolbar-disclosure__chevron {
+    flex: 0 0 auto;
+    transition-property: transform;
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .status-board-toolbar-disclosure--expanded .status-board-toolbar-disclosure__chevron {
+    transform: rotate(180deg);
+  }
+
+  .status-board-toolbar-disclosure__content {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: 0fr;
+    visibility: hidden;
+    opacity: 0;
+    transition-property: grid-template-rows, opacity, visibility;
+    transition-duration: 180ms, 120ms, 0s;
+    transition-delay: 0s, 0s, 180ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1), ease-out, linear;
+  }
+
+  .status-board-toolbar-disclosure__content-inner {
+    min-width: 0;
+    min-height: 0;
+    display: block;
+    overflow: hidden;
+  }
+
+  .status-board-toolbar-disclosure--expanded .status-board-toolbar-disclosure__content {
+    grid-template-rows: 1fr;
+    visibility: visible;
+    opacity: 1;
+    transition-delay: 0s;
+  }
+
+  .status-board-toolbar-disclosure .status-board-toolbar-disclosure__content-inner > .status-board-toolbar {
+    position: static;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    flex-basis: auto;
+    border: 0;
+    border-top: 1px solid var(--app-border-soft);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
 
   .status-board-toolbar {
@@ -2368,8 +2554,29 @@
   }
 
   .status-board-toolbar__settings-button.ant-btn {
-    width: 40px;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
     margin-left: auto;
+  }
+
+  .status-board-toolbar__tablet-refresh.ant-btn,
+  .status-board-toolbar__mobile-add-bath.ant-btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .status-board-toolbar__tablet-refresh.ant-btn {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding-inline: 0;
+  }
+
+  .status-board-tabs .ant-tabs-tab {
+    min-height: 44px;
   }
 
   .status-board-toolbar__display-mode .ant-segmented-group {
@@ -2383,7 +2590,8 @@
   .status-board-toolbar--production {
     align-items: center;
     flex-wrap: nowrap;
-    overflow-x: visible;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .status-board-toolbar--production .status-board-toolbar__search {
@@ -2406,6 +2614,12 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  .status-board-column__cards {
+    overscroll-behavior-x: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-x pan-y;
+  }
+
   .status-board-columns:not(.status-board-columns--cnc) .status-board-column {
     width: calc(100vw - 48px);
     min-width: calc(100vw - 48px);
@@ -2417,9 +2631,19 @@
     min-width: calc((100vw - 48px) * 0.6);
   }
 
+  .status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed) {
+    width: 200%;
+    min-width: 200%;
+  }
+
   .status-board-card__actions .ant-btn {
     width: 44px;
     height: 44px;
+  }
+
+  .status-board-card:focus {
+    outline: 2px solid #1677ff;
+    outline-offset: 2px;
   }
 }
 
@@ -2621,6 +2845,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .status-board-toolbar-disclosure__content,
+  .status-board-toolbar-disclosure__chevron,
   .status-board-column,
   .status-board-card,
   .cnc-card-display-toggle.ant-btn,

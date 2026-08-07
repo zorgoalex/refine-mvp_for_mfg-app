@@ -175,6 +175,7 @@ export interface PreviewOrderLabelsInput {
   useBasisFields?: boolean;
   cutMapSource?: LabelCutMapSource;
   cutMapSelections?: LabelCutMapSelection[];
+  telegramCutMapFallbackVersion?: 'v1';
 }
 
 export type LabelCutMapSource = 'regular' | 'bath';
@@ -215,6 +216,12 @@ export interface OrderLabelCutMapOptions {
     cutJobCutNumber: string | null;
     bathCutJobCutNumber: string | null;
     options: LabelCutMapOption[];
+    telegramSvgFallbackInstances?: Array<{ copyIndex: number; packetId: string; sourceMessageId: number | null }>;
+    telegramImageFallbackInstances?: Array<{ copyIndex: number; packetId: string; sourceMessageId: number | null }>;
+    telegramImageUnavailableInstances?: Array<{
+      copyIndex: number;
+      reason: 'request_limit_exceeded' | 'invalid_media' | 'ambiguous_evidence';
+    }>;
   }>;
 }
 

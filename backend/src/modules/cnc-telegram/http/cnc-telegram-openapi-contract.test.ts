@@ -39,4 +39,49 @@ describe('CNC Telegram OpenAPI contract', () => {
       expect(section).toContain(`'${status}':`);
     }
   });
+
+  it('documents the permission-gated detailed worker audit JSON export', () => {
+    const start = contract.indexOf('  /api/v1/cnc-telegram/worker-logs/export:');
+    const end = contract.indexOf('  /api/v1/cnc-telegram/worker-logs/batch:', start);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const section = contract.slice(start, end);
+    expect(section).toContain('operationId: exportCncTelegramWorkerAudit');
+    expect(section).toContain('x-permission: audit.view');
+    expect(section).toContain('format: binary');
+    expect(section).toContain('Content-Disposition:');
+    for (const field of ['dateFrom', 'dateTo', 'status', 'messageType', 'reasonCode', 'search']) {
+      expect(section).toContain(`name: ${field}`);
+    }
+    for (const status of ['200', '401', '403', '413', '422']) {
+      expect(section).toContain(`'${status}':`);
+    }
+  });
+
+  it('documents server-side sorting for the Telegram worker When column', () => {
+    const start = contract.indexOf('  /api/v1/cnc-telegram/worker-logs:');
+    const end = contract.indexOf('  /api/v1/cnc-telegram/worker-logs/export:', start);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const section = contract.slice(start, end);
+    expect(section).toContain('name: sortDirection');
+    expect(section).toContain('enum: [asc, desc]');
+    expect(section).toContain('default: desc');
+  });
+
+  it('documents cut.view and every supported raster type for raw Telegram media', () => {
+    const start = contract.indexOf('  /api/v1/cnc-telegram/media/{storageKey}:');
+    const end = contract.indexOf('\n  /api/v1/', start + 1);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    const section = contract.slice(start, end < 0 ? undefined : end);
+    expect(section).toContain('operationId: getCncTelegramMedia');
+    expect(section).toContain('x-permission: cut.view');
+    expect(section).not.toContain('x-permission: orders.view');
+    expect(section).toContain('image/jpeg:');
+    expect(section).toContain('image/png:');
+    expect(section).toContain('image/webp:');
+  });
 });

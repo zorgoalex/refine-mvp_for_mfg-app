@@ -35,6 +35,7 @@ import {
   CloseOutlined,
   CompressOutlined,
   DownloadOutlined,
+  DownOutlined,
   DragOutlined,
   ExpandOutlined,
   FilterOutlined,
@@ -71,10 +72,13 @@ import type {
   OrderStatusBoardCard,
   OrderStatusBoardColumn,
   OrderStatusBoardResponse,
+  OrderStatusBoardSortBy,
+  OrderStatusBoardSortOrder,
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
 import type {
   CncTelegramBathCard,
+  CncTelegramBazisCutSetCard,
   CncTelegramPacket,
   CncTelegramTodayColumn,
   CncTelegramTodayResponse,
@@ -99,7 +103,9 @@ import {
   buildCncOrderFilterOptions,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
+  DEFAULT_ORDER_STATUS_BOARD_SORT,
   filterBoardColumns,
+  filterCncBazisCutSetsByMissingBathDetails,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
@@ -222,6 +228,16 @@ const STATUS_BOARD_CARD_DISPLAY_ICONS: Record<StatusBoardCardDisplayMode, React.
   compact: <CompressOutlined />,
   minimal: <FileTextOutlined />,
 };
+const STATUS_BOARD_SORT_STORAGE_PREFIX = 'erp.status-board.card-sort';
+const STATUS_BOARD_SORT_FIELD_OPTIONS: Array<{
+  label: string;
+  value: OrderStatusBoardSortBy;
+}> = [
+  { label: 'Приоритет', value: 'priority' },
+  { label: 'Номер заказа', value: 'orderNumber' },
+  { label: 'Плановая дата', value: 'plannedDate' },
+  { label: 'Последнее изменение', value: 'updatedAt' },
+];
 
 interface BoardDragItem {
   card: OrderStatusBoardCard;
@@ -234,6 +250,54 @@ interface OrderStatusBoardPageProps {
   fixedView?: OrderStatusBoardViewState['view'];
 }
 
+interface StatusBoardToolbarDisclosureProps {
+  children: React.ReactNode;
+  contentId: string;
+  expanded: boolean;
+  label: string;
+  summary: string;
+  onToggle: () => void;
+}
+
+const StatusBoardToolbarDisclosure: React.FC<StatusBoardToolbarDisclosureProps> = ({
+  children,
+  contentId,
+  expanded,
+  label,
+  summary,
+  onToggle,
+}) => (
+  <section
+    className={[
+      'status-board-toolbar-disclosure',
+      expanded ? 'status-board-toolbar-disclosure--expanded' : '',
+    ].filter(Boolean).join(' ')}
+  >
+    <button
+      type="button"
+      className="status-board-toolbar-disclosure__toggle"
+      aria-expanded={expanded}
+      aria-controls={contentId}
+      onClick={onToggle}
+    >
+      <span className="status-board-toolbar-disclosure__label">
+        <FilterOutlined aria-hidden="true" />
+        {label}
+      </span>
+      <span className="status-board-toolbar-disclosure__summary">{summary}</span>
+      <DownOutlined
+        className="status-board-toolbar-disclosure__chevron"
+        aria-hidden="true"
+      />
+    </button>
+    <div id={contentId} className="status-board-toolbar-disclosure__content">
+      <div className="status-board-toolbar-disclosure__content-inner">
+        {children}
+      </div>
+    </div>
+  </section>
+);
+
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
   const isOperational = useOperationalUi();
   const touchBoardDragEnabled = useCoarsePointer();
@@ -241,12 +305,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const currentUser = authSession.getUser();
+  const sortPreferenceBoard: OrderStatusBoardType =
+    fixedView === 'production' || (!fixedView && searchParams.get('board') === 'production')
+      ? 'production'
+      : 'order';
+  const defaultSort = useMemo(
+    () => readStatusBoardSortPreference(currentUser?.id, sortPreferenceBoard),
+    [currentUser?.id, sortPreferenceBoard],
+  );
   const viewState = useMemo(() => {
     const parsed = parseOrderStatusBoardViewState(searchParams, {
       cncTelegram: featureFlags.cncTelegram,
+      ...(defaultSort ? { defaultSort } : {}),
     });
     return fixedView ? { ...parsed, view: fixedView } : parsed;
-  }, [fixedView, searchParams]);
+  }, [defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
   const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
   const mdfBoardHiddenStatusesSetting =
@@ -280,6 +354,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const datasetRevisionRef = useRef(0);
   const actionFocusRef = useRef<HTMLElement | null>(null);
   const focusOrderRef = useRef<number | null>(null);
+  const revealTouchMovedCardRef = useRef(false);
   const topScrollbarRef = useRef<HTMLDivElement | null>(null);
   const topScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const boardViewportRef = useRef<HTMLElement | null>(null);
@@ -291,6 +366,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     useState<StatusBoardCardDisplayMode>('compact');
   const [cncCardDisplayMode, setCncCardDisplayMode] =
     useState<CncCardDisplayMode>('standard');
+  const [mobileToolbarExpanded, setMobileToolbarExpanded] = useState(false);
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
@@ -302,8 +378,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     useState<string | null>(null);
   const [activeCncDetailedDetail, setActiveCncDetailedDetail] =
     useState<CncDetailedDetailTarget | null>(null);
-  const currentUser = authSession.getUser();
   const isPacker = isPackerUser(currentUser);
+
+  useEffect(() => {
+    if (viewState.view === 'cnc_today') return;
+    writeStatusBoardSortPreference(currentUser?.id, viewState.view, {
+      sortBy: viewState.sortBy,
+      sortOrder: viewState.sortOrder,
+    });
+  }, [currentUser?.id, viewState.sortBy, viewState.sortOrder, viewState.view]);
 
   useEffect(() => {
     boardRef.current = board;
@@ -321,6 +404,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     setSearchDraft(viewState.search);
   }, [viewState.search]);
 
+  useEffect(() => {
+    setMobileToolbarExpanded(false);
+  }, [viewState.view]);
+
   const updateViewState = useCallback(
     (patch: Partial<OrderStatusBoardViewState>) => {
       const next = { ...viewState, ...patch };
@@ -328,12 +415,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     },
     [setSearchParams, viewState],
   );
+  const switchStatusBoardView = useCallback(
+    (view: OrderStatusBoardType) => {
+      const savedSort = readStatusBoardSortPreference(currentUser?.id, view)
+        ?? DEFAULT_ORDER_STATUS_BOARD_SORT;
+      updateViewState({ view, ...savedSort });
+    },
+    [currentUser?.id, updateViewState],
+  );
 
   useEffect(() => {
     if (!fixedView && isPacker && viewState.view !== 'order') {
-      updateViewState({ view: 'order' });
+      switchStatusBoardView('order');
     }
-  }, [fixedView, isPacker, updateViewState, viewState.view]);
+  }, [fixedView, isPacker, switchStatusBoardView, viewState.view]);
 
   useEffect(() => {
     if (searchDraft.trim() === viewState.search) return;
@@ -406,14 +501,27 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         const focusOrderId = focusOrderRef.current;
         if (focusOrderId !== null) {
           focusOrderRef.current = null;
+          const revealTouchMovedCard = revealTouchMovedCardRef.current;
+          revealTouchMovedCardRef.current = false;
           window.requestAnimationFrame(() => {
+            const movedCard = document.querySelector<HTMLElement>(
+              `[data-status-board-order-id="${focusOrderId}"]`,
+            );
+            if (revealTouchMovedCard && movedCard) {
+              movedCard.focus({ preventScroll: true });
+              movedCard.scrollIntoView({
+                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                  ? 'auto'
+                  : 'smooth',
+                block: 'nearest',
+                inline: 'center',
+              });
+              return;
+            }
             restoreOrderStatusBoardFocus(
               focusOrderId,
               actionFocusRef.current,
-              (orderId) =>
-                document.querySelector<HTMLElement>(
-                  `[data-status-board-order-id="${orderId}"]`,
-                ),
+              () => movedCard,
               () => document.getElementById('status-board-title'),
             );
           });
@@ -466,19 +574,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   }, [fetchInitial, stale]);
 
   const loadMore = useCallback(
-    async (column: OrderStatusBoardColumn) => {
+    async (column: OrderStatusBoardColumn): Promise<boolean> => {
       if (
         stale ||
         !column.nextCursor ||
         loadingColumnTokensRef.current.has(column.key)
       ) {
-        return;
+        return !stale;
       }
       const current = boardRef.current;
-      if (!current) return;
+      if (!current) return false;
       const revision = datasetRevisionRef.current;
       const expectedFilterKey = current.filterKey;
       const requestToken = Symbol(column.key);
+      let loaded = true;
       loadingColumnTokensRef.current.set(column.key, requestToken);
       setLoadingColumns((value) => new Set(value).add(column.key));
       try {
@@ -488,9 +597,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             cursor: column.nextCursor,
           }),
         );
-        if (datasetRevisionRef.current !== revision) return;
+        if (datasetRevisionRef.current !== revision) return true;
         const latest = boardRef.current;
-        if (!latest) return;
+        if (!latest) return true;
         const merged = mergeOrderStatusBoardColumnPage(
           latest,
           response,
@@ -499,7 +608,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         if (merged.kind === 'anomaly') {
           message.warning('Данные колонки изменились. Доска будет обновлена полностью.');
           void fetchInitial({ preserveLoading: true });
-          return;
+          return true;
         }
         if (merged.kind === 'applied') {
           boardRef.current = merged.board;
@@ -507,6 +616,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         }
       } catch (error) {
         if (datasetRevisionRef.current === revision) {
+          loaded = false;
           message.error(errorMessage(error, 'Не удалось догрузить колонку.'));
         }
       } finally {
@@ -519,6 +629,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           });
         }
       }
+      return loaded;
     },
     [fetchInitial, stale],
   );
@@ -529,6 +640,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       targetStatusId: number,
       targetName: string,
       trigger: HTMLElement | null,
+      revealTouchMovedCard = false,
     ) => {
       if (
         stale ||
@@ -559,6 +671,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       if (!nextPending) return;
 
       actionFocusRef.current = trigger;
+      revealTouchMovedCardRef.current = revealTouchMovedCard;
       const idempotencyKey = createProductionActionIdempotencyKey(
         boardType === 'order'
           ? 'status-board-order'
@@ -595,6 +708,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
 
         if (result.kind === 'cancelled') {
           commandInFlightRef.current = false;
+          revealTouchMovedCardRef.current = false;
           const withoutOrder = new Set(pendingRef.current);
           withoutOrder.delete(card.orderId);
           replacePending(withoutOrder);
@@ -807,7 +921,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     [cncPeriodColumns],
   );
   const cncOrderFilteredColumns = useMemo(
-    () => filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
+    () => filterCncBazisCutSetsByMissingBathDetails(
+      filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
+    ),
     [cncPeriodColumns, cncOrderFilterKey],
   );
   const cncFilteredColumns = useMemo(
@@ -855,8 +971,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     ],
   );
   const cncShownDataColumns = useMemo(
-    () => cncActiveColumns.filter((column) =>
-      cncTerminalColumnsVisible || !isCncTerminalColumnKey(column.key),
+    () => filterCncBazisCutSetsByMissingBathDetails(
+      cncActiveColumns.filter((column) =>
+        cncTerminalColumnsVisible || !isCncTerminalColumnKey(column.key),
+      ),
     ),
     [cncActiveColumns, cncTerminalColumnsVisible],
   );
@@ -1085,6 +1203,27 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     }
     updateViewState({ cncOrderSearchPeriod: period });
   };
+  const cardDisplayModeLabel = STATUS_BOARD_CARD_DISPLAY_OPTIONS.find(
+    (option) => option.value === cardDisplayMode,
+  )?.label ?? 'Компактный';
+  const sortFieldLabel = STATUS_BOARD_SORT_FIELD_OPTIONS.find(
+    (option) => option.value === viewState.sortBy,
+  )?.label ?? 'Приоритет';
+  const sortDirectionOptions = statusBoardSortDirectionOptions(viewState.sortBy);
+  const sortDirectionLabel = sortDirectionOptions.find(
+    (option) => option.value === viewState.sortOrder,
+  )?.label ?? 'Сначала срочные';
+  const cncCardDisplayModeLabel = CNC_CARD_DISPLAY_OPTIONS.find(
+    (option) => option.value === cncCardDisplayMode,
+  )?.label ?? 'Стандартные';
+  const focusCncOrderSearch = () => {
+    setMobileToolbarExpanded(true);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(
+        '.status-board-toolbar__cnc-order-search input',
+      )?.focus();
+    });
+  };
   const cncSettingsContent = (
     <section className="status-board-settings__modes" aria-label="Настройки отображения МДФ-доски">
       <strong>Отображение</strong>
@@ -1130,6 +1269,37 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       </div>
     </section>
   );
+  const cardSortSettingsContent = (
+    <section
+      className="status-board-settings__modes status-board-toolbar__sort-settings"
+      aria-label="Сортировка карточек"
+    >
+      <strong>Сортировка карточек</strong>
+      <span className="status-board-settings__hint">
+        Применяется ко всем колонкам этой доски и сохраняется в текущем браузере.
+      </span>
+      <div className="status-board-toolbar__sort-row">
+        <Typography.Text>Сортировать по</Typography.Text>
+        <Select<OrderStatusBoardSortBy>
+          value={viewState.sortBy}
+          options={STATUS_BOARD_SORT_FIELD_OPTIONS}
+          onChange={(sortBy) => updateViewState({ sortBy })}
+          aria-label="Поле сортировки карточек"
+        />
+      </div>
+      <div className="status-board-toolbar__sort-row">
+        <Typography.Text>Показывать сначала</Typography.Text>
+        <Segmented
+          value={viewState.sortOrder}
+          options={sortDirectionOptions}
+          onChange={(sortOrder) =>
+            updateViewState({ sortOrder: sortOrder as OrderStatusBoardSortOrder })
+          }
+          aria-label="Направление сортировки карточек"
+        />
+      </div>
+    </section>
+  );
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -1152,9 +1322,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   <>
                     <Button
                       icon={<FilterOutlined />}
-                      onClick={() => {
-                        document.querySelector<HTMLInputElement>('.status-board-toolbar__cnc-order-search input')?.focus();
-                      }}
+                      onClick={focusCncOrderSearch}
                     >
                       Фильтры
                     </Button>
@@ -1214,16 +1382,19 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           <Tabs
             className="status-board-tabs"
             activeKey={isPacker && viewState.view !== 'order' ? 'order' : viewState.view}
-            onChange={(key) =>
-              updateViewState({
-                view: key as typeof viewState.view,
-              })
-            }
+            onChange={(key) => switchStatusBoardView(key as OrderStatusBoardType)}
             items={statusBoardTabItems}
           />
         )}
 
         {!isCncToday && (
+          <StatusBoardToolbarDisclosure
+            contentId="status-board-toolbar-controls"
+            expanded={mobileToolbarExpanded}
+            label="Настройки доски"
+            summary={`${cardDisplayModeLabel} · ${sortFieldLabel}: ${sortDirectionLabel}`}
+            onToggle={() => setMobileToolbarExpanded((current) => !current)}
+          >
           <div
             className={[
               'status-board-toolbar',
@@ -1241,7 +1412,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   size="small"
                   value={viewState.view}
                   options={tabletBoardSwitchOptions}
-                  onChange={(value) => updateViewState({ view: value as OrderStatusBoardType })}
+                  onChange={(value) => switchStatusBoardView(value as OrderStatusBoardType)}
                 />
               </div>
             )}
@@ -1368,10 +1539,19 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               definitions={activeColumnDefinitions}
               settings={activeColumnPreferences.settings}
               onChange={activeColumnPreferences.saveSettings}
+              extraContent={cardSortSettingsContent}
             />
           </div>
+          </StatusBoardToolbarDisclosure>
         )}
         {isCncToday && (
+          <StatusBoardToolbarDisclosure
+            contentId="status-board-toolbar-controls"
+            expanded={mobileToolbarExpanded}
+            label="Настройки МДФ"
+            summary={`${cncSelectedDate?.format(DATE_FORMAT) ?? 'Сегодня'} · ${cncCardDisplayModeLabel}`}
+            onToggle={() => setMobileToolbarExpanded((current) => !current)}
+          >
           <div className="status-board-toolbar status-board-toolbar--cnc" aria-label="Фильтры CNC-работ">
             <Tooltip title="Предыдущий день">
               <Button
@@ -1413,6 +1593,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               onClick={() => updateCncWorkday(dayjs())}
             >
               Сегодня
+            </Button>
+            <Button
+              type="primary"
+              size="small"
+              className="status-board-toolbar__mobile-add-bath"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/cut')}
+            >
+              Добавить карту ванны
             </Button>
             <Select
               size="small"
@@ -1516,6 +1705,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               extraContent={cncSettingsContent}
             />
           </div>
+          </StatusBoardToolbarDisclosure>
         )}
 
         {!isCncToday && !featureFlags.useBackendProductionActions && (
@@ -1624,6 +1814,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 onCloseDetailedBath={closeCncDetailedBath}
                 onSelectDetailedDetail={selectCncDetailedDetail}
                 onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
+                onOpenBazisCut={(setId) => navigate(`/bazis-cut/${setId}`)}
                 showFinancials={canViewFinancials}
               />
             )
@@ -1715,6 +1906,7 @@ interface CncTelegramTodayColumnsProps {
   onCloseDetailedBath: (bathId: string) => void;
   onSelectDetailedDetail: (target: CncDetailedDetailTarget) => void;
   onOpenOrder: (orderId: number) => void;
+  onOpenBazisCut: (setId: number) => void;
   showFinancials: boolean;
 }
 
@@ -1728,6 +1920,7 @@ interface CncTelegramTodayDisplayColumn {
   total: number;
   packets: CncTelegramPacket[];
   baths: CncTelegramBathCard[];
+  bazisCutSets?: CncTelegramBazisCutSetCard[];
   orderCards?: OrderStatusBoardCard[];
 }
 
@@ -1750,6 +1943,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onCloseDetailedBath,
   onSelectDetailedDetail,
   onOpenOrder,
+  onOpenBazisCut,
   showFinancials,
 }) => {
   const isOperational = useOperationalUi();
@@ -1780,6 +1974,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               total: 0,
               packets: [],
               baths: [],
+              bazisCutSets: [],
             }))
         : CNC_STATUS_BOARD_COLUMN_DEFINITIONS
             .filter((definition) => definition.key !== 'orders')
@@ -1801,6 +1996,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 total: orderCards.length,
                 packets: [],
                 baths: [],
+                bazisCutSets: [],
                 orderCards,
               },
             ]
@@ -1829,6 +2025,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       <div
         className={[
           'status-board-columns status-board-columns--cnc',
+          cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : '',
           detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
         ].filter(Boolean).join(' ')}
         style={
@@ -1848,11 +2045,14 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         const loadPercent = Math.min(100, Math.round(totals.areaM2));
         const bathSourceCards = column.baths ?? [];
         const packetSourceCards = column.packets ?? [];
+        const bazisCutSetSourceCards = column.bazisCutSets ?? [];
         const orderSourceCards = column.orderCards ?? [];
         const packetStateFor = (packet: CncTelegramPacket) =>
           getCncPacketDisplayState(packet, relationContext, detailedContext);
         const orderStateFor = (card: OrderStatusBoardCard) =>
           getCncOrderRelationState(card, relationContext);
+        const bazisCutSetStateFor = (card: CncTelegramBazisCutSetCard) =>
+          getCncBazisCutSetDisplayState(card, relationContext, detailedContext);
         const bathCards = relationContext
           ? sortCncRelationCards(
             bathSourceCards,
@@ -1862,6 +2062,9 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         const packetCards = relationContext || detailedPacketHighlightEnabled
           ? sortCncRelationCards(packetSourceCards, packetStateFor)
           : packetSourceCards;
+        const bazisCutSetCards = relationContext || detailedPacketHighlightEnabled
+          ? sortCncRelationCards(bazisCutSetSourceCards, bazisCutSetStateFor)
+          : bazisCutSetSourceCards;
         const sortedOrderCards = relationContext
           ? sortCncRelationCards(orderSourceCards, orderStateFor)
           : orderSourceCards;
@@ -2026,14 +2229,38 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     );
                   })
                 )
-              ) : packetCards.length === 0 ? (
+              ) : packetCards.length === 0 && bazisCutSetCards.length === 0 ? (
                 <div className="status-board-column__empty">
                   <span className="status-board-column__empty-icon"><FileTextOutlined /></span>
                   <strong>Пакетов пока нет</strong>
                   <small>Новые файлы появятся здесь после загрузки.</small>
                 </div>
               ) : (
-                packetCards.map((packet) => {
+                <>
+                {bazisCutSetCards.map((bazisCutSet) => {
+                  const cardKey = `bazis-cut:${bazisCutSet.bazisCutSetId}`;
+                  const state = bazisCutSetStateFor(bazisCutSet);
+                  const summaryOnly = isCncCardSummaryOnly(
+                    cardDisplayMode,
+                    standardCardOverrides,
+                    cardKey,
+                    detailedPacketHighlightEnabled && state === 'related',
+                  );
+                  return (
+                    <CncBazisCutSetCardView
+                      key={bazisCutSet.bazisCutSetId}
+                      card={bazisCutSet}
+                      relationState={state}
+                      highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
+                      summaryOnly={summaryOnly}
+                      displayToggleVisible={cardDisplayMode === 'compact'}
+                      onToggleDisplay={() => toggleCardDisplay(cardKey)}
+                      onOpenOrder={onOpenOrder}
+                      onOpenBazisCut={onOpenBazisCut}
+                    />
+                  );
+                })}
+                {packetCards.map((packet) => {
                   const cardKey = `packet:${packet.packetId}`;
                   const packetState = packetStateFor(packet);
                   const summaryOnly = isCncCardSummaryOnly(
@@ -2058,7 +2285,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       onOpenOrder={onOpenOrder}
                     />
                   );
-                })
+                })}
+                </>
               )}
             </div>
           </article>
@@ -2437,6 +2665,7 @@ interface CncTelegramPrintBoardProps {
 type CncPrintCard =
   | { kind: 'packet'; packet: CncTelegramPacket }
   | { kind: 'bath'; bath: CncTelegramBathCard }
+  | { kind: 'bazis-cut'; bazisCutSet: CncTelegramBazisCutSetCard }
   | { kind: 'order'; order: OrderStatusBoardCard };
 
 interface CncPrintColumn {
@@ -2457,7 +2686,13 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
       ? (column.orderCards ?? []).map((order) => ({ kind: 'order', order }))
       : isCncBathColumnKey(column.key)
         ? column.baths.map((bath) => ({ kind: 'bath', bath }))
-        : column.packets.map((packet) => ({ kind: 'packet', packet }));
+        : [
+            ...(column.bazisCutSets ?? []).map((bazisCutSet) => ({
+              kind: 'bazis-cut' as const,
+              bazisCutSet,
+            })),
+            ...column.packets.map((packet) => ({ kind: 'packet' as const, packet })),
+          ];
     return {
       key: column.key,
       title: cncColumnDisplayTitle(column),
@@ -2537,7 +2772,11 @@ const CncTelegramPrintCard: React.FC<{
   }
 
   const summaries = buildCncOrderSummaries(
-    card.kind === 'bath' ? card.bath.items : card.packet.items,
+    card.kind === 'bath'
+      ? card.bath.items
+      : card.kind === 'bazis-cut'
+        ? card.bazisCutSet.items
+        : card.packet.items,
   );
   return (
     <div className={`cnc-print-card${card.kind === 'bath' ? ' cnc-print-card--bath' : ''}`}>
@@ -2568,6 +2807,11 @@ const CncTelegramPrintCard: React.FC<{
           aria-label={`Номер карты раскроя ${card.bath.cutNumber}`}
         >
           {card.bath.cutNumber}
+        </span>
+      )}
+      {card.kind === 'bazis-cut' && (
+        <span className="cnc-print-card__bath-cut-number">
+          БР-{card.bazisCutSet.bazisCutSetId} · {card.bazisCutSet.name}
         </span>
       )}
     </div>
@@ -2622,6 +2866,156 @@ const CncCardDisplayToggle: React.FC<CncCardDisplayToggleProps> = ({
     </Tooltip>
   );
 };
+
+interface CncBazisCutSetCardViewProps {
+  card: CncTelegramBazisCutSetCard;
+  relationState: CncRelationCardState;
+  highlightEnabled: boolean;
+  summaryOnly: boolean;
+  displayToggleVisible: boolean;
+  onToggleDisplay: () => void;
+  onOpenOrder: (orderId: number) => void;
+  onOpenBazisCut: (setId: number) => void;
+}
+
+const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
+  card,
+  relationState,
+  highlightEnabled,
+  summaryOnly,
+  displayToggleVisible,
+  onToggleDisplay,
+  onOpenOrder,
+  onOpenBazisCut,
+}) => {
+  const orderSummaries = buildCncOrderSummaries(card.items);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const openSet = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    onOpenBazisCut(card.bazisCutSetId);
+  };
+
+  return (
+    <div
+      className={cncRelationCardClassName(
+        [
+          'status-board-card cnc-packet-card cnc-bazis-cut-card',
+          summaryOnly ? 'cnc-card--summary-only' : '',
+        ].filter(Boolean).join(' '),
+        relationState,
+        highlightEnabled,
+      )}
+      data-cnc-relation-state={highlightEnabled ? relationState : undefined}
+      data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
+      data-bazis-cut-set-id={card.bazisCutSetId}
+    >
+      <div className="status-board-card__top">
+        <div className="cnc-packet-card__title">
+          <div className="cnc-packet-card__summaries" aria-label="Итоги по ERP-заказам набора">
+            {orderSummaries.map((summary) => (
+              <CncOrderSummaryLine
+                key={summary.orderName}
+                summary={summary}
+                onOpenOrder={onOpenOrder}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="cnc-bazis-cut-card__actions">
+          <CncCardDisplayToggle
+            visible={displayToggleVisible}
+            standardView={!summaryOnly}
+            onToggle={onToggleDisplay}
+          />
+          <Tooltip title={card.name}>
+            <Button
+              type="text"
+              className="cnc-bazis-cut-card__badge"
+              aria-label={`Открыть Базис-раскрой БР-${card.bazisCutSetId}`}
+              onClick={openSet}
+            >
+              БР-{card.bazisCutSetId}
+            </Button>
+          </Tooltip>
+        </div>
+      </div>
+      {!summaryOnly && (
+        <>
+          <div
+            className="cnc-packet-card__tabs cnc-bazis-cut-card__tabs"
+            role="group"
+            aria-label="Данные Базис-раскроя"
+            onClick={stopCncCardClickPropagation}
+          >
+            <Button
+              type="text"
+              className="cnc-packet-card__tab"
+              icon={<FileTextOutlined />}
+              aria-expanded={detailsOpen}
+              aria-pressed={detailsOpen}
+              onClick={() => setDetailsOpen((current) => !current)}
+            >
+              {card.itemQuantityTotal} дет.
+            </Button>
+          </div>
+
+          {detailsOpen && (
+            <div
+              className="cnc-packet-card__items-panel"
+              onClick={stopCncCardClickPropagation}
+            >
+              <div className="cnc-packet-card__items" role="table" aria-label="Детали Базис-раскроя">
+                <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
+                  <span>Заказ</span>
+                  <span>Деталь / размер</span>
+                  <span>Кол.</span>
+                </div>
+                {card.items.map((item, index) => (
+                  <div
+                    className={[
+                      'cnc-packet-card__item',
+                      item.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : '',
+                    ].filter(Boolean).join(' ')}
+                    role="row"
+                    key={`${card.bazisCutSetId}:${item.detailId ?? 'manual'}:${index}`}
+                  >
+                    <span>
+                      <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {item.orderId !== null ? (
+                          <Button
+                            type="link"
+                            className="cnc-packet-card__order-link"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenOrder(item.orderId!);
+                            }}
+                          >
+                            {item.orderName}
+                          </Button>
+                        ) : (
+                          item.orderName
+                        )}
+                        <OrderDeletedTag deleted={item.orderDeleted} />
+                      </span>
+                    </span>
+                    <span>
+                      <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
+                      <span className="cnc-packet-card__size">
+                        {formatCncSize(item.widthMm, item.heightMm)}
+                      </span>
+                    </span>
+                    <span className="cnc-packet-card__qty">{item.quantity}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+});
+CncBazisCutSetCardView.displayName = 'CncBazisCutSetCardView';
 
 interface CncTelegramPacketCardProps {
   packet: CncTelegramPacket;
@@ -3879,12 +4273,13 @@ interface StatusBoardColumnViewProps {
   pendingOrders: Set<number>;
   cardDisplayMode: StatusBoardCardDisplayMode;
   loadingMore: boolean;
-  onLoadMore: (column: OrderStatusBoardColumn) => void;
+  onLoadMore: (column: OrderStatusBoardColumn) => Promise<boolean>;
   onMove: (
     card: OrderStatusBoardCard,
     statusId: number,
     statusName: string,
     trigger: HTMLElement | null,
+    revealTouchMovedCard?: boolean,
   ) => void;
   onAnnounce: (message: string) => void;
   onOpenOrder: (orderId: number) => void;
@@ -3907,6 +4302,11 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
   onOpenOrder,
   showFinancials,
 }) => {
+  const cardsRef = useRef<HTMLDivElement | null>(null);
+  const loadSentinelRef = useRef<HTMLDivElement | null>(null);
+  const requestedCursorRef = useRef<string | null>(null);
+  const [autoLoadFailed, setAutoLoadFailed] = useState(false);
+  const [observerUnavailable, setObserverUnavailable] = useState(false);
   const destination = column.status.id !== null && column.status.isActive;
   const currentUser = authSession.getUser();
   const packerDestinationAllowed =
@@ -3939,6 +4339,59 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
     }),
   });
 
+  useEffect(() => {
+    requestedCursorRef.current = null;
+    setAutoLoadFailed(false);
+    setObserverUnavailable(false);
+  }, [column.key, column.nextCursor]);
+
+  const requestNextPage = useCallback(async () => {
+    if (!column.nextCursor || loadingMore) return;
+    requestedCursorRef.current = column.nextCursor;
+    setAutoLoadFailed(false);
+    const loaded = await onLoadMore(column);
+    if (!loaded) setAutoLoadFailed(true);
+  }, [column, loadingMore, onLoadMore]);
+
+  useEffect(() => {
+    const root = cardsRef.current;
+    const sentinel = loadSentinelRef.current;
+    const cursor = column.nextCursor;
+    if (!root || !sentinel || !cursor || loadingMore || autoLoadFailed) return;
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setObserverUnavailable(true);
+      return;
+    }
+
+    let cancelled = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (
+          !entries.some((entry) => entry.isIntersecting) ||
+          requestedCursorRef.current === cursor
+        ) {
+          return;
+        }
+        requestedCursorRef.current = cursor;
+        observer.disconnect();
+        void onLoadMore(column).then((loaded) => {
+          if (!cancelled && !loaded) setAutoLoadFailed(true);
+        });
+      },
+      {
+        root,
+        rootMargin: '0px 0px 320px 0px',
+        threshold: 0,
+      },
+    );
+    observer.observe(sentinel);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [autoLoadFailed, column, loadingMore, onLoadMore]);
+
   return (
     <article
       ref={(node) => dropRef(node)}
@@ -3967,7 +4420,11 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
         />
       </header>
 
-      <div className="status-board-column__cards">
+      <div
+        ref={cardsRef}
+        className="status-board-column__cards"
+        aria-busy={loadingMore}
+      >
         {column.cards.length === 0 ? (
           <div className="status-board-column__empty">В этой колонке пока нет заказов</div>
         ) : (
@@ -3991,13 +4448,32 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
           ))
         )}
         {column.nextCursor && (
+          <div
+            ref={loadSentinelRef}
+            className={`status-board-column__load-sentinel${
+              loadingMore ? ' status-board-column__load-sentinel--loading' : ''
+            }`}
+            data-testid={`status-board-column-load-sentinel-${column.key}`}
+            role="status"
+            aria-live="polite"
+          >
+            {loadingMore ? (
+              <>
+                <Spin size="small" />
+                <span>Загружаем следующие заказы…</span>
+              </>
+            ) : null}
+          </div>
+        )}
+        {column.nextCursor && (autoLoadFailed || observerUnavailable) && (
           <Button
             block
             className="status-board-column__more"
             loading={loadingMore}
-            onClick={() => onLoadMore(column)}
+            onClick={() => void requestNextPage()}
           >
-            Загрузить ещё · {column.cards.length} из {column.total}
+            {autoLoadFailed ? 'Повторить загрузку' : 'Загрузить ещё'} ·{' '}
+            {column.cards.length} из {column.total}
           </Button>
         )}
       </div>
@@ -4128,7 +4604,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     ),
     onAnnounce,
     onDrop: (destination, trigger) => {
-      onMove(card, destination.statusId, destination.statusName, trigger);
+      onMove(card, destination.statusId, destination.statusName, trigger, true);
     },
   });
   const showCompactDetails = displayMode !== 'minimal';
@@ -4602,12 +5078,20 @@ function buildCncColumnTotals(
           !relationContext || getCncBathRelationState(bath, relationContext) !== 'dimmed',
         )
         .flatMap((bath) => bath.items)
-      : column.packets
-        .filter((packet) =>
-          (!relationContext && !detailedPacketHighlightEnabled) ||
-          getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed',
-        )
-        .flatMap((packet) => packet.items);
+      : [
+          ...column.packets
+            .filter((packet) =>
+              (!relationContext && !detailedPacketHighlightEnabled) ||
+              getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed',
+            )
+            .flatMap((packet) => packet.items),
+          ...(column.bazisCutSets ?? [])
+            .filter((card) =>
+              (!relationContext && !detailedPacketHighlightEnabled) ||
+              getCncBazisCutSetDisplayState(card, relationContext, detailedContext) !== 'dimmed',
+            )
+            .flatMap((card) => card.items),
+        ];
 
   return items.reduce<CncColumnTotals>(
     (totals, item) => {
@@ -4837,6 +5321,24 @@ function getCncPacketDisplayState(
     : getCncPacketRelationState(packet, relationContext);
 }
 
+function getCncBazisCutSetDisplayState(
+  card: CncTelegramBazisCutSetCard,
+  relationContext: CncRelationContext | null,
+  detailedContext: CncDetailedContext | null,
+): CncRelationCardState {
+  const fingerprint = buildCncBazisCutSetFingerprint(card);
+  if (cncDetailedContextHasActiveDetail(detailedContext)) {
+    return cncDetailFingerprintsIntersect(fingerprint, detailedContext.fingerprint)
+      ? 'related'
+      : 'dimmed';
+  }
+  if (!relationContext) return 'normal';
+  return cncFingerprintsIntersect(fingerprint, relationContext.fingerprint) ||
+    cncMentionedOrderKeysIntersect(fingerprint, relationContext.fingerprint)
+    ? 'related'
+    : 'dimmed';
+}
+
 function getCncDetailedPacketState(
   packet: CncTelegramPacket,
   context: CncDetailedContext | null,
@@ -4899,6 +5401,20 @@ function buildCncPacketFingerprint(packet: CncTelegramPacket): CncRelationFinger
   return fingerprint;
 }
 
+function buildCncBazisCutSetFingerprint(
+  card: CncTelegramBazisCutSetCard,
+): CncRelationFingerprint {
+  const fingerprint = emptyCncRelationFingerprint();
+  for (const item of card.items) {
+    if (item.detailId !== null) fingerprint.detailIds.add(item.detailId);
+    addCncOrderRelationKeys(fingerprint, item.orderName, item.orderId);
+    for (const fallbackKey of cncBazisCutSetItemFallbackKeys(item)) {
+      fingerprint.fallbackKeys.add(fallbackKey);
+    }
+  }
+  return fingerprint;
+}
+
 function buildCncOrderCardFingerprint(card: OrderStatusBoardCard): CncRelationFingerprint {
   const fingerprint = buildCncOrderIdFingerprint(card.orderId);
   addCncOrderRelationKeys(fingerprint, card.orderName, card.orderId);
@@ -4945,6 +5461,16 @@ function cncPacketItemFallbackKeys(item: CncTelegramPacket['items'][number]): st
 }
 
 function cncBathItemFallbackKeys(item: CncTelegramBathCard['items'][number]): string[] {
+  return cncRelationOrderKeys(item.orderName, item.orderId)
+    .map((orderKey) =>
+      cncRelationFallbackKey(orderKey, item.detailNumber, item.widthMm, item.heightMm),
+    )
+    .filter((key): key is string => key !== null);
+}
+
+function cncBazisCutSetItemFallbackKeys(
+  item: CncTelegramBazisCutSetCard['items'][number],
+): string[] {
   return cncRelationOrderKeys(item.orderName, item.orderId)
     .map((orderKey) =>
       cncRelationFallbackKey(orderKey, item.detailNumber, item.widthMm, item.heightMm),
@@ -5216,4 +5742,80 @@ function cncItemQuantityWarningTitle(item: CncTelegramPacket['items'][number]): 
     return 'Низкая уверенность распознавания';
   }
   return '';
+}
+
+function statusBoardSortDirectionOptions(
+  sortBy: OrderStatusBoardSortBy,
+): Array<{ label: string; value: OrderStatusBoardSortOrder }> {
+  switch (sortBy) {
+    case 'orderNumber':
+      return [
+        { label: 'Меньшие', value: 'asc' },
+        { label: 'Большие', value: 'desc' },
+      ];
+    case 'plannedDate':
+      return [
+        { label: 'Ранние', value: 'asc' },
+        { label: 'Поздние', value: 'desc' },
+      ];
+    case 'updatedAt':
+      return [
+        { label: 'Старые', value: 'asc' },
+        { label: 'Новые', value: 'desc' },
+      ];
+    case 'priority':
+      return [
+        { label: 'Срочные', value: 'asc' },
+        { label: 'Обычные', value: 'desc' },
+      ];
+  }
+}
+
+function readStatusBoardSortPreference(
+  userId: string | undefined,
+  board: OrderStatusBoardType,
+): { sortBy: OrderStatusBoardSortBy; sortOrder: OrderStatusBoardSortOrder } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(statusBoardSortPreferenceKey(userId, board));
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const sortBy = value.sortBy;
+    const sortOrder = value.sortOrder;
+    if (
+      (sortBy === 'priority'
+        || sortBy === 'orderNumber'
+        || sortBy === 'plannedDate'
+        || sortBy === 'updatedAt')
+      && (sortOrder === 'asc' || sortOrder === 'desc')
+    ) {
+      return { sortBy, sortOrder };
+    }
+  } catch {
+    // Invalid or unavailable browser storage falls back to the safe server default.
+  }
+  return null;
+}
+
+function writeStatusBoardSortPreference(
+  userId: string | undefined,
+  board: OrderStatusBoardType,
+  value: { sortBy: OrderStatusBoardSortBy; sortOrder: OrderStatusBoardSortOrder },
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      statusBoardSortPreferenceKey(userId, board),
+      JSON.stringify(value),
+    );
+  } catch {
+    // The URL still carries the current choice when browser storage is unavailable.
+  }
+}
+
+function statusBoardSortPreferenceKey(
+  userId: string | undefined,
+  board: OrderStatusBoardType,
+): string {
+  return `${STATUS_BOARD_SORT_STORAGE_PREFIX}.${userId ?? 'anonymous'}.${board}`;
 }

@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -187,6 +187,29 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(probeFn).toContain('107_bazis_cut_erp_identity*');
     expect(probeFn).toContain("'bazis_cut_set_details'::regclass");
     expect(probeFn).toContain('manual snapshot edits are preserved by migration 107');
+  });
+
+  it('pins migration 110 Telegram label evidence, provenance, and immutability markers', () => {
+    const migration110Probe = probeFn.slice(
+      probeFn.indexOf('110_cnc_telegram_label_maps*'),
+      probeFn.indexOf('*) return 2'),
+    );
+    for (const marker of [
+      'cnc_telegram_packet_evidence_set',
+      'cnc_telegram_packet_item_evidence',
+      'cnc_telegram_label_sheet_map',
+      'cnc_telegram_label_placement',
+      'label_generation_media_asset',
+      'label_generation_telegram_source',
+      'fk_label_generation_telegram_source_media',
+      'fk_label_generation_telegram_source_sheet',
+      'fk_label_generation_telegram_source_placement',
+      'trg_label_generation_cut_placement_immutable',
+      'trg_label_generation_cut_source_exclusive_cut',
+      'trg_label_generation_cut_source_exclusive_telegram',
+      'reject_cnc_telegram_label_immutable_mutation()',
+      'guard_label_generation_cut_source_exclusive()',
+    ]) expect(migration110Probe).toContain(marker);
   });
 });
 

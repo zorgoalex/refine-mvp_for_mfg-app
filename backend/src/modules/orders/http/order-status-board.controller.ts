@@ -9,7 +9,11 @@ import {
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { OrderStatusBoardService } from '../application/order-status-board.service';
-import type { OrderStatusBoardQuery } from '../application/order-status-board.types';
+import type {
+  OrderStatusBoardQuery,
+  OrderStatusBoardSortBy,
+  OrderStatusBoardSortOrder,
+} from '../application/order-status-board.types';
 import type { OrderStatusBoardResponseDto } from '../dto/order-status-board.dto';
 import { OrdersRuntimeConfigService } from './orders-runtime-config.service';
 
@@ -37,6 +41,12 @@ export class OrderStatusBoardController {
   @ApiQuery({ name: 'plannedFrom', required: false, type: String })
   @ApiQuery({ name: 'plannedTo', required: false, type: String })
   @ApiQuery({ name: 'orderIds', required: false, type: String })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['priority', 'orderNumber', 'plannedDate', 'updatedAt'],
+  })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'] })
   @ApiResponse({ status: 200, description: 'Order status board projection' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -65,6 +75,8 @@ export class OrderStatusBoardController {
       this.logger.log({
         event: 'orders.status_board.read',
         board: query.board,
+        sortBy: query.sortBy,
+        sortOrder: query.sortOrder,
         requestKind: query.column ? 'column' : 'initial',
         durationMs: Date.now() - startedAt,
         returnedCardCount: response.columns.reduce(
@@ -79,6 +91,8 @@ export class OrderStatusBoardController {
       this.logger.error({
         event: 'orders.status_board.read',
         board: query?.board ?? rawBoardName(rawQuery.board),
+        sortBy: query?.sortBy ?? null,
+        sortOrder: query?.sortOrder ?? null,
         requestKind: query?.column || rawQuery.column ? 'column' : 'initial',
         durationMs: Date.now() - startedAt,
         errorCode: classifyOrderStatusBoardError(error),
@@ -157,6 +171,8 @@ export function parseOrderStatusBoardQuery(
     throw validationError('includeDone', 'includeDone is only valid for production board');
   }
   const orderIds = parseOrderIds(query.orderIds);
+  const sortBy = parseSortBy(query.sortBy);
+  const sortOrder = parseSortOrder(query.sortOrder);
 
   return {
     board,
@@ -170,7 +186,30 @@ export function parseOrderStatusBoardQuery(
     ...(plannedFrom ? { plannedFrom } : {}),
     ...(plannedTo ? { plannedTo } : {}),
     ...(orderIds.length > 0 ? { orderIds } : {}),
+    sortBy,
+    sortOrder,
   };
+}
+
+function parseSortBy(value: unknown): OrderStatusBoardSortBy {
+  const raw = single(value, 'sortBy');
+  if (raw === undefined || raw === '') return 'priority';
+  if (
+    raw === 'priority'
+    || raw === 'orderNumber'
+    || raw === 'plannedDate'
+    || raw === 'updatedAt'
+  ) {
+    return raw;
+  }
+  throw validationError('sortBy', 'sortBy is not supported');
+}
+
+function parseSortOrder(value: unknown): OrderStatusBoardSortOrder {
+  const raw = single(value, 'sortOrder');
+  if (raw === undefined || raw === '') return 'asc';
+  if (raw === 'asc' || raw === 'desc') return raw;
+  throw validationError('sortOrder', 'sortOrder must be asc or desc');
 }
 
 function parseInteger(

@@ -91,6 +91,55 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toContain('scroll-snap-type: x proximity');
   });
 
+  it('collapses mobile board controls and doubles standard MDF columns', () => {
+    expect(page).toContain('const StatusBoardToolbarDisclosure');
+    expect(page).toContain('aria-expanded={expanded}');
+    expect(page).toContain('setMobileToolbarExpanded((current) => !current)');
+    expect(page).toContain('setMobileToolbarExpanded(true)');
+    expect(page).toContain("cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : ''");
+    expect(css).toContain('.status-board-toolbar-disclosure__toggle');
+    expect(css).toContain('min-height: 44px');
+    expect(css).toContain('grid-template-rows: 0fr');
+    expect(css).toContain('visibility: hidden');
+    expect(css).toContain('transition-property: grid-template-rows, opacity, visibility');
+    expect(css).toContain('.status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed)');
+    expect(css).toContain('min-width: 200%');
+    expect(tabletCss).toContain('.status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed)');
+    expect(tabletCss).toContain('clamp(480px, 48vw, 552px)');
+  });
+
+  it('passes horizontal phone swipes from card lists to the board viewport', () => {
+    expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-column__cards \{[^}]*overscroll-behavior-x: auto;[^}]*overscroll-behavior-y: contain;[^}]*touch-action: pan-x pan-y;/,
+    );
+    expect(css).toContain('.status-board-card__drag--touch');
+    expect(css).toContain('touch-action: none');
+  });
+
+  it('focuses and reveals a card after a successful touch move', () => {
+    expect(page).toContain('const revealTouchMovedCardRef = useRef(false)');
+    expect(page).toContain('revealTouchMovedCardRef.current = revealTouchMovedCard');
+    expect(page).toContain('onMove(card, destination.statusId, destination.statusName, trigger, true)');
+    expect(page).toContain('movedCard.focus({ preventScroll: true })');
+    expect(page).toContain('movedCard.scrollIntoView({');
+    expect(page).toContain("window.matchMedia('(prefers-reduced-motion: reduce)').matches");
+    expect(page).toContain("inline: 'center'");
+    expect(css).toMatch(/@media \(max-width: 768px\) \{[\s\S]*?\.status-board-card:focus \{[^}]*outline: 2px solid #1677ff;/);
+  });
+
+  it('keeps only tabs and the settings disclosure in the mobile board header', () => {
+    expect(page).toContain('label="Настройки доски"');
+    expect(page).toContain('label="Настройки МДФ"');
+    expect(page.match(/className="status-board-toolbar__tablet-refresh"/g)).toHaveLength(2);
+    expect(page).toContain('className="status-board-toolbar__mobile-add-bath"');
+    expect(css).toContain('.status-board-page > .operational-page-head');
+    expect(css).toContain('.status-board-page > .status-board-page__header');
+    expect(css).toMatch(/\.status-board-page > \.status-board-page__header\s*\{\s*display: none;/);
+    expect(css).toContain('.status-board-toolbar__tablet-refresh.ant-btn');
+    expect(css).toContain('.status-board-toolbar__mobile-add-bath.ant-btn');
+    expect(css).toContain('.status-board-tabs .ant-tabs-tab');
+  });
+
   it('keeps the upper scrollbar synchronized with the board viewport', () => {
     expect(page).toContain('topScrollbarTrack.style.width');
     expect(page).toContain('scrollBoardFromTop');
@@ -98,6 +147,19 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('aria-controls="status-board-viewport"');
     expect(css).toContain('.status-board-scrollbar');
     expect(css).toContain('overflow-x: auto');
+  });
+
+  it('loads the next column page before vertical scroll reaches the bottom', () => {
+    expect(page).toContain('const loadSentinelRef = useRef<HTMLDivElement | null>(null)');
+    expect(page).toContain("rootMargin: '0px 0px 320px 0px'");
+    expect(page).toContain('root,');
+    expect(page).toContain('observer.observe(sentinel)');
+    expect(page).toContain('requestedCursorRef.current === cursor');
+    expect(page).toContain('aria-busy={loadingMore}');
+    expect(page).toContain('Загружаем следующие заказы…');
+    expect(page).toContain("autoLoadFailed ? 'Повторить загрузку' : 'Загрузить ещё'");
+    expect(css).toContain('.status-board-column__load-sentinel');
+    expect(css).toContain('font-variant-numeric: tabular-nums');
   });
 
   it('keeps desktop MDF auto-height but gives tablet a full-height pannable viewport', () => {
@@ -147,6 +209,20 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('height: 32px');
   });
 
+  it('offers persistent server-side card sorting for both status boards', () => {
+    expect(page).toContain('Сортировка карточек');
+    expect(page).toContain('Сортировать по');
+    expect(page).toContain("value: 'orderNumber'");
+    expect(page).toContain("value: 'plannedDate'");
+    expect(page).toContain("value: 'updatedAt'");
+    expect(page).toContain('sortBy: viewState.sortBy');
+    expect(page).toContain('sortOrder: viewState.sortOrder');
+    expect(page).toContain('window.localStorage');
+    expect(page).toContain('status-board-toolbar__sort-settings');
+    expect(page).toContain('switchStatusBoardView');
+    expect(page).toContain('readStatusBoardSortPreference(currentUser?.id, view)');
+  });
+
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
@@ -188,6 +264,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('dateTo: displayRange.dateTo');
     expect(page).toContain('datasetKey');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
+    expect(page).toContain('CncBazisCutSetCardView');
+    expect(page).toContain('Итоги по ERP-заказам набора');
+    expect(page).toContain('aria-label={`Открыть Базис-раскрой БР-${card.bazisCutSetId}`}');
+    expect(page).toContain('getCncBazisCutSetDisplayState(card, relationContext, detailedContext)');
+    expect(page).toContain('buildCncBazisCutSetFingerprint');
+    expect(css).toContain('.cnc-bazis-cut-card');
     expect(page).not.toContain('buildCncDetailedDisplayColumns(columns)');
     expect(page).toContain("getCncBathRelationState(bath, relationContext) !== 'dimmed'");
     expect(page).toContain("getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed'");
@@ -203,6 +285,26 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
+  });
+
+  it('keeps the Basis-cut card compact and expands its full detail list', () => {
+    const cardStart = page.indexOf('const CncBazisCutSetCardView =');
+    const cardEnd = page.indexOf('interface CncTelegramPacketCardProps', cardStart);
+    const card = page.slice(cardStart, cardEnd);
+
+    expect(card).toContain('const [detailsOpen, setDetailsOpen] = useState(false)');
+    expect(card).toContain('className="cnc-bazis-cut-card__badge"');
+    expect(card).toContain('onClick={openSet}');
+    expect(card).not.toContain('cnc-bazis-cut-card__set-link');
+    expect(card).not.toContain('cnc-bazis-cut-card__open');
+    expect(card).not.toContain('card.positionCount');
+    expect(card).toContain('aria-label="Данные Базис-раскроя"');
+    expect(card).toContain('aria-label="Детали Базис-раскроя"');
+    expect(card).toContain('setDetailsOpen((current) => !current)');
+    expect(card).toContain('card.items.map((item, index)');
+    expect(css).toMatch(
+      /\.cnc-bazis-cut-card__tabs\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s,
+    );
   });
 
   it('keeps bath cards printable with SVG and PDF previews', () => {

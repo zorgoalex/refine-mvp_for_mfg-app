@@ -5,14 +5,109 @@
    ============================================ */
 
 @media (max-width: 768px) {
-  .calendar-page-header {
-    align-items: stretch;
-    flex-direction: column;
-    padding: 12px 12px 0;
+  .calendar-page-wrapper > .operational-page-head,
+  .calendar-page-wrapper > .calendar-page-header {
+    display: none;
   }
 
-  .calendar-page-header__actions {
-    flex-wrap: wrap;
+  .calendar-mobile-disclosure {
+    width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
+    overflow: clip;
+    background: var(--app-surface);
+    border-bottom: 1px solid var(--app-border-soft);
+    box-shadow: 0 2px 4px var(--app-shadow);
+  }
+
+  .calendar-mobile-disclosure__toggle {
+    width: 100%;
+    min-height: 44px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    border: 0;
+    background: transparent;
+    color: var(--app-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition-property: transform;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+
+  .calendar-mobile-disclosure__toggle:active {
+    transform: scale(0.98);
+  }
+
+  .calendar-mobile-disclosure__toggle:focus-visible {
+    outline: 2px solid #1677ff;
+    outline-offset: -2px;
+  }
+
+  .calendar-mobile-disclosure__label {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    overflow: hidden;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .calendar-mobile-disclosure__summary {
+    min-width: 0;
+    margin-left: auto;
+    overflow: hidden;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .calendar-mobile-disclosure__chevron {
+    flex: 0 0 auto;
+    transition-property: transform;
+    transition-duration: 180ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  .calendar-mobile-disclosure--expanded .calendar-mobile-disclosure__chevron {
+    transform: rotate(180deg);
+  }
+
+  .calendar-mobile-disclosure__content {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: 0fr;
+    visibility: hidden;
+    opacity: 0;
+    transition-property: grid-template-rows, opacity, visibility;
+    transition-duration: 180ms, 120ms, 0s;
+    transition-delay: 0s, 0s, 180ms;
+    transition-timing-function: cubic-bezier(0.2, 0, 0, 1), ease-out, linear;
+  }
+
+  .calendar-mobile-disclosure__content-inner {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .calendar-mobile-disclosure--expanded .calendar-mobile-disclosure__content {
+    grid-template-rows: 1fr;
+    visibility: visible;
+    opacity: 1;
+    transition-delay: 0s;
+  }
+
+  .calendar-mobile-disclosure--expanded .calendar-mobile-disclosure__content-inner {
+    max-height: min(70vh, 640px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   /* Двухрядная навигация (AD-4) */
@@ -20,12 +115,29 @@
     flex-direction: column;
     align-items: stretch;
     gap: 8px;
+    padding: 8px;
+    border-bottom: 0;
+    box-shadow: none;
+  }
+
+  .calendar-navigation--mobile .calendar-navigation__tablet-filter {
+    width: 100%;
+    display: block;
+  }
+
+  .calendar-navigation--mobile .calendar-navigation__tablet-filter .ant-btn {
+    width: 100%;
+    min-height: 44px;
   }
 
   .calendar-navigation__row {
     display: flex;
     gap: 6px;
     width: 100%;
+  }
+
+  .calendar-navigation__row :where(.ant-btn, .ant-input-affix-wrapper, .ant-segmented-item) {
+    min-height: 44px;
   }
 
   .calendar-navigation__quick-filter {
@@ -60,7 +172,7 @@
      обрезки текста при 4 кнопках в ряд. */
   .calendar-navigation__flex-btn--icon-only {
     flex: 0 0 auto;
-    min-width: 36px;
+    min-width: 44px;
     padding-left: 6px;
     padding-right: 6px;
   }
@@ -109,6 +221,15 @@
   .order-card__date,
   .order-card__client {
     font-size: 11px;
+  }
+}
+
+@media (max-width: 768px) and (prefers-reduced-motion: reduce) {
+  .calendar-mobile-disclosure__toggle,
+  .calendar-mobile-disclosure__chevron,
+  .calendar-mobile-disclosure__content {
+    transition-duration: 0.01ms;
+    transition-delay: 0s;
   }
 }
 

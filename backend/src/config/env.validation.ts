@@ -200,6 +200,7 @@ export const envSchema = z
     BACKEND_CUT_AUTO_TRIGGER: booleanFromEnv.default(false),
     BACKEND_CUT_NATIVE_PORTRAIT: booleanFromEnv.default(false),
     BACKEND_ENABLE_LABELS: booleanFromEnv.default(false),
+    LABEL_TELEGRAM_CUT_MAP_FALLBACK_ENABLED: booleanFromEnv.default(false),
     BACKEND_ENABLE_SHEET_MATERIALS: booleanFromEnv.default(false),
     // SP3: gate the migration-029-dependent sheet columns in backend ORDER reads
     // (sheet_material_type_id / sheet_eligible / is_sheet_shadow + COALESCE joins).

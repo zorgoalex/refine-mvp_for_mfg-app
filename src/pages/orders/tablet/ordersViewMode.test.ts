@@ -12,6 +12,7 @@ describe('orders tablet view state', () => {
     expect(resolveOrdersViewMode('invalid', 'cards')).toBe('cards');
     expect(resolveOrdersViewMode(null, 'board')).toBe('list');
     expect(resolveOrdersViewMode(null, 'invalid')).toBe('list');
+    expect(resolveOrdersViewMode(null, 'invalid', 'cards')).toBe('cards');
   });
 
   it('uses a user-scoped storage key', () => {
