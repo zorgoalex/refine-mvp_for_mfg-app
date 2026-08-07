@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Вкладки ERP сохраняются после возврата в браузер",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Открытые рабочие вкладки сохраняются отдельно для каждого пользователя в долговременном хранилище и восстанавливаются после выгрузки фоновой страницы мобильным браузером.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Миниатюры Telegram-раскроев на бирках",
     services: ["ERP", "Cutting", "SVG/DXF"],
     repositories: ["repo_erp"],
