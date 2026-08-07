@@ -190,6 +190,7 @@ class CncTelegramWorker:
         audit = ScanAudit.start(
             audit_spool, chat_id, workday, session_user_id,
             self.config.parser_version, self.config.can_write_chat,
+            business_timezone=self.config.business_timezone,
         )
         await audit_spool.flush(self.erp.audit_batch)
         try:
