@@ -29,6 +29,7 @@ import {
   DownloadOutlined,
   UploadOutlined,
   DatabaseOutlined,
+  DownOutlined,
   ProjectOutlined,
   TableOutlined,
 } from "@ant-design/icons";
@@ -157,12 +158,65 @@ const withOrderListHeaderTitles = (columns: ColumnsType<any>): ColumnsType<any> 
     title: renderOrderListHeaderTitle(column.title as React.ReactNode),
   }));
 
+interface OrdersMobileHeaderDisclosureProps {
+  children: React.ReactNode;
+  expanded: boolean;
+  mobile: boolean;
+  summary: string;
+  onToggle: () => void;
+}
+
+const OrdersMobileHeaderDisclosure: React.FC<OrdersMobileHeaderDisclosureProps> = ({
+  children,
+  expanded,
+  mobile,
+  summary,
+  onToggle,
+}) => (
+  <section
+    className={[
+      'orders-mobile-header-disclosure',
+      mobile ? 'orders-mobile-header-disclosure--mobile' : '',
+      expanded ? 'orders-mobile-header-disclosure--expanded' : '',
+    ].filter(Boolean).join(' ')}
+  >
+    <button
+      type="button"
+      className="orders-mobile-header-disclosure__toggle"
+      aria-expanded={expanded}
+      aria-controls="orders-mobile-header-controls"
+      onClick={onToggle}
+    >
+      <span className="orders-mobile-header-disclosure__label">
+        <FilterOutlined aria-hidden="true" />
+        Действия и фильтры
+      </span>
+      <span className="orders-mobile-header-disclosure__summary">{summary}</span>
+      <DownOutlined
+        className="orders-mobile-header-disclosure__chevron"
+        aria-hidden="true"
+      />
+    </button>
+    <div
+      id="orders-mobile-header-controls"
+      className="orders-mobile-header-disclosure__content"
+    >
+      <div className="orders-mobile-header-disclosure__content-inner">
+        <div className="orders-mobile-header-disclosure__actions">
+          {children}
+        </div>
+      </div>
+    </div>
+  </section>
+);
+
 export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [searchOrderId, setSearchOrderId] = useState<string>("");
   const [highlightedOrderId, setHighlightedOrderId] = useState<number | null>(null);
   const [form] = Form.useForm();
   const [filtersVisible, setFiltersVisible] = useState(false);
+  const [mobileHeaderExpanded, setMobileHeaderExpanded] = useState(false);
   const [showResultCount, setShowResultCount] = useState(false);
   const [showMyOrders, setShowMyOrders] = useState(false);
   const [groupMode, setGroupMode] = useState<'any' | 'all' | 'primary' | 'none'>('any');
@@ -262,13 +316,18 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         storedValue = null;
       }
     }
-    const resolved = resolveOrdersViewMode(queryValue, storedValue);
-    return resolved === 'board' && !canViewStatusBoard ? 'list' : resolved;
-  }, [canViewStatusBoard, location.search, ordersViewKey]);
+    const resolved = resolveOrdersViewMode(
+      queryValue,
+      storedValue,
+      isMobile ? 'cards' : 'list',
+    );
+    if (resolved !== 'board') return resolved;
+    return isMobile ? 'cards' : canViewStatusBoard ? 'board' : 'list';
+  }, [canViewStatusBoard, isMobile, location.search, ordersViewKey]);
   const selectOrdersView = useCallback((nextMode: OrdersViewMode) => {
-    if (!isTablet) return;
+    if (!isTablet && !isMobile) return;
     if (nextMode === 'board') {
-      if (!canViewStatusBoard) return;
+      if (!isTablet || !canViewStatusBoard) return;
       const returnMode = ordersViewMode === 'cards' ? 'cards' : 'list';
       if (ordersViewKey) {
         try {
@@ -295,25 +354,36 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       pathname: location.pathname,
       search: setOrdersViewQuery(location.search, nextMode),
     });
-  }, [canViewStatusBoard, isTablet, location.pathname, location.search, ordersViewKey, ordersViewMode, routerNavigate]);
+  }, [canViewStatusBoard, isMobile, isTablet, location.pathname, location.search, ordersViewKey, ordersViewMode, routerNavigate]);
 
   useEffect(() => {
-    if (!isTablet || appSettingsLoading) return;
+    if ((!isTablet && !isMobile) || appSettingsLoading) return;
     if (new URLSearchParams(location.search).get('view') !== 'board') return;
-    if (canViewStatusBoard) {
+    if (isTablet && canViewStatusBoard) {
       routerNavigate('/order-status-board', { replace: true });
       return;
     }
     routerNavigate({
       pathname: location.pathname,
-      search: setOrdersViewQuery(location.search, 'list'),
+      search: setOrdersViewQuery(location.search, isMobile ? 'cards' : 'list'),
     }, { replace: true });
-  }, [appSettingsLoading, canViewStatusBoard, isTablet, location.pathname, location.search, routerNavigate]);
+  }, [appSettingsLoading, canViewStatusBoard, isMobile, isTablet, location.pathname, location.search, routerNavigate]);
   const orderFilterFormSync = useMemo(
     () => buildOrderListFilterFormSync(filters, { useBackendOrdersRead, canViewUsers }),
     [filters, useBackendOrdersRead, canViewUsers],
   );
   const hasActiveOrderFilters = orderFilterFormSync.hasActiveFilters;
+  const ordersHeaderSummary = [
+    ordersViewMode === 'cards' ? 'Карточки' : 'Список',
+    hasActiveOrderFilters || showMyOrders ? 'фильтры активны' : '',
+  ].filter(Boolean).join(' · ');
+  const toggleMobileHeader = useCallback(() => {
+    setMobileHeaderExpanded((current) => {
+      const next = !current;
+      if (!next) setFiltersVisible(false);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (canViewFinancials) return;
@@ -1436,23 +1506,28 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       <List
         title="Заказы"
         headerButtons={({ createButtonProps }) => (
-          <>
-            {isTablet && (
+          <OrdersMobileHeaderDisclosure
+            expanded={mobileHeaderExpanded}
+            mobile={isMobile}
+            summary={ordersHeaderSummary}
+            onToggle={toggleMobileHeader}
+          >
+            {(isTablet || isMobile) && (
               <Segmented
-                className="orders-tablet-view-switch"
+                className="orders-tablet-view-switch orders-view-switch"
                 aria-label="Вид заказов"
                 value={ordersViewMode}
                 onChange={(value) => selectOrdersView(value as OrdersViewMode)}
                 options={[
                   {
                     value: 'list',
-                    label: <Tooltip title="Таблица"><span aria-label="Таблица"><TableOutlined /></span></Tooltip>,
+                    label: <Tooltip title="Список"><span aria-label="Список"><TableOutlined />{isMobile ? ' Список' : ''}</span></Tooltip>,
                   },
                   {
                     value: 'cards',
-                    label: <Tooltip title="Карточки"><span aria-label="Карточки"><AppstoreOutlined /></span></Tooltip>,
+                    label: <Tooltip title="Карточки"><span aria-label="Карточки"><AppstoreOutlined />{isMobile ? ' Карточки' : ''}</span></Tooltip>,
                   },
-                  ...(canViewStatusBoard
+                  ...(isTablet && canViewStatusBoard
                     ? [{
                       value: 'board',
                       label: <Tooltip title="Доска статусов"><span aria-label="Доска статусов"><ProjectOutlined /></span></Tooltip>,
@@ -1546,7 +1621,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 loading={snapshotImporting}
               />
             </Dropdown>}
-          </>
+          </OrdersMobileHeaderDisclosure>
         )}
       >
         <Modal
@@ -1607,8 +1682,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             </div>
           </div>
         </Modal>
-        {filtersVisible && (
-          <Card style={{ marginBottom: 16 }}>
+        {filtersVisible && (!isMobile || mobileHeaderExpanded) && (
+          <Card className="orders-filter-card" style={{ marginBottom: 16 }}>
             <Form form={form} layout="vertical" onFinish={handleFilter}>
               <Row gutter={16}>
                 <Col xs={24} sm={12} md={6} lg={4}>
@@ -1735,8 +1810,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             </Form>
           </Card>
         )}
-        {isMobile || (isTablet && ordersViewMode === 'cards') ? (
-          <div className={isTablet ? 'order-card-list--tablet' : undefined}>
+        {(isMobile || isTablet) && ordersViewMode === 'cards' ? (
+          <div className={isTablet ? 'order-card-list--tablet' : 'order-card-list--mobile'}>
             <OrderCardList
               rows={tableProps.dataSource ?? []}
               loading={!!tableProps.loading}

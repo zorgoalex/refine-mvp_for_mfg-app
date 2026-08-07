@@ -10,10 +10,11 @@ export function isOrdersViewMode(value: unknown): value is OrdersViewMode {
 export function resolveOrdersViewMode(
   queryValue: unknown,
   storedValue: unknown,
+  fallback: Exclude<OrdersViewMode, 'board'> = 'list',
 ): OrdersViewMode {
   if (isOrdersViewMode(queryValue)) return queryValue;
   if (storedValue === 'list' || storedValue === 'cards') return storedValue;
-  return 'list';
+  return fallback;
 }
 
 export function ordersViewStorageKey(userId: string | number | null | undefined): string | null {
