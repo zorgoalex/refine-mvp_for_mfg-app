@@ -91,6 +91,23 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toContain('scroll-snap-type: x proximity');
   });
 
+  it('collapses mobile board controls and doubles standard MDF columns', () => {
+    expect(page).toContain('const StatusBoardToolbarDisclosure');
+    expect(page).toContain('aria-expanded={expanded}');
+    expect(page).toContain('setMobileToolbarExpanded((current) => !current)');
+    expect(page).toContain('setMobileToolbarExpanded(true)');
+    expect(page).toContain("cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : ''");
+    expect(css).toContain('.status-board-toolbar-disclosure__toggle');
+    expect(css).toContain('min-height: 44px');
+    expect(css).toContain('grid-template-rows: 0fr');
+    expect(css).toContain('visibility: hidden');
+    expect(css).toContain('transition-property: grid-template-rows, opacity, visibility');
+    expect(css).toContain('.status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed)');
+    expect(css).toContain('min-width: 200%');
+    expect(tabletCss).toContain('.status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed)');
+    expect(tabletCss).toContain('clamp(480px, 48vw, 552px)');
+  });
+
   it('keeps the upper scrollbar synchronized with the board viewport', () => {
     expect(page).toContain('topScrollbarTrack.style.width');
     expect(page).toContain('scrollBoardFromTop');

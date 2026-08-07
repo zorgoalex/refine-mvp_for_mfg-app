@@ -35,6 +35,7 @@ import {
   CloseOutlined,
   CompressOutlined,
   DownloadOutlined,
+  DownOutlined,
   DragOutlined,
   ExpandOutlined,
   FilterOutlined,
@@ -234,6 +235,54 @@ interface OrderStatusBoardPageProps {
   fixedView?: OrderStatusBoardViewState['view'];
 }
 
+interface StatusBoardToolbarDisclosureProps {
+  children: React.ReactNode;
+  contentId: string;
+  expanded: boolean;
+  label: string;
+  summary: string;
+  onToggle: () => void;
+}
+
+const StatusBoardToolbarDisclosure: React.FC<StatusBoardToolbarDisclosureProps> = ({
+  children,
+  contentId,
+  expanded,
+  label,
+  summary,
+  onToggle,
+}) => (
+  <section
+    className={[
+      'status-board-toolbar-disclosure',
+      expanded ? 'status-board-toolbar-disclosure--expanded' : '',
+    ].filter(Boolean).join(' ')}
+  >
+    <button
+      type="button"
+      className="status-board-toolbar-disclosure__toggle"
+      aria-expanded={expanded}
+      aria-controls={contentId}
+      onClick={onToggle}
+    >
+      <span className="status-board-toolbar-disclosure__label">
+        <FilterOutlined aria-hidden="true" />
+        {label}
+      </span>
+      <span className="status-board-toolbar-disclosure__summary">{summary}</span>
+      <DownOutlined
+        className="status-board-toolbar-disclosure__chevron"
+        aria-hidden="true"
+      />
+    </button>
+    <div id={contentId} className="status-board-toolbar-disclosure__content">
+      <div className="status-board-toolbar-disclosure__content-inner">
+        {children}
+      </div>
+    </div>
+  </section>
+);
+
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
   const isOperational = useOperationalUi();
   const touchBoardDragEnabled = useCoarsePointer();
@@ -291,6 +340,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     useState<StatusBoardCardDisplayMode>('compact');
   const [cncCardDisplayMode, setCncCardDisplayMode] =
     useState<CncCardDisplayMode>('standard');
+  const [mobileToolbarExpanded, setMobileToolbarExpanded] = useState(false);
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
@@ -320,6 +370,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   useEffect(() => {
     setSearchDraft(viewState.search);
   }, [viewState.search]);
+
+  useEffect(() => {
+    setMobileToolbarExpanded(false);
+  }, [viewState.view]);
 
   const updateViewState = useCallback(
     (patch: Partial<OrderStatusBoardViewState>) => {
@@ -1085,6 +1139,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     }
     updateViewState({ cncOrderSearchPeriod: period });
   };
+  const cardDisplayModeLabel = STATUS_BOARD_CARD_DISPLAY_OPTIONS.find(
+    (option) => option.value === cardDisplayMode,
+  )?.label ?? 'Компактный';
+  const cncCardDisplayModeLabel = CNC_CARD_DISPLAY_OPTIONS.find(
+    (option) => option.value === cncCardDisplayMode,
+  )?.label ?? 'Стандартные';
+  const focusCncOrderSearch = () => {
+    setMobileToolbarExpanded(true);
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(
+        '.status-board-toolbar__cnc-order-search input',
+      )?.focus();
+    });
+  };
   const cncSettingsContent = (
     <section className="status-board-settings__modes" aria-label="Настройки отображения МДФ-доски">
       <strong>Отображение</strong>
@@ -1152,9 +1220,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   <>
                     <Button
                       icon={<FilterOutlined />}
-                      onClick={() => {
-                        document.querySelector<HTMLInputElement>('.status-board-toolbar__cnc-order-search input')?.focus();
-                      }}
+                      onClick={focusCncOrderSearch}
                     >
                       Фильтры
                     </Button>
@@ -1224,6 +1290,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         )}
 
         {!isCncToday && (
+          <StatusBoardToolbarDisclosure
+            contentId="status-board-toolbar-controls"
+            expanded={mobileToolbarExpanded}
+            label="Фильтры и вид"
+            summary={cardDisplayModeLabel}
+            onToggle={() => setMobileToolbarExpanded((current) => !current)}
+          >
           <div
             className={[
               'status-board-toolbar',
@@ -1370,8 +1443,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               onChange={activeColumnPreferences.saveSettings}
             />
           </div>
+          </StatusBoardToolbarDisclosure>
         )}
         {isCncToday && (
+          <StatusBoardToolbarDisclosure
+            contentId="status-board-toolbar-controls"
+            expanded={mobileToolbarExpanded}
+            label="Фильтры МДФ"
+            summary={`${cncSelectedDate?.format(DATE_FORMAT) ?? 'Сегодня'} · ${cncCardDisplayModeLabel}`}
+            onToggle={() => setMobileToolbarExpanded((current) => !current)}
+          >
           <div className="status-board-toolbar status-board-toolbar--cnc" aria-label="Фильтры CNC-работ">
             <Tooltip title="Предыдущий день">
               <Button
@@ -1516,6 +1597,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               extraContent={cncSettingsContent}
             />
           </div>
+          </StatusBoardToolbarDisclosure>
         )}
 
         {!isCncToday && !featureFlags.useBackendProductionActions && (
@@ -1829,6 +1911,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       <div
         className={[
           'status-board-columns status-board-columns--cnc',
+          cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : '',
           detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
         ].filter(Boolean).join(' ')}
         style={

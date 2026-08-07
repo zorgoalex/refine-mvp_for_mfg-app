@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-07",
+    title: "Мобильные доски: компактная панель и широкие МДФ-колонки",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "На мобильном экране панель фильтров доски свёрнута в одну строку и раскрывается по нажатию, чтобы колонки и карточки оставались видны.",
+      "На мобильной МДФ-доске колонки стандартного вида по умолчанию стали в два раза шире; компактный и детальный режимы не изменены.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-06",
     title: "Понятный журнал Telegram-бота раскроя",
     services: ["ERP", "Cutting"],
