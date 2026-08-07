@@ -4,9 +4,14 @@ import { Resvg } from '@resvg/resvg-js';
 import QRCode from 'qrcode';
 import { existsSync } from 'node:fs';
 import { writeBmp } from './bmp-writer';
+import { ApiError } from '../../../common/errors/api-error';
 import { readQrErrorCorrection, readQrTemplate, renderLabelTemplateString } from './label-template-fields';
 import { assertRenderableTemplateShape, legacyConditionPasses, readCutMapStyleV1, readTypographyV1, resolveLabelText } from './label-template-advanced';
-import type { LabelRow } from './label-row-builder';
+import type {
+  CutResultLabelRowCutMapSnapshot,
+  LabelRow,
+  LabelRowCutMapSnapshot,
+} from './label-row-builder';
 import type { LabelExportFormat, LabelTemplateDto } from './labels.types';
 
 export interface RenderedPreview {
@@ -14,11 +19,17 @@ export interface RenderedPreview {
 }
 
 export interface LabelCutMapAsset {
+  kind?: 'svg';
   svg: string;
   isVacuum: boolean;
 }
 
-export type LabelCutMapAssets = ReadonlyMap<number, LabelCutMapAsset>;
+export interface LabelCutMapImageAsset {
+  kind: 'image';
+  dataUri: string;
+}
+
+export type LabelCutMapAssets = ReadonlyMap<string | number, LabelCutMapAsset | LabelCutMapImageAsset>;
 
 const CUT_MAP_RENDERER_VERSION = 5;
 const CUT_MAP_DETAIL_STROKE_MULTIPLIER = 2;
@@ -62,10 +73,17 @@ export async function renderLabelsZip(input: {
   }
   const zipOptions = { date: archiveDate };
   zip.file('labels/', null, { ...zipOptions, dir: true });
+  let telegramSvgBytes = 0;
 
   for (const [index, row] of input.rows.entries()) {
     const n = index + 1;
     const svg = renderSvgPage(input.template, row, input.cutMapAssets);
+    if (row.cutMap?.source === 'telegram_image') {
+      telegramSvgBytes += Buffer.byteLength(svg, 'utf8');
+      if (telegramSvgBytes > 96 * 1024 * 1024) {
+        throw new ApiError(422, 'LABEL_TELEGRAM_IMAGE_LIMIT_EXCEEDED', 'Rendered Telegram label pages exceed limits');
+      }
+    }
     const png = renderSvgToPng(svg);
     const image = PNG.sync.read(png);
     const bmp = writeBmp({ width: image.width, height: image.height, rgba: image.data });
@@ -147,21 +165,36 @@ function renderCutMapElement(
 ): string {
   const map = row.cutMap;
   if (!map) return '';
-  const frozenAsset = cutMapAssets.get(map.cutResultSheetMapId);
+  const source = map.source ?? 'cut_result';
+  const cutResultMap = isCutResultMap(map);
+  const assetKey = map.assetKey ?? (cutResultMap ? `cut_result:${map.cutResultSheetMapId}` : '');
+  const frozenAsset = cutMapAssets.get(assetKey)
+    ?? (cutResultMap ? cutMapAssets.get(map.cutResultSheetMapId) : undefined);
   if (!frozenAsset) {
-    throw new Error(`Missing frozen cut-map asset ${map.cutResultSheetMapId}`);
+    throw new Error(`Missing frozen cut-map asset ${assetKey}`);
   }
-  const baseSvg = frozenAsset.svg;
-  const keepLegacyRotatedOrigin = frozenAsset.isVacuum;
-  const safeBody = extractSafeCutSheetBody(baseSvg);
-  if (safeBody === null) {
-    throw new Error(`Invalid frozen cut-map asset ${map.cutResultSheetMapId}`);
-  }
-  const body = thickenCutSheetDetailStrokes(safeBody);
   const style = readCutMapStyleV1(element.style);
   if (!style) {
     throw new Error(`Invalid cut-map style for ${element.elementKey}`);
   }
+  if (map.source === 'telegram_image') {
+    if (frozenAsset.kind !== 'image' || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(frozenAsset.dataUri)) {
+      throw new Error(`Invalid frozen Telegram image asset ${assetKey}`);
+    }
+    return [
+      `<g data-label-element-kind="cut_map" data-cut-map-source="telegram_image">`,
+      `<image x="${num(element.xMm)}" y="${num(element.yMm)}" width="${num(element.widthMm)}" height="${num(element.heightMm)}" href="${frozenAsset.dataUri}" preserveAspectRatio="xMidYMid meet"/>`,
+      '</g>',
+    ].join('');
+  }
+  if (frozenAsset.kind === 'image') throw new Error(`Invalid SVG cut-map asset ${assetKey}`);
+  const baseSvg = frozenAsset.svg;
+  const keepLegacyRotatedOrigin = frozenAsset.isVacuum;
+  const safeBody = extractSafeCutSheetBody(baseSvg);
+  if (safeBody === null) {
+    throw new Error(`Invalid frozen cut-map asset ${assetKey}`);
+  }
+  const body = thickenCutSheetDetailStrokes(safeBody);
 
   const rotateSheet = (
     element.widthMm < element.heightMm && map.sheetWidthMm > map.sheetHeightMm
@@ -201,12 +234,16 @@ function renderCutMapElement(
     : orientedSheetBody;
 
   return [
-    `<g data-label-element-kind="cut_map" data-cut-number="${escapeXml(map.cutNumber)}" data-cut-result-placement-id="${map.cutResultPlacementId}" data-cut-map-flip-horizontal="${style.flipHorizontal}" data-cut-map-flip-vertical="${style.flipVertical}">`,
+    `<g data-label-element-kind="cut_map" data-cut-map-source="${source}" data-cut-number="${escapeXml(map.cutNumber)}"${cutResultMap ? ` data-cut-result-placement-id="${map.cutResultPlacementId}"` : ''} data-cut-map-flip-horizontal="${style.flipHorizontal}" data-cut-map-flip-vertical="${style.flipVertical}">`,
     `<svg x="${num(element.xMm)}" y="${num(element.yMm)}" width="${num(element.widthMm)}" height="${num(element.heightMm)}" viewBox="0 0 ${num(orientedSheetWidthMm)} ${num(orientedSheetHeightMm)}" preserveAspectRatio="xMidYMid meet" overflow="hidden">`,
     displayedSheetBody,
     '</svg>',
     '</g>',
   ].join('');
+}
+
+function isCutResultMap(value: LabelRowCutMapSnapshot): value is CutResultLabelRowCutMapSnapshot {
+  return value.source === undefined || value.source === 'cut_result';
 }
 
 function extractSafeCutSheetBody(svg: string): string | null {

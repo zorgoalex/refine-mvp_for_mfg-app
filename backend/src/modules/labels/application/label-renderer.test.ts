@@ -89,6 +89,71 @@ describe('label renderer', () => {
     ]))).toThrow(/Invalid frozen cut-map asset/);
   });
 
+  it('renders a parsed Telegram SVG as the full sheet with the selected detail highlighted', () => {
+    const base = cutMapTemplate();
+    const mapped: LabelRow = {
+      ...row({}),
+      cutMap: {
+        source: 'telegram_svg',
+        assetKey: 'telegram_svg:31',
+        telegramLabelSheetMapId: 31,
+        telegramLabelPlacementId: 44,
+        packetId: '11111111-1111-4111-8111-111111111111',
+        sourceVersion: 2,
+        sourceMessageId: 901,
+        sourceDigest: 'sha256:layout',
+        cutNumber: 'TG-901',
+        cutJobName: 'Telegram',
+        variant: 'telegram',
+        sheetIndex: 1,
+        sheetNumber: 1,
+        sheetWidthMm: 1000,
+        sheetHeightMm: 500,
+        xMm: 120,
+        yMm: 80,
+        widthMm: 200,
+        heightMm: 50,
+      },
+    };
+    const svg = renderSvgPages(base, [mapped], new Map([['telegram_svg:31', {
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500"><rect x="0" y="0" width="1000" height="500"/><rect x="120" y="80" width="200" height="50"/></svg>',
+      isVacuum: false,
+    }]])).pages[0];
+
+    expect(svg).toContain('viewBox="0 0 1000 500"');
+    expect(svg).toContain('x="120" y="80" width="200" height="50" fill="#000000" stroke="#000000"');
+  });
+
+  it('renders Telegram screenshot fallback without a selected-detail overlay', () => {
+    const base = cutMapTemplate();
+    const mapped: LabelRow = {
+      ...row({}),
+      cutMap: {
+        source: 'telegram_image',
+        assetKey: 'telegram_image:packet:2',
+        packetId: '11111111-1111-4111-8111-111111111111',
+        sourceVersion: 2,
+        sourceMessageId: 901,
+        sourceDigest: 'sha256:image',
+        rawSha256: 'sha256:raw',
+        normalizedSha256: 'sha256:normalized',
+        cutNumber: 'TG-901',
+        cutJobName: 'Telegram',
+        variant: 'telegram',
+        sheetIndex: 1,
+        sheetNumber: 1,
+      },
+    };
+    const svg = renderSvgPages(base, [mapped], new Map([['telegram_image:packet:2', {
+      kind: 'image',
+      dataUri: 'data:image/png;base64,iVBORw0KGgo=',
+    }]])).pages[0];
+
+    expect(svg).toContain('data-cut-map-source="telegram_image"');
+    expect(svg).toContain('preserveAspectRatio="xMidYMid meet"');
+    expect(svg).not.toContain('fill="#000000" stroke="#000000"');
+  });
+
   it('mirrors the final cut-map thumbnail horizontally, vertically, or on both axes', () => {
     const render = (
       flipHorizontal: boolean,
@@ -592,6 +657,34 @@ function template(): LabelTemplateDto {
       },
     ],
   };
+}
+
+function cutMapTemplate(): LabelTemplateDto {
+  const base = template();
+  base.rendererCapabilities = ['if_else_v1', 'typography_v1', 'cut_map_v1'];
+  base.elements = [{
+    labelTemplateElementId: 10,
+    elementKey: 'cut-map',
+    kind: 'cut_map',
+    sourceField: null,
+    staticText: null,
+    xMm: 5,
+    yMm: 7,
+    widthMm: 42,
+    heightMm: 18,
+    rotationDeg: 0,
+    zIndex: 0,
+    style: {
+      cutMap: {
+        version: 1,
+        fit: 'contain',
+        highlightFill: '#ffd666',
+        highlightStroke: '#d4380d',
+      },
+    },
+    condition: {},
+  }];
+  return base;
 }
 
 function row(values: Record<string, string>, rowIndex = 1): LabelRow {

@@ -35,6 +35,7 @@ const cutMapSelectionSchema = z.object({
 }).strict();
 
 const cutMapSourceSchema = z.enum(['regular', 'bath']);
+const telegramCutMapFallbackVersionSchema = z.literal('v1');
 
 export const previewOrderLabelsSchema = z
   .object({
@@ -44,6 +45,7 @@ export const previewOrderLabelsSchema = z
     useBasisFields: z.boolean().optional().default(true),
     cutMapSource: cutMapSourceSchema.optional(),
     cutMapSelections: z.array(cutMapSelectionSchema).max(5000).optional(),
+    telegramCutMapFallbackVersion: telegramCutMapFallbackVersionSchema.optional(),
   })
   .strict();
 

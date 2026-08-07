@@ -19,6 +19,8 @@ describe('parseOrderStatusBoardQuery', () => {
         plannedFrom: '2026-07-01',
         plannedTo: '2026-07-31',
         orderIds: '11453, 11454',
+        sortBy: 'orderNumber',
+        sortOrder: 'desc',
       }),
     ).toEqual({
       board: 'production',
@@ -31,6 +33,8 @@ describe('parseOrderStatusBoardQuery', () => {
       plannedFrom: '2026-07-01',
       plannedTo: '2026-07-31',
       orderIds: [11453, 11454],
+      sortBy: 'orderNumber',
+      sortOrder: 'desc',
     });
   });
 
@@ -53,6 +57,8 @@ describe('parseOrderStatusBoardQuery', () => {
       onlyMyOrders: false,
       overdueOnly: false,
       includeDone: false,
+      sortBy: 'priority',
+      sortOrder: 'asc',
     });
   });
 
@@ -71,6 +77,8 @@ describe('parseOrderStatusBoardQuery', () => {
     [{ board: 'order', plannedFrom: '0000-01-01' }, 'plannedFrom'],
     [{ board: 'order', orderIds: '2706,nope' }, 'orderIds'],
     [{ board: 'order', orderIds: '0' }, 'orderIds'],
+    [{ board: 'order', sortBy: 'client' }, 'sortBy'],
+    [{ board: 'order', sortOrder: 'newest' }, 'sortOrder'],
     [{ board: ['order'] }, 'board'],
     [{ board: 'order', search: { nested: 'value' } }, 'search'],
     [

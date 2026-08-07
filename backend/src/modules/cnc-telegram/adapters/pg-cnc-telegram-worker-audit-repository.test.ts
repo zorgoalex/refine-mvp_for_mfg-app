@@ -124,6 +124,26 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     expect(scanSql).toContain('created_at AS "createdAt"');
     expect(scanSql).toContain('LIMIT $3');
   });
+
+  it('filters and sorts message rows by the timestamp shown in the When column', async () => {
+    const database = fakeDatabase(() => []);
+    const repository = new PgCncTelegramWorkerAuditRepository(database.service);
+
+    await repository.list({
+      dateFrom: '2026-08-01',
+      dateTo: '2026-08-06',
+      page: 1,
+      pageSize: 50,
+      sortDirection: 'asc',
+    });
+
+    const messageSql = database.sql.find((sql) =>
+      sql.includes('FROM cnc_telegram_worker_message_logs m') && sql.includes('LIMIT'),
+    ) ?? '';
+    expect(messageSql).toContain("m.source_created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Almaty')");
+    expect(messageSql).toContain("m.source_created_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Almaty')");
+    expect(messageSql).toContain('ORDER BY m.source_created_at ASC, m.source_message_id ASC, m.log_id ASC');
+  });
 });
 
 function batch(options: { operation?: boolean; observation?: boolean } = {}): WorkerAuditBatchDto {

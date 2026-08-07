@@ -17,6 +17,7 @@ describe('Telegram worker audit UI', () => {
     };
     expect(buildTelegramWorkerAuditQuery(values, 25)).toEqual({
       dateFrom: '2026-08-01', dateTo: '2026-08-06', page: 1, pageSize: 25,
+      sortDirection: 'desc',
       status: 'failed', messageType: 'svg', reasonCode: undefined, search: '9007199254740993',
     });
     expect(buildTelegramWorkerAuditExportQuery(values)).toEqual({
@@ -40,6 +41,8 @@ describe('Telegram worker audit UI', () => {
     expect(telegram).toContain('все поля сканов, сообщений, наблюдений, операций, шагов и ответов');
     expect(telegram).toContain('loading={exporting}');
     expect(telegram).toContain('saveBlob(');
+    expect(telegram).toContain('sorter={true}');
+    expect(telegram).toContain("sortOrder={query.sortDirection === 'asc' ? 'ascend' : 'descend'}");
   });
 
   it('marks only an overdue running scan as stale', () => {

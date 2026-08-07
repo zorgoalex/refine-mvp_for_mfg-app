@@ -279,7 +279,9 @@ test.describe('Evolutionary tablet UI', () => {
             await page.goto('/orders');
             await expect(page.locator('.evolution-shell')).toHaveCount(0);
             await expect(page.locator('.ui-variant-root')).toHaveAttribute('data-ui-variant', 'legacy', { timeout: 30_000 });
-            await expect(page.getByRole('heading', { name: 'Заказы' })).toBeVisible({ timeout: 30_000 });
+            await expect(page.getByRole('heading', { name: 'Заказы' })).toHaveCount(0);
+            await expect(page.getByRole('tab', { name: 'Заказы' })).toBeVisible({ timeout: 30_000 });
+            await expect(page.getByRole('button', { name: /Действия и фильтры/ })).toBeVisible();
             await expect(page.locator('.ant-table')).toHaveCount(0);
             await expect(page.locator('.ant-list')).toBeVisible({ timeout: 30_000 });
         }
@@ -366,6 +368,21 @@ test.describe('Evolutionary tablet UI', () => {
         await page.goto('/order-status-board');
         await expectTabletShell(page, 'status-board');
         await expect(page.locator('[data-status-board-order-id="15"]')).toBeVisible({ timeout: 30_000 });
+        await expect(page.getByRole('button', { name: /Загрузить ещё/ })).toHaveCount(0);
+        await expect(page.getByTestId('status-board-column-load-sentinel-order-1')).toBeAttached();
+        expect(boardMock.columnPageRequests).toEqual([]);
+        await touchScrollStatusColumnNearBottom(context, page, 'order-1');
+        await expect.poll(() => boardMock.columnPageRequests).toEqual(['order-1:tablet-page-2']);
+        const paginatedCards = page.locator(
+            '[data-status-board-column-key="order-1"] .status-board-column__cards',
+        );
+        await expect(paginatedCards).toHaveAttribute('aria-busy', 'true');
+        await expect(paginatedCards.getByText('Загружаем следующие заказы…')).toBeVisible();
+        await expect(page.locator('[data-status-board-order-id="199"]')).toBeAttached();
+        await expect(page.getByTestId('status-board-column-load-sentinel-order-1')).toHaveCount(0);
+        await page.locator('[data-status-board-column-key="order-1"] .status-board-column__cards').evaluate((element) => {
+            element.scrollTop = 0;
+        });
         const boardContent = page.locator('.evolution-shell__content');
         await expect(boardContent).toHaveAttribute('data-tablet-header-compact', 'true');
         await expect(page.locator('.evolution-shell')).toHaveAttribute('data-tablet-header-compact', 'true');
@@ -389,7 +406,7 @@ test.describe('Evolutionary tablet UI', () => {
         await captureTabletState(page, testInfo, '03-order-board');
 
         await page.locator('.status-board-toolbar__tablet-board-switch .ant-segmented-item').nth(1).click();
-        await expect(page).toHaveURL(/\/order-status-board\?board=production$/);
+        await expect(page).toHaveURL(/\/order-status-board\?board=production(?:&[^#]*)?$/);
         await expectTabletShell(page, 'status-board');
         await expect(page.locator('.evolution-shell__content')).toHaveAttribute('data-tablet-header-compact', 'true');
         await expect(page.locator('.status-board-tabs')).toBeHidden();
@@ -431,6 +448,9 @@ test.describe('Evolutionary tablet UI', () => {
         await touchPanBoardFromMiddle(context, page);
         await captureTabletState(page, testInfo, '18-real-87-tablet-cnc-board');
 
+        expect(boardMock.columnPageRequests, 'one request per pagination cursor').toEqual([
+            'order-1:tablet-page-2',
+        ]);
         expect(boardMock.unexpectedWrites, 'unmocked writes must fail closed').toEqual([]);
         expect(health.pageErrors, 'page errors').toEqual([]);
         expect(health.consoleErrors, 'console errors').toEqual([]);
@@ -487,6 +507,7 @@ async function setupBoardTabletMocks(page: Page, db: WorkflowMockDb) {
 
     const orderStatusBodies: Array<Record<string, unknown>> = [];
     const productionStatusBodies: Array<Record<string, unknown>> = [];
+    const columnPageRequests: string[] = [];
     const unexpectedWrites: string[] = [];
     let orderStatusId = 1;
     let productionStatusId = 1;
@@ -505,10 +526,20 @@ async function setupBoardTabletMocks(page: Page, db: WorkflowMockDb) {
     await page.route(/\/api\/v1\/orders\/status-board(?:\?.*)?$/, async (route) => {
         const url = new URL(route.request().url());
         const board = url.searchParams.get('board') === 'production' ? 'production' : 'order';
+        const column = url.searchParams.get('column');
+        const cursor = url.searchParams.get('cursor');
+        if (column && cursor) {
+            columnPageRequests.push(`${column}:${cursor}`);
+            await new Promise((resolve) => setTimeout(resolve, 3_000));
+        }
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify(buildBoardResponse(board, orderStatusId, productionStatusId, version)),
+            body: JSON.stringify(
+                column && cursor
+                    ? buildBoardColumnPage(board, column, orderStatusId, productionStatusId, version)
+                    : buildBoardResponse(board, orderStatusId, productionStatusId, version),
+            ),
         });
     });
     await page.route(/\/api\/v1\/cnc-telegram\/today(?:\?.*)?$/, async (route) => {
@@ -551,7 +582,7 @@ async function setupBoardTabletMocks(page: Page, db: WorkflowMockDb) {
         });
     });
 
-    return { orderStatusBodies, productionStatusBodies, unexpectedWrites };
+    return { orderStatusBodies, productionStatusBodies, columnPageRequests, unexpectedWrites };
 }
 
 async function setupSharedReadMocks(page: Page) {
@@ -783,18 +814,58 @@ function buildBoardResponse(board: 'order' | 'production', orderStatusId: number
         canChangeOrderStatus: true,
         canChangeProductionStatus: true,
     };
+    const paginatedColumn = board === 'order' && currentId === 1;
+    const initialCards = paginatedColumn
+        ? [
+            card,
+            ...Array.from({ length: 18 }, (_, index) => ({
+                ...card,
+                orderId: 100 + index,
+                orderName: `Lazy QA ${100 + index}`,
+                fullNumber: `Lazy QA ${100 + index}`,
+            })),
+        ]
+        : [card];
     return {
         board,
         generatedAt: '2026-08-05T10:00:00.000Z',
         filterKey: `tablet-${board}-${orderStatusId}-${productionStatusId}-${version}`,
         financialsVisible: true,
-        columns: statuses.map((status) => ({
-            key: `${board}-${status.id}`,
-            status: { ...status, sortOrder: status.id * 10, isActive: true },
-            total: status.id === currentId ? 1 : 0,
-            cards: status.id === currentId ? [card] : [],
+        columns: statuses.map((status) => {
+            const cards = status.id === currentId ? initialCards : [];
+            return {
+                key: `${board}-${status.id}`,
+                status: { ...status, sortOrder: status.id * 10, isActive: true },
+                total: cards.length + (status.id === currentId && paginatedColumn ? 1 : 0),
+                cards,
+                nextCursor: status.id === currentId && paginatedColumn ? 'tablet-page-2' : null,
+            };
+        }),
+    };
+}
+
+function buildBoardColumnPage(
+    board: 'order' | 'production',
+    columnKey: string,
+    orderStatusId: number,
+    productionStatusId: number,
+    version: number,
+) {
+    const response = buildBoardResponse(board, orderStatusId, productionStatusId, version);
+    const source = response.columns.find((column) => column.key === columnKey);
+    if (!source || source.cards.length === 0) return { ...response, columns: [] };
+    return {
+        ...response,
+        columns: [{
+            ...source,
+            cards: [{
+                ...source.cards[0],
+                orderId: 199,
+                orderName: 'Lazy QA 199',
+                fullNumber: 'Lazy QA 199',
+            }],
             nextCursor: null,
-        })),
+        }],
     };
 }
 
@@ -927,6 +998,58 @@ async function touchHoldCalendarDragHandle(context: BrowserContext, page: Page) 
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await cdp.detach();
     await expect(card).not.toHaveClass(/order-card--dragging/);
+}
+
+async function touchScrollStatusColumnNearBottom(
+    context: BrowserContext,
+    page: Page,
+    columnKey: string,
+) {
+    const scroller = page.locator(
+        `[data-status-board-column-key="${columnKey}"] .status-board-column__cards`,
+    );
+    const box = await scroller.boundingBox();
+    expect(box).not.toBeNull();
+    const initial = await scroller.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+        scrollTop: element.scrollTop,
+    }));
+    expect(initial.scrollHeight, JSON.stringify(initial)).toBeGreaterThan(initial.clientHeight + 640);
+
+    const start = { x: box!.x + 24, y: box!.y + box!.height - 36 };
+    const endY = box!.y + 72;
+    const cdp = await context.newCDPSession(page);
+    for (let gesture = 0; gesture < 8; gesture += 1) {
+        const remaining = await scroller.evaluate(
+            (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+        );
+        if (remaining <= 300) break;
+        await cdp.send('Input.dispatchTouchEvent', {
+            type: 'touchStart',
+            touchPoints: [{ ...start, id: 5, radiusX: 8, radiusY: 8, force: 1 }],
+        });
+        for (let step = 1; step <= 6; step += 1) {
+            await cdp.send('Input.dispatchTouchEvent', {
+                type: 'touchMove',
+                touchPoints: [{
+                    x: start.x,
+                    y: start.y + ((endY - start.y) * step) / 6,
+                    id: 5,
+                    radiusX: 8,
+                    radiusY: 8,
+                    force: 1,
+                }],
+            });
+            await page.waitForTimeout(20);
+        }
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await page.waitForTimeout(80);
+    }
+    await cdp.detach();
+    await expect.poll(() => scroller.evaluate(
+        (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+    )).toBeLessThanOrEqual(320);
 }
 
 async function touchPanBoardFromMiddle(context: BrowserContext, page: Page) {

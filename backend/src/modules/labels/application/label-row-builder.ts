@@ -18,7 +18,9 @@ export interface LabelRow {
   cutMap?: LabelRowCutMapSnapshot;
 }
 
-export interface LabelRowCutMapSnapshot {
+export interface CutResultLabelRowCutMapSnapshot {
+  source?: 'cut_result';
+  assetKey?: string;
   cutResultPlacementId: number;
   cutResultSheetMapId: number;
   cutResultId: number;
@@ -35,6 +37,49 @@ export interface LabelRowCutMapSnapshot {
   widthMm: number;
   heightMm: number;
 }
+
+export interface TelegramSvgLabelRowCutMapSnapshot {
+  source: 'telegram_svg';
+  assetKey: string;
+  telegramLabelSheetMapId: number;
+  telegramLabelPlacementId: number;
+  packetId: string;
+  sourceVersion: number;
+  sourceMessageId: number | null;
+  sourceDigest: string;
+  cutNumber: string;
+  cutJobName: string;
+  variant: 'telegram';
+  sheetIndex: number;
+  sheetNumber: number;
+  sheetWidthMm: number;
+  sheetHeightMm: number;
+  xMm: number;
+  yMm: number;
+  widthMm: number;
+  heightMm: number;
+}
+
+export interface TelegramImageLabelRowCutMapSnapshot {
+  source: 'telegram_image';
+  assetKey: string;
+  packetId: string;
+  sourceVersion: number;
+  sourceMessageId: number | null;
+  sourceDigest: string;
+  rawSha256: string;
+  normalizedSha256: string;
+  cutNumber: string;
+  cutJobName: string;
+  variant: 'telegram';
+  sheetIndex: number;
+  sheetNumber: number;
+}
+
+export type LabelRowCutMapSnapshot =
+  | CutResultLabelRowCutMapSnapshot
+  | TelegramSvgLabelRowCutMapSnapshot
+  | TelegramImageLabelRowCutMapSnapshot;
 
 export function buildLabelRows(input: {
   orderName: string | null;

@@ -145,7 +145,11 @@ describe('CncTelegramWorkerAuditService', () => {
       schemaVersion: 1,
       detailLevel: 'full',
       exportedBy: { userId: currentUser.id, username: 'auditor', role: currentUser.role },
-      period: { dateFrom: '2026-08-01', dateTo: '2026-08-06', dateField: 'workday', inclusive: true },
+      period: {
+        dateFrom: '2026-08-01', dateTo: '2026-08-06',
+        messageDateField: 'sourceCreatedAt', messageTimezone: 'Asia/Almaty',
+        scanDateField: 'workday', inclusive: true,
+      },
       filters: { status: 'failed', messageType: null, reasonCode: null, search: null },
       totals: { scans: 1, messages: 1, observations: 1, operations: 1, steps: 1, responses: 2 },
     });

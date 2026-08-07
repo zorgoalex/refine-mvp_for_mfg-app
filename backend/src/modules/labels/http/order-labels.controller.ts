@@ -81,9 +81,19 @@ export class OrderLabelActionsController {
   async cutMapOptions(
     @Req() request: RequestWithCurrentUser,
     @Param('orderId') orderId: string,
+    @Query('telegramCutMapFallbackVersion') telegramCutMapFallbackVersion: string | undefined,
   ): Promise<OrderLabelCutMapOptionsDto> {
     assertLabelsEnabled(this.runtimeConfig);
-    return this.service.listOrderCutMapOptions({ ...this.context(request), orderId: parseId(orderId) });
+    if (telegramCutMapFallbackVersion !== undefined && telegramCutMapFallbackVersion !== 'v1') {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Unsupported Telegram cut-map fallback version', {
+        field: 'telegramCutMapFallbackVersion',
+      });
+    }
+    return this.service.listOrderCutMapOptions({
+      ...this.context(request),
+      orderId: parseId(orderId),
+      telegramCutMapFallbackVersion,
+    });
   }
 
   @ApiOperation({ operationId: 'previewOrderLabels', summary: 'Preview order labels' })

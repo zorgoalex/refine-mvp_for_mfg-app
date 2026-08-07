@@ -243,13 +243,14 @@ export interface WorkerAuditListQueryDto {
   dateTo: string;
   page: number;
   pageSize: number;
+  sortDirection: 'asc' | 'desc';
   status?: string;
   messageType?: string;
   reasonCode?: string;
   search?: string;
 }
 
-export type WorkerAuditExportQueryDto = Omit<WorkerAuditListQueryDto, 'page' | 'pageSize'>;
+export type WorkerAuditExportQueryDto = Omit<WorkerAuditListQueryDto, 'page' | 'pageSize' | 'sortDirection'>;
 
 export function parseWorkerAuditBatch(value: unknown): WorkerAuditBatchDto {
   const parsed = workerAuditBatchSchema.safeParse(value);
@@ -290,6 +291,7 @@ function parseWorkerAuditQuery(
       ...filterShape,
       page: z.coerce.number().int().positive().default(1),
       pageSize: z.coerce.number().int().positive().max(100).default(50),
+      sortDirection: z.enum(['asc', 'desc']).default('desc'),
     }).strict()
     : z.object(filterShape).strict();
   const parsed = schema.safeParse(value);

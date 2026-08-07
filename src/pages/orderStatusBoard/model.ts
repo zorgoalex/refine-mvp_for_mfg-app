@@ -7,6 +7,8 @@ import type {
   OrderStatusBoardColumn,
   OrderStatusBoardQuery,
   OrderStatusBoardResponse,
+  OrderStatusBoardSortBy,
+  OrderStatusBoardSortOrder,
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
 
@@ -36,6 +38,15 @@ export type CncOrderSearchPeriod = '1d' | '1w' | '2w' | '1m';
 export type CncCardDisplayMode = 'standard' | 'compact';
 export const DEFAULT_CNC_ORDER_SEARCH_PERIOD: CncOrderSearchPeriod = '1w';
 const CNC_ORDER_SEARCH_PERIODS = new Set<CncOrderSearchPeriod>(['1d', '1w', '2w', '1m']);
+export const DEFAULT_ORDER_STATUS_BOARD_SORT = {
+  sortBy: 'priority',
+  sortOrder: 'asc',
+} as const;
+
+export interface OrderStatusBoardSortPreference {
+  sortBy: OrderStatusBoardSortBy;
+  sortOrder: OrderStatusBoardSortOrder;
+}
 
 export interface OrderStatusBoardViewState {
   view: OrderStatusBoardVisualFlow;
@@ -49,10 +60,13 @@ export interface OrderStatusBoardViewState {
   cncOrderSearchPeriod?: CncOrderSearchPeriod;
   cncOrderFilters: string[];
   hideEmpty: boolean;
+  sortBy: OrderStatusBoardSortBy;
+  sortOrder: OrderStatusBoardSortOrder;
 }
 
 export interface OrderStatusBoardViewStateOptions {
   cncTelegram?: boolean;
+  defaultSort?: OrderStatusBoardSortPreference;
 }
 
 export function toggleCncCardStandardOverride(
@@ -106,6 +120,14 @@ export function parseOrderStatusBoardViewState(
   const cncOrderSearchPeriod = view === 'cnc_today'
     ? parseCncOrderSearchPeriod(params.get('period')) ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD
     : undefined;
+  const sortByRaw = params.get('sort');
+  const sortOrderRaw = params.get('direction');
+  const sortBy = sortByRaw === null
+    ? options.defaultSort?.sortBy ?? DEFAULT_ORDER_STATUS_BOARD_SORT.sortBy
+    : parseOrderStatusBoardSortBy(sortByRaw) ?? DEFAULT_ORDER_STATUS_BOARD_SORT.sortBy;
+  const sortOrder = sortOrderRaw === null
+    ? options.defaultSort?.sortOrder ?? DEFAULT_ORDER_STATUS_BOARD_SORT.sortOrder
+    : parseOrderStatusBoardSortOrder(sortOrderRaw) ?? DEFAULT_ORDER_STATUS_BOARD_SORT.sortOrder;
   return {
     view,
     search: params.get('q')?.trim() ?? '',
@@ -118,6 +140,8 @@ export function parseOrderStatusBoardViewState(
     ...(view === 'cnc_today' && cncOrderSearchPeriod ? { cncOrderSearchPeriod } : {}),
     cncOrderFilters: normalizeCncOrderFilterValues(params.getAll('order')),
     hideEmpty: params.get('hideEmpty') === '1',
+    sortBy,
+    sortOrder,
   };
 }
 
@@ -146,6 +170,8 @@ export function serializeOrderStatusBoardViewState(
     }
   }
   if (state.hideEmpty) params.set('hideEmpty', '1');
+  params.set('sort', state.sortBy);
+  params.set('direction', state.sortOrder);
   return params;
 }
 
@@ -164,8 +190,26 @@ export function toOrderStatusBoardQuery(
       : {}),
     ...(state.plannedFrom ? { plannedFrom: state.plannedFrom } : {}),
     ...(state.plannedTo ? { plannedTo: state.plannedTo } : {}),
+    sortBy: state.sortBy,
+    sortOrder: state.sortOrder,
     ...override,
   };
+}
+
+function parseOrderStatusBoardSortBy(value: string): OrderStatusBoardSortBy | undefined {
+  if (
+    value === 'priority'
+    || value === 'orderNumber'
+    || value === 'plannedDate'
+    || value === 'updatedAt'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function parseOrderStatusBoardSortOrder(value: string): OrderStatusBoardSortOrder | undefined {
+  return value === 'asc' || value === 'desc' ? value : undefined;
 }
 
 export function buildCncOrderFilterOptions(

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import { buildOrderLabelsArchiveFilename, PgLabelsRepository } from './pg-labels-repository';
@@ -66,6 +67,53 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toContain("= 'vacuum_table'");
     expect(loader).toContain('${CUT_RESULT_SHEET_IS_VACUUM_SQL} AS is_vacuum');
     expect(loader).toContain('isVacuum: row.is_vacuum === true');
+  });
+
+  it('ranks Telegram screenshot candidates by recency before checking evidence ambiguity', () => {
+    const imageResolverStart = source.indexOf('const imageResult = await client.query<TelegramImageCandidateRow>');
+    const imageResolverEnd = source.indexOf('const imageByCopy', imageResolverStart);
+    const imageResolver = source.slice(imageResolverStart, imageResolverEnd);
+
+    expect(imageResolver).toContain('COALESCE(packet.completed_at, packet.source_updated_at, packet.source_created_at, packet.updated_at) DESC');
+    expect(imageResolver).not.toContain('evidence.evidence_eligible DESC');
+    expect(imageResolver).toContain('PARTITION BY evidence.order_id, evidence.detail_id');
+    expect(imageResolver).toContain('candidate.candidate_rank=1');
+    expect(imageResolver).not.toContain('requested.instance <= LEAST');
+  });
+
+  it('ranks newest Telegram SVG per detail before expanding its placements to requested copies', () => {
+    const svgStart = source.indexOf('const svgResult = await client.query<TelegramSvgCandidateRow>');
+    const svgEnd = source.indexOf('const svgByCopy', svgStart);
+    const svgResolver = source.slice(svgStart, svgEnd);
+
+    expect(svgResolver).toContain('PARTITION BY candidate.order_id, candidate.order_detail_id');
+    expect(svgResolver).not.toContain('PARTITION BY requested.order_id, requested.detail_id, requested.instance');
+    expect(svgResolver.indexOf('candidate.candidate_rank=1'))
+      .toBeLessThan(svgResolver.indexOf('placement.instance=requested.instance'));
+    expect(svgResolver.indexOf('candidate.candidate_rank=1'))
+      .toBeLessThan(svgResolver.indexOf('requested.instance <= detail.quantity'));
+    expect(svgResolver.indexOf('candidate.candidate_rank=1'))
+      .toBeLessThan(svgResolver.indexOf('abs(placement.source_width_mm-detail.width)'));
+  });
+
+  it('ranks newest Telegram image packet before mutable detail validation', () => {
+    const imageStart = source.indexOf('const imageResult = await client.query<TelegramImageCandidateRow>');
+    const imageEnd = source.indexOf('const imageByCopy', imageStart);
+    const imageResolver = source.slice(imageStart, imageEnd);
+
+    expect(imageResolver.indexOf('candidate.candidate_rank=1'))
+      .toBeLessThan(imageResolver.indexOf('abs(candidate.width_mm-detail.width)'));
+  });
+
+  it('validates screenshot options without full PNG preparation', () => {
+    const optionsStart = source.indexOf('async function addTelegramFallbackOptions');
+    const optionsEnd = source.indexOf('function cutMapSourceMatches', optionsStart);
+    const optionsResolver = source.slice(optionsStart, optionsEnd);
+
+    expect(optionsResolver).toContain("imageMode: 'validate'");
+    expect(source).toContain("telegram.imageMode === 'validate'");
+    expect(source).toContain('validateTelegramImage(telegram.mediaDir, metadata)');
+    expect(source).toContain('attemptedStorageKeys.size >= 16');
   });
 
   it('exposes detail cut and bath calculation numbers for source selection in order labels', () => {
@@ -278,9 +326,73 @@ describe('PgLabelsRepository structural guards', () => {
     })).resolves.toEqual(response);
     expect(query).toHaveBeenCalledTimes(2);
   });
+
+  it('replays a completed Telegram generation before reading mutable media or order state', async () => {
+    const response = {
+      generationId: 78,
+      orderId: 42,
+      templateId: 9,
+      templateVersion: 1,
+      labelCount: 1,
+      generatedAt: '2026-07-21T00:00:00.000Z',
+    };
+    const token = previewToken({
+      orderId: 42,
+      templateId: 9,
+      templateVersion: 1,
+      cutMapSource: 'regular',
+      telegramCutMapFallbackVersion: 'v1',
+    });
+    const requestHash = createHash('sha256').update(JSON.stringify({
+      orderId: 42,
+      templateId: 9,
+      templateVersion: 1,
+      detailIds: [],
+      useBasisFields: true,
+      cutMapSource: 'regular',
+      telegramCutMapFallbackVersion: 'v1',
+      rowHash: 'frozen-preview-row-hash',
+      exportFormats: ['png'],
+    })).digest('hex');
+    const query = vi.fn().mockResolvedValue({
+      rowCount: 1,
+      rows: [{ request_hash: requestHash, response_json: response, status: 'completed' }],
+    });
+    const transaction = vi.fn(async () => {
+      throw new Error('transaction must not start for completed replay');
+    });
+    const database = { query, transaction } as unknown as DatabaseService;
+    const repo = new PgLabelsRepository(database, {
+      telegramFallbackEnabled: true,
+      telegramMediaDir: '/missing-media-must-not-be-read',
+    });
+
+    await expect(repo.generateOrderLabels({
+      currentUser: { id: '1', username: 'tester', role: 'manager', roleId: 1, permissions: ['labels.generate'] },
+      requestId: 'req-telegram-replay',
+      orderId: 42,
+      input: {
+        templateId: 9,
+        templateVersion: 1,
+        previewToken: token,
+        exportFormats: ['png'],
+        cutMapSource: 'regular',
+        telegramCutMapFallbackVersion: 'v1',
+        idempotencyKey: 'generation-telegram-replay-completed',
+      },
+    })).resolves.toEqual(response);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(transaction).not.toHaveBeenCalled();
+  });
 });
 
-function previewToken(input: { orderId: number; templateId: number; templateVersion: number }): string {
+function previewToken(input: {
+  orderId: number;
+  templateId: number;
+  templateVersion: number;
+  cutMapSource?: 'regular' | 'bath';
+  telegramCutMapFallbackVersion?: 'v1';
+}): string {
   return Buffer.from(JSON.stringify({
     ...input,
     detailIds: [],

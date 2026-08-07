@@ -9,6 +9,8 @@ import type {
   GetOrderStatusBoardCommand,
   OrderStatusBoardQuery,
   OrderStatusBoardRepositoryPort,
+  OrderStatusBoardSortBy,
+  OrderStatusBoardSortOrder,
 } from '../application/order-status-board.types';
 import type {
   OrderStatusBoardCardDto,
@@ -18,7 +20,7 @@ import type {
 } from '../dto/order-status-board.dto';
 import { parseOrderSearchInput } from './pg-order-read-repository';
 
-const CURSOR_VERSION = 1;
+const CURSOR_VERSION = 2;
 const UNASSIGNED_COLUMN = 'unassigned';
 const ORDER_PRIORITY_MIN = 0;
 const ORDER_PRIORITY_MAX = 100;
@@ -28,8 +30,12 @@ interface BoardCursor {
   board: OrderStatusBoardType;
   column: string;
   filterKey: string;
+  sortBy: OrderStatusBoardSortBy;
+  sortOrder: OrderStatusBoardSortOrder;
   priority: number;
   plannedCompletionDate: string | null;
+  orderNumberSortKey: string;
+  updatedAt: string;
   orderId: number;
 }
 
@@ -50,6 +56,8 @@ interface BoardRow extends QueryResultRow {
   client_name: string | null;
   priority: string | number | null;
   planned_completion_date: string | Date | null;
+  order_number_sort_key: string | null;
+  updated_at_sort: string | Date | null;
   past_planned_date: boolean | null;
   order_status_id: string | number | null;
   order_status_name: string | null;
@@ -75,6 +83,8 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
   constructor(private readonly database: DatabaseClient) {}
 
   async getBoard(command: GetOrderStatusBoardCommand): Promise<OrderStatusBoardResponseDto> {
+    const sortBy = command.query.sortBy ?? 'priority';
+    const sortOrder = command.query.sortOrder ?? 'asc';
     const filterKey = createOrderStatusBoardFilterKey(command.query);
     const cursor = command.query.cursor
       ? decodeAndValidateCursor(command.query.cursor, command.query, filterKey)
@@ -138,6 +148,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
     const cursorPredicate = cursor
       ? buildCursorPredicate(params, cursor)
       : 'TRUE';
+    const cardOrderSql = buildCardOrderSql(sortBy, sortOrder);
     const limitIndex = params.push(command.query.limit + 1);
     const statusCatalogSql = buildStatusCatalogSql(command.query, params);
     const selectedColumnPredicate =
@@ -154,6 +165,8 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
           o.order_id,
           COALESCE(o.priority, 100) AS priority,
           o.planned_completion_date,
+          ${orderNumberSortKeySql('o.order_name')} AS order_number_sort_key,
+          COALESCE(o.updated_at, TIMESTAMPTZ 'epoch') AS updated_at_sort,
           ${assignedSql} AS current_user_assigned
         FROM orders o
         ${boardFilterJoinSql}
@@ -180,7 +193,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
           eligible.*,
           ROW_NUMBER() OVER (
             PARTITION BY status_key
-            ORDER BY priority ASC, planned_completion_date ASC NULLS LAST, order_id DESC
+            ${cardOrderSql}
           ) AS row_number
         FROM eligible
       )
@@ -201,6 +214,8 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
         c.client_name,
         ranked.priority,
         ranked.planned_completion_date,
+        ranked.order_number_sort_key,
+        ranked.updated_at_sort,
         (ranked.planned_completion_date < CURRENT_DATE) AS past_planned_date,
         o.order_status_id,
         os.order_status_name,
@@ -446,28 +461,109 @@ function visibleProductionStatusSql(alias: string): string {
   )`;
 }
 
-function buildCursorPredicate(params: unknown[], cursor: BoardCursor): string {
-  const priorityIndex = params.push(cursor.priority);
-  const dateIndex = params.push(cursor.plannedCompletionDate);
-  const orderIdIndex = params.push(cursor.orderId);
+function buildCardOrderSql(
+  sortBy: OrderStatusBoardSortBy,
+  sortOrder: OrderStatusBoardSortOrder,
+): string {
+  const direction = sortOrder === 'desc' ? 'DESC' : 'ASC';
+  switch (sortBy) {
+    case 'orderNumber':
+      return `ORDER BY order_number_sort_key ${direction}, order_id DESC`;
+    case 'plannedDate':
+      return `ORDER BY planned_completion_date ${direction} NULLS LAST, order_id DESC`;
+    case 'updatedAt':
+      return `ORDER BY updated_at_sort ${direction}, order_id DESC`;
+    case 'priority':
+      return `ORDER BY priority ${direction}, planned_completion_date ${direction} NULLS LAST, order_id DESC`;
+  }
+}
 
-  return `(
-    priority > $${priorityIndex}
-    OR (
-      priority = $${priorityIndex}
-      AND (
-        (
-          $${dateIndex}::date IS NOT NULL
-          AND (
-            planned_completion_date > $${dateIndex}::date
-            OR planned_completion_date IS NULL
-          )
-        )
+function orderNumberSortKeySql(valueSql: string): string {
+  const normalized = `BTRIM(COALESCE(${valueSql}, ''))`;
+  return `CASE
+            WHEN ${normalized} ~ '^[0-9]+$'
+              THEN '0:' || LPAD(${normalized}, 30, '0')
+            ELSE '1:' || LOWER(${normalized})
+          END`;
+}
+
+function buildCursorPredicate(params: unknown[], cursor: BoardCursor): string {
+  const comparison = cursor.sortOrder === 'desc' ? '<' : '>';
+  const orderIdIndex = params.push(cursor.orderId);
+  switch (cursor.sortBy) {
+    case 'orderNumber': {
+      const valueIndex = params.push(cursor.orderNumberSortKey);
+      return `(
+        order_number_sort_key ${comparison} $${valueIndex}::text
         OR (
-          planned_completion_date IS NOT DISTINCT FROM $${dateIndex}::date
+          order_number_sort_key = $${valueIndex}::text
           AND order_id < $${orderIdIndex}
         )
-      )
+      )`;
+    }
+    case 'plannedDate': {
+      const valueIndex = params.push(cursor.plannedCompletionDate);
+      return nullableSortAfterSql(
+        'planned_completion_date',
+        'date',
+        cursor.plannedCompletionDate,
+        comparison,
+        valueIndex,
+        orderIdIndex,
+      );
+    }
+    case 'updatedAt': {
+      const valueIndex = params.push(cursor.updatedAt);
+      return `(
+        updated_at_sort ${comparison} $${valueIndex}::timestamptz
+        OR (
+          updated_at_sort = $${valueIndex}::timestamptz
+          AND order_id < $${orderIdIndex}
+        )
+      )`;
+    }
+    case 'priority': {
+      const priorityIndex = params.push(cursor.priority);
+      const dateIndex = params.push(cursor.plannedCompletionDate);
+      const datePredicate = nullableSortAfterSql(
+        'planned_completion_date',
+        'date',
+        cursor.plannedCompletionDate,
+        comparison,
+        dateIndex,
+        orderIdIndex,
+      );
+      return `(
+        priority ${comparison} $${priorityIndex}
+        OR (
+          priority = $${priorityIndex}
+          AND ${datePredicate}
+        )
+      )`;
+    }
+  }
+}
+
+function nullableSortAfterSql(
+  columnSql: string,
+  cast: 'date',
+  cursorValue: string | null,
+  comparison: '<' | '>',
+  valueIndex: number,
+  orderIdIndex: number,
+): string {
+  if (cursorValue === null) {
+    return `(
+      ${columnSql} IS NOT DISTINCT FROM $${valueIndex}::${cast}
+      AND order_id < $${orderIdIndex}
+    )`;
+  }
+  return `(
+    ${columnSql} ${comparison} $${valueIndex}::${cast}
+    OR ${columnSql} IS NULL
+    OR (
+      ${columnSql} IS NOT DISTINCT FROM $${valueIndex}::${cast}
+      AND order_id < $${orderIdIndex}
     )
   )`;
 }
@@ -478,7 +574,10 @@ function mapBoardColumns(
   query: OrderStatusBoardQuery,
   filterKey: string,
 ): OrderStatusBoardColumnDto[] {
-  const columns = new Map<string, { column: OrderStatusBoardColumnDto; rawCards: OrderStatusBoardCardDto[] }>();
+  const columns = new Map<string, {
+    column: OrderStatusBoardColumnDto;
+    rawCards: Array<{ card: OrderStatusBoardCardDto; row: BoardRow }>;
+  }>();
 
   for (const row of rows) {
     let entry = columns.get(row.status_key);
@@ -504,27 +603,32 @@ function mapBoardColumns(
     }
 
     if (row.order_id !== null) {
-      entry.rawCards.push(mapBoardCard(row, currentUser));
+      entry.rawCards.push({ card: mapBoardCard(row, currentUser), row });
     }
   }
 
   return Array.from(columns.values()).map(({ column, rawCards }) => {
     const hasMore = rawCards.length > query.limit;
-    const cards = rawCards.slice(0, query.limit);
-    const lastCard = cards.at(-1);
+    const cardRows = rawCards.slice(0, query.limit);
+    const cards = cardRows.map(({ card }) => card);
+    const lastCardRow = cardRows.at(-1);
     return {
       ...column,
       cards,
       nextCursor:
-        hasMore && lastCard
+        hasMore && lastCardRow
           ? encodeCursor({
               v: CURSOR_VERSION,
               board: query.board,
               column: column.key,
               filterKey,
-              priority: lastCard.priority,
-              plannedCompletionDate: lastCard.plannedCompletionDate,
-              orderId: lastCard.orderId,
+              sortBy: query.sortBy ?? 'priority',
+              sortOrder: query.sortOrder ?? 'asc',
+              priority: lastCardRow.card.priority,
+              plannedCompletionDate: lastCardRow.card.plannedCompletionDate,
+              orderNumberSortKey: lastCardRow.row.order_number_sort_key ?? '',
+              updatedAt: toIsoString(lastCardRow.row.updated_at_sort),
+              orderId: lastCardRow.card.orderId,
             })
           : null,
     };
@@ -598,6 +702,8 @@ export function createOrderStatusBoardFilterKey(query: OrderStatusBoardQuery): s
     plannedFrom: query.plannedFrom ?? null,
     plannedTo: query.plannedTo ?? null,
     orderIds: query.orderIds ? [...query.orderIds].sort((left, right) => left - right) : [],
+    sortBy: query.sortBy ?? 'priority',
+    sortOrder: query.sortOrder ?? 'asc',
   });
   return `sha256:${createHash('sha256').update(canonical).digest('hex')}`;
 }
@@ -620,7 +726,9 @@ function decodeAndValidateCursor(
   if (
     parsed.board !== query.board ||
     parsed.column !== query.column ||
-    parsed.filterKey !== filterKey
+    parsed.filterKey !== filterKey ||
+    parsed.sortBy !== (query.sortBy ?? 'priority') ||
+    parsed.sortOrder !== (query.sortOrder ?? 'asc')
   ) {
     throw new ApiError(422, 'BOARD_CURSOR_MISMATCH', 'Курсор не соответствует доске или фильтрам');
   }
@@ -635,6 +743,13 @@ function isBoardCursor(value: unknown): value is BoardCursor {
     (cursor.board === 'order' || cursor.board === 'production') &&
     typeof cursor.column === 'string' &&
     typeof cursor.filterKey === 'string' &&
+    (
+      cursor.sortBy === 'priority'
+      || cursor.sortBy === 'orderNumber'
+      || cursor.sortBy === 'plannedDate'
+      || cursor.sortBy === 'updatedAt'
+    ) &&
+    (cursor.sortOrder === 'asc' || cursor.sortOrder === 'desc') &&
     Number.isInteger(cursor.priority) &&
     Number(cursor.priority) >= ORDER_PRIORITY_MIN &&
     Number(cursor.priority) <= ORDER_PRIORITY_MAX &&
@@ -645,9 +760,17 @@ function isBoardCursor(value: unknown): value is BoardCursor {
         isValidDateOnly(cursor.plannedCompletionDate)
       )
     ) &&
+    typeof cursor.orderNumberSortKey === 'string' &&
+    typeof cursor.updatedAt === 'string' &&
+    isValidIsoTimestamp(cursor.updatedAt) &&
     Number.isSafeInteger(cursor.orderId) &&
     Number(cursor.orderId) > 0
   );
+}
+
+function isValidIsoTimestamp(value: string): boolean {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 }
 
 function isValidDateOnly(value: string): boolean {

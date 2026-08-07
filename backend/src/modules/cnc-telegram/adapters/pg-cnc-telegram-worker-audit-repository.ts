@@ -167,6 +167,7 @@ export class PgCncTelegramWorkerAuditRepository {
 
   async list(query: WorkerAuditListQueryDto): Promise<Record<string, unknown>> {
     const { params, where } = buildMessageFilter(query);
+    const sortDirection = query.sortDirection === 'asc' ? 'ASC' : 'DESC';
     const countResult = await this.database.query<{ total: string }>(
       `SELECT count(*)::text AS total FROM cnc_telegram_worker_message_logs m WHERE ${where.join(' AND ')}`,
       params,
@@ -218,7 +219,7 @@ export class PgCncTelegramWorkerAuditRepository {
           FROM cnc_telegram_worker_operations p WHERE p.log_id=m.log_id), '[]'::jsonb) AS operations
       FROM cnc_telegram_worker_message_logs m
       WHERE ${where.join(' AND ')}
-      ORDER BY m.last_observed_at DESC, m.source_message_id DESC
+      ORDER BY m.source_created_at ${sortDirection}, m.source_message_id ${sortDirection}, m.log_id ${sortDirection}
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `, params);
     const scans = await this.database.query<Record<string, unknown>>(`
@@ -564,7 +565,10 @@ function buildMessageFilter(
   query: WorkerAuditListQueryDto | WorkerAuditExportQueryDto,
 ): { params: unknown[]; where: string[] } {
   const params: unknown[] = [query.dateFrom, query.dateTo];
-  const where = ['m.workday >= $1::date', 'm.workday <= $2::date'];
+  const where = [
+    "m.source_created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Almaty')",
+    "m.source_created_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Almaty')",
+  ];
   const add = (sql: string, value: unknown) => {
     params.push(value);
     where.push(sql.replace('?', `$${params.length}`));

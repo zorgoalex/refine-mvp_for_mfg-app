@@ -66,6 +66,12 @@ export class UnavailableLabelsRepository implements LabelsPort {
   async exportDetailLabels() {
     return unavailable();
   }
+  async getOrderLabelGenerationAccessDescriptor() {
+    return unavailable();
+  }
+  async getDetailLabelGenerationAccessDescriptor() {
+    return unavailable();
+  }
   async recordPermissionDenied() {
     /* no-op: cannot audit without a DB */
   }

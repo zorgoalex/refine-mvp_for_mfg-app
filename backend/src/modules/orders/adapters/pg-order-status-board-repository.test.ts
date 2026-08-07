@@ -200,6 +200,85 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(createOrderStatusBoardFilterKey({ ...base, orderIds: [1, 3] })).not.toBe(
       createOrderStatusBoardFilterKey({ ...base, orderIds: [1, 2] }),
     );
+    expect(createOrderStatusBoardFilterKey(base)).not.toBe(
+      createOrderStatusBoardFilterKey({
+        ...base,
+        sortBy: 'orderNumber',
+        sortOrder: 'asc',
+      }),
+    );
+  });
+
+  it.each([
+    ['priority', 'asc', 'ORDER BY priority ASC, planned_completion_date ASC NULLS LAST, order_id DESC'],
+    ['orderNumber', 'desc', 'ORDER BY order_number_sort_key DESC, order_id DESC'],
+    ['plannedDate', 'asc', 'ORDER BY planned_completion_date ASC NULLS LAST, order_id DESC'],
+    ['updatedAt', 'desc', 'ORDER BY updated_at_sort DESC, order_id DESC'],
+  ] as const)('orders every column by %s %s before pagination', async (sortBy, sortOrder, expectedSql) => {
+    const database = fakeDatabase([]);
+
+    await new PgOrderStatusBoardRepository(database.client).getBoard({
+      currentUser: user('admin'),
+      query: {
+        board: 'order',
+        limit: 24,
+        onlyMyOrders: false,
+        overdueOnly: false,
+        sortBy,
+        sortOrder,
+      },
+    });
+
+    expect(database.queries[0]?.text).toContain(expectedSql);
+    if (sortBy === 'orderNumber') {
+      expect(database.queries[0]?.text).toContain("~ '^[0-9]+$'");
+      expect(database.queries[0]?.text).toContain("LPAD(BTRIM(COALESCE(o.order_name, '')), 30, '0')");
+    }
+  });
+
+  it.each([
+    ['orderNumber', 'asc', 'order_number_sort_key >'],
+    ['plannedDate', 'desc', 'planned_completion_date <'],
+    ['updatedAt', 'desc', 'updated_at_sort <'],
+  ] as const)('binds %s %s to its cursor and keyset predicate', async (sortBy, sortOrder, expectedSql) => {
+    const firstDatabase = fakeDatabase([
+      boardRow(null, null),
+      {
+        ...boardRow(101, '2026-07-20'),
+        order_number_sort_key: '0:000000000000000000000000000101',
+        updated_at_sort: '2026-07-20T10:00:00.000Z',
+      },
+      boardRow(100, null),
+    ]);
+    const query = {
+      board: 'production' as const,
+      column: 'unassigned',
+      limit: 1,
+      onlyMyOrders: false,
+      overdueOnly: false,
+      sortBy,
+      sortOrder,
+    };
+    const first = await new PgOrderStatusBoardRepository(firstDatabase.client).getBoard({
+      currentUser: worker(),
+      query,
+    });
+    const cursor = first.columns[0]?.nextCursor;
+    expect(cursor).toBeTruthy();
+    expect(JSON.parse(Buffer.from(cursor!, 'base64url').toString('utf8'))).toMatchObject({
+      v: 2,
+      sortBy,
+      sortOrder,
+      orderId: 101,
+    });
+
+    const nextDatabase = fakeDatabase([boardRow(null, null)]);
+    await new PgOrderStatusBoardRepository(nextDatabase.client).getBoard({
+      currentUser: worker(),
+      query: { ...query, cursor },
+    });
+
+    expect(nextDatabase.queries[0]?.text).toContain(expectedSql);
   });
 
   it('rejects the production board for packer before querying PostgreSQL', async () => {

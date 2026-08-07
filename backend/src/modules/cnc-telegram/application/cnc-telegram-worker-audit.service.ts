@@ -85,7 +85,9 @@ export class CncTelegramWorkerAuditService {
       period: {
         dateFrom: query.dateFrom,
         dateTo: query.dateTo,
-        dateField: 'workday',
+        messageDateField: 'sourceCreatedAt',
+        messageTimezone: 'Asia/Almaty',
+        scanDateField: 'workday',
         inclusive: true,
       },
       filters: {

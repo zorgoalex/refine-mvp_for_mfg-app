@@ -28,7 +28,7 @@ export function buildTelegramWorkerAuditQuery(values: FilterValues, pageSize = 5
   const period = values.period ?? [dayjs().subtract(6, 'day'), dayjs()];
   return {
     dateFrom: period[0].format('YYYY-MM-DD'), dateTo: period[1].format('YYYY-MM-DD'),
-    page: 1, pageSize, status: values.status, messageType: values.messageType,
+    page: 1, pageSize, sortDirection: 'desc', status: values.status, messageType: values.messageType,
     reasonCode: values.reasonCode?.trim() || undefined, search: values.search?.trim() || undefined,
   };
 }
@@ -208,8 +208,16 @@ export const TelegramWorkerAudit: React.FC = () => {
         <Col xs={12} md={6}><Statistic title="На странице: пропущено" value={data.filter((item) => item.status === 'skipped').length} /></Col>
         <Col xs={12} md={6}><Statistic title="На странице: ошибки" value={data.filter((item) => item.status === 'failed').length} /></Col>
       </Row>
-      <Table<TelegramWorkerMessageLog> rowKey="logId" size="middle" loading={loading} dataSource={data} scroll={{ x: 1040 }} locale={{ emptyText: <Empty description="За период сообщений нет" /> }} expandable={{ expandedRowRender: (record) => <ExpandedEvidence record={record} />, rowExpandable: (record) => record.operations.length > 0 || record.observations.length > 0 }} pagination={{ current: pagination.page, pageSize: pagination.pageSize, total: pagination.total, showSizeChanger: true }} onChange={(next) => setQuery((current) => ({ ...current, page: next.current ?? 1, pageSize: next.pageSize ?? 50 }))}>
-        <Table.Column<TelegramWorkerMessageLog> title="Когда" width={150} render={(_, record) => <Text className="tg-audit-num">{formatDateTime(record.sourceCreatedAt)}</Text>} />
+      <Table<TelegramWorkerMessageLog> rowKey="logId" size="middle" loading={loading} dataSource={data} scroll={{ x: 1040 }} locale={{ emptyText: <Empty description="За период сообщений нет" /> }} expandable={{ expandedRowRender: (record) => <ExpandedEvidence record={record} />, rowExpandable: (record) => record.operations.length > 0 || record.observations.length > 0 }} pagination={{ current: pagination.page, pageSize: pagination.pageSize, total: pagination.total, showSizeChanger: true }} onChange={(next, _filters, sorter, extra) => {
+        const activeSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+        setQuery((current) => ({
+          ...current,
+          page: extra.action === 'sort' ? 1 : next.current ?? 1,
+          pageSize: next.pageSize ?? 50,
+          sortDirection: activeSorter?.order === 'ascend' ? 'asc' : 'desc',
+        }));
+      }}>
+        <Table.Column<TelegramWorkerMessageLog> dataIndex="sourceCreatedAt" key="sourceCreatedAt" title="Когда" width={150} sorter={true} sortOrder={query.sortDirection === 'asc' ? 'ascend' : 'descend'} render={(value) => <Text className="tg-audit-num">{formatDateTime(value)}</Text>} />
         <Table.Column<TelegramWorkerMessageLog> title="Telegram" width={190} render={(_, record) => <div><Text strong className="tg-audit-num">Сообщение #{record.sourceMessageId}</Text><br /><Text type="secondary" className="tg-audit-num">Отправитель #{record.senderUserId ?? '—'} · {record.outgoing ? 'исх.' : 'вх.'}</Text></div>} />
         <Table.Column<TelegramWorkerMessageLog> title="Тип" width={105} render={(_, record) => <Tag>{TYPE_LABELS[record.messageType] ?? record.messageType}</Tag>} />
         <Table.Column<TelegramWorkerMessageLog> title="Файл / текст" width={260} render={(_, record) => <div><Text strong={Boolean(record.filename)}>{record.filename || 'Без файла'}</Text>{record.messageText && <Text type="secondary" ellipsis={{ tooltip: record.messageText }} style={{ display: 'block', maxWidth: 240 }}>{record.messageText}</Text>}</div>} />

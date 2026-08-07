@@ -103,6 +103,23 @@ describe('CncTelegramService', () => {
     });
   });
 
+  it('requires cut.view for Telegram source media', () => {
+    const service = new CncTelegramService({
+      packets: {
+        listToday: vi.fn(),
+        listOrderCuttingSequences: vi.fn(),
+        ingest: vi.fn(),
+        configureAutoCutStatus: vi.fn(),
+      },
+    });
+
+    expect(() => service.assertCanViewMedia(user([]))).toThrowError(expect.objectContaining({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+    }));
+    expect(() => service.assertCanViewMedia(user(['cut.view']))).not.toThrow();
+  });
+
   it('requires status_automation.manage for auto-cut status and audits denial', async () => {
     const deniedAudit = {
       recordIngestDenied: vi.fn().mockResolvedValue(undefined),

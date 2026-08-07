@@ -1060,6 +1060,38 @@ probe_file() {
                        'reconcile_bazis_panel_order_links(bigint,bigint[],text,bigint,text)'::regprocedure,
                        'pg_proc'
                      ) = 'v109 exact current-revision panel reconciliation with one-product NULL product support';" ;;
+    110_cnc_telegram_label_maps*) probe_all \
+                     "$(q_tbl cnc_telegram_packet_evidence_set)" \
+                     "$(q_tbl cnc_telegram_packet_item_evidence)" \
+                     "$(q_tbl cnc_telegram_label_sheet_map)" \
+                     "$(q_tbl cnc_telegram_label_placement)" \
+                     "$(q_tbl label_generation_media_asset)" \
+                     "$(q_tbl label_generation_telegram_source)" \
+                     "$(q_con_on cnc_telegram_packet_evidence_set pk_cnc_telegram_packet_evidence_set)" \
+                     "$(q_con_on cnc_telegram_packet_item_evidence fk_cnc_telegram_packet_item_evidence_set)" \
+                     "$(q_con_on cnc_telegram_label_sheet_map uq_cnc_telegram_label_sheet_map_identity)" \
+                     "$(q_con_on cnc_telegram_label_sheet_map fk_cnc_telegram_label_sheet_map_evidence)" \
+                     "$(q_con_on cnc_telegram_label_placement uq_cnc_telegram_label_placement_identity)" \
+                     "$(q_con_on label_generation_media_asset chk_label_generation_media_asset_bytes)" \
+                     "$(q_con_on label_generation_telegram_source chk_label_generation_telegram_source_variant)" \
+                     "$(q_con_on label_generation_telegram_source fk_label_generation_telegram_source_media)" \
+                     "$(q_con_on label_generation_telegram_source fk_label_generation_telegram_source_sheet)" \
+                     "$(q_con_on label_generation_telegram_source fk_label_generation_telegram_source_placement)" \
+                     "$(q_idx idx_cnc_telegram_packet_item_evidence_detail)" \
+                     "$(q_idx idx_cnc_telegram_label_sheet_map_packet_current)" \
+                     "$(q_idx idx_cnc_telegram_label_placement_detail)" \
+                     "$(q_idx idx_label_generation_telegram_source_packet)" \
+                     "$(q_trg trg_cnc_telegram_packet_evidence_set_immutable)" \
+                     "$(q_trg trg_cnc_telegram_packet_item_evidence_immutable)" \
+                     "$(q_trg trg_cnc_telegram_label_sheet_map_immutable)" \
+                     "$(q_trg trg_cnc_telegram_label_placement_immutable)" \
+                     "$(q_trg trg_label_generation_media_asset_immutable)" \
+                     "$(q_trg trg_label_generation_telegram_source_immutable)" \
+                     "$(q_trg trg_label_generation_cut_placement_immutable)" \
+                     "$(q_trg trg_label_generation_cut_source_exclusive_cut)" \
+                     "$(q_trg trg_label_generation_cut_source_exclusive_telegram)" \
+                     "SELECT to_regprocedure('reject_cnc_telegram_label_immutable_mutation()') IS NOT NULL;" \
+                     "SELECT to_regprocedure('guard_label_generation_cut_source_exclusive()') IS NOT NULL;" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1071,7 +1103,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

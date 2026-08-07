@@ -13,6 +13,8 @@ export interface OrderCutMapLabelRow {
   cutJobCutNumber: string | null;
   bathCutJobCutNumber: string | null;
   options: LabelCutMapOption[];
+  telegramFallback: 'svg' | 'image' | null;
+  telegramUnavailableReason: string | null;
 }
 
 export type OrderCutMapSelectionState = Record<string, number>;
@@ -30,6 +32,12 @@ export function buildOrderCutMapLabelRows(data: OrderLabelCutMapOptions | null):
       cutJobCutNumber: detail.cutJobCutNumber,
       bathCutJobCutNumber: detail.bathCutJobCutNumber,
       options: detail.options.filter((option) => option.instance === copyIndex && option.dimensionsMatch && !option.isArchived),
+      telegramFallback: (detail.telegramSvgFallbackInstances ?? []).some((item) => item.copyIndex === copyIndex)
+        ? 'svg'
+        : (detail.telegramImageFallbackInstances ?? []).some((item) => item.copyIndex === copyIndex)
+          ? 'image'
+          : null,
+      telegramUnavailableReason: (detail.telegramImageUnavailableInstances ?? []).find((item) => item.copyIndex === copyIndex)?.reason ?? null,
     };
   }));
 }
@@ -84,11 +92,24 @@ export function filterOrderCutMapRowOptions(
   return row.options.filter((option) => cutMapOptionMatchesSource(row, option, source));
 }
 
+export function filterOrderCutMapRowsForSource(
+  rows: OrderCutMapLabelRow[],
+  source: OrderCutMapSelectionSource,
+): OrderCutMapLabelRow[] {
+  return rows.map((row) => ({
+    ...row,
+    options: filterOrderCutMapRowOptions(row, source),
+    telegramFallback: source === 'regular' ? row.telegramFallback : null,
+    telegramUnavailableReason: source === 'regular' ? row.telegramUnavailableReason : null,
+  }));
+}
+
 export function orderCutMapRowHasSourceOption(
   row: OrderCutMapLabelRow,
   source: OrderCutMapSelectionSource,
 ): boolean {
-  return row.options.some((option) => cutMapOptionMatchesSource(row, option, source));
+  return row.options.some((option) => cutMapOptionMatchesSource(row, option, source))
+    || (source === 'regular' && row.telegramFallback !== null);
 }
 
 export function orderCutMapSourceCutNumbers(
@@ -99,6 +120,7 @@ export function orderCutMapSourceCutNumbers(
   for (const row of rows) {
     const cutNumber = cutMapSourceCutNumber(row, source);
     if (cutNumber) numbers.add(cutNumber);
+    else if (source === 'regular' && row.telegramFallback) numbers.add('Telegram');
   }
   return [...numbers].sort((a, b) => a.localeCompare(b, 'ru'));
 }
@@ -181,6 +203,7 @@ export function missingOrderCutMapRows(
 ): OrderCutMapLabelRow[] {
   return rows.filter((row) => (
     (detailId == null || row.detailId === detailId)
+    && (row.telegramFallback === null || row.options.length > 0)
     && !row.options.some((option) => option.cutResultPlacementId === selected[row.key])
   ));
 }

@@ -1,4 +1,10 @@
 export type OrderStatusBoardType = 'order' | 'production';
+export type OrderStatusBoardSortBy =
+  | 'priority'
+  | 'orderNumber'
+  | 'plannedDate'
+  | 'updatedAt';
+export type OrderStatusBoardSortOrder = 'asc' | 'desc';
 
 export interface OrderStatusBoardQuery {
   board: OrderStatusBoardType;
@@ -12,6 +18,8 @@ export interface OrderStatusBoardQuery {
   plannedFrom?: string;
   plannedTo?: string;
   orderIds?: number[];
+  sortBy?: OrderStatusBoardSortBy;
+  sortOrder?: OrderStatusBoardSortOrder;
 }
 
 export interface OrderStatusBoardStatus {

@@ -80,6 +80,9 @@ describe('CNC Telegram worker audit DTO', () => {
 
   it('bounds list periods to 31 days', () => {
     expect(parseWorkerAuditListQuery({ dateFrom: '2026-08-01', dateTo: '2026-08-06' }).pageSize).toBe(50);
+    expect(parseWorkerAuditListQuery({ dateFrom: '2026-08-01', dateTo: '2026-08-06' }).sortDirection).toBe('desc');
+    expect(parseWorkerAuditListQuery({ dateFrom: '2026-08-01', dateTo: '2026-08-06', sortDirection: 'asc' }).sortDirection).toBe('asc');
+    expect(() => parseWorkerAuditListQuery({ dateFrom: '2026-08-01', dateTo: '2026-08-06', sortDirection: 'sideways' })).toThrow();
     expect(parseWorkerAuditListQuery({ dateFrom: '2026-08-01', dateTo: '2026-08-31' }).dateTo).toBe('2026-08-31');
     expect(parseWorkerAuditListQuery({ dateFrom: '2024-02-29', dateTo: '2024-02-29' }).dateFrom).toBe('2024-02-29');
     expect(() => parseWorkerAuditListQuery({ dateFrom: '2026-01-01', dateTo: '2026-08-06' })).toThrow();

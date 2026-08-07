@@ -6,6 +6,7 @@ import {
   buildOrderCutMapSelectionForSource,
   buildOrderCutMapSelections,
   filterOrderCutMapRowOptions,
+  filterOrderCutMapRowsForSource,
   missingOrderCutMapRows,
   orderCutMapRawOptionMatchesSource,
   orderCutMapSourceCutNumbers,
@@ -167,6 +168,61 @@ describe('order cut-map selection', () => {
     expect(orderCutMapRawOptionMatchesSource(detail, option(601, 1, 21, '45-1', false), 'regular')).toBe(true);
     expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, '28-2', false), isVacuum: true }, 'bath')).toBe(true);
     expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, '28-2', false), isVacuum: true }, 'regular')).toBe(false);
+  });
+
+  it('treats Telegram SVG and screenshot fallbacks as regular-source coverage', () => {
+    const rows = buildOrderCutMapLabelRows({
+      orderId: 7,
+      details: [{
+        ...data.details[0],
+        quantity: 2,
+        cutJobCutNumber: null,
+        options: [],
+        telegramSvgFallbackInstances: [{ copyIndex: 1, packetId: 'p1', sourceMessageId: 10 }],
+        telegramImageFallbackInstances: [{ copyIndex: 2, packetId: 'p2', sourceMessageId: 11 }],
+        telegramImageUnavailableInstances: [],
+      }],
+    });
+
+    expect(rows.map((row) => row.telegramFallback)).toEqual(['svg', 'image']);
+    expect(pickDefaultOrderCutMapSource(rows)).toBe('regular');
+    expect(orderCutMapSourceCutNumbers(rows, 'regular')).toEqual(['Telegram']);
+    expect(missingOrderCutMapRows(rows, {})).toEqual([]);
+    expect(buildOrderCutMapSelections(rows, {})).toEqual([]);
+  });
+
+  it('does not let Telegram fallback bypass an available cut-result selection', () => {
+    const rows = buildOrderCutMapLabelRows({
+      orderId: 7,
+      details: [{
+        ...data.details[0],
+        quantity: 1,
+        options: [option(101, 1, 5, '50-4', true)],
+        telegramSvgFallbackInstances: [{ copyIndex: 1, packetId: 'p1', sourceMessageId: 10 }],
+      }],
+    });
+
+    expect(missingOrderCutMapRows(rows, {}).map((row) => row.key)).toEqual(['11:1']);
+    expect(missingOrderCutMapRows(rows, { '11:1': 101 })).toEqual([]);
+  });
+
+  it('keeps Telegram image unavailability reason for truthful UI state', () => {
+    const rows = buildOrderCutMapLabelRows({
+      orderId: 7,
+      details: [{
+        ...data.details[0],
+        quantity: 1,
+        options: [],
+        telegramImageUnavailableInstances: [{ copyIndex: 1, reason: 'invalid_media' }],
+      }],
+    });
+
+    expect(rows[0]?.telegramFallback).toBeNull();
+    expect(rows[0]?.telegramUnavailableReason).toBe('invalid_media');
+    expect(filterOrderCutMapRowsForSource(rows, 'bath')[0]).toMatchObject({
+      telegramFallback: null,
+      telegramUnavailableReason: null,
+    });
   });
 });
 

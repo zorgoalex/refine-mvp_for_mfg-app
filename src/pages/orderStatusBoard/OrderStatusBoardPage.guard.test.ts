@@ -149,6 +149,19 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
+  it('loads the next column page before vertical scroll reaches the bottom', () => {
+    expect(page).toContain('const loadSentinelRef = useRef<HTMLDivElement | null>(null)');
+    expect(page).toContain("rootMargin: '0px 0px 320px 0px'");
+    expect(page).toContain('root,');
+    expect(page).toContain('observer.observe(sentinel)');
+    expect(page).toContain('requestedCursorRef.current === cursor');
+    expect(page).toContain('aria-busy={loadingMore}');
+    expect(page).toContain('Загружаем следующие заказы…');
+    expect(page).toContain("autoLoadFailed ? 'Повторить загрузку' : 'Загрузить ещё'");
+    expect(css).toContain('.status-board-column__load-sentinel');
+    expect(css).toContain('font-variant-numeric: tabular-nums');
+  });
+
   it('keeps desktop MDF auto-height but gives tablet a full-height pannable viewport', () => {
     expect(page).toContain("isCncToday ? ' status-board-page--cnc' : ''");
     expect(css).toMatch(
@@ -196,6 +209,20 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('height: 32px');
   });
 
+  it('offers persistent server-side card sorting for both status boards', () => {
+    expect(page).toContain('Сортировка карточек');
+    expect(page).toContain('Сортировать по');
+    expect(page).toContain("value: 'orderNumber'");
+    expect(page).toContain("value: 'plannedDate'");
+    expect(page).toContain("value: 'updatedAt'");
+    expect(page).toContain('sortBy: viewState.sortBy');
+    expect(page).toContain('sortOrder: viewState.sortOrder');
+    expect(page).toContain('window.localStorage');
+    expect(page).toContain('status-board-toolbar__sort-settings');
+    expect(page).toContain('switchStatusBoardView');
+    expect(page).toContain('readStatusBoardSortPreference(currentUser?.id, view)');
+  });
+
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
@@ -239,7 +266,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
     expect(page).toContain('CncBazisCutSetCardView');
     expect(page).toContain('Итоги по ERP-заказам набора');
-    expect(page).toContain('Открыть Базис-раскрой');
+    expect(page).toContain('aria-label={`Открыть Базис-раскрой БР-${card.bazisCutSetId}`}');
     expect(page).toContain('getCncBazisCutSetDisplayState(card, relationContext, detailedContext)');
     expect(page).toContain('buildCncBazisCutSetFingerprint');
     expect(css).toContain('.cnc-bazis-cut-card');
@@ -258,6 +285,26 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
+  });
+
+  it('keeps the Basis-cut card compact and expands its full detail list', () => {
+    const cardStart = page.indexOf('const CncBazisCutSetCardView =');
+    const cardEnd = page.indexOf('interface CncTelegramPacketCardProps', cardStart);
+    const card = page.slice(cardStart, cardEnd);
+
+    expect(card).toContain('const [detailsOpen, setDetailsOpen] = useState(false)');
+    expect(card).toContain('className="cnc-bazis-cut-card__badge"');
+    expect(card).toContain('onClick={openSet}');
+    expect(card).not.toContain('cnc-bazis-cut-card__set-link');
+    expect(card).not.toContain('cnc-bazis-cut-card__open');
+    expect(card).not.toContain('card.positionCount');
+    expect(card).toContain('aria-label="Данные Базис-раскроя"');
+    expect(card).toContain('aria-label="Детали Базис-раскроя"');
+    expect(card).toContain('setDetailsOpen((current) => !current)');
+    expect(card).toContain('card.items.map((item, index)');
+    expect(css).toMatch(
+      /\.cnc-bazis-cut-card__tabs\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s,
+    );
   });
 
   it('keeps bath cards printable with SVG and PDF previews', () => {

@@ -49,6 +49,10 @@ import type {
   CncTelegramTodayResponseDto,
   CncTelegramToolDto,
 } from '../dto/cnc-telegram.dto';
+import {
+  persistTelegramItemEvidence,
+  projectTelegramLabelMap,
+} from './cnc-telegram-label-map-projector';
 
 const SOURCE = 'backend-cnc-telegram-command';
 const COMMAND_NAME = 'cnc.telegram_packet.ingest';
@@ -397,9 +401,33 @@ export class PgCncTelegramRepository
       ) {
         const matchedDto = await resolveItemMatches(tx, command.dto);
         const resolvedDto = aggregateMatchedItems(matchedDto);
+        await assertMatchedDetailsBelongToOrders(tx, matchedDto);
+        await persistTelegramItemEvidence(tx, {
+          packetId: existing.packet_id,
+          sourceVersion: command.dto.source.version,
+          payloadHash,
+          dto: matchedDto,
+          source: 'authoritative_replay',
+          context: {
+            actorUserId: command.currentUser.id,
+            actorUsername: command.currentUser.username,
+            actorRole: command.currentUser.role,
+            requestId,
+          },
+        });
         await ensureCuttingSequenceNo(tx, existing.packet_id, resolvedDto, Number(command.currentUser.id));
         await ensureStoredCutLayout(tx, existing.packet_id, command.dto.cutLayout ?? null);
         await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchedDto, command.currentUser.id);
+        await projectTelegramLabelMap(tx, {
+          packetId: existing.packet_id,
+          source: 'ingest',
+          context: {
+            actorUserId: command.currentUser.id,
+            actorUsername: command.currentUser.username,
+            actorRole: command.currentUser.role,
+            requestId,
+          },
+        });
         const packet = await loadPacket(tx, existing.packet_id);
         const response: CncTelegramIngestResponseDto = {
           packet,
@@ -414,15 +442,38 @@ export class PgCncTelegramRepository
       const matchedDto = await resolveItemMatches(tx, command.dto);
       const resolvedDto = aggregateMatchedItems(matchedDto);
       const resolvedCommand = resolvedDto === command.dto ? command : { ...command, dto: resolvedDto };
-      await assertMatchedDetailsBelongToOrders(tx, resolvedDto);
+      await assertMatchedDetailsBelongToOrders(tx, matchedDto);
 
       const packetId = existing?.packet_id ?? await insertPacket(tx, resolvedCommand, payloadHash);
       if (existing) {
         await updatePacket(tx, packetId, resolvedCommand, payloadHash);
       }
+      await persistTelegramItemEvidence(tx, {
+        packetId,
+        sourceVersion: command.dto.source.version,
+        payloadHash,
+        dto: matchedDto,
+        source: 'ingest',
+        context: {
+          actorUserId: command.currentUser.id,
+          actorUsername: command.currentUser.username,
+          actorRole: command.currentUser.role,
+          requestId,
+        },
+      });
       await replaceItems(tx, packetId, resolvedDto);
       await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));
       await syncSvgCutImport(tx, packetId, resolvedDto, matchedDto, command.currentUser.id);
+      await projectTelegramLabelMap(tx, {
+        packetId,
+        source: 'ingest',
+        context: {
+          actorUserId: command.currentUser.id,
+          actorUsername: command.currentUser.username,
+          actorRole: command.currentUser.role,
+          requestId,
+        },
+      });
 
       const packet = await loadPacket(tx, packetId);
       const auditId = await writeIngestAudit(tx, {

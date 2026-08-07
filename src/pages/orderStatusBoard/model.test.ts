@@ -86,7 +86,7 @@ describe('order status board model', () => {
   it('round-trips shareable URL state and API query', () => {
     const state = parseOrderStatusBoardViewState(
       new URLSearchParams(
-        'board=production&q=ABC&mine=1&overdue=1&showDone=1&plannedFrom=2026-07-01&hideEmpty=1',
+        'board=production&q=ABC&mine=1&overdue=1&showDone=1&plannedFrom=2026-07-01&hideEmpty=1&sort=orderNumber&direction=desc',
       ),
     );
     expect(state).toMatchObject({
@@ -97,6 +97,8 @@ describe('order status board model', () => {
       showDone: true,
       plannedFrom: '2026-07-01',
       hideEmpty: true,
+      sortBy: 'orderNumber',
+      sortOrder: 'desc',
     });
     expect(serializeOrderStatusBoardViewState(state).toString()).toContain(
       'board=production',
@@ -111,7 +113,37 @@ describe('order status board model', () => {
       cursor: 'next',
       limit: 24,
       includeDone: true,
+      sortBy: 'orderNumber',
+      sortOrder: 'desc',
     });
+  });
+
+  it('uses a saved per-board sort when URL has no explicit sorting', () => {
+    const state = parseOrderStatusBoardViewState(
+      new URLSearchParams('board=production'),
+      {
+        defaultSort: { sortBy: 'updatedAt', sortOrder: 'desc' },
+      },
+    );
+
+    expect(state).toMatchObject({
+      sortBy: 'updatedAt',
+      sortOrder: 'desc',
+    });
+    expect(serializeOrderStatusBoardViewState(state).toString()).toContain(
+      'sort=updatedAt&direction=desc',
+    );
+  });
+
+  it('falls back safely from invalid hand-edited sort parameters', () => {
+    const state = parseOrderStatusBoardViewState(
+      new URLSearchParams('sort=client&direction=newest'),
+    );
+
+    expect(state).toMatchObject({ sortBy: 'priority', sortOrder: 'asc' });
+    expect(serializeOrderStatusBoardViewState(state).toString()).toContain(
+      'sort=priority&direction=asc',
+    );
   });
 
   it('keeps CNC today as visual flow without changing status-board API type', () => {
