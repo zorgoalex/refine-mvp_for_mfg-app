@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -210,6 +210,22 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'reject_cnc_telegram_label_immutable_mutation()',
       'guard_label_generation_cut_source_exclusive()',
     ]) expect(migration110Probe).toContain(marker);
+  });
+
+  it('pins migration 111 Telegram media restore queue end state', () => {
+    const migration111Probe = probeFn.slice(
+      probeFn.indexOf('111_cnc_telegram_media_restore*'),
+      probeFn.indexOf('*) return 2'),
+    );
+    for (const marker of [
+      'cnc_telegram_media_restore_requests',
+      'restore_request_id',
+      'available_until',
+      'chk_cnc_telegram_media_restore_state',
+      'uq_cnc_telegram_media_restore_active_packet',
+      'idx_cnc_telegram_media_restore_claim',
+      'idx_cnc_telegram_media_restore_packet_history',
+    ]) expect(migration111Probe).toContain(marker);
   });
 });
 

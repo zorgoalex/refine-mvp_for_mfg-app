@@ -86,6 +86,36 @@ class ErpClient:
             response.raise_for_status()
             return response.json()
 
+    async def claim_media_restores(self) -> dict[str, Any]:
+        return await self._authorized_post("/cnc-telegram/media-restores/claim")
+
+    async def complete_media_restore(self, request_id: str, media: dict[str, Any]) -> dict[str, Any]:
+        if not request_id:
+            raise RuntimeError("media restore request id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/media-restores/{request_id}/complete",
+            payload=media,
+        )
+
+    async def fail_media_restore(self, request_id: str, error: str) -> dict[str, Any]:
+        if not request_id:
+            raise RuntimeError("media restore request id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/media-restores/{request_id}/fail",
+            payload={"error": error[:500]},
+        )
+
+    async def _authorized_post(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        headers = {"Authorization": await self._authorization_header()}
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await client.post(f"{self.api_url}{path}", json=payload, headers=headers)
+            if response.status_code == 401 and not self.auth.bearer_token:
+                self._access_token = ""
+                headers["Authorization"] = await self._authorization_header(force=True)
+                response = await client.post(f"{self.api_url}{path}", json=payload, headers=headers)
+            response.raise_for_status()
+            return response.json()
+
     async def _authorization_header(self, force: bool = False) -> str:
         if self.auth.bearer_token:
             return f"Bearer {self.auth.bearer_token}"

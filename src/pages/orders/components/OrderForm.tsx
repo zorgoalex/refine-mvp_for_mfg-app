@@ -51,6 +51,7 @@ import { OrderFinanceSection } from './sections/OrderFinanceSection';
 import { OrderMaterialsTab } from './sections/OrderMaterialsTab';
 import { OrderLegacySection } from './sections/OrderLegacySection';
 import { OrderFilesSection } from './sections/OrderFilesSection';
+import { OrderTelegramScreenshots } from './sections/OrderTelegramScreenshots';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 import { OrderLabelDataEditor } from './labels/OrderLabelDataEditor';
 import { makeOrderDeleteHandler } from '../orderDeleteAction';
@@ -1408,11 +1409,14 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'additional',
         label: isOperational ? 'Бирки' : 'Дополнительно',
         children: isOperational ? (
-          labelsEnabled ? (
-            <OrderLabelDataEditor orderId={header.order_id ?? orderId} isOrderDirty={isDirty} />
-          ) : (
-            <span>Бирки недоступны</span>
-          )
+          <Space direction="vertical" style={{ width: '100%' }} size="large">
+            <OrderTelegramScreenshots orderId={header.order_id ?? orderId} />
+            {labelsEnabled ? (
+              <OrderLabelDataEditor orderId={header.order_id ?? orderId} isOrderDirty={isDirty} />
+            ) : (
+              <span>Бирки недоступны</span>
+            )}
+          </Space>
         ) : (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <OrderLegacySection />

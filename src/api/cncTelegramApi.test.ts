@@ -101,6 +101,32 @@ describe('cncTelegramApi', () => {
     await expect(result.blob.text()).resolves.toContain('erp.cnc-telegram-worker-audit');
   });
 
+  it('lists, downloads and restores order-scoped Telegram screenshots', async () => {
+    const packetId = '00000000-0000-4000-8000-000000000001';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        orderId: 2700, generatedAt: '2026-08-07T10:00:00.000Z',
+        originalRetentionDays: 30, screenshots: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(new Response(new Blob(['preview'], { type: 'image/jpeg' }), {
+        status: 200, headers: { 'Content-Type': 'image/jpeg' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        requestId: '00000000-0000-4000-8000-000000000002', packetId,
+        status: 'pending', requestedAt: '2026-08-07T10:00:00.000Z', availableUntil: null,
+      }), { status: 202, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.orderScreenshots(2700);
+    await cncTelegramApi.downloadOrderScreenshotPreview(2700, packetId);
+    await cncTelegramApi.restoreOrderScreenshot(2700, packetId);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cnc-telegram/orders/2700/screenshots');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`/api/v1/cnc-telegram/orders/2700/screenshots/${packetId}/preview`);
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(`/api/v1/cnc-telegram/orders/2700/screenshots/${packetId}/restore`);
+    expect(fetchMock.mock.calls[2]?.[1]).toEqual(expect.objectContaining({ method: 'POST' }));
+  });
+
   it('configures auto-cut status with an idempotency header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

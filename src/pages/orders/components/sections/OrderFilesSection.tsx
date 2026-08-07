@@ -5,6 +5,7 @@ import React from 'react';
 import { Form, Input, Row, Col, Collapse } from 'antd';
 import { LinkOutlined } from '@ant-design/icons';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
+import { OrderTelegramScreenshots } from './OrderTelegramScreenshots';
 
 const { Panel } = Collapse;
 
@@ -62,6 +63,7 @@ export const OrderFilesSection: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
+          <OrderTelegramScreenshots orderId={Number(header.order_id)} />
         </Form>
       </Panel>
     </Collapse>

@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Скрины Telegram-раскроев в карточке заказа",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В блоках файлов заказа появились постоянные компактные превью скринов раскроя из Telegram с полноэкранным просмотром, масштабированием и печатью.",
+      "После окончания 30-дневного хранения оригинала клик по превью ставит безопасное восстановление из исходного сообщения Telegram в очередь воркера.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Вкладки ERP сохраняются после возврата в браузер",
     services: ["ERP"],
     repositories: ["repo_erp"],

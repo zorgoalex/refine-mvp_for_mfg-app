@@ -3,7 +3,9 @@ import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
   CncAutoCutStatusConfigureResponse,
+  CncTelegramMediaRestoreResponse,
   CncTelegramOrderCuttingSequencesResponse,
+  CncTelegramOrderScreenshotsResponse,
   CncTelegramTodayResponse,
 } from './types/cncTelegramApi.types';
 import type {
@@ -30,6 +32,27 @@ export const cncTelegramApi = {
     }
     return httpClient.get<CncTelegramOrderCuttingSequencesResponse>(
       apiRoutes.cncTelegram.orderCuttingSequences(orderId),
+    );
+  },
+  orderScreenshots(orderId: number): Promise<CncTelegramOrderScreenshotsResponse> {
+    assertOrderId(orderId);
+    return httpClient.get<CncTelegramOrderScreenshotsResponse>(
+      apiRoutes.cncTelegram.orderScreenshots(orderId),
+    );
+  },
+  downloadOrderScreenshotPreview(orderId: number, packetId: string) {
+    assertOrderScreenshotIdentity(orderId, packetId);
+    return httpClient.download(apiRoutes.cncTelegram.orderScreenshotPreview(orderId, packetId));
+  },
+  downloadOrderScreenshotImage(orderId: number, packetId: string) {
+    assertOrderScreenshotIdentity(orderId, packetId);
+    return httpClient.download(apiRoutes.cncTelegram.orderScreenshotImage(orderId, packetId));
+  },
+  restoreOrderScreenshot(orderId: number, packetId: string): Promise<CncTelegramMediaRestoreResponse> {
+    assertOrderScreenshotIdentity(orderId, packetId);
+    return httpClient.post<CncTelegramMediaRestoreResponse>(
+      apiRoutes.cncTelegram.orderScreenshotRestore(orderId, packetId),
+      {},
     );
   },
   workerLogs(query: TelegramWorkerAuditQuery = {}): Promise<TelegramWorkerAuditListResponse> {
@@ -60,6 +83,17 @@ export const cncTelegramApi = {
     return httpClient.download(path);
   },
 };
+
+function assertOrderId(orderId: number): void {
+  if (!Number.isInteger(orderId) || orderId <= 0) throw new Error('Invalid orderId');
+}
+
+function assertOrderScreenshotIdentity(orderId: number, packetId: string): void {
+  assertOrderId(orderId);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(packetId)) {
+    throw new Error('Invalid packetId');
+  }
+}
 
 export function createCncAutoCutStatusIdempotencyKey(): string {
   const suffix = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'

@@ -1092,6 +1092,30 @@ probe_file() {
                      "$(q_trg trg_label_generation_cut_source_exclusive_telegram)" \
                      "SELECT to_regprocedure('reject_cnc_telegram_label_immutable_mutation()') IS NOT NULL;" \
                      "SELECT to_regprocedure('guard_label_generation_cut_source_exclusive()') IS NOT NULL;" ;;
+    111_cnc_telegram_media_restore*) probe_all \
+                     "$(q_tbl cnc_telegram_media_restore_requests)" \
+                     "$(q_col cnc_telegram_media_restore_requests restore_request_id)" \
+                     "$(q_col cnc_telegram_media_restore_requests packet_id)" \
+                     "$(q_col cnc_telegram_media_restore_requests requested_by)" \
+                     "$(q_col cnc_telegram_media_restore_requests request_trace_id)" \
+                     "$(q_col cnc_telegram_media_restore_requests status)" \
+                     "$(q_col cnc_telegram_media_restore_requests attempt_count)" \
+                     "$(q_col cnc_telegram_media_restore_requests requested_at)" \
+                     "$(q_col cnc_telegram_media_restore_requests claimed_at)" \
+                     "$(q_col cnc_telegram_media_restore_requests finished_at)" \
+                     "$(q_col cnc_telegram_media_restore_requests available_until)" \
+                     "$(q_col cnc_telegram_media_restore_requests last_error)" \
+                     "$(q_col cnc_telegram_media_restore_requests updated_at)" \
+                     "$(q_con_on cnc_telegram_media_restore_requests cnc_telegram_media_restore_requests_pkey)" \
+                     "$(q_con_on cnc_telegram_media_restore_requests cnc_telegram_media_restore_requests_packet_id_fkey)" \
+                     "$(q_con_on cnc_telegram_media_restore_requests cnc_telegram_media_restore_requests_requested_by_fkey)" \
+                     "$(q_con_on cnc_telegram_media_restore_requests chk_cnc_telegram_media_restore_status)" \
+                     "$(q_con_on cnc_telegram_media_restore_requests chk_cnc_telegram_media_restore_attempts)" \
+                     "$(q_con_on cnc_telegram_media_restore_requests chk_cnc_telegram_media_restore_error)" \
+                     "$(q_con_on cnc_telegram_media_restore_requests chk_cnc_telegram_media_restore_state)" \
+                     "$(q_idx uq_cnc_telegram_media_restore_active_packet)" \
+                     "$(q_idx idx_cnc_telegram_media_restore_claim)" \
+                     "$(q_idx idx_cnc_telegram_media_restore_packet_history)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1103,7 +1127,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

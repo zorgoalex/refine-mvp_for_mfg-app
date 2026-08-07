@@ -13,6 +13,7 @@ class FakeAsyncClient:
     def __init__(self, responses: list[httpx.Response]) -> None:
         self.responses = responses
         self.post_calls = 0
+        self.requests: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
     async def __aenter__(self) -> "FakeAsyncClient":
         return self
@@ -21,6 +22,7 @@ class FakeAsyncClient:
         return None
 
     async def post(self, *args: Any, **kwargs: Any) -> httpx.Response:
+        self.requests.append((args, kwargs))
         response = self.responses[self.post_calls]
         self.post_calls += 1
         return response
@@ -63,6 +65,23 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(fake_http.post_calls, 1)
         sleep.assert_not_awaited()
+
+    async def test_claims_and_completes_media_restore_with_worker_auth(self) -> None:
+        fake_http = FakeAsyncClient([
+            response(200, {"capability": "cnc_telegram_media_restore_v1", "tasks": []}),
+            response(200, {"status": "completed"}),
+        ])
+        client = ErpClient("http://backend/api/v1", BackendAuth(bearer_token="test-token"))
+
+        with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
+            await client.claim_media_restores()
+            await client.complete_media_restore("request-1", {
+                "storageKey": "tg_100_10.jpg", "contentType": "image/jpeg", "sizeBytes": 123,
+            })
+
+        self.assertTrue(fake_http.requests[0][0][0].endswith("/cnc-telegram/media-restores/claim"))
+        self.assertTrue(fake_http.requests[1][0][0].endswith("/media-restores/request-1/complete"))
+        self.assertEqual(fake_http.requests[1][1]["json"]["sizeBytes"], 123)
 
 
 if __name__ == "__main__":
