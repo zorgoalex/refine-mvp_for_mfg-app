@@ -120,10 +120,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const revealTouchMovedCardRef = useRef(false)');
     expect(page).toContain('revealTouchMovedCardRef.current = revealTouchMovedCard');
     expect(page).toContain('onMove(card, destination.statusId, destination.statusName, trigger, true)');
-    expect(page).toContain('movedCard.focus({ preventScroll: true })');
-    expect(page).toContain('movedCard.scrollIntoView({');
+    expect(page).toContain('revealOrderStatusBoardCard(');
+    expect(page).toContain("movedCard.closest<HTMLElement>('.status-board-column__cards')");
     expect(page).toContain("window.matchMedia('(prefers-reduced-motion: reduce)').matches");
-    expect(page).toContain("inline: 'center'");
+    expect(page).not.toContain('movedCard.scrollIntoView({');
+    expect(interaction).toContain('viewport.scrollTo({ left: targetLeft, behavior })');
+    expect(interaction).toContain('cards.scrollTo({ top: targetTop, behavior })');
     expect(css).toMatch(/@media \(max-width: 768px\) \{[\s\S]*?\.status-board-card:focus \{[^}]*outline: 2px solid #1677ff;/);
   });
 

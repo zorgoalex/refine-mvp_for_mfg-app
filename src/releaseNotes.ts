@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Точный переход к перенесённой карточке на планшете",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "После переноса заказа планшетная доска теперь независимо прокручивает горизонтальный ряд колонок и вертикальный список, поэтому фокус всегда переходит к самой карточке даже при отображении всех колонок.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Скрины Telegram-раскроев в карточке заказа",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -95,6 +95,7 @@ import {
   isCncPreviewRequestCurrent,
   releaseCncPreviewLoadKey,
   reserveOrderStatusBoardMutation,
+  revealOrderStatusBoardCard,
   restoreOrderStatusBoardFocus,
   syncCncBathSelectedDetail,
 } from './interaction';
@@ -508,15 +509,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               `[data-status-board-order-id="${focusOrderId}"]`,
             );
             if (revealTouchMovedCard && movedCard) {
-              movedCard.focus({ preventScroll: true });
-              movedCard.scrollIntoView({
-                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-                  ? 'auto'
-                  : 'smooth',
-                block: 'nearest',
-                inline: 'center',
-              });
-              return;
+              const cards = movedCard.closest<HTMLElement>('.status-board-column__cards');
+              if (
+                revealOrderStatusBoardCard(
+                  movedCard,
+                  boardViewportRef.current,
+                  cards,
+                  window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+                )
+              ) {
+                return;
+              }
             }
             restoreOrderStatusBoardFocus(
               focusOrderId,
