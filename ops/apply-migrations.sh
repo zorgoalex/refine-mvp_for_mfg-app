@@ -1116,6 +1116,39 @@ probe_file() {
                      "$(q_idx uq_cnc_telegram_media_restore_active_packet)" \
                      "$(q_idx idx_cnc_telegram_media_restore_claim)" \
                      "$(q_idx idx_cnc_telegram_media_restore_packet_history)" ;;
+    112_cut_job_rotation_allowed*) probe_all \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM information_schema.columns
+                         WHERE table_schema = 'public'
+                           AND table_name = 'cut_job'
+                           AND column_name = 'rotation_allowed'
+                           AND data_type = 'boolean'
+                           AND is_nullable = 'NO'
+                           AND column_default = 'true'
+                      );" ;;
+    113_cut_job_texture_direction*) probe_all \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM information_schema.columns
+                         WHERE table_schema = 'public'
+                           AND table_name = 'cut_job'
+                           AND column_name = 'texture_direction'
+                           AND data_type = 'text'
+                           AND is_nullable = 'NO'
+                           AND column_default = '''none''::text'
+                      );" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE conname = 'cut_job_texture_direction_check'
+                           AND conrelid = 'public.cut_job'::regclass
+                           AND convalidated
+                           AND pg_get_constraintdef(oid) LIKE '%texture_direction%'
+                           AND pg_get_constraintdef(oid) LIKE '%vertical%'
+                           AND pg_get_constraintdef(oid) LIKE '%horizontal%'
+                           AND pg_get_constraintdef(oid) LIKE '%none%'
+                      );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1127,7 +1160,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

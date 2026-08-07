@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -226,6 +226,36 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'idx_cnc_telegram_media_restore_claim',
       'idx_cnc_telegram_media_restore_packet_history',
     ]) expect(migration111Probe).toContain(marker);
+  });
+
+  it('pins migrations 112/113 cut-job orientation end states', () => {
+    const migration112Probe = probeFn.slice(
+      probeFn.indexOf('112_cut_job_rotation_allowed*'),
+      probeFn.indexOf('113_cut_job_texture_direction*'),
+    );
+    for (const marker of [
+      "column_name = 'rotation_allowed'",
+      "data_type = 'boolean'",
+      "is_nullable = 'NO'",
+      "column_default = 'true'",
+    ]) expect(migration112Probe).toContain(marker);
+
+    const migration113Probe = probeFn.slice(
+      probeFn.indexOf('113_cut_job_texture_direction*'),
+      probeFn.indexOf('*) return 2'),
+    );
+    for (const marker of [
+      "column_name = 'texture_direction'",
+      "data_type = 'text'",
+      "column_default = '''none''::text'",
+      "conname = 'cut_job_texture_direction_check'",
+      'convalidated',
+      "LIKE '%vertical%'",
+      "LIKE '%horizontal%'",
+      "LIKE '%none%'",
+    ]) expect(migration113Probe).toContain(marker);
+
+    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\)/);
   });
 });
 
