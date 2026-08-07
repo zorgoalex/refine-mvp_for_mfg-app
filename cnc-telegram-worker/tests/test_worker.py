@@ -15,7 +15,7 @@ telethon_stub.TelegramClient = object
 telethon_stub.utils = types.SimpleNamespace(get_peer_id=lambda entity: entity)
 sys.modules.setdefault("telethon", telethon_stub)
 
-from cnc_telegram_worker.telegram_source import is_image_message, is_vector_message
+from cnc_telegram_worker.telegram_source import collect_day_messages, is_image_message, is_vector_message
 from cnc_telegram_worker.audit import (
     AuditSpool,
     ScanAudit,
@@ -322,6 +322,30 @@ class WorkerFingerprintTest(unittest.TestCase):
         self.assertEqual(cutting_sequence_reply_number([image, reply], image), 7)
         self.assertEqual(groups[0].cutting_sequence_no, 7)
         self.assertEqual(groups[0].comments, ["2700 весь"])
+
+
+class WorkerDayHistoryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_observer_never_records_previous_workday_boundary_message(self) -> None:
+        current = FakeMessage(101, text="current")
+        current.date = datetime(2026, 7, 24, 12, 0, tzinfo=timezone.utc)
+        previous = FakeMessage(100, text="previous")
+        previous.date = datetime(2026, 7, 23, 23, 59, tzinfo=timezone.utc)
+        observed: list[tuple[int, int]] = []
+
+        async def observe(message: FakeMessage, ordinal: int) -> None:
+            observed.append((int(message.id), ordinal))
+
+        messages = await collect_day_messages(
+            FakeTelegramClient([current, previous]),
+            object(),
+            date(2026, 7, 24),
+            timezone.utc,
+            100,
+            observer=observe,
+        )
+
+        self.assertEqual([message.id for message in messages], [101])
+        self.assertEqual(observed, [(101, 1)])
 
 
 class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):

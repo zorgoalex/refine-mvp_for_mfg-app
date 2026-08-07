@@ -28,13 +28,13 @@ async def collect_day_messages(
     messages: list[Any] = []
     ordinal = 0
     async for message in client.iter_messages(entity, offset_date=end_utc, limit=max_messages):
-        ordinal += 1
-        if observer is not None:
-            await observer(message, ordinal)
         message_date = message_datetime(message).astimezone(tz)
         if message_date.date() < workday:
             break
         if start_local <= message_date <= end_local:
+            ordinal += 1
+            if observer is not None:
+                await observer(message, ordinal)
             messages.append(message)
     return list(reversed(messages))
 
