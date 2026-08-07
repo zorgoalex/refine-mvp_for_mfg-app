@@ -153,6 +153,7 @@ export const apiRoutes = {
     autoCutStatus: backendApiPath('/cnc-telegram/auto-cut-status'),
     orderCuttingSequences: (orderId: number) => backendApiPath(`/cnc-telegram/orders/${orderId}/cutting-sequences`),
     workerLogs: backendApiPath('/cnc-telegram/worker-logs'),
+    workerLogsExport: backendApiPath('/cnc-telegram/worker-logs/export'),
   },
   sheetMaterials: {
     list: backendApiPath('/sheet-material-types'),

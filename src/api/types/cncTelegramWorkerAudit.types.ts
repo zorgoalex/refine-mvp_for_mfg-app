@@ -150,3 +150,5 @@ export interface TelegramWorkerAuditQuery {
   reasonCode?: string;
   search?: string;
 }
+
+export type TelegramWorkerAuditExportQuery = Omit<TelegramWorkerAuditQuery, 'page' | 'pageSize'>;

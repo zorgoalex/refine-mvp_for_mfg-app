@@ -39,4 +39,23 @@ describe('CNC Telegram OpenAPI contract', () => {
       expect(section).toContain(`'${status}':`);
     }
   });
+
+  it('documents the permission-gated detailed worker audit JSON export', () => {
+    const start = contract.indexOf('  /api/v1/cnc-telegram/worker-logs/export:');
+    const end = contract.indexOf('  /api/v1/cnc-telegram/worker-logs/batch:', start);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const section = contract.slice(start, end);
+    expect(section).toContain('operationId: exportCncTelegramWorkerAudit');
+    expect(section).toContain('x-permission: audit.view');
+    expect(section).toContain('format: binary');
+    expect(section).toContain('Content-Disposition:');
+    for (const field of ['dateFrom', 'dateTo', 'status', 'messageType', 'reasonCode', 'search']) {
+      expect(section).toContain(`name: ${field}`);
+    }
+    for (const status of ['200', '401', '403', '413', '422']) {
+      expect(section).toContain(`'${status}':`);
+    }
+  });
 });

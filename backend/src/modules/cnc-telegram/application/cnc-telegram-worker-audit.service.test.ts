@@ -116,12 +116,67 @@ describe('CncTelegramWorkerAuditService', () => {
     await expect(service.writeBatch(user('cnc-bot', ['cut.manage']), batch('-123'), 'request-collision'))
       .rejects.toMatchObject({ code: 'CNC_TELEGRAM_CHAT_DENIED', statusCode: 403 });
   });
+
+  it('exports a readable full-fidelity JSON envelope for audit viewers', async () => {
+    const exportDetailed = vi.fn().mockResolvedValue({
+      scans: [{ scanId }],
+      messages: [{
+        logId: 'log-1',
+        observations: [{ observationId: 'observation-1' }],
+        operations: [{
+          operationId: 'operation-1',
+          steps: [{ stepId: 'step-1' }],
+          responses: [{ responseId: 'response-1' }, { responseId: 'response-2' }],
+        }],
+      }],
+    });
+    const service = createService(deniedAuditPort(), { exportDetailed });
+    const query = { dateFrom: '2026-08-01', dateTo: '2026-08-06', status: 'failed' } as const;
+
+    const currentUser = user('auditor', ['audit.view']);
+    const file = await service.exportDetailed(currentUser, query);
+    const payload = JSON.parse(file.content) as Record<string, unknown>;
+
+    expect(exportDetailed).toHaveBeenCalledWith(query);
+    expect(file.fileName).toBe('telegram-worker-audit_2026-08-01_2026-08-06.json');
+    expect(file.content.endsWith('\n')).toBe(true);
+    expect(payload).toMatchObject({
+      format: 'erp.cnc-telegram-worker-audit',
+      schemaVersion: 1,
+      detailLevel: 'full',
+      exportedBy: { userId: currentUser.id, username: 'auditor', role: currentUser.role },
+      period: { dateFrom: '2026-08-01', dateTo: '2026-08-06', dateField: 'workday', inclusive: true },
+      filters: { status: 'failed', messageType: null, reasonCode: null, search: null },
+      totals: { scans: 1, messages: 1, observations: 1, operations: 1, steps: 1, responses: 2 },
+    });
+    expect(payload.scans).toEqual([{ scanId }]);
+    expect(payload.messages).toEqual([expect.objectContaining({
+      operations: [expect.objectContaining({
+        responses: [{ responseId: 'response-1' }, { responseId: 'response-2' }],
+      })],
+    })]);
+  });
+
+  it('denies detailed export without audit.view before reading the repository', async () => {
+    const exportDetailed = vi.fn();
+    const service = createService(deniedAuditPort(), { exportDetailed });
+
+    await expect(service.exportDetailed(
+      user('viewer', []),
+      { dateFrom: '2026-08-01', dateTo: '2026-08-06' },
+    )).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(exportDetailed).not.toHaveBeenCalled();
+  });
 });
 
-function createService(deniedAudit: ReturnType<typeof deniedAuditPort>): CncTelegramWorkerAuditService {
+function createService(
+  deniedAudit: ReturnType<typeof deniedAuditPort>,
+  repositoryOverrides: Record<string, unknown> = {},
+): CncTelegramWorkerAuditService {
   const repository = {
     capabilities: vi.fn().mockResolvedValue(true),
     writeBatch: vi.fn().mockResolvedValue({ accepted: 1 }),
+    ...repositoryOverrides,
   } as unknown as PgCncTelegramWorkerAuditRepository;
   const config = {
     get: vi.fn((key: keyof BackendEnv) => ({

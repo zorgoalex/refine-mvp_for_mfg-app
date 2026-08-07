@@ -1,4 +1,8 @@
-import { parseWorkerAuditBatch, parseWorkerAuditListQuery } from './cnc-telegram-worker-audit.dto';
+import {
+  parseWorkerAuditBatch,
+  parseWorkerAuditExportQuery,
+  parseWorkerAuditListQuery,
+} from './cnc-telegram-worker-audit.dto';
 import { describe, expect, it } from 'vitest';
 import { sanitizeWorkerAuditBatch } from '../application/cnc-telegram-worker-audit.service';
 
@@ -84,6 +88,22 @@ describe('CNC Telegram worker audit DTO', () => {
     expect(() => parseWorkerAuditListQuery({ dateFrom: '2026-99-99', dateTo: '2026-99-99' })).toThrow();
     expect(() => parseWorkerAuditBatch({
       scan: { ...scan, workday: '2026-02-29' }, messages: [], observations: [], operations: [],
+    })).toThrow();
+  });
+
+  it('accepts bounded export filters without pagination fields', () => {
+    expect(parseWorkerAuditExportQuery({
+      dateFrom: '2026-08-01', dateTo: '2026-08-31', status: 'failed', messageType: 'svg',
+      reasonCode: 'backend_ingest_failed', search: ' layout.svg ',
+    })).toEqual({
+      dateFrom: '2026-08-01', dateTo: '2026-08-31', status: 'failed', messageType: 'svg',
+      reasonCode: 'backend_ingest_failed', search: 'layout.svg',
+    });
+    expect(() => parseWorkerAuditExportQuery({
+      dateFrom: '2026-08-01', dateTo: '2026-09-01',
+    })).toThrow();
+    expect(() => parseWorkerAuditExportQuery({
+      dateFrom: '2026-08-01', dateTo: '2026-08-06', page: 1,
     })).toThrow();
   });
 

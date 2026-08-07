@@ -1,17 +1,26 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildTelegramWorkerAuditQuery, isTelegramWorkerScanStale } from './TelegramWorkerAudit';
+import {
+  buildTelegramWorkerAuditExportQuery,
+  buildTelegramWorkerAuditQuery,
+  isTelegramWorkerScanStale,
+} from './TelegramWorkerAudit';
 import type { TelegramWorkerScan } from '../../api/types/cncTelegramWorkerAudit.types';
 import dayjs from 'dayjs';
 import { describe, expect, it } from 'vitest';
 
 describe('Telegram worker audit UI', () => {
   it('encodes bounded filters', () => {
-    expect(buildTelegramWorkerAuditQuery({
+    const values: Parameters<typeof buildTelegramWorkerAuditQuery>[0] = {
       period: [dayjs('2026-08-01'), dayjs('2026-08-06')], status: 'failed',
       messageType: 'svg', search: ' 9007199254740993 ',
-    }, 25)).toEqual({
+    };
+    expect(buildTelegramWorkerAuditQuery(values, 25)).toEqual({
       dateFrom: '2026-08-01', dateTo: '2026-08-06', page: 1, pageSize: 25,
+      status: 'failed', messageType: 'svg', reasonCode: undefined, search: '9007199254740993',
+    });
+    expect(buildTelegramWorkerAuditExportQuery(values)).toEqual({
+      dateFrom: '2026-08-01', dateTo: '2026-08-06',
       status: 'failed', messageType: 'svg', reasonCode: undefined, search: '9007199254740993',
     });
   });
@@ -27,6 +36,10 @@ describe('Telegram worker audit UI', () => {
     expect(telegram).toContain('min-height: 40px');
     expect(telegram).toContain('replyToMessageId');
     expect(telegram).toContain('sentTelegramMessageId');
+    expect(telegram).toContain('Выгрузить JSON');
+    expect(telegram).toContain('все поля сканов, сообщений, наблюдений, операций, шагов и ответов');
+    expect(telegram).toContain('loading={exporting}');
+    expect(telegram).toContain('saveBlob(');
   });
 
   it('marks only an overdue running scan as stale', () => {
