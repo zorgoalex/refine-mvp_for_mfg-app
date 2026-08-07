@@ -73,6 +73,23 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     expect(operationSql).toContain('reply_text IS NULL OR cnc_telegram_worker_operations.reply_text IS NOT DISTINCT FROM EXCLUDED.reply_text');
   });
 
+  it('accepts append-only evidence while an operation remains planned', async () => {
+    const database = fakeDatabase((sql) => defaultRows(sql));
+    const repository = new PgCncTelegramWorkerAuditRepository(database.service);
+
+    await repository.writeBatch(batch({ plannedOperation: true }), { id: '77' });
+
+    const operationIndex = database.sql.findIndex((sql) => sql.includes('INSERT INTO cnc_telegram_worker_operations'));
+    const operationSql = database.sql[operationIndex] ?? '';
+    expect(database.params[operationIndex]?.[4]).toBe('planned');
+    expect(JSON.parse(String(database.params[operationIndex]?.[29]))).toHaveLength(2);
+    expect(operationSql).toContain("EXCLUDED.status='planned'");
+    expect(operationSql).toContain('finished_at IS NOT DISTINCT FROM EXCLUDED.finished_at');
+    expect(operationSql).toContain('reconciliation_window_to IS NOT DISTINCT FROM EXCLUDED.reconciliation_window_to');
+    expect(operationSql).toContain('EXCLUDED.steps_json @> cnc_telegram_worker_operations.steps_json');
+    expect(operationSql).toContain('EXCLUDED.responses_json @> cnc_telegram_worker_operations.responses_json');
+  });
+
   it('accepts only an exact observation replay after an ordinal conflict', async () => {
     const database = fakeDatabase((sql) => {
       if (sql.includes('INSERT INTO cnc_telegram_worker_message_observations')) return [];
@@ -146,7 +163,8 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
   });
 });
 
-function batch(options: { operation?: boolean; observation?: boolean } = {}): WorkerAuditBatchDto {
+function batch(options: { operation?: boolean; observation?: boolean; plannedOperation?: boolean } = {}): WorkerAuditBatchDto {
+  const hasOperation = options.operation || options.plannedOperation;
   return parseWorkerAuditBatch({
     scan: {
       scanId, sourceChatId: '-100123', workday: '2026-08-06', status: 'completed',
@@ -162,12 +180,17 @@ function batch(options: { operation?: boolean; observation?: boolean } = {}): Wo
       messageType: 'svg', filename: 'layout.svg', outgoing: false, status: 'ingested',
       reasonCode: 'backend_ingest_succeeded', observedAt: '2026-08-06T10:00:00+00:00',
     }],
-    operations: options.operation ? [{
+    operations: hasOperation ? [{
       operationKey: `tgop:v1:${scanId}:${digest}:message_processing:1`, scanId, logKey,
-      operationType: 'message_processing', status: 'succeeded',
-      plannedAt: '2026-08-06T10:00:00+00:00', finishedAt: '2026-08-06T10:01:00+00:00',
-      reasonCode: 'backend_ingest_succeeded', reconciliationYieldedCount: 0,
-      reconciliationExhausted: false, reconciliationTruncated: false, steps: [], responses: [],
+      operationType: 'message_processing', status: options.plannedOperation ? 'planned' : 'succeeded',
+      plannedAt: '2026-08-06T10:00:00+00:00',
+      finishedAt: options.plannedOperation ? null : '2026-08-06T10:01:00+00:00',
+      reasonCode: options.plannedOperation ? null : 'backend_ingest_succeeded', reconciliationYieldedCount: 0,
+      reconciliationExhausted: false, reconciliationTruncated: false,
+      steps: options.plannedOperation ? [
+        { stepId: 'start:message_processing', code: 'classified', status: 'started', at: '2026-08-06T10:00:00+00:00', message: 'Обработка начата' },
+        { stepId: 'step:rejection', code: 'reply_search', status: 'skipped', at: '2026-08-06T10:00:01+00:00', message: 'Ответ не найден' },
+      ] : [], responses: [],
     }] : [],
     observations: options.observation ? [{
       scanId, logKey, sourceChatId: '-100123', sourceMessageId: '10',

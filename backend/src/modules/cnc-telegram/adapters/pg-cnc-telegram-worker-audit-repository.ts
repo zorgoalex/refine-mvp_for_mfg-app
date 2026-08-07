@@ -495,7 +495,35 @@ export class PgCncTelegramWorkerAuditRepository {
         AND (
           (
            cnc_telegram_worker_operations.status='planned'
-           AND EXCLUDED.status<>'planned'
+           AND (
+             EXCLUDED.status<>'planned'
+             OR (
+               EXCLUDED.status='planned'
+               AND cnc_telegram_worker_operations.finished_at IS NOT DISTINCT FROM EXCLUDED.finished_at
+               AND cnc_telegram_worker_operations.reason_code IS NOT DISTINCT FROM EXCLUDED.reason_code
+               AND cnc_telegram_worker_operations.reason_message IS NOT DISTINCT FROM EXCLUDED.reason_message
+               AND cnc_telegram_worker_operations.error_code IS NOT DISTINCT FROM EXCLUDED.error_code
+               AND cnc_telegram_worker_operations.error_message IS NOT DISTINCT FROM EXCLUDED.error_message
+               AND cnc_telegram_worker_operations.external_packet_key IS NOT DISTINCT FROM EXCLUDED.external_packet_key
+               AND cnc_telegram_worker_operations.source_version IS NOT DISTINCT FROM EXCLUDED.source_version
+               AND cnc_telegram_worker_operations.packet_id IS NOT DISTINCT FROM EXCLUDED.packet_id
+               AND cnc_telegram_worker_operations.cut_job_id IS NOT DISTINCT FROM EXCLUDED.cut_job_id
+               AND cnc_telegram_worker_operations.cut_result_no IS NOT DISTINCT FROM EXCLUDED.cut_result_no
+               AND cnc_telegram_worker_operations.cutting_sequence_no IS NOT DISTINCT FROM EXCLUDED.cutting_sequence_no
+               AND cnc_telegram_worker_operations.backend_applied IS NOT DISTINCT FROM EXCLUDED.backend_applied
+               AND cnc_telegram_worker_operations.backend_stale IS NOT DISTINCT FROM EXCLUDED.backend_stale
+               AND cnc_telegram_worker_operations.reply_text IS NOT DISTINCT FROM EXCLUDED.reply_text
+               AND cnc_telegram_worker_operations.reply_to_message_id IS NOT DISTINCT FROM EXCLUDED.reply_to_message_id
+               AND cnc_telegram_worker_operations.session_sender_user_id IS NOT DISTINCT FROM EXCLUDED.session_sender_user_id
+               AND cnc_telegram_worker_operations.sent_telegram_message_id IS NOT DISTINCT FROM EXCLUDED.sent_telegram_message_id
+               AND cnc_telegram_worker_operations.reconciliation_yielded_count=EXCLUDED.reconciliation_yielded_count
+               AND cnc_telegram_worker_operations.reconciliation_exhausted=EXCLUDED.reconciliation_exhausted
+               AND cnc_telegram_worker_operations.reconciliation_truncated=EXCLUDED.reconciliation_truncated
+               AND cnc_telegram_worker_operations.reconciliation_error_code IS NOT DISTINCT FROM EXCLUDED.reconciliation_error_code
+               AND cnc_telegram_worker_operations.reconciliation_window_from IS NOT DISTINCT FROM EXCLUDED.reconciliation_window_from
+               AND cnc_telegram_worker_operations.reconciliation_window_to IS NOT DISTINCT FROM EXCLUDED.reconciliation_window_to
+             )
+           )
            AND (cnc_telegram_worker_operations.external_packet_key IS NULL OR cnc_telegram_worker_operations.external_packet_key IS NOT DISTINCT FROM EXCLUDED.external_packet_key)
            AND (cnc_telegram_worker_operations.source_version IS NULL OR cnc_telegram_worker_operations.source_version IS NOT DISTINCT FROM EXCLUDED.source_version)
            AND (cnc_telegram_worker_operations.packet_id IS NULL OR cnc_telegram_worker_operations.packet_id IS NOT DISTINCT FROM EXCLUDED.packet_id)
