@@ -31,6 +31,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-07",
+    title: "Присадка в деталях заказа и Excel",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В просмотре заказа после колонки «Статус» появилась колонка «Присадка».",
+    ],
+    changed: [
+      "В обычном и производственном Excel для деталей с присадкой слово «Присадка» выводится первой строкой примечания без повторного добавления; прежнее примечание переносится ниже.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-07",
     title: "Предупреждение о деталях, не помещающихся на лист раскроя",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

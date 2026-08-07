@@ -30,6 +30,7 @@ export interface OrderExcelDetail {
   milling_cost_per_sqm?: number | null;
   detail_cost?: number | null;
   notes?: string | null;
+  doweling?: boolean;
   milling_type?: { milling_type_name: string } | null;
   edge_type?: { edge_type_name: string } | null;
   film?: { film_name: string } | null;
@@ -83,6 +84,18 @@ const cloneValue = (value: any) => (
 const isBlankDetailRow = (detail: OrderExcelDetailRow): detail is OrderExcelBlankRow => (
   'kind' in detail && detail.kind === 'blank'
 );
+
+export function formatOrderExcelDetailNote(
+  notes: string | null | undefined,
+  doweling: boolean | undefined,
+): string {
+  const original = notes ?? '';
+  if (doweling !== true) return original;
+
+  const normalized = original.replace(/\r\n?/g, '\n').trim();
+  if (normalized.toLocaleLowerCase('ru-RU').includes('присадка')) return normalized;
+  return normalized ? `Присадка\n${normalized}` : 'Присадка';
+}
 
 function address(row: number, column: number) {
   let columnName = '';
@@ -338,7 +351,14 @@ export const buildOrderExcelBuffer = async ({
       row.getCell(4).value = detail.quantity; // D: Кол-во
       row.getCell(6).value = detail.milling_type?.milling_type_name || ''; // F: Тип фрезеровки ⚠️
       row.getCell(7).value = detail.edge_type?.edge_type_name || ''; // G: Обкат/кромка
-      row.getCell(8).value = detail.notes || ''; // H: Примечание
+      const noteCell = row.getCell(8);
+      const note = formatOrderExcelDetailNote(detail.notes, detail.doweling);
+      noteCell.value = note; // H: Примечание
+      noteCell.alignment = { ...noteCell.alignment, wrapText: true };
+      const noteLineCount = note === '' ? 1 : note.split('\n').length;
+      if (noteLineCount > 1) {
+        row.height = Math.max(row.height ?? 13.9, 13.9 * noteLineCount);
+      }
       row.getCell(9).value = pricingMode === 'omit'
         ? null
         : detail.milling_cost_per_sqm || null; // I: Цена за кв.м.

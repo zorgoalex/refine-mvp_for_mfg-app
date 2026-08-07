@@ -163,6 +163,26 @@ describe('buildOrderExcelBuffer dynamic detail rows', () => {
     expect(worksheet.getCell('M8').value).toEqual({ formula: 'SUM(D12:D66)' });
   });
 
+  it.each(['full', 'omit'] as const)(
+    'puts the doweling marker on the first note line without duplication in %s mode',
+    async (pricingMode) => {
+      const [first, second, third, fourth] = makeDetails(4);
+      const worksheet = await buildWorkbookFromRows([
+        { ...first, doweling: true, notes: 'Сверлить по карте\r\nПроверить размер' },
+        { ...second, doweling: true, notes: 'пРИСАДКА:\nСверлить по карте' },
+        { ...third, doweling: true, notes: null },
+        { ...fourth, doweling: false, notes: 'Без присадки' },
+      ], pricingMode);
+
+      expect(worksheet.getCell('H12').value).toBe('Присадка\nСверлить по карте\nПроверить размер');
+      expect(worksheet.getCell('H13').value).toBe('пРИСАДКА:\nСверлить по карте');
+      expect(worksheet.getCell('H14').value).toBe('Присадка');
+      expect(worksheet.getCell('H15').value).toBe('Без присадки');
+      expect(worksheet.getCell('H12').alignment.wrapText).toBe(true);
+      expect(worksheet.getRow(12).height).toBeGreaterThan(13.9);
+    },
+  );
+
   it('keeps one blank Excel row between grouped detail blocks without group subtotals', async () => {
     const [first, second, third] = makeDetails(3);
     const worksheet = await buildWorkbookFromRows([first, second, { kind: 'blank' }, third]);

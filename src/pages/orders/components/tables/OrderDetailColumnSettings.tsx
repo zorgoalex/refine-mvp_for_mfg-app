@@ -10,6 +10,7 @@ export interface OrderDetailColumnDefinition {
   label: string;
   lockVisible?: boolean;
   lockPosition?: 'start' | 'end';
+  defaultAfter?: string;
 }
 
 export interface OrderDetailColumnSettingsButtonProps {
@@ -27,7 +28,18 @@ export function normalizeOrderDetailColumnSettings(
 ): OrderDetailColumnPreference {
   const allowed = new Set(definitions.map((definition) => definition.key));
   const locked = new Set(definitions.filter((definition) => definition.lockVisible).map((definition) => definition.key));
-  const normalizedOrder = uniqueKnownKeys([...(value?.order ?? []), ...defaultOrder], allowed);
+  const storedOrder = uniqueKnownKeys(value?.order ?? [], allowed);
+  const normalizedOrder = uniqueKnownKeys([...storedOrder, ...defaultOrder], allowed);
+  const storedKeys = new Set(storedOrder);
+  for (const definition of definitions) {
+    if (!definition.defaultAfter || storedKeys.has(definition.key)) continue;
+    const keyIndex = normalizedOrder.indexOf(definition.key);
+    const anchorIndex = normalizedOrder.indexOf(definition.defaultAfter);
+    if (keyIndex < 0 || anchorIndex < 0) continue;
+    normalizedOrder.splice(keyIndex, 1);
+    const currentAnchorIndex = normalizedOrder.indexOf(definition.defaultAfter);
+    normalizedOrder.splice(currentAnchorIndex + 1, 0, definition.key);
+  }
   const pinnedStart = definitions.filter((definition) => definition.lockPosition === 'start').map((definition) => definition.key);
   const pinnedEnd = definitions.filter((definition) => definition.lockPosition === 'end').map((definition) => definition.key);
   const pinned = new Set([...pinnedStart, ...pinnedEnd]);

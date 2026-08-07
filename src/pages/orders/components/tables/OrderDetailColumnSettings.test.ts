@@ -9,27 +9,36 @@ import {
 const definitions: OrderDetailColumnDefinition[] = [
   { key: 'a', label: 'A', lockVisible: true },
   { key: 'b', label: 'B' },
+  { key: 'd', label: 'D', defaultAfter: 'b' },
   { key: 'c', label: 'C' },
   { key: 'actions', label: 'Actions', lockVisible: true, lockPosition: 'end' },
 ];
 
 describe('OrderDetailColumnSettings', () => {
   it('normalizes order and keeps locked columns visible', () => {
-    expect(normalizeOrderDetailColumnSettings(['a', 'b', 'c', 'actions'], definitions, {
+    expect(normalizeOrderDetailColumnSettings(['a', 'b', 'd', 'c', 'actions'], definitions, {
       order: ['c', 'missing', 'b', 'c'],
       hidden: ['a', 'b', 'missing'],
     })).toEqual({
-      order: ['c', 'b', 'a', 'actions'],
+      order: ['c', 'b', 'd', 'a', 'actions'],
       hidden: ['b'],
     });
   });
 
   it('keeps an end-pinned action column last when old preferences precede new columns', () => {
     expect(normalizeOrderDetailColumnSettings(
-      ['a', 'b', 'c', 'actions'],
+      ['a', 'b', 'd', 'c', 'actions'],
       definitions,
       { order: ['a', 'actions', 'b'], hidden: [] },
-    ).order).toEqual(['a', 'b', 'c', 'actions']);
+    ).order).toEqual(['a', 'b', 'd', 'c', 'actions']);
+  });
+
+  it('places a newly introduced column after its default anchor without resetting saved order', () => {
+    expect(normalizeOrderDetailColumnSettings(
+      ['a', 'b', 'd', 'c', 'actions'],
+      definitions,
+      { order: ['c', 'a', 'b', 'actions'], hidden: [] },
+    ).order).toEqual(['c', 'a', 'b', 'd', 'actions']);
   });
 
   it('applies visibility and order to table columns', () => {
