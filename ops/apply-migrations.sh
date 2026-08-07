@@ -1116,6 +1116,39 @@ probe_file() {
                      "$(q_idx uq_cnc_telegram_media_restore_active_packet)" \
                      "$(q_idx idx_cnc_telegram_media_restore_claim)" \
                      "$(q_idx idx_cnc_telegram_media_restore_packet_history)" ;;
+    112_cut_job_rotation_allowed*) probe_all \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM information_schema.columns
+                         WHERE table_schema = 'public'
+                           AND table_name = 'cut_job'
+                           AND column_name = 'rotation_allowed'
+                           AND data_type = 'boolean'
+                           AND is_nullable = 'NO'
+                           AND column_default = 'true'
+                      );" ;;
+    113_cut_job_texture_direction*) probe_all \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM information_schema.columns
+                         WHERE table_schema = 'public'
+                           AND table_name = 'cut_job'
+                           AND column_name = 'texture_direction'
+                           AND data_type = 'text'
+                           AND is_nullable = 'NO'
+                           AND column_default = '''none''::text'
+                      );" \
+                     "SELECT EXISTS (
+                        SELECT 1
+                          FROM pg_constraint
+                         WHERE conname = 'cut_job_texture_direction_check'
+                           AND conrelid = 'public.cut_job'::regclass
+                           AND convalidated
+                           AND pg_get_constraintdef(oid) LIKE '%texture_direction%'
+                           AND pg_get_constraintdef(oid) LIKE '%vertical%'
+                           AND pg_get_constraintdef(oid) LIKE '%horizontal%'
+                           AND pg_get_constraintdef(oid) LIKE '%none%'
+                      );" ;;
     114_production_status_always_from_details*) probe_all \
                      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='recalc_order_production_status' AND prosrc LIKE '%erp.order_status_to_details_sync%' AND prosrc NOT LIKE '%v_enabled%');" \
                      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='trg_orders_sync_details_status' AND prosrc LIKE '%erp.detail_status_to_order_recalc%' AND prosrc NOT LIKE '%NEW.production_status_from_details_enabled%');" ;;
