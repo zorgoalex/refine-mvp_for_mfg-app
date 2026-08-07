@@ -19,3 +19,20 @@ describe('CutPage combine-films toggle wiring', () => {
     expect(src).toMatch(/плёнками кроятся вместе; применится после команды «Рассчитать»/);
   });
 });
+
+describe('CutPage rotation and texture controls wiring', () => {
+  it('renders rotation checkbox bound to setJobRotationAllowed', () => {
+    expect(src).toMatch(/Поворот разрешён/);
+    expect(src).toMatch(/checked=\{job\.rotationAllowed\}/);
+    expect(src).toMatch(/setJobRotationAllowed/);
+    expect(src).toMatch(/cutApi\.setRotationAllowed/);
+  });
+
+  it('renders informational texture direction select bound to setJobTextureDirection', () => {
+    expect(src).toMatch(/Направление текстуры/);
+    expect(src).toMatch(/value=\{job\.textureDirection \?\? 'none'\}/);
+    expect(src).toMatch(/CUT_TEXTURE_DIRECTION_OPTIONS/);
+    expect(src).toMatch(/setJobTextureDirection/);
+    expect(src).toMatch(/cutApi\.setTextureDirection/);
+  });
+});

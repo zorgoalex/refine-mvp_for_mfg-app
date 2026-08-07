@@ -7,6 +7,7 @@ import type {
   CutDetailPlacementsResponseDto,
   CutFilmOptionDto,
   CutJobDto,
+  CutTextureDirection,
   CutResultDto,
   CutResultSummaryDto,
   CutManualSheetDto,
@@ -105,7 +106,16 @@ export interface CutResultStateCommand {
 
 export interface ListCutJobsQuery {
   currentUser: CurrentUser;
-  filters?: { status?: string; createdBy?: number };
+  filters?: {
+    status?: string;
+    createdBy?: number;
+    /** Match order id or orders.order_name before the list LIMIT is applied. */
+    orderSearch?: string;
+    /** Inclusive cut_job.created_at lower bound, YYYY-MM-DD. */
+    createdFrom?: string;
+    /** Inclusive cut_job.created_at upper bound, YYYY-MM-DD. */
+    createdTo?: string;
+  };
   requestId?: string;
 }
 
@@ -295,6 +305,25 @@ export interface SetCutJobSplitByMaterialCommand {
   requestId?: string;
 }
 
+export interface SetCutJobRotationAllowedCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  /** true (default) lets freecut rotate details when profile/grain rules allow;
+   *  false forces `rotation: forbid` for every detail in this job calculation. */
+  rotationAllowed: boolean;
+  version: number;
+  requestId?: string;
+}
+
+export interface SetCutJobTextureDirectionCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  /** Informational value for PDF maps; does not participate in calculation basis. */
+  textureDirection: CutTextureDirection;
+  version: number;
+  requestId?: string;
+}
+
 export interface SetCutJobPdfTemplateCommand {
   currentUser: CurrentUser;
   cutJobId: number;
@@ -339,6 +368,8 @@ export interface CutRepositoryPort {
   setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto>;
   setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto>;
   setSplitByMaterial(command: SetCutJobSplitByMaterialCommand): Promise<CutJobDto>;
+  setRotationAllowed(command: SetCutJobRotationAllowedCommand): Promise<CutJobDto>;
+  setTextureDirection(command: SetCutJobTextureDirectionCommand): Promise<CutJobDto>;
   setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto>;
   setName(command: SetCutJobNameCommand): Promise<CutJobDto>;
   setGroupPdfTemplate(command: SetCutGroupPdfTemplateCommand): Promise<CutJobDto>;

@@ -8,6 +8,14 @@ export interface CutSelectionCriteria {
   dateTo?: string;
 }
 
+export interface CutJobListFilters {
+  status?: string;
+  createdBy?: number;
+  orderSearch?: string;
+  createdFrom?: string;
+  createdTo?: string;
+}
+
 export interface CutFilmOption {
   filmId: number;
   name: string;
@@ -208,11 +216,15 @@ export interface SaveManualLayoutRequest {
   commandId: string;
 }
 
+export type CutTextureDirection = 'vertical' | 'horizontal' | 'none';
+
 export interface CutJobDto {
   cutJobId: number;
   name: string;
   status: string;
   source: string;
+  /** cut_job.created_at — creation timestamp for list/card display. */
+  createdAt: string;
   version: number;
   pdfPrewarmState: string;
   /** Stable failure code when status === 'failed' (else null/absent). */
@@ -228,6 +240,10 @@ export interface CutJobDto {
   /** true (default) = split by material (different materials → separate groups);
    *  false = all details in one group. */
   splitByMaterial: boolean;
+  /** true (default) = calculation may rotate details 90° when profile/grain rules allow it. */
+  rotationAllowed: boolean;
+  /** Informational material/film texture direction for PDF maps; does not affect calculation. */
+  textureDirection: CutTextureDirection;
   /** Unique per-detail material names in this job (not the per-job sheet override). */
   materialNames: string[];
   totals: CutJobTotals;

@@ -7,10 +7,12 @@ import type {
   CutDetailLastReadyResponse,
   CutDetailPlacements,
   CutJobDto,
+  CutJobListFilters,
   CutResultDto,
   CutResultSummary,
   CutSelectionCriteria,
   CutSheetTypeOption,
+  CutTextureDirection,
   EligibleDetailsResponse,
   SaveManualLayoutRequest,
 } from './types/cutApi.types';
@@ -21,8 +23,10 @@ import type {
  * Hasura. Auth token is auto-attached by httpClient.
  */
 export const cutApi = {
-  list(): Promise<CutJobDto[]> {
-    return httpClient.get<CutJobDto[]>(apiRoutes.cutJobs.list);
+  list(filters: CutJobListFilters = {}): Promise<CutJobDto[]> {
+    const query = buildCutJobListQuery(filters);
+    const path = apiRoutes.cutJobs.list;
+    return httpClient.get<CutJobDto[]>(query ? `${path}?${query}` : path);
   },
 
   async get(cutJobId: number): Promise<CutJobDto> {
@@ -294,6 +298,20 @@ export const cutApi = {
     });
   },
 
+  async setRotationAllowed(cutJobId: number, rotationAllowed: boolean, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.rotationAllowed(validateCutJobId(cutJobId)), {
+      rotationAllowed,
+      version,
+    });
+  },
+
+  async setTextureDirection(cutJobId: number, textureDirection: CutTextureDirection, version: number): Promise<CutJobDto> {
+    return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.textureDirection(validateCutJobId(cutJobId)), {
+      textureDirection,
+      version,
+    });
+  },
+
   async setJobPdfTemplate(cutJobId: number, pdfTemplate: string): Promise<CutJobDto> {
     return httpClient.patch<CutJobDto>(apiRoutes.cutJobs.jobPdfTemplate(validateCutJobId(cutJobId)), {
       pdfTemplate,
@@ -338,6 +356,18 @@ export function buildEligibleQuery(criteria: CutSelectionCriteria): string {
   return params.toString();
 }
 
+export function buildCutJobListQuery(filters: CutJobListFilters): string {
+  const params = new URLSearchParams();
+  appendText(params, 'status', filters.status);
+  if (filters.createdBy && Number.isInteger(filters.createdBy) && filters.createdBy > 0) {
+    params.append('createdBy', String(filters.createdBy));
+  }
+  appendText(params, 'orderSearch', filters.orderSearch);
+  appendDate(params, 'createdFrom', filters.createdFrom);
+  appendDate(params, 'createdTo', filters.createdTo);
+  return params.toString();
+}
+
 function appendCsv(params: URLSearchParams, key: string, values: number[] | undefined): void {
   if (values && values.length > 0) {
     params.append(key, values.join(','));
@@ -347,6 +377,13 @@ function appendCsv(params: URLSearchParams, key: string, values: number[] | unde
 function appendDate(params: URLSearchParams, key: string, value: string | undefined): void {
   if (value) {
     params.append(key, value);
+  }
+}
+
+function appendText(params: URLSearchParams, key: string, value: string | undefined): void {
+  const text = value?.trim();
+  if (text) {
+    params.append(key, text);
   }
 }
 

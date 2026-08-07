@@ -43,6 +43,7 @@ const cutJob = (placements: SheetPlacements, overrides: Partial<CutJobDto> = {})
   name: 'Раскрой',
   status: 'ready',
   source: 'manual',
+  createdAt: '2026-08-07T00:00:00.000Z',
   version: 1,
   pdfPrewarmState: 'idle',
   paramProfileId: 1,
@@ -50,6 +51,8 @@ const cutJob = (placements: SheetPlacements, overrides: Partial<CutJobDto> = {})
   pdfTemplate: 'standard',
   combineFilms: false,
   splitByMaterial: true,
+  rotationAllowed: true,
+  textureDirection: 'none',
   materialNames: ['Ванна 2080x1050'],
   totals: { positions: 1, details: 1, area: 0.01, sheets: 1, materialsCount: 1, filmsCount: 1, filmUsage: [] },
   items: [{

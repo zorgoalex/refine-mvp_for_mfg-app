@@ -1387,7 +1387,7 @@ async function createSvgCutJob(
     sourceVersion: dto.source.version,
     requestHash,
   });
-  const job = await tx.query<{ cut_job_id: string | number }>(
+  const job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
     `
     INSERT INTO cut_job (
       name, status, source, selection_criteria, params, request_hash,
@@ -1399,7 +1399,7 @@ async function createSvgCutJob(
       'pending', $5, 1, $3::jsonb, $6,
       $7, false, true
     )
-    RETURNING cut_job_id
+    RETURNING cut_job_id, created_at
     `,
     [
       jobName,
@@ -1412,6 +1412,7 @@ async function createSvgCutJob(
     ],
   );
   const cutJobId = toNumber(job.rows[0].cut_job_id);
+  const cutJobCreatedAt = toIso(job.rows[0].created_at);
   await tx.query(
     `INSERT INTO cut_result_command
        (cut_job_id, command_id, command_type, payload_hash, status, created_by)
@@ -1465,6 +1466,7 @@ async function createSvgCutJob(
   const totals = buildSvgCutTotals(plan);
   const snapshot: CutJobDto = {
     cutJobId,
+    createdAt: cutJobCreatedAt,
     name: jobName,
     status: 'ready',
     source: 'api',
@@ -1477,6 +1479,8 @@ async function createSvgCutJob(
     pdfTemplate: 'standard',
     combineFilms: false,
     splitByMaterial: true,
+    rotationAllowed: true,
+    textureDirection: 'none',
     materialNames: uniqueValues(plan.details.map((detail) => detail.materialName).filter((value): value is string => Boolean(value))),
     totals,
     items,

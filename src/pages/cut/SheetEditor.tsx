@@ -18,6 +18,7 @@ import { createPortal } from 'react-dom';
 import { Button, Menu, Space, Tooltip, message } from 'antd';
 import {
   ColumnHeightOutlined,
+  DeleteOutlined,
   RotateLeftOutlined,
   RotateRightOutlined,
   SwapOutlined,
@@ -63,6 +64,7 @@ export interface SheetEditorProps {
   originTopLeft?: boolean;
   axisOrigin?: CutAxisOrigin;
   onChange: (sheets: SheetEditorProps['sheets']) => void;
+  onRemoveSheet?: (sheetIndex: number) => void;
   violations: ManualViolation[];
   /**
    * Label info keyed by piece.item_id (e.g. "det-42").
@@ -344,6 +346,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
     originTopLeft = false,
     axisOrigin = 'top-left',
     onChange,
+    onRemoveSheet,
     violations,
     labelInfoByItemId,
     splitByMaterial,
@@ -1039,6 +1042,17 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                     )}
                   </span>
                   <Space size={2}>
+                    {onRemoveSheet && sheets.length > 1 && placements.pieces.length === 0 ? (
+                      <Tooltip title="Удалить пустой лист">
+                        <Button
+                          danger
+                          aria-label={`Удалить пустой лист ${sheetPos + 1}`}
+                          icon={<DeleteOutlined />}
+                          style={{ width: 40, height: 40 }}
+                          onClick={() => onRemoveSheet(sheetIndex)}
+                        />
+                      </Tooltip>
+                    ) : null}
                     <Tooltip title="Повернуть лист против часовой стрелки">
                       <Button
                         aria-label={`Повернуть лист ${sheetPos + 1} против часовой стрелки`}

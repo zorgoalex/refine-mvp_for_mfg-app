@@ -24,6 +24,7 @@ import {
   snapDraggedPiece,
   moveAllowed,
   validateSheetGroupInvariant,
+  reconstructManualSheets,
 } from './index';
 
 describe('bath meter guides', () => {
@@ -495,5 +496,64 @@ describe('moveAllowed', () => {
   });
   it('reports material first when both mismatch', () => {
     expect(moveAllowed({ ...base, targetMaterialTypeId: 2, targetFilmId: 20 })).toEqual({ ok: false, reason: 'material' });
+  });
+});
+
+describe('reconstructManualSheets', () => {
+  const autoPiece = { itemId: 'det-1', instance: 0, baseW: 300, baseH: 200 };
+  const autoSheet = {
+    sheetIndex: 0,
+    sheet_width_mm: 1000,
+    sheet_height_mm: 800,
+    coordinate_contract: 'native_portrait_v1' as const,
+  };
+  const trim = { left: 10, right: 10, top: 10, bottom: 10 };
+
+  it('allows an operator-created non-negative sheet index and reuses stock geometry', () => {
+    const result = reconstructManualSheets({
+      autoPieces: [autoPiece],
+      autoSheets: [autoSheet],
+      trim,
+      moves: [{ itemId: 'det-1', instance: 0, sheetIndex: 3, xMm: 20, yMm: 30, rotated: false }],
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.sheets).toEqual([
+      {
+        sheetIndex: 3,
+        placements: {
+          coordinate_contract: 'native_portrait_v1',
+          trim_mm: trim,
+          sheet_width_mm: 1000,
+          sheet_height_mm: 800,
+          pieces: [
+            {
+              item_id: 'det-1',
+              instance: 0,
+              x_mm: 20,
+              y_mm: 30,
+              width_mm: 300,
+              height_mm: 200,
+              rotated: false,
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it('rejects negative and non-integer sheet indexes', () => {
+    expect(reconstructManualSheets({
+      autoPieces: [autoPiece],
+      autoSheets: [autoSheet],
+      trim,
+      moves: [{ itemId: 'det-1', instance: 0, sheetIndex: -1, xMm: 20, yMm: 30, rotated: false }],
+    }).error?.code).toBe('foreign_sheet');
+    expect(reconstructManualSheets({
+      autoPieces: [autoPiece],
+      autoSheets: [autoSheet],
+      trim,
+      moves: [{ itemId: 'det-1', instance: 0, sheetIndex: 1.5, xMm: 20, yMm: 30, rotated: false }],
+    }).error?.code).toBe('foreign_sheet');
   });
 });

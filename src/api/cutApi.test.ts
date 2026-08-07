@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildEligibleQuery, cutApi, validateCutJobId } from './cutApi';
+import { buildCutJobListQuery, buildEligibleQuery, cutApi, validateCutJobId } from './cutApi';
 import { cutConfigApi } from './cutConfigApi';
 import type { CutJobDto } from './types/cutApi.types';
 
@@ -17,6 +17,20 @@ describe('cutApi', () => {
     expect(buildEligibleQuery({ orderIds: [9, 10], filmIds: [5] })).toBe('orderIds=9%2C10&filmIds=5');
     expect(buildEligibleQuery({ dateFrom: '2026-07-16', dateTo: '2026-07-26' })).toBe('dateFrom=2026-07-16&dateTo=2026-07-26');
     expect(buildEligibleQuery({})).toBe('');
+  });
+
+  it('builds cut-job list filters for backend-side order/date search', async () => {
+    expect(buildCutJobListQuery({
+      orderSearch: ' 2700 ',
+      createdFrom: '2026-08-01',
+      createdTo: '2026-08-07',
+    })).toBe('orderSearch=2700&createdFrom=2026-08-01&createdTo=2026-08-07');
+
+    const fetchMock = mockFetch([]);
+    await cutApi.list({ orderSearch: '2700', createdFrom: '2026-08-01', createdTo: '2026-08-07' });
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/api/v1/cut-jobs?orderSearch=2700&createdFrom=2026-08-01&createdTo=2026-08-07',
+    );
   });
 
   it('drives the cut-jobs backend command/read endpoints', async () => {
@@ -289,6 +303,24 @@ describe('cutApi', () => {
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ splitByMaterial: false, version: 7 });
   });
 
+  it('setRotationAllowed PATCHes the rotation-allowed route with body', async () => {
+    const job = jobDto({ rotationAllowed: false });
+    const fetchMock = mockFetch(job);
+    await cutApi.setRotationAllowed(3, false, 8);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/rotation-allowed');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ rotationAllowed: false, version: 8 });
+  });
+
+  it('setTextureDirection PATCHes the texture-direction route with body', async () => {
+    const job = jobDto({ textureDirection: 'vertical' });
+    const fetchMock = mockFetch(job);
+    await cutApi.setTextureDirection(3, 'vertical', 9);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs/3/texture-direction');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ textureDirection: 'vertical', version: 9 });
+  });
+
   it('persists the selected whole-job PDF template', async () => {
     const job = jobDto({ pdfTemplate: 'bath_profiles' });
     const fetchMock = mockFetch(job);
@@ -349,6 +381,7 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     name: 'Тест',
     status: 'draft',
     source: 'manual',
+    createdAt: '2026-08-07T00:00:00.000Z',
     version: 0,
     pdfPrewarmState: 'pending',
     paramProfileId: null,
@@ -356,6 +389,8 @@ function jobDto(overrides: Partial<CutJobDto> = {}): CutJobDto {
     pdfTemplate: 'standard',
     combineFilms: false,
     splitByMaterial: true,
+    rotationAllowed: true,
+    textureDirection: 'none',
     materialNames: [],
     failureCode: null,
     failureReason: null,

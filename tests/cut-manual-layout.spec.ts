@@ -48,6 +48,7 @@ function makeReadyJob(overrides: Record<string, unknown> = {}) {
     name: 'E2E-Тест ручной раскрой',
     status: 'ready',
     source: 'manual',
+    createdAt: '2026-08-07T00:00:00.000Z',
     version: 1,
     pdfPrewarmState: 'done',
     requiresRecalc: false,
@@ -57,6 +58,8 @@ function makeReadyJob(overrides: Record<string, unknown> = {}) {
     sheetMaterialTypeId: null,
     combineFilms: false,
     splitByMaterial: true,
+    rotationAllowed: true,
+    textureDirection: 'none',
     totals: { positions: 3, details: 3, area: 1.5, sheets: 2, materialsCount: 1, filmsCount: 2 },
     // item_id format: "det-<orderDetailId>" (parseCutPieceDetailId expects /^det-(\d+)$/)
     items: [

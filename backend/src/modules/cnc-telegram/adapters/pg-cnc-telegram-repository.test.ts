@@ -1507,7 +1507,7 @@ describe('PgCncTelegramRepository', () => {
           return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none' }] };
         }
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
-          return { rows: [{ cut_job_id: 700 }] };
+          return { rows: [{ cut_job_id: 700, created_at: '2026-07-24T08:00:00.000Z' }] };
         }
         if (/INSERT INTO cut_group\s*\(/i.test(text)) {
           return { rows: [{ cut_group_id: 701 }] };
