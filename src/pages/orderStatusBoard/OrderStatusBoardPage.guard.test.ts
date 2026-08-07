@@ -239,7 +239,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
     expect(page).toContain('CncBazisCutSetCardView');
     expect(page).toContain('Итоги по ERP-заказам набора');
-    expect(page).toContain('Открыть Базис-раскрой');
+    expect(page).toContain('aria-label={`Открыть Базис-раскрой БР-${card.bazisCutSetId}`}');
     expect(page).toContain('getCncBazisCutSetDisplayState(card, relationContext, detailedContext)');
     expect(page).toContain('buildCncBazisCutSetFingerprint');
     expect(css).toContain('.cnc-bazis-cut-card');
@@ -258,6 +258,26 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
+  });
+
+  it('keeps the Basis-cut card compact and expands its full detail list', () => {
+    const cardStart = page.indexOf('const CncBazisCutSetCardView =');
+    const cardEnd = page.indexOf('interface CncTelegramPacketCardProps', cardStart);
+    const card = page.slice(cardStart, cardEnd);
+
+    expect(card).toContain('const [detailsOpen, setDetailsOpen] = useState(false)');
+    expect(card).toContain('className="cnc-bazis-cut-card__badge"');
+    expect(card).toContain('onClick={openSet}');
+    expect(card).not.toContain('cnc-bazis-cut-card__set-link');
+    expect(card).not.toContain('cnc-bazis-cut-card__open');
+    expect(card).not.toContain('card.positionCount');
+    expect(card).toContain('aria-label="Данные Базис-раскроя"');
+    expect(card).toContain('aria-label="Детали Базис-раскроя"');
+    expect(card).toContain('setDetailsOpen((current) => !current)');
+    expect(card).toContain('card.items.map((item, index)');
+    expect(css).toMatch(
+      /\.cnc-bazis-cut-card__tabs\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s,
+    );
   });
 
   it('keeps bath cards printable with SVG and PDF previews', () => {

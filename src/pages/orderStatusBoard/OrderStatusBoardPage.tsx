@@ -2813,6 +2813,7 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
   onOpenBazisCut,
 }) => {
   const orderSummaries = buildCncOrderSummaries(card.items);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const openSet = (event: React.MouseEvent) => {
     event.stopPropagation();
     onOpenBazisCut(card.bazisCutSetId);
@@ -2843,13 +2844,6 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
               />
             ))}
           </div>
-          <Button
-            type="link"
-            className="cnc-bazis-cut-card__set-link"
-            onClick={openSet}
-          >
-            {card.name}
-          </Button>
         </div>
         <div className="cnc-bazis-cut-card__actions">
           <CncCardDisplayToggle
@@ -2857,19 +2851,89 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
             standardView={!summaryOnly}
             onToggle={onToggleDisplay}
           />
-          <Tag className="cnc-bazis-cut-card__badge">БР-{card.bazisCutSetId}</Tag>
+          <Tooltip title={card.name}>
+            <Button
+              type="text"
+              className="cnc-bazis-cut-card__badge"
+              aria-label={`Открыть Базис-раскрой БР-${card.bazisCutSetId}`}
+              onClick={openSet}
+            >
+              БР-{card.bazisCutSetId}
+            </Button>
+          </Tooltip>
         </div>
       </div>
       {!summaryOnly && (
         <>
-          <div className="cnc-packet-card__metrics">
-            <span>{card.itemQuantityTotal} деталей · {card.positionCount} поз.</span>
-          </div>
-          <div className="status-board-card__footer">
-            <Button type="link" className="cnc-bazis-cut-card__open" onClick={openSet}>
-              Открыть Базис-раскрой
+          <div
+            className="cnc-packet-card__tabs cnc-bazis-cut-card__tabs"
+            role="group"
+            aria-label="Данные Базис-раскроя"
+            onClick={stopCncCardClickPropagation}
+          >
+            <Button
+              type="text"
+              className="cnc-packet-card__tab"
+              icon={<FileTextOutlined />}
+              aria-expanded={detailsOpen}
+              aria-pressed={detailsOpen}
+              onClick={() => setDetailsOpen((current) => !current)}
+            >
+              {card.itemQuantityTotal} дет.
             </Button>
           </div>
+
+          {detailsOpen && (
+            <div
+              className="cnc-packet-card__items-panel"
+              onClick={stopCncCardClickPropagation}
+            >
+              <div className="cnc-packet-card__items" role="table" aria-label="Детали Базис-раскроя">
+                <div className="cnc-packet-card__item cnc-packet-card__item--head" role="row">
+                  <span>Заказ</span>
+                  <span>Деталь / размер</span>
+                  <span>Кол.</span>
+                </div>
+                {card.items.map((item, index) => (
+                  <div
+                    className={[
+                      'cnc-packet-card__item',
+                      item.orderDeleted ? ORDER_DELETED_REFERENCE_LINE_CLASS : '',
+                    ].filter(Boolean).join(' ')}
+                    role="row"
+                    key={`${card.bazisCutSetId}:${item.detailId ?? 'manual'}:${index}`}
+                  >
+                    <span>
+                      <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                        {item.orderId !== null ? (
+                          <Button
+                            type="link"
+                            className="cnc-packet-card__order-link"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenOrder(item.orderId!);
+                            }}
+                          >
+                            {item.orderName}
+                          </Button>
+                        ) : (
+                          item.orderName
+                        )}
+                        <OrderDeletedTag deleted={item.orderDeleted} />
+                      </span>
+                    </span>
+                    <span>
+                      <span>{item.detailNumber ? `#${item.detailNumber}` : '—'}</span>
+                      <span className="cnc-packet-card__size">
+                        {formatCncSize(item.widthMm, item.heightMm)}
+                      </span>
+                    </span>
+                    <span className="cnc-packet-card__qty">{item.quantity}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
