@@ -375,6 +375,28 @@ class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(client.iter_messages_calls), 1)
         self.assertEqual(client.iter_messages_calls[0], {"search": "Раскрой", "limit": 1000})
 
+    async def test_does_not_audit_search_results_for_other_source_messages(self) -> None:
+        decisions: list[tuple[int, str]] = []
+        selected = FakeMessage(903, text="Раскрой №7", reply_to=100)
+        selected.out = True
+
+        async def observe(message: FakeMessage, _ordinal: int, decision: str) -> None:
+            decisions.append((int(message.id), decision))
+
+        index = await collect_cutting_sequence_reply_search_index(
+            FakeTelegramClient([
+                FakeMessage(901, text="Раскрой №9"),
+                FakeMessage(902, text="Раскрой №8", reply_to=999),
+                selected,
+            ]),
+            object(),
+            {100},
+            observer=observe,
+        )
+
+        self.assertEqual(index, {100: 7})
+        self.assertEqual(decisions, [(903, "reply_selected")])
+
     async def test_excludes_out_of_window_reply_and_records_exact_decisions(self) -> None:
         stale = FakeMessage(900, text="Раскрой №99", reply_to=100)
         stale.date = datetime(2026, 7, 23, 23, 59, tzinfo=timezone.utc)
