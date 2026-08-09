@@ -139,7 +139,7 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(rowCellStyles).toContain('padding: 0 4px !important');
     expect(rowCellStyles).toContain('vertical-align: middle');
     expect(cellStyles).toContain('height: 20px');
-    expect(cellStyles).toContain('padding: 0 4px !important');
+    expect(cellStyles).toContain('padding: 0 8px !important');
     expect(cellStyles).toContain('line-height: 18px');
     expect(cellStyles).toContain('white-space: normal');
     expect(cellStyles).toContain('overflow-wrap: anywhere');
@@ -150,6 +150,35 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(appStyles).toContain(
       '.order-details-table .ant-table-tbody > tr > td .ant-btn-sm',
     );
+    expect(appStyles).toContain('box-sizing: border-box');
+  });
+
+  it('commits the latest price value and recalculates the sum on blur', () => {
+    expect(source).toContain('const handleMillingCostBlur = useCallback(() => {');
+    expect(source).toContain("form.getFieldValue('milling_cost_per_sqm')");
+    expect(source).toContain("recalcSum('milling_cost_per_sqm', value)");
+    expect(source).toContain('onBlur={handleMillingCostBlur}');
+  });
+
+  it('uses arrow keys for cell selection instead of changing editor values', () => {
+    expect(source).toContain('const editorDirectionByKey: Partial<Record<string, OrderDetailSpreadsheetDirection>>');
+    expect(source).toContain('const editorDirection = editorDirectionByKey[event.key]');
+    expect(source).toContain("moveOrderDetailSpreadsheetCell(\n        getSpreadsheetNavigationRowKeys(),");
+    expect(source).toContain('if (saved) focusSpreadsheetCoordinate(nextCell)');
+    expect(source.match(/keyboard=\{false\}/g)?.length ?? 0).toBeGreaterThanOrEqual(7);
+    expect(source).toContain('event.key.length !== 1');
+    expect(source).toContain('initialValue ?? undefined');
+  });
+
+  it('keeps only the spreadsheet cell frame around an active editor', () => {
+    expect(appStyles).toContain(
+      'td.order-detail-spreadsheet-cell .ant-input-number-input:focus',
+    );
+    expect(appStyles).toContain(
+      'td.order-detail-spreadsheet-cell .ant-select-focused .ant-select-selector',
+    );
+    expect(appStyles).toContain('outline: none !important');
+    expect(appStyles).toContain('box-shadow: none !important');
   });
 
   it('frames only the active cell without replacing the row background', () => {

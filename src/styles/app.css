@@ -1019,6 +1019,7 @@ html {
 }
 
 .order-details-table .ant-table-cell {
+  box-sizing: border-box;
   border-color: var(--order-detail-grid-line) !important;
 }
 
@@ -1053,7 +1054,7 @@ html {
 .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
   position: relative;
   height: 20px;
-  padding: 0 4px !important;
+  padding: 0 8px !important;
   cursor: cell;
   line-height: 18px;
   outline: none;
@@ -1109,6 +1110,15 @@ html {
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-item,
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-placeholder {
   line-height: 18px !important;
+}
+
+.order-details-table td.order-detail-spreadsheet-cell .ant-input:focus,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number:focus,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number-focused,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input:focus,
+.order-details-table td.order-detail-spreadsheet-cell .ant-select-focused .ant-select-selector {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .order-details-table .ant-table-tbody > tr > td .ant-btn-sm {

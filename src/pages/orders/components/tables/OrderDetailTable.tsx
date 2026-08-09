@@ -1188,6 +1188,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     recalcSum('milling_cost_per_sqm', value);
   }, [recalcSum]);
 
+  const handleMillingCostBlur = useCallback(() => {
+    queueMicrotask(() => {
+      const value = form.getFieldValue('milling_cost_per_sqm') as number | null;
+      recalcSum('milling_cost_per_sqm', value);
+    });
+  }, [form, recalcSum]);
+
   const { settings: columnSettings, saveSettings: saveColumnSettings } = useOrderDetailColumnPreferences(
     'orderEdit',
     ORDER_DETAIL_EDIT_DEFAULT_ORDER,
@@ -1245,6 +1252,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <CurrencyInput
               controls={false}
+              keyboard={false}
               style={{ width: '100%', ...getRequiredFieldStyle(watchedHeight) }}
               min={0.01}
               precision={2}
@@ -1289,6 +1297,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <CurrencyInput
               controls={false}
+              keyboard={false}
               style={{ width: '100%', ...getRequiredFieldStyle(watchedWidth) }}
               min={0.01}
               precision={2}
@@ -1323,6 +1332,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <InputNumber
               controls={false}
+              keyboard={false}
               style={{ width: '100%' }}
               min={1}
               precision={0}
@@ -1354,7 +1364,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         if (!d) return null;
         return isEditingField(d, 'area') ? (
           <Form.Item name="area" style={{ margin: 0, padding: '0 4px' }}>
-            <InputNumber style={{ width: '100%' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber keyboard={false} style={{ width: '100%' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           formatNumber(getDisplayedField(d, 'area'), 2) + ' м²'
@@ -1522,12 +1532,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <InputNumber
               controls={false}
+              keyboard={false}
               style={{ width: '100%' }}
               precision={2}
               min={0.01}
               formatter={currencySmartFormatter}
               parser={numberParser}
               onChange={handleMillingCostChange}
+              onBlur={handleMillingCostBlur}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
             />
           </Form.Item>
@@ -1565,6 +1577,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             >
               <InputNumber
                 controls={false}
+                keyboard={false}
                 style={{ width: '100%' }}
                 precision={2}
                 min={0.01}
@@ -1728,6 +1741,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
               controls={false}
+              keyboard={false}
               style={{ width: '100%' }}
               min={1}
               max={999}
@@ -2035,11 +2049,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       void beginSpreadsheetCellEdit(record, columnKey);
       return;
     }
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (
+      event.altKey
+      || event.ctrlKey
+      || event.metaKey
+      || event.key.length !== 1
+      || !isSpreadsheetCellEditable(columnKey)
+    ) return;
     const initialValue = orderDetailSpreadsheetTypedValue(columnKey, event.key);
-    if (initialValue === null || !isSpreadsheetCellEditable(columnKey)) return;
     event.preventDefault();
-    void beginSpreadsheetCellEdit(record, columnKey, initialValue);
+    void beginSpreadsheetCellEdit(record, columnKey, initialValue ?? undefined);
   };
   const handleInlineEditorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (
@@ -2067,6 +2086,27 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       event.stopPropagation();
       cancelEdit();
       focusSpreadsheetCell(currentCell);
+      return;
+    }
+    const editorDirectionByKey: Partial<Record<string, OrderDetailSpreadsheetDirection>> = {
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+    };
+    const editorDirection = editorDirectionByKey[event.key];
+    if (editorDirection) {
+      event.preventDefault();
+      event.stopPropagation();
+      const nextCell = moveOrderDetailSpreadsheetCell(
+        getSpreadsheetNavigationRowKeys(),
+        spreadsheetColumnKeys,
+        currentCell,
+        editorDirection,
+      ) ?? currentCell;
+      void saveCurrentRow().then((saved) => {
+        if (saved) focusSpreadsheetCoordinate(nextCell);
+      });
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
