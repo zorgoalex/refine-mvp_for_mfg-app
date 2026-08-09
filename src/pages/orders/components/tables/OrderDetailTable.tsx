@@ -54,6 +54,15 @@ import {
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
+import {
+  moveOrderDetailSpreadsheetCell,
+  orderDetailSpreadsheetColumnKeys,
+  orderDetailSpreadsheetColumnLabel,
+  orderDetailSpreadsheetPastedValue,
+  orderDetailSpreadsheetTypedValue,
+  type OrderDetailSpreadsheetCell,
+  type OrderDetailSpreadsheetDirection,
+} from './orderDetailSpreadsheetNavigation';
 import { BasisProjectLink } from '../BasisProjectLink';
 
 interface OrderDetailTableProps {
@@ -433,11 +442,27 @@ function useStableOrderDetailColumns(
       ),
       onCell: (row: any, index: number) => {
         const currentProps = runtime.onCellByKey.get(key)?.(row, index) ?? {};
+        const latestProps = () => runtime.onCellByKey.get(key)?.(row, index) ?? {};
         return {
           ...currentProps,
           'data-order-detail-column-key': String(key),
           onClick: (event: React.MouseEvent<HTMLElement>) => {
-            runtime.onCellByKey.get(key)?.(row, index)?.onClick?.(event);
+            latestProps().onClick?.(event);
+          },
+          onDoubleClick: (event: React.MouseEvent<HTMLElement>) => {
+            latestProps().onDoubleClick?.(event);
+          },
+          onFocus: (event: React.FocusEvent<HTMLElement>) => {
+            latestProps().onFocus?.(event);
+          },
+          onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+            latestProps().onKeyDown?.(event);
+          },
+          onCopy: (event: React.ClipboardEvent<HTMLElement>) => {
+            latestProps().onCopy?.(event);
+          },
+          onPaste: (event: React.ClipboardEvent<HTMLElement>) => {
+            latestProps().onPaste?.(event);
           },
         };
       },
@@ -609,6 +634,36 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   function getDisplayedField<K extends keyof OrderDetail>(record: OrderDetail, field: K): OrderDetail[K] {
     return isEditing(record) ? form.getFieldValue(field) : record[field];
   }
+  const activeSpreadsheetCellRef = useRef<OrderDetailSpreadsheetCell | null>(null);
+  const spreadsheetFocusFramesRef = useRef<number[]>([]);
+  const focusSpreadsheetCell = useCallback((cell: OrderDetailSpreadsheetCell) => {
+    activeSpreadsheetCellRef.current = cell;
+    spreadsheetFocusFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
+    spreadsheetFocusFramesRef.current = [];
+    const firstFrame = requestAnimationFrame(() => {
+      const rows = tableContainerRef.current?.querySelectorAll<HTMLTableRowElement>(
+        'tr[data-row-key]',
+      );
+      const row = Array.from(rows ?? []).find(
+        (candidate) => candidate.dataset.rowKey === cell.rowKey,
+      );
+      const cells = row?.querySelectorAll<HTMLTableCellElement>(
+        '[data-order-detail-spreadsheet-cell="true"]',
+      );
+      const target = Array.from(cells ?? []).find(
+        (candidate) => candidate.dataset.orderDetailColumnKey === cell.columnKey,
+      );
+      target?.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' });
+      const secondFrame = requestAnimationFrame(() => {
+        target?.focus({ preventScroll: true });
+      });
+      spreadsheetFocusFramesRef.current = [secondFrame];
+    });
+    spreadsheetFocusFramesRef.current = [firstFrame];
+  }, []);
+  useEffect(() => () => {
+    spreadsheetFocusFramesRef.current.forEach((frame) => cancelAnimationFrame(frame));
+  }, []);
   const cellRuntimeRef = useRef<OrderDetailCellRuntime | null>(null);
   if (!cellRuntimeRef.current) cellRuntimeRef.current = createOrderDetailCellRuntime();
   const cellRuntime = cellRuntimeRef.current;
@@ -899,13 +954,28 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     validateDimensions();
   }, [cellRuntime, editingKey, form, validateDimensions, recalcSum]);
 
-  const startEdit = (record: OrderDetail, scrollToRow = false) => {
+  const startEdit = (
+    record: OrderDetail,
+    scrollToRow = false,
+    requestedField?: React.Key,
+    initialValue?: string | number,
+  ) => {
     if (!groupingActive) {
       setCurrentPage(pageContainingOrderDetail(paginatedDetails, record, pageSize));
     }
+    const nextEditingField = requestedField && ORDER_DETAIL_EDITABLE_CELL_KEYS.has(requestedField)
+      ? requestedField
+      : inlineTabFieldsRef.current[0] ?? 'height';
+    const rowKey = record.temp_id || record.detail_id || null;
     scrollToEditingRowRef.current = scrollToRow;
-    setEditingKey(record.temp_id || record.detail_id || null);
-    setEditingField(inlineTabFieldsRef.current[0] ?? 'height');
+    setEditingKey(rowKey);
+    setEditingField(nextEditingField);
+    if (rowKey !== null) {
+      activeSpreadsheetCellRef.current = {
+        rowKey: String(rowKey),
+        columnKey: String(nextEditingField),
+      };
+    }
     setCurrentFilmId(record.film_id ?? null);
     setDimensionValidationError(null);
     // Each edit session starts with the sum field locked; unlocking it is an
@@ -925,7 +995,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       detail_cost: record.detail_cost ?? null,
     };
 
-    form.setFieldsValue({
+    const initialFormValues: Record<string, unknown> = {
       height: record.height ?? null,
       width: record.width ?? null,
       quantity: record.quantity ?? null,
@@ -945,7 +1015,33 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       priority: record.priority,
       production_status_id: record.production_status_id ?? null,
       detail_name: record.detail_name ?? '',
-    });
+    };
+    if (initialValue !== undefined) {
+      initialFormValues[String(nextEditingField)] = initialValue;
+      if (
+        nextEditingField === 'height'
+        || nextEditingField === 'width'
+        || nextEditingField === 'quantity'
+      ) {
+        fieldValuesRef.current[nextEditingField] = Number(initialValue);
+      }
+      if (nextEditingField === 'milling_cost_per_sqm') {
+        fieldValuesRef.current.milling_cost_per_sqm = Number(initialValue);
+      }
+    }
+    form.setFieldsValue(initialFormValues);
+
+    if (
+      initialValue !== undefined
+      && (nextEditingField === 'height'
+        || nextEditingField === 'width'
+        || nextEditingField === 'quantity')
+    ) {
+      recalcArea(nextEditingField, Number(initialValue));
+    }
+    if (initialValue !== undefined && nextEditingField === 'milling_cost_per_sqm') {
+      recalcSum('milling_cost_per_sqm', Number(initialValue));
+    }
 
     // recalcSum reads fieldValuesRef, initialized above, so no deferred timer is needed.
     if (record.area && record.milling_cost_per_sqm && !record.detail_cost) {
@@ -988,7 +1084,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const recordKey = record.temp_id || record.detail_id;
     const lastDetail = sortedDetails[sortedDetails.length - 1];
     const lastKey = lastDetail?.temp_id || lastDetail?.detail_id;
-    await finishOrderDetailInlineTab({
+    return await finishOrderDetailInlineTab({
       saveCurrentRow,
       isLastRow: recordKey === lastKey,
       onQuickAdd,
@@ -1833,10 +1929,122 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     { detailCostEditable: isSumEditable },
   );
   inlineTabFieldsRef.current = inlineTabFields;
+  const spreadsheetColumnKeys = orderDetailSpreadsheetColumnKeys(
+    visibleColumns.map((column) => String(column.key ?? column.dataIndex ?? '')),
+  );
+  const isSpreadsheetCellEditable = (columnKey: React.Key) =>
+    ORDER_DETAIL_EDITABLE_CELL_KEYS.has(columnKey)
+    && (columnKey !== 'detail_cost' || isSumEditable);
+  const getVisibleSpreadsheetRowKeys = (): string[] => {
+    const seen = new Set<string>();
+    return Array.from(
+      tableContainerRef.current?.querySelectorAll<HTMLTableRowElement>(
+        '.ant-table-tbody > tr[data-row-key]',
+      ) ?? [],
+    ).flatMap((row) => {
+      const rowKey = row.dataset.rowKey;
+      if (
+        !rowKey
+        || seen.has(rowKey)
+        || !row.querySelector('[data-order-detail-spreadsheet-cell="true"]')
+      ) return [];
+      seen.add(rowKey);
+      return [rowKey];
+    });
+  };
+  const getSpreadsheetNavigationRowKeys = () => groupingActive
+    ? getVisibleSpreadsheetRowKeys()
+    : paginatedDetails.map((detail) => String(getRowKey(detail)));
+  const focusSpreadsheetCoordinate = (cell: OrderDetailSpreadsheetCell) => {
+    if (!groupingActive) {
+      const targetIndex = getSpreadsheetNavigationRowKeys().indexOf(cell.rowKey);
+      if (targetIndex >= 0) {
+        const targetPage = Math.floor(targetIndex / Math.max(1, pageSize)) + 1;
+        if (targetPage !== currentPage) setCurrentPage(targetPage);
+      }
+    }
+    focusSpreadsheetCell(cell);
+  };
+  const beginSpreadsheetCellEdit = async (
+    record: OrderDetail,
+    columnKey: React.Key,
+    initialValue?: string | number,
+  ) => {
+    if (!isSpreadsheetCellEditable(columnKey)) return false;
+    const rowKey = String(getRowKey(record));
+    activeSpreadsheetCellRef.current = { rowKey, columnKey: String(columnKey) };
+
+    if (editingKey !== null && String(editingKey) !== rowKey) {
+      const saved = await saveCurrentRow();
+      if (!saved) return false;
+    }
+
+    if (editingKey !== null && String(editingKey) === rowKey) {
+      setEditingField(columnKey);
+      if (initialValue !== undefined) {
+        form.setFieldValue(String(columnKey), initialValue);
+        cellRuntime.notifyCell(editingKey, columnKey);
+      }
+      return true;
+    }
+
+    startEdit(record, false, columnKey, initialValue);
+    return true;
+  };
+  const moveSpreadsheetFocus = (
+    record: OrderDetail,
+    columnKey: string,
+    direction: OrderDetailSpreadsheetDirection,
+  ) => {
+    const nextCell = moveOrderDetailSpreadsheetCell(
+      getSpreadsheetNavigationRowKeys(),
+      spreadsheetColumnKeys,
+      { rowKey: String(getRowKey(record)), columnKey },
+      direction,
+    );
+    if (nextCell) focusSpreadsheetCoordinate(nextCell);
+    return nextCell;
+  };
+  const handleSpreadsheetCellKeyDown = (
+    event: React.KeyboardEvent<HTMLElement>,
+    record: OrderDetail,
+    columnKey: string,
+  ) => {
+    if (editingKey !== null || event.defaultPrevented) return;
+    if (event.target !== event.currentTarget) return;
+
+    const directionByKey: Partial<Record<string, OrderDetailSpreadsheetDirection>> = {
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+    };
+    const direction = directionByKey[event.key];
+    if (direction) {
+      event.preventDefault();
+      moveSpreadsheetFocus(record, columnKey, direction);
+      return;
+    }
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      moveSpreadsheetFocus(record, columnKey, event.shiftKey ? 'previous' : 'next');
+      return;
+    }
+    if (event.key === 'Enter' || event.key === 'F2') {
+      if (!isSpreadsheetCellEditable(columnKey)) return;
+      event.preventDefault();
+      void beginSpreadsheetCellEdit(record, columnKey);
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    const initialValue = orderDetailSpreadsheetTypedValue(columnKey, event.key);
+    if (initialValue === null || !isSpreadsheetCellEditable(columnKey)) return;
+    event.preventDefault();
+    void beginSpreadsheetCellEdit(record, columnKey, initialValue);
+  };
   const handleInlineEditorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (
-      event.key !== 'Tab'
-      || event.altKey
+      event.altKey
       || event.ctrlKey
       || event.metaKey
       || editingKey === null
@@ -1851,6 +2059,33 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if (!editingRow || editingRow.dataset.rowKey !== String(editingKey)) return;
 
     const currentField = String(editingField);
+    const currentCell = { rowKey: String(editingKey), columnKey: currentField };
+    const selectIsOpen = !!target.closest('.ant-select-open')
+      || target.getAttribute('aria-expanded') === 'true';
+    if (event.key === 'Escape') {
+      if (selectIsOpen) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelEdit();
+      focusSpreadsheetCell(currentCell);
+      return;
+    }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      if (selectIsOpen) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const nextCell = moveOrderDetailSpreadsheetCell(
+        getSpreadsheetNavigationRowKeys(),
+        spreadsheetColumnKeys,
+        currentCell,
+        'down',
+      ) ?? currentCell;
+      void saveCurrentRow().then((saved) => {
+        if (saved) focusSpreadsheetCoordinate(nextCell);
+      });
+      return;
+    }
+    if (event.key !== 'Tab') return;
     const nextField = nextOrderDetailInlineTabField(
       inlineTabFields,
       currentField,
@@ -1858,22 +2093,45 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     );
     if (nextField) {
       event.preventDefault();
+      activeSpreadsheetCellRef.current = {
+        rowKey: String(editingKey),
+        columnKey: nextField,
+      };
       setEditingField(nextField);
       return;
     }
-
-    // Shift+Tab on the first field keeps native navigation out of the row.
-    if (
-      event.shiftKey
-      || inlineTabFields[inlineTabFields.length - 1] !== currentField
-    ) return;
 
     const record = details.find((detail) =>
       (detail.temp_id || detail.detail_id) === editingKey,
     );
     if (!record) return;
+    const navigationRows = getSpreadsheetNavigationRowKeys();
+    const currentRowIndex = navigationRows.indexOf(String(editingKey));
+    if (event.shiftKey) {
+      const previousRowKey = navigationRows[currentRowIndex - 1];
+      const previousField = inlineTabFields[inlineTabFields.length - 1];
+      if (!previousRowKey || !previousField) return;
+      event.preventDefault();
+      void saveCurrentRow().then((saved) => {
+        if (saved) {
+          focusSpreadsheetCoordinate({
+            rowKey: previousRowKey,
+            columnKey: previousField,
+          });
+        }
+      });
+      return;
+    }
+    if (inlineTabFields[inlineTabFields.length - 1] !== currentField) return;
+
+    const nextRowKey = navigationRows[currentRowIndex + 1];
+    const nextFieldInRow = inlineTabFields[0];
     event.preventDefault();
-    void finishInlineEditOnTab(record);
+    void finishInlineEditOnTab(record).then((saved) => {
+      if (saved && nextRowKey && nextFieldInRow) {
+        focusSpreadsheetCoordinate({ rowKey: nextRowKey, columnKey: nextFieldInRow });
+      }
+    });
   };
   const tableScrollWidth = visibleColumns.reduce(
     (total, column) => total + (typeof column.width === 'number' ? column.width : 0),
@@ -1973,18 +2231,75 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       onCell: (row: any, index: number) => {
         const cellProps = originalOnCell?.(row, index) ?? {};
         const detail = asDetail(row);
-        if (
-          !detail
-          || !isEditing(detail)
-          || !ORDER_DETAIL_EDITABLE_CELL_KEYS.has(column.key)
-        ) {
-          return cellProps;
-        }
+        if (!detail || key === 'actions') return cellProps;
+        const rowKey = String(getRowKey(detail));
+        const editable = isSpreadsheetCellEditable(column.key);
         return {
           ...cellProps,
+          tabIndex: 0,
+          role: 'gridcell',
+          className: [cellProps.className, 'order-detail-spreadsheet-cell']
+            .filter(Boolean)
+            .join(' '),
+          'data-order-detail-spreadsheet-cell': 'true',
+          'aria-readonly': editable ? undefined : true,
+          'aria-keyshortcuts': editable ? 'Enter F2 Control+V Meta+V' : 'Control+C Meta+C',
+          onFocus: (event: React.FocusEvent<HTMLElement>) => {
+            cellProps.onFocus?.(event);
+            activeSpreadsheetCellRef.current = { rowKey, columnKey: key };
+          },
           onClick: (event: React.MouseEvent<HTMLElement>) => {
             cellProps.onClick?.(event);
-            if (!event.defaultPrevented) setEditingField(column.key);
+            if (event.defaultPrevented) return;
+            activeSpreadsheetCellRef.current = { rowKey, columnKey: key };
+            const target = event.target as HTMLElement;
+            const clickedInteractiveChild = target !== event.currentTarget && !!target.closest(
+              'a, button, input, textarea, [role="combobox"], .ant-select, .ant-input-number',
+            );
+            if (!clickedInteractiveChild) event.currentTarget.focus({ preventScroll: true });
+
+            if (editingKey === null) return;
+            if (String(editingKey) === rowKey) {
+              if (editable) setEditingField(column.key);
+              return;
+            }
+            void saveCurrentRow().then((saved) => {
+              if (saved) focusSpreadsheetCell({ rowKey, columnKey: key });
+            });
+          },
+          onDoubleClick: (event: React.MouseEvent<HTMLElement>) => {
+            cellProps.onDoubleClick?.(event);
+            if (event.defaultPrevented) return;
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.focus({ preventScroll: true });
+            if (editable) void beginSpreadsheetCellEdit(detail, column.key);
+          },
+          onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+            cellProps.onKeyDown?.(event);
+            handleSpreadsheetCellKeyDown(event, detail, key);
+          },
+          onCopy: (event: React.ClipboardEvent<HTMLElement>) => {
+            cellProps.onCopy?.(event);
+            if (event.defaultPrevented || event.target !== event.currentTarget) return;
+            event.clipboardData.setData('text/plain', event.currentTarget.textContent?.trim() ?? '');
+            event.preventDefault();
+          },
+          onPaste: (event: React.ClipboardEvent<HTMLElement>) => {
+            cellProps.onPaste?.(event);
+            if (
+              event.defaultPrevented
+              || event.target !== event.currentTarget
+              || editingKey !== null
+              || !editable
+            ) return;
+            const pastedValue = orderDetailSpreadsheetPastedValue(
+              key,
+              event.clipboardData.getData('text/plain'),
+            );
+            if (pastedValue === null) return;
+            event.preventDefault();
+            void beginSpreadsheetCellEdit(detail, column.key, pastedValue);
           },
         };
       },
@@ -1997,12 +2312,27 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     };
   });
 
-  const renderedColumns = groupingActive
+  const renderedColumnsWithoutExcelHeaders = groupingActive
     ? summaryAwareColumns.map((col: any) => {
         const { sorter, defaultSortOrder, sortOrder, ...rest } = col;
         return rest;
-    })
+      })
     : summaryAwareColumns;
+  const renderedColumns = renderedColumnsWithoutExcelHeaders.map((column: any, columnIndex: number) => {
+    const columnKey = String(column.key ?? column.dataIndex ?? '');
+    if (!columnKey) return column;
+    return {
+      ...column,
+      title: (
+        <div className="order-detail-spreadsheet-header">
+          <span className="order-detail-spreadsheet-header__letter">
+            {orderDetailSpreadsheetColumnLabel(columnIndex)}
+          </span>
+          <div className="order-detail-spreadsheet-header__label">{column.title}</div>
+        </div>
+      ),
+    };
+  });
   const stableRenderedColumns = useStableOrderDetailColumns(renderedColumns, cellRuntime);
 
   useEffect(() => {
@@ -2058,7 +2388,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }, [currentPage, groupingActive, validationScrollTargetKey]);
 
   useEffect(() => {
-    if (editingKey == null || groupingActive) return;
+    if (editingKey == null) return;
     let focusFrame = 0;
     const frame = requestAnimationFrame(() => {
       const row = tableContainerRef.current?.querySelector<HTMLElement>(
@@ -2683,6 +3013,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       <MemoizedOrderDetailTable
         renderVersion={tableRenderVersion}
         className={`order-details-table${groupingActive ? ' details-grouped' : ''}`}
+        role="grid"
+        aria-label="Детали заказа, табличный режим"
         loading={!tableRowsReady}
         dataSource={mountedTableRows as any}
         columns={stableRenderedColumns}
@@ -2804,12 +3136,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             title: isValidationError ? `Позиция №${record.detail_number ?? ''} содержит ошибки` : undefined,
             // Drag selection handlers
             onMouseDown: (e) => {
+              if ((e.target as HTMLElement).closest('[data-order-detail-spreadsheet-cell="true"]')) {
+                return;
+              }
               // Only start drag if not editing and not clicking interactive elements
               if (!isCurrentlyEditing) {
                 dragSelection.handleMouseDown(rowKey, e);
               }
              },
-             onDoubleClick: () => startEdit(record),
+             onDoubleClick: (e) => {
+               if ((e.target as HTMLElement).closest('[data-order-detail-spreadsheet-cell="true"]')) {
+                 return;
+               }
+               startEdit(record);
+             },
              onContextMenu: (e) => {
                 e.preventDefault();
                 e.stopPropagation();

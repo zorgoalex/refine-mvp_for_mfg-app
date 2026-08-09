@@ -950,26 +950,6 @@ html {
   animation: none !important;
 }
 
-.order-details-table .ant-table-tbody > tr.order-detail-row-editing > td,
-.order-details-table .ant-table-tbody > tr.order-detail-row-editing:hover > td {
-  box-shadow:
-    inset 0 2px 0 var(--app-selection-border),
-    inset 0 -2px 0 var(--app-selection-border) !important;
-}
-
-.order-details-table .ant-table-tbody > tr.order-detail-row-editing > td:first-child {
-  box-shadow:
-    inset 2px 0 0 var(--app-selection-border),
-    inset 0 2px 0 var(--app-selection-border),
-    inset 0 -2px 0 var(--app-selection-border) !important;
-}
-
-.order-details-table .ant-table-tbody > tr.order-detail-row-editing > td:last-child {
-  box-shadow:
-    inset -2px 0 0 var(--app-selection-border),
-    inset 0 2px 0 var(--app-selection-border),
-    inset 0 -2px 0 var(--app-selection-border) !important;
-}
 /* Pin group tint + separator on hover (the global hover rules at app.css ~213
    use !important and would otherwise wash out group boundaries on hover). */
 .details-grouped .ant-table-tbody > tr.detail-group-tint-0:hover > td { background-color: var(--app-group-tint-0) !important; }
@@ -1013,6 +993,147 @@ html {
    the message itself from the table layout; the order form shows the summary. */
 .order-details-table .ant-form-item-explain {
   display: none !important;
+}
+
+/* Order details use spreadsheet geometry: one continuous grid, compact rows,
+   and a single active-cell frame instead of a card-like editing row. */
+.order-details-table {
+  --order-detail-grid-accent: #217346;
+  --order-detail-grid-line: #b7b7b7;
+  --order-detail-grid-header: #f3f3f3;
+  --order-detail-grid-letter: #e5e5e5;
+}
+
+[data-theme="dark"] .order-details-table {
+  --order-detail-grid-accent: #58a66f;
+  --order-detail-grid-line: #555;
+  --order-detail-grid-header: #292929;
+  --order-detail-grid-letter: #343434;
+}
+
+.order-details-table .ant-table,
+.order-details-table .ant-table-container,
+.order-details-table table {
+  border-radius: 0 !important;
+  border-spacing: 0 !important;
+}
+
+.order-details-table .ant-table-cell {
+  border-color: var(--order-detail-grid-line) !important;
+}
+
+.order-details-table .ant-table-thead > tr > th {
+  height: 46px;
+  padding: 0 !important;
+  background: var(--order-detail-grid-header) !important;
+  vertical-align: top;
+}
+
+.order-detail-spreadsheet-header {
+  display: grid;
+  grid-template-rows: 18px minmax(27px, auto);
+  min-width: 0;
+  height: 100%;
+}
+
+.order-detail-spreadsheet-header__letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  border-bottom: 1px solid var(--order-detail-grid-line);
+  background: var(--order-detail-grid-letter);
+  color: var(--app-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 18px;
+  user-select: none;
+}
+
+.order-detail-spreadsheet-header__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 2px 5px;
+  overflow: hidden;
+}
+
+.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
+  position: relative;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 6px !important;
+  cursor: cell;
+  outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell[data-order-detail-column-key="detail_number"] {
+  background: var(--order-detail-grid-letter) !important;
+  text-align: center;
+}
+
+.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus,
+.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus-within {
+  z-index: 4;
+  box-shadow: inset 0 0 0 2px var(--order-detail-grid-accent) !important;
+}
+
+.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus::after {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--app-surface);
+  background: var(--order-detail-grid-accent);
+  content: '';
+  pointer-events: none;
+}
+
+.order-details-table td.order-detail-spreadsheet-cell .ant-form-item {
+  width: 100%;
+  margin: 0 !important;
+}
+
+.order-details-table td.order-detail-spreadsheet-cell .ant-input,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input,
+.order-details-table td.order-detail-spreadsheet-cell .ant-select-selector {
+  height: 28px !important;
+  min-height: 28px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.order-details-table td.order-detail-spreadsheet-cell .ant-input,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input {
+  padding-block: 2px !important;
+}
+
+.order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-item,
+.order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-placeholder {
+  line-height: 26px !important;
+}
+
+@media (pointer: coarse) {
+  .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .order-details-table td.order-detail-spreadsheet-cell .ant-input,
+  .order-details-table td.order-detail-spreadsheet-cell .ant-input-number,
+  .order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input,
+  .order-details-table td.order-detail-spreadsheet-cell .ant-select-selector {
+    height: 38px !important;
+    min-height: 38px !important;
+  }
 }
 
 :root {
