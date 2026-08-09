@@ -118,6 +118,14 @@ describe('OrderDetailTable interaction performance guards', () => {
   });
 
   it('keeps one-line spreadsheet rows compact and grows only for wrapped content', () => {
+    const rowCellStyleStart = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr > td {',
+    );
+    const rowCellStyleEnd = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {',
+      rowCellStyleStart,
+    );
+    const rowCellStyles = appStyles.slice(rowCellStyleStart, rowCellStyleEnd);
     const cellStyleStart = appStyles.indexOf(
       '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {',
     );
@@ -127,14 +135,20 @@ describe('OrderDetailTable interaction performance guards', () => {
     );
     const cellStyles = appStyles.slice(cellStyleStart, cellStyleEnd);
 
-    expect(cellStyles).toContain('height: 24px');
-    expect(cellStyles).toContain('padding: 2px 6px !important');
+    expect(rowCellStyles).toContain('height: 20px');
+    expect(rowCellStyles).toContain('padding: 0 4px !important');
+    expect(rowCellStyles).toContain('vertical-align: middle');
+    expect(cellStyles).toContain('height: 20px');
+    expect(cellStyles).toContain('padding: 0 4px !important');
     expect(cellStyles).toContain('line-height: 18px');
     expect(cellStyles).toContain('white-space: normal');
     expect(cellStyles).toContain('overflow-wrap: anywhere');
     expect(cellStyles).not.toContain('white-space: nowrap');
     expect(appStyles).not.toContain(
       '@media (pointer: coarse) {\n  .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell',
+    );
+    expect(appStyles).toContain(
+      '.order-details-table .ant-table-tbody > tr > td .ant-btn-sm',
     );
   });
 

@@ -1043,10 +1043,17 @@ html {
   overflow-wrap: anywhere;
 }
 
+.order-details-table .ant-table-tbody > tr > td {
+  height: 20px;
+  padding: 0 4px !important;
+  line-height: 18px;
+  vertical-align: middle;
+}
+
 .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
   position: relative;
-  height: 24px;
-  padding: 2px 6px !important;
+  height: 20px;
+  padding: 0 4px !important;
   cursor: cell;
   line-height: 18px;
   outline: none;
@@ -1086,8 +1093,8 @@ html {
 .order-details-table td.order-detail-spreadsheet-cell .ant-input-number,
 .order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input,
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selector {
-  height: 22px !important;
-  min-height: 22px !important;
+  height: 20px !important;
+  min-height: 20px !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -1101,7 +1108,14 @@ html {
 
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-item,
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-placeholder {
-  line-height: 20px !important;
+  line-height: 18px !important;
+}
+
+.order-details-table .ant-table-tbody > tr > td .ant-btn-sm {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 2px !important;
+  line-height: 18px;
 }
 
 :root {
