@@ -23,7 +23,7 @@ describe('OrderDetailTable interaction performance guards', () => {
   });
 
   it('does not combine smooth scrolling with an automatic focus scroll', () => {
-    const effectStart = source.lastIndexOf('if (editingKey == null || groupingActive) return;');
+    const effectStart = source.lastIndexOf('if (editingKey == null) return;');
     const effectEnd = source.indexOf(
       '}, [currentPage, editingField, editingKey, groupingActive]);',
       effectStart,
@@ -44,11 +44,12 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(editingFocusEffect).not.toContain("behavior: 'smooth'");
   });
 
-  it('keeps table and editing-row geometry stable', () => {
+  it('keeps table and active-cell geometry stable', () => {
     expect(source).toContain('tableLayout="fixed"');
     expect(source).toContain('scroll={{ x: tableScrollWidth, y: 500 }}');
     expect(source).toContain("editing ? 'order-detail-row-editing dg-editing' : ''");
-    expect(appStyles).toContain('tr.order-detail-row-editing > td');
+    expect(appStyles).toContain('td.order-detail-spreadsheet-cell:focus');
+    expect(appStyles).toContain('inset 0 0 0 2px var(--order-detail-grid-accent)');
     expect(source).not.toContain('backgroundColor: isCurrentlyEditing');
     expect(source).not.toContain("transform: isCurrentlyEditing ? 'scale(1.01)'");
     expect(source).not.toContain("border: isCurrentlyEditing ? '2px solid #faad14'");
@@ -90,27 +91,43 @@ describe('OrderDetailTable interaction performance guards', () => {
   it('mounts only the active cell editor while preserving row edit state', () => {
     expect(source).toContain('const [editingField, setEditingField] = useState<React.Key | null>(null);');
     expect(source).toContain("isEditing(record) && editingField === field");
-    expect(source).toContain('ORDER_DETAIL_EDITABLE_CELL_KEYS.has(column.key)');
+    expect(source).toContain('isSpreadsheetCellEditable(column.key)');
     expect(source).toContain('setEditingField(column.key)');
     expect(source).toContain('onKeyDownCapture={handleInlineEditorKeyDown}');
     expect(source).toContain('nextOrderDetailInlineTabField(');
-    expect(source).toContain('void finishInlineEditOnTab(record);');
+    expect(source).toContain('void finishInlineEditOnTab(record).then((saved) =>');
     expect(source).toContain('await finishOrderDetailInlineTab({');
     expect(source).toContain('const validateInlineForm = useCallback');
   });
 
-  it('frames the editing row without replacing its normal background', () => {
+  it('wires Excel-style cell focus, keyboard navigation, and direct editing', () => {
+    expect(source).toContain("'data-order-detail-spreadsheet-cell': 'true'");
+    expect(source).toContain("ArrowUp: 'up'");
+    expect(source).toContain("ArrowDown: 'down'");
+    expect(source).toContain("event.key === 'Enter' || event.key === 'F2'");
+    expect(source).toContain('orderDetailSpreadsheetTypedValue(columnKey, event.key)');
+    expect(source).toContain('orderDetailSpreadsheetPastedValue(');
+    expect(source).toContain("event.clipboardData.setData('text/plain'");
+    expect(source).toContain('void beginSpreadsheetCellEdit(detail, column.key)');
+    expect(source).toContain('focusSpreadsheetCoordinate(nextCell)');
+    expect(source).toContain('cancelEdit();');
+    expect(appStyles).toContain('.order-detail-spreadsheet-header__letter');
+    expect(appStyles).toContain('border-spacing: 0 !important');
+  });
+
+  it('frames only the active cell without replacing the row background', () => {
     const styleStart = appStyles.indexOf(
-      '.order-details-table .ant-table-tbody > tr.order-detail-row-editing > td,',
+      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus,',
     );
     const styleEnd = appStyles.indexOf(
-      '.order-details-table .ant-table-tbody > tr.order-detail-row-editing > td:first-child',
+      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus::after',
       styleStart,
     );
-    const editingRowStyles = appStyles.slice(styleStart, styleEnd);
+    const activeCellStyles = appStyles.slice(styleStart, styleEnd);
 
-    expect(editingRowStyles).toContain('var(--app-selection-border)');
-    expect(editingRowStyles).not.toContain('background-color');
+    expect(activeCellStyles).toContain('var(--order-detail-grid-accent)');
+    expect(activeCellStyles).not.toContain('background-color');
+    expect(appStyles).not.toContain('tr.order-detail-row-editing > td');
     expect(appStyles).not.toContain('tr.dg-editing > td { background-color: var(--app-highlight)');
   });
 
