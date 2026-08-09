@@ -111,8 +111,31 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('void beginSpreadsheetCellEdit(detail, column.key)');
     expect(source).toContain('focusSpreadsheetCoordinate(nextCell)');
     expect(source).toContain('cancelEdit();');
-    expect(appStyles).toContain('.order-detail-spreadsheet-header__letter');
+    expect(source).not.toContain('orderDetailSpreadsheetColumnLabel');
+    expect(source).not.toContain('order-detail-spreadsheet-header__letter');
+    expect(appStyles).not.toContain('.order-detail-spreadsheet-header__letter');
     expect(appStyles).toContain('border-spacing: 0 !important');
+  });
+
+  it('keeps one-line spreadsheet rows compact and grows only for wrapped content', () => {
+    const cellStyleStart = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {',
+    );
+    const cellStyleEnd = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell[data-order-detail-column-key="detail_number"]',
+      cellStyleStart,
+    );
+    const cellStyles = appStyles.slice(cellStyleStart, cellStyleEnd);
+
+    expect(cellStyles).toContain('height: 24px');
+    expect(cellStyles).toContain('padding: 2px 6px !important');
+    expect(cellStyles).toContain('line-height: 18px');
+    expect(cellStyles).toContain('white-space: normal');
+    expect(cellStyles).toContain('overflow-wrap: anywhere');
+    expect(cellStyles).not.toContain('white-space: nowrap');
+    expect(appStyles).not.toContain(
+      '@media (pointer: coarse) {\n  .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell',
+    );
   });
 
   it('frames only the active cell without replacing the row background', () => {

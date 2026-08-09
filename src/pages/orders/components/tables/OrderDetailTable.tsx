@@ -57,7 +57,6 @@ import {
 import {
   moveOrderDetailSpreadsheetCell,
   orderDetailSpreadsheetColumnKeys,
-  orderDetailSpreadsheetColumnLabel,
   orderDetailSpreadsheetPastedValue,
   orderDetailSpreadsheetTypedValue,
   type OrderDetailSpreadsheetCell,
@@ -2312,23 +2311,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     };
   });
 
-  const renderedColumnsWithoutExcelHeaders = groupingActive
+  const baseRenderedColumns = groupingActive
     ? summaryAwareColumns.map((col: any) => {
         const { sorter, defaultSortOrder, sortOrder, ...rest } = col;
         return rest;
       })
     : summaryAwareColumns;
-  const renderedColumns = renderedColumnsWithoutExcelHeaders.map((column: any, columnIndex: number) => {
+  const renderedColumns = baseRenderedColumns.map((column: any) => {
     const columnKey = String(column.key ?? column.dataIndex ?? '');
     if (!columnKey) return column;
     return {
       ...column,
       title: (
         <div className="order-detail-spreadsheet-header">
-          <span className="order-detail-spreadsheet-header__letter">
-            {orderDetailSpreadsheetColumnLabel(columnIndex)}
-          </span>
-          <div className="order-detail-spreadsheet-header__label">{column.title}</div>
+          {column.title}
         </div>
       ),
     };
