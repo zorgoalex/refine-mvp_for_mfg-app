@@ -65,10 +65,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('CNC_BOARD_DRAG_TYPE');
     expect(page).toContain('CncManualCardFrame');
     expect(page).toContain('isCncManualMoveAllowed(item.kind, columnKey)');
-    expect(page).toContain('applyCncManualMovesToColumns(columns, manualMoves)');
+    expect(page).toContain('includeTerminalManualMoves: terminalColumnsVisible');
     expect(page).toContain('applyCncManualMovesToColumns(readinessColumns, manualMoves)');
     expect(page).toContain('kind="bazisCutSet"');
     expect(page).toContain('completed_laminated');
+    expect(page).toContain('cncOrderStatusBadgeOverride(column.key)');
+    expect(page).toContain('statusBadgeOverride?.name');
     expect(page).toContain("label: 'Переместить'");
     expect(page).toContain('trigger={[');
     expect(page).toContain('trigger: shellRef.current');
@@ -758,6 +760,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('checked={cncBathsRequireMachineFiles}');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)');
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
+    expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');
     expect(settings).toContain('checked={cncTerminalColumnsVisible}');
     expect(settings).toContain('Распиленные файлы');
     expect(page).toContain("completed_laminated: 'Распиленные файлы'");

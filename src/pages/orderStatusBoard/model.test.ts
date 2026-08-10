@@ -303,6 +303,7 @@ describe('order status board model', () => {
     expect(isCncManualMoveAllowed('packet', 'completed')).toBe(true);
     expect(isCncManualMoveAllowed('packet', 'completed_laminated')).toBe(true);
     expect(isCncManualMoveAllowed('packet', 'baths_laminated')).toBe(false);
+    expect(isCncManualMoveAllowed('bazisCutSet', 'completed')).toBe(true);
     expect(isCncManualMoveAllowed('bazisCutSet', 'completed_laminated')).toBe(true);
     expect(isCncManualMoveAllowed('bath', 'baths')).toBe(true);
     expect(isCncManualMoveAllowed('bath', 'baths_ready')).toBe(true);
@@ -313,6 +314,10 @@ describe('order status board model', () => {
     expect(isCncManualMoveAllowed('order', 'orders_issued')).toBe(true);
     expect(isCncManualMoveAllowed('order', 'completed')).toBe(false);
     expect(cncManualMoveDestinations('packet', 'parsed').map(({ key }) => key)).toEqual([
+      'completed',
+      'completed_laminated',
+    ]);
+    expect(cncManualMoveDestinations('bazisCutSet', 'parsed').map(({ key }) => key)).toEqual([
       'completed',
       'completed_laminated',
     ]);
@@ -357,6 +362,36 @@ describe('order status board model', () => {
     expect(moved.find((column) => column.key === 'completed_laminated')?.bazisCutSets?.map((card) => card.bazisCutSetId)).toEqual([9001]);
     expect(moved.find((column) => column.key === 'baths_ready')?.baths).toEqual([]);
     expect(moved.find((column) => column.key === 'baths_laminated')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-ready']);
+  });
+
+  it('hides MDF packet and Basis cut cards moved to terminal files when terminal column is disabled', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 2,
+        packets: [cncPacket('packet-pending', ['2706'], [2706])],
+        baths: [],
+        bazisCutSets: [cncBazisCutSet(9001, [
+          { orderName: '2707', orderId: 2707, detailId: 7001 },
+        ])],
+      },
+    ] as CncTelegramTodayColumn[];
+    const manualMoves: CncBoardManualMoveState = {
+      [cncManualMoveStorageKey('packet', 'packet-pending')]: 'completed_laminated',
+      [cncManualMoveStorageKey('bazisCutSet', '9001')]: 'completed_laminated',
+    };
+
+    const hiddenTerminal = applyCncManualMovesToColumns(columns, manualMoves, {
+      includeTerminalManualMoves: false,
+    });
+    const readiness = buildCncOrderReadiness(columns, manualMoves);
+
+    expect(hiddenTerminal.find((column) => column.key === 'parsed')?.packets).toEqual([]);
+    expect(hiddenTerminal.find((column) => column.key === 'parsed')?.bazisCutSets).toEqual([]);
+    expect(hiddenTerminal.find((column) => column.key === 'completed_laminated')).toBeUndefined();
+    expect(readiness.get(2706)?.cutDetails).toBe(1);
+    expect(readiness.get(2707)?.cutDetails).toBe(1);
   });
 
   it('derives MDF order readiness from completed packets and rolled baths', () => {

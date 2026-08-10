@@ -222,6 +222,11 @@ const DND_BACKEND_OPTIONS = {
 };
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
+interface StatusBoardCardStatusBadgeOverride {
+  name: string;
+  color: string;
+}
+
 export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
 type CncRelationTarget =
   | { kind: 'packet'; id: string }
@@ -1890,6 +1895,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 mutedOrderIds={cncMutedOrderIds}
                 orderStatusColumns={cncOrderBoardColumns}
                 orderCardsLoading={cncOrderBoardLoading}
+                terminalColumnsVisible={cncTerminalColumnsVisible}
                 orderSort={cncOrderSortPreference}
                 relationContext={cncRelationContext}
                 relationsEnabled={cncRelationsEnabled}
@@ -1986,6 +1992,7 @@ interface CncTelegramTodayColumnsProps {
   mutedOrderIds: ReadonlySet<number>;
   orderStatusColumns: OrderStatusBoardColumn[];
   orderCardsLoading: boolean;
+  terminalColumnsVisible: boolean;
   orderSort: {
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
@@ -2053,6 +2060,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   mutedOrderIds,
   orderStatusColumns,
   orderCardsLoading,
+  terminalColumnsVisible,
   orderSort,
   relationContext,
   relationsEnabled,
@@ -2106,8 +2114,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     [manualMoves, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort],
   );
   const manualDisplayColumns = useMemo(
-    () => applyCncManualMovesToColumns(columns, manualMoves),
-    [columns, manualMoves],
+    () => applyCncManualMovesToColumns(columns, manualMoves, {
+      includeTerminalManualMoves: terminalColumnsVisible,
+    }),
+    [columns, manualMoves, terminalColumnsVisible],
   );
   const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
   const displayColumns = useMemo(
@@ -2344,6 +2354,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cncSummaryOnly={summaryOnly}
                         cncReadiness={readiness}
                         cncMissingDetails={missingDetails}
+                        statusBadgeOverride={cncOrderStatusBadgeOverride(column.key)}
                         displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         relationState={orderStateFor(entry)}
@@ -4963,6 +4974,7 @@ interface StatusBoardCardViewProps {
   cncSummaryOnly?: boolean;
   cncReadiness?: CncOrderReadiness;
   cncMissingDetails?: CncOrderMissingDetail[];
+  statusBadgeOverride?: StatusBoardCardStatusBadgeOverride;
   displayToggleVisible?: boolean;
   onToggleDisplay?: () => void;
   relationState?: CncRelationCardState;
@@ -4992,6 +5004,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   cncSummaryOnly = false,
   cncReadiness,
   cncMissingDetails = [],
+  statusBadgeOverride,
   displayToggleVisible = false,
   onToggleDisplay,
   relationState = 'normal',
@@ -5050,11 +5063,14 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   });
 
   const primaryStatus =
-    board === 'order'
+    statusBadgeOverride?.name ??
+    (board === 'order'
       ? card.orderStatusName || 'Без статуса'
-      : card.productionStatusName || 'Без статуса';
+      : card.productionStatusName || 'Без статуса');
   const primaryStatusColor =
-    resolveStatusBoardStatusColor(board, card, allColumns) ?? '#8c8c8c';
+    statusBadgeOverride?.color ??
+    resolveStatusBoardStatusColor(board, card, allColumns) ??
+    '#8c8c8c';
   const {
     active: isTouchDragging,
     ghost: touchDragGhost,
@@ -5690,6 +5706,7 @@ function isCncManualColumnKey(value: string): value is CncTelegramTodayDisplayCo
 export function applyCncManualMovesToColumns(
   columns: CncTelegramTodayColumn[],
   manualMoves: CncBoardManualMoveState,
+  options: { includeTerminalManualMoves?: boolean } = {},
 ): CncTelegramTodayColumn[] {
   const byKey = new Map<CncTelegramTodayColumn['key'], CncTelegramTodayColumn>();
   const ensureColumn = (key: CncTelegramTodayColumn['key']): CncTelegramTodayColumn => {
@@ -5720,6 +5737,7 @@ export function applyCncManualMovesToColumns(
         column.key,
         manualMoves,
       ) as CncTelegramTodayColumn['key'];
+      if (!shouldProjectCncManualTarget(target, options)) continue;
       ensureColumn(target).packets.push(packet);
     }
     for (const bazisCutSet of column.bazisCutSets ?? []) {
@@ -5729,6 +5747,7 @@ export function applyCncManualMovesToColumns(
         column.key,
         manualMoves,
       ) as CncTelegramTodayColumn['key'];
+      if (!shouldProjectCncManualTarget(target, options)) continue;
       ensureColumn(target).bazisCutSets?.push(bazisCutSet);
     }
     for (const bath of column.baths) {
@@ -5738,6 +5757,7 @@ export function applyCncManualMovesToColumns(
         column.key,
         manualMoves,
       ) as CncTelegramTodayColumn['key'];
+      if (!shouldProjectCncManualTarget(target, options)) continue;
       ensureColumn(target).baths.push(bath);
     }
   }
@@ -5749,6 +5769,13 @@ export function applyCncManualMovesToColumns(
       column.baths.length +
       (column.bazisCutSets?.length ?? 0),
   }));
+}
+
+function shouldProjectCncManualTarget(
+  target: CncTelegramTodayColumn['key'],
+  options: { includeTerminalManualMoves?: boolean },
+): boolean {
+  return options.includeTerminalManualMoves !== false || !isCncTerminalColumnKey(target);
 }
 
 export function buildCncOrderReadiness(
@@ -6098,6 +6125,16 @@ function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): strin
   if (columnKey === 'baths_laminated') return '#13c2c2';
   if (columnKey === 'baths') return '#cf1322';
   return '#1677ff';
+}
+
+function cncOrderStatusBadgeOverride(
+  columnKey: CncTelegramTodayDisplayColumnKey,
+): StatusBoardCardStatusBadgeOverride | undefined {
+  if (columnKey !== 'orders_ready' && columnKey !== 'orders_issued') return undefined;
+  return {
+    name: cncColumnTitleByKey(columnKey),
+    color: cncColumnBadgeColor(columnKey),
+  };
 }
 
 function cncColumnDisplayTitle(column: CncTelegramTodayDisplayColumn): string {
