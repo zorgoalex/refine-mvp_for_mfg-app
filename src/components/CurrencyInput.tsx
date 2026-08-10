@@ -1,5 +1,5 @@
 // CurrencyInput - InputNumber with smart focus/blur formatting
-// Focus: hides ".00" for integers, shows empty for 0
+// Focus: hides unnecessary fractional zeroes
 // Blur: shows ".00" and "0"
 
 import React, { useState } from 'react';
@@ -14,19 +14,33 @@ interface CurrencyInputProps extends Omit<InputNumberProps, 'formatter' | 'parse
 }
 
 /**
- * Format value for focused state: hide ".00" for integers, empty for 0
+ * Format value for focused state without unnecessary fractional zeroes.
  */
 type CurrencyInputValue = number | string | undefined | null;
 
-const formatFocused = (value: CurrencyInputValue, precision: number): string => {
-  if (value === undefined || value === null || value === '' || Number(value) === 0) {
+interface CurrencyInputFormatterInfo {
+  userTyping: boolean;
+  input: string;
+}
+
+export const formatCurrencyInputFocusedValue = (
+  value: CurrencyInputValue,
+  precision: number,
+  info?: CurrencyInputFormatterInfo,
+): string => {
+  if (info?.userTyping && /[.,]/.test(info.input)) {
+    return info.input;
+  }
+  if (value === undefined || value === null || value === '') {
     return '';
   }
   const numericValue = Number(value);
-  const hasDecimalPart = numericValue % 1 !== 0;
-  return hasDecimalPart
-    ? formatNumber(numericValue, precision)
-    : formatNumber(numericValue, 0);
+  if (!Number.isFinite(numericValue)) return '';
+  const validPrecision = Math.max(0, Math.min(20, Math.floor(precision || 0)));
+  return new Intl.NumberFormat('ru-RU', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: validPrecision,
+  }).format(numericValue);
 };
 
 /**
@@ -51,7 +65,7 @@ const formatBlurred = (
 
 /**
  * Smart currency input with focus/blur formatting:
- * - On focus: hides ".00" for integers, empty for 0/null
+ * - On focus: hides unnecessary fractional zeroes
  * - On blur: shows ".00" and "0"
  */
 export const CurrencyInput: React.FC<CurrencyInputProps> = ({
@@ -68,8 +82,13 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   const [isFocused, setIsFocused] = useState(!!autoFocus);
 
   const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
     setIsFocused(true);
     onFocus?.(e);
+    requestAnimationFrame(() => {
+      const cursorPosition = input.value.length;
+      input.setSelectionRange(cursorPosition, cursorPosition);
+    });
   };
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
@@ -78,9 +97,12 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   };
 
   // Formatter for InputNumber (used during typing)
-  const formatter = (val: number | string | undefined): string => {
+  const formatter = (
+    val: number | string | undefined,
+    info: CurrencyInputFormatterInfo,
+  ): string => {
     if (isFocused) {
-      return formatFocused(val, precision);
+      return formatCurrencyInputFocusedValue(val, precision, info);
     }
     return formatBlurred(val, precision, emptyWhenUnset);
   };

@@ -46,16 +46,36 @@ describe('edit-form detail grouping', () => {
     expect(table).not.toContain('clientWidth');
     expect(table).not.toContain('scaleX');
   });
-  it('keeps total columns wide enough for full summary values', () => {
-    expect(table).toContain('ORDER_DETAIL_TOTAL_COLUMN_WIDTHS');
+  it('shows the live detail-cost total in the bottom summary row', () => {
+    expect(table).toContain('LiveOrderDetailCostSummary');
+    expect(table).toContain('calculateLiveOrderDetailCostTotal(details, editingKey, editingValue)');
+    expect(table).toContain('Итого по сумме:');
+  });
+  it('keeps requested spreadsheet columns at 70% of their previous widths', () => {
+    expect(table).toContain('ORDER_DETAIL_COLUMN_WIDTHS');
     expect(table).toContain('detailNumber: 44');
-    expect(table).toContain('quantity: 96');
-    expect(table).toContain('area: 128');
-    expect(table).toContain('detailCost: 150');
-    expect(table).toContain('width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailNumber');
-    expect(table).toContain('width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.quantity');
-    expect(table).toContain('width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.area');
-    expect(table).toContain('width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailCost');
+    expect(table).toContain('height: 67');
+    expect(table).toContain('width: 67');
+    expect(table).toContain('quantity: 67');
+    expect(table).toContain('area: 90');
+    expect(table).toContain('millingType: 119');
+    expect(table).toContain('edgeType: 91');
+    expect(table).toContain('sheetMaterial: 126');
+    expect(table).toContain('millingCostPerSqm: 98');
+    expect(table).toContain('detailCost: 105');
+    for (const key of [
+      'height',
+      'width',
+      'quantity',
+      'area',
+      'millingType',
+      'edgeType',
+      'sheetMaterial',
+      'millingCostPerSqm',
+      'detailCost',
+    ]) {
+      expect(table).toContain(`width: ORDER_DETAIL_COLUMN_WIDTHS.${key}`);
+    }
   });
   it('renders a persisted-only group checkbox + group label on separators when cutSelectable', () => {
     expect(table).toContain('cutSelectable');

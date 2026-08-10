@@ -1,9 +1,26 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { CurrencyInput } from './CurrencyInput';
+import { CurrencyInput, formatCurrencyInputFocusedValue } from './CurrencyInput';
 
 describe('CurrencyInput', () => {
+  it('edits integers without decimal zeroes and trims fractional zeroes', () => {
+    expect(formatCurrencyInputFocusedValue(0, 2)).toBe('0');
+    expect(formatCurrencyInputFocusedValue(12, 2)).toBe('12');
+    expect(formatCurrencyInputFocusedValue(12.5, 2)).toBe('12,5');
+  });
+
+  it('preserves an explicitly typed decimal separator', () => {
+    expect(formatCurrencyInputFocusedValue(12, 2, {
+      userTyping: true,
+      input: '12,',
+    })).toBe('12,');
+    expect(formatCurrencyInputFocusedValue(12, 2, {
+      userTyping: true,
+      input: '12.',
+    })).toBe('12.');
+  });
+
   it('keeps only missing draft values empty when requested', () => {
     const missingMarkup = renderToStaticMarkup(
       <CurrencyInput emptyWhenUnset value={undefined} />,
