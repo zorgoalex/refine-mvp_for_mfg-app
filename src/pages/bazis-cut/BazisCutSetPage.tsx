@@ -12,7 +12,7 @@ import {
 import { OrderDeletedTag, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { useTabStore } from '../../stores/tabStore';
 import { can } from '../../utils/permissions';
-import { buildBazisCutQrCode, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
+import { buildBazisCutQrCode, formatBazisCutAreaM2, summarizeBazisCutDetails } from './bazisCutDetailPresentation';
 import { saveBazisCutFile, type BazisCutSaveHandle } from './bazisCutSaveFile';
 import './BazisCutSetPage.css';
 
@@ -141,6 +141,7 @@ export const BazisCutSetPage: React.FC = () => {
       <Descriptions.Item label="Сформирован">{new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(set.createdAt))}</Descriptions.Item>
       <Descriptions.Item label="Деталей"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{set.quantity}</span></Descriptions.Item>
       <Descriptions.Item label="Позиций"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{set.positionCount}</span></Descriptions.Item>
+      <Descriptions.Item label="Площадь"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatBazisCutAreaM2(set.totalAreaM2)} м²</span></Descriptions.Item>
       <Descriptions.Item label="ERP-заказы"><SourceRefs refs={set.orders} href={(refId) => `/orders/show/${refId}`} /></Descriptions.Item>
       <Descriptions.Item label="ERP-проекты"><SourceRefs refs={set.projects} /></Descriptions.Item>
       <Descriptions.Item label="Базис-проекты"><SourceRefs refs={set.bazisProjects} href={(refId) => `/bazis/projects/${refId}`} /></Descriptions.Item>

@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto, type BazisCutSourceRefDto } from '../../api/bazisCutApi';
 import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
+import { formatBazisCutAreaM2 } from './bazisCutDetailPresentation';
 
 const { Title, Text } = Typography;
 
@@ -38,6 +39,8 @@ export const BazisCutListPage: React.FC = () => {
       render: (_, row) => <Sources row={row} /> },
     { title: 'Количество деталей', dataIndex: 'quantity', key: 'quantity', align: 'right', width: 180,
       render: (value: number, row) => <Space direction="vertical" size={0} align="end"><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</Text><Text type="secondary">Позиций: {row.positionCount}</Text></Space> },
+    { title: 'Площадь, м²', dataIndex: 'totalAreaM2', key: 'totalAreaM2', align: 'right', width: 130,
+      render: (value: number) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{formatBazisCutAreaM2(value)}</Text> },
   ], []);
 
   const pagination: TablePaginationConfig = { current: page, pageSize, total, showSizeChanger: true,

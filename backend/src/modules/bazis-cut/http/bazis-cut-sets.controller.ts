@@ -59,7 +59,8 @@ const summaryProperties: NonNullable<SchemaObject['properties']> = {
   bazisCutSetId: { type: 'integer', format: 'int64' }, name: { type: 'string' },
   version: { type: 'integer', minimum: 0 }, createdAt: { type: 'string', format: 'date-time' },
   updatedAt: { type: 'string', format: 'date-time' }, quantity: { type: 'integer', minimum: 0 },
-  positionCount: { type: 'integer', minimum: 0 }, orders: sourceRefs(), projects: sourceRefs(),
+  positionCount: { type: 'integer', minimum: 0 }, totalAreaM2: { type: 'number', minimum: 0 },
+  orders: sourceRefs(), projects: sourceRefs(),
   bazisProjects: sourceRefs(), bazisOrders: sourceRefs(),
 };
 const summaryRequired = Object.keys(summaryProperties);
