@@ -231,6 +231,12 @@ function isKeyboardMoveMenuTrigger(event: React.KeyboardEvent<HTMLElement>): boo
 
 function scrollStatusBoardColumnCardsToTop(viewport: HTMLElement | null): void {
   if (!viewport) return;
+  (viewport.closest<HTMLElement>('.status-board-page') ?? viewport).scrollIntoView({
+    block: 'start',
+    inline: 'nearest',
+    behavior: 'smooth',
+  });
+  viewport.scrollTo({ top: 0, behavior: 'smooth' });
   const cardLists = viewport.querySelectorAll<HTMLElement>('.status-board-column__cards');
   for (const cardList of cardLists) {
     cardList.scrollTo({ top: 0, behavior: 'smooth' });

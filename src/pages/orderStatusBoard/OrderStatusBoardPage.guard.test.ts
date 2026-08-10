@@ -195,8 +195,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
-  it('scrolls MDF column card lists to top after relation selection', () => {
+  it('scrolls MDF board and column card lists to top after relation selection', () => {
     expect(page).toContain('function scrollStatusBoardColumnCardsToTop');
+    expect(page).toContain("viewport.closest<HTMLElement>('.status-board-page')");
+    expect(page).toContain("block: 'start'");
+    expect(page).toContain("inline: 'nearest'");
+    expect(page).toContain("viewport.scrollTo({ top: 0, behavior: 'smooth' })");
     expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
     expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
     expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
