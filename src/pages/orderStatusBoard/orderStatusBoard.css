@@ -811,9 +811,24 @@
   background: #fff7e6;
 }
 
+.cnc-today-column--baths_laminated {
+  --status-color: #13c2c2;
+  background: #f6fffb;
+}
+
 .cnc-today-column--orders {
   --status-color: #722ed1;
   background: #f9f0ff;
+}
+
+.cnc-today-column--orders_ready {
+  --status-color: #389e0d;
+  background: #f6ffed;
+}
+
+.cnc-today-column--orders_issued {
+  --status-color: #595959;
+  background: #f5f5f5;
 }
 
 .status-board-column.cnc-today-column--terminal {
@@ -827,12 +842,18 @@
 }
 
 .cnc-today-column--baths .status-board-column__header,
-.cnc-today-column--baths_ready .status-board-column__header {
+.cnc-today-column--baths_ready .status-board-column__header,
+.cnc-today-column--baths_laminated .status-board-column__header {
   background: #fffaf0;
 }
 
-.cnc-today-column--orders .status-board-column__header {
+.cnc-today-column--orders .status-board-column__header,
+.cnc-today-column--orders_ready .status-board-column__header {
   background: #fcf7ff;
+}
+
+.cnc-today-column--orders_issued .status-board-column__header {
+  background: #fafafa;
 }
 
 .cnc-today-column--terminal .status-board-column__header {
@@ -1127,6 +1148,15 @@
   white-space: normal;
 }
 
+.status-board-card__identity {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__number.ant-btn {
   min-height: 26px;
   padding: 2px 0;
@@ -1225,30 +1255,20 @@
   color: var(--app-text-muted);
 }
 
-.status-board-card__status-row {
-  min-width: 0;
-  margin: 2px 0 7px;
-  display: flex;
-  align-items: center;
-}
-
-.status-board-card--minimal .status-board-card__status-row {
-  margin-bottom: 0;
-}
-
-.status-board-card--compact .status-board-card__status-row {
-  margin: 1px 0 4px;
-}
-
 .status-board-card__status-badge.ant-tag {
-  max-width: 100%;
+  max-width: 45%;
   min-width: 0;
+  flex: 0 1 auto;
   margin: 0;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 650;
   line-height: 1.35;
   white-space: normal;
+}
+
+.status-board-card__overdue-icon {
+  color: #cf1322;
 }
 
 .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__status-badge.ant-tag {
@@ -1326,6 +1346,42 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.cnc-board-card-shell {
+  display: block;
+}
+
+.cnc-board-card-shell--dragging .status-board-card {
+  opacity: 0.42;
+}
+
+.cnc-card-move-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cnc-card-move-actions .ant-btn {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+}
+
+.cnc-card-move-actions__drag {
+  cursor: grab;
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.cnc-card-move-actions__drag:active {
+  cursor: grabbing;
+}
+
+.cnc-card-context-menu .ant-dropdown-menu,
+.status-board-card-context-menu .ant-dropdown-menu {
+  min-width: 190px;
 }
 
 .status-board-card__standard-client {
@@ -1553,6 +1609,39 @@
   color: var(--app-text-muted);
   font-size: 12px;
   line-height: 1.3;
+}
+
+.cnc-order-card__readiness {
+  margin-top: 8px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.cnc-order-card__footer {
+  margin-top: 8px;
+}
+
+.cnc-order-card__progress {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  display: flex;
+  border-radius: 999px;
+  background: var(--app-border-soft);
+}
+
+.cnc-order-card__progress-segment {
+  height: 100%;
+  flex: 0 0 auto;
+}
+
+.cnc-order-card__progress-segment--cut {
+  background: #1677ff;
+}
+
+.cnc-order-card__progress-segment--rolled {
+  background: #722ed1;
 }
 
 .cnc-card-display-toggle.ant-btn {
@@ -2337,7 +2426,6 @@
   .status-board-columns--cnc .cnc-packet-card__sheet,
   .status-board-columns--cnc .status-board-card__footer,
   .status-board-columns--cnc .cnc-bath-card__actions,
-  .status-board-columns--cnc .status-board-card__status-row,
   .status-board-columns--cnc .status-board-card__standard-grid,
   .status-board-columns--cnc .status-board-card__compact-text,
   .status-board-columns--cnc .cnc-order-card__compact-client {
