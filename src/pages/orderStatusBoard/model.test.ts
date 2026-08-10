@@ -21,7 +21,6 @@ import {
   collectCncOrderIds,
   DEFAULT_MDF_ORDER_CARD_SORT,
   filterBoardColumns,
-  filterCncBazisCutSetsByMissingBathDetails,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
@@ -670,12 +669,12 @@ describe('order status board model', () => {
     ]);
   });
 
-  it('keeps Basis-cut cards only for bath details missing from machine files', () => {
+  it('keeps Basis-cut cards as machine-file cards even when bath details have packet files', () => {
     const columns = [
       {
         key: 'parsed',
         title: 'Файлы на станке',
-        total: 2,
+        total: 3,
         packets: [cncPacket('p-2712', ['2712'], [2712], [2712], [7002])],
         baths: [],
         bazisCutSets: [
@@ -706,9 +705,9 @@ describe('order status board model', () => {
       },
     ] as CncTelegramTodayColumn[];
 
-    const filtered = filterCncBazisCutSetsByMissingBathDetails(columns);
+    const filtered = filterCncTodayColumnsByOrders(columns, ['2712']);
 
-    expect(filtered[0]?.bazisCutSets?.map((card) => card.bazisCutSetId)).toEqual([8]);
+    expect(filtered[0]?.bazisCutSets?.map((card) => card.bazisCutSetId)).toEqual([9]);
     expect(filtered[0]?.total).toBe(2);
   });
 

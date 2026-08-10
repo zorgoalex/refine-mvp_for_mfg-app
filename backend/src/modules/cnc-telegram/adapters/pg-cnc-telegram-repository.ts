@@ -286,7 +286,11 @@ export class PgCncTelegramRepository
     );
     const packets = mapPacketRows(rows.rows);
     const baths = await loadBathCards(this.database, workdayFrom, workdayTo);
-    const bazisCutSets = await loadBathBazisCutSetCards(this.database, baths);
+    const bazisCutSets = await loadPeriodBazisCutSetCards(
+      this.database,
+      workdayFrom,
+      workdayTo,
+    );
     return {
       workday: workdayTo,
       generatedAt: new Date().toISOString(),
@@ -3568,21 +3572,18 @@ function buildTodayColumns(
   ];
 }
 
-async function loadBathBazisCutSetCards(
+async function loadPeriodBazisCutSetCards(
   database: DatabaseClient,
-  baths: readonly CncTelegramBathCardDto[],
+  workdayFrom: string,
+  workdayTo: string,
 ): Promise<CncTelegramBazisCutSetCardDto[]> {
-  const bathDetailIds = Array.from(new Set(
-    baths.flatMap((bath) => bath.items.map((item) => item.detailId)),
-  )).sort((left, right) => left - right);
-  if (bathDetailIds.length === 0) return [];
-
   const result = await database.query<BazisCutSetJoinedRow>(
     `
     WITH target_bazis_cut_sets AS (
-      SELECT DISTINCT detail.bazis_cut_set_id
-      FROM bazis_cut_set_details detail
-      WHERE detail.source_order_detail_id = ANY($1::bigint[])
+      SELECT cut_set.bazis_cut_set_id
+      FROM bazis_cut_sets cut_set
+      WHERE cut_set.created_at >= $1::date
+        AND cut_set.created_at < ($2::date + INTERVAL '1 day')
     )
     SELECT
       cut_set.bazis_cut_set_id,
@@ -3610,14 +3611,15 @@ async function loadBathBazisCutSetCards(
       ON source_detail.detail_id = detail.source_order_detail_id
     LEFT JOIN orders source_order
       ON source_order.order_id = COALESCE(detail.source_order_id, source_detail.order_id)
-    ORDER BY cut_set.bazis_cut_set_id, detail.sort_order, detail.bazis_cut_set_detail_id
+    ORDER BY cut_set.created_at DESC, cut_set.bazis_cut_set_id DESC,
+      detail.sort_order, detail.bazis_cut_set_detail_id
     `,
-    [bathDetailIds],
+    [workdayFrom, workdayTo],
   );
-  return mapBathBazisCutSetRows(result.rows);
+  return mapBazisCutSetRows(result.rows);
 }
 
-function mapBathBazisCutSetRows(
+function mapBazisCutSetRows(
   rows: readonly BazisCutSetJoinedRow[],
 ): CncTelegramBazisCutSetCardDto[] {
   const cards = new Map<number, {

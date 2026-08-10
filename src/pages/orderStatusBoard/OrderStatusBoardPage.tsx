@@ -111,7 +111,6 @@ import {
   DEFAULT_MDF_ORDER_CARD_SORT,
   DEFAULT_ORDER_STATUS_BOARD_SORT,
   filterBoardColumns,
-  filterCncBazisCutSetsByMissingBathDetails,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
@@ -964,9 +963,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     [cncPeriodColumns],
   );
   const cncOrderFilteredColumns = useMemo(
-    () => filterCncBazisCutSetsByMissingBathDetails(
-      filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
-    ),
+    () => filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
     [cncPeriodColumns, cncOrderFilterKey],
   );
   const cncFilteredColumns = useMemo(
@@ -1014,10 +1011,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     ],
   );
   const cncShownDataColumns = useMemo(
-    () => filterCncBazisCutSetsByMissingBathDetails(
-      cncActiveColumns.filter((column) =>
-        cncTerminalColumnsVisible || !isCncTerminalColumnKey(column.key),
-      ),
+    () => cncActiveColumns.filter((column) =>
+      cncTerminalColumnsVisible || !isCncTerminalColumnKey(column.key),
     ),
     [cncActiveColumns, cncTerminalColumnsVisible],
   );

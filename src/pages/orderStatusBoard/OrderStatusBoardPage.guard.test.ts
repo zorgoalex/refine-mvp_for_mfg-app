@@ -310,6 +310,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('suffixIcon={<SearchOutlined />}');
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
+    expect(page).toContain('() => filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters)');
+    expect(page).not.toContain('filterCncBazisCutSetsByMissingBathDetails');
     expect(page).toContain('status-board-toolbar__cnc-period');
     expect(page).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
     expect(page).toContain('DEFAULT_CNC_ORDER_SEARCH_PERIOD');

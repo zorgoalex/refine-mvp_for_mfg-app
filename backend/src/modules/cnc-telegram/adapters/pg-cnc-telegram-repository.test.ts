@@ -543,13 +543,13 @@ describe('PgCncTelegramRepository', () => {
     });
   });
 
-  it('returns Basis-cut set cards for ERP details present in bath cards', async () => {
+  it('returns Basis-cut set cards created in the requested date range', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const database = {
       query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
         queries.push({ text, params });
         if (/latest_vacuum_results/i.test(text)) {
-          return { rows: [bathPlacementRow({ order_detail_id: 3101 })] };
+          return { rows: [] };
         }
         if (/target_bazis_cut_sets/i.test(text)) {
           return {
@@ -605,12 +605,18 @@ describe('PgCncTelegramRepository', () => {
     };
     const repo = new PgCncTelegramRepository(database as never);
 
-    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+    const result = await repo.listToday({
+      currentUser: user(),
+      workdayFrom: '2026-07-18',
+      workdayTo: '2026-07-24',
+    });
     const parsed = result.columns.find((column) => column.key === 'parsed');
     const basisQuery = queries.find((query) => /target_bazis_cut_sets/i.test(query.text));
 
-    expect(basisQuery?.params).toEqual([[3101]]);
-    expect(basisQuery?.text).toContain('detail.source_order_detail_id = ANY($1::bigint[])');
+    expect(basisQuery?.params).toEqual(['2026-07-18', '2026-07-24']);
+    expect(basisQuery?.text).toContain('cut_set.created_at >= $1::date');
+    expect(basisQuery?.text).toContain("cut_set.created_at < ($2::date + INTERVAL '1 day')");
+    expect(basisQuery?.text).not.toContain('detail.source_order_detail_id = ANY($1::bigint[])');
     expect(parsed?.total).toBe(1);
     expect(parsed?.bazisCutSets).toEqual([
       {

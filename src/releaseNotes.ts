@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-10",
+    title: "МДФ-работы: Базис-раскрои как файлы станка",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Карточки Базис-раскроя на МДФ-доске теперь отображаются как самостоятельные файлы станка: в выбранный период попадают все созданные за этот период наборы, а не только наборы, связанные с текущими карточками ванн.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-10",
     title: "МДФ-работы: подсчёт распила только по МДФ",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
