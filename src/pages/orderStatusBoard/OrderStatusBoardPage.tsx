@@ -5402,37 +5402,27 @@ interface CncOrderMissingDetailsSpoilerProps {
 const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>(({
   details,
 }) => (
-  <div
+  <details
     className="cnc-order-card__missing"
     data-cnc-manual-drag-ignore="true"
     onPointerDown={stopCncCardNestedInteraction}
     onMouseDown={stopCncCardNestedInteraction}
     onTouchStart={stopCncCardNestedInteraction}
-    onClick={(event) => event.stopPropagation()}
+    onClick={stopCncCardClickPropagation}
   >
-    <Collapse
-      ghost
-      size="small"
-      expandIconPosition="end"
-    >
-      <Collapse.Panel
-        key="missing-details"
-        header={(
-          <span className="cnc-order-card__missing-label">
-            {formatCncMissingPositionsLabel(details.length)}
-          </span>
-        )}
-      >
-        <ul className="cnc-order-card__missing-list">
-          {details.map((detail) => (
-            <li key={detail.detailId}>
-              {formatCncMissingDetailLine(detail)}
-            </li>
-          ))}
-        </ul>
-      </Collapse.Panel>
-    </Collapse>
-  </div>
+    <summary className="cnc-order-card__missing-summary">
+      <span className="cnc-order-card__missing-label">
+        {formatCncMissingPositionsLabel(details.length)}
+      </span>
+    </summary>
+    <ul className="cnc-order-card__missing-list">
+      {details.map((detail) => (
+        <li key={detail.detailId}>
+          {formatCncMissingDetailLine(detail)}
+        </li>
+      ))}
+    </ul>
+  </details>
 ));
 CncOrderMissingDetailsSpoiler.displayName = 'CncOrderMissingDetailsSpoiler';
 

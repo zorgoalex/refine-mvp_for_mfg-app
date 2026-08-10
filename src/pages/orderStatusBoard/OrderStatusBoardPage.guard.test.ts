@@ -347,10 +347,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('По выбранному заказу МДФ-работ нет');
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
-    expect(page).toContain('key="missing-details"');
+    expect(page).toContain('<details');
+    expect(page).toContain('className="cnc-order-card__missing-summary"');
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('data-cnc-manual-drag-ignore="true"');
     expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');
+    expect(css).toContain('.cnc-order-card__missing-summary::after');
+    expect(css).toContain('.cnc-order-card__missing[open] .cnc-order-card__missing-summary::after');
     expect(page).toContain('cncColumnDisplayTitle(column)');
     expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
