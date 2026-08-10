@@ -144,7 +144,7 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(rowCellStyles).toContain('padding: 0 4px !important');
     expect(rowCellStyles).toContain('vertical-align: middle');
     expect(cellStyles).toContain('height: 20px');
-    expect(cellStyles).toContain('padding: 0 8px !important');
+    expect(cellStyles).toContain('padding: 0 2px !important');
     expect(cellStyles).toContain('line-height: 18px');
     expect(cellStyles).toContain('white-space: normal');
     expect(cellStyles).toContain('overflow-wrap: anywhere');
@@ -156,6 +156,9 @@ describe('OrderDetailTable interaction performance guards', () => {
       '.order-details-table .ant-table-tbody > tr > td .ant-btn-sm',
     );
     expect(appStyles).toContain('box-sizing: border-box');
+    expect(appStyles).toContain('padding: 0 !important;\n}\n\n.order-details-table td.order-detail-spreadsheet-cell .ant-input,');
+    expect(appStyles).toContain('padding: 2px !important;');
+    expect(appStyles).toContain('padding-inline: 2px !important;');
   });
 
   it('commits the latest price value and recalculates the sum on blur', () => {
@@ -191,13 +194,14 @@ describe('OrderDetailTable interaction performance guards', () => {
       '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus,',
     );
     const styleEnd = appStyles.indexOf(
-      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus::after',
+      '.order-details-table td.order-detail-spreadsheet-cell .ant-form-item',
       styleStart,
     );
     const activeCellStyles = appStyles.slice(styleStart, styleEnd);
 
     expect(activeCellStyles).toContain('var(--order-detail-grid-accent)');
     expect(activeCellStyles).not.toContain('background-color');
+    expect(appStyles).not.toContain('td.order-detail-spreadsheet-cell:focus::after');
     expect(appStyles).not.toContain('tr.order-detail-row-editing > td');
     expect(appStyles).not.toContain('tr.dg-editing > td { background-color: var(--app-highlight)');
   });

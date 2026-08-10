@@ -1054,7 +1054,7 @@ html {
 .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
   position: relative;
   height: 20px;
-  padding: 0 8px !important;
+  padding: 0 2px !important;
   cursor: cell;
   line-height: 18px;
   outline: none;
@@ -1073,21 +1073,10 @@ html {
   box-shadow: inset 0 0 0 2px var(--order-detail-grid-accent) !important;
 }
 
-.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus::after {
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--app-surface);
-  background: var(--order-detail-grid-accent);
-  content: '';
-  pointer-events: none;
-}
-
 .order-details-table td.order-detail-spreadsheet-cell .ant-form-item {
   width: 100%;
   margin: 0 !important;
+  padding: 0 !important;
 }
 
 .order-details-table td.order-detail-spreadsheet-cell .ant-input,
@@ -1104,7 +1093,11 @@ html {
 
 .order-details-table td.order-detail-spreadsheet-cell .ant-input,
 .order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input {
-  padding-block: 2px !important;
+  padding: 2px !important;
+}
+
+.order-details-table td.order-detail-spreadsheet-cell .ant-select-selector {
+  padding-inline: 2px !important;
 }
 
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-item,
