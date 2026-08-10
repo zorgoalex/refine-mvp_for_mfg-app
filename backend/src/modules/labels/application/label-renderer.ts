@@ -181,6 +181,33 @@ function renderCutMapElement(
     if (frozenAsset.kind !== 'image' || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(frozenAsset.dataUri)) {
       throw new Error(`Invalid frozen Telegram image asset ${assetKey}`);
     }
+    if (isPositiveFinite(map.sheetWidthMm) && isPositiveFinite(map.sheetHeightMm)) {
+      const rotateSheet = (
+        element.widthMm < element.heightMm && map.sheetWidthMm > map.sheetHeightMm
+      ) || (
+        element.widthMm > element.heightMm && map.sheetWidthMm < map.sheetHeightMm
+      );
+      const orientedSheetWidthMm = rotateSheet ? map.sheetHeightMm : map.sheetWidthMm;
+      const orientedSheetHeightMm = rotateSheet ? map.sheetWidthMm : map.sheetHeightMm;
+      const imageBody = `<image x="0" y="0" width="${num(map.sheetWidthMm)}" height="${num(map.sheetHeightMm)}" href="${frozenAsset.dataUri}" preserveAspectRatio="xMidYMid meet"/>`;
+      const orientedImageBody = rotateSheet
+        ? `<g transform="matrix(0 1 1 0 0 0)">${imageBody}</g>`
+        : imageBody;
+      const flipScaleX = style.flipHorizontal ? -1 : 1;
+      const flipScaleY = style.flipVertical ? -1 : 1;
+      const flipTranslateX = style.flipHorizontal ? orientedSheetWidthMm : 0;
+      const flipTranslateY = style.flipVertical ? orientedSheetHeightMm : 0;
+      const displayedImageBody = style.flipHorizontal || style.flipVertical
+        ? `<g transform="translate(${num(flipTranslateX)} ${num(flipTranslateY)}) scale(${flipScaleX} ${flipScaleY})">${orientedImageBody}</g>`
+        : orientedImageBody;
+      return [
+        `<g data-label-element-kind="cut_map" data-cut-map-source="telegram_image" data-cut-number="${escapeXml(map.cutNumber)}" data-cut-map-flip-horizontal="${style.flipHorizontal}" data-cut-map-flip-vertical="${style.flipVertical}">`,
+        `<svg x="${num(element.xMm)}" y="${num(element.yMm)}" width="${num(element.widthMm)}" height="${num(element.heightMm)}" viewBox="0 0 ${num(orientedSheetWidthMm)} ${num(orientedSheetHeightMm)}" preserveAspectRatio="xMidYMid meet" overflow="hidden">`,
+        displayedImageBody,
+        '</svg>',
+        '</g>',
+      ].join('');
+    }
     return [
       `<g data-label-element-kind="cut_map" data-cut-map-source="telegram_image">`,
       `<image x="${num(element.xMm)}" y="${num(element.yMm)}" width="${num(element.widthMm)}" height="${num(element.heightMm)}" href="${frozenAsset.dataUri}" preserveAspectRatio="xMidYMid meet"/>`,
@@ -384,6 +411,10 @@ function parseSafeAttributes(
 
 function isSafeNumber(value: string): boolean {
   return /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value) && Number.isFinite(Number(value));
+}
+
+function isPositiveFinite(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 function isSafeColor(value: string): boolean {

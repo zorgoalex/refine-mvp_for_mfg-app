@@ -212,8 +212,10 @@ describe('PgLabelsRepository structural guards', () => {
       expect(resolver).toContain("packet.svg_cut_import_status IS DISTINCT FROM 'imported'");
       expect(resolver).toContain('packet.svg_cut_job_id IS NULL');
       expect(resolver).toContain('packet.svg_cut_result_id IS NULL');
-      expect(resolver).not.toContain('packet.cut_layout_json');
+      expect(resolver).not.toContain("packet.cut_layout_json->>'status'='valid'");
     }
+    expect(imageResolver).toContain("packet.cut_layout_json #>> '{sheet,widthMm}' AS sheet_width_mm");
+    expect(imageResolver).toContain("packet.cut_layout_json #>> '{sheet,heightMm}' AS sheet_height_mm");
   });
 
   it('names order archives from the order name and current generation number', () => {

@@ -159,9 +159,12 @@ interface TelegramSheetImageRow extends QueryResultRow {
   packet_id: string;
   source_version: string | number;
   source_message_id: string | number | null;
+  cutting_sequence_no: string | number | null;
   sheet_image_storage_key: string | null;
   sheet_image_content_type: string | null;
   sheet_image_size_bytes: string | number | null;
+  sheet_width_mm: string | number | null;
+  sheet_height_mm: string | number | null;
 }
 
 interface TelegramSheetImageEvidenceRow extends QueryResultRow {
@@ -303,6 +306,7 @@ interface TelegramSvgCandidateRow extends QueryResultRow {
   packet_id: string;
   source_version: string | number;
   source_message_id: string | number | null;
+  cutting_sequence_no: string | number | null;
   layout_digest: string;
   order_id: string | number;
   order_detail_id: string | number;
@@ -320,12 +324,15 @@ interface TelegramImageCandidateRow extends QueryResultRow {
   packet_id: string;
   source_version: string | number;
   source_message_id: string | number | null;
+  cutting_sequence_no: string | number | null;
   order_id: string | number;
   order_detail_id: string | number;
   instance: string | number;
   sheet_image_storage_key: string;
   sheet_image_content_type: string | null;
   sheet_image_size_bytes: string | number | null;
+  sheet_width_mm: string | number | null;
+  sheet_height_mm: string | number | null;
   evidence_quantity: string | number;
   evidence_eligible: boolean;
 }
@@ -2273,9 +2280,9 @@ async function resolveExplicitTelegramSheetImageRows(
   if (rows.length === 0) return { rows, assets: new Map(), preparedImages: new Map() };
   await assertExplicitTelegramImageRowsBelongToPacket(client, input, rows);
   const prepared = await prepareExplicitTelegramSheetImage(client, input, mediaDir, preparedImages);
-  const cutJobName = prepared.packet.source_message_id === null
-    ? 'Скрин Telegram'
-    : `Скрин Telegram · ${toNumber(prepared.packet.source_message_id)}`;
+  const cutNumber = telegramPacketCutNumber(prepared.packet);
+  const cutJobName = telegramPacketCutJobName(prepared.packet, 'Скрин Telegram');
+  const sheetSize = telegramPacketSheetSize(prepared.packet);
   const sheetIndex = scope?.sheetIndex ?? 0;
   const sheetNumber = sheetIndex + 1;
   const resolvedRows = rows.map((row) => withCutMap(row, {
@@ -2287,11 +2294,12 @@ async function resolveExplicitTelegramSheetImageRows(
     sourceDigest: `sha256:${prepared.image.rawSha256}`,
     rawSha256: prepared.image.rawSha256,
     normalizedSha256: prepared.image.normalizedSha256,
-    cutNumber: 'Telegram',
+    cutNumber,
     cutJobName,
     variant: 'telegram',
     sheetIndex,
     sheetNumber,
+    ...sheetSize,
   }));
   return {
     rows: resolvedRows,
@@ -2391,8 +2399,10 @@ async function prepareExplicitTelegramSheetImage(
   preparedImages?: Map<string, PreparedTelegramImage>,
 ): Promise<{ assetKey: string; image: PreparedTelegramImage; packet: TelegramSheetImageRow }> {
   const result = await client.query<TelegramSheetImageRow>(
-    `SELECT packet_id, source_version, source_message_id,
-            sheet_image_storage_key, sheet_image_content_type, sheet_image_size_bytes
+    `SELECT packet_id, source_version, source_message_id, cutting_sequence_no,
+            sheet_image_storage_key, sheet_image_content_type, sheet_image_size_bytes,
+            cut_layout_json #>> '{sheet,widthMm}' AS sheet_width_mm,
+            cut_layout_json #>> '{sheet,heightMm}' AS sheet_height_mm
      FROM cnc_telegram_packets
      WHERE packet_id=$1::uuid`,
     [input.packetId],
@@ -2725,7 +2735,7 @@ async function resolveTelegramFallbackRows(
      ), svg_candidates AS (
        SELECT DISTINCT
        map.telegram_label_sheet_map_id,
-       packet.packet_id, packet.source_version, packet.source_message_id, map.layout_digest,
+       packet.packet_id, packet.source_version, packet.source_message_id, packet.cutting_sequence_no, map.layout_digest,
        placement.order_id, placement.order_detail_id,
        map.sheet_width_mm, map.sheet_height_mm, map.base_svg,
        COALESCE(packet.completed_at, packet.source_updated_at, packet.source_created_at, packet.updated_at) AS candidate_at
@@ -2755,7 +2765,7 @@ async function resolveTelegramFallbackRows(
        FROM svg_candidates candidate
      )
      SELECT candidate.telegram_label_sheet_map_id, placement.telegram_label_placement_id,
-       candidate.packet_id, candidate.source_version, candidate.source_message_id, candidate.layout_digest,
+       candidate.packet_id, candidate.source_version, candidate.source_message_id, candidate.cutting_sequence_no, candidate.layout_digest,
        requested.order_id, requested.detail_id AS order_detail_id, requested.instance,
        candidate.sheet_width_mm, candidate.sheet_height_mm, candidate.base_svg,
        placement.x_mm, placement.y_mm, placement.width_mm, placement.height_mm
@@ -2804,8 +2814,8 @@ async function resolveTelegramFallbackRows(
       sourceVersion: Number(candidate.source_version),
       sourceMessageId: nullableNumber(candidate.source_message_id),
       sourceDigest: candidate.layout_digest,
-      cutNumber: 'Telegram',
-      cutJobName: candidate.source_message_id === null ? 'Telegram SVG' : `Telegram SVG · ${candidate.source_message_id}`,
+      cutNumber: telegramPacketCutNumber(candidate),
+      cutJobName: telegramPacketCutJobName(candidate, 'Telegram SVG'),
       variant: 'telegram',
       sheetIndex: 0,
       sheetNumber: 1,
@@ -2845,8 +2855,10 @@ async function resolveTelegramFallbackRows(
      ), ranked_candidates AS (
        SELECT evidence.order_id, evidence.detail_id, evidence.quantity AS evidence_quantity,
               evidence.width_mm, evidence.height_mm, evidence.source, evidence.evidence_eligible,
-              packet.packet_id, packet.source_version, packet.source_message_id,
+              packet.packet_id, packet.source_version, packet.source_message_id, packet.cutting_sequence_no,
               packet.sheet_image_storage_key, packet.sheet_image_content_type, packet.sheet_image_size_bytes,
+              packet.cut_layout_json #>> '{sheet,widthMm}' AS sheet_width_mm,
+              packet.cut_layout_json #>> '{sheet,heightMm}' AS sheet_height_mm,
               row_number() OVER (
                 PARTITION BY evidence.order_id, evidence.detail_id
                 ORDER BY COALESCE(packet.completed_at, packet.source_updated_at, packet.source_created_at, packet.updated_at) DESC,
@@ -2869,9 +2881,10 @@ async function resolveTelegramFallbackRows(
            OR packet.svg_cut_result_id IS NULL
          )
      )
-     SELECT candidate.packet_id, candidate.source_version, candidate.source_message_id,
+     SELECT candidate.packet_id, candidate.source_version, candidate.source_message_id, candidate.cutting_sequence_no,
        requested.order_id, requested.detail_id AS order_detail_id, requested.instance,
        candidate.sheet_image_storage_key, candidate.sheet_image_content_type, candidate.sheet_image_size_bytes,
+       candidate.sheet_width_mm, candidate.sheet_height_mm,
        candidate.evidence_quantity, candidate.evidence_eligible
      FROM requested
      JOIN ranked_candidates candidate
@@ -3012,6 +3025,7 @@ async function resolveTelegramFallbackRows(
     const assetKey = `telegram_image:${candidate.packet_id}:${candidate.source_version}:${prepared.rawSha256}:${prepared.normalizedSha256}`;
     preparedImages.set(assetKey, prepared);
     assets.set(assetKey, { kind: 'image', dataUri: prepared.dataUri });
+    const sheetSize = telegramPacketSheetSize(candidate);
     const cutMap: LabelRowCutMapSnapshot = {
       source: 'telegram_image',
       assetKey,
@@ -3021,11 +3035,12 @@ async function resolveTelegramFallbackRows(
       sourceDigest: `sha256:${prepared.rawSha256}`,
       rawSha256: prepared.rawSha256,
       normalizedSha256: prepared.normalizedSha256,
-      cutNumber: 'Telegram',
-      cutJobName: candidate.source_message_id === null ? 'Скрин Telegram' : `Скрин Telegram · ${candidate.source_message_id}`,
+      cutNumber: telegramPacketCutNumber(candidate),
+      cutJobName: telegramPacketCutJobName(candidate, 'Скрин Telegram'),
       variant: 'telegram',
       sheetIndex: 0,
       sheetNumber: 1,
+      ...sheetSize,
     };
     return withCutMap(row, cutMap);
   });
@@ -3061,17 +3076,49 @@ function telegramImageCandidateMatchesMedia(
 }
 
 function withCutMap(row: LabelRow, cutMap: LabelRowCutMapSnapshot): LabelRow {
+  const values: LabelRow['values'] = {
+    ...row.values,
+    'cut.number': cutMap.cutNumber,
+    'cut.job_name': cutMap.cutJobName,
+    'cut.sheet_number': cutMap.sheetNumber,
+    'cut.variant': cutMap.variant,
+  };
+  if (isTelegramCutMap(cutMap)) {
+    values[`detail.${DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD}`] = cutMap.cutNumber;
+    values[`detail.${DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD}`] = cutMap.cutNumber;
+  }
   return {
     ...row,
     cutMap,
-    values: {
-      ...row.values,
-      'cut.number': cutMap.cutNumber,
-      'cut.job_name': cutMap.cutJobName,
-      'cut.sheet_number': cutMap.sheetNumber,
-      'cut.variant': cutMap.variant,
-    },
+    values,
   };
+}
+
+function telegramPacketCutNumber(
+  source: { cutting_sequence_no?: string | number | null },
+): string {
+  const sequenceNo = nullablePositiveNumber(source.cutting_sequence_no ?? null);
+  return sequenceNo === null ? 'Telegram' : `№${sequenceNo}`;
+}
+
+function telegramPacketCutJobName(
+  source: { cutting_sequence_no?: string | number | null; source_message_id?: string | number | null },
+  fallbackLabel: 'Скрин Telegram' | 'Telegram SVG',
+): string {
+  const sequenceNo = nullablePositiveNumber(source.cutting_sequence_no ?? null);
+  if (sequenceNo !== null) return `Раскрой №${sequenceNo}`;
+  const sourceMessageId = nullableNumber(source.source_message_id ?? null);
+  return sourceMessageId === null ? fallbackLabel : `${fallbackLabel} · ${sourceMessageId}`;
+}
+
+function telegramPacketSheetSize(
+  source: { sheet_width_mm?: string | number | null; sheet_height_mm?: string | number | null },
+): { sheetWidthMm?: number; sheetHeightMm?: number } {
+  const sheetWidthMm = nullablePositiveNumber(source.sheet_width_mm ?? null);
+  const sheetHeightMm = nullablePositiveNumber(source.sheet_height_mm ?? null);
+  return sheetWidthMm === null || sheetHeightMm === null
+    ? {}
+    : { sheetWidthMm, sheetHeightMm };
 }
 
 function assertTelegramSvgPagesLimit(rows: LabelRow[], pages: string[]): void {
@@ -3862,6 +3909,11 @@ function toNumber(value: string | number): number {
 
 function nullableNumber(value: string | number | null): number | null {
   return value == null ? null : toNumber(value);
+}
+
+function nullablePositiveNumber(value: string | number | null): number | null {
+  const parsed = nullableNumber(value);
+  return parsed !== null && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function toIsoString(value: string | Date): string {
