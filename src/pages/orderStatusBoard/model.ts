@@ -53,6 +53,14 @@ export const DEFAULT_MDF_ORDER_CARD_SORT: OrderStatusBoardSortPreference = {
   sortOrder: 'asc',
 };
 
+export interface CncOrderMissingDetail {
+  detailId: number;
+  detailNumber: number | null;
+  requiredQuantity: number;
+  presentQuantity: number;
+  missingQuantity: number;
+}
+
 export interface OrderStatusBoardViewState {
   view: OrderStatusBoardVisualFlow;
   search: string;
@@ -327,6 +335,99 @@ export function filterCncBathColumnsByMachineOrderMatches(
     );
     return { ...column, baths, total: baths.length };
   });
+}
+
+export function buildCncOrderMissingDetails(
+  cards: readonly OrderStatusBoardCard[],
+  columns: readonly CncTelegramTodayColumn[],
+): Map<number, CncOrderMissingDetail[]> {
+  const orderIdByOrderKey = new Map<string, number>();
+  for (const card of cards) {
+    const orderKey = normalizeCncOrderKey(card.orderName);
+    if (orderKey && !orderIdByOrderKey.has(orderKey)) {
+      orderIdByOrderKey.set(orderKey, card.orderId);
+    }
+  }
+
+  const quantityByDetailId = new Map<number, Map<number, number>>();
+  const quantityByDetailNumber = new Map<number, Map<number, number>>();
+  const addPresentQuantity = (
+    orderId: number | null | undefined,
+    orderName: string | null | undefined,
+    detailId: number | null | undefined,
+    detailNumber: number | null | undefined,
+    quantity: number,
+  ) => {
+    const resolvedOrderId = resolveCncOrderId(orderId, orderName, orderIdByOrderKey);
+    if (resolvedOrderId === null) return;
+    const safeQuantity = nonNegativeInteger(quantity);
+    if (safeQuantity <= 0) return;
+    const safeDetailId = positiveIntegerOrNull(detailId);
+    if (safeDetailId !== null) {
+      addNestedQuantity(quantityByDetailId, resolvedOrderId, safeDetailId, safeQuantity);
+      return;
+    }
+    const safeDetailNumber = positiveIntegerOrNull(detailNumber);
+    if (safeDetailNumber !== null) {
+      addNestedQuantity(quantityByDetailNumber, resolvedOrderId, safeDetailNumber, safeQuantity);
+    }
+  };
+
+  for (const column of columns) {
+    for (const packet of column.packets ?? []) {
+      for (const item of packet.items) {
+        addPresentQuantity(
+          item.matchOrderId ?? item.orderId,
+          item.orderName,
+          item.matchDetailId,
+          item.detailNumber,
+          item.quantity,
+        );
+      }
+    }
+    for (const bazisCutSet of column.bazisCutSets ?? []) {
+      for (const item of bazisCutSet.items) {
+        addPresentQuantity(
+          item.orderId,
+          item.orderName,
+          item.detailId,
+          item.detailNumber,
+          item.quantity,
+        );
+      }
+    }
+  }
+
+  const result = new Map<number, CncOrderMissingDetail[]>();
+  for (const card of cards) {
+    const detailIdQuantities = quantityByDetailId.get(card.orderId);
+    const detailNumberQuantities = quantityByDetailNumber.get(card.orderId);
+    const missing = (card.details ?? []).flatMap((detail): CncOrderMissingDetail[] => {
+      const requiredQuantity = nonNegativeInteger(detail.quantity);
+      if (requiredQuantity <= 0) return [];
+      const byDetailId = detailIdQuantities?.get(detail.detailId) ?? 0;
+      const byDetailNumber = detail.detailNumber === null
+        ? 0
+        : detailNumberQuantities?.get(detail.detailNumber) ?? 0;
+      const byBazisCut = nonNegativeInteger(detail.bazisCutQuantity);
+      const presentQuantity = Math.min(
+        requiredQuantity,
+        Math.max(byDetailId, byDetailNumber, byBazisCut),
+      );
+      const missingQuantity = requiredQuantity - presentQuantity;
+      if (missingQuantity <= 0) return [];
+      return [{
+        detailId: detail.detailId,
+        detailNumber: detail.detailNumber,
+        requiredQuantity,
+        presentQuantity,
+        missingQuantity,
+      }];
+    }).sort(compareCncMissingDetails);
+
+    if (missing.length > 0) result.set(card.orderId, missing);
+  }
+  return result;
 }
 
 export function isCncOrderHiddenFromMdfBoard(
@@ -623,6 +724,51 @@ function normalizePositiveIntegerArray(value: readonly unknown[]): number[] {
 
 function isPositiveInteger(value: number | null | undefined): value is number {
   return Number.isInteger(value) && Number(value) > 0;
+}
+
+function positiveIntegerOrNull(value: number | null | undefined): number | null {
+  return isPositiveInteger(value) ? value : null;
+}
+
+function nonNegativeInteger(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+function resolveCncOrderId(
+  orderId: number | null | undefined,
+  orderName: string | null | undefined,
+  orderIdByOrderKey: ReadonlyMap<string, number>,
+): number | null {
+  const safeOrderId = positiveIntegerOrNull(orderId);
+  if (safeOrderId !== null) return safeOrderId;
+  const orderKey = normalizeCncOrderKey(orderName);
+  return orderKey ? orderIdByOrderKey.get(orderKey) ?? null : null;
+}
+
+function addNestedQuantity(
+  map: Map<number, Map<number, number>>,
+  orderId: number,
+  itemKey: number,
+  quantity: number,
+): void {
+  let orderMap = map.get(orderId);
+  if (!orderMap) {
+    orderMap = new Map();
+    map.set(orderId, orderMap);
+  }
+  orderMap.set(itemKey, (orderMap.get(itemKey) ?? 0) + quantity);
+}
+
+function compareCncMissingDetails(
+  left: CncOrderMissingDetail,
+  right: CncOrderMissingDetail,
+): number {
+  if (left.detailNumber !== null && right.detailNumber !== null) {
+    return left.detailNumber - right.detailNumber || left.detailId - right.detailId;
+  }
+  if (left.detailNumber !== null) return -1;
+  if (right.detailNumber !== null) return 1;
+  return left.detailId - right.detailId;
 }
 
 function normalizeCncOrderFilterValues(values: readonly string[]): string[] {

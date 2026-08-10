@@ -106,6 +106,7 @@ import {
 import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
+  buildCncOrderMissingDetails,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   DEFAULT_MDF_ORDER_CARD_SORT,
@@ -125,6 +126,7 @@ import {
   toggleCncCardStandardOverride,
   toOrderStatusBoardQuery,
   type CncCardDisplayMode,
+  type CncOrderMissingDetail,
   type CncOrderSearchPeriod,
   type MdfBoardHiddenStatusesSetting,
   type OrderStatusBoardViewState,
@@ -2029,6 +2031,7 @@ export interface CncOrderReadiness {
 interface CncOrderBoardCard {
   card: OrderStatusBoardCard;
   readiness: CncOrderReadiness;
+  missingDetails: CncOrderMissingDetail[];
 }
 
 export interface CncTelegramTodayDisplayColumn {
@@ -2087,14 +2090,19 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     () => buildCncOrderReadiness(applyCncManualMovesToColumns(readinessColumns, manualMoves), {}),
     [manualMoves, readinessColumns],
   );
+  const orderMissingDetailsByOrderId = useMemo(
+    () => buildCncOrderMissingDetails(orderCards, readinessColumns),
+    [orderCards, readinessColumns],
+  );
   const orderDisplayCards = useMemo(
     () => splitCncOrderCardsByManualColumn(
       orderCards,
       orderReadinessByOrderId,
       manualMoves,
       orderSort,
+      orderMissingDetailsByOrderId,
     ),
-    [manualMoves, orderCards, orderReadinessByOrderId, orderSort],
+    [manualMoves, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort],
   );
   const manualDisplayColumns = useMemo(
     () => applyCncManualMovesToColumns(columns, manualMoves),
@@ -2303,7 +2311,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     <small>В текущих карточках нет связанных заказов ERP.</small>
                   </div>
                 ) : (
-                  sortedOrderCards.map(({ card, readiness }) => {
+                  sortedOrderCards.map((entry) => {
+                    const { card, readiness, missingDetails } = entry;
                     const cardKey = `order:${card.orderId}`;
                     const summaryOnly = detailedBathActive || isCncCardSummaryOnly(
                       cardDisplayMode,
@@ -2333,9 +2342,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cncMuted={mutedOrderIds.has(card.orderId)}
                         cncSummaryOnly={summaryOnly}
                         cncReadiness={readiness}
+                        cncMissingDetails={missingDetails}
                         displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
-                        relationState={orderStateFor({ card, readiness })}
+                        relationState={orderStateFor(entry)}
                         relationsEnabled={relationsEnabled}
                         highlightEnabled={relationsEnabled}
                         onSelectRelation={() =>
@@ -4870,6 +4880,7 @@ interface StatusBoardCardViewProps {
   cncMuted?: boolean;
   cncSummaryOnly?: boolean;
   cncReadiness?: CncOrderReadiness;
+  cncMissingDetails?: CncOrderMissingDetail[];
   displayToggleVisible?: boolean;
   onToggleDisplay?: () => void;
   relationState?: CncRelationCardState;
@@ -4898,6 +4909,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   cncMuted = false,
   cncSummaryOnly = false,
   cncReadiness,
+  cncMissingDetails = [],
   displayToggleVisible = false,
   onToggleDisplay,
   relationState = 'normal',
@@ -5247,6 +5259,10 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </div>
       )}
 
+      {cncOrderCard && cncMissingDetails.length > 0 && (
+        <CncOrderMissingDetailsSpoiler details={cncMissingDetails} />
+      )}
+
       {cncOrderCard && readinessProgress && (
         <div className="cnc-order-card__footer" aria-label="Готовность деталей заказа">
           <div className="cnc-order-card__progress">
@@ -5273,6 +5289,45 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   );
 });
 StatusBoardCardView.displayName = 'StatusBoardCardView';
+
+interface CncOrderMissingDetailsSpoilerProps {
+  details: CncOrderMissingDetail[];
+}
+
+const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>(({
+  details,
+}) => (
+  <div
+    className="cnc-order-card__missing"
+    onClick={(event) => event.stopPropagation()}
+  >
+    <Collapse
+      ghost
+      size="small"
+      expandIconPosition="end"
+      items={[
+        {
+          key: 'missing-details',
+          label: (
+            <span className="cnc-order-card__missing-label">
+              {formatCncMissingPositionsLabel(details.length)}
+            </span>
+          ),
+          children: (
+            <ul className="cnc-order-card__missing-list">
+              {details.map((detail) => (
+                <li key={detail.detailId}>
+                  {formatCncMissingDetailLine(detail)}
+                </li>
+              ))}
+            </ul>
+          ),
+        },
+      ]}
+    />
+  </div>
+));
+CncOrderMissingDetailsSpoiler.displayName = 'CncOrderMissingDetailsSpoiler';
 
 function confirmManualProductionMove(
   card: OrderStatusBoardCard,
@@ -5354,6 +5409,27 @@ function formatPaymentSummary(card: OrderStatusBoardCard): string | null {
 
 function formatArea(value: number): string {
   return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value)} м²`;
+}
+
+function formatCncMissingPositionsLabel(count: number): string {
+  return `Отсутствует ${count} ${pluralRu(count, 'позиция', 'позиции', 'позиций')}`;
+}
+
+function formatCncMissingDetailLine(detail: CncOrderMissingDetail): string {
+  const position = detail.detailNumber === null ? 'без номера' : String(detail.detailNumber);
+  return `поз. ${position} — отсутствует ${detail.missingQuantity} из ${detail.requiredQuantity} ${
+    pluralRu(detail.requiredQuantity, 'детали', 'деталей', 'деталей')
+  }`;
+}
+
+function pluralRu(count: number, one: string, few: string, many: string): string {
+  const absolute = Math.abs(Math.trunc(count));
+  const mod100 = absolute % 100;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  const mod10 = absolute % 10;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
 }
 
 async function fetchCncOrderStatusBoard(
@@ -5597,21 +5673,34 @@ export function buildCncOrderReadiness(
   columns: CncTelegramTodayColumn[],
   manualMoves: CncBoardManualMoveState,
 ): Map<number, CncOrderReadiness> {
-  const orders = new Map<number, {
-    bathTotal: number;
-    bathCut: number;
-    packetTotal: number;
-    packetCut: number;
-    rolled: number;
-  }>();
-  const getOrder = (orderId: number | null | undefined) => {
+  const orders = new Map<number, Map<string, CncReadinessDetailTotals>>();
+  const getDetail = (
+    orderId: number | null | undefined,
+    detailId: number | null | undefined,
+    detailNumber: number | null | undefined,
+    fallbackKey: string,
+  ) => {
     if (!Number.isInteger(orderId) || (orderId ?? 0) <= 0) return null;
     const key = orderId as number;
-    const current = orders.get(key);
+    let orderDetails = orders.get(key);
+    if (!orderDetails) {
+      orderDetails = new Map();
+      orders.set(key, orderDetails);
+    }
+    const detailKey = cncReadinessDetailKey(detailId, detailNumber, fallbackKey);
+    let current = orderDetails.get(detailKey);
     if (current) return current;
-    const next = { bathTotal: 0, bathCut: 0, packetTotal: 0, packetCut: 0, rolled: 0 };
-    orders.set(key, next);
-    return next;
+    current = {
+      bathTotal: 0,
+      bathCut: 0,
+      packetTotal: 0,
+      packetCut: 0,
+      bazisCutTotal: 0,
+      bazisCutReady: 0,
+      rolled: 0,
+    };
+    orderDetails.set(detailKey, current);
+    return current;
   };
 
   for (const column of columns) {
@@ -5622,13 +5711,18 @@ export function buildCncOrderReadiness(
         column.key,
         manualMoves,
       );
-      for (const item of packet.items) {
-        const order = getOrder(item.orderId ?? item.matchOrderId);
-        if (!order) continue;
+      for (const [index, item] of packet.items.entries()) {
+        const detail = getDetail(
+          item.matchOrderId ?? item.orderId,
+          item.matchDetailId,
+          item.detailNumber,
+          `packet:${packet.packetId}:${item.packetItemId}:${index}`,
+        );
+        if (!detail) continue;
         const quantity = nonNegativeInteger(item.quantity);
-        order.packetTotal += quantity;
+        detail.packetTotal += quantity;
         if (packetTarget === 'completed' || packetTarget === 'completed_laminated') {
-          order.packetCut += quantity;
+          detail.packetCut += quantity;
         }
       }
     }
@@ -5640,13 +5734,18 @@ export function buildCncOrderReadiness(
         column.key,
         manualMoves,
       );
-      for (const item of bazisCutSet.items) {
-        const order = getOrder(item.orderId);
-        if (!order) continue;
+      for (const [index, item] of bazisCutSet.items.entries()) {
+        const detail = getDetail(
+          item.orderId,
+          item.detailId,
+          item.detailNumber,
+          `bazis:${bazisCutSet.bazisCutSetId}:${index}`,
+        );
+        if (!detail) continue;
         const quantity = nonNegativeInteger(item.quantity);
-        order.packetTotal += quantity;
+        detail.bazisCutTotal += quantity;
         if (packetTarget === 'completed' || packetTarget === 'completed_laminated') {
-          order.packetCut += quantity;
+          detail.bazisCutReady += quantity;
         }
       }
     }
@@ -5658,22 +5757,44 @@ export function buildCncOrderReadiness(
         column.key,
         manualMoves,
       );
-      for (const item of bath.items) {
-        const order = getOrder(item.orderId);
-        if (!order) continue;
+      for (const [index, item] of bath.items.entries()) {
+        const detail = getDetail(
+          item.orderId,
+          item.detailId,
+          item.detailNumber,
+          `bath:${bath.bathCardId}:${item.bathItemId}:${index}`,
+        );
+        if (!detail) continue;
         const quantity = nonNegativeInteger(item.quantity);
-        order.bathTotal += quantity;
+        detail.bathTotal += quantity;
         if (bathTarget === 'baths_laminated') {
-          order.rolled += quantity;
+          detail.rolled += quantity;
         } else {
-          order.bathCut += Math.min(nonNegativeInteger(item.completedQuantity), quantity);
+          detail.bathCut += Math.min(nonNegativeInteger(item.completedQuantity), quantity);
         }
       }
     }
   }
 
   const result = new Map<number, CncOrderReadiness>();
-  for (const [orderId, order] of orders) {
+  for (const [orderId, details] of orders) {
+    const order = Array.from(details.values()).reduce(
+      (accumulator, detail) => {
+        const sourceTotal = Math.max(detail.packetTotal, detail.bazisCutTotal);
+        const sourceCut = Math.min(
+          Math.max(detail.packetCut, detail.bazisCutReady),
+          sourceTotal,
+        );
+        const bathTotal = detail.bathTotal;
+        accumulator.packetTotal += sourceTotal;
+        accumulator.packetCut += sourceCut;
+        accumulator.bathTotal += bathTotal;
+        accumulator.bathCut += Math.min(detail.bathCut, bathTotal);
+        accumulator.rolled += Math.min(detail.rolled, Math.max(sourceTotal, bathTotal));
+        return accumulator;
+      },
+      { bathTotal: 0, bathCut: 0, packetTotal: 0, packetCut: 0, rolled: 0 },
+    );
     const totalDetails = Math.max(order.bathTotal, order.packetTotal);
     const rolledDetails = Math.min(order.rolled, totalDetails);
     const cutDetails = Math.min(
@@ -5690,11 +5811,34 @@ export function buildCncOrderReadiness(
   return result;
 }
 
+interface CncReadinessDetailTotals {
+  bathTotal: number;
+  bathCut: number;
+  packetTotal: number;
+  packetCut: number;
+  bazisCutTotal: number;
+  bazisCutReady: number;
+  rolled: number;
+}
+
+function cncReadinessDetailKey(
+  detailId: number | null | undefined,
+  detailNumber: number | null | undefined,
+  fallbackKey: string,
+): string {
+  const safeDetailId = positiveIntegerOrNull(detailId);
+  if (safeDetailId !== null) return `id:${safeDetailId}`;
+  const safeDetailNumber = positiveIntegerOrNull(detailNumber);
+  if (safeDetailNumber !== null) return `number:${safeDetailNumber}`;
+  return `fallback:${fallbackKey}`;
+}
+
 export function splitCncOrderCardsByManualColumn(
   cards: OrderStatusBoardCard[],
   readinessByOrderId: ReadonlyMap<number, CncOrderReadiness>,
   manualMoves: CncBoardManualMoveState,
   sortPreference = DEFAULT_MDF_ORDER_CARD_SORT,
+  missingDetailsByOrderId: ReadonlyMap<number, CncOrderMissingDetail[]> = new Map(),
 ): Record<'orders' | 'orders_ready' | 'orders_issued', CncOrderBoardCard[]> {
   const result: Record<'orders' | 'orders_ready' | 'orders_issued', CncOrderBoardCard[]> = {
     orders: [],
@@ -5717,7 +5861,11 @@ export function splitCncOrderCardsByManualColumn(
       manualMoves,
     );
     const orderColumn = isCncOrderColumnKey(targetColumn) ? targetColumn : autoColumn;
-    result[orderColumn].push({ card, readiness });
+    result[orderColumn].push({
+      card,
+      readiness,
+      missingDetails: missingDetailsByOrderId.get(card.orderId) ?? [],
+    });
   }
   for (const columnCards of Object.values(result)) {
     columnCards.sort((left, right) =>
@@ -5842,6 +5990,10 @@ function cncOrderReadinessProgress(readiness: CncOrderReadiness): {
 
 function nonNegativeInteger(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+function positiveIntegerOrNull(value: number | null | undefined): number | null {
+  return Number.isInteger(value) && (value ?? 0) > 0 ? value as number : null;
 }
 
 function cncRelationTargetEquals(

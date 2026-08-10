@@ -256,6 +256,7 @@ function card(
     debtAmount: null,
     partsCount: 0,
     totalArea: 0,
+    details: [],
     managerId: null,
     managerName: null,
     updatedAt: '2026-07-19T00:00:00.000Z',

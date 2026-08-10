@@ -15285,6 +15285,7 @@ components:
         - debtAmount
         - partsCount
         - totalArea
+        - details
         - managerId
         - managerName
         - updatedAt
@@ -15355,6 +15356,10 @@ components:
           type: number
           format: decimal
           minimum: 0
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderStatusBoardCardDetail'
         managerId:
           type: integer
           format: int64
@@ -15372,6 +15377,28 @@ components:
           type: boolean
         canChangeProductionStatus:
           type: boolean
+
+    OrderStatusBoardCardDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - detailId
+        - detailNumber
+        - quantity
+        - bazisCutQuantity
+      properties:
+        detailId:
+          type: integer
+          format: int64
+        detailNumber:
+          type: integer
+          nullable: true
+        quantity:
+          type: integer
+          minimum: 0
+        bazisCutQuantity:
+          type: integer
+          minimum: 0
 
     OrderListResponse:
       type: object

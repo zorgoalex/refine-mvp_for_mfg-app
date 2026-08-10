@@ -17,6 +17,7 @@ import {
 import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
+  buildCncOrderMissingDetails,
   collectCncOrderIds,
   DEFAULT_MDF_ORDER_CARD_SORT,
   filterBoardColumns,
@@ -409,6 +410,42 @@ describe('order status board model', () => {
     });
   });
 
+  it('deduplicates MDF order readiness between machine files and Basis-cut sets', () => {
+    const packet = cncPacket('packet-ready', ['2705'], [2705], [2705], [101]);
+    packet.items[0] = {
+      ...packet.items[0],
+      detailNumber: 1,
+      quantity: 2,
+    };
+    const bazisCutSet = cncBazisCutSet(9001, [
+      { orderName: '2705', orderId: 2705, detailId: 101 },
+    ]);
+    bazisCutSet.items[0] = {
+      ...bazisCutSet.items[0],
+      detailNumber: 1,
+      quantity: 2,
+    };
+    const columns = [
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 2,
+        packets: [packet],
+        baths: [],
+        bazisCutSets: [bazisCutSet],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const readiness = buildCncOrderReadiness(columns, {});
+
+    expect(readiness.get(2705)).toEqual({
+      totalDetails: 2,
+      cutDetails: 2,
+      rolledDetails: 0,
+      remainingDetails: 0,
+    });
+  });
+
   it('keeps MDF order readiness total at least the order detail count', () => {
     const split = splitCncOrderCardsByManualColumn(
       [{ ...card(501), partsCount: 50 }],
@@ -483,6 +520,76 @@ describe('order status board model', () => {
       '2',
       '1',
       '10',
+    ]);
+  });
+
+  it('lists MDF order positions missing from machine files and Basis-cut sets', () => {
+    const orderCard = {
+      ...card(2705),
+      details: [
+        { detailId: 101, detailNumber: 1, quantity: 2, bazisCutQuantity: 0 },
+        { detailId: 102, detailNumber: 2, quantity: 3, bazisCutQuantity: 0 },
+        { detailId: 103, detailNumber: 3, quantity: 1, bazisCutQuantity: 1 },
+        { detailId: 104, detailNumber: 4, quantity: 1, bazisCutQuantity: 0 },
+      ],
+    };
+    const columns = [
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 1,
+        packets: [{
+          ...cncPacket('p-2705', ['2705', '2705']),
+          items: [
+            {
+              packetItemId: 'p-2705-1',
+              orderName: '2705',
+              orderId: 2705,
+              matchOrderId: 2705,
+              matchDetailId: 101,
+              detailNumber: 1,
+              quantity: 1,
+            },
+            {
+              packetItemId: 'p-2705-2',
+              orderName: '2705',
+              orderId: null,
+              matchOrderId: null,
+              matchDetailId: null,
+              detailNumber: 2,
+              quantity: 1,
+            },
+          ],
+        }],
+        baths: [],
+        bazisCutSets: [],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const missing = buildCncOrderMissingDetails([orderCard], columns);
+
+    expect(missing.get(2705)).toEqual([
+      {
+        detailId: 101,
+        detailNumber: 1,
+        requiredQuantity: 2,
+        presentQuantity: 1,
+        missingQuantity: 1,
+      },
+      {
+        detailId: 102,
+        detailNumber: 2,
+        requiredQuantity: 3,
+        presentQuantity: 1,
+        missingQuantity: 2,
+      },
+      {
+        detailId: 104,
+        detailNumber: 4,
+        requiredQuantity: 1,
+        presentQuantity: 0,
+        missingQuantity: 1,
+      },
     ]);
   });
 
@@ -822,6 +929,7 @@ function card(orderId: number): OrderStatusBoardCard {
     debtAmount: null,
     partsCount: 0,
     totalArea: 0,
+    details: [],
     managerId: null,
     managerName: null,
     updatedAt: '2026-07-19T00:00:00.000Z',

@@ -31,6 +31,13 @@ export interface OrderStatusBoardStatus {
   isActive: boolean;
 }
 
+export interface OrderStatusBoardCardDetail {
+  detailId: number;
+  detailNumber: number | null;
+  quantity: number;
+  bazisCutQuantity: number;
+}
+
 export interface OrderStatusBoardCard {
   orderId: number;
   orderName: string;
@@ -53,6 +60,7 @@ export interface OrderStatusBoardCard {
   debtAmount: number | null;
   partsCount: number;
   totalArea: number;
+  details: OrderStatusBoardCardDetail[];
   managerId: number | null;
   managerName: string | null;
   updatedAt: string;

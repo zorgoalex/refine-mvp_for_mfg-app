@@ -145,6 +145,7 @@ function response(): OrderStatusBoardResponseDto {
             debtAmount: 750,
             partsCount: 5,
             totalArea: 3.2,
+            details: [],
             managerId: 42,
             managerName: 'Manager',
             updatedAt: '2026-07-19T00:00:00.000Z',

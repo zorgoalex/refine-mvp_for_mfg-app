@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-10",
+    title: "МДФ-работы: недостающие позиции заказа",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В карточке заказа на МДФ-доске появился красный спойлер с количеством позиций, которых не хватает в файлах станка и Базис-раскрое; внутри спойлера перечислены номера позиций и недостающее количество деталей.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-10",
     title: "МДФ-работы: сортировка карточек заказов",
     services: ["ERP"],
     repositories: ["repo_erp"],
