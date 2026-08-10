@@ -216,7 +216,7 @@ const DND_BACKEND_OPTIONS = {
 };
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
-export type CncManualCardKind = 'packet' | 'bath' | 'order';
+export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
 type CncRelationTarget =
   | { kind: 'packet'; id: string }
   | { kind: 'bath'; id: string }
@@ -2039,7 +2039,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     );
   }, []);
   const orderReadinessByOrderId = useMemo(
-    () => buildCncOrderReadiness(readinessColumns, manualMoves),
+    () => buildCncOrderReadiness(applyCncManualMovesToColumns(readinessColumns, manualMoves), {}),
     [manualMoves, readinessColumns],
   );
   const orderDisplayCards = useMemo(
@@ -2050,13 +2050,17 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     ),
     [manualMoves, orderCards, orderReadinessByOrderId],
   );
+  const manualDisplayColumns = useMemo(
+    () => applyCncManualMovesToColumns(columns, manualMoves),
+    [columns, manualMoves],
+  );
   const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
   const displayColumns = useMemo(
     () => {
       const primaryColumns = detailedBathActive
         ? CNC_STATUS_BOARD_COLUMN_DEFINITIONS
             .filter((definition) => !isCncOrderColumnKey(definition.key))
-            .map((definition) => columns.find((column) => column.key === definition.key) ?? ({
+            .map((definition) => manualDisplayColumns.find((column) => column.key === definition.key) ?? ({
               key: definition.key as CncTelegramTodayColumn['key'],
               title: definition.label,
               total: 0,
@@ -2067,11 +2071,11 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         : CNC_STATUS_BOARD_COLUMN_DEFINITIONS
             .filter((definition) => !isCncOrderColumnKey(definition.key))
             .flatMap((definition) => {
-              const column = columns.find((candidate) => candidate.key === definition.key);
+              const column = manualDisplayColumns.find((candidate) => candidate.key === definition.key);
               return column ? [column] : [];
             });
       const terminalColumns = CNC_TERMINAL_COLUMN_DEFINITIONS.flatMap((definition) => {
-        const column = columns.find((candidate) => candidate.key === definition.key);
+        const column = manualDisplayColumns.find((candidate) => candidate.key === definition.key);
         return column ? [column] : [];
       });
       return [
@@ -2110,20 +2114,20 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         ...terminalColumns,
       ];
     },
-    [columns, detailedBathActive, orderDisplayCards, showOrdersColumn],
+    [detailedBathActive, manualDisplayColumns, orderDisplayCards, showOrdersColumn],
   );
   const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
   const selectedDetailedDetailId = detailedContext?.activeDetail?.detailId ?? null;
   const detailedMachineSources = useMemo(
     () => detailedContext?.activeBath
       ? buildCncDetailedMachineSources({
-          columns,
+          columns: manualDisplayColumns,
           bath: detailedContext.activeBath,
           selectedDetailId: selectedDetailedDetailId,
           canViewCut,
         })
       : [],
-    [canViewCut, columns, detailedContext?.activeBath, selectedDetailedDetailId],
+    [canViewCut, detailedContext?.activeBath, manualDisplayColumns, selectedDetailedDetailId],
   );
 
   return (
@@ -2383,17 +2387,26 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     detailedPacketHighlightEnabled && state === 'related',
                   );
                   return (
-                    <CncBazisCutSetCardView
+                    <CncManualCardFrame
                       key={bazisCutSet.bazisCutSetId}
-                      card={bazisCutSet}
-                      relationState={state}
-                      highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
-                      summaryOnly={summaryOnly}
-                      displayToggleVisible={cardDisplayMode === 'compact'}
-                      onToggleDisplay={() => toggleCardDisplay(cardKey)}
-                      onOpenOrder={onOpenOrder}
-                      onOpenBazisCut={onOpenBazisCut}
-                    />
+                      kind="bazisCutSet"
+                      cardId={String(bazisCutSet.bazisCutSetId)}
+                      sourceColumn={column.key}
+                      onMove={onMove}
+                    >
+                      {() => (
+                        <CncBazisCutSetCardView
+                          card={bazisCutSet}
+                          relationState={state}
+                          highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
+                          summaryOnly={summaryOnly}
+                          displayToggleVisible={cardDisplayMode === 'compact'}
+                          onToggleDisplay={() => toggleCardDisplay(cardKey)}
+                          onOpenOrder={onOpenOrder}
+                          onOpenBazisCut={onOpenBazisCut}
+                        />
+                      )}
+                    </CncManualCardFrame>
                   );
                 })}
                 {packetCards.map((packet) => {
@@ -5104,14 +5117,25 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </span>
       )}
 
+      {cncOrderCard && !cncSummaryOnly && (
+        <Typography.Text
+          className="cnc-order-card__client"
+          ellipsis={{ tooltip: card.clientName }}
+        >
+          {card.clientName || 'Клиент не указан'}
+        </Typography.Text>
+      )}
+
       {showCompactDetails && showStandardDetails && !cncSummaryOnly && (
         <div className="status-board-card__standard-grid">
-          <Typography.Text
-            className="status-board-card__client status-board-card__standard-client"
-            ellipsis={{ tooltip: card.clientName }}
-          >
-            {card.clientName || 'Клиент не указан'}
-          </Typography.Text>
+          {!cncOrderCard && (
+            <Typography.Text
+              className="status-board-card__client status-board-card__standard-client"
+              ellipsis={{ tooltip: card.clientName }}
+            >
+              {card.clientName || 'Клиент не указан'}
+            </Typography.Text>
+          )}
           <span className="status-board-card__standard-cell">
             <span>
               {card.plannedCompletionDate
@@ -5136,7 +5160,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           <span className="status-board-card__standard-cell">
             {card.partsCount} дет. · {formatArea(card.totalArea)}
           </span>
-          {paymentSummary && (
+          {paymentSummary && !cncOrderCard && (
             <span className="status-board-card__standard-cell">
               {paymentSummary}
             </span>
@@ -5406,14 +5430,16 @@ export function cncManualMoveDestinations(
   sourceColumn: CncTelegramTodayDisplayColumnKey,
 ): Array<{ key: CncTelegramTodayDisplayColumnKey; title: string }> {
   if (
-    kind === 'packet'
+    (kind === 'packet' || kind === 'bazisCutSet')
     && sourceColumn !== 'parsed'
     && sourceColumn !== 'completed'
+    && sourceColumn !== 'completed_laminated'
   ) {
     return [];
   }
   const keys: Record<CncManualCardKind, CncTelegramTodayDisplayColumnKey[]> = {
-    packet: ['parsed', 'completed'],
+    packet: ['parsed', 'completed', 'completed_laminated'],
+    bazisCutSet: ['parsed', 'completed', 'completed_laminated'],
     bath: ['baths', 'baths_ready', 'baths_laminated'],
     order: ['orders', 'orders_ready', 'orders_issued'],
   };
@@ -5426,7 +5452,11 @@ export function isCncManualMoveAllowed(
   kind: CncManualCardKind,
   targetColumn: CncTelegramTodayDisplayColumnKey,
 ): boolean {
-  if (kind === 'packet') return targetColumn === 'parsed' || targetColumn === 'completed';
+  if (kind === 'packet' || kind === 'bazisCutSet') {
+    return targetColumn === 'parsed'
+      || targetColumn === 'completed'
+      || targetColumn === 'completed_laminated';
+  }
   if (kind === 'bath') return isCncBathColumnKey(targetColumn);
   return isCncOrderColumnKey(targetColumn);
 }
@@ -5443,6 +5473,70 @@ function isCncManualColumnKey(value: string): value is CncTelegramTodayDisplayCo
     'orders_ready',
     'orders_issued',
   ].includes(value);
+}
+
+export function applyCncManualMovesToColumns(
+  columns: CncTelegramTodayColumn[],
+  manualMoves: CncBoardManualMoveState,
+): CncTelegramTodayColumn[] {
+  const byKey = new Map<CncTelegramTodayColumn['key'], CncTelegramTodayColumn>();
+  const ensureColumn = (key: CncTelegramTodayColumn['key']): CncTelegramTodayColumn => {
+    const current = byKey.get(key);
+    if (current) return current;
+    const source = columns.find((column) => column.key === key);
+    const next: CncTelegramTodayColumn = {
+      key,
+      title: cncColumnTitleByKey(key, source?.title ?? ''),
+      total: 0,
+      packets: [],
+      baths: [],
+      bazisCutSets: [],
+    };
+    byKey.set(key, next);
+    return next;
+  };
+
+  for (const column of columns) {
+    ensureColumn(column.key);
+  }
+
+  for (const column of columns) {
+    for (const packet of column.packets) {
+      const target = resolveCncManualTarget(
+        'packet',
+        packet.packetId,
+        column.key,
+        manualMoves,
+      ) as CncTelegramTodayColumn['key'];
+      ensureColumn(target).packets.push(packet);
+    }
+    for (const bazisCutSet of column.bazisCutSets ?? []) {
+      const target = resolveCncManualTarget(
+        'bazisCutSet',
+        String(bazisCutSet.bazisCutSetId),
+        column.key,
+        manualMoves,
+      ) as CncTelegramTodayColumn['key'];
+      ensureColumn(target).bazisCutSets?.push(bazisCutSet);
+    }
+    for (const bath of column.baths) {
+      const target = resolveCncManualTarget(
+        'bath',
+        bath.bathCardId,
+        column.key,
+        manualMoves,
+      ) as CncTelegramTodayColumn['key'];
+      ensureColumn(target).baths.push(bath);
+    }
+  }
+
+  return Array.from(byKey.values()).map((column) => ({
+    ...column,
+    total:
+      column.packets.length +
+      column.baths.length +
+      (column.bazisCutSets?.length ?? 0),
+  }));
 }
 
 export function buildCncOrderReadiness(
@@ -5476,6 +5570,24 @@ export function buildCncOrderReadiness(
       );
       for (const item of packet.items) {
         const order = getOrder(item.orderId ?? item.matchOrderId);
+        if (!order) continue;
+        const quantity = nonNegativeInteger(item.quantity);
+        order.packetTotal += quantity;
+        if (packetTarget === 'completed' || packetTarget === 'completed_laminated') {
+          order.packetCut += quantity;
+        }
+      }
+    }
+
+    for (const bazisCutSet of column.bazisCutSets ?? []) {
+      const packetTarget = resolveCncManualTarget(
+        'bazisCutSet',
+        String(bazisCutSet.bazisCutSetId),
+        column.key,
+        manualMoves,
+      );
+      for (const item of bazisCutSet.items) {
+        const order = getOrder(item.orderId);
         if (!order) continue;
         const quantity = nonNegativeInteger(item.quantity);
         order.packetTotal += quantity;

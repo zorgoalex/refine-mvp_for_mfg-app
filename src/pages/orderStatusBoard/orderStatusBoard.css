@@ -1290,8 +1290,8 @@
   min-height: 0;
   padding: 0;
   flex: 1 1 auto;
-  font-size: clamp(9px, 3.8cqw, 13px);
-  line-height: 1.08;
+  font-size: clamp(12px, 5.2cqw, 15px);
+  line-height: 1.12;
   white-space: nowrap;
 }
 
@@ -1303,12 +1303,12 @@
 }
 
 .status-board-columns--cnc .cnc-order-card .status-board-card__status-badge.ant-tag {
-  max-width: 52%;
-  padding-inline: clamp(3px, 1.4cqw, 7px);
+  max-width: 50%;
+  padding-inline: clamp(5px, 1.8cqw, 8px);
   flex: 0 1 auto;
   overflow: hidden;
-  font-size: clamp(7.5px, 2.8cqw, 10.5px);
-  line-height: 1.12;
+  font-size: clamp(10px, 4.2cqw, 12px);
+  line-height: 1.18;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1631,6 +1631,18 @@
   font-size: 1.2em;
   color: var(--app-text);
   font-weight: 700;
+}
+
+.cnc-order-card__client {
+  min-width: 0;
+  margin-top: 2px;
+  display: block;
+  overflow: hidden;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cnc-order-card__compact-client {

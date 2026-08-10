@@ -65,6 +65,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('CNC_BOARD_DRAG_TYPE');
     expect(page).toContain('CncManualCardFrame');
     expect(page).toContain('isCncManualMoveAllowed(item.kind, columnKey)');
+    expect(page).toContain('applyCncManualMovesToColumns(columns, manualMoves)');
+    expect(page).toContain('applyCncManualMovesToColumns(readinessColumns, manualMoves)');
+    expect(page).toContain('kind="bazisCutSet"');
+    expect(page).toContain('completed_laminated');
     expect(page).toContain("label: 'Переместить'");
     expect(page).toContain('trigger={[');
     expect(page).toContain('trigger: shellRef.current');
@@ -616,7 +620,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Распилено {cncReadiness.cutDetails}');
     expect(page).toContain('Закатано {cncReadiness.rolledDetails}');
     expect(page).toContain('Осталось {cncReadiness.remainingDetails}');
+    expect(page).toContain('className="cnc-order-card__client"');
+    expect(page).toContain('paymentSummary && !cncOrderCard');
     expect(css).toMatch(/\.cnc-order-card__readiness\s*\{[^}]*display: grid;/s);
+    expect(css).toContain('.cnc-order-card__client');
+    expect(css).toContain('font-size: clamp(12px, 5.2cqw, 15px)');
+    expect(css).toContain('font-size: clamp(10px, 4.2cqw, 12px)');
     expect(css).toContain('.cnc-order-card__progress-segment--cut');
     expect(css).toContain('.cnc-order-card__progress-segment--rolled');
     expect(css).toContain('background: #fff7e6');
