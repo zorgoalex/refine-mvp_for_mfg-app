@@ -1758,12 +1758,6 @@
   outline-offset: 2px;
 }
 
-.cnc-packet-card__status-icon--completed {
-  color: #389e0d;
-  background: color-mix(in srgb, #389e0d 14%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #389e0d 32%, transparent);
-}
-
 .cnc-packet-card__notes {
   display: grid;
   gap: 4px;
@@ -2189,11 +2183,6 @@
   flex: 0 0 auto;
 }
 
-.cnc-bath-card__ready-icon {
-  min-width: 22px;
-  font-size: 22px;
-}
-
 .cnc-bath-card__cut-result-badge.ant-tag {
   margin: 0;
   padding-inline: 6px;
@@ -2203,14 +2192,6 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
-}
-
-.cnc-bath-card__ready-icon--ready {
-  color: #389e0d;
-}
-
-.cnc-bath-card__ready-icon--pending {
-  color: #cf1322;
 }
 
 .cnc-bath-card__sheet-figure {

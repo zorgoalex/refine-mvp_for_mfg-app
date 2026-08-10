@@ -364,21 +364,29 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('DownloadOutlined');
     expect(css).toContain('.cnc-bath-card__pdf-pages');
     expect(css).toContain('.cnc-bath-card__pdf-page-image');
-    expect(css).toContain('.cnc-bath-card__ready-icon--pending');
+    expect(css).not.toContain('.cnc-bath-card__ready-icon');
   });
 
-  it('keeps the completed CNC card check marker understandable', () => {
-    expect(page).toContain("packet.completionStatus === 'completed'");
-    expect(page).toContain('<CheckCircleOutlined />');
-    expect(page).toContain('Распилено на станке');
-    expect(css).toContain('.cnc-packet-card__status-icon--completed');
-    expect(css).toContain('border-radius: 50%');
+  it('does not duplicate the completed CNC file state with a check marker', () => {
+    const cardStart = page.indexOf('const CncTelegramPacketCard =');
+    const cardEnd = page.indexOf('interface CncPacketSheetPreviewModalProps', cardStart);
+    const packetCard = page.slice(cardStart, cardEnd);
+
+    expect(packetCard).not.toContain("packet.completionStatus === 'completed'");
+    expect(packetCard).not.toContain('<CheckCircleOutlined />');
+    expect(packetCard).not.toContain('Распилено на станке');
+    expect(css).not.toContain('.cnc-packet-card__status-icon--completed');
   });
 
-  it('hides the red bath readiness check in «Карты ванн» and keeps it in ready columns', () => {
-    expect(page).toContain('showReadyIcon={isCncReadyBathColumnKey(column.key)}');
-    expect(page).toContain('!summaryOnly && showReadyIcon && (');
-    expect(page).toContain('<CheckCircleFilled');
+  it('does not duplicate bath readiness with a check marker', () => {
+    const cardStart = page.indexOf('const CncTelegramBathCardView =');
+    const cardEnd = page.indexOf('function buildCncOrderSummaries', cardStart);
+    const bathCard = page.slice(cardStart, cardEnd);
+
+    expect(page).not.toContain('showReadyIcon');
+    expect(page).not.toContain('<CheckCircleFilled');
+    expect(bathCard).not.toContain('cnc-bath-card__ready-icon');
+    expect(css).not.toContain('.cnc-bath-card__ready-icon');
   });
 
   it('shows CNC order totals directly on each card', () => {
@@ -488,16 +496,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
   });
 
-  it('shows the bath cut-result version before readiness and removes terminal work', () => {
+  it('shows the bath cut-result version without a readiness check and removes terminal work', () => {
     const actionsStart = page.indexOf('<div className="cnc-bath-card__actions">');
     const actionsEnd = page.indexOf('</div>', actionsStart);
     const actions = page.slice(actionsStart, actionsEnd);
     expect(actions).toContain('className="cnc-bath-card__cut-result-badge"');
     expect(actions).toMatch(/>\s*\{bath\.cutNumber\}\s*<\/Tag>/);
     expect(actions).not.toContain('№{bath.cutNumber}');
-    expect(actions.indexOf('cnc-bath-card__cut-result-badge')).toBeLessThan(
-      actions.indexOf('cnc-bath-card__ready-icon'),
-    );
+    expect(actions).not.toContain('cnc-bath-card__ready-icon');
     expect(css).toMatch(
       /\.cnc-bath-card__actions\s*\{[^}]*align-items: center;/s,
     );

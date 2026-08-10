@@ -30,7 +30,6 @@ import {
 import type { MenuProps } from 'antd';
 import {
   CalendarOutlined,
-  CheckCircleFilled,
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseOutlined,
@@ -2349,7 +2348,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         detailedPlacement={detailedPlacement}
                         summaryOnly={summaryOnly}
                         displayToggleVisible={cardDisplayMode === 'compact'}
-                        showReadyIcon={isCncReadyBathColumnKey(column.key)}
                         selectedDetailId={selectedDetailId}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         onSelect={() => {
@@ -2475,7 +2473,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 detailedPlacement="right"
                 summaryOnly={false}
                 displayToggleVisible={false}
-                showReadyIcon
                 selectedDetailId={selectedDetailedDetailId}
                 onToggleDisplay={() => undefined}
                 onSelect={() => undefined}
@@ -3395,7 +3392,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             </>
           )}
         </div>
-        {(displayToggleVisible || packet.cuttingSequenceNo != null || (!summaryOnly && packet.completionStatus === 'completed')) && (
+        {(displayToggleVisible || packet.cuttingSequenceNo != null) && (
           <div
             className="cnc-packet-card__status-icons"
             aria-label={summaryOnly ? 'Вид карточки и номер раскроя' : 'Статусы листа'}
@@ -3410,18 +3407,6 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
                 <span className="cnc-packet-card__sequence">
                   <span className="cnc-packet-card__sequence-sign">№</span>
                   {packet.cuttingSequenceNo}
-                </span>
-              </Tooltip>
-            )}
-            {!summaryOnly && packet.completionStatus === 'completed' && (
-              <Tooltip title="Распилено на станке">
-                <span
-                  className="cnc-packet-card__status-icon cnc-packet-card__status-icon--completed"
-                  role="img"
-                  aria-label="Распилено на станке"
-                  tabIndex={0}
-                >
-                  <CheckCircleOutlined />
                 </span>
               </Tooltip>
             )}
@@ -3686,7 +3671,6 @@ interface CncTelegramBathCardViewProps {
   detailedPlacement: CncDetailedBathPlacement;
   summaryOnly: boolean;
   displayToggleVisible: boolean;
-  showReadyIcon: boolean;
   selectedDetailId: number | null;
   onToggleDisplay: () => void;
   onSelect: () => void;
@@ -3706,7 +3690,6 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   detailedPlacement,
   summaryOnly,
   displayToggleVisible,
-  showReadyIcon,
   selectedDetailId,
   onToggleDisplay,
   onSelect,
@@ -3777,19 +3760,6 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           >
             {bath.cutNumber}
           </Tag>
-          {!summaryOnly && showReadyIcon && (
-            <Tooltip
-              title={bath.ready ? 'Все детали ванны уже в колонке «Распилено»' : 'Не все детали ванны распилены'}
-            >
-              <CheckCircleFilled
-                className={[
-                  'cnc-bath-card__ready-icon',
-                  bath.ready ? 'cnc-bath-card__ready-icon--ready' : 'cnc-bath-card__ready-icon--pending',
-                ].join(' ')}
-                aria-label={bath.ready ? 'Ванна готова к закатке' : 'Ванна не готова к закатке'}
-              />
-            </Tooltip>
-          )}
         </div>
       </div>
 
