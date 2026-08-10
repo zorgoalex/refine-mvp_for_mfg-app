@@ -449,7 +449,7 @@ export class ProductionActionsController {
 
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
   @ApiBody({ schema: swaggerSchema(productionStatusModeRequestSwaggerSchema) })
-  @ApiResponse({ status: 200, description: 'Entered manual production status mode', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Kept production status derived from details', schema: swaggerSchema(productionActionResponseSwaggerSchema) })
   @ApiResponse({ status: 400, description: 'Invalid order ID' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
@@ -457,7 +457,7 @@ export class ProductionActionsController {
   @ApiResponse({ status: 409, description: 'Stale order version or idempotency key conflict' })
   @ApiResponse({ status: 422, description: 'Invalid production action payload' })
   @ApiResponse({ status: 503, description: 'Production actions API is disabled' })
-  @ApiOperation({ operationId: 'enterManualProductionStatus', summary: 'Enter manual production status mode' })
+  @ApiOperation({ operationId: 'enterManualProductionStatus', summary: 'Deprecated compatibility endpoint for production status mode' })
   @Patch('production-status-mode/manual')
   async enterManualProductionStatus(
     @Req() request: RequestWithCurrentUser,

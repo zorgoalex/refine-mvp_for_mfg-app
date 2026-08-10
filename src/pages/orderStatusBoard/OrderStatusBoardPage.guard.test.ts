@@ -42,18 +42,24 @@ const imagePrintPreview = readFileSync(
 
 describe('OrderStatusBoardPage UX guards', () => {
   it('keeps keyboard move, live announcements and focus restoration', () => {
-    expect(page).toContain('aria-label={`Переместить заказ');
+    expect(page).toContain('cardRef.current');
+    expect(page).toContain('function isKeyboardMoveMenuTrigger');
+    expect(page).toContain('onKeyDown={(event) =>');
+    expect(page).toContain("aria-haspopup={moveAvailable ? 'menu' : undefined}");
+    expect(page).toContain('aria-expanded={moveAvailable ? menuOpen : undefined}');
+    expect(page).toContain('setMenuOpen(true)');
     expect(page).toContain('aria-live="polite"');
     expect(page).toContain('aria-describedby');
     expect(page).toContain('restoreOrderStatusBoardFocus');
     expect(page).toContain('data-status-board-order-id');
   });
 
-  it('keeps production auto-mode side effects behind explicit confirmation', () => {
-    expect(interaction).toContain('productionStatusFromDetailsEnabled');
-    expect(page).toContain('Перевести заказ в ручной режим?');
-    expect(page).toContain('отключит авторасчёт');
-    expect(interaction).toContain('if (!confirmed)');
+  it('moves production cards without the obsolete manual-mode confirmation', () => {
+    expect(page).not.toContain('Перевести заказ в ручной режим?');
+    expect(page).not.toContain('отключит авторасчёт');
+    expect(page).not.toContain('confirmManualProductionMove');
+    expect(interaction).not.toContain('confirmManualProductionMove');
+    expect(interaction).not.toContain("kind: 'cancelled'");
   });
 
   it('keeps regular status DnD guarded and MDF manual drag touch-capable', () => {
@@ -74,10 +80,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("label: 'Переместить'");
     expect(page).toContain('trigger={[');
     expect(page).toContain('trigger: shellRef.current');
+    expect(page).toContain('trigger: cardRef.current');
     expect(page).toContain('dragRef(node)');
     expect(page).toContain('isCncManualDragIgnored(event.target)');
     expect(page).not.toContain('CncCardMoveActions');
     expect(page).not.toContain('cncMoveControls');
+    expect(page).not.toContain('DragOutlined');
+    expect(page).not.toContain('MoreOutlined');
     expect(page).toContain('const touchBoardDragEnabled = useCoarsePointer()');
     expect(page).toContain('touchDragEnabled={touchBoardDragEnabled}');
     expect(page).toContain('touchDragEnabled={mutationsEnabled && touchDragEnabled}');
@@ -88,9 +97,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(touchDrag).toContain('document.elementFromPoint');
     expect(page).toContain('data-status-board-column-key={column.key}');
     expect(page).toContain('status-board-touch-drag-instructions');
-    expect(page).toContain('actionsVisible && (finePointer || touchDragEnabled)');
     expect(page).not.toContain('touchDragEnabled={false}');
-    expect(css).toContain('.status-board-card__drag--touch');
     expect(css).toContain('.cnc-board-card-shell--draggable');
     expect(css).not.toContain('.cnc-card-move-actions');
     expect(css).toContain('touch-action: none');
@@ -149,8 +156,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-column__cards \{[^}]*overscroll-behavior-x: auto;[^}]*overscroll-behavior-y: contain;[^}]*touch-action: pan-x pan-y;/,
     );
-    expect(css).toContain('.status-board-card__drag--touch');
-    expect(css).toContain('touch-action: none');
+    expect(page).toContain('{...touchDragHandleProps}');
+    expect(css).not.toContain('.status-board-card__drag--touch');
   });
 
   it('focuses and reveals a card after a successful touch move', () => {

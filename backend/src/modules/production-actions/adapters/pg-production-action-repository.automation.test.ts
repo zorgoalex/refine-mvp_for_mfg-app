@@ -20,15 +20,30 @@ describe('production-action automation in-transaction actions', () => {
     expect(database.outboxCalls).toHaveLength(0);
   });
 
-  it('skips a production status action when details own the order status', async () => {
-    const database = createAutomationTx({ productionStatusFromDetailsEnabled: true });
+  it('cascades a production status automation action through details even when detail-derived mode is active', async () => {
+    const database = createAutomationTx({
+      productionStatusFromDetailsEnabled: true,
+      detailRows: [
+        { detail_id: 101, production_status_id: 1 },
+        { detail_id: 102, production_status_id: 2 },
+      ],
+      updatedDetailIds: [101, 102],
+      recalcOrderProductionStatusId: 7,
+    });
 
     await expect(
       changeProductionStatusFromAutomationInTransaction(database.tx, 15, 7, automationContext()),
-    ).resolves.toEqual({ status: 'skipped', skipReason: 'auto_mode_from_details' });
+    ).resolves.toMatchObject({ status: 'executed', auditId: 42 });
 
-    expect(database.auditCalls).toHaveLength(0);
-    expect(database.outboxCalls).toHaveLength(0);
+    expect(database.sql.some((sql) => sql.startsWith('UPDATE order_details'))).toBe(true);
+    expect(database.recalcCalls).toEqual([15]);
+    expect(database.auditCalls[0]?.metadata).toMatchObject({
+      productionStatusFromDetailsEnabled: true,
+      affectedDetailCount: 2,
+    });
+    expect(database.outboxCalls[0]?.payload).toMatchObject({
+      productionStatusFromDetailsEnabled: true,
+    });
   });
 
   it('writes automation metadata and preserves the supplied outbox idempotency key', async () => {
@@ -113,6 +128,7 @@ interface AutomationTxOptions {
   productionStatusFromDetailsEnabled?: boolean;
   detailRows?: Array<{ detail_id: number; production_status_id: number | null }>;
   updatedDetailIds?: number[];
+  recalcOrderProductionStatusId?: number;
 }
 
 interface AutomationTxState {
@@ -172,7 +188,22 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
         return { rows: [{ version: 4 } as T] };
       }
       if (normalized.startsWith('UPDATE orders SET production_status_id')) {
-        return { rows: [{ version: 4 } as T] };
+        return {
+          rows: [{
+            version: 4,
+            production_status_id:
+              options.recalcOrderProductionStatusId ?? params[2] ?? options.productionStatusId ?? 1,
+          } as T],
+        };
+      }
+      if (normalized.startsWith('UPDATE orders SET production_status_from_details_enabled = true')) {
+        return {
+          rows: [{
+            version: 4,
+            production_status_id:
+              options.recalcOrderProductionStatusId ?? options.productionStatusId ?? 1,
+          } as T],
+        };
       }
       if (normalized.startsWith('UPDATE orders SET version = version + 1')) {
         return { rows: [{ version: 4, production_status_id: options.productionStatusId ?? 1 } as T] };

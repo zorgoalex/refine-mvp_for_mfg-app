@@ -5,7 +5,7 @@
 // Row 4: Doweling Orders Table (Name, Engineer)
 
 import React, { useCallback, useRef, useState } from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, Switch, Tooltip, Tag, notification } from 'antd';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
@@ -59,8 +59,6 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
   const [dowelingSearchValue, setDowelingSearchValue] = useState<string>('');
   const [productionStatusPending, setProductionStatusPending] = useState(false);
   const productionStatusPendingRef = useRef(false);
-  const [autoStatusModePending, setAutoStatusModePending] = useState(false);
-  const autoStatusModePendingRef = useRef(false);
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
   const orderFormData = useOrderFormData();
@@ -203,7 +201,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
           idempotencyKey: createProductionActionIdempotencyKey('order-header-production-status'),
         });
         updateHeaderField('production_status_id', value);
-        updateHeaderField('production_status_from_details_enabled', false);
+        updateHeaderField('production_status_from_details_enabled', response.order.productionStatusFromDetailsEnabled ?? true);
         syncDetailsProductionStatus(value);
         updateHeaderField('version', response.order.version);
         await invalidate({ resource: 'orders_view', invalidates: ['list'] });
@@ -250,100 +248,13 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
     }
 
     updateHeaderField('production_status_id', value);
-    if (header.production_status_from_details_enabled) {
-      updateHeaderField('production_status_from_details_enabled', false);
-    }
+    updateHeaderField('production_status_from_details_enabled', true);
+    syncDetailsProductionStatus(value);
   }, [
     header.order_id,
     header.version,
-    header.production_status_from_details_enabled,
     updateHeaderField,
     syncDetailsProductionStatus,
-    invalidate,
-    refreshHeaderFromOrder,
-    refreshFullOrderFromBackend,
-  ]);
-
-  const handleAutoStatusToggle = useCallback(async (next: boolean) => {
-    if (!featureFlags.useBackendProductionActions) {
-      updateHeaderField('production_status_from_details_enabled', next);
-      return;
-    }
-
-    if (!(header.order_id && Number.isInteger(header.version))) {
-      notification.warning({
-        message: 'Обновите заказ',
-        description: 'Для изменения режима статуса нужны актуальные данные заказа',
-        duration: 2,
-      });
-      await refreshHeaderFromOrder();
-      await invalidate({ resource: 'orders_view', invalidates: ['list'] });
-      return;
-    }
-
-    if (autoStatusModePendingRef.current) return;
-    autoStatusModePendingRef.current = true;
-    setAutoStatusModePending(true);
-    const commandVersion = header.version;
-    updateHeaderField('version', commandVersion + 1);
-    try {
-      const response = next
-        ? await productionActionsApi.restoreAutoProductionStatus(header.order_id, {
-            version: commandVersion,
-            idempotencyKey: createProductionActionIdempotencyKey('order-header-auto-status-restore'),
-          })
-        : await productionActionsApi.enterManualProductionStatus(header.order_id, {
-            version: commandVersion,
-            idempotencyKey: createProductionActionIdempotencyKey('order-header-auto-status-manual'),
-          });
-      updateHeaderField('production_status_from_details_enabled', response.order.productionStatusFromDetailsEnabled ?? next);
-      if (response.order.productionStatusId !== undefined) {
-        // Mode toggle never rewrites detail statuses server-side: enter-manual just freezes the
-        // current order status, and restore-auto derives the order status FROM the (unchanged)
-        // details. So only sync the header value — do NOT touch local detail statuses.
-        updateHeaderField('production_status_id', response.order.productionStatusId);
-      }
-      updateHeaderField('version', response.order.version);
-      await invalidate({ resource: 'orders_view', invalidates: ['list'] });
-      notification.success({
-        message: next ? 'Автообновление статусов включено' : 'Ручной режим статуса включён',
-        duration: 2,
-      });
-    } catch (error) {
-      updateHeaderField('version', commandVersion);
-      if (isProductionActionVersionConflict(error)) {
-        const refreshed = await refreshFullOrderFromBackend();
-        if (!refreshed) {
-          notification.error({
-            message: 'Данные заказа изменились',
-            description: 'Не удалось обновить позиции заказа. Перезагрузите страницу перед сохранением.',
-            duration: 0,
-          });
-          return;
-        }
-        await invalidate({ resource: 'orders_view', invalidates: ['list'] });
-        notification.warning({
-          message: 'Данные заказа изменились',
-          description: 'Заказ обновлён. Повторите действие.',
-          duration: 2,
-        });
-        return;
-      }
-      notification.error({
-        message: 'Ошибка переключения режима статуса',
-        description: isProductionActionPermissionDenied(error)
-          ? formatProductionActionPermissionDeniedMessage('production_stage')
-          : 'Не удалось переключить режим',
-      });
-    } finally {
-      autoStatusModePendingRef.current = false;
-      setAutoStatusModePending(false);
-    }
-  }, [
-    header.order_id,
-    header.version,
-    featureFlags.useBackendProductionActions,
-    updateHeaderField,
     invalidate,
     refreshHeaderFromOrder,
     refreshFullOrderFromBackend,
@@ -542,43 +453,6 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
             </Form.Item>
           </Col>
 
-          <Col span={4}>
-          <Form.Item>
-            <div
-              style={{
-                border: '1px solid var(--app-border)',
-                borderRadius: 8,
-                padding: '8px 12px',
-                backgroundColor: 'var(--app-surface)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 8,
-              }}
-            >
-              <Space size={6} wrap>
-                <Tooltip title="Если включено, статус производства заказа пересчитывается из статусов деталей. Если выключено, статус выбирается вручную.">
-                  <span
-                    onClick={() => { void handleAutoStatusToggle(!(header.production_status_from_details_enabled ?? true)); }}
-                    style={{ cursor: 'pointer' }}
-                  >
-                    Статус заказа рассчитывается от деталей
-                  </span>
-                </Tooltip>
-                <Tag color={(header.production_status_from_details_enabled ?? true) ? 'processing' : 'warning'}>
-                  {(header.production_status_from_details_enabled ?? true) ? 'Авто' : 'Ручной'}
-                </Tag>
-              </Space>
-              <Switch
-                checked={header.production_status_from_details_enabled ?? true}
-                onChange={(checked) => { void handleAutoStatusToggle(checked); }}
-                checkedChildren="Вкл"
-                unCheckedChildren="Выкл"
-                disabled={autoStatusModePending}
-              />
-            </div>
-          </Form.Item>
-        </Col>
         </Row>
 
         {/* Row 2: Статус заказа, Статус оплаты, Статус производства, Менеджер, Приоритет */}
@@ -617,11 +491,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
 
           <Col span={5}>
             <Form.Item
-              label={
-                <Tooltip title={header.production_status_from_details_enabled ? 'Рассчитывается автоматически из деталей' : 'Ручной выбор статуса'}>
-                  Статус производства
-                </Tooltip>
-              }
+              label="Статус производства"
             >
               <div aria-label="Статус производства">
                 <Select
@@ -629,7 +499,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
                   value={header.production_status_id}
                   onChange={(value) => { void handleProductionStatusChange(value); }}
                   placeholder="Выберите статус"
-                  disabled={(header.production_status_from_details_enabled ?? true) || productionStatusPending}
+                  disabled={productionStatusPending}
                   allowClear={!featureFlags.useBackendProductionActions}
                 />
               </div>

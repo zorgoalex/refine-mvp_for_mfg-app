@@ -768,7 +768,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.orderStatusId,
         input.totals.paymentStatusId,
         input.header.productionStatusId ?? null,
-        input.header.productionStatusFromDetailsEnabled,
+        true,
         input.header.plannedCompletionDate ?? null,
         input.header.completionDate ?? null,
         input.header.issueDate ?? null,
@@ -805,8 +805,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
     totals: OrderTotalsDto;
     currentUser: CurrentUser;
   }): Promise<void> {
-    // production_status_from_details_enabled is intentionally NOT updated here — it is owned by the
-    // production-status-mode backend commands (audit/outbox/version). Creation still sets it (createOrderHeader).
+    // production_status_id is derived from order_details after child persistence; do not write
+    // the stale form snapshot here.
     await this.tx.query(
       `
       UPDATE orders
@@ -816,25 +816,24 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           priority = $5,
           manager_id = $6,
           order_status_id = $7,
-          production_status_id = $8,
-          planned_completion_date = $9,
-          completion_date = $10,
-          issue_date = $11,
-          discount = $12,
-          surcharge = $13,
-          total_amount = $14,
-          final_amount = $15,
-          link_cutting_file = $16,
-          link_cutting_image_file = $17,
-          link_cad_file = $18,
-          link_pdf_file = $19,
-          notes = $20,
-          material_id = $21,
-          milling_type_id = $22,
-          edge_type_id = $23,
-          film_id = $24,
-          ref_key_1c = $25,
-          sheet_material_type_id = $26
+          planned_completion_date = $8,
+          completion_date = $9,
+          issue_date = $10,
+          discount = $11,
+          surcharge = $12,
+          total_amount = $13,
+          final_amount = $14,
+          link_cutting_file = $15,
+          link_cutting_image_file = $16,
+          link_cad_file = $17,
+          link_pdf_file = $18,
+          notes = $19,
+          material_id = $20,
+          milling_type_id = $21,
+          edge_type_id = $22,
+          film_id = $23,
+          ref_key_1c = $24,
+          sheet_material_type_id = $25
       WHERE order_id = $1 AND delete_flag = false
       `,
       [
@@ -845,7 +844,6 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.priority,
         input.header.managerId ?? Number(input.currentUser.id),
         input.header.orderStatusId,
-        input.header.productionStatusId ?? null,
         input.header.plannedCompletionDate ?? null,
         input.header.completionDate ?? null,
         input.header.issueDate ?? null,
@@ -914,6 +912,19 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
 
   async deleteDetails(orderId: number, ids: readonly number[]): Promise<void> {
     await deleteByIds(this.tx, 'order_details', 'detail_id', orderId, ids);
+  }
+
+  async recalcOrderProductionStatus(orderId: number): Promise<void> {
+    await this.tx.query(
+      `
+      UPDATE orders
+      SET production_status_from_details_enabled = true
+      WHERE order_id = $1
+        AND production_status_from_details_enabled IS DISTINCT FROM true
+      `,
+      [orderId],
+    );
+    await this.tx.query('SELECT recalc_order_production_status($1)', [orderId]);
   }
 
   async upsertPayments(

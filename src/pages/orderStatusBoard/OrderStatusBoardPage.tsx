@@ -36,13 +36,11 @@ import {
   CompressOutlined,
   DownloadOutlined,
   DownOutlined,
-  DragOutlined,
   ExpandOutlined,
   FilterOutlined,
   FilePdfOutlined,
   FileTextOutlined,
   LeftOutlined,
-  MoreOutlined,
   PictureOutlined,
   PlusOutlined,
   PrinterOutlined,
@@ -220,6 +218,15 @@ const DND_BACKEND_OPTIONS = {
   delayTouchStart: 160,
   touchSlop: 6,
 };
+
+function isKeyboardMoveMenuTrigger(event: React.KeyboardEvent<HTMLElement>): boolean {
+  return (
+    event.key === 'Enter' ||
+    event.key === ' ' ||
+    event.key === 'ContextMenu' ||
+    (event.key === 'F10' && event.shiftKey)
+  );
+}
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 interface StatusBoardCardStatusBadgeOverride {
@@ -726,8 +733,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             idempotencyKey,
           },
           {
-            confirmManualProductionMove: (currentCard, currentTargetName) =>
-              confirmManualProductionMove(currentCard, currentTargetName, trigger),
             changeOrderStatus: productionActionsApi.changeOrderStatus,
             changeProductionStatus: productionActionsApi.changeProductionStatus,
             afterCommand: () => {
@@ -741,15 +746,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               }),
           },
         );
-
-        if (result.kind === 'cancelled') {
-          commandInFlightRef.current = false;
-          revealTouchMovedCardRef.current = false;
-          const withoutOrder = new Set(pendingRef.current);
-          withoutOrder.delete(card.orderId);
-          replacePending(withoutOrder);
-          return;
-        }
 
         if (result.kind === 'refreshed') {
           const orderNumber = formatStatusBoardOrderNumber(card);
@@ -5019,8 +5015,8 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   onOpenOrder,
   showFinancials,
 }) => {
-  const actionButtonRef = useRef<HTMLButtonElement | null>(null);
-  const dragButtonRef = useRef<HTMLButtonElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const hasPermission =
     board === 'order'
       ? card.canChangeOrderStatus
@@ -5058,7 +5054,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     { isDragging: boolean }
   >({
     type: BOARD_DRAG_TYPE,
-    item: () => ({ card, sourceColumn, board, trigger: dragButtonRef.current }),
+    item: () => ({ card, sourceColumn, board, trigger: cardRef.current }),
     canDrag: moveAvailable && finePointer,
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
   });
@@ -5135,11 +5131,12 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         (column) => String(column.status.id) === key,
       );
       if (target?.status.id !== null && target?.status.id !== undefined) {
+        setMenuOpen(false);
         onMove(
           card,
           target.status.id,
           target.status.name,
-          actionButtonRef.current,
+          cardRef.current,
         );
       }
     },
@@ -5153,11 +5150,17 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
       trigger={['contextMenu']}
       disabled={!moveAvailable}
       menu={statusMoveMenu}
+      open={moveAvailable ? menuOpen : false}
+      onOpenChange={setMenuOpen}
       overlayClassName="status-board-card-context-menu"
     >
     <div>
       {touchDragGhost}
       <div
+      ref={(node) => {
+        cardRef.current = node;
+        dragRef(node);
+      }}
       className={cncRelationCardClassName(
         [
           'status-board-card',
@@ -5175,19 +5178,27 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-card-view={cncOrderCard ? (cncSummaryOnly ? 'compact' : 'standard') : undefined}
       data-cnc-clickable={relationClickEnabled ? 'true' : undefined}
-      role={relationClickEnabled ? 'button' : undefined}
-      tabIndex={relationClickEnabled ? 0 : -1}
+      role={relationClickEnabled || moveAvailable ? 'button' : undefined}
+      tabIndex={relationClickEnabled || moveAvailable ? 0 : -1}
+      aria-label={moveAvailable ? `Меню перемещения заказа ${orderNumber}` : undefined}
       aria-busy={pending}
+      aria-haspopup={moveAvailable ? 'menu' : undefined}
+      aria-expanded={moveAvailable ? menuOpen : undefined}
+      aria-describedby={!moveAvailable ? readonlyReasonId : undefined}
+      aria-disabled={!moveAvailable && !relationClickEnabled ? true : undefined}
       onClick={relationClickEnabled ? onSelectRelation : undefined}
-      onKeyDown={
-        relationClickEnabled
-          ? (event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            onSelectRelation?.();
-          }
-          : undefined
-      }
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (moveAvailable && isKeyboardMoveMenuTrigger(event)) {
+          event.preventDefault();
+          setMenuOpen(true);
+          return;
+        }
+        if (!relationClickEnabled || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        onSelectRelation?.();
+      }}
+      {...touchDragHandleProps}
     >
       <div className="status-board-card__top">
         <div className="status-board-card__identity">
@@ -5213,54 +5224,13 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
             {primaryStatus}
           </Tag>
         </div>
-        {(actionsVisible || displayToggleVisible) && (
+        {displayToggleVisible && (
           <div className="status-board-card__actions">
             <CncCardDisplayToggle
               visible={displayToggleVisible}
               standardView={!cncSummaryOnly}
               onToggle={onToggleDisplay ?? (() => undefined)}
             />
-            {actionsVisible && (finePointer || touchDragEnabled) && (
-              <Tooltip title={moveAvailable ? 'Перетащить заказ' : unavailableReason}>
-                <Button
-                  ref={(node) => {
-                    dragButtonRef.current = node;
-                    dragRef(node);
-                  }}
-                  type="text"
-                  className={`status-board-card__drag${touchDragEnabled ? ' status-board-card__drag--touch' : ''}`}
-                  aria-label={touchDragEnabled
-                    ? `Удерживайте и перетащите заказ ${orderNumber}`
-                    : `Перетащить заказ ${orderNumber}`}
-                  aria-describedby={touchDragEnabled ? 'status-board-touch-drag-instructions' : undefined}
-                  data-touch-drag-active={isTouchDragging ? 'true' : undefined}
-                  disabled={!moveAvailable}
-                  icon={<DragOutlined />}
-                  {...touchDragHandleProps}
-                />
-              </Tooltip>
-            )}
-            {actionsVisible && (
-              <Dropdown
-                trigger={['click']}
-                disabled={!moveAvailable}
-                menu={statusMoveMenu}
-                overlayClassName="status-board-card-context-menu"
-              >
-                <Tooltip
-                  title={moveAvailable ? 'Переместить в другой статус' : unavailableReason}
-                >
-                  <Button
-                    ref={actionButtonRef}
-                    type="text"
-                    aria-label={`Переместить заказ ${orderNumber}`}
-                    aria-describedby={!moveAvailable ? readonlyReasonId : undefined}
-                    aria-disabled={!moveAvailable}
-                    icon={<MoreOutlined />}
-                  />
-                </Tooltip>
-              </Dropdown>
-            )}
           </div>
         )}
       </div>
@@ -5427,32 +5397,6 @@ const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>((
   </div>
 ));
 CncOrderMissingDetailsSpoiler.displayName = 'CncOrderMissingDetailsSpoiler';
-
-function confirmManualProductionMove(
-  card: OrderStatusBoardCard,
-  targetName: string,
-  trigger: HTMLElement | null,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    Modal.confirm({
-      title: 'Перевести заказ в ручной режим?',
-      content: (
-        <>
-          Заказ <strong>{formatStatusBoardOrderNumber(card)}</strong> использует автостатус по деталям.
-          Переход в «{targetName}» отключит авторасчёт и применит выбранный статус
-          деталям заказа.
-        </>
-      ),
-      okText: 'Перевести вручную',
-      cancelText: 'Отмена',
-      onOk: () => resolve(true),
-      onCancel: () => {
-        window.requestAnimationFrame(() => trigger?.focus());
-        resolve(false);
-      },
-    });
-  });
-}
 
 function formatStatusBoardOrderNumber(card: OrderStatusBoardCard): string {
   return card.orderName.trim() || String(card.orderId);

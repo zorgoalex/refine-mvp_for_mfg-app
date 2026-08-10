@@ -191,7 +191,7 @@ describeIntegration('changeBatchDetailProductionStatus (real erp_test DB)', () =
     expect(Number(outbox.rows[0].count)).toBeGreaterThanOrEqual(1);
   });
 
-  it('manual mode: leaves order production_status_id untouched but still bumps version', async () => {
+  it('legacy manual flag: still recalcs order production_status_id and bumps version', async () => {
     await pool.query(
       `UPDATE orders SET production_status_from_details_enabled = false WHERE order_id = $1`,
       [orderId],
@@ -216,15 +216,18 @@ describeIntegration('changeBatchDetailProductionStatus (real erp_test DB)', () =
     });
 
     const after = (
-      await pool.query<{ production_status_id: number; version: string | number }>(
-        `SELECT production_status_id, version FROM orders WHERE order_id = $1`,
+      await pool.query<{
+        production_status_id: number;
+        production_status_from_details_enabled: boolean;
+        version: string | number;
+      }>(
+        `SELECT production_status_id, production_status_from_details_enabled, version FROM orders WHERE order_id = $1`,
         [orderId],
       )
     ).rows[0];
 
-    // Manual mode: recalc is NOT called, so the order's derived status is unchanged...
-    expect(Number(after.production_status_id)).toBe(Number(before.production_status_id));
-    // ...but the version still advances (stale-caller guard).
+    expect(Number(after.production_status_id)).toBe(STATUS_FILM);
+    expect(after.production_status_from_details_enabled).toBe(true);
     expect(Number(after.version)).toBe(Number(before.version) + 1);
 
     const details = await pool.query<{ production_status_id: number }>(

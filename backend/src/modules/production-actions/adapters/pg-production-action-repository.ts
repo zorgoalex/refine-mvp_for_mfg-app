@@ -115,6 +115,15 @@ interface DetailProductionStatusSnapshot {
   statusDistribution: Record<string, number>;
 }
 
+interface ProductionStatusCascadeResult {
+  beforeDetails: DetailProductionStatusSnapshot;
+  afterDetails: DetailProductionStatusSnapshot;
+  affectedDetailIds: number[];
+  nextProductionStatusId: number | null;
+  nextProductionStatusFromDetailsEnabled: true;
+  nextVersion: number;
+}
+
 interface LockedOrder {
   orderId: number;
   clientId: number | null;
@@ -630,14 +639,13 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       const status = await loadProductionStatus(tx, command.dto.productionStatusId);
       assertVersion(order, command.dto.version);
 
-      if (
-        order.productionStatusId === status.productionStatusId &&
-        !order.productionStatusFromDetailsEnabled
-      ) {
+      const cascade = await cascadeProductionStatusToDetails(tx, order, status.productionStatusId);
+      if (!cascade) {
         const response = {
           order: {
             orderId: order.orderId,
             productionStatusId: order.productionStatusId ?? undefined,
+            productionStatusFromDetailsEnabled: true,
             version: order.version,
           },
           requestId,
@@ -645,20 +653,6 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         await completeIdempotency(tx, command.dto.idempotencyKey, response);
         return response;
       }
-
-      const beforeDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
-      // Manual-mode detail sync is handled by the existing DB trigger on this order update;
-      // the after snapshot captures the trigger result.
-      const nextVersion = await updateProductionStatus(
-        tx,
-        order.orderId,
-        status.productionStatusId,
-      );
-      const afterDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
-      const affectedDetailIds = beforeDetails.detailIds.filter((detailId) =>
-        afterDetails.detailIds.includes(detailId),
-      );
-      const nextProductionStatusFromDetailsEnabled = false;
 
       const auditId = await writeAudit(tx, {
         event: 'orders.production_status_change',
@@ -674,43 +668,43 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusId: order.productionStatusId,
           productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
           version: order.version,
-          detailStatusDistribution: beforeDetails.statusDistribution,
+          detailStatusDistribution: cascade.beforeDetails.statusDistribution,
         },
         afterJson: {
-          productionStatusId: status.productionStatusId,
+          productionStatusId: cascade.nextProductionStatusId,
           productionStatusName: status.productionStatusName,
           productionStatusCode: status.productionStatusCode,
-          productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
-          version: nextVersion,
-          detailStatusDistribution: afterDetails.statusDistribution,
+          productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
+          version: cascade.nextVersion,
+          detailStatusDistribution: cascade.afterDetails.statusDistribution,
         },
         diffJson: {
           productionStatusId: {
             before: order.productionStatusId,
-            after: status.productionStatusId,
+            after: cascade.nextProductionStatusId,
           },
           productionStatusFromDetailsEnabled: {
             before: order.productionStatusFromDetailsEnabled,
-            after: nextProductionStatusFromDetailsEnabled,
+            after: cascade.nextProductionStatusFromDetailsEnabled,
           },
-          affectedDetailIds,
-          affectedDetailCount: affectedDetailIds.length,
-          beforeStatusDistribution: beforeDetails.statusDistribution,
-          afterStatusDistribution: afterDetails.statusDistribution,
+          affectedDetailIds: cascade.affectedDetailIds,
+          affectedDetailCount: cascade.affectedDetailIds.length,
+          beforeStatusDistribution: cascade.beforeDetails.statusDistribution,
+          afterStatusDistribution: cascade.afterDetails.statusDistribution,
         },
         metadataJson: {
           source: SOURCE,
           orderId: order.orderId,
           clientId: order.clientId,
-          productionStatusId: status.productionStatusId,
+          productionStatusId: cascade.nextProductionStatusId,
           productionStatusCode: status.productionStatusCode,
           productionStatusName: status.productionStatusName,
-          productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
+          productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
           previousProductionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
-          affectedDetailIds,
-          affectedDetailCount: affectedDetailIds.length,
-          beforeStatusDistribution: beforeDetails.statusDistribution,
-          afterStatusDistribution: afterDetails.statusDistribution,
+          affectedDetailIds: cascade.affectedDetailIds,
+          affectedDetailCount: cascade.affectedDetailIds.length,
+          beforeStatusDistribution: cascade.beforeDetails.statusDistribution,
+          afterStatusDistribution: cascade.afterDetails.statusDistribution,
           action: 'production_status_change',
           statusField: 'productionCurrentStatus',
           accessVia: access.accessVia,
@@ -732,11 +726,11 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           entityId: String(order.orderId),
           orderId: order.orderId,
           clientId: order.clientId,
-          productionStatusId: status.productionStatusId,
+          productionStatusId: cascade.nextProductionStatusId,
           productionStatusCode: status.productionStatusCode,
-          productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
-          affectedDetailIds,
-          affectedDetailCount: affectedDetailIds.length,
+          productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
+          affectedDetailIds: cascade.affectedDetailIds,
+          affectedDetailCount: cascade.affectedDetailIds.length,
           action: 'production_status_change',
           scope: { source: 'order-header|kanban' },
           accessVia: access.accessVia,
@@ -757,8 +751,9 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       const response = {
         order: {
           orderId: order.orderId,
-          productionStatusId: status.productionStatusId,
-          version: nextVersion,
+          productionStatusId: cascade.nextProductionStatusId ?? undefined,
+          productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
+          version: cascade.nextVersion,
         },
         auditId,
         requestId,
@@ -1117,13 +1112,14 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       );
       assertVersion(order, command.dto.version);
 
-      // No-op branch: already in manual mode
-      if (order.productionStatusFromDetailsEnabled === false) {
+      // Deprecated compatibility endpoint: manual status locking was removed.
+      // Keep the route/idempotency shape for old clients, but never write a durable manual lock.
+      if (order.productionStatusFromDetailsEnabled === true) {
         const response: ProductionActionResponseDto = {
           order: {
             orderId: order.orderId,
             productionStatusId: order.productionStatusId ?? undefined,
-            productionStatusFromDetailsEnabled: false,
+            productionStatusFromDetailsEnabled: true,
             version: order.version,
           },
           requestId,
@@ -1133,31 +1129,33 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }
 
       const beforeDetails = await loadDetailProductionStatusMap(tx, command.orderId);
-      const nextVersion = await disableAutoProductionStatus(tx, command.orderId);
+      const nextVersion = await enableAutoProductionStatus(tx, command.orderId);
+      await runRecalcOrderProductionStatus(tx, command.orderId);
+      const recalculatedStatusId = await loadOrderProductionStatusId(tx, command.orderId);
       const afterDetails = await loadDetailProductionStatusMap(tx, command.orderId);
 
       const affectedDetailIds = computeAffectedDetailIds(beforeDetails, afterDetails);
       const beforeStatusDistribution = detailMapToDistribution(beforeDetails);
       const afterStatusDistribution = detailMapToDistribution(afterDetails);
 
-      let statusName: string | undefined;
-      let statusCode: string | undefined;
-      if (order.productionStatusId !== null) {
-        const statusInfo = await loadProductionStatus(tx, order.productionStatusId);
-        statusName = statusInfo.productionStatusName;
-        statusCode = statusInfo.productionStatusCode;
+      let recalcStatusName: string | undefined;
+      let recalcStatusCode: string | undefined;
+      if (recalculatedStatusId !== null) {
+        const statusInfo = await loadProductionStatus(tx, recalculatedStatusId);
+        recalcStatusName = statusInfo.productionStatusName;
+        recalcStatusCode = statusInfo.productionStatusCode;
       }
 
       const auditId = await writeAudit(tx, {
-        event: 'orders.production_status_mode_manual',
+        event: 'orders.production_status_mode_restore',
         currentUser: command.currentUser,
         requestId,
         order,
         source: SOURCE,
         statusField: 'productionStatusMode',
-        statusId: order.productionStatusId ?? undefined,
-        statusName,
-        statusCode,
+        statusId: recalculatedStatusId ?? undefined,
+        statusName: recalcStatusName,
+        statusCode: recalcStatusCode,
         beforeJson: {
           productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
           productionStatusId: order.productionStatusId,
@@ -1165,20 +1163,19 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           detailStatusDistribution: beforeStatusDistribution,
         },
         afterJson: {
-          productionStatusFromDetailsEnabled: false,
-          productionStatusId: order.productionStatusId,
+          productionStatusFromDetailsEnabled: true,
+          productionStatusId: recalculatedStatusId,
           version: nextVersion,
           detailStatusDistribution: afterStatusDistribution,
         },
         diffJson: {
           productionStatusFromDetailsEnabled: {
             before: order.productionStatusFromDetailsEnabled,
-            after: false,
+            after: true,
           },
-          // productionStatusId is unchanged by enter-manual (flag-only transition); kept for audit symmetry
           productionStatusId: {
             before: order.productionStatusId,
-            after: order.productionStatusId,
+            after: recalculatedStatusId,
           },
           affectedDetailIds,
           affectedDetailCount: affectedDetailIds.length,
@@ -1189,33 +1186,33 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           source: SOURCE,
           orderId: order.orderId,
           clientId: order.clientId,
-          productionStatusId: order.productionStatusId,
-          mode: 'manual',
-          action: 'production_status_mode_manual',
+          productionStatusId: recalculatedStatusId,
+          mode: 'auto',
+          action: 'production_status_mode_restore',
           statusField: 'productionStatusMode',
           requestId,
         },
       });
 
       await enqueueOutbox(tx, {
-        eventType: 'order.production_status_mode_set_manual',
+        eventType: 'order.production_status_mode_restored',
         aggregateType: 'order',
         aggregateId: String(order.orderId),
         idempotencyKey: command.dto.idempotencyKey,
         payload: {
-          eventType: 'order.production_status_mode_set_manual',
+          eventType: 'order.production_status_mode_restored',
           actorUserId: command.currentUser.id,
           requestId,
           entityType: 'order',
           entityId: String(order.orderId),
           orderId: order.orderId,
           clientId: order.clientId,
-          productionStatusId: order.productionStatusId,
-          productionStatusFromDetailsEnabled: false,
+          productionStatusId: recalculatedStatusId,
+          productionStatusFromDetailsEnabled: true,
           affectedDetailIds,
           affectedDetailCount: affectedDetailIds.length,
-          mode: 'manual',
-          action: 'production_status_mode_manual',
+          mode: 'auto',
+          action: 'production_status_mode_restore',
           scope: { source: 'order-header' },
           idempotencyKey: command.dto.idempotencyKey,
         },
@@ -1224,8 +1221,8 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       const response: ProductionActionResponseDto = {
         order: {
           orderId: order.orderId,
-          productionStatusId: order.productionStatusId ?? undefined,
-          productionStatusFromDetailsEnabled: false,
+          productionStatusId: recalculatedStatusId ?? undefined,
+          productionStatusFromDetailsEnabled: true,
           version: nextVersion,
         },
         auditId,
@@ -1322,11 +1319,9 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
       const affectedDetailCount = changedDetailIds.length;
 
-      // 4. Auto mode: command owns the recalc (a DB trigger also guards on the flag; the explicit
-      //    call is idempotent). Manual mode leaves orders.production_status_id untouched.
-      if (order.productionStatusFromDetailsEnabled) {
-        await runRecalcOrderProductionStatus(tx, order.orderId);
-      }
+      // 4. Detail statuses always own the derived order production status.
+      await ensureProductionStatusFromDetailsEnabled(tx, order.orderId);
+      await runRecalcOrderProductionStatus(tx, order.orderId);
 
       // 5. Bump the parent version so stale callers are rejected (recalc never bumps version).
       //    This UPDATE orders fires the existing trg_crm_sync_orders trigger, exactly as the
@@ -1337,7 +1332,9 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
       }>(
         `
         UPDATE orders
-        SET version = version + 1, updated_at = now()
+        SET production_status_from_details_enabled = true,
+            version = version + 1,
+            updated_at = now()
         WHERE order_id = $1
         RETURNING version, production_status_id
         `,
@@ -1376,7 +1373,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         },
         afterJson: {
           orderProductionStatusId: afterProductionStatusId,
-          productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          productionStatusFromDetailsEnabled: true,
           orderVersion: newVersion,
           detailStatusDistribution: afterStatusDistribution,
         },
@@ -1403,7 +1400,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           productionStatusId: status.productionStatusId,
           productionStatusCode: status.productionStatusCode,
           productionStatusName: status.productionStatusName,
-          productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          productionStatusFromDetailsEnabled: true,
           action: 'detail_production_status_batch_change',
           statusField: 'productionDetailBatch',
           accessVia: access.accessVia,
@@ -1431,7 +1428,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           affectedDetailCount,
           productionStatusId: status.productionStatusId,
           productionStatusCode: status.productionStatusCode,
-          productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+          productionStatusFromDetailsEnabled: true,
           orderProductionStatusId: { before: order.productionStatusId, after: afterProductionStatusId },
           orderVersion: { before: order.version, after: newVersion },
           beforeStatusDistribution,
@@ -1961,14 +1958,13 @@ export async function changeProductionStatusFromDeadlineInTransaction(
     productionStatusScope: command.productionStatusScope,
   };
 
-  if (
-    order.productionStatusId === status.productionStatusId &&
-    !order.productionStatusFromDetailsEnabled
-  ) {
+  const cascade = await cascadeProductionStatusToDetails(tx, order, status.productionStatusId);
+  if (!cascade) {
     const response = {
       order: {
         orderId: order.orderId,
         productionStatusId: order.productionStatusId ?? undefined,
+        productionStatusFromDetailsEnabled: true,
         version: order.version,
       },
       requestId,
@@ -1980,18 +1976,6 @@ export async function changeProductionStatusFromDeadlineInTransaction(
     });
     return { status: 'skipped', skipReason: 'same_production_status', response };
   }
-
-  const beforeDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
-  const nextVersion = await updateProductionStatus(
-    tx,
-    order.orderId,
-    status.productionStatusId,
-  );
-  const afterDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
-  const affectedDetailIds = beforeDetails.detailIds.filter((detailId) =>
-    afterDetails.detailIds.includes(detailId),
-  );
-  const nextProductionStatusFromDetailsEnabled = false;
 
   const auditId = await writeAudit(tx, {
     event: 'orders.production_status_change',
@@ -2007,19 +1991,19 @@ export async function changeProductionStatusFromDeadlineInTransaction(
       productionStatusId: order.productionStatusId,
       productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
       version: order.version,
-      detailStatusDistribution: beforeDetails.statusDistribution,
+      detailStatusDistribution: cascade.beforeDetails.statusDistribution,
       deadlineId: command.deadlineId,
       deadlineEventId: command.deadlineEventId,
       actionRuleId: command.actionRuleId,
       snapshotHash,
     },
     afterJson: {
-      productionStatusId: status.productionStatusId,
+      productionStatusId: cascade.nextProductionStatusId,
       productionStatusName: status.productionStatusName,
       productionStatusCode: status.productionStatusCode,
-      productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
-      version: nextVersion,
-      detailStatusDistribution: afterDetails.statusDistribution,
+      productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
+      version: cascade.nextVersion,
+      detailStatusDistribution: cascade.afterDetails.statusDistribution,
       deadlineId: command.deadlineId,
       deadlineEventId: command.deadlineEventId,
       actionRuleId: command.actionRuleId,
@@ -2028,29 +2012,29 @@ export async function changeProductionStatusFromDeadlineInTransaction(
     diffJson: {
       productionStatusId: {
         before: order.productionStatusId,
-        after: status.productionStatusId,
+        after: cascade.nextProductionStatusId,
       },
       productionStatusFromDetailsEnabled: {
         before: order.productionStatusFromDetailsEnabled,
-        after: nextProductionStatusFromDetailsEnabled,
+        after: cascade.nextProductionStatusFromDetailsEnabled,
       },
-      affectedDetailIds,
-      affectedDetailCount: affectedDetailIds.length,
-      beforeStatusDistribution: beforeDetails.statusDistribution,
-      afterStatusDistribution: afterDetails.statusDistribution,
+      affectedDetailIds: cascade.affectedDetailIds,
+      affectedDetailCount: cascade.affectedDetailIds.length,
+      beforeStatusDistribution: cascade.beforeDetails.statusDistribution,
+      afterStatusDistribution: cascade.afterDetails.statusDistribution,
     },
     metadataJson: {
       ...deadlineMetadata,
-      productionStatusId: status.productionStatusId,
+      productionStatusId: cascade.nextProductionStatusId,
       productionStatusCode: status.productionStatusCode,
       productionStatusName: status.productionStatusName,
       previousProductionStatusId: order.productionStatusId,
-      productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
+      productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
       previousProductionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
-      affectedDetailIds,
-      affectedDetailCount: affectedDetailIds.length,
-      beforeStatusDistribution: beforeDetails.statusDistribution,
-      afterStatusDistribution: afterDetails.statusDistribution,
+      affectedDetailIds: cascade.affectedDetailIds,
+      affectedDetailCount: cascade.affectedDetailIds.length,
+      beforeStatusDistribution: cascade.beforeDetails.statusDistribution,
+      afterStatusDistribution: cascade.afterDetails.statusDistribution,
       action: 'production_status_change',
       statusField: 'productionCurrentStatus',
     },
@@ -2067,12 +2051,12 @@ export async function changeProductionStatusFromDeadlineInTransaction(
       actorUserId: null,
       entityType: 'order',
       entityId: String(order.orderId),
-      productionStatusId: status.productionStatusId,
+      productionStatusId: cascade.nextProductionStatusId,
       previousProductionStatusId: order.productionStatusId,
       productionStatusCode: status.productionStatusCode,
-      productionStatusFromDetailsEnabled: nextProductionStatusFromDetailsEnabled,
-      affectedDetailIds,
-      affectedDetailCount: affectedDetailIds.length,
+      productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
+      affectedDetailIds: cascade.affectedDetailIds,
+      affectedDetailCount: cascade.affectedDetailIds.length,
       action: 'production_status_change',
       scope: { source: command.source, productionStatusScope: command.productionStatusScope },
     },
@@ -2081,8 +2065,9 @@ export async function changeProductionStatusFromDeadlineInTransaction(
   const response = {
     order: {
       orderId: order.orderId,
-      productionStatusId: status.productionStatusId,
-      version: nextVersion,
+      productionStatusId: cascade.nextProductionStatusId ?? undefined,
+      productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
+      version: cascade.nextVersion,
     },
     auditId,
     requestId,
@@ -2175,30 +2160,23 @@ export async function changeProductionStatusFromAutomationInTransaction(
   ctx: AutomationActionContext,
 ): Promise<AutomationActionResult> {
   const order = await loadOrderForUpdate(tx, orderId);
-  if (order.productionStatusFromDetailsEnabled) {
-    return { status: 'skipped', skipReason: 'auto_mode_from_details' };
-  }
-  if (order.productionStatusId === targetStatusId) {
+
+  const status = await loadProductionStatus(tx, targetStatusId);
+  const cascade = await cascadeProductionStatusToDetails(tx, order, status.productionStatusId);
+  if (!cascade) {
     return { status: 'skipped', skipReason: 'same_status' };
   }
 
-  const status = await loadProductionStatus(tx, targetStatusId);
-  const beforeDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
-  const nextVersion = await updateProductionStatus(tx, order.orderId, status.productionStatusId);
-  const afterDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
-  const affectedDetailIds = beforeDetails.detailIds.filter((detailId) =>
-    afterDetails.detailIds.includes(detailId),
-  );
   const metadata = automationMetadata(ctx, order.orderId, order.clientId, {
-    productionStatusId: status.productionStatusId,
+    productionStatusId: cascade.nextProductionStatusId,
     productionStatusCode: status.productionStatusCode,
     productionStatusName: status.productionStatusName,
-    productionStatusFromDetailsEnabled: false,
+    productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
     previousProductionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
-    affectedDetailIds,
-    affectedDetailCount: affectedDetailIds.length,
-    beforeStatusDistribution: beforeDetails.statusDistribution,
-    afterStatusDistribution: afterDetails.statusDistribution,
+    affectedDetailIds: cascade.affectedDetailIds,
+    affectedDetailCount: cascade.affectedDetailIds.length,
+    beforeStatusDistribution: cascade.beforeDetails.statusDistribution,
+    afterStatusDistribution: cascade.afterDetails.statusDistribution,
     action: 'automation_status_change',
     statusField: 'productionCurrentStatus',
   });
@@ -2216,29 +2194,29 @@ export async function changeProductionStatusFromAutomationInTransaction(
       productionStatusId: order.productionStatusId,
       productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
       version: order.version,
-      detailStatusDistribution: beforeDetails.statusDistribution,
+      detailStatusDistribution: cascade.beforeDetails.statusDistribution,
     },
     afterJson: {
-      productionStatusId: status.productionStatusId,
+      productionStatusId: cascade.nextProductionStatusId,
       productionStatusName: status.productionStatusName,
       productionStatusCode: status.productionStatusCode,
-      productionStatusFromDetailsEnabled: false,
-      version: nextVersion,
-      detailStatusDistribution: afterDetails.statusDistribution,
+      productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
+      version: cascade.nextVersion,
+      detailStatusDistribution: cascade.afterDetails.statusDistribution,
     },
     diffJson: {
       productionStatusId: {
         before: order.productionStatusId,
-        after: status.productionStatusId,
+        after: cascade.nextProductionStatusId,
       },
       productionStatusFromDetailsEnabled: {
         before: order.productionStatusFromDetailsEnabled,
-        after: false,
+        after: cascade.nextProductionStatusFromDetailsEnabled,
       },
-      affectedDetailIds,
-      affectedDetailCount: affectedDetailIds.length,
-      beforeStatusDistribution: beforeDetails.statusDistribution,
-      afterStatusDistribution: afterDetails.statusDistribution,
+      affectedDetailIds: cascade.affectedDetailIds,
+      affectedDetailCount: cascade.affectedDetailIds.length,
+      beforeStatusDistribution: cascade.beforeDetails.statusDistribution,
+      afterStatusDistribution: cascade.afterDetails.statusDistribution,
     },
     metadataJson: metadata,
   });
@@ -2256,11 +2234,11 @@ export async function changeProductionStatusFromAutomationInTransaction(
       entityId: String(order.orderId),
       orderId: order.orderId,
       clientId: order.clientId,
-      productionStatusId: status.productionStatusId,
+      productionStatusId: cascade.nextProductionStatusId,
       productionStatusCode: status.productionStatusCode,
-      productionStatusFromDetailsEnabled: false,
-      affectedDetailIds,
-      affectedDetailCount: affectedDetailIds.length,
+      productionStatusFromDetailsEnabled: cascade.nextProductionStatusFromDetailsEnabled,
+      affectedDetailIds: cascade.affectedDetailIds,
+      affectedDetailCount: cascade.affectedDetailIds.length,
       action: 'production_status_change',
       scope: { source: 'order-header' },
       origin: 'automation',
@@ -2311,9 +2289,8 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   const changedDetailIds = updated.rows.map((row) => toNumber(row.detail_id));
   const affectedDetailCount = changedDetailIds.length;
 
-  if (order.productionStatusFromDetailsEnabled) {
-    await runRecalcOrderProductionStatus(tx, order.orderId);
-  }
+  await ensureProductionStatusFromDetailsEnabled(tx, order.orderId);
+  await runRecalcOrderProductionStatus(tx, order.orderId);
 
   const bumped = await tx.query<{
     version: string | number;
@@ -2321,7 +2298,9 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
   }>(
     `
     UPDATE orders
-    SET version = version + 1, updated_at = now()
+    SET production_status_from_details_enabled = true,
+        version = version + 1,
+        updated_at = now()
     WHERE order_id = $1
     RETURNING version, production_status_id
     `,
@@ -2346,7 +2325,7 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
     productionStatusId: status.productionStatusId,
     productionStatusCode: status.productionStatusCode,
     productionStatusName: status.productionStatusName,
-    productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+    productionStatusFromDetailsEnabled: true,
     action: 'automation_status_change',
     statusField: 'productionDetailBatch',
   });
@@ -2368,7 +2347,7 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
     },
     afterJson: {
       orderProductionStatusId: afterProductionStatusId,
-      productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+      productionStatusFromDetailsEnabled: true,
       orderVersion: newVersion,
       detailStatusDistribution: afterStatusDistribution,
     },
@@ -2409,7 +2388,7 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       affectedDetailCount,
       productionStatusId: status.productionStatusId,
       productionStatusCode: status.productionStatusCode,
-      productionStatusFromDetailsEnabled: order.productionStatusFromDetailsEnabled,
+      productionStatusFromDetailsEnabled: true,
       orderProductionStatusId: { before: order.productionStatusId, after: afterProductionStatusId },
       orderVersion: { before: order.version, after: newVersion },
       beforeStatusDistribution,
@@ -2861,24 +2840,59 @@ async function loadDetailProductionStatusSnapshot(
   return { detailIds, statusDistribution };
 }
 
-async function updateProductionStatus(
+async function cascadeProductionStatusToDetails(
   tx: TransactionClient,
-  orderId: number,
+  order: LockedOrder,
   productionStatusId: number,
-): Promise<number> {
-  const result = await tx.query<VersionRow>(
+): Promise<ProductionStatusCascadeResult | null> {
+  const beforeDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
+  const allActiveDetailsAlreadyTarget =
+    beforeDetails.detailIds.length === 0 ||
+    beforeDetails.statusDistribution[String(productionStatusId)] === beforeDetails.detailIds.length;
+
+  if (
+    order.productionStatusId === productionStatusId &&
+    allActiveDetailsAlreadyTarget &&
+    order.productionStatusFromDetailsEnabled
+  ) {
+    return null;
+  }
+
+  await ensureProductionStatusFromDetailsEnabled(tx, order.orderId);
+
+  const updated = await tx.query<{ detail_id: string | number }>(
     `
-    UPDATE orders
+    UPDATE order_details
     SET production_status_id = $2,
-        production_status_from_details_enabled = false,
-        version = version + 1
+        updated_at = now()
     WHERE order_id = $1
-    RETURNING version
+      AND COALESCE(delete_flag, false) = false
+      AND production_status_id IS DISTINCT FROM $2
+    RETURNING detail_id
     `,
-    [orderId, productionStatusId],
+    [order.orderId, productionStatusId],
   );
 
-  return toNumber(result.rows[0].version);
+  if (beforeDetails.detailIds.length > 0) {
+    await runRecalcOrderProductionStatus(tx, order.orderId);
+  }
+
+  const bumped = await bumpOrderProductionStatusCascadeVersion(
+    tx,
+    order.orderId,
+    beforeDetails.detailIds.length === 0,
+    productionStatusId,
+  );
+  const afterDetails = await loadDetailProductionStatusSnapshot(tx, order.orderId);
+
+  return {
+    beforeDetails,
+    afterDetails,
+    affectedDetailIds: updated.rows.map((row) => toNumber(row.detail_id)),
+    nextProductionStatusId: bumped.productionStatusId,
+    nextProductionStatusFromDetailsEnabled: true,
+    nextVersion: bumped.version,
+  };
 }
 
 async function enableAutoProductionStatus(tx: TransactionClient, orderId: number): Promise<number> {
@@ -2896,19 +2910,48 @@ async function enableAutoProductionStatus(tx: TransactionClient, orderId: number
   return toNumber(result.rows[0].version);
 }
 
-async function disableAutoProductionStatus(tx: TransactionClient, orderId: number): Promise<number> {
-  const result = await tx.query<VersionRow>(
+async function ensureProductionStatusFromDetailsEnabled(
+  tx: TransactionClient,
+  orderId: number,
+): Promise<void> {
+  await tx.query(
     `
     UPDATE orders
-    SET production_status_from_details_enabled = false,
-        version = version + 1
+    SET production_status_from_details_enabled = true
     WHERE order_id = $1
-    RETURNING version
+      AND production_status_from_details_enabled IS DISTINCT FROM true
     `,
     [orderId],
   );
+}
 
-  return toNumber(result.rows[0].version);
+async function bumpOrderProductionStatusCascadeVersion(
+  tx: TransactionClient,
+  orderId: number,
+  forceProductionStatus: boolean,
+  productionStatusId: number,
+): Promise<{ version: number; productionStatusId: number | null }> {
+  const result = await tx.query<{
+    version: string | number;
+    production_status_id: string | number | null;
+  }>(
+    `
+    UPDATE orders
+    SET production_status_id = CASE WHEN $2 THEN $3 ELSE production_status_id END,
+        production_status_from_details_enabled = true,
+        version = version + 1,
+        updated_at = now()
+    WHERE order_id = $1
+    RETURNING version, production_status_id
+    `,
+    [orderId, forceProductionStatus, productionStatusId],
+  );
+  const row = result.rows[0];
+  return {
+    version: toNumber(row.version),
+    productionStatusId:
+      row.production_status_id === null ? null : toNumber(row.production_status_id),
+  };
 }
 
 async function runRecalcOrderProductionStatus(tx: TransactionClient, orderId: number): Promise<void> {

@@ -1188,19 +1188,6 @@
   height: 32px;
 }
 
-.status-board-card__drag {
-  cursor: grab;
-}
-
-.status-board-card__drag--touch {
-  touch-action: none;
-  -webkit-touch-callout: none;
-}
-
-.status-board-card__drag:active {
-  cursor: grabbing;
-}
-
 .status-board-viewport--touch-dragging {
   scroll-snap-type: none !important;
   user-select: none;
@@ -1229,24 +1216,6 @@
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-@media (pointer: coarse) {
-  .status-board-card__drag--touch.ant-btn {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
-    border: 1px solid color-mix(in srgb, #1677ff 34%, transparent);
-    background: color-mix(in srgb, #1677ff 10%, var(--app-surface));
-    color: #1677ff;
-  }
-
-  .status-board-card__drag--touch.ant-btn:active,
-  .status-board-card__drag--touch.ant-btn[data-touch-drag-active="true"] {
-    background: color-mix(in srgb, #1677ff 20%, var(--app-surface));
-    box-shadow: 0 0 0 3px color-mix(in srgb, #1677ff 16%, transparent);
-  }
 }
 
 .status-board-card__client {

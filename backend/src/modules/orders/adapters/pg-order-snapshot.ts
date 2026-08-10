@@ -1441,6 +1441,7 @@ async function upsertOrderChildren(
   }
   await deleteMissingImportedRows(tx, source, SNAPSHOT_ENTITY_TYPES.dowelingLink, orderId, savedLinks, 'order_doweling_links', 'order_doweling_link_id');
 
+  await recalcOrderProductionStatus(tx, orderId);
   await updateOrderTotals(tx, orderId, prepared.totals, await readOrderVersion(tx, orderId));
 }
 
@@ -1786,8 +1787,8 @@ async function insertOrderHeader(
   return Number(result.rows[0].id);
 }
 
-// production_status_from_details_enabled is intentionally NOT updated here — it is owned by the
-// production-status-mode backend commands (audit/outbox/version). Creation still sets it (insertOrderHeader).
+// production_status_id is derived from order_details after child persistence; do not write
+// the stale snapshot header value here.
 async function updateOrderHeader(
   tx: TransactionClient,
   orderId: number,
@@ -1804,29 +1805,28 @@ async function updateOrderHeader(
         manager_id = $6,
         order_status_id = $7,
         payment_status_id = $8,
-        production_status_id = $9,
-        planned_completion_date = $10,
-        completion_date = $11,
-        issue_date = $12,
-        payment_date = $13,
-        discount = $14,
-        surcharge = $15,
-        total_amount = $16,
-        final_amount = $17,
-        paid_amount = $18,
-        parts_count = $19,
-        total_area = $20,
-        link_cutting_file = $21,
-        link_cutting_image_file = $22,
-        link_cad_file = $23,
-        link_pdf_file = $24,
-        notes = $25,
-        material_id = $26,
-        milling_type_id = $27,
-        edge_type_id = $28,
-        film_id = $29,
-        ref_key_1c = $30,
-        sheet_material_type_id = $31
+        planned_completion_date = $9,
+        completion_date = $10,
+        issue_date = $11,
+        payment_date = $12,
+        discount = $13,
+        surcharge = $14,
+        total_amount = $15,
+        final_amount = $16,
+        paid_amount = $17,
+        parts_count = $18,
+        total_area = $19,
+        link_cutting_file = $20,
+        link_cutting_image_file = $21,
+        link_cad_file = $22,
+        link_pdf_file = $23,
+        notes = $24,
+        material_id = $25,
+        milling_type_id = $26,
+        edge_type_id = $27,
+        film_id = $28,
+        ref_key_1c = $29,
+        sheet_material_type_id = $30
     WHERE order_id = $1 AND delete_flag = false
     `,
     [orderId, ...orderHeaderUpdateParams(header, totals)],
@@ -1845,7 +1845,7 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
     header.orderStatusId,
     totals.paymentStatusId,
     header.productionStatusId,
-    header.productionStatusFromDetailsEnabled,
+    true,
     header.plannedCompletionDate,
     header.completionDate,
     header.issueDate,
@@ -1876,9 +1876,9 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
 }
 
 /**
- * Params for UPDATE — same as orderHeaderParams but WITHOUT production_status_from_details_enabled.
- * The flag is owned exclusively by the production-status-mode backend commands (audit/outbox/version).
- * Includes sheet_material_type_id ($31 in UPDATE, $30 without orderId prefix removed by caller).
+ * Params for UPDATE — same as orderHeaderParams but WITHOUT production status mode/current status.
+ * Production status is derived from details after child persistence.
+ * Includes sheet_material_type_id ($30 in UPDATE, $29 without orderId prefix removed by caller).
  * NOTE: pg-order-transaction-manager.ts has its own equivalent inline order UPDATE (different column
  * subset) that also omits this flag — keep both in sync if order header columns change.
  */
@@ -1891,7 +1891,6 @@ function orderHeaderUpdateParams(header: NormalizedSaveOrderHeaderDto, totals: O
     header.managerId,
     header.orderStatusId,
     totals.paymentStatusId,
-    header.productionStatusId,
     header.plannedCompletionDate,
     header.completionDate,
     header.issueDate,
@@ -1917,6 +1916,19 @@ function orderHeaderUpdateParams(header: NormalizedSaveOrderHeaderDto, totals: O
     header.refKey1c,
     header.sheetMaterialTypeId ?? null,
   ];
+}
+
+async function recalcOrderProductionStatus(tx: TransactionClient, orderId: number): Promise<void> {
+  await tx.query(
+    `
+    UPDATE orders
+    SET production_status_from_details_enabled = true
+    WHERE order_id = $1
+      AND production_status_from_details_enabled IS DISTINCT FROM true
+    `,
+    [orderId],
+  );
+  await tx.query('SELECT recalc_order_production_status($1)', [orderId]);
 }
 
 async function upsertDetail(

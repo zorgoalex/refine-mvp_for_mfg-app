@@ -336,16 +336,6 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
           return;
         }
 
-        // Disable auto-update when manually toggling
-        if (!featureFlags.useBackendProductionActions && header.production_status_from_details_enabled) {
-          await updateOrder({
-            resource: 'orders',
-            id: header.order_id,
-            values: { production_status_from_details_enabled: false },
-          });
-          updateHeaderField('production_status_from_details_enabled', false);
-        }
-
         // Refetch events to update the context menu
         refetch();
 
@@ -376,7 +366,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         });
       }
     },
-    [header.order_id, header.production_status_from_details_enabled, toggleOrderEvent, updateOrder, updateHeaderField, refetch, invalidate, refreshHeaderFromOrder, queueHeaderAction]
+    [header.order_id, toggleOrderEvent, updateHeaderField, refetch, invalidate, refreshHeaderFromOrder, queueHeaderAction]
   );
 
   if (!visible) return null;
