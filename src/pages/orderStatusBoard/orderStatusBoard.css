@@ -1282,16 +1282,22 @@
   align-items: center;
 }
 
+.status-board-columns--cnc .cnc-order-card .status-board-card__top {
+  justify-content: flex-start;
+}
+
 .status-board-columns--cnc .cnc-order-card .status-board-card__identity {
-  gap: clamp(4px, 1.7cqw, 8px);
+  width: 100%;
+  justify-content: flex-start;
+  gap: 6px;
 }
 
 .status-board-columns--cnc .cnc-order-card .status-board-card__number.ant-btn {
   min-height: 0;
   padding: 0;
-  flex: 1 1 auto;
-  font-size: clamp(12px, 5.2cqw, 15px);
-  line-height: 1.12;
+  flex: 0 1 auto;
+  font-size: clamp(14px, 4.8cqw, 16px);
+  line-height: 1.15;
   white-space: nowrap;
 }
 
@@ -1303,12 +1309,13 @@
 }
 
 .status-board-columns--cnc .cnc-order-card .status-board-card__status-badge.ant-tag {
-  max-width: 50%;
-  padding-inline: clamp(5px, 1.8cqw, 8px);
+  max-width: 58%;
+  padding-inline: clamp(6px, 1.8cqw, 8px);
+  display: block;
   flex: 0 1 auto;
   overflow: hidden;
-  font-size: clamp(10px, 4.2cqw, 12px);
-  line-height: 1.18;
+  font-size: clamp(11px, 3.8cqw, 12.5px);
+  line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1641,6 +1648,12 @@
   color: var(--app-text-muted);
   font-size: 12px;
   line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cnc-order-card__parts-total {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2518,9 +2531,15 @@
   }
 
   .status-board-columns--cnc .cnc-packet-card__summary-order,
-  .status-board-columns--cnc .cnc-packet-card__summary-order.ant-btn,
-  .status-board-columns--cnc .cnc-order-card .status-board-card__number {
+  .status-board-columns--cnc .cnc-packet-card__summary-order.ant-btn {
     font-size: clamp(10px, 1.5vw, 15px);
+    color: var(--app-text);
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  .status-board-columns--cnc .cnc-order-card .status-board-card__number {
+    font-size: clamp(14px, 4.8cqw, 16px);
     color: var(--app-text);
     font-weight: 700;
     line-height: 1.15;

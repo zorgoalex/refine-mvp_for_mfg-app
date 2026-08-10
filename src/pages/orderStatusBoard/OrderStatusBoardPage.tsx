@@ -5127,7 +5127,12 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
               {card.managerName}
             </span>
           )}
-          <span className="status-board-card__standard-cell">
+          <span
+            className={[
+              'status-board-card__standard-cell',
+              cncOrderCard ? 'cnc-order-card__parts-total' : '',
+            ].filter(Boolean).join(' ')}
+          >
             {card.partsCount} дет. · {formatArea(card.totalArea)}
           </span>
           {paymentSummary && !cncOrderCard && (

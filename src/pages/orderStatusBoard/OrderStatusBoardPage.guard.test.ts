@@ -627,11 +627,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Закатано {cncReadiness.rolledDetails}');
     expect(page).toContain('Осталось {cncReadiness.remainingDetails}');
     expect(page).toContain('className="cnc-order-card__client"');
+    expect(page).toContain("cncOrderCard ? 'cnc-order-card__parts-total' : ''");
     expect(page).toContain('paymentSummary && !cncOrderCard');
     expect(css).toMatch(/\.cnc-order-card__readiness\s*\{[^}]*display: grid;/s);
     expect(css).toContain('.cnc-order-card__client');
-    expect(css).toContain('font-size: clamp(12px, 5.2cqw, 15px)');
-    expect(css).toContain('font-size: clamp(10px, 4.2cqw, 12px)');
+    expect(css).toContain('justify-content: flex-start;');
+    expect(css).toContain('gap: 6px;');
+    expect(css).toContain('font-size: clamp(14px, 4.8cqw, 16px)');
+    expect(css).toContain('font-size: clamp(11px, 3.8cqw, 12.5px)');
+    expect(css).toMatch(/\.cnc-order-card__parts-total\s*\{[^}]*white-space: nowrap;/s);
     expect(css).toContain('.cnc-order-card__progress-segment--cut');
     expect(css).toContain('.cnc-order-card__progress-segment--rolled');
     expect(css).toContain('background: #fff7e6');
