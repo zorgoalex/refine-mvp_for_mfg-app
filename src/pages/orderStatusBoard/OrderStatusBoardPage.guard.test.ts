@@ -286,6 +286,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
+    expect(page).toContain('fixedView ? { fixedView } : {}');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
     expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
     expect(page).toContain('{!fixedView && (');
@@ -340,6 +341,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('По выбранному заказу МДФ-работ нет');
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
+    expect(page).toContain('key="missing-details"');
     expect(page).toContain('cncColumnDisplayTitle(column)');
     expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");

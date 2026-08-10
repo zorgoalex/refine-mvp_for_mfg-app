@@ -365,8 +365,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     const parsed = parseOrderStatusBoardViewState(searchParams, {
       cncTelegram: featureFlags.cncTelegram,
       ...(defaultSort ? { defaultSort } : {}),
+      ...(fixedView ? { fixedView } : {}),
     });
-    return fixedView ? { ...parsed, view: fixedView } : parsed;
+    return parsed;
   }, [defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
   const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
@@ -5390,26 +5391,24 @@ const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>((
       ghost
       size="small"
       expandIconPosition="end"
-      items={[
-        {
-          key: 'missing-details',
-          label: (
-            <span className="cnc-order-card__missing-label">
-              {formatCncMissingPositionsLabel(details.length)}
-            </span>
-          ),
-          children: (
-            <ul className="cnc-order-card__missing-list">
-              {details.map((detail) => (
-                <li key={detail.detailId}>
-                  {formatCncMissingDetailLine(detail)}
-                </li>
-              ))}
-            </ul>
-          ),
-        },
-      ]}
-    />
+    >
+      <Collapse.Panel
+        key="missing-details"
+        header={(
+          <span className="cnc-order-card__missing-label">
+            {formatCncMissingPositionsLabel(details.length)}
+          </span>
+        )}
+      >
+        <ul className="cnc-order-card__missing-list">
+          {details.map((detail) => (
+            <li key={detail.detailId}>
+              {formatCncMissingDetailLine(detail)}
+            </li>
+          ))}
+        </ul>
+      </Collapse.Panel>
+    </Collapse>
   </div>
 ));
 CncOrderMissingDetailsSpoiler.displayName = 'CncOrderMissingDetailsSpoiler';

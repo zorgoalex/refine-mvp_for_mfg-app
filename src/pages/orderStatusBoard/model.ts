@@ -80,6 +80,7 @@ export interface OrderStatusBoardViewState {
 export interface OrderStatusBoardViewStateOptions {
   cncTelegram?: boolean;
   defaultSort?: OrderStatusBoardSortPreference;
+  fixedView?: OrderStatusBoardVisualFlow;
 }
 
 export function toggleCncCardStandardOverride(
@@ -126,7 +127,8 @@ export function parseOrderStatusBoardViewState(
   options: OrderStatusBoardViewStateOptions = {},
 ): OrderStatusBoardViewState {
   const board = params.get('board') === 'production' ? 'production' : 'order';
-  const view = options.cncTelegram && params.get('flow') === 'cnc' ? 'cnc_today' : board;
+  const routeView = options.cncTelegram && params.get('flow') === 'cnc' ? 'cnc_today' : board;
+  const view = options.fixedView ?? routeView;
   const plannedFrom = dateOnly(params.get('plannedFrom'));
   const plannedTo = dateOnly(params.get('plannedTo'));
   const cncWorkday = dateOnly(params.get('date'));

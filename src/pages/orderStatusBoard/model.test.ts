@@ -183,6 +183,14 @@ describe('order status board model', () => {
       { cncTelegram: true },
     );
     expect(defaultPeriodState.cncOrderSearchPeriod).toBe('1w');
+
+    const fixedMdfState = parseOrderStatusBoardViewState(
+      new URLSearchParams('period=1m&order=2707'),
+      { cncTelegram: true, fixedView: 'cnc_today' },
+    );
+    expect(fixedMdfState.view).toBe('cnc_today');
+    expect(fixedMdfState.cncOrderSearchPeriod).toBe('1m');
+    expect(fixedMdfState.cncOrderFilters).toEqual(['2707']);
   });
 
   it('builds CNC order search ranges from the selected board date', () => {
