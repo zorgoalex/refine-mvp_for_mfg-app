@@ -66,6 +66,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('CncManualCardFrame');
     expect(page).toContain('isCncManualMoveAllowed(item.kind, columnKey)');
     expect(page).toContain("label: 'Переместить'");
+    expect(page).toContain('trigger={[');
+    expect(page).toContain('trigger: shellRef.current');
+    expect(page).toContain('dragRef(node)');
+    expect(page).toContain('isCncManualDragIgnored(event.target)');
+    expect(page).not.toContain('CncCardMoveActions');
+    expect(page).not.toContain('cncMoveControls');
     expect(page).toContain('const touchBoardDragEnabled = useCoarsePointer()');
     expect(page).toContain('touchDragEnabled={touchBoardDragEnabled}');
     expect(page).toContain('touchDragEnabled={mutationsEnabled && touchDragEnabled}');
@@ -79,7 +85,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('actionsVisible && (finePointer || touchDragEnabled)');
     expect(page).not.toContain('touchDragEnabled={false}');
     expect(css).toContain('.status-board-card__drag--touch');
-    expect(css).toContain('.cnc-card-move-actions__drag');
+    expect(css).toContain('.cnc-board-card-shell--draggable');
+    expect(css).not.toContain('.cnc-card-move-actions');
     expect(css).toContain('touch-action: none');
     expect(css).toContain('.status-board-viewport--touch-dragging');
     expect(css).toContain('scroll-snap-type: none');
@@ -606,7 +613,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-today-column--orders_issued');
     expect(page).toContain("title: 'Готов к выдаче'");
     expect(page).toContain("title: 'Выдан'");
-    expect(page).toContain('Из {cncReadiness.totalDetails} деталей Распилено {cncReadiness.cutDetails}, Закатаны {cncReadiness.rolledDetails}. Осталось {cncReadiness.remainingDetails}.');
+    expect(page).toContain('Распилено {cncReadiness.cutDetails}');
+    expect(page).toContain('Закатано {cncReadiness.rolledDetails}');
+    expect(page).toContain('Осталось {cncReadiness.remainingDetails}');
+    expect(css).toMatch(/\.cnc-order-card__readiness\s*\{[^}]*display: grid;/s);
     expect(css).toContain('.cnc-order-card__progress-segment--cut');
     expect(css).toContain('.cnc-order-card__progress-segment--rolled');
     expect(css).toContain('background: #fff7e6');

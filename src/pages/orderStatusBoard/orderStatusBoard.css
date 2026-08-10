@@ -1271,6 +1271,48 @@
   color: #cf1322;
 }
 
+.status-board-columns--cnc .cnc-order-card {
+  container-type: inline-size;
+  container-name: cnc-order-card;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__top,
+.status-board-columns--cnc .cnc-order-card .status-board-card__identity {
+  min-width: 0;
+  align-items: center;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__identity {
+  gap: clamp(4px, 1.7cqw, 8px);
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__number.ant-btn {
+  min-height: 0;
+  padding: 0;
+  flex: 1 1 auto;
+  font-size: clamp(9px, 3.8cqw, 13px);
+  line-height: 1.08;
+  white-space: nowrap;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__number.ant-btn > span {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__status-badge.ant-tag {
+  max-width: 52%;
+  padding-inline: clamp(3px, 1.4cqw, 7px);
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-size: clamp(7.5px, 2.8cqw, 10.5px);
+  line-height: 1.12;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__status-badge.ant-tag {
   display: block;
   overflow: hidden;
@@ -1352,31 +1394,19 @@
   display: block;
 }
 
-.cnc-board-card-shell--dragging .status-board-card {
-  opacity: 0.42;
-}
-
-.cnc-card-move-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.cnc-card-move-actions .ant-btn {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  min-height: 32px;
-}
-
-.cnc-card-move-actions__drag {
+.cnc-board-card-shell--draggable {
   cursor: grab;
   touch-action: none;
+  user-select: none;
   -webkit-touch-callout: none;
 }
 
-.cnc-card-move-actions__drag:active {
+.cnc-board-card-shell--draggable:active {
   cursor: grabbing;
+}
+
+.cnc-board-card-shell--dragging .status-board-card {
+  opacity: 0.42;
 }
 
 .cnc-card-context-menu .ant-dropdown-menu,
@@ -1613,9 +1643,12 @@
 
 .cnc-order-card__readiness {
   margin-top: 8px;
+  display: grid;
+  gap: 2px;
   color: var(--app-text-muted);
   font-size: 12px;
   line-height: 1.35;
+  font-variant-numeric: tabular-nums;
 }
 
 .cnc-order-card__footer {

@@ -2268,7 +2268,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         sourceColumn={column.key}
                         onMove={onMove}
                       >
-                        {(moveControls) => (
+                        {() => (
                       <StatusBoardCardView
                         board="production"
                         card={card}
@@ -2283,7 +2283,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cncMuted={mutedOrderIds.has(card.orderId)}
                         cncSummaryOnly={summaryOnly}
                         cncReadiness={readiness}
-                        cncMoveControls={moveControls}
                         displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         relationState={orderStateFor({ card, readiness })}
@@ -2335,7 +2334,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         sourceColumn={column.key}
                         onMove={onMove}
                       >
-                        {(moveControls) => (
+                        {() => (
                       <CncTelegramBathCardView
                         bath={bath}
                         relationState={getCncBathRelationState(bath, relationContext)}
@@ -2346,7 +2345,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         detailedPlacement={detailedPlacement}
                         summaryOnly={summaryOnly}
                         displayToggleVisible={cardDisplayMode === 'compact'}
-                        moveControls={moveControls}
                         showReadyIcon={isCncReadyBathColumnKey(column.key)}
                         selectedDetailId={selectedDetailId}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
@@ -2415,7 +2413,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       sourceColumn={column.key}
                       onMove={onMove}
                     >
-                      {(moveControls) => (
+                      {() => (
                     <CncTelegramPacketCard
                       packet={packet}
                       relationState={packetState}
@@ -2423,7 +2421,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
                       summaryOnly={summaryOnly}
                       displayToggleVisible={cardDisplayMode === 'compact'}
-                      moveControls={moveControls}
                       onToggleDisplay={() => toggleCardDisplay(cardKey)}
                       onSelectRelation={() =>
                         onSelectRelation({ kind: 'packet', id: packet.packetId })
@@ -2539,19 +2536,12 @@ const CncColumnDropZone: React.FC<CncColumnDropZoneProps> = ({
   });
 };
 
-interface CncMoveControls {
-  moveMenu: MenuProps;
-  moveAvailable: boolean;
-  actionButtonRef: React.MutableRefObject<HTMLButtonElement | null>;
-  dragRef: (node: HTMLButtonElement | null) => void;
-}
-
 interface CncManualCardFrameProps {
   kind: CncManualCardKind;
   cardId: string;
   sourceColumn: CncTelegramTodayDisplayColumnKey;
   onMove: CncTelegramTodayColumnsProps['onMove'];
-  children: (controls: CncMoveControls) => React.ReactElement;
+  children: () => React.ReactElement;
 }
 
 const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
@@ -2561,7 +2551,8 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
   onMove,
   children,
 }) => {
-  const actionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const dragSuppressedRef = useRef(false);
   const destinations = useMemo(
     () => cncManualMoveDestinations(kind, sourceColumn),
     [kind, sourceColumn],
@@ -2577,11 +2568,17 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       kind,
       cardId,
       sourceColumn,
-      trigger: actionButtonRef.current,
+      trigger: shellRef.current,
     }),
-    canDrag: moveAvailable,
+    canDrag: () => moveAvailable && !dragSuppressedRef.current,
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
   });
+  const updateDragSuppression = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
+    dragSuppressedRef.current = isCncManualDragIgnored(event.target);
+  }, []);
+  const clearDragSuppression = useCallback(() => {
+    dragSuppressedRef.current = false;
+  }, []);
   const moveMenu = useMemo<MenuProps>(() => ({
     items: [
       {
@@ -2598,7 +2595,7 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       const targetKey = key.slice('move:'.length) as CncTelegramTodayDisplayColumnKey;
       const target = destinations.find((destination) => destination.key === targetKey);
       if (!target) return;
-      onMove(kind, cardId, target.key, target.title, actionButtonRef.current);
+      onMove(kind, cardId, target.key, target.title, shellRef.current);
     },
   }), [cardId, destinations, kind, onMove]);
 
@@ -2610,62 +2607,26 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       overlayClassName="cnc-card-context-menu"
     >
       <div
+        ref={(node) => {
+          shellRef.current = node;
+          dragRef(node);
+        }}
         className={[
           'cnc-board-card-shell',
+          moveAvailable ? 'cnc-board-card-shell--draggable' : '',
           isDragging ? 'cnc-board-card-shell--dragging' : '',
         ].filter(Boolean).join(' ')}
+        onMouseDownCapture={updateDragSuppression}
+        onMouseUpCapture={clearDragSuppression}
+        onTouchStartCapture={updateDragSuppression}
+        onTouchEndCapture={clearDragSuppression}
+        onTouchCancelCapture={clearDragSuppression}
       >
-        {children({
-          moveMenu,
-          moveAvailable,
-          actionButtonRef,
-          dragRef: (node) => {
-            dragRef(node);
-          },
-        })}
+        {children()}
       </div>
     </Dropdown>
   );
 };
-
-const CncCardMoveActions: React.FC<{
-  controls: CncMoveControls;
-  label: string;
-}> = ({ controls, label }) => (
-  <div className="cnc-card-move-actions" onClick={stopCncCardClickPropagation}>
-    <Tooltip title={controls.moveAvailable ? 'Перетащить карточку' : 'Нет доступных колонок'}>
-      <Button
-        ref={(node) => {
-          controls.actionButtonRef.current = node;
-          controls.dragRef(node);
-        }}
-        type="text"
-        size="small"
-        className="cnc-card-move-actions__drag"
-        aria-label={`Перетащить ${label}`}
-        disabled={!controls.moveAvailable}
-        icon={<DragOutlined />}
-      />
-    </Tooltip>
-    <Dropdown
-      trigger={['click']}
-      disabled={!controls.moveAvailable}
-      menu={controls.moveMenu}
-      overlayClassName="cnc-card-context-menu"
-    >
-      <Tooltip title={controls.moveAvailable ? 'Переместить' : 'Нет доступных колонок'}>
-        <Button
-          ref={controls.actionButtonRef}
-          type="text"
-          size="small"
-          aria-label={`Переместить ${label}`}
-          disabled={!controls.moveAvailable}
-          icon={<MoreOutlined />}
-        />
-      </Tooltip>
-    </Dropdown>
-  </div>
-);
 
 interface CncDetailedMachineMapsProps {
   sources: CncDetailedMachineSource[];
@@ -3349,7 +3310,6 @@ interface CncTelegramPacketCardProps {
   highlightEnabled: boolean;
   summaryOnly: boolean;
   displayToggleVisible: boolean;
-  moveControls?: CncMoveControls;
   onToggleDisplay: () => void;
   onSelectRelation: () => void;
   onOpenOrder: (orderId: number) => void;
@@ -3362,7 +3322,6 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   highlightEnabled,
   summaryOnly,
   displayToggleVisible,
-  moveControls,
   onToggleDisplay,
   onSelectRelation,
   onOpenOrder,
@@ -3423,12 +3382,11 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             </>
           )}
         </div>
-        {(moveControls.moveAvailable || displayToggleVisible || packet.cuttingSequenceNo != null || (!summaryOnly && packet.completionStatus === 'completed')) && (
+        {(displayToggleVisible || packet.cuttingSequenceNo != null || (!summaryOnly && packet.completionStatus === 'completed')) && (
           <div
             className="cnc-packet-card__status-icons"
             aria-label={summaryOnly ? 'Вид карточки и номер раскроя' : 'Статусы листа'}
           >
-            <CncCardMoveActions controls={moveControls} label="файл станка" />
             <CncCardDisplayToggle
               visible={displayToggleVisible}
               standardView={!summaryOnly}
@@ -3715,7 +3673,6 @@ interface CncTelegramBathCardViewProps {
   detailedPlacement: CncDetailedBathPlacement;
   summaryOnly: boolean;
   displayToggleVisible: boolean;
-  moveControls: CncMoveControls;
   showReadyIcon: boolean;
   selectedDetailId: number | null;
   onToggleDisplay: () => void;
@@ -3736,7 +3693,6 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   detailedPlacement,
   summaryOnly,
   displayToggleVisible,
-  moveControls,
   showReadyIcon,
   selectedDetailId,
   onToggleDisplay,
@@ -3782,7 +3738,6 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           </div>
         </div>
         <div className="cnc-bath-card__actions">
-          {moveControls && <CncCardMoveActions controls={moveControls} label="карту ванны" />}
           <CncCardDisplayToggle
             visible={displayToggleVisible}
             standardView={!summaryOnly}
@@ -4238,6 +4193,12 @@ function decorateCncBathSheetSvg(
 
 function stopCncCardClickPropagation(event: React.MouseEvent<HTMLElement>): void {
   event.stopPropagation();
+}
+
+function isCncManualDragIgnored(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(
+    target.closest('button, a, input, textarea, select, [contenteditable="true"], [data-cnc-manual-drag-ignore="true"]'),
+  );
 }
 
 function enlargeCncBathDetailText(piece: SVGElement, scale: number): void {
@@ -4853,7 +4814,6 @@ interface StatusBoardCardViewProps {
   cncMuted?: boolean;
   cncSummaryOnly?: boolean;
   cncReadiness?: CncOrderReadiness;
-  cncMoveControls?: CncMoveControls;
   displayToggleVisible?: boolean;
   onToggleDisplay?: () => void;
   relationState?: CncRelationCardState;
@@ -4882,7 +4842,6 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   cncMuted = false,
   cncSummaryOnly = false,
   cncReadiness,
-  cncMoveControls,
   displayToggleVisible = false,
   onToggleDisplay,
   relationState = 'normal',
@@ -5087,11 +5046,8 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
             {primaryStatus}
           </Tag>
         </div>
-        {(actionsVisible || displayToggleVisible || cncMoveControls) && (
+        {(actionsVisible || displayToggleVisible) && (
           <div className="status-board-card__actions">
-            {cncMoveControls && (
-              <CncCardMoveActions controls={cncMoveControls} label="заказ" />
-            )}
             <CncCardDisplayToggle
               visible={displayToggleVisible}
               standardView={!cncSummaryOnly}
@@ -5213,7 +5169,9 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
 
       {cncOrderCard && cncReadiness && (
         <div className="cnc-order-card__readiness">
-          Из {cncReadiness.totalDetails} деталей Распилено {cncReadiness.cutDetails}, Закатаны {cncReadiness.rolledDetails}. Осталось {cncReadiness.remainingDetails}.
+          <span>Распилено {cncReadiness.cutDetails}</span>
+          <span>Закатано {cncReadiness.rolledDetails}</span>
+          <span>Осталось {cncReadiness.remainingDetails}</span>
         </div>
       )}
 
