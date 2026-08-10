@@ -202,6 +202,20 @@ describe('PgLabelsRepository structural guards', () => {
     expect(helperSource).toContain('LABEL_CUT_MAP_FALLBACK_MISMATCH');
   });
 
+  it('allows Telegram screenshot fallback when only text layout exists and no SVG result is imported', () => {
+    const helperStart = source.indexOf('async function assertExplicitTelegramImageRowsBelongToPacket');
+    const helperSource = source.slice(helperStart, source.indexOf('async function prepareExplicitTelegramSheetImage', helperStart));
+    const imageStart = source.indexOf('const imageResult = await client.query<TelegramImageCandidateRow>');
+    const imageResolver = source.slice(imageStart, source.indexOf('const imageByCopy', imageStart));
+
+    for (const resolver of [helperSource, imageResolver]) {
+      expect(resolver).toContain("packet.svg_cut_import_status IS DISTINCT FROM 'imported'");
+      expect(resolver).toContain('packet.svg_cut_job_id IS NULL');
+      expect(resolver).toContain('packet.svg_cut_result_id IS NULL');
+      expect(resolver).not.toContain('packet.cut_layout_json');
+    }
+  });
+
   it('names order archives from the order name and current generation number', () => {
     expect(buildOrderLabelsArchiveFilename(' Кухня / Север ', 22)).toBe('заказ-Кухня - Север-бирки-22.zip');
     expect(buildOrderLabelsArchiveFilename(null, 4)).toBe('заказ-без-названия-бирки-4.zip');

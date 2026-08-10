@@ -2331,7 +2331,11 @@ async function assertExplicitTelegramImageRowsBelongToPacket(
          AND evidence.match_order_id IS NOT NULL
          AND evidence.match_detail_id IS NOT NULL
          AND packet.sheet_image_storage_key IS NOT NULL
-         AND (packet.cut_layout_json IS NULL OR packet.cut_layout_json->>'status' IS DISTINCT FROM 'valid')
+         AND (
+           packet.svg_cut_import_status IS DISTINCT FROM 'imported'
+           OR packet.svg_cut_job_id IS NULL
+           OR packet.svg_cut_result_id IS NULL
+         )
        GROUP BY evidence.match_order_id, evidence.match_detail_id
      )
      SELECT requested.order_id, requested.detail_id, requested.instance,
@@ -2859,7 +2863,11 @@ async function resolveTelegramFallbackRows(
          AND packet.rework=false
          AND (packet.completion_status='completed' OR packet.thumbs_up=true)
          AND packet.sheet_image_storage_key IS NOT NULL
-         AND (packet.cut_layout_json IS NULL OR packet.cut_layout_json->>'status' IS DISTINCT FROM 'valid')
+         AND (
+           packet.svg_cut_import_status IS DISTINCT FROM 'imported'
+           OR packet.svg_cut_job_id IS NULL
+           OR packet.svg_cut_result_id IS NULL
+         )
      )
      SELECT candidate.packet_id, candidate.source_version, candidate.source_message_id,
        requested.order_id, requested.detail_id AS order_detail_id, requested.instance,
