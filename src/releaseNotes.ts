@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-10",
+    title: "Базис-раскрой: удаление пустых наборов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке наборов Базис-раскроя появилась кнопка удаления для наборов без деталей; непустые наборы удалить нельзя, а номер удалённого пустого набора освобождается для следующих новых наборов.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-10",
     title: "МДФ-работы: номер раскроя на печати скрина",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

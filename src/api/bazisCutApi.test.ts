@@ -25,7 +25,7 @@ describe('bazisCutApi', () => {
     expect(buildBazisCutSetListUrl()).toBe('/api/v1/bazis-cut-sets');
   });
 
-  it('drives all eight routes and puts idempotency keys in command headers', async () => {
+  it('drives all nine routes and puts idempotency keys in command headers', async () => {
     const card = cardDto();
     const list = {
       items: [card],
@@ -37,6 +37,7 @@ describe('bazisCutApi', () => {
       jsonResponse(list),
       jsonResponse({ set: card, addedCount: 1 }),
       jsonResponse(card),
+      jsonResponse({ deleted: true, set: card }),
       jsonResponse({ set: { ...card, name: 'Переименован' } }),
       jsonResponse({ set: card, addedCount: 0 }),
       jsonResponse({ set: card }),
@@ -56,6 +57,11 @@ describe('bazisCutApi', () => {
       { idempotencyKey: 'create-key-1491' },
     );
     await bazisCutApi.get(42);
+    await bazisCutApi.removeSet(
+      42,
+      { expectedVersion: 1 },
+      { idempotencyKey: 'delete-set-key-1491' },
+    );
     await bazisCutApi.rename(
       42,
       { name: 'Переименован', expectedVersion: 1 },
@@ -85,18 +91,20 @@ describe('bazisCutApi', () => {
       '/api/v1/bazis-cut-sets',
       '/api/v1/bazis-cut-sets/42',
       '/api/v1/bazis-cut-sets/42',
+      '/api/v1/bazis-cut-sets/42',
       '/api/v1/bazis-cut-sets/42/details',
       '/api/v1/bazis-cut-sets/42/details/7',
       '/api/v1/bazis-cut-sets/42/details/7',
       '/api/v1/bazis-cut-sets/42/export.xls',
     ]);
     expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
-      'GET', 'POST', 'GET', 'PATCH', 'POST', 'PATCH', 'DELETE', 'POST',
+      'GET', 'POST', 'GET', 'DELETE', 'PATCH', 'POST', 'PATCH', 'DELETE', 'POST',
     ]);
 
-    const commandCalls = [1, 3, 4, 5, 6];
+    const commandCalls = [1, 3, 4, 5, 6, 7];
     const expectedKeys = [
       'create-key-1491',
+      'delete-set-key-1491',
       'rename-key-1491',
       'add-key-1491',
       'update-key-1491',
@@ -112,8 +120,9 @@ describe('bazisCutApi', () => {
       orderId: 9,
       detailIds: [101, 102],
     });
-    expect(JSON.parse(fetchMock.mock.calls[6][1]?.body as string)).toEqual({ expectedVersion: 4 });
-    expect(fetchMock.mock.calls[7][1]).toMatchObject({ cache: 'no-store' });
+    expect(JSON.parse(fetchMock.mock.calls[3][1]?.body as string)).toEqual({ expectedVersion: 1 });
+    expect(JSON.parse(fetchMock.mock.calls[7][1]?.body as string)).toEqual({ expectedVersion: 4 });
+    expect(fetchMock.mock.calls[8][1]).toMatchObject({ cache: 'no-store' });
     expect(exported.fileName).toBe('Базис-1491.xls');
     expect(exported.blob.type).toBe('application/vnd.ms-excel');
   });

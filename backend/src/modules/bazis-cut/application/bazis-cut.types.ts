@@ -1,5 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
+  BazisCutDeleteSetResultDto,
   BazisCutDetailFields,
   BazisCutMutationResultDto,
   BazisCutOrderMembershipsDto,
@@ -60,6 +61,12 @@ export interface DeleteBazisCutDetailCommand extends BazisCutContext {
   idempotencyKey: string;
 }
 
+export interface DeleteBazisCutSetCommand extends BazisCutContext {
+  setId: number;
+  expectedVersion: number;
+  idempotencyKey: string;
+}
+
 export interface BazisCutRepositoryPort {
   list(input: BazisCutContext & { search: string; page: number; pageSize: number }): Promise<BazisCutSetListDto>;
   get(input: BazisCutContext & { setId: number }): Promise<BazisCutSetDto>;
@@ -76,5 +83,6 @@ export interface BazisCutRepositoryPort {
   addDetails(command: AddBazisCutDetailsCommand): Promise<BazisCutMutationResultDto>;
   updateDetail(command: UpdateBazisCutDetailCommand): Promise<BazisCutMutationResultDto>;
   deleteDetail(command: DeleteBazisCutDetailCommand): Promise<BazisCutMutationResultDto>;
+  deleteEmptySet(command: DeleteBazisCutSetCommand): Promise<BazisCutDeleteSetResultDto>;
   export(input: BazisCutContext & { setId: number; templateId?: number }): Promise<{ set: BazisCutSetDto; bytes: Buffer }>;
 }

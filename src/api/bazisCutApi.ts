@@ -106,6 +106,11 @@ export interface BazisCutMutationResultDto {
   addedCount?: number;
 }
 
+export interface BazisCutDeleteSetResultDto {
+  deleted: true;
+  set: BazisCutSetListItemDto;
+}
+
 export interface CreateBazisCutSetRequest {
   orderId: number;
   detailIds: number[];
@@ -214,6 +219,10 @@ export interface RemoveBazisCutSetDetailRequest {
   expectedVersion: number;
 }
 
+export interface RemoveBazisCutSetRequest {
+  expectedVersion: number;
+}
+
 export interface BazisCutCommandOptions {
   idempotencyKey: string;
 }
@@ -296,6 +305,17 @@ export const bazisCutApi = {
 
   get(setId: number): Promise<BazisCutSetCardDto> {
     return httpClient.get<BazisCutSetCardDto>(bazisCutSetRoutes.byId(setId));
+  },
+
+  removeSet(
+    setId: number,
+    request: RemoveBazisCutSetRequest,
+    options: BazisCutCommandOptions,
+  ): Promise<BazisCutDeleteSetResultDto> {
+    return httpClient.delete<BazisCutDeleteSetResultDto>(bazisCutSetRoutes.byId(setId), {
+      ...commandOptions(options),
+      body: JSON.stringify(request),
+    });
   },
 
   rename(

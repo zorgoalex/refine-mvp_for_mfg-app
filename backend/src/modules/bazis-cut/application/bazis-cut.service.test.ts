@@ -70,4 +70,17 @@ describe('BazisCutService denied audit', () => {
 
     expect(permissions.canUser).toHaveBeenCalledWith(user, 'orders.view');
   });
+
+  it('requires cut.manage before deleting an empty set', async () => {
+    const repository = { deleteEmptySet: vi.fn() } as unknown as BazisCutRepositoryPort;
+    const permissions = { canUser: vi.fn(() => false) } as unknown as PermissionsService;
+    const service = new BazisCutService(repository, permissions, {} as DatabaseClient);
+
+    await expect(service.deleteEmptySet({
+      currentUser: user, requestId: 'req-delete-empty', setId: 99, expectedVersion: 0, idempotencyKey: 'delete-empty-key',
+    })).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' });
+
+    expect(repository.deleteEmptySet).not.toHaveBeenCalled();
+    expect(permissions.canUser).toHaveBeenCalledWith(user, 'cut.manage');
+  });
 });
