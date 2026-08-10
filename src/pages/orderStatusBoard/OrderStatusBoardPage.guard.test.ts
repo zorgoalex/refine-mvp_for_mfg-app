@@ -160,6 +160,9 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('keeps bath cards printable with SVG and PDF previews', () => {
     expect(page).toContain('cutApi.fetchSheetSvg');
     expect(page).toContain('cutApi.fetchJobPdf');
+    expect(page).toContain('CutSheetLabelGenerateAction');
+    expect(page).toContain('labelSheet.detailIds');
+    expect(page).toContain('buildCncSheetImagePrintDocument');
     expect(page).toContain('const fetchFreshPdf = useCallback');
     expect(page).toContain('const downloadPdf = useCallback(async () =>');
     expect(page).toContain('const printPdf = useCallback(async () =>');
@@ -174,7 +177,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('triggerBlobDownload(blob, fileName');
     expect(page).not.toContain("window.open(url, '_blank')");
     expect(page).toContain('PrinterOutlined');
+    expect(page).toContain('TagsOutlined');
     expect(page).toContain('DownloadOutlined');
+    expect(css).toContain('.cnc-packet-card__sheet-toolbar');
+    expect(css).toContain('flex-wrap: nowrap');
     expect(css).toContain('.cnc-bath-card__pdf-pages');
     expect(css).toContain('.cnc-bath-card__pdf-page-image');
     expect(css).toContain('.cnc-bath-card__ready-icon--pending');

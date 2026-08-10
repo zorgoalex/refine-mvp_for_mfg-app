@@ -339,13 +339,28 @@ describe('CutPage source guards', () => {
     expect(source).toContain('sheetThumbs');
   });
 
-  it('mounts per-sheet label generation actions using detail ids from sheet placements', () => {
+  it('mounts per-sheet label generation actions on the common preview path for every cut profile', () => {
+    const previewLoopStart = source.indexOf('{previewSheets.map((sheet, sheetPos) => {');
+    expect(previewLoopStart).toBeGreaterThan(-1);
+    const labelActionStart = source.indexOf('<CutSheetLabelGenerateAction', previewLoopStart);
+    expect(labelActionStart).toBeGreaterThan(previewLoopStart);
+    const labelActionSource = source.slice(previewLoopStart, source.indexOf('{sheetThumbs[key]', labelActionStart));
+
     expect(source).toContain('CutSheetLabelGenerateAction');
     expect(source).toContain('detailIdsForSheet');
     expect(source).toContain('sheet.placements.pieces');
+    expect(labelActionSource).toContain('const sheetDetailIds = detailIdsForSheet(sheet)');
+    expect(labelActionSource).toContain('<CutSheetLabelGenerateAction');
+    expect(labelActionSource).toContain('detailIds={sheetDetailIds}');
+    expect(labelActionSource).toContain('cutGroupId={group.cutGroupId}');
+    expect(labelActionSource).toContain('sheetIndex={sheet.sheetIndex}');
+    expect(labelActionSource).not.toMatch(/layout_mode\s*===\s*'vacuum_table'|engine_used\s*===\s*'vacuum_table'/);
     expect(sheetLabelSource).toContain('Бирки');
     expect(sheetLabelSource).toContain('labelsApi.previewDetailLabels');
     expect(sheetLabelSource).toContain('labelsApi.generateDetailLabels');
+    expect(sheetLabelSource).toContain('printLabelSvgPages');
+    expect(sheetLabelSource).toContain('const runPrint = async () =>');
+    expect(sheetLabelSource).toContain('Скачать ZIP');
     // Operator picks the export file formats via checkboxes (bmp/png/emf).
     expect(sheetLabelSource).toContain('Форматы файлов бирок');
     expect(sheetLabelSource).toContain('Checkbox.Group');

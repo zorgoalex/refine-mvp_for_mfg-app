@@ -56,6 +56,14 @@ export interface CncTelegramCutLayout {
   items: CncTelegramCutLayoutItem[];
 }
 
+export interface CncTelegramPacketCutSheet {
+  cutGroupId: number;
+  sheetIndex: number;
+  sheetNumber: number;
+  variant: 'auto' | 'manual';
+  detailIds: number[];
+}
+
 export interface CncTelegramPacket {
   packetId: string;
   externalPacketKey: string;
@@ -88,6 +96,7 @@ export interface CncTelegramPacket {
   svgCutResultId?: number | null;
   svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
   svgCutImportNote?: string | null;
+  svgCutSheets?: CncTelegramPacketCutSheet[];
   itemCount: number;
   itemQuantityTotal: number;
   updatedAt: string;

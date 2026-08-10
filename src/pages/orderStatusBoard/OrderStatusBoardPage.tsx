@@ -49,6 +49,7 @@ import {
   RightOutlined,
   SearchOutlined,
   SettingOutlined,
+  TagsOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -73,12 +74,14 @@ import type {
 import type {
   CncTelegramBathCard,
   CncTelegramPacket,
+  CncTelegramPacketCutSheet,
   CncTelegramTodayColumn,
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
+import { CutSheetLabelGenerateAction } from '../cut/CutSheetLabelGenerateAction';
 import {
   classifyOrderStatusBoardMoveFailure,
   executeOrderStatusBoardMove,
@@ -1787,6 +1790,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
     isCncDisplayComment(comment) && comment.trim() !== (packet.programName ?? '').trim(),
   );
   const orderSummaries = buildCncOrderSummaries(packet.items);
+  const svgCutSheet = packet.svgCutSheets?.[0] ?? null;
 
   return (
     <div
@@ -1947,6 +1951,8 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         <CncTelegramSheetImagePreview
           imageUrl={packet.sheetImageUrl}
           title={packet.programName ?? packet.externalPacketKey}
+          cutJobId={packet.svgCutJobId ?? null}
+          labelSheet={svgCutSheet}
         />
       )}
 
@@ -1961,11 +1967,15 @@ CncTelegramPacketCard.displayName = 'CncTelegramPacketCard';
 interface CncTelegramSheetImagePreviewProps {
   imageUrl: string;
   title: string;
+  cutJobId: number | null;
+  labelSheet: CncTelegramPacketCutSheet | null;
 }
 
 const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> = ({
   imageUrl,
   title,
+  cutJobId,
+  labelSheet,
 }) => {
   const [open, setOpen] = useState(false);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -2001,6 +2011,30 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     if (objectUrl) URL.revokeObjectURL(objectUrl);
   }, [objectUrl]);
 
+  const printSheetImage = useCallback(() => {
+    if (!objectUrl) {
+      message.warning('Скрин ещё не готов для печати');
+      return;
+    }
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      message.warning('Браузер заблокировал окно печати. Разрешите всплывающие окна.');
+      return;
+    }
+    printWindow.opener = null;
+    printWindow.document.open();
+    printWindow.document.write(buildCncSheetImagePrintDocument(objectUrl, title));
+    printWindow.document.close();
+    printWindow.focus();
+    window.setTimeout(() => {
+      try {
+        printWindow.print();
+      } catch {
+        printWindow.close();
+      }
+    }, 100);
+  }, [objectUrl, title]);
+
   return (
     <Collapse
       className="cnc-packet-card__sheet"
@@ -2017,6 +2051,34 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
         }
       >
         <div className="cnc-packet-card__sheet-body">
+          <div className="cnc-packet-card__sheet-toolbar" onClick={(event) => event.stopPropagation()}>
+            {cutJobId && labelSheet ? (
+              <CutSheetLabelGenerateAction
+                detailIds={labelSheet.detailIds}
+                cutJobId={cutJobId}
+                cutGroupId={labelSheet.cutGroupId}
+                sheetIndex={labelSheet.sheetIndex}
+              />
+            ) : (
+              <Tooltip title="Нет связанного листа раскроя для бирок">
+                <span>
+                  <Button className="app-hit-area-sm" size="small" icon={<TagsOutlined />} disabled>
+                    Бирки
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+            <Tooltip title="Печать скрина листа">
+              <Button
+                className="app-hit-area-sm"
+                size="small"
+                icon={<PrinterOutlined />}
+                disabled={!objectUrl}
+                onClick={printSheetImage}
+                aria-label={`Печать скрина листа ${title}`}
+              />
+            </Tooltip>
+          </div>
           {loading && (
             <div className="cnc-packet-card__sheet-loading">
               <Spin size="small" />
@@ -3268,6 +3330,54 @@ function resolveStatusBoardStatusColor(
 function errorMessage(error: unknown, fallback: string): string {
   if (isApiError(error)) return error.message || fallback;
   return error instanceof Error ? error.message : fallback;
+}
+
+function buildCncSheetImagePrintDocument(imageUrl: string, title: string): string {
+  const escapedTitle = escapeHtml(title);
+  const escapedImageUrl = escapeHtml(imageUrl);
+  return `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapedTitle}</title>
+  <style>
+    @page { margin: 8mm; size: auto; }
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #fff;
+      color: #111;
+    }
+    body {
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+    }
+    img {
+      display: block;
+      max-width: 100%;
+      max-height: 100vh;
+      object-fit: contain;
+    }
+    @media screen {
+      body { background: #f5f5f5; padding: 24px; box-sizing: border-box; }
+      img { background: #fff; box-shadow: 0 10px 32px rgba(0, 0, 0, 0.16); }
+    }
+  </style>
+</head>
+<body>
+  <img src="${escapedImageUrl}" alt="${escapedTitle}" />
+</body>
+</html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 }
 
 function formatDateTime(value: string): string {

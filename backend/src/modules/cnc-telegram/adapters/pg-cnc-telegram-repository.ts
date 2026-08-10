@@ -36,6 +36,7 @@ import type {
   CncTelegramItemSource,
   CncTelegramMatchStatus,
   CncTelegramPacketDto,
+  CncTelegramPacketCutSheetDto,
   CncTelegramPacketItemDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayColumnDto,
@@ -81,6 +82,7 @@ interface PacketJoinedRow extends QueryResultRow {
   svg_cut_result_id: string | number | null;
   svg_cut_import_status: 'none' | 'skipped' | 'needs_review' | 'imported' | null;
   svg_cut_import_note: string | null;
+  svg_cut_sheets_json: unknown;
   updated_at: string | Date;
   packet_item_id: string | null;
   source_item_key: string | null;
@@ -340,6 +342,36 @@ function packetSelectSql(whereSql: string): string {
       p.svg_cut_result_id,
       p.svg_cut_import_status,
       p.svg_cut_import_note,
+      (
+        SELECT COALESCE(jsonb_agg(
+          jsonb_build_object(
+            'cutGroupId', sheet_summary.cut_group_id,
+            'sheetIndex', sheet_summary.sheet_index,
+            'sheetNumber', sheet_summary.sheet_ordinal,
+            'variant', sheet_summary.variant,
+            'detailIds', sheet_summary.detail_ids
+          )
+          ORDER BY sheet_summary.sheet_ordinal, sheet_summary.cut_group_id, sheet_summary.sheet_index
+        ), '[]'::jsonb)
+        FROM (
+          SELECT
+            sheet.cut_group_id,
+            sheet.sheet_index,
+            sheet.sheet_ordinal,
+            sheet.variant,
+            jsonb_agg(
+              placement.order_detail_id
+              ORDER BY placement.order_id, placement.order_detail_id, placement.instance
+            ) AS detail_ids
+          FROM cut_result_placement placement
+          JOIN cut_result_sheet_map sheet
+            ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+           AND sheet.is_effective = true
+          WHERE placement.cut_result_id = p.svg_cut_result_id
+            AND placement.order_detail_id IS NOT NULL
+          GROUP BY sheet.cut_group_id, sheet.sheet_index, sheet.sheet_ordinal, sheet.variant
+        ) sheet_summary
+      ) AS svg_cut_sheets_json,
       p.updated_at,
       i.packet_item_id,
       i.source_item_key,
@@ -2382,6 +2414,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         svgCutResultId: toNullableNumber(row.svg_cut_result_id),
         svgCutImportStatus: row.svg_cut_import_status ?? 'none',
         svgCutImportNote: row.svg_cut_import_note,
+        svgCutSheets: packetCutSheetsArray(row.svg_cut_sheets_json),
         itemCount: 0,
         itemQuantityTotal: 0,
         updatedAt: toIso(row.updated_at),
@@ -2524,6 +2557,42 @@ function dowelingArray(value: unknown): CncTelegramDowelingLinkDto[] {
     typeof (item as CncTelegramDowelingLinkDto).orderName === 'string' &&
     typeof (item as CncTelegramDowelingLinkDto).dowelingNumber === 'string',
   );
+}
+
+function packetCutSheetsArray(value: unknown): CncTelegramPacketCutSheetDto[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(packetCutSheetOrNull)
+    .filter((sheet): sheet is CncTelegramPacketCutSheetDto => sheet !== null);
+}
+
+function packetCutSheetOrNull(value: unknown): CncTelegramPacketCutSheetDto | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const cutGroupId = toPositiveInteger(raw.cutGroupId as string | number | null | undefined);
+  const sheetIndex = toNullableNumber(raw.sheetIndex as string | number | null | undefined);
+  const sheetNumber = toPositiveInteger(raw.sheetNumber as string | number | null | undefined);
+  const detailIds = Array.isArray(raw.detailIds)
+    ? raw.detailIds
+      .map((id) => toPositiveInteger(id as string | number | null | undefined))
+      .filter((id): id is number => id !== null)
+    : [];
+  if (
+    cutGroupId === null ||
+    sheetNumber === null ||
+    sheetIndex === null ||
+    !Number.isInteger(sheetIndex) ||
+    sheetIndex < 0
+  ) {
+    return null;
+  }
+  return {
+    cutGroupId,
+    sheetIndex,
+    sheetNumber,
+    variant: raw.variant === 'manual' ? 'manual' : 'auto',
+    detailIds,
+  };
 }
 
 function cutLayoutOrNull(value: unknown): CncTelegramCutLayoutDto | null {

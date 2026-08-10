@@ -87,6 +87,7 @@ describe('PgCncTelegramRepository', () => {
       packet: {
         itemCount: 1,
         itemQuantityTotal: 4,
+        svgCutSheets: [{ cutGroupId: 100, sheetIndex: 0, sheetNumber: 1, detailIds: [3101, 3101] }],
         sourceCreatedAt: '2026-07-24T07:59:00.000Z',
       },
     });
@@ -95,6 +96,8 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('INSERT INTO outbox_events');
     expect(sql).toContain('UPDATE command_idempotency_keys');
     expect(sql).toContain('FROM unnest($1::bigint[], $2::bigint[])');
+    expect(sql).toContain('svg_cut_sheets_json');
+    expect(sql).toContain('cut_result_placement placement');
     expect(sql).not.toMatch(/\b(raw_gcode|screenshot_path|file_path)\b/i);
     const idempotencyInsert = queries.find((query) =>
       /INSERT INTO command_idempotency_keys/i.test(query.text),
@@ -1199,6 +1202,19 @@ function packetRowBase() {
     analysis_warnings_json: [],
     ocr_engine: 'glm-ocr-0.9b-q8-llama.cpp',
     parser_version: 'cnc-telegram-structured-v1',
+    svg_cut_job_id: 30,
+    svg_cut_result_id: 500,
+    svg_cut_import_status: 'imported',
+    svg_cut_import_note: null,
+    svg_cut_sheets_json: [
+      {
+        cutGroupId: 100,
+        sheetIndex: 0,
+        sheetNumber: 1,
+        variant: 'auto',
+        detailIds: [3101, 3101],
+      },
+    ],
     updated_at: '2026-07-24T08:00:10.000Z',
     packet_item_id: '00000000-0000-0000-0000-000000000002',
     source_item_key: '2689:31:497x477',
