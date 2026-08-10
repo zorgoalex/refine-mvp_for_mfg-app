@@ -3085,7 +3085,6 @@ function withCutMap(row: LabelRow, cutMap: LabelRowCutMapSnapshot): LabelRow {
   };
   if (isTelegramCutMap(cutMap)) {
     values[`detail.${DETAIL_CUT_RESULT_VERSION_REGULAR_FIELD}`] = cutMap.cutNumber;
-    values[`detail.${DETAIL_CUT_RESULT_VERSION_VACUUM_FIELD}`] = cutMap.cutNumber;
   }
   return {
     ...row,

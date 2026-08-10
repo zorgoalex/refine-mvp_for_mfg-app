@@ -320,7 +320,7 @@ describe('label cut-map resolution', () => {
       expect(resolved.rows[0].values).toMatchObject({
         'cut.number': '№47',
         'detail.cut_result_version_no': '№47',
-        'detail.bath_cut_result_version_no': '№47',
+        'detail.bath_cut_result_version_no': '31-1',
       });
       const svg = renderSvgPages(template(), resolved.rows, resolved.assets).pages[0];
       expect(svg).toContain('data-cut-number="№47"');
