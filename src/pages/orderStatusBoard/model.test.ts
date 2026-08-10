@@ -18,6 +18,7 @@ import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   collectCncOrderIds,
+  DEFAULT_MDF_ORDER_CARD_SORT,
   filterBoardColumns,
   filterCncBazisCutSetsByMissingBathDetails,
   filterCncBathColumnsByMachineOrderMatches,
@@ -454,6 +455,35 @@ describe('order status board model', () => {
       rolledDetails: 0,
       remainingDetails: 0,
     });
+  });
+
+  it('sorts MDF order cards by order number by default and supports selected direction', () => {
+    const cards = [
+      { ...card(10), orderName: '10', updatedAt: '2026-07-19T09:00:00.000Z' },
+      { ...card(2), orderName: '2', updatedAt: '2026-07-19T11:00:00.000Z' },
+      { ...card(1), orderName: '1', updatedAt: '2026-07-19T10:00:00.000Z' },
+    ];
+
+    const defaultSplit = splitCncOrderCardsByManualColumn(cards, new Map(), {});
+    expect(DEFAULT_MDF_ORDER_CARD_SORT).toEqual({
+      sortBy: 'orderNumber',
+      sortOrder: 'asc',
+    });
+    expect(defaultSplit.orders.map(({ card: item }) => item.orderName)).toEqual([
+      '1',
+      '2',
+      '10',
+    ]);
+
+    const updatedDescSplit = splitCncOrderCardsByManualColumn(cards, new Map(), {}, {
+      sortBy: 'updatedAt',
+      sortOrder: 'desc',
+    });
+    expect(updatedDescSplit.orders.map(({ card: item }) => item.orderName)).toEqual([
+      '2',
+      '1',
+      '10',
+    ]);
   });
 
   it('keeps Basis-cut cards only for bath details missing from machine files', () => {

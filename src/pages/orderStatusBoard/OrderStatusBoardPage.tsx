@@ -108,6 +108,7 @@ import {
   buildCncOrderFilterOptions,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
+  DEFAULT_MDF_ORDER_CARD_SORT,
   DEFAULT_ORDER_STATUS_BOARD_SORT,
   filterBoardColumns,
   filterCncBazisCutSetsByMissingBathDetails,
@@ -331,8 +332,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       ? 'production'
       : 'order';
   const defaultSort = useMemo(
-    () => readStatusBoardSortPreference(currentUser?.id, sortPreferenceBoard),
-    [currentUser?.id, sortPreferenceBoard],
+    () =>
+      fixedView === 'cnc_today' || (!fixedView && searchParams.get('flow') === 'cnc')
+        ? DEFAULT_MDF_ORDER_CARD_SORT
+        : readStatusBoardSortPreference(currentUser?.id, sortPreferenceBoard),
+    [currentUser?.id, fixedView, searchParams, sortPreferenceBoard],
   );
   const viewState = useMemo(() => {
     const parsed = parseOrderStatusBoardViewState(searchParams, {
@@ -1020,6 +1024,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       : cncOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId)),
     [cncMutedOrderIds, cncOrderStatusCards, cncTerminalColumnsVisible],
   );
+  const cncOrderSortPreference = useMemo(
+    () => ({ sortBy: viewState.sortBy, sortOrder: viewState.sortOrder }),
+    [viewState.sortBy, viewState.sortOrder],
+  );
   const cncRelationContext = useMemo(
     () =>
       cncRelationsEnabled
@@ -1090,7 +1098,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       initialLoad = false;
       if (showLoading) setCncOrderBoardLoading(true);
       try {
-        const response = await fetchCncOrderStatusBoard(cncOrderIds);
+        const response = await fetchCncOrderStatusBoard(cncOrderIds, {
+          sortBy: viewState.sortBy,
+          sortOrder: viewState.sortOrder,
+        });
         if (!cancelled) setCncOrderBoard(response);
       } catch (error) {
         if (!cancelled && !warned) {
@@ -1111,7 +1122,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [cncOrderIds, isCncToday]);
+  }, [cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
 
   const toggleCncRelation = useCallback((target: CncRelationTarget) => {
     setActiveCncRelation((current) =>
@@ -1313,6 +1324,32 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         >
           Распиленные файлы
         </Checkbox>
+      </div>
+      <div
+        className="status-board-toolbar__sort-settings"
+        aria-label="Сортировка карточек заказов МДФ-доски"
+      >
+        <strong>Сортировка заказов</strong>
+        <div className="status-board-toolbar__sort-row">
+          <Typography.Text>Сортировать по</Typography.Text>
+          <Select<OrderStatusBoardSortBy>
+            value={viewState.sortBy}
+            options={STATUS_BOARD_SORT_FIELD_OPTIONS}
+            onChange={(sortBy) => updateViewState({ sortBy })}
+            aria-label="Свойство сортировки заказов МДФ-доски"
+          />
+        </div>
+        <div className="status-board-toolbar__sort-row">
+          <Typography.Text>Показывать сначала</Typography.Text>
+          <Segmented
+            value={viewState.sortOrder}
+            options={sortDirectionOptions}
+            onChange={(sortOrder) =>
+              updateViewState({ sortOrder: sortOrder as OrderStatusBoardSortOrder })
+            }
+            aria-label="Направление сортировки заказов МДФ-доски"
+          />
+        </div>
       </div>
     </section>
   );
@@ -1850,6 +1887,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 mutedOrderIds={cncMutedOrderIds}
                 orderStatusColumns={cncOrderBoardColumns}
                 orderCardsLoading={cncOrderBoardLoading}
+                orderSort={cncOrderSortPreference}
                 relationContext={cncRelationContext}
                 relationsEnabled={cncRelationsEnabled}
                 detailedContext={cncDetailedContext}
@@ -1945,6 +1983,10 @@ interface CncTelegramTodayColumnsProps {
   mutedOrderIds: ReadonlySet<number>;
   orderStatusColumns: OrderStatusBoardColumn[];
   orderCardsLoading: boolean;
+  orderSort: {
+    sortBy: OrderStatusBoardSortBy;
+    sortOrder: OrderStatusBoardSortOrder;
+  };
   relationContext: CncRelationContext | null;
   relationsEnabled: boolean;
   detailedContext: CncDetailedContext | null;
@@ -2007,6 +2049,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   mutedOrderIds,
   orderStatusColumns,
   orderCardsLoading,
+  orderSort,
   relationContext,
   relationsEnabled,
   detailedContext,
@@ -2049,8 +2092,9 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       orderCards,
       orderReadinessByOrderId,
       manualMoves,
+      orderSort,
     ),
-    [manualMoves, orderCards, orderReadinessByOrderId],
+    [manualMoves, orderCards, orderReadinessByOrderId, orderSort],
   );
   const manualDisplayColumns = useMemo(
     () => applyCncManualMovesToColumns(columns, manualMoves),
@@ -5314,6 +5358,10 @@ function formatArea(value: number): string {
 
 async function fetchCncOrderStatusBoard(
   orderIds: readonly number[],
+  sortPreference: {
+    sortBy: OrderStatusBoardSortBy;
+    sortOrder: OrderStatusBoardSortOrder;
+  },
 ): Promise<OrderStatusBoardResponse | null> {
   if (orderIds.length === 0) return null;
   const responses = await Promise.all(
@@ -5323,6 +5371,8 @@ async function fetchCncOrderStatusBoard(
         limit: CNC_ORDER_STATUS_BOARD_BATCH_SIZE,
         includeDone: true,
         orderIds: chunk,
+        sortBy: sortPreference.sortBy,
+        sortOrder: sortPreference.sortOrder,
       }),
     ),
   );
@@ -5644,6 +5694,7 @@ export function splitCncOrderCardsByManualColumn(
   cards: OrderStatusBoardCard[],
   readinessByOrderId: ReadonlyMap<number, CncOrderReadiness>,
   manualMoves: CncBoardManualMoveState,
+  sortPreference = DEFAULT_MDF_ORDER_CARD_SORT,
 ): Record<'orders' | 'orders_ready' | 'orders_issued', CncOrderBoardCard[]> {
   const result: Record<'orders' | 'orders_ready' | 'orders_issued', CncOrderBoardCard[]> = {
     orders: [],
@@ -5668,7 +5719,87 @@ export function splitCncOrderCardsByManualColumn(
     const orderColumn = isCncOrderColumnKey(targetColumn) ? targetColumn : autoColumn;
     result[orderColumn].push({ card, readiness });
   }
+  for (const columnCards of Object.values(result)) {
+    columnCards.sort((left, right) =>
+      compareCncOrderBoardCards(left, right, sortPreference),
+    );
+  }
   return result;
+}
+
+function compareCncOrderBoardCards(
+  left: CncOrderBoardCard,
+  right: CncOrderBoardCard,
+  sortPreference: {
+    sortBy: OrderStatusBoardSortBy;
+    sortOrder: OrderStatusBoardSortOrder;
+  },
+): number {
+  if (sortPreference.sortBy === 'plannedDate') {
+    const primary = compareNullableDate(
+      left.card.plannedCompletionDate,
+      right.card.plannedCompletionDate,
+      sortPreference.sortOrder,
+    );
+    if (primary !== 0) return primary;
+    return right.card.orderId - left.card.orderId;
+  }
+  if (sortPreference.sortBy === 'updatedAt') {
+    const primary = compareNullableDate(
+      left.card.updatedAt,
+      right.card.updatedAt,
+      sortPreference.sortOrder,
+    );
+    if (primary !== 0) return primary;
+    return right.card.orderId - left.card.orderId;
+  }
+  const direction = sortPreference.sortOrder === 'desc' ? -1 : 1;
+  const primary = compareCncOrderBoardCardsByField(left, right, sortPreference.sortBy);
+  if (primary !== 0) return primary * direction;
+  return compareStatusBoardOrderNumber(left.card, right.card) ||
+    right.card.orderId - left.card.orderId;
+}
+
+function compareCncOrderBoardCardsByField(
+  left: CncOrderBoardCard,
+  right: CncOrderBoardCard,
+  sortBy: OrderStatusBoardSortBy,
+): number {
+  if (sortBy === 'orderNumber') {
+    return compareStatusBoardOrderNumber(left.card, right.card);
+  }
+  return left.card.priority - right.card.priority;
+}
+
+function compareStatusBoardOrderNumber(
+  left: OrderStatusBoardCard,
+  right: OrderStatusBoardCard,
+): number {
+  return formatStatusBoardOrderNumber(left).localeCompare(
+    formatStatusBoardOrderNumber(right),
+    'ru-RU',
+    { numeric: true, sensitivity: 'base' },
+  );
+}
+
+function compareNullableDate(
+  leftValue: string | null,
+  rightValue: string | null,
+  sortOrder: OrderStatusBoardSortOrder,
+): number {
+  const leftTimestamp = parseSortTimestamp(leftValue);
+  const rightTimestamp = parseSortTimestamp(rightValue);
+  if (leftTimestamp === null && rightTimestamp === null) return 0;
+  if (leftTimestamp === null) return 1;
+  if (rightTimestamp === null) return -1;
+  const direction = sortOrder === 'desc' ? -1 : 1;
+  return (leftTimestamp - rightTimestamp) * direction;
+}
+
+function parseSortTimestamp(value: string | null): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function normalizeCncOrderReadiness(

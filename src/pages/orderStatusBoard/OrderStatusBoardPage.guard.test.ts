@@ -258,6 +258,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('status-board-toolbar__sort-settings');
     expect(page).toContain('switchStatusBoardView');
     expect(page).toContain('readStatusBoardSortPreference(currentUser?.id, view)');
+    expect(page).toContain('DEFAULT_MDF_ORDER_CARD_SORT');
+    expect(page).toContain('Сортировка заказов');
+    expect(page).toContain('Свойство сортировки заказов МДФ-доски');
+    expect(page).toContain('Направление сортировки заказов МДФ-доски');
+    expect(page).toContain('fetchCncOrderStatusBoard(cncOrderIds, {');
+    expect(page).toContain('orderSort={cncOrderSortPreference}');
+    expect(page).toContain('compareCncOrderBoardCards');
   });
 
   it('keeps CNC work as a separate visual flow and API contract', () => {

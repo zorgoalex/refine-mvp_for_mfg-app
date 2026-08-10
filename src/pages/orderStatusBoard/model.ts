@@ -48,6 +48,11 @@ export interface OrderStatusBoardSortPreference {
   sortOrder: OrderStatusBoardSortOrder;
 }
 
+export const DEFAULT_MDF_ORDER_CARD_SORT: OrderStatusBoardSortPreference = {
+  sortBy: 'orderNumber',
+  sortOrder: 'asc',
+};
+
 export interface OrderStatusBoardViewState {
   view: OrderStatusBoardVisualFlow;
   search: string;

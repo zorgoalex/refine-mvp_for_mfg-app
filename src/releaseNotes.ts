@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-10",
+    title: "МДФ-работы: сортировка карточек заказов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Карточки заказов на доске МДФ-работ по умолчанию сортируются по номеру заказа; в настройках за шестерёнкой можно выбрать поле сортировки и направление.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-10",
     title: "Базис-раскрой: площадь наборов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
