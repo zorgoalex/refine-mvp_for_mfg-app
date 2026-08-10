@@ -34,9 +34,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(interaction).toContain('if (!confirmed)');
   });
 
-  it('keeps mobile drag-free and respects reduced motion', () => {
+  it('keeps MDF drag touch-capable while backend status drag stays fine-pointer gated', () => {
+    expect(page).toContain("import { TouchBackend } from 'react-dnd-touch-backend'");
+    expect(page).toContain('enableMouseEvents: true');
+    expect(page).toContain('delayTouchStart');
+    expect(page).toContain('function useFinePointer()');
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
-    expect(page).toContain('canDrag: moveAvailable && finePointer');
+    expect(page).toContain('const dragAvailable = moveAvailable && finePointer');
+    expect(page).toContain('canDrag: dragAvailable');
+    expect(page).toContain('canDrag: moveAvailable');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     expect(css).toContain('scroll-snap-type: x mandatory');
   });
@@ -58,6 +64,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('formatMoney(');
     expect(page).not.toContain('CURRENCY_CODE');
     expect(page).not.toContain('paymentStatusName ||');
+  });
+
+  it('keeps order status badge in the order header and overdue as a clock icon', () => {
+    expect(page).toContain('status-board-card__identity');
+    expect(page).toContain('status-board-card__status-badge');
+    expect(page).toContain('status-board-card__overdue-icon');
+    expect(page).toContain('aria-label="Плановая дата прошла"');
+    expect(page).not.toContain("<Tag color=\"blue\">Авто</Tag>");
+    expect(page).not.toContain("<Tag color=\"volcano\">Плановая дата прошла</Tag>");
+    expect(css).toContain('.status-board-card__identity');
+    expect(css).toContain('.status-board-card__overdue-icon');
+    expect(css).toContain('color: #cf1322');
   });
 
   it('shows the completed-status opt-in only on the production tab with a usable hit area', () => {
@@ -107,13 +125,33 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed'");
     expect(page).toContain('cnc-today-column__header-main');
     expect(page).toContain('cnc-today-column__totals');
-    expect(page).toContain("{totals.details} дет. · {formatArea(totals.areaM2)}");
+    expect(page).toContain('`${totals.details} дет. · ${formatArea(totals.areaM2)}`');
     expect(page).toContain('По выбранному заказу МДФ-работ нет');
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
     expect(page).toContain('cncColumnDisplayTitle(column)');
     expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
+    expect(page).toContain("baths_rolled: 'Закатаны'");
+    expect(page).toContain("orders: 'Заказы'");
+    expect(page).toContain("orders_ready: 'Готов к выдаче'");
+    expect(page).toContain("orders_issued: 'Выдан'");
+    expect(page).toContain('buildCncBoardDisplayColumns(cncFilteredColumns, cncManualMoves)');
+    expect(page).toContain('CNC_MANUAL_MOVE_STORAGE_KEY');
+    expect(page).toContain('CncManualCardFrame');
+    expect(page).toContain("trigger={['contextMenu']}");
+    expect(page).toContain("label: 'Переместить'");
+    expect(page).toContain('isCncManualMoveAllowed');
+    expect(page).toContain('const autoColumn = isCncOrderReady(order)');
+    expect(page).toContain('CncOrderCardView');
+    expect(page).toContain('Из {order.totalDetails} деталей Распилено {order.cutDetails}, Закатаны {order.rolledDetails}. Осталось {order.remainingDetails}.');
+    expect(css).toContain('.cnc-today-column--baths_rolled');
+    expect(css).toContain('.cnc-today-column--orders_ready');
+    expect(css).toContain('.cnc-today-column--orders_issued');
+    expect(css).toContain('.cnc-card-context-menu');
+    expect(css).toContain('.cnc-order-card__progress');
+    expect(css).toContain('.cnc-order-card__progress-segment--cut');
+    expect(css).toContain('.cnc-order-card__progress-segment--rolled');
     expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
@@ -191,7 +229,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('checked={cncRelationsEnabled}');
     expect(page).toContain('if (!cncRelationsEnabled) setActiveCncRelation(null)');
     expect(page).toContain('cncRelationsEnabled');
-    expect(page).toContain('? buildCncRelationContext(cncFilteredColumns, activeCncRelation)');
+    expect(page).toContain('? buildCncRelationContext(cncDisplayColumns, activeCncRelation)');
     expect(page).toContain('const bathCards = relationContext');
     expect(page).toContain('const packetCards = relationContext');
     expect(page).toContain('sortCncRelationCards');
@@ -307,7 +345,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('status-board-card__status-label');
     expect(page).toContain('resolveStatusBoardStatusColor(board, card, allColumns)');
     expect(page).toContain('color={primaryStatusColor}');
-    expect(page).toContain('status-board-card__status-row');
+    expect(page).toContain('status-board-card__identity');
     expect(page).toContain('status-board-card__status-badge');
     expect(page).toContain('status-board-card__standard-grid');
     expect(css).toContain('.status-board-toolbar__display-mode');
@@ -317,7 +355,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('flex-wrap: nowrap');
     expect(css).toContain('.status-board-card--compact');
     expect(css).toContain('.status-board-card--minimal');
-    expect(css).toContain('.status-board-card__status-row');
+    expect(css).toContain('.status-board-card__identity');
     expect(css).toContain('.status-board-card__status-badge.ant-tag');
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
     expect(css).toContain('.status-board-card__number.ant-btn');
