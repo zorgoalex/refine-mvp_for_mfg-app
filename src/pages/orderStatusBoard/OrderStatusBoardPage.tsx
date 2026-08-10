@@ -51,6 +51,7 @@ import {
   RightOutlined,
   SearchOutlined,
   ToolOutlined,
+  TagsOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -80,6 +81,7 @@ import type {
   CncTelegramBathCard,
   CncTelegramBazisCutSetCard,
   CncTelegramPacket,
+  CncTelegramPacketCutSheet,
   CncTelegramTodayColumn,
   CncTelegramTodayResponse,
 } from '../../api/types/cncTelegramApi.types';
@@ -90,6 +92,7 @@ import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
+import { CutSheetLabelGenerateAction } from '../cut/CutSheetLabelGenerateAction';
 import {
   classifyOrderStatusBoardMoveFailure,
   executeOrderStatusBoardMove,
@@ -3343,6 +3346,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const orderSummaries = buildCncOrderSummaries(packet.items);
   const otherMaterial = cncPacketHasOtherMaterialMarker(packet);
   const hasSheetImage = Boolean(packet.sheetImageUrl);
+  const svgCutSheet = packet.svgCutSheets?.[0] ?? null;
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
 
   useEffect(() => {
@@ -3546,6 +3550,8 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               imageUrl={packet.sheetImageUrl}
               title={packet.programName ?? packet.externalPacketKey}
               open={activeAuxView === 'sheet'}
+              cutJobId={packet.svgCutJobId ?? null}
+              labelSheet={svgCutSheet}
             />
           )}
 
@@ -3563,12 +3569,16 @@ interface CncTelegramSheetImagePreviewProps {
   imageUrl: string;
   title: string;
   open: boolean;
+  cutJobId: number | null;
+  labelSheet: CncTelegramPacketCutSheet | null;
 }
 
 const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> = ({
   imageUrl,
   title,
   open,
+  cutJobId,
+  labelSheet,
 }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -3622,15 +3632,34 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
         className="cnc-packet-card__sheet-panel"
         onClick={stopCncCardClickPropagation}
       >
-        <div className="cnc-packet-card__sheet-actions">
-          <Button
-            icon={<PrinterOutlined />}
-            disabled={!objectUrl}
-            aria-haspopup="dialog"
-            onClick={() => setPrintPreviewOpen(true)}
-          >
-            Печать
-          </Button>
+        <div className="cnc-packet-card__sheet-actions" onClick={(event) => event.stopPropagation()}>
+          {cutJobId && labelSheet ? (
+            <CutSheetLabelGenerateAction
+              detailIds={labelSheet.detailIds}
+              cutJobId={cutJobId}
+              cutGroupId={labelSheet.cutGroupId}
+              sheetIndex={labelSheet.sheetIndex}
+            />
+          ) : (
+            <Tooltip title="Нет связанного листа раскроя для бирок">
+              <span>
+                <Button className="app-hit-area-sm" size="small" icon={<TagsOutlined />} disabled>
+                  Бирки
+                </Button>
+              </span>
+            </Tooltip>
+          )}
+          <Tooltip title="Печать скрина листа">
+            <Button
+              className="app-hit-area-sm"
+              size="small"
+              icon={<PrinterOutlined />}
+              disabled={!objectUrl}
+              aria-haspopup="dialog"
+              aria-label={`Печать скрина листа ${title}`}
+              onClick={() => setPrintPreviewOpen(true)}
+            />
+          </Tooltip>
         </div>
         <div className="cnc-packet-card__sheet-body">
           {loading && (

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
-import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PrinterOutlined, TagsOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../api/labelsApi';
 import type { DetailLabelsPreview, LabelExportFormat, LabelTemplate } from '../../api/types/labelsApi.types';
 import { can } from '../../utils/permissions';
 import { saveLabelBlob } from '../orders/components/labels/labelDownloads';
+import { printLabelSvgPages } from '../orders/components/labels/labelPrint';
 
 const { Text } = Typography;
 
@@ -37,6 +38,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   const [preview, setPreview] = useState<DetailLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const previewRequestRef = useRef(0);
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
@@ -57,7 +59,8 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
       .then((next) => {
         // A cut-map label is intentionally configured from the order card,
         // where every physical copy can be bound to an exact immutable
-        // placement. The sheet shortcut only carries de-duplicated detail IDs.
+        // placement. The sheet shortcut scopes labels by detail IDs from the
+        // visible sheet, without a persisted per-copy placement binding.
         const supported = next.filter((template) => !template.elements.some((element) => element.kind === 'cut_map'));
         setTemplates(supported);
         setTemplateId((current) => (
@@ -128,6 +131,26 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     }
   };
 
+  const runPrint = async () => {
+    if (!selectedTemplate || detailIds.length === 0) return;
+    setPrinting(true);
+    try {
+      const printPreview = await labelsApi.previewDetailLabels({
+        templateId: selectedTemplate.labelTemplateId,
+        templateVersion: selectedTemplate.version,
+        detailIds,
+        useBasisFields,
+      });
+      setPreview(printPreview);
+      const printed = printLabelSvgPages(printPreview.svgPages, `Бирки листа ${sheetIndex + 1}`);
+      if (!printed) message.warning('Нет бирок для печати');
+    } catch {
+      message.error('Не удалось открыть печать бирок');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   return (
     <>
       <Button
@@ -148,6 +171,15 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
             Предпросмотр
           </Button>,
           <Button
+            key="print"
+            icon={<PrinterOutlined />}
+            onClick={runPrint}
+            loading={printing}
+            disabled={!selectedTemplate || detailIds.length === 0 || generating}
+          >
+            Печать
+          </Button>,
+          <Button
             key="generate"
             type="primary"
             icon={<DownloadOutlined />}
@@ -155,7 +187,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
             loading={generating}
             disabled={!preview || exportFormats.length === 0}
           >
-            Сформировать и скачать
+            Скачать ZIP
           </Button>,
         ]}
         width={680}

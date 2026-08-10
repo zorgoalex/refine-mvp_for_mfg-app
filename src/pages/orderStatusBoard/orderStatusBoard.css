@@ -1987,12 +1987,21 @@
 
 .cnc-packet-card__sheet-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 6px;
   margin-bottom: 8px;
 }
 
 .cnc-packet-card__sheet-actions .ant-btn {
+  flex: 0 0 auto;
   min-height: 40px;
+  white-space: nowrap;
+}
+
+.cnc-packet-card__sheet-actions > span {
+  flex: 0 0 auto;
 }
 
 .status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__collapse .ant-collapse-header,
