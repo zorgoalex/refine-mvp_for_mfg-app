@@ -50,7 +50,10 @@ import type {
   ListLabelTemplatesQuery,
   ListOrderLabelCutMapOptionsQuery,
   OrderLabelCutMapOptionsDto,
+  LabelCutMapFallbackImageInput,
   LabelCutMapSelectionInput,
+  LabelCutSheetDetailInstanceInput,
+  LabelCutSheetScopeInput,
   OrderLabelDataDetailDto,
   OrderLabelDataDto,
   OrderLabelGenerationDto,
@@ -143,6 +146,31 @@ interface OrderLabelDetailRow extends QueryResultRow {
 
 interface OrderFieldsRow extends QueryResultRow {
   order_fields: Record<string, unknown> | null;
+}
+
+interface CutSheetScopeSelectionRow extends QueryResultRow {
+  order_id: string | number;
+  order_detail_id: string | number;
+  instance: string | number;
+  cut_result_placement_id: string | number;
+}
+
+interface TelegramSheetImageRow extends QueryResultRow {
+  packet_id: string;
+  source_version: string | number;
+  source_message_id: string | number | null;
+  sheet_image_storage_key: string | null;
+  sheet_image_content_type: string | null;
+  sheet_image_size_bytes: string | number | null;
+}
+
+interface TelegramSheetImageEvidenceRow extends QueryResultRow {
+  order_id: string | number;
+  detail_id: string | number;
+  instance: string | number;
+  evidence_quantity: string | number;
+  evidence_eligible: boolean;
+  dimensions_match: boolean;
 }
 
 const DETAIL_CUT_RESULT_VERSION_FIELDS_SQL = `
@@ -1525,59 +1553,92 @@ export class PgLabelsRepository implements LabelsPort {
   async previewDetailLabels(command: PreviewDetailLabelsCommand): Promise<DetailLabelsPreviewDto> {
     const template = await this.readTemplate(this.database, command.input.templateId, true);
     assertTemplateVersion(template.version, command.input.templateVersion);
-    assertCutMapOrderScope(template);
-    const detailIds = command.input.detailIds;
     const useBasisFields = command.input.useBasisFields ?? true;
-    const details = await readDetailLabelDetails(
+    const baseRows = await buildDetailLabelRowsForInput(this.database, template, command.input, useBasisFields);
+    const resolved = await resolveDetailLabelCutMaps(
       this.database,
-      detailIds,
-      template.labelTemplateId,
-      template.customFieldSchema,
+      template,
+      baseRows,
+      command.input,
+      this.telegramMediaDir,
     );
-    const rows = buildLabelRows({ orderName: null, template, details, useBasisFields });
-    const rowHash = hashLabelRows(rows);
-    const svgPages = renderSvgPages(template, rows).pages;
-    return {
-      generationScope: 'details',
-      templateId: template.labelTemplateId,
-      templateVersion: template.version,
-      labelCount: rows.length,
-      rows,
-      svgPages,
-      previewToken: encodePreviewToken({
+    try {
+      const rows = resolved.rows;
+      const rowHash = hashLabelRows(rows);
+      const svgPages = renderSvgPages(template, rows, resolved.assets).pages;
+      assertTelegramSvgPagesLimit(rows, svgPages);
+      return {
         generationScope: 'details',
         templateId: template.labelTemplateId,
         templateVersion: template.version,
-        detailIds,
-        useBasisFields,
-        rowHash,
-      }),
-    };
+        labelCount: rows.length,
+        rows,
+        svgPages,
+        previewToken: encodePreviewToken({
+          generationScope: 'details',
+          templateId: template.labelTemplateId,
+          templateVersion: template.version,
+          detailIds: command.input.detailIds,
+          useBasisFields,
+          ...detailLabelScopeSnapshot(command.input),
+          rowHash,
+        }),
+      };
+    } finally {
+      await closePreparedTelegramImages(resolved.preparedImages.values());
+    }
   }
 
   async generateDetailLabels(command: GenerateDetailLabelsCommand): Promise<OrderLabelGenerationDto> {
-    return this.database.transaction(async (tx) => {
-      const detailIds = command.input.detailIds;
-      const useBasisFields = command.input.useBasisFields ?? true;
-      const token = decodePreviewToken(command.input.previewToken);
-      if (
-        token.generationScope !== 'details'
-        || token.templateId !== command.input.templateId
-        || token.templateVersion !== command.input.templateVersion
-        || JSON.stringify(token.detailIds ?? []) !== JSON.stringify(detailIds)
-        || (token.useBasisFields ?? true) !== useBasisFields
-      ) {
-        throw new ApiError(409, 'LABEL_PREVIEW_TOKEN_STALE', 'Label preview token is stale');
+    const detailIds = command.input.detailIds;
+    const useBasisFields = command.input.useBasisFields ?? true;
+    const token = decodePreviewToken(command.input.previewToken);
+    const scopeSnapshot = detailLabelScopeSnapshot(command.input);
+    if (
+      token.generationScope !== 'details'
+      || token.templateId !== command.input.templateId
+      || token.templateVersion !== command.input.templateVersion
+      || JSON.stringify(token.detailIds ?? []) !== JSON.stringify(detailIds)
+      || (token.useBasisFields ?? true) !== useBasisFields
+      || JSON.stringify(detailLabelScopeFromToken(token)) !== JSON.stringify(scopeSnapshot)
+    ) {
+      throw new ApiError(409, 'LABEL_PREVIEW_TOKEN_STALE', 'Label preview token is stale');
+    }
+    const requestHash = hashRequest({
+      generationScope: 'details',
+      templateId: command.input.templateId,
+      templateVersion: command.input.templateVersion,
+      detailIds,
+      useBasisFields,
+      ...scopeSnapshot,
+      rowHash: token.rowHash,
+      exportFormats: command.input.exportFormats,
+    });
+    let needsPreparedFallbackImage = false;
+    if (command.input.cutMapFallbackImage) {
+      const template = await this.readTemplate(this.database, command.input.templateId, true);
+      assertTemplateVersion(template.version, command.input.templateVersion);
+      needsPreparedFallbackImage = template.elements.some((element) => element.kind === 'cut_map');
+      if (needsPreparedFallbackImage) {
+        const replay = await readIdempotencyReplay<OrderLabelGenerationDto>(
+          this.database,
+          command.input.idempotencyKey,
+          requestHash,
+        );
+        if (replay) return replay;
       }
-      const requestHash = hashRequest({
-        generationScope: 'details',
-        templateId: command.input.templateId,
-        templateVersion: command.input.templateVersion,
-        detailIds,
-        useBasisFields,
-        rowHash: token.rowHash,
-        exportFormats: command.input.exportFormats,
-      });
+    }
+    const generationPreparedImages = new Map<string, PreparedTelegramImage>();
+    if (needsPreparedFallbackImage && command.input.cutMapFallbackImage) {
+      const prepared = await prepareExplicitTelegramSheetImage(
+        this.database,
+        command.input.cutMapFallbackImage,
+        this.telegramMediaDir,
+      );
+      generationPreparedImages.set(prepared.assetKey, prepared.image);
+    }
+    try {
+      return await this.database.transaction(async (tx) => {
       const existing = await claimIdempotency<OrderLabelGenerationDto>(
         tx,
         command.input.idempotencyKey,
@@ -1591,9 +1652,16 @@ export class PgLabelsRepository implements LabelsPort {
 
       const template = await this.readTemplate(tx, command.input.templateId, true, true);
       assertTemplateVersion(template.version, command.input.templateVersion);
-      assertCutMapOrderScope(template);
-      const details = await readDetailLabelDetails(tx, detailIds, template.labelTemplateId, template.customFieldSchema);
-      const rows = buildLabelRows({ orderName: null, template, details, useBasisFields });
+      const baseRows = await buildDetailLabelRowsForInput(tx, template, command.input, useBasisFields);
+      const resolved = await resolveDetailLabelCutMaps(
+        tx,
+        template,
+        baseRows,
+        command.input,
+        this.telegramMediaDir,
+        generationPreparedImages,
+      );
+      const rows = resolved.rows;
       const rowHash = hashLabelRows(rows);
       if (
         token.rowHash !== rowHash
@@ -1615,8 +1683,8 @@ export class PgLabelsRepository implements LabelsPort {
           command.input.idempotencyKey,
           requestHash,
           sha256(command.input.previewToken),
-          JSON.stringify({ detailIds, useBasisFields }),
-          JSON.stringify({ detailIds, orderIds: [...new Set(details.map((detail) => detail.orderId))] }),
+          JSON.stringify({ detailIds, useBasisFields, ...scopeSnapshot }),
+          JSON.stringify({ detailIds, orderIds: [...new Set(rows.map((row) => row.orderId))], ...scopeSnapshot }),
           JSON.stringify(template),
           JSON.stringify(rows),
           rows.length,
@@ -1626,6 +1694,16 @@ export class PgLabelsRepository implements LabelsPort {
         ],
       );
       const generation = mapGenerationRow(inserted.rows[0]);
+      await insertGenerationCutPlacements(tx, generation.generationId, rows);
+      await insertGenerationTelegramSources(tx, generation.generationId, rows, resolved.preparedImages);
+      const cutResultIds = [...new Set(rows.flatMap((row) => isCutResultCutMap(row.cutMap) ? [row.cutMap.cutResultId] : []))];
+      const cutJobIds = [...new Set(rows.flatMap((row) => isCutResultCutMap(row.cutMap) ? [row.cutMap.cutJobId] : []))];
+      const telegramRows = rows.filter((row): row is LabelRow & {
+        cutMap: TelegramSvgLabelRowCutMapSnapshot | TelegramImageLabelRowCutMapSnapshot;
+      } => isTelegramCutMap(row.cutMap));
+      const telegramPacketIds = [...new Set(telegramRows.map((row) => row.cutMap.packetId))];
+      const telegramSourceMessageIds = [...new Set(telegramRows.flatMap((row) => row.cutMap.sourceMessageId === null ? [] : [row.cutMap.sourceMessageId]))];
+      const telegramAssetKeys = [...new Set(telegramRows.map((row) => row.cutMap.assetKey))];
       await auditService.record(tx, {
         event: 'detail_labels.generated',
         entityType: 'order_label_generation',
@@ -1638,15 +1716,20 @@ export class PgLabelsRepository implements LabelsPort {
         before: null,
         after: { ...generation, exportFormats: command.input.exportFormats, detailIds },
         diff: { labelCount: generation.labelCount },
-        metadata: { idempotencyKey: command.input.idempotencyKey, generationScope: 'details' },
+        metadata: { idempotencyKey: command.input.idempotencyKey, generationScope: 'details', telegramPacketIds, telegramSourceMessageIds, telegramAssetKeys },
         relatedEntities: [
           { entityType: 'order_label_generation', entityId: generation.generationId },
-          ...details.map((detail) => ({ entityType: 'order_detail', entityId: detail.detailId })),
+          ...[...new Set(rows.map((row) => row.detailId))].map((detailId) => ({ entityType: 'order_detail', entityId: detailId })),
+          ...cutResultIds.map((cutResultId) => ({ entityType: 'cut_result', entityId: cutResultId })),
+          ...cutJobIds.map((cutJobId) => ({ entityType: 'cut_job', entityId: cutJobId })),
         ],
       });
       await completeIdempotency(tx, command.input.idempotencyKey, generation);
       return generation;
-    });
+      });
+    } finally {
+      await closePreparedTelegramImages(new Set(generationPreparedImages.values()));
+    }
   }
 
   async exportOrderLabels(query: ExportOrderLabelsQuery): Promise<{ filename: string; contentType: string; body: Buffer }> {
@@ -1979,6 +2062,361 @@ export class PgLabelsRepository implements LabelsPort {
     }
     return [...byDetail.values()].slice(0, 200);
   }
+}
+
+async function buildDetailLabelRowsForInput(
+  client: DatabaseClient,
+  template: LabelTemplateDto,
+  input: PreviewDetailLabelsCommand['input'],
+  useBasisFields: boolean,
+): Promise<LabelRow[]> {
+  const detailInstances = detailInstancesForInput(input);
+  const detailIds = detailInstances ? detailInstances.map((instance) => instance.detailId) : input.detailIds;
+  if (detailInstances) assertDetailIdsCoverInstances(input.detailIds, detailInstances);
+  const details = await readDetailLabelDetails(
+    client,
+    detailIds,
+    template.labelTemplateId,
+    template.customFieldSchema,
+    detailInstances ? { quantityMode: 'actual' } : undefined,
+  );
+  const rows = buildLabelRows({ orderName: null, template, details, useBasisFields });
+  return detailInstances ? selectLabelRowsByInstances(rows, detailInstances) : rows;
+}
+
+async function resolveDetailLabelCutMaps(
+  client: DatabaseClient,
+  template: LabelTemplateDto,
+  rows: LabelRow[],
+  input: PreviewDetailLabelsCommand['input'],
+  mediaDir: string,
+  preparedImages?: Map<string, PreparedTelegramImage>,
+): Promise<{
+  rows: LabelRow[];
+  assets: LabelCutMapAssets;
+  preparedImages: Map<string, PreparedTelegramImage>;
+}> {
+  const usesCutMap = template.elements.some((element) => element.kind === 'cut_map');
+  if (!usesCutMap) return { rows, assets: new Map(), preparedImages: new Map() };
+  if (!input.cutSheetScope && !input.cutMapFallbackImage) {
+    throw new ApiError(
+      422,
+      'LABEL_CUT_MAP_SHEET_SCOPE_REQUIRED',
+      'Передайте лист раскроя или скрин листа для шаблона с миниатюрой раскроя',
+    );
+  }
+
+  const selections = input.cutSheetScope
+    ? await resolveCutSheetScopeSelections(client, input.cutSheetScope, rows)
+    : [];
+  if (!input.cutMapFallbackImage) {
+    if (selections.length !== rows.length) {
+      throw new ApiError(409, 'LABEL_CUT_SHEET_PLACEMENT_MISSING', 'Лист раскроя больше недоступен для бирок');
+    }
+    return pickCutMapResolution(
+      await resolveLabelCutMaps(client, template, rows, selections, undefined, undefined, undefined),
+    );
+  }
+
+  const selectedKeys = new Set(selections.map((selection) => `${selection.detailId}:${selection.copyIndex}`));
+  if (selectedKeys.size === rows.length) {
+    return pickCutMapResolution(
+      await resolveLabelCutMaps(client, template, rows, selections, undefined, undefined, undefined),
+    );
+  }
+
+  const exactRows = rows.filter((row) => selectedKeys.has(`${row.detailId}:${row.copyIndex}`));
+  const fallbackRows = rows.filter((row) => !selectedKeys.has(`${row.detailId}:${row.copyIndex}`));
+  const exact = exactRows.length > 0
+    ? pickCutMapResolution(await resolveLabelCutMaps(client, template, exactRows, selections, undefined, undefined, undefined))
+    : { rows: [] as LabelRow[], assets: new Map() as LabelCutMapAssets, preparedImages: new Map<string, PreparedTelegramImage>() };
+  const fallback = await resolveExplicitTelegramSheetImageRows(
+    client,
+    fallbackRows,
+    input.cutMapFallbackImage,
+    mediaDir,
+    preparedImages,
+    input.cutSheetScope,
+  );
+  const exactByKey = new Map(exact.rows.map((row) => [`${row.detailId}:${row.copyIndex}`, row]));
+  const fallbackByKey = new Map(fallback.rows.map((row) => [`${row.detailId}:${row.copyIndex}`, row]));
+  return {
+    rows: rows.map((row) => exactByKey.get(`${row.detailId}:${row.copyIndex}`) ?? fallbackByKey.get(`${row.detailId}:${row.copyIndex}`) ?? row),
+    assets: new Map([...exact.assets, ...fallback.assets]),
+    preparedImages: new Map([...exact.preparedImages, ...fallback.preparedImages]),
+  };
+}
+
+function pickCutMapResolution(resolved: Awaited<ReturnType<typeof resolveLabelCutMaps>>): {
+  rows: LabelRow[];
+  assets: LabelCutMapAssets;
+  preparedImages: Map<string, PreparedTelegramImage>;
+} {
+  return { rows: resolved.rows, assets: resolved.assets, preparedImages: resolved.preparedImages };
+}
+
+function detailInstancesForInput(input: PreviewDetailLabelsCommand['input']): LabelCutSheetDetailInstanceInput[] | undefined {
+  return input.cutSheetScope?.detailInstances ?? input.detailInstances;
+}
+
+function assertDetailIdsCoverInstances(detailIds: number[], detailInstances: LabelCutSheetDetailInstanceInput[]): void {
+  const requested = new Set(detailIds);
+  const missing = [...new Set(detailInstances.map((instance) => instance.detailId).filter((detailId) => !requested.has(detailId)))];
+  if (missing.length > 0) {
+    throw new ApiError(422, 'LABEL_DETAIL_INVALID', 'One or more label details were not found', { detailIds: missing });
+  }
+}
+
+function selectLabelRowsByInstances(
+  rows: LabelRow[],
+  detailInstances: LabelCutSheetDetailInstanceInput[],
+): LabelRow[] {
+  const rowsByKey = new Map(rows.map((row) => [`${row.detailId}:${row.copyIndex}`, row]));
+  const seen = new Set<string>();
+  const countByDetailId = new Map<number, number>();
+  for (const instance of detailInstances) {
+    const key = `${instance.detailId}:${instance.instance}`;
+    if (seen.has(key)) {
+      throw new ApiError(422, 'LABEL_DETAIL_INSTANCE_DUPLICATE', 'Один экземпляр детали нельзя добавить дважды', { key });
+    }
+    seen.add(key);
+    countByDetailId.set(instance.detailId, (countByDetailId.get(instance.detailId) ?? 0) + 1);
+  }
+  const selected = detailInstances.map((instance, index): LabelRow => {
+    const key = `${instance.detailId}:${instance.instance}`;
+    const row = rowsByKey.get(key);
+    if (!row) {
+      throw new ApiError(422, 'LABEL_DETAIL_INSTANCE_INVALID', 'Экземпляр детали не найден', { key });
+    }
+    const rowIndex = index + 1;
+    const copyCount = countByDetailId.get(row.detailId) ?? row.copyCount;
+    return {
+      ...row,
+      rowIndex,
+      copyCount,
+      values: {
+        ...row.values,
+        'bazis.quantity': copyCount,
+        'label.counter': rowIndex,
+        'label.counter_total': detailInstances.length,
+        'label.counter_text': `Бир. № ${rowIndex} / ${detailInstances.length}`,
+      },
+    };
+  });
+  return selected;
+}
+
+async function resolveCutSheetScopeSelections(
+  client: DatabaseClient,
+  scope: LabelCutSheetScopeInput,
+  rows: LabelRow[],
+): Promise<LabelCutMapSelectionInput[]> {
+  if (rows.length === 0) return [];
+  const result = await client.query<CutSheetScopeSelectionRow>(
+    `SELECT DISTINCT ON (p.order_id, p.order_detail_id, p.instance)
+            p.order_id, p.order_detail_id, p.instance, p.cut_result_placement_id
+     FROM cut_result_placement p
+     JOIN cut_result_sheet_map s
+       ON s.cut_result_sheet_map_id = p.cut_result_sheet_map_id
+      AND s.is_effective = true
+     JOIN cut_result_label_map_projection projection
+       ON projection.cut_result_id = p.cut_result_id
+     JOIN cut_result r
+       ON r.cut_result_id = p.cut_result_id
+      AND r.snapshot_digest = projection.snapshot_digest
+     JOIN cut_job j
+       ON j.cut_job_id = p.cut_job_id
+      AND j.status <> 'archived'
+     LEFT JOIN cut_result_archive_state archive
+       ON archive.cut_job_id = r.cut_job_id
+      AND archive.result_no = r.result_no
+     JOIN unnest($4::bigint[], $5::bigint[], $6::integer[])
+       AS requested(order_id, detail_id, instance)
+       ON requested.order_id = p.order_id
+      AND requested.detail_id = p.order_detail_id
+      AND requested.instance = p.instance
+     WHERE p.cut_job_id=$1
+       AND p.cut_group_id=$2
+       AND p.sheet_index=$3
+       AND s.cut_group_id=$2
+       AND s.sheet_index=$3
+       AND archive.archived_at IS NULL
+     ORDER BY p.order_id, p.order_detail_id, p.instance, p.cut_result_id DESC, p.cut_result_placement_id DESC`,
+    [
+      scope.cutJobId,
+      scope.cutGroupId,
+      scope.sheetIndex,
+      rows.map((row) => row.orderId),
+      rows.map((row) => row.detailId),
+      rows.map((row) => row.copyIndex),
+    ],
+  );
+  return result.rows.map((row) => ({
+    detailId: toNumber(row.order_detail_id),
+    copyIndex: toNumber(row.instance),
+    cutResultPlacementId: toNumber(row.cut_result_placement_id),
+  }));
+}
+
+async function resolveExplicitTelegramSheetImageRows(
+  client: DatabaseClient,
+  rows: LabelRow[],
+  input: LabelCutMapFallbackImageInput,
+  mediaDir: string,
+  preparedImages?: Map<string, PreparedTelegramImage>,
+  scope?: LabelCutSheetScopeInput,
+): Promise<{
+  rows: LabelRow[];
+  assets: LabelCutMapAssets;
+  preparedImages: Map<string, PreparedTelegramImage>;
+}> {
+  if (rows.length === 0) return { rows, assets: new Map(), preparedImages: new Map() };
+  await assertExplicitTelegramImageRowsBelongToPacket(client, input, rows);
+  const prepared = await prepareExplicitTelegramSheetImage(client, input, mediaDir, preparedImages);
+  const cutJobName = prepared.packet.source_message_id === null
+    ? 'Скрин Telegram'
+    : `Скрин Telegram · ${toNumber(prepared.packet.source_message_id)}`;
+  const sheetIndex = scope?.sheetIndex ?? 0;
+  const sheetNumber = sheetIndex + 1;
+  const resolvedRows = rows.map((row) => withCutMap(row, {
+    source: 'telegram_image',
+    assetKey: prepared.assetKey,
+    packetId: prepared.packet.packet_id,
+    sourceVersion: toNumber(prepared.packet.source_version),
+    sourceMessageId: nullableNumber(prepared.packet.source_message_id),
+    sourceDigest: `sha256:${prepared.image.rawSha256}`,
+    rawSha256: prepared.image.rawSha256,
+    normalizedSha256: prepared.image.normalizedSha256,
+    cutNumber: 'Telegram',
+    cutJobName,
+    variant: 'telegram',
+    sheetIndex,
+    sheetNumber,
+  }));
+  return {
+    rows: resolvedRows,
+    assets: new Map([[prepared.assetKey, { kind: 'image', dataUri: prepared.image.dataUri }]]),
+    preparedImages: new Map([[prepared.assetKey, prepared.image]]),
+  };
+}
+
+async function assertExplicitTelegramImageRowsBelongToPacket(
+  client: DatabaseClient,
+  input: LabelCutMapFallbackImageInput,
+  rows: LabelRow[],
+): Promise<void> {
+  const result = await client.query<TelegramSheetImageEvidenceRow>(
+    `WITH requested AS (
+       SELECT * FROM unnest($3::bigint[], $4::bigint[], $5::integer[])
+         AS value(order_id, detail_id, instance)
+     ), evidence_by_detail AS (
+       SELECT evidence.match_order_id AS order_id,
+              evidence.match_detail_id AS detail_id,
+              min(evidence.quantity)::integer AS evidence_quantity,
+              min(evidence.width_mm) AS width_mm,
+              min(evidence.height_mm) AS height_mm,
+              min(evidence.source) AS source,
+              count(*)=1 AND bool_and(evidence.match_status='matched') AS evidence_eligible
+       FROM cnc_telegram_packet_item_evidence evidence
+       JOIN cnc_telegram_packet_evidence_set evidence_set
+         ON evidence_set.packet_id=evidence.packet_id
+        AND evidence_set.source_version=evidence.source_version
+        AND evidence_set.payload_hash=evidence.payload_hash
+       JOIN cnc_telegram_packets packet
+         ON packet.packet_id=evidence.packet_id
+        AND packet.source_version=evidence.source_version
+        AND packet.payload_hash=evidence.payload_hash
+       WHERE evidence.packet_id=$1::uuid
+         AND evidence.source_version=$2
+         AND evidence.match_order_id IS NOT NULL
+         AND evidence.match_detail_id IS NOT NULL
+         AND packet.sheet_image_storage_key IS NOT NULL
+         AND (packet.cut_layout_json IS NULL OR packet.cut_layout_json->>'status' IS DISTINCT FROM 'valid')
+       GROUP BY evidence.match_order_id, evidence.match_detail_id
+     )
+     SELECT requested.order_id, requested.detail_id, requested.instance,
+            evidence.evidence_quantity,
+            evidence.evidence_eligible,
+            (
+              evidence.width_mm IS NOT NULL AND evidence.height_mm IS NOT NULL
+              AND (
+                (abs(evidence.width_mm-detail.width) <= CASE WHEN evidence.source='ocr' THEN 3 ELSE 0.01 END
+                 AND abs(evidence.height_mm-detail.height) <= CASE WHEN evidence.source='ocr' THEN 3 ELSE 0.01 END)
+                OR
+                (abs(evidence.width_mm-detail.height) <= CASE WHEN evidence.source='ocr' THEN 3 ELSE 0.01 END
+                 AND abs(evidence.height_mm-detail.width) <= CASE WHEN evidence.source='ocr' THEN 3 ELSE 0.01 END)
+              )
+            ) AS dimensions_match
+     FROM requested
+     JOIN evidence_by_detail evidence
+       ON evidence.order_id=requested.order_id
+      AND evidence.detail_id=requested.detail_id
+     JOIN order_details detail
+       ON detail.detail_id=requested.detail_id
+      AND detail.order_id=requested.order_id
+      AND detail.delete_flag=false
+     JOIN orders order_row
+       ON order_row.order_id=detail.order_id
+      AND order_row.delete_flag=false
+     WHERE requested.instance <= evidence.evidence_quantity`,
+    [
+      input.packetId,
+      input.sourceVersion,
+      rows.map((row) => row.orderId),
+      rows.map((row) => row.detailId),
+      rows.map((row) => row.copyIndex),
+    ],
+  );
+  const evidenceByKey = new Map(result.rows.map((row) => [`${toNumber(row.order_id)}:${toNumber(row.detail_id)}:${toNumber(row.instance)}`, row]));
+  for (const row of rows) {
+    const evidence = evidenceByKey.get(`${row.orderId}:${row.detailId}:${row.copyIndex}`);
+    if (!evidence || evidence.evidence_eligible !== true || evidence.dimensions_match !== true) {
+      throw new ApiError(422, 'LABEL_CUT_MAP_FALLBACK_MISMATCH', 'Скрин листа не соответствует деталям бирок', {
+        packetId: input.packetId,
+        detailId: row.detailId,
+        copyIndex: row.copyIndex,
+      });
+    }
+  }
+}
+
+async function prepareExplicitTelegramSheetImage(
+  client: DatabaseClient,
+  input: LabelCutMapFallbackImageInput,
+  mediaDir: string,
+  preparedImages?: Map<string, PreparedTelegramImage>,
+): Promise<{ assetKey: string; image: PreparedTelegramImage; packet: TelegramSheetImageRow }> {
+  const result = await client.query<TelegramSheetImageRow>(
+    `SELECT packet_id, source_version, source_message_id,
+            sheet_image_storage_key, sheet_image_content_type, sheet_image_size_bytes
+     FROM cnc_telegram_packets
+     WHERE packet_id=$1::uuid`,
+    [input.packetId],
+  );
+  const packet = result.rows[0];
+  if (
+    !packet
+    || toNumber(packet.source_version) !== input.sourceVersion
+    || packet.sheet_image_storage_key !== input.storageKey
+  ) {
+    throw new ApiError(409, 'LABEL_TELEGRAM_MEDIA_STALE', 'Telegram image changed after preview');
+  }
+  if (!packet.sheet_image_storage_key) {
+    throw new ApiError(422, 'LABEL_TELEGRAM_MEDIA_INVALID', 'Telegram cut-map image is unavailable');
+  }
+  const metadata = {
+    storageKey: packet.sheet_image_storage_key,
+    contentType: packet.sheet_image_content_type,
+    sizeBytes: nullableNumber(packet.sheet_image_size_bytes),
+  };
+  const cached = [...(preparedImages?.values() ?? [])].find((image) => image.storageKey === metadata.storageKey);
+  const image = cached ?? await prepareTelegramImage(mediaDir, metadata);
+  if (!telegramImageCandidateMatchesMedia(packet, image)) {
+    if (!cached) await image.handle.close();
+    throw new ApiError(409, 'LABEL_TELEGRAM_MEDIA_STALE', 'Telegram image changed after preview');
+  }
+  const assetKey = `telegram_image:${packet.packet_id}:${packet.source_version}:${image.rawSha256}:${image.normalizedSha256}`;
+  return { assetKey, image, packet };
 }
 
 export async function resolveLabelCutMaps(
@@ -2712,16 +3150,6 @@ function cutMapPlacementMatchesSource(placement: ResolvedCutMapRow, source: Labe
   return expectedCutNumber === `${toNumber(placement.cut_job_id)}-${toNumber(placement.result_no)}`;
 }
 
-function assertCutMapOrderScope(template: LabelTemplateDto): void {
-  if (template.elements.some((element) => element.kind === 'cut_map')) {
-    throw new ApiError(
-      422,
-      'LABEL_CUT_MAP_ORDER_SCOPE_ONLY',
-      'Шаблон с миниатюрой раскроя формируется из карточки заказа',
-    );
-  }
-}
-
 async function insertGenerationCutPlacements(
   client: DatabaseClient,
   generationId: number,
@@ -2916,6 +3344,9 @@ interface PreviewTokenPayload {
   useBasisFields?: boolean;
   cutMapSource?: LabelCutMapSource;
   telegramCutMapFallbackVersion?: 'v1';
+  detailInstances?: LabelCutSheetDetailInstanceInput[];
+  cutSheetScope?: LabelCutSheetScopeInput;
+  cutMapFallbackImage?: LabelCutMapFallbackImageInput;
   rowHash: string;
 }
 
@@ -2955,6 +3386,40 @@ function filterDetails(details: OrderLabelDataDetailDto[], detailIds: number[]):
   }
   const allow = new Set(detailIds);
   return details.filter((detail) => allow.has(detail.detailId));
+}
+
+function detailLabelScopeSnapshot(input: PreviewDetailLabelsCommand['input']): Pick<
+  PreviewTokenPayload,
+  'detailInstances' | 'cutSheetScope' | 'cutMapFallbackImage'
+> {
+  return {
+    ...(input.detailInstances ? { detailInstances: input.detailInstances } : {}),
+    ...(input.cutSheetScope ? { cutSheetScope: input.cutSheetScope } : {}),
+    ...(input.cutMapFallbackImage ? { cutMapFallbackImage: canonicalCutMapFallbackImage(input.cutMapFallbackImage) } : {}),
+  };
+}
+
+function detailLabelScopeFromToken(token: PreviewTokenPayload): Pick<
+  PreviewTokenPayload,
+  'detailInstances' | 'cutSheetScope' | 'cutMapFallbackImage'
+> {
+  return {
+    ...(token.detailInstances ? { detailInstances: token.detailInstances } : {}),
+    ...(token.cutSheetScope ? { cutSheetScope: token.cutSheetScope } : {}),
+    ...(token.cutMapFallbackImage ? { cutMapFallbackImage: canonicalCutMapFallbackImage(token.cutMapFallbackImage) } : {}),
+  };
+}
+
+function canonicalCutMapFallbackImage(
+  input: LabelCutMapFallbackImageInput,
+): LabelCutMapFallbackImageInput {
+  return {
+    packetId: input.packetId,
+    sourceVersion: input.sourceVersion,
+    storageKey: input.storageKey,
+    contentType: input.contentType ?? null,
+    sizeBytes: input.sizeBytes ?? null,
+  };
 }
 
 function encodePreviewToken(payload: PreviewTokenPayload): string {
@@ -3208,6 +3673,7 @@ async function readDetailLabelDetails(
   detailIds: number[],
   templateId: number,
   currentSchema: Record<string, unknown>,
+  options: { quantityMode?: 'requestedCount' | 'actual' } = {},
 ): Promise<OrderLabelDataDetailDto[]> {
   const uniqueDetailIds = [...new Set(detailIds)];
   const result = await client.query<OrderLabelDetailRow>(
@@ -3232,15 +3698,12 @@ async function readDetailLabelDetails(
     throw new ApiError(422, 'LABEL_DETAIL_INVALID', 'One or more label details were not found', { detailIds: missing });
   }
   const orderFieldsByOrderId = await readOrderFieldsByIds(client, [...new Set(result.rows.map((row) => toNumber(row.order_id)))]);
-  const counts = new Map<number, number>();
-  for (const detailId of detailIds) {
-    counts.set(detailId, (counts.get(detailId) ?? 0) + 1);
-  }
   return uniqueDetailIds.map((detailId) => {
     const detail = byId.get(detailId)!;
+    const requestedCount = detailIds.filter((id) => id === detailId).length;
     return {
       ...detail,
-      quantity: counts.get(detailId) ?? 0,
+      quantity: options.quantityMode === 'actual' ? detail.quantity : requestedCount,
       orderFields: orderFieldsByOrderId.get(detail.orderId) ?? {},
     };
   });

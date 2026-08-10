@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
-import { buildOrderLabelsArchiveFilename, PgLabelsRepository } from './pg-labels-repository';
+
+vi.mock('sharp', () => ({ default: vi.fn() }));
+
+const { buildOrderLabelsArchiveFilename, PgLabelsRepository } = await import('./pg-labels-repository');
 
 const source = readFileSync(new URL('./pg-labels-repository.ts', import.meta.url), 'utf8');
 const cutMapMigration = readFileSync(
@@ -180,8 +183,23 @@ describe('PgLabelsRepository structural guards', () => {
     const previewStart = source.indexOf('async previewDetailLabels');
     const previewEnd = source.indexOf('async generateDetailLabels', previewStart);
     const previewSource = source.slice(previewStart, previewEnd);
-    expect(previewSource).toMatch(/renderSvgPages\(template,\s*rows\)/);
+    expect(previewSource).toContain('resolveDetailLabelCutMaps');
+    expect(previewSource).toMatch(/renderSvgPages\(template,\s*rows,\s*resolved\.assets\)/);
     expect(previewSource).not.toMatch(/rows\.slice\(0,\s*1\)/);
+    expect(source).not.toContain('assertCutMapOrderScope');
+    expect(source).not.toContain('LABEL_CUT_MAP_ORDER_SCOPE_ONLY');
+  });
+
+  it('binds explicit sheet screenshot cut-map fallback to matching Telegram evidence rows', () => {
+    const helperStart = source.indexOf('async function assertExplicitTelegramImageRowsBelongToPacket');
+    expect(helperStart).toBeGreaterThan(-1);
+    const helperSource = source.slice(helperStart, source.indexOf('async function prepareExplicitTelegramSheetImage', helperStart));
+    expect(helperSource).toContain('cnc_telegram_packet_item_evidence');
+    expect(helperSource).toContain('evidence.match_order_id');
+    expect(helperSource).toContain('evidence.match_detail_id');
+    expect(helperSource).toContain('requested.instance <= evidence.evidence_quantity');
+    expect(helperSource).toContain('dimensions_match');
+    expect(helperSource).toContain('LABEL_CUT_MAP_FALLBACK_MISMATCH');
   });
 
   it('names order archives from the order name and current generation number', () => {

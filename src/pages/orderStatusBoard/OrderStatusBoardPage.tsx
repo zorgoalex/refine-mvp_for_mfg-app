@@ -92,7 +92,8 @@ import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
-import { CutSheetLabelGenerateAction } from '../cut/CutSheetLabelGenerateAction';
+import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from '../cut/CutSheetLabelGenerateAction';
+import type { LabelCutMapFallbackImage } from '../../api/types/labelsApi.types';
 import {
   classifyOrderStatusBoardMoveFailure,
   executeOrderStatusBoardMove,
@@ -3382,6 +3383,62 @@ interface CncTelegramPacketCardProps {
   onOpenOrder: (orderId: number) => void;
 }
 
+function detailInstancesFromRepeatedDetailIds(detailIds: number[]): CutSheetLabelDetailInstance[] {
+  const nextInstanceByDetailId = new Map<number, number>();
+  const instances: CutSheetLabelDetailInstance[] = [];
+  for (const detailId of detailIds) {
+    if (!Number.isInteger(detailId) || detailId <= 0) continue;
+    const instance = nextInstanceByDetailId.get(detailId) ?? 1;
+    instances.push({ detailId, instance });
+    nextInstanceByDetailId.set(detailId, instance + 1);
+  }
+  return instances;
+}
+
+function detailInstancesFromPacketItems(items: CncTelegramPacket['items']): CutSheetLabelDetailInstance[] {
+  const nextInstanceByDetailId = new Map<number, number>();
+  const instances: CutSheetLabelDetailInstance[] = [];
+  for (const item of items) {
+    const detailId = item.matchDetailId;
+    if (!Number.isInteger(detailId) || detailId <= 0) continue;
+    const quantity = Math.max(0, Math.trunc(item.quantity || 0));
+    const firstInstance = nextInstanceByDetailId.get(detailId) ?? 1;
+    for (let offset = 0; offset < quantity; offset += 1) {
+      instances.push({ detailId, instance: firstInstance + offset });
+    }
+    nextInstanceByDetailId.set(detailId, firstInstance + quantity);
+  }
+  return instances;
+}
+
+function cutMapFallbackImageFromPacket(packet: CncTelegramPacket): LabelCutMapFallbackImage | null {
+  const storageKey = cncTelegramMediaStorageKey(packet.sheetImageUrl);
+  if (!storageKey) return null;
+  return {
+    packetId: packet.packetId,
+    sourceVersion: packet.sourceVersion,
+    storageKey,
+    contentType: packet.sheetImageContentType,
+    sizeBytes: packet.sheetImageSizeBytes,
+  };
+}
+
+function cncTelegramMediaStorageKey(imageUrl: string | null): string | null {
+  if (!imageUrl) return null;
+  const prefix = '/api/v1/cnc-telegram/media/';
+  try {
+    const path = imageUrl.startsWith('http://') || imageUrl.startsWith('https://')
+      ? new URL(imageUrl).pathname
+      : imageUrl.split('?', 1)[0] ?? imageUrl;
+    const index = path.indexOf(prefix);
+    if (index < 0) return null;
+    const encoded = path.slice(index + prefix.length).split('/', 1)[0];
+    return encoded ? decodeURIComponent(encoded) : null;
+  } catch {
+    return null;
+  }
+}
+
 const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   packet,
   relationState,
@@ -3402,6 +3459,13 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const hasSheetImage = Boolean(packet.sheetImageUrl);
   const svgCutSheet = packet.svgCutSheets?.[0] ?? null;
   const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);
+  const labelDetailInstances = useMemo(
+    () => svgCutSheet
+      ? detailInstancesFromRepeatedDetailIds(svgCutSheet.detailIds)
+      : detailInstancesFromPacketItems(packet.items),
+    [packet.items, svgCutSheet],
+  );
+  const cutMapFallbackImage = useMemo(() => cutMapFallbackImageFromPacket(packet), [packet]);
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
 
   useEffect(() => {
@@ -3608,6 +3672,8 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               cutJobId={packet.svgCutJobId ?? null}
               labelSheet={svgCutSheet}
               printHeader={sheetPrintHeader ?? undefined}
+              labelDetailInstances={labelDetailInstances}
+              cutMapFallbackImage={cutMapFallbackImage}
             />
           )}
 
@@ -3628,6 +3694,8 @@ interface CncTelegramSheetImagePreviewProps {
   cutJobId: number | null;
   labelSheet: CncTelegramPacketCutSheet | null;
   printHeader?: string;
+  labelDetailInstances: CutSheetLabelDetailInstance[];
+  cutMapFallbackImage: LabelCutMapFallbackImage | null;
 }
 
 const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> = ({
@@ -3637,6 +3705,8 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   cutJobId,
   labelSheet,
   printHeader,
+  labelDetailInstances,
+  cutMapFallbackImage,
 }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -3683,6 +3753,11 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   }, [objectUrl]);
 
   if (!open) return null;
+  const hasCutSheetScope = Boolean(cutJobId && labelSheet);
+  const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null);
+  const disabledLabelReason = labelDetailInstances.length === 0
+    ? 'Нет сопоставленных деталей для бирок'
+    : 'Нет связанного листа раскроя или доступного скрина';
 
   return (
     <>
@@ -3691,15 +3766,17 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
         onClick={stopCncCardClickPropagation}
       >
         <div className="cnc-packet-card__sheet-actions" onClick={(event) => event.stopPropagation()}>
-          {cutJobId && labelSheet ? (
+          {canGenerateLabels ? (
             <CutSheetLabelGenerateAction
-              detailIds={labelSheet.detailIds}
-              cutJobId={cutJobId}
-              cutGroupId={labelSheet.cutGroupId}
-              sheetIndex={labelSheet.sheetIndex}
+              detailInstances={labelDetailInstances}
+              cutJobId={hasCutSheetScope ? cutJobId : null}
+              cutGroupId={hasCutSheetScope ? labelSheet?.cutGroupId : null}
+              sheetIndex={labelSheet?.sheetIndex ?? 0}
+              sheetLabel={labelSheet ? `листа ${labelSheet.sheetNumber}` : 'скрина'}
+              cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}
             />
           ) : (
-            <Tooltip title="Нет связанного листа раскроя для бирок">
+            <Tooltip title={disabledLabelReason}>
               <span>
                 <Button className="app-hit-area-sm" size="small" icon={<TagsOutlined />} disabled>
                   Бирки

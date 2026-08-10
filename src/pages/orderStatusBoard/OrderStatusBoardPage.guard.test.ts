@@ -355,7 +355,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cutApi.fetchSheetSvg');
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain('CutSheetLabelGenerateAction');
-    expect(page).toContain('labelSheet.detailIds');
+    expect(page).toContain('detailInstancesFromRepeatedDetailIds(svgCutSheet.detailIds)');
+    expect(page).toContain('detailInstancesFromPacketItems(packet.items)');
+    expect(page).toContain('cutMapFallbackImageFromPacket(packet)');
     expect(page).toContain('ImagePrintPreviewModal');
     expect(page).toContain('aria-label={`Печать скрина листа ${title}`}');
     expect(page).toContain('const fetchFreshPdf = useCallback');
@@ -939,6 +941,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('if (!open) return null;');
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-panel"');
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-actions"');
+    expect(sheetPreview).toContain('const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null)');
+    expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
     expect(sheetPreview).toContain('status="Скрин из Telegram-чата"');

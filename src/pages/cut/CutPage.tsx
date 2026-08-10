@@ -77,7 +77,7 @@ import { SheetEditor } from './SheetEditor';
 import { CutPdfPreview } from './CutPdfPreview';
 import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { pushHistory } from './editorHistory';
-import { CutSheetLabelGenerateAction } from './CutSheetLabelGenerateAction';
+import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from './CutSheetLabelGenerateAction';
 import { authSession } from '../../api/authSession';
 import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
 import { CutJobVersionLines } from '../orders/CutJobVersionLines';
@@ -343,13 +343,16 @@ function groupFilmNames(job: CutJobDto, group: CutGroupDto): string[] {
   return [...names];
 }
 
-function detailIdsForSheet(sheet: { placements: SheetPlacements }): number[] {
+function detailInstancesForSheet(sheet: { placements: SheetPlacements }): CutSheetLabelDetailInstance[] {
   return sheet.placements.pieces
     .map((piece) => {
       const match = /^det-(\d+)$/.exec(piece.item_id);
-      return match ? Number(match[1]) : null;
+      const detailId = match ? Number(match[1]) : null;
+      return detailId && Number.isInteger(piece.instance) && piece.instance > 0
+        ? { detailId, instance: piece.instance }
+        : null;
     })
-    .filter((value): value is number => Number.isInteger(value) && value > 0);
+    .filter((value): value is CutSheetLabelDetailInstance => value !== null);
 }
 
 function editableSheetsForGroup(group: CutGroupDto): { sheetIndex: number; placements: SheetPlacements }[] {
@@ -4460,7 +4463,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   const displayHeightMm = rotate90 ? widthMm : heightMm;
                   const isPortraitPreview = displayHeightMm > displayWidthMm;
                   const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin);
-                  const sheetDetailIds = detailIdsForSheet(sheet);
+                  const sheetDetailInstances = detailInstancesForSheet(sheet);
                   const bathFilmUsage = showBathMeterGuides ? calculateBathSheetFilmUsage(sheet.placements) : null;
                   return (
                     <div
@@ -4523,7 +4526,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                             SVG
                           </Button>
                           <CutSheetLabelGenerateAction
-                            detailIds={sheetDetailIds}
+                            detailInstances={sheetDetailInstances}
                             cutJobId={job.cutJobId}
                             cutGroupId={group.cutGroupId}
                             sheetIndex={sheet.sheetIndex}

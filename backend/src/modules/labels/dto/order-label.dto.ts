@@ -36,6 +36,23 @@ const cutMapSelectionSchema = z.object({
 
 const cutMapSourceSchema = z.enum(['regular', 'bath']);
 const telegramCutMapFallbackVersionSchema = z.literal('v1');
+const cutSheetDetailInstanceSchema = z.object({
+  detailId: z.number().int().positive(),
+  instance: z.number().int().positive(),
+}).strict();
+const cutSheetScopeSchema = z.object({
+  cutJobId: z.number().int().positive(),
+  cutGroupId: z.number().int().positive(),
+  sheetIndex: z.number().int().min(0),
+  detailInstances: z.array(cutSheetDetailInstanceSchema).min(1).max(5000),
+}).strict();
+const cutMapFallbackImageSchema = z.object({
+  packetId: z.string().uuid(),
+  sourceVersion: z.number().int().positive(),
+  storageKey: z.string().trim().min(1).max(220),
+  contentType: z.string().trim().min(1).max(120).nullable().optional(),
+  sizeBytes: z.number().int().positive().nullable().optional(),
+}).strict();
 
 export const previewOrderLabelsSchema = z
   .object({
@@ -63,6 +80,9 @@ export const previewDetailLabelsSchema = z
     templateVersion: z.number().int().min(1),
     detailIds: z.array(z.number().int().positive()).min(1).max(5000),
     useBasisFields: z.boolean().optional().default(true),
+    detailInstances: z.array(cutSheetDetailInstanceSchema).min(1).max(5000).optional(),
+    cutSheetScope: cutSheetScopeSchema.optional(),
+    cutMapFallbackImage: cutMapFallbackImageSchema.optional(),
   })
   .strict();
 

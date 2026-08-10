@@ -19,14 +19,32 @@ describe('DetailLabelActionsController', () => {
 
     await controller.preview(
       { user, requestId: 'req-preview' },
-      { templateId: 1, templateVersion: 2, detailIds: [101, 202], useBasisFields: false },
+      {
+        templateId: 1,
+        templateVersion: 2,
+        detailIds: [101, 202],
+        useBasisFields: false,
+        detailInstances: [{ detailId: 101, instance: 1 }],
+        cutMapFallbackImage: {
+          packetId: '11111111-1111-4111-8111-111111111111',
+          sourceVersion: 1,
+          storageKey: 'sheet.jpg',
+        },
+      },
     );
 
     expect(service.previewDetailLabels).toHaveBeenCalledWith(
       expect.objectContaining({
         currentUser: user,
         requestId: 'req-preview',
-        input: { templateId: 1, templateVersion: 2, detailIds: [101, 202], useBasisFields: false },
+        input: expect.objectContaining({
+          templateId: 1,
+          templateVersion: 2,
+          detailIds: [101, 202],
+          useBasisFields: false,
+          detailInstances: [{ detailId: 101, instance: 1 }],
+          cutMapFallbackImage: expect.objectContaining({ storageKey: 'sheet.jpg' }),
+        }),
       }),
     );
   });

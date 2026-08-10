@@ -9420,8 +9420,59 @@ paths:
       tags: [Labels]
       operationId: previewDetailLabels
       summary: Preview labels for explicit detail instances
+      description: Supplying `cutSheetScope` or `cutMapFallbackImage` additionally requires `cut.view` permission.
       security: [{ bearerAuth: [] }]
-      x-permission: labels.view
+      x-permissions-any:
+        - labels.view
+        - labels.generate
+        - labels.manage_templates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId, templateVersion, detailIds]
+              properties:
+                templateId: { type: integer, minimum: 1 }
+                templateVersion: { type: integer, minimum: 1 }
+                detailIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items: { type: integer, minimum: 1 }
+                useBasisFields: { type: boolean, default: true }
+                detailInstances:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items: &LabelCutSheetDetailInstance
+                    type: object
+                    required: [detailId, instance]
+                    properties:
+                      detailId: { type: integer, minimum: 1 }
+                      instance: { type: integer, minimum: 1 }
+                cutSheetScope:
+                  type: object
+                  required: [cutJobId, cutGroupId, sheetIndex, detailInstances]
+                  properties:
+                    cutJobId: { type: integer, minimum: 1 }
+                    cutGroupId: { type: integer, minimum: 1 }
+                    sheetIndex: { type: integer, minimum: 0 }
+                    detailInstances:
+                      type: array
+                      minItems: 1
+                      maxItems: 5000
+                      items: *LabelCutSheetDetailInstance
+                cutMapFallbackImage:
+                  type: object
+                  required: [packetId, sourceVersion, storageKey]
+                  properties:
+                    packetId: { type: string, format: uuid }
+                    sourceVersion: { type: integer, minimum: 1 }
+                    storageKey: { type: string, minLength: 1, maxLength: 220 }
+                    contentType: { type: string, nullable: true }
+                    sizeBytes: { type: integer, minimum: 1, nullable: true }
       responses:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }
@@ -9433,8 +9484,58 @@ paths:
       tags: [Labels]
       operationId: generateDetailLabels
       summary: Generate labels for explicit detail instances
+      description: Supplying `cutSheetScope` or `cutMapFallbackImage` additionally requires `cut.view` permission.
       security: [{ bearerAuth: [] }]
       x-permission: labels.generate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId, templateVersion, detailIds, previewToken, exportFormats, idempotencyKey]
+              properties:
+                templateId: { type: integer, minimum: 1 }
+                templateVersion: { type: integer, minimum: 1 }
+                detailIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items: { type: integer, minimum: 1 }
+                useBasisFields: { type: boolean, default: true }
+                detailInstances:
+                  type: array
+                  minItems: 1
+                  maxItems: 5000
+                  items: *LabelCutSheetDetailInstance
+                cutSheetScope:
+                  type: object
+                  required: [cutJobId, cutGroupId, sheetIndex, detailInstances]
+                  properties:
+                    cutJobId: { type: integer, minimum: 1 }
+                    cutGroupId: { type: integer, minimum: 1 }
+                    sheetIndex: { type: integer, minimum: 0 }
+                    detailInstances:
+                      type: array
+                      minItems: 1
+                      maxItems: 5000
+                      items: *LabelCutSheetDetailInstance
+                cutMapFallbackImage:
+                  type: object
+                  required: [packetId, sourceVersion, storageKey]
+                  properties:
+                    packetId: { type: string, format: uuid }
+                    sourceVersion: { type: integer, minimum: 1 }
+                    storageKey: { type: string, minLength: 1, maxLength: 220 }
+                    contentType: { type: string, nullable: true }
+                    sizeBytes: { type: integer, minimum: 1, nullable: true }
+                previewToken: { type: string, minLength: 20, maxLength: 4000 }
+                exportFormats:
+                  type: array
+                  minItems: 1
+                  maxItems: 3
+                  items: { type: string, enum: [bmp, png, emf] }
+                idempotencyKey: { type: string, minLength: 8, maxLength: 200 }
       responses:
         '200': { description: OK }
         '401': { $ref: '#/components/responses/Unauthorized' }

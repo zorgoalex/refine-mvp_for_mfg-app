@@ -90,7 +90,23 @@ describe('labelsApi', () => {
         }),
       );
 
-    await labelsApi.previewDetailLabels({ templateId: 1, templateVersion: 2, detailIds: [101, 202] });
+    await labelsApi.previewDetailLabels({
+      templateId: 1,
+      templateVersion: 2,
+      detailIds: [101, 202],
+      detailInstances: [{ detailId: 101, instance: 1 }],
+      cutSheetScope: {
+        cutJobId: 7,
+        cutGroupId: 3,
+        sheetIndex: 0,
+        detailInstances: [{ detailId: 101, instance: 1 }],
+      },
+      cutMapFallbackImage: {
+        packetId: '11111111-1111-4111-8111-111111111111',
+        sourceVersion: 2,
+        storageKey: 'sheet.jpg',
+      },
+    });
     await labelsApi.generateDetailLabels({
       templateId: 1,
       templateVersion: 2,
@@ -104,6 +120,8 @@ describe('labelsApi', () => {
     expect(fetch).toHaveBeenNthCalledWith(1, '/api/v1/labels/preview', expect.any(Object));
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/v1/labels/generate', expect.any(Object));
     expect(fetch).toHaveBeenNthCalledWith(3, '/api/v1/labels/generations/9/export', expect.any(Object));
+    expect((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body).toContain('cutSheetScope');
+    expect((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body).toContain('cutMapFallbackImage');
     expect(downloaded.fileName).toBe('detail-labels.zip');
   });
 

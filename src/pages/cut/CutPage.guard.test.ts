@@ -347,11 +347,11 @@ describe('CutPage source guards', () => {
     const labelActionSource = source.slice(previewLoopStart, source.indexOf('{sheetThumbs[key]', labelActionStart));
 
     expect(source).toContain('CutSheetLabelGenerateAction');
-    expect(source).toContain('detailIdsForSheet');
+    expect(source).toContain('detailInstancesForSheet');
     expect(source).toContain('sheet.placements.pieces');
-    expect(labelActionSource).toContain('const sheetDetailIds = detailIdsForSheet(sheet)');
+    expect(labelActionSource).toContain('const sheetDetailInstances = detailInstancesForSheet(sheet)');
     expect(labelActionSource).toContain('<CutSheetLabelGenerateAction');
-    expect(labelActionSource).toContain('detailIds={sheetDetailIds}');
+    expect(labelActionSource).toContain('detailInstances={sheetDetailInstances}');
     expect(labelActionSource).toContain('cutGroupId={group.cutGroupId}');
     expect(labelActionSource).toContain('sheetIndex={sheet.sheetIndex}');
     expect(labelActionSource).not.toMatch(/layout_mode\s*===\s*'vacuum_table'|engine_used\s*===\s*'vacuum_table'/);
@@ -361,6 +361,9 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toContain('printLabelSvgPages');
     expect(sheetLabelSource).toContain('const runPrint = async () =>');
     expect(sheetLabelSource).toContain('Скачать ZIP');
+    expect(sheetLabelSource).toContain('cutSheetScope');
+    expect(sheetLabelSource).not.toContain("element.kind === 'cut_map'");
+    expect(sheetLabelSource).not.toContain('Шаблоны с миниатюрой раскроя доступны');
     // Operator picks the export file formats via checkboxes (bmp/png/emf).
     expect(sheetLabelSource).toContain('Форматы файлов бирок');
     expect(sheetLabelSource).toContain('Checkbox.Group');
