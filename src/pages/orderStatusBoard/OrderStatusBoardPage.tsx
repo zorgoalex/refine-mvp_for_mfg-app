@@ -3831,6 +3831,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
         alt={`Скрин листа ${title}`}
         printTitle={`Раскрой Telegram ${title}`}
         printHeader={printHeader}
+        printMode="stretch-page-height"
         onClose={() => setPrintPreviewOpen(false)}
       />
     </>
