@@ -489,6 +489,40 @@ describe('order status board model', () => {
     });
   });
 
+  it('counts only MDF machine files and Basis-cut details for MDF order cut readiness', () => {
+    const mdfPacket = cncPacket('packet-mdf', ['2705'], [2705], [2705], [101]);
+    mdfPacket.items[0] = { ...mdfPacket.items[0], quantity: 2 };
+    const hdfPacket = cncPacket('packet-hdf', ['2706'], [2706], [2706], [102]);
+    hdfPacket.materialName = 'ХДФ 3 мм';
+    hdfPacket.items[0] = { ...hdfPacket.items[0], quantity: 3 };
+    const unknownPacket = cncPacket('packet-unknown', ['2707'], [2707], [2707], [103]);
+    unknownPacket.materialName = 'Не определён';
+    const bazisCutSet = cncBazisCutSet(9002, [
+      { orderName: '2708', orderId: 2708, detailId: 108, materialName: 'МДФ 16 мм' },
+      { orderName: '2709', orderId: 2709, detailId: 109, materialName: 'ЛДСП 16 мм' },
+      { orderName: '2710', orderId: 2710, detailId: 110, materialName: 'Фанера 12 мм' },
+    ]);
+    const columns = [
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 4,
+        packets: [mdfPacket, hdfPacket, unknownPacket],
+        baths: [],
+        bazisCutSets: [bazisCutSet],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const readiness = buildCncOrderReadiness(columns, {});
+
+    expect(readiness.get(2705)?.cutDetails).toBe(2);
+    expect(readiness.get(2708)?.cutDetails).toBe(1);
+    expect(readiness.has(2706)).toBe(false);
+    expect(readiness.has(2707)).toBe(false);
+    expect(readiness.has(2709)).toBe(false);
+    expect(readiness.has(2710)).toBe(false);
+  });
+
   it('keeps MDF order readiness total at least the order detail count', () => {
     const split = splitCncOrderCardsByManualColumn(
       [{ ...card(501), partsCount: 50 }],
@@ -1029,7 +1063,12 @@ function cncBath(
 
 function cncBazisCutSet(
   bazisCutSetId: number,
-  items: Array<{ orderName: string; orderId: number | null; detailId: number | null }>,
+  items: Array<{
+    orderName: string;
+    orderId: number | null;
+    detailId: number | null;
+    materialName?: string;
+  }>,
 ) {
   return {
     bazisCutSetId,
@@ -1043,6 +1082,7 @@ function cncBazisCutSet(
       detailNumber: null,
       widthMm: null,
       heightMm: null,
+      materialName: item.materialName ?? 'МДФ 16 мм',
       quantity: 1,
     })),
   };

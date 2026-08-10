@@ -158,6 +158,7 @@ export interface CncTelegramBazisCutSetItemDto {
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
+  materialName: string;
   quantity: number;
 }
 

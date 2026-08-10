@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-10",
+    title: "МДФ-работы: подсчёт распила только по МДФ",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В карточке заказа на МДФ-доске счётчик «Распилено» теперь учитывает только файлы станка и Базис-раскрой с материалом МДФ; ЛДСП, ХДФ, фанера и другие материалы не увеличивают готовность распила.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-10",
     title: "МДФ-работы: ручные статусы карточек",
     services: ["ERP"],
     repositories: ["repo_erp"],

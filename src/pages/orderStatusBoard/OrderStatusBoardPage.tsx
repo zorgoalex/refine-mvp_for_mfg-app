@@ -153,6 +153,8 @@ import {
 import { can } from '../../utils/permissions';
 import {
   buildCncDetailedMachineSources,
+  cncMaterialNameIsMdf,
+  cncPacketCountsForMdfReadiness,
   cncPacketHasOtherMaterialMarker,
   type CncDetailedMachineSource,
 } from './cncDetailedMachine';
@@ -5774,6 +5776,7 @@ export function buildCncOrderReadiness(
 
   for (const column of columns) {
     for (const packet of column.packets) {
+      if (!cncPacketCountsForMdfReadiness(packet)) continue;
       const packetTarget = resolveCncManualTarget(
         'packet',
         packet.packetId,
@@ -5804,6 +5807,7 @@ export function buildCncOrderReadiness(
         manualMoves,
       );
       for (const [index, item] of bazisCutSet.items.entries()) {
+        if (!cncMaterialNameIsMdf(item.materialName)) continue;
         const detail = getDetail(
           item.orderId,
           item.detailId,

@@ -231,6 +231,7 @@ interface BazisCutSetJoinedRow extends QueryResultRow {
   detail_number: string | number | null;
   width_mm: string | number | null;
   height_mm: string | number | null;
+  material_name: string | null;
   quantity: string | number;
 }
 
@@ -3598,6 +3599,7 @@ async function loadBathBazisCutSetCards(
       source_detail.detail_number,
       COALESCE(source_detail.width, detail.finished_width_mm) AS width_mm,
       COALESCE(source_detail.height, detail.finished_length_mm) AS height_mm,
+      detail.material_name,
       detail.quantity
     FROM target_bazis_cut_sets target
     JOIN bazis_cut_sets cut_set
@@ -3653,6 +3655,7 @@ function mapBathBazisCutSetRows(
       detailNumber: toNullableNumber(row.detail_number),
       widthMm: toNullableNumber(row.width_mm),
       heightMm: toNullableNumber(row.height_mm),
+      materialName: normalizeOptional(row.material_name) ?? 'Не определён',
       quantity,
     };
     accumulator.card.items.push(item);

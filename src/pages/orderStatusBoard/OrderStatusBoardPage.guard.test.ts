@@ -659,6 +659,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("title: 'Готов к выдаче'");
     expect(page).toContain("title: 'Выдан'");
     expect(page).toContain('Распилено {cncReadiness.cutDetails}');
+    expect(page).toContain('if (!cncPacketCountsForMdfReadiness(packet)) continue;');
+    expect(page).toContain('if (!cncMaterialNameIsMdf(item.materialName)) continue;');
     expect(page).toContain('Закатано {cncReadiness.rolledDetails}');
     expect(page).toContain('Осталось {cncReadiness.remainingDetails}');
     expect(page).toContain('className="cnc-order-card__client"');
@@ -693,6 +695,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(detailedMachine).toContain("packet.programName ?? ''");
     expect(detailedMachine).toContain('...packet.comments');
     expect(detailedMachine).toContain('CNC_OTHER_MATERIAL_MARKER_PATTERN');
+    expect(detailedMachine).toContain('export function cncMaterialNameIsMdf');
+    expect(detailedMachine).toContain('export function cncPacketCountsForMdfReadiness');
     expect(css).toMatch(
       /\.cnc-packet-card--other-material\s*\{[^}]*border-color: #8b5a2b;[^}]*box-shadow:/s,
     );
