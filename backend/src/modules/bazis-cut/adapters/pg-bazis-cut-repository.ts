@@ -64,6 +64,7 @@ interface SetRow extends QueryResultRow {
 interface ListRow extends SetRow {
   quantity: string | number;
   position_count: string | number;
+  total_area_m2: string | number;
   orders: unknown;
   projects: unknown;
   bazis_projects: unknown;
@@ -148,6 +149,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       `SELECT s.*,
               COALESCE(SUM(d.quantity), 0)::bigint AS quantity,
               COUNT(d.bazis_cut_set_detail_id)::bigint AS position_count,
+              COALESCE(SUM(d.finished_length_mm * d.finished_width_mm * d.quantity / 1000000.0), 0)::numeric AS total_area_m2,
               COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
                 'id', d.source_order_id,
                 'label', d.source_order_name,
@@ -736,6 +738,7 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
     createdBy: nullableNumber(header.created_by), updatedBy: nullableNumber(header.updated_by),
     createdAt: iso(header.created_at), updatedAt: iso(header.updated_at), details,
     quantity: details.reduce((sum, detail) => sum + detail.quantity, 0), positionCount: details.length,
+    totalAreaM2: totalAreaM2(details),
     orders: refs(details, 'sourceOrderId', 'sourceOrderName', 'sourceOrderDeleted'),
     projects: refs(details, 'sourceProjectId', 'sourceProjectCode'),
     bazisProjects: labelRefs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
@@ -747,7 +750,8 @@ function mapSummaryRow(row: ListRow): BazisCutSetSummaryDto {
   return {
     bazisCutSetId: toNumber(row.bazis_cut_set_id), name: row.name, version: Number(row.version),
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), quantity: toNumber(row.quantity),
-    positionCount: toNumber(row.position_count), orders: parseRefs(row.orders), projects: parseRefs(row.projects),
+    positionCount: toNumber(row.position_count), totalAreaM2: toNumber(row.total_area_m2),
+    orders: parseRefs(row.orders), projects: parseRefs(row.projects),
     bazisProjects: parseRefs(row.bazis_projects), bazisOrders: parseRefs(row.bazis_orders),
   };
 }
@@ -1031,7 +1035,11 @@ function parseMembershipRefs(value: unknown): Array<{ bazisCutSetId: number; nam
 
 function summaryAudit(set: BazisCutSetDto): Record<string, unknown> {
   return { setId: set.bazisCutSetId, name: set.name, version: set.version,
-    quantity: set.quantity, positionCount: set.positionCount };
+    quantity: set.quantity, positionCount: set.positionCount, totalAreaM2: set.totalAreaM2 };
+}
+
+function totalAreaM2(details: readonly Pick<BazisCutSetDetailDto, 'finishedLengthMm' | 'finishedWidthMm' | 'quantity'>[]): number {
+  return details.reduce((sum, detail) => sum + detail.finishedLengthMm * detail.finishedWidthMm * detail.quantity / 1_000_000, 0);
 }
 
 async function setSessionUser(client: TransactionClient, user: CurrentUser): Promise<void> {

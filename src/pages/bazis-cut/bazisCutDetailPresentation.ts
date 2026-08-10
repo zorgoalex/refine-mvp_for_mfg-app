@@ -41,6 +41,10 @@ export function summarizeBazisCutDetails(details: readonly {
   };
 }
 
+export function formatBazisCutAreaM2(value: number): string {
+  return value.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function clean(value: string | null | undefined): string {
   return value?.trim() ?? '';
 }

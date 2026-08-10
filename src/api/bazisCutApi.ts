@@ -21,6 +21,7 @@ export interface BazisCutSetListItemDto {
   updatedAt: string;
   quantity: number;
   positionCount: number;
+  totalAreaM2: number;
   orders: BazisCutSourceRefDto[];
   projects: BazisCutSourceRefDto[];
   bazisProjects: BazisCutSourceRefDto[];

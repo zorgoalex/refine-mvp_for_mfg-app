@@ -25,9 +25,10 @@ describe('Basis-cut UI integration guards', () => {
   });
 
   it('renders the exact requested list columns and source categories', () => {
-    for (const label of ['Название набора', 'Дата формирования', 'Заказы / Базис-проекты / Базис-заказы', 'Количество деталей']) {
+    for (const label of ['Название набора', 'Дата формирования', 'Заказы / Базис-проекты / Базис-заказы', 'Количество деталей', 'Площадь, м²']) {
       expect(list).toContain(label);
     }
+    expect(list).toContain("dataIndex: 'totalAreaM2'");
     expect(list).toContain('ERP-заказы');
     expect(list).toContain('Базис-проекты');
     expect(list).toContain('Базис-заказы');
@@ -108,5 +109,6 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain('scroll={{ x: 5750, y: 480 }}');
     expect(card).toContain('<Table.Summary fixed="bottom">');
     expect(card).toContain('Итого позиций:');
+    expect(card).toContain('formatBazisCutAreaM2(setTotals.totalAreaM2)');
   });
 });

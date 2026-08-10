@@ -56,6 +56,31 @@ describe('PgBazisCutRepository security and event contract', () => {
     expect(sql).not.toMatch(/'label', d\.source_order_full_number,[\s\S]*AS orders/i);
   });
 
+  it('lists saved sets with total finished detail area', async () => {
+    let sqlText = '';
+    const database = {
+      query: vi.fn(async (sql: string) => {
+        sqlText = sql;
+        return result([{
+          ...setRow(0),
+          quantity: 5,
+          position_count: 2,
+          total_area_m2: '1.25',
+          orders: [],
+          projects: [],
+          bazis_projects: [],
+          bazis_orders: [],
+          total_count: 1,
+        }]);
+      }),
+    } as unknown as DatabaseService;
+    const repository = new PgBazisCutRepository(database);
+
+    await expect(repository.list({ currentUser: user, requestId: 'list-1', search: '', page: 1, pageSize: 25 }))
+      .resolves.toMatchObject({ items: [{ quantity: 5, positionCount: 2, totalAreaM2: 1.25 }] });
+    expect(sqlText).toContain('finished_length_mm * d.finished_width_mm * d.quantity / 1000000.0');
+  });
+
   it('uses unprefixed ERP order numbers on the card and preserves full provenance', async () => {
     const query = vi.fn(async (sql: string) => {
       if (sql.includes('SELECT * FROM bazis_cut_sets WHERE')) return result([setRow(0)]);

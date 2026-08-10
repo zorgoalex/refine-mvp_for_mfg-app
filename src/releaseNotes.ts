@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-10",
+    title: "Базис-раскрой: площадь наборов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке наборов Базис-раскроя появилась колонка «Площадь, м²» с суммарной площадью всех деталей набора.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-10",
     title: "Раскрой: бирки по листам для всех профилей",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

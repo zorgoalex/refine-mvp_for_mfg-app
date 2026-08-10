@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildBazisCutCardPosition,
   buildBazisCutQrCode,
+  formatBazisCutAreaM2,
   summarizeBazisCutDetails,
 } from './bazisCutDetailPresentation';
 
@@ -57,16 +58,19 @@ describe('buildBazisCutQrCode', () => {
 });
 
 describe('summarizeBazisCutDetails', () => {
-  it('counts positions and sums quantity and finished-detail area', () => {
-    const summary = summarizeBazisCutDetails([
-      { quantity: 2, finishedLengthMm: 1000, finishedWidthMm: 500 },
-      { quantity: 3, finishedLengthMm: 500, finishedWidthMm: 200 },
-      { quantity: 1, finishedLengthMm: 1000, finishedWidthMm: 100 },
-    ]);
-    expect(summary).toMatchObject({
+  it('counts positions and sums quantity and finished area', () => {
+    expect(summarizeBazisCutDetails([
+      { finishedLengthMm: 411, finishedWidthMm: 100, quantity: 2 },
+      { finishedLengthMm: 1000, finishedWidthMm: 500, quantity: 3 },
+      { finishedLengthMm: 200, finishedWidthMm: 50, quantity: 1 },
+    ])).toEqual({
       positionCount: 3,
       quantity: 6,
+      totalAreaM2: 1.5922,
     });
-    expect(summary.totalAreaM2).toBeCloseTo(1.4);
+  });
+
+  it('formats area with two decimal places for compact tables', () => {
+    expect(formatBazisCutAreaM2(1.5922)).toBe('1,59');
   });
 });

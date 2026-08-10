@@ -268,6 +268,7 @@ function cardDto(): BazisCutSetCardDto {
     updatedAt: '2026-07-15T10:00:00.000Z',
     positionCount: 0,
     quantity: 0,
+    totalAreaM2: 0,
     orders: [],
     projects: [],
     bazisProjects: [],
