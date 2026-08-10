@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-10",
+    title: "МДФ-работы: номер раскроя на печати скрина",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "При печати скрина листа из карточки файла станка на МДФ-доске сверху страницы выводится номер раскроя из карточки; размер шрифта в колонтитуле — 20 px.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-10",
     title: "МДФ-работы: недостающие позиции заказа",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

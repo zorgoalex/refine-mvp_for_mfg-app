@@ -3401,6 +3401,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const otherMaterial = cncPacketHasOtherMaterialMarker(packet);
   const hasSheetImage = Boolean(packet.sheetImageUrl);
   const svgCutSheet = packet.svgCutSheets?.[0] ?? null;
+  const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
 
   useEffect(() => {
@@ -3606,6 +3607,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               open={activeAuxView === 'sheet'}
               cutJobId={packet.svgCutJobId ?? null}
               labelSheet={svgCutSheet}
+              printHeader={sheetPrintHeader ?? undefined}
             />
           )}
 
@@ -3625,6 +3627,7 @@ interface CncTelegramSheetImagePreviewProps {
   open: boolean;
   cutJobId: number | null;
   labelSheet: CncTelegramPacketCutSheet | null;
+  printHeader?: string;
 }
 
 const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> = ({
@@ -3633,6 +3636,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   open,
   cutJobId,
   labelSheet,
+  printHeader,
 }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -3738,6 +3742,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
         status="Скрин из Telegram-чата"
         alt={`Скрин листа ${title}`}
         printTitle={`Раскрой Telegram ${title}`}
+        printHeader={printHeader}
         onClose={() => setPrintPreviewOpen(false)}
       />
     </>
@@ -6621,6 +6626,20 @@ function cncRelationCardClassName(
   ]
     .filter((item): item is string => Boolean(item))
     .join(' ');
+}
+
+function cncMachineFileCutPrintHeader(packet: CncTelegramPacket): string | null {
+  const cardNumber = packet.cuttingSequenceNo;
+  if (cardNumber !== null && cardNumber !== undefined) return `Раскрой №${cardNumber}`;
+  if (
+    packet.svgCutJobId !== null &&
+    packet.svgCutJobId !== undefined &&
+    packet.svgCutResultNo !== null &&
+    packet.svgCutResultNo !== undefined
+  ) {
+    return `Раскрой №${packet.svgCutJobId}-${packet.svgCutResultNo}`;
+  }
+  return null;
 }
 
 function cncSheetPreviewRotate90(

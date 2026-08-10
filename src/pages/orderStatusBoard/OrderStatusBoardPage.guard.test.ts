@@ -942,7 +942,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
     expect(sheetPreview).toContain('status="Скрин из Telegram-чата"');
+    expect(sheetPreview).toContain('printHeader={printHeader}');
+    expect(packetCard).toContain('const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);');
+    expect(page).toContain('function cncMachineFileCutPrintHeader(packet: CncTelegramPacket)');
+    expect(page).toContain('return `Раскрой №${cardNumber}`;');
     expect(imagePrintPreview).toContain('export const DEFAULT_IMAGE_PREVIEW_SCALE = 0.25;');
+    expect(imagePrintPreview).toContain('printHeader?: string;');
+    expect(imagePrintPreview).toContain('printImage(imageUrl, printTitle, printHeader)');
+    expect(imagePrintPreview).toContain('class="image-print-header"');
+    expect(imagePrintPreview).toContain('font-size:20px');
     expect(imagePrintPreview).toContain('ZoomOutOutlined');
     expect(imagePrintPreview).toContain('ZoomInOutlined');
     expect(imagePrintPreview).toContain('Печать скрина');
