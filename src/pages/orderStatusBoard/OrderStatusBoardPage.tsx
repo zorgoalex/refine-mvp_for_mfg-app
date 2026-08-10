@@ -4365,6 +4365,10 @@ function stopCncCardClickPropagation(event: React.MouseEvent<HTMLElement>): void
   event.stopPropagation();
 }
 
+function stopCncCardNestedInteraction(event: React.SyntheticEvent<HTMLElement>): void {
+  event.stopPropagation();
+}
+
 function isCncManualDragIgnored(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(
     target.closest('button, a, input, textarea, select, [contenteditable="true"], [data-cnc-manual-drag-ignore="true"]'),
@@ -5030,6 +5034,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   showFinancials,
 }) => {
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const dragSuppressedRef = useRef(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const hasPermission =
     board === 'order'
@@ -5062,6 +5067,12 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           ? 'Нет доступных активных статусов для перемещения.'
           : null;
   const orderNumber = formatStatusBoardOrderNumber(card);
+  const updateDragSuppression = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
+    dragSuppressedRef.current = isCncManualDragIgnored(event.target);
+  }, []);
+  const clearDragSuppression = useCallback(() => {
+    dragSuppressedRef.current = false;
+  }, []);
   const [{ isDragging }, dragRef] = useDrag<
     BoardDragItem,
     void,
@@ -5069,7 +5080,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   >({
     type: BOARD_DRAG_TYPE,
     item: () => ({ card, sourceColumn, board, trigger: cardRef.current }),
-    canDrag: moveAvailable && finePointer,
+    canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current,
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
   });
 
@@ -5212,6 +5223,11 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         event.preventDefault();
         onSelectRelation?.();
       }}
+      onMouseDownCapture={updateDragSuppression}
+      onMouseUpCapture={clearDragSuppression}
+      onTouchStartCapture={updateDragSuppression}
+      onTouchEndCapture={clearDragSuppression}
+      onTouchCancelCapture={clearDragSuppression}
       {...touchDragHandleProps}
     >
       <div className="status-board-card__top">
@@ -5382,6 +5398,10 @@ const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>((
 }) => (
   <div
     className="cnc-order-card__missing"
+    data-cnc-manual-drag-ignore="true"
+    onPointerDown={stopCncCardNestedInteraction}
+    onMouseDown={stopCncCardNestedInteraction}
+    onTouchStart={stopCncCardNestedInteraction}
     onClick={(event) => event.stopPropagation()}
   >
     <Collapse

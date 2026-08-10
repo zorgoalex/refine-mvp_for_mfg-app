@@ -67,7 +67,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('enableMouseEvents: true');
     expect(page).toContain('delayTouchStart');
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
-    expect(page).toContain('canDrag: moveAvailable && finePointer');
+    expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('CNC_BOARD_DRAG_TYPE');
     expect(page).toContain('CncManualCardFrame');
     expect(page).toContain('isCncManualMoveAllowed(item.kind, columnKey)');
@@ -344,6 +344,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
     expect(page).toContain('key="missing-details"');
+    expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
+    expect(page).toContain('data-cnc-manual-drag-ignore="true"');
+    expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');
     expect(page).toContain('cncColumnDisplayTitle(column)');
     expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
