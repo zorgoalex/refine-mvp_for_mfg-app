@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Card, Input, Space, Table, Typography, message } from 'antd';
+import { Button, Card, Input, Popconfirm, Space, Table, Typography, message } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
+import { DeleteOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto, type BazisCutSourceRefDto } from '../../api/bazisCutApi';
 import { OrderDeletedTag, hasDeletedOrderReference, orderDeletedReferenceClassName } from '../../components/OrderDeletedTag';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../hooks/usePageSizePreference';
+import { can } from '../../utils/permissions';
 import { formatBazisCutAreaM2 } from './bazisCutDetailPresentation';
 
 const { Title, Text } = Typography;
@@ -18,6 +20,8 @@ export const BazisCutListPage: React.FC = () => {
   const { pageSize, setPageSize } = usePageSizePreference('bazis-cut:list', 25);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [deletingSetId, setDeletingSetId] = useState<number | null>(null);
+  const canManage = can('cut.manage');
 
   useEffect(() => { const id = window.setTimeout(() => { setDebounced(search.trim()); setPage(1); }, 300); return () => clearTimeout(id); }, [search]);
   const load = useCallback(async () => {
@@ -30,6 +34,22 @@ export const BazisCutListPage: React.FC = () => {
   }, [debounced, page, pageSize]);
   useEffect(() => { void load(); }, [load]);
 
+  const removeSet = useCallback(async (row: BazisCutSetListItemDto) => {
+    setDeletingSetId(row.bazisCutSetId);
+    try {
+      await bazisCutApi.removeSet(row.bazisCutSetId, { expectedVersion: row.version }, {
+        idempotencyKey: commandKey('bazis-cut-set-delete'),
+      });
+      message.success(`Набор «${row.name}» удалён`);
+      if (items.length === 1 && page > 1) setPage(page - 1);
+      else await load();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось удалить набор');
+    } finally {
+      setDeletingSetId(null);
+    }
+  }, [items.length, load, page]);
+
   const columns = useMemo<ColumnsType<BazisCutSetListItemDto>>(() => [
     { title: 'Название набора', dataIndex: 'name', key: 'name',
       render: (name: string, row) => <Link to={`/bazis-cut/${row.bazisCutSetId}`} onClick={(event) => event.stopPropagation()}>{name}</Link> },
@@ -41,7 +61,21 @@ export const BazisCutListPage: React.FC = () => {
       render: (value: number, row) => <Space direction="vertical" size={0} align="end"><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</Text><Text type="secondary">Позиций: {row.positionCount}</Text></Space> },
     { title: 'Площадь, м²', dataIndex: 'totalAreaM2', key: 'totalAreaM2', align: 'right', width: 130,
       render: (value: number) => <Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{formatBazisCutAreaM2(value)}</Text> },
-  ], []);
+    ...(canManage ? [{ title: 'Действия', key: 'actions', align: 'right' as const, width: 130,
+      render: (_: unknown, row: BazisCutSetListItemDto) => {
+        const empty = row.positionCount === 0;
+        const button = <Button danger icon={<DeleteOutlined />} disabled={!empty}
+          loading={deletingSetId === row.bazisCutSetId}
+          title={empty ? 'Удалить пустой набор' : 'Удалять можно только наборы без деталей'}>
+          Удалить
+        </Button>;
+        if (!empty) return <span onClick={(event) => event.stopPropagation()}>{button}</span>;
+        return <span onClick={(event) => event.stopPropagation()}><Popconfirm title="Удалить пустой набор?" description={`«${row.name}» будет удалён безвозвратно.`}
+          okText="Удалить" cancelText="Отмена" onConfirm={() => void removeSet(row)}>
+          {button}
+        </Popconfirm></span>;
+      } }] : []),
+  ], [canManage, deletingSetId, removeSet]);
 
   const pagination: TablePaginationConfig = { current: page, pageSize, total, showSizeChanger: true,
     pageSizeOptions: PAGE_SIZE_OPTIONS,
@@ -81,3 +115,7 @@ const SourceLine: React.FC<{ title: string; refs: BazisCutSourceRefDto[]; href?:
     </Space>
   </React.Fragment>)}</div>;
 };
+
+function commandKey(prefix: string): string {
+  return `${prefix}-${typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`;
+}

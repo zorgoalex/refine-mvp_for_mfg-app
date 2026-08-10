@@ -10994,6 +10994,27 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationError' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
+    delete:
+      tags: [BazisCutSets]
+      operationId: deleteBazisCutSet
+      summary: Delete an empty Basis-cut set
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DeleteBazisCutSetRequest' } } }
+      responses:
+        '200':
+          description: Deleted
+          content: { application/json: { schema: { $ref: '#/components/schemas/BazisCutDeleteSetResult' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
 
   /api/v1/bazis-cut-sets/{setId}/details:
     parameters:
@@ -11613,6 +11634,12 @@ components:
       required: [expectedVersion]
       properties:
         expectedVersion: { type: integer, minimum: 0 }
+    DeleteBazisCutSetRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedVersion]
+      properties:
+        expectedVersion: { type: integer, minimum: 0 }
     UpdateBazisCutDetailRequest:
       allOf:
         - { $ref: '#/components/schemas/BazisCutDetailFields' }
@@ -11726,6 +11753,12 @@ components:
       properties:
         set: { $ref: '#/components/schemas/BazisCutSet' }
         addedCount: { type: integer, minimum: 0 }
+    BazisCutDeleteSetResult:
+      type: object
+      required: [deleted, set]
+      properties:
+        deleted: { type: boolean, enum: [true] }
+        set: { $ref: '#/components/schemas/BazisCutSetSummary' }
     BazisCutSetList:
       type: object
       required: [items, page, pageSize, total]

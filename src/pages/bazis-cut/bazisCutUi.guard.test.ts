@@ -39,6 +39,15 @@ describe('Basis-cut UI integration guards', () => {
     expect(styles).toContain('order-deleted-reference-row');
   });
 
+  it('offers deletion only for empty Basis-cut sets from the list', () => {
+    expect(list).toContain("can('cut.manage')");
+    expect(list).toContain('bazisCutApi.removeSet(');
+    expect(list).toContain('row.positionCount === 0');
+    expect(list).toContain('Удалять можно только наборы без деталей');
+    expect(list).toContain('Удалить пустой набор?');
+    expect(list).toContain('event.stopPropagation()');
+  });
+
   it('supports new/existing searchable set selection', () => {
     expect(modal).toContain('Новый набор');
     expect(modal).toContain('Существующий набор');

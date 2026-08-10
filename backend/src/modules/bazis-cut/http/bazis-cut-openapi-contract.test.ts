@@ -24,7 +24,8 @@ describe('Bazis-cut OpenAPI contract', () => {
     for (const token of [
       'BazisCutSetId:', 'BazisCutSetDetailId:', "#/components/parameters/IdempotencyKey",
       'CreateBazisCutSetRequest', 'RenameBazisCutSetRequest', 'AddBazisCutDetailsRequest',
-      'UpdateBazisCutDetailRequest', 'DeleteBazisCutDetailRequest', 'BazisCutMutationResult',
+      'UpdateBazisCutDetailRequest', 'DeleteBazisCutSetRequest', 'DeleteBazisCutDetailRequest',
+      'BazisCutMutationResult', 'BazisCutDeleteSetResult',
       'application/vnd.ms-excel', 'format: binary',
     ]) expect(contract).toContain(token);
     expect(contract.match(/name: setId/g)?.length).toBeGreaterThanOrEqual(1);
@@ -33,8 +34,8 @@ describe('Bazis-cut OpenAPI contract', () => {
   });
 
   it('keeps matching Swagger metadata on every command route', () => {
-    expect(controller.match(/@ApiHeader\(commandHeader\)/g)).toHaveLength(5);
-    expect(controller.match(/@ApiParam\(idParameter\)/g)).toHaveLength(6);
+    expect(controller.match(/@ApiHeader\(commandHeader\)/g)).toHaveLength(6);
+    expect(controller.match(/@ApiParam\(idParameter\)/g)).toHaveLength(7);
     expect(controller).toContain("@ApiProduces('application/vnd.ms-excel')");
     expect(controller).toContain("description: 'Strict full replacement: all 33 editable Basis fields plus expectedVersion'");
     expect(controller.match(/@ApiQuery\(/g)).toHaveLength(3);

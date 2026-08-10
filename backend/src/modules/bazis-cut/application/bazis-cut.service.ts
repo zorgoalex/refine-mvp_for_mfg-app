@@ -52,6 +52,11 @@ export class BazisCutService {
     return this.repository.deleteDetail(input);
   }
 
+  async deleteEmptySet(input: Parameters<BazisCutRepositoryPort['deleteEmptySet']>[0]) {
+    await this.require(input.currentUser, 'cut.manage', 'delete_empty_set', input.requestId, input.setId);
+    return this.repository.deleteEmptySet(input);
+  }
+
   async export(input: Parameters<BazisCutRepositoryPort['export']>[0]) {
     await this.require(input.currentUser, 'cut.view', 'export', input.requestId, input.setId);
     return this.repository.export(input);
