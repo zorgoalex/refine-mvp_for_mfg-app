@@ -228,6 +228,14 @@ function isKeyboardMoveMenuTrigger(event: React.KeyboardEvent<HTMLElement>): boo
   );
 }
 
+function scrollStatusBoardColumnCardsToTop(viewport: HTMLElement | null): void {
+  if (!viewport) return;
+  const cardLists = viewport.querySelectorAll<HTMLElement>('.status-board-column__cards');
+  for (const cardList of cardLists) {
+    cardList.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 interface StatusBoardCardStatusBadgeOverride {
   name: string;
@@ -1133,6 +1141,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       cncRelationTargetEquals(current, target) ? null : target,
     );
   }, []);
+
+  useEffect(() => {
+    if (!isCncToday || !cncRelationsEnabled || !activeCncRelation) return undefined;
+    const animationFrame = window.requestAnimationFrame(() => {
+      scrollStatusBoardColumnCardsToTop(boardViewportRef.current);
+    });
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [activeCncRelation, cncRelationsEnabled, isCncToday]);
 
   useEffect(() => {
     setActiveCncRelation(null);

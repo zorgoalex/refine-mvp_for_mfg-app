@@ -195,6 +195,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
+  it('scrolls MDF column card lists to top after relation selection', () => {
+    expect(page).toContain('function scrollStatusBoardColumnCardsToTop');
+    expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
+    expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
+    expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
+    expect(page).toContain('[activeCncRelation, cncRelationsEnabled, isCncToday]');
+  });
+
   it('loads the next column page before vertical scroll reaches the bottom', () => {
     expect(page).toContain('const loadSentinelRef = useRef<HTMLDivElement | null>(null)');
     expect(page).toContain("rootMargin: '0px 0px 320px 0px'");
