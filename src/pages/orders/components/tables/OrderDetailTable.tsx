@@ -51,6 +51,7 @@ import {
 import {
   findOrderDetailInlineEditor,
   finishOrderDetailInlineTab,
+  focusOrderDetailInlineEditorAtEnd,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
@@ -195,12 +196,12 @@ const ORDER_DETAIL_COLUMN_WIDTHS = {
   detailNumber: 44,
   height: 67,
   width: 67,
-  quantity: 67,
+  quantity: 54,
   area: 90,
   millingType: 119,
-  edgeType: 91,
+  edgeType: 73,
   sheetMaterial: 126,
-  millingCostPerSqm: 98,
+  millingCostPerSqm: 78,
   detailCost: 105,
 } as const;
 
@@ -230,7 +231,7 @@ const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
   width: 'max-content',
   maxWidth: 'none',
   whiteSpace: 'nowrap',
-  fontSize: 11,
+  fontSize: 13.2,
   lineHeight: 1.2,
   fontVariantNumeric: 'tabular-nums',
   letterSpacing: 0,
@@ -2044,7 +2045,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     record: OrderDetail,
     columnKey: string,
   ) => {
-    if (editingKey !== null || event.defaultPrevented) return;
+    if ((editingKey !== null && editingField !== null) || event.defaultPrevented) return;
     if (event.target !== event.currentTarget) return;
 
     const directionByKey: Partial<Record<string, OrderDetailSpreadsheetDirection>> = {
@@ -2078,8 +2079,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       || !isSpreadsheetCellEditable(columnKey)
     ) return;
     const initialValue = orderDetailSpreadsheetTypedValue(columnKey, event.key);
+    if (initialValue === null) return;
     event.preventDefault();
-    void beginSpreadsheetCellEdit(record, columnKey, initialValue ?? undefined);
+    void beginSpreadsheetCellEdit(record, columnKey, initialValue);
   };
   const handleInlineEditorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (
@@ -2320,7 +2322,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
             if (editingKey === null) return;
             if (String(editingKey) === rowKey) {
-              if (editable) setEditingField(column.key);
+              if (!clickedInteractiveChild) setEditingField(null);
               return;
             }
             void saveCurrentRow().then((saved) => {
@@ -2456,8 +2458,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         scrollToEditingRowRef.current = false;
       }
       focusFrame = requestAnimationFrame(() => {
-        findOrderDetailInlineEditor(row ?? null, String(editingField))
-          ?.focus({ preventScroll: true });
+        focusOrderDetailInlineEditorAtEnd(
+          findOrderDetailInlineEditor(row ?? null, String(editingField)),
+        );
       });
     });
     return () => {

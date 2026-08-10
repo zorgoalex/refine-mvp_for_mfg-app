@@ -41,6 +41,7 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain("width: 'max-content'");
     expect(table).toContain("whiteSpace: 'nowrap'");
     expect(table).toContain("fontVariantNumeric: 'tabular-nums'");
+    expect(table).toContain('fontSize: 13.2');
     expect(table).not.toContain('ResizeObserver');
     expect(table).not.toContain('scrollWidth');
     expect(table).not.toContain('clientWidth');
@@ -56,12 +57,12 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain('detailNumber: 44');
     expect(table).toContain('height: 67');
     expect(table).toContain('width: 67');
-    expect(table).toContain('quantity: 67');
+    expect(table).toContain('quantity: 54');
     expect(table).toContain('area: 90');
     expect(table).toContain('millingType: 119');
-    expect(table).toContain('edgeType: 91');
+    expect(table).toContain('edgeType: 73');
     expect(table).toContain('sheetMaterial: 126');
-    expect(table).toContain('millingCostPerSqm: 98');
+    expect(table).toContain('millingCostPerSqm: 78');
     expect(table).toContain('detailCost: 105');
     for (const key of [
       'height',

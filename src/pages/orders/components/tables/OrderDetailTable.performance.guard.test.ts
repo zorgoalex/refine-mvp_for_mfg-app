@@ -37,7 +37,7 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(editingFocusEffect).toContain(
       'findOrderDetailInlineEditor(row ?? null, String(editingField))',
     );
-    expect(editingFocusEffect).toContain('focus({ preventScroll: true })');
+    expect(editingFocusEffect).toContain('focusOrderDetailInlineEditorAtEnd(');
     expect(editingFocusEffect).not.toContain(
       "row?.querySelector<HTMLElement>('input, textarea, [role=\"combobox\"]')",
     );
@@ -92,7 +92,8 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('const [editingField, setEditingField] = useState<React.Key | null>(null);');
     expect(source).toContain("isEditing(record) && editingField === field");
     expect(source).toContain('isSpreadsheetCellEditable(column.key)');
-    expect(source).toContain('setEditingField(column.key)');
+    expect(source).toContain('setEditingField(columnKey)');
+    expect(source).toContain('if (!clickedInteractiveChild) setEditingField(null);');
     expect(source).toContain('onKeyDownCapture={handleInlineEditorKeyDown}');
     expect(source).toContain('nextOrderDetailInlineTabField(');
     expect(source).toContain('void finishInlineEditOnTab(record).then((saved) =>');
@@ -106,6 +107,10 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain("ArrowDown: 'down'");
     expect(source).toContain("event.key === 'Enter' || event.key === 'F2'");
     expect(source).toContain('orderDetailSpreadsheetTypedValue(columnKey, event.key)');
+    expect(source).toContain('if (initialValue === null) return;');
+    expect(source).toContain('editingKey !== null && editingField !== null');
+    expect(source).toContain('focusOrderDetailInlineEditorAtEnd(');
+    expect(source).toContain('if (!clickedInteractiveChild) setEditingField(null);');
     expect(source).toContain('orderDetailSpreadsheetPastedValue(');
     expect(source).toContain("event.clipboardData.setData('text/plain'");
     expect(source).toContain('void beginSpreadsheetCellEdit(detail, column.key)');
@@ -167,7 +172,7 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('if (saved) focusSpreadsheetCoordinate(nextCell)');
     expect(source.match(/keyboard=\{false\}/g)?.length ?? 0).toBeGreaterThanOrEqual(7);
     expect(source).toContain('event.key.length !== 1');
-    expect(source).toContain('initialValue ?? undefined');
+    expect(source).toContain('void beginSpreadsheetCellEdit(record, columnKey, initialValue);');
   });
 
   it('keeps only the spreadsheet cell frame around an active editor', () => {

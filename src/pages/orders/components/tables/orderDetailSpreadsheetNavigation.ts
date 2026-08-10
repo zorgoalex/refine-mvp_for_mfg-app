@@ -27,6 +27,7 @@ const DIRECT_TYPE_NUMBER_FIELDS = new Set([
   'width',
   'quantity',
   'milling_cost_per_sqm',
+  'detail_cost',
   'priority',
 ]);
 

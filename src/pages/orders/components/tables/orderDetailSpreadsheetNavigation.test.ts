@@ -49,6 +49,7 @@ describe('order detail spreadsheet navigation', () => {
 
   it('starts direct typing only for compatible text and number cells', () => {
     expect(orderDetailSpreadsheetTypedValue('height', '7')).toBe(7);
+    expect(orderDetailSpreadsheetTypedValue('detail_cost', '8')).toBe(8);
     expect(orderDetailSpreadsheetTypedValue('note', 'П')).toBe('П');
     expect(orderDetailSpreadsheetTypedValue('film_id', '7')).toBeNull();
     expect(orderDetailSpreadsheetTypedValue('height', '.')).toBeNull();

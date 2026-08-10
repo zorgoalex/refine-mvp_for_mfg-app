@@ -2,7 +2,7 @@
 // Focus: hides unnecessary fractional zeroes
 // Blur: shows ".00" and "0"
 
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { InputNumber, InputNumberProps } from 'antd';
 import { formatNumber, numberParser } from '../utils/numberFormat';
 
@@ -43,6 +43,21 @@ export const formatCurrencyInputFocusedValue = (
   }).format(numericValue);
 };
 
+interface CurrencyInputCaretTarget {
+  value: string;
+  setSelectionRange: (selectionStart: number, selectionEnd: number) => void;
+}
+
+export const placeCurrencyInputCaretAtEditableEnd = (
+  input: CurrencyInputCaretTarget,
+  value: CurrencyInputValue,
+  precision: number,
+): void => {
+  const editableValue = formatCurrencyInputFocusedValue(value, precision);
+  input.value = editableValue;
+  input.setSelectionRange(editableValue.length, editableValue.length);
+};
+
 /**
  * Format value for blurred state: always show full precision
  */
@@ -78,21 +93,20 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
   emptyWhenUnset = false,
   ...props
 }) => {
-  // Initialize isFocused based on autoFocus prop
-  const [isFocused, setIsFocused] = useState(!!autoFocus);
+  const isFocusedRef = useRef(!!autoFocus);
 
   const handleFocus = (e: React.FocusEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
-    setIsFocused(true);
+    const focusedValue = value ?? numberParser(input.value);
+    isFocusedRef.current = true;
     onFocus?.(e);
     requestAnimationFrame(() => {
-      const cursorPosition = input.value.length;
-      input.setSelectionRange(cursorPosition, cursorPosition);
+      placeCurrencyInputCaretAtEditableEnd(input, focusedValue, precision);
     });
   };
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    setIsFocused(false);
+    isFocusedRef.current = false;
     onBlur?.(e);
   };
 
@@ -101,7 +115,7 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({
     val: number | string | undefined,
     info: CurrencyInputFormatterInfo,
   ): string => {
-    if (isFocused) {
+    if (isFocusedRef.current) {
       return formatCurrencyInputFocusedValue(val, precision, info);
     }
     return formatBlurred(val, precision, emptyWhenUnset);
