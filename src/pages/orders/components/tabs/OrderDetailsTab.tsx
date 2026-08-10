@@ -13,6 +13,7 @@ import {
   CloseOutlined,
   ClearOutlined,
   ScissorOutlined,
+  TableOutlined,
   SwapOutlined,
 } from '@ant-design/icons';
 import { OrderDetailTable, OrderDetailTableRef } from '../tables/OrderDetailTable';
@@ -816,7 +817,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                 return (
                   <AccessibleToolbarTooltip title={reason} disabled={disabled}>
                     <Button
-                      icon={<ScissorOutlined />}
+                      icon={<TableOutlined />}
                       onClick={() => setAddToBazisCutOpen(true)}
                       disabled={disabled}
                       aria-label="Добавить в Базис раскрой"

@@ -49,6 +49,7 @@ describe('Basis-cut UI integration guards', () => {
 
   it('wires the action into order edit/show and blocks dirty edit drafts', () => {
     expect(editDetails).toContain('Добавить в Базис раскрой');
+    expect(editDetails).toMatch(/icon=\{<TableOutlined \/>}\s*[\s\S]{0,240}aria-label="Добавить в Базис раскрой"/);
     expect(editDetails).toContain('Сначала сохраните изменения заказа');
     expect(editDetails).toContain('const disabled = !bazisCutManage || isDirty');
     expect(editDetails).toContain('disabled={disabled}');
