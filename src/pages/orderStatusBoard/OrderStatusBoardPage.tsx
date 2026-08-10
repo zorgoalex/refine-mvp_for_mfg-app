@@ -5653,7 +5653,7 @@ function normalizeCncOrderReadiness(
     rolledDetails: 0,
     remainingDetails: 0,
   };
-  const totalDetails = Math.max(source.totalDetails, fallbackTotal);
+  const totalDetails = fallbackTotal > 0 ? fallbackTotal : nonNegativeInteger(source.totalDetails);
   const rolledDetails = Math.min(nonNegativeInteger(source.rolledDetails), totalDetails);
   const cutDetails = Math.min(
     nonNegativeInteger(source.cutDetails),

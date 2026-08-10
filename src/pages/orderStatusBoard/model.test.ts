@@ -432,6 +432,30 @@ describe('order status board model', () => {
     expect(split.orders_ready).toEqual([]);
   });
 
+  it('caps MDF order readiness by the order detail count', () => {
+    const split = splitCncOrderCardsByManualColumn(
+      [{ ...card(2705), partsCount: 34 }],
+      new Map([
+        [2705, {
+          totalDetails: 53,
+          cutDetails: 53,
+          rolledDetails: 0,
+          remainingDetails: 0,
+        }],
+      ]),
+      {},
+    );
+
+    expect(split.orders).toEqual([]);
+    expect(split.orders_ready.map(({ card: item }) => item.orderId)).toEqual([2705]);
+    expect(split.orders_ready[0]?.readiness).toEqual({
+      totalDetails: 34,
+      cutDetails: 34,
+      rolledDetails: 0,
+      remainingDetails: 0,
+    });
+  });
+
   it('keeps Basis-cut cards only for bath details missing from machine files', () => {
     const columns = [
       {
