@@ -490,6 +490,11 @@ function formatCutJobCreatedDateTime(value: string | null | undefined): string {
   return date.isValid() ? date.format('DD.MM.YYYY HH:mm') : '—';
 }
 
+function cutJobCreatedAtSortValue(value: string | null | undefined): number {
+  const date = dayjs(value);
+  return date.isValid() ? date.valueOf() : 0;
+}
+
 function cutJobCreatedAtInRange(value: string | null | undefined, range: CutOrderDateRangeValue): boolean {
   const from = range?.[0];
   const to = range?.[1];
@@ -509,6 +514,12 @@ function cutJobMatchesOrderFilter(job: CutJobDto, query: string): boolean {
       .toLocaleLowerCase('ru-RU')
       .includes(needle),
   );
+}
+
+function cutJobMatchesSheetMaterial(job: CutJobDto, sheetMaterialTypeId: number | undefined): boolean {
+  if (!sheetMaterialTypeId) return true;
+  if (job.sheetMaterialTypeId === sheetMaterialTypeId) return true;
+  return job.items.some((item) => item.detail?.sheetMaterialTypeId === sheetMaterialTypeId);
 }
 
 function CutOrderReference({
@@ -2411,6 +2422,32 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [applyPdfTemplateState, editorSheetMirrors, editorSheetRotations, emitCutJobUpdate, job, workingSheets, loadJobs, handleError, resetSheetViews],
   );
 
+  const resetCutJobListFilters = useCallback(() => {
+    setCutListDateRange(undefined);
+    setJobOrderSearch('');
+    setAppliedJobOrderSearch('');
+    setAppliedCutListDateRange(undefined);
+    setJobSearch('');
+    setOperationalSheetFilter(undefined);
+    setOperationalFilmFilter(undefined);
+    setProfileFilter(undefined);
+    listFiltersRef.current = {};
+    void loadJobs({});
+  }, [loadJobs]);
+
+  const cutJobListFiltersActive = Boolean(
+    cutListDateRange?.[0] ||
+    cutListDateRange?.[1] ||
+    appliedCutListDateRange?.[0] ||
+    appliedCutListDateRange?.[1] ||
+    jobOrderSearch.trim() ||
+    appliedJobOrderSearch.trim() ||
+    jobSearch.trim() ||
+    operationalSheetFilter ||
+    operationalFilmFilter ||
+    profileFilter,
+  );
+
   const filteredJobs = useMemo(() => {
     const statusFiltered = statusFilter === 'work'
       ? jobs.filter((candidate) => candidate.status === 'draft' || candidate.status === 'calculating')
@@ -2423,29 +2460,22 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       candidate.items?.some((item) => item.orderId === embeddedOrderId),
     );
     const query = jobSearch.trim().toLocaleLowerCase('ru-RU');
-    const useOperationalListFilters = !isEmbeddedOrder && isOperational;
+    const useJobListFilters = !isEmbeddedOrder;
     return scoped.filter((candidate) => {
-      if (
-        query &&
-        !`${candidate.cutJobId} ${candidate.name} ${candidate.materialNames.join(' ')}`
-          .toLocaleLowerCase('ru-RU')
-          .includes(query)
-      ) {
+      if (query && !candidate.name.toLocaleLowerCase('ru-RU').includes(query)) {
         return false;
       }
-      if (useOperationalListFilters && !cutJobMatchesOrderFilter(candidate, appliedJobOrderSearch)) {
+      if (useJobListFilters && !cutJobMatchesOrderFilter(candidate, appliedJobOrderSearch)) {
         return false;
       }
-      if (useOperationalListFilters && !cutJobCreatedAtInRange(candidate.createdAt, appliedCutListDateRange)) {
+      if (useJobListFilters && !cutJobCreatedAtInRange(candidate.createdAt, appliedCutListDateRange)) {
         return false;
       }
-      if (
-        operationalSheetFilter &&
-        !candidate.items.some((item) => item.detail?.sheetMaterialTypeId === operationalSheetFilter)
-      ) {
+      if (useJobListFilters && !cutJobMatchesSheetMaterial(candidate, operationalSheetFilter)) {
         return false;
       }
       if (
+        useJobListFilters &&
         operationalFilmFilter &&
         !candidate.items.some((item) => item.detail?.filmId === operationalFilmFilter)
       ) {
@@ -2459,7 +2489,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     appliedCutListDateRange,
     appliedJobOrderSearch,
     isEmbeddedOrder,
-    isOperational,
     jobSearch,
     jobs,
     operationalFilmFilter,
@@ -2583,6 +2612,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         dataIndex: 'createdAt',
         key: 'createdAt',
         width: 92,
+        sorter: (a, b) => cutJobCreatedAtSortValue(a.createdAt) - cutJobCreatedAtSortValue(b.createdAt),
         render: (value: string) => (
           <Tooltip title={formatCutJobCreatedDateTime(value)}>
             <span>{formatCutJobCreatedDate(value)}</span>
@@ -2650,12 +2680,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'Деталей',
         key: 'details',
         width: 63,
+        sorter: (a, b) => a.totals.details - b.totals.details,
         render: (_: unknown, row: CutJobDto) => row.totals.details,
       },
       {
         title: isOperational ? 'Площадь, м²' : 'Площадь, итого',
         key: 'area',
         width: 84,
+        sorter: (a, b) => a.totals.area - b.totals.area,
         render: (_: unknown, row: CutJobDto) => formatArea(row.totals.area),
       },
       {
@@ -2668,6 +2700,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'Количество плёнки',
         key: 'filmUsage',
         width: 118,
+        sorter: (a, b) => totalFilmUsageMeters(a.totals.filmUsage) - totalFilmUsageMeters(b.totals.filmUsage),
         render: (_: unknown, row: CutJobDto) => {
           const total = totalFilmUsageMeters(row.totals.filmUsage);
           if (row.status !== 'ready' || total <= 0) return '—';
@@ -3239,7 +3272,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ) : null}
         {!isEmbeddedOrder && !isOperational && <Title level={3}>Раскрой</Title>}
 
-      {isOperational && !isEmbeddedOrder && !job ? (
+      {!isEmbeddedOrder ? (
         <section className="cut-operational-filters operational-panel" aria-label="Фильтры заданий на раскрой">
           <label className="cut-operational-filter cut-operational-filter--period">
             <span>Дата создания</span>
@@ -3251,7 +3284,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               onChange={(value) => setCutListDateRange(value)}
             />
           </label>
-          <label className="cut-operational-filter cut-operational-filter--search">
+          <label className="cut-operational-filter cut-operational-filter--order">
             <span>Номер заказа</span>
             <Input
               allowClear
@@ -3262,20 +3295,22 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             />
           </label>
           <label className="cut-operational-filter cut-operational-filter--search">
-            <span>Название или материал</span>
+            <span>Название задания</span>
             <Input
               allowClear
               prefix={<SearchOutlined />}
-              placeholder="ванна, пленка"
+              placeholder="текст названия"
               value={jobSearch}
               onChange={(event) => setJobSearch(event.target.value)}
             />
           </label>
           <label className="cut-operational-filter">
-            <span>Тип листа</span>
+            <span>Материал</span>
             <Select
               allowClear
-              placeholder="Все типы листов"
+              showSearch
+              optionFilterProp="label"
+              placeholder="Все материалы"
               options={visibleSheetTypeOptions}
               value={operationalSheetFilter}
               onChange={setOperationalSheetFilter}
@@ -3306,22 +3341,27 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               onChange={setProfileFilter}
             />
           </label>
-          <Button
-            icon={<FilterOutlined />}
-            onClick={() => {
-              const trimmedJobSearch = jobSearch.trim();
-              const trimmedOrderSearch = jobOrderSearch.trim();
-              const filters = buildOperationalListFilters(trimmedOrderSearch, cutListDateRange);
-              setJobSearch(trimmedJobSearch);
-              setJobOrderSearch(trimmedOrderSearch);
-              setAppliedJobOrderSearch(trimmedOrderSearch);
-              setAppliedCutListDateRange(cutListDateRange);
-              listFiltersRef.current = filters;
-              void loadJobs(filters);
-            }}
-          >
-            Применить
-          </Button>
+          <Space className="cut-operational-filter-actions">
+            <Button
+              icon={<FilterOutlined />}
+              onClick={() => {
+                const trimmedJobSearch = jobSearch.trim();
+                const trimmedOrderSearch = jobOrderSearch.trim();
+                const filters = buildOperationalListFilters(trimmedOrderSearch, cutListDateRange);
+                setJobSearch(trimmedJobSearch);
+                setJobOrderSearch(trimmedOrderSearch);
+                setAppliedJobOrderSearch(trimmedOrderSearch);
+                setAppliedCutListDateRange(cutListDateRange);
+                listFiltersRef.current = filters;
+                void loadJobs(filters);
+              }}
+            >
+              Применить
+            </Button>
+            <Button onClick={resetCutJobListFilters} disabled={!cutJobListFiltersActive}>
+              Сбросить
+            </Button>
+          </Space>
         </section>
       ) : null}
 

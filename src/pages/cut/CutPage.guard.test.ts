@@ -156,6 +156,22 @@ describe('CutPage source guards', () => {
     expect(source).not.toContain('react-router-dom');
   });
 
+  it('keeps list filters and sortable cut-job production columns', () => {
+    expect(source).toContain('aria-label="Фильтры заданий на раскрой"');
+    expect(source).toContain('{!isEmbeddedOrder ? (');
+    expect(source).toContain('<span>Номер заказа</span>');
+    expect(source).toContain('<span>Материал</span>');
+    expect(source).toContain('<span>Название задания</span>');
+    expect(source).toContain("candidate.name.toLocaleLowerCase('ru-RU').includes(query)");
+    expect(source).toContain('cutJobMatchesOrderFilter(candidate, appliedJobOrderSearch)');
+    expect(source).toContain('cutJobMatchesSheetMaterial(candidate, operationalSheetFilter)');
+    expect(source).toContain('resetCutJobListFilters');
+    expect(source).toContain('cutJobCreatedAtSortValue(a.createdAt) - cutJobCreatedAtSortValue(b.createdAt)');
+    expect(source).toContain('a.totals.details - b.totals.details');
+    expect(source).toContain('a.totals.area - b.totals.area');
+    expect(source).toContain('totalFilmUsageMeters(a.totals.filmUsage) - totalFilmUsageMeters(b.totals.filmUsage)');
+  });
+
   it('fail-closes detail file links against javascript:/data: stored-link XSS', () => {
     // Operator-clickable detail links must be sanitized; a raw href is never
     // rendered directly into an anchor on this cut.view surface.

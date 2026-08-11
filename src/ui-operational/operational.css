@@ -1348,7 +1348,7 @@
 
 .cut-operational-filters {
   display: grid;
-  grid-template-columns: minmax(190px, 1.15fr) minmax(170px, 1fr) repeat(3, minmax(140px, 0.85fr)) auto;
+  grid-template-columns: minmax(190px, 1.1fr) minmax(140px, 0.75fr) minmax(170px, 0.95fr) repeat(3, minmax(130px, 0.8fr)) auto;
   align-items: end;
   gap: 10px;
   padding: 11px 12px;
@@ -1369,6 +1369,27 @@
 .cut-operational-filter .ant-picker,
 .cut-operational-filter .ant-select {
   width: 100%;
+}
+
+.cut-operational-filter-actions {
+  align-self: end;
+  white-space: nowrap;
+}
+
+@media (max-width: 1240px) {
+  .cut-operational-filters {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .cut-operational-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .cut-operational-filter-actions {
+    white-space: normal;
+  }
 }
 
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .cut-page-modern__jobs > .ant-card-body {
