@@ -1187,6 +1187,56 @@ probe_file() {
                          AND job.selection_criteria->>'source' = 'cnc_telegram_svg'
                          AND job.source_display_number IS DISTINCT FROM packet.cutting_sequence_no::text
                      );" ;;
+    117_dedupe_telegram_svg_image_packets*) probe_true "SELECT NOT EXISTS (
+                       WITH imported AS (
+                         SELECT
+                           packet.packet_id,
+                           packet.source_chat_id,
+                           COALESCE(packet.source_created_at, packet.source_updated_at, packet.created_at) AS source_at,
+                           packet.workday,
+                           regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\.[^.]+$', '') AS program_key,
+                           lower(trim(COALESCE(packet.material_name, 'МДФ 16мм'))) AS material_key,
+                           packet.cut_layout_json,
+                           packet.sheet_image_storage_key,
+                           packet.cutting_sequence_no,
+                           item_signature.detail_signature
+                         FROM cnc_telegram_packets packet
+                         JOIN cut_job job
+                           ON job.cut_job_id = packet.svg_cut_job_id
+                         LEFT JOIN LATERAL (
+                           SELECT string_agg(
+                             cji.order_detail_id::text || ':' || cji.order_id::text || ':' || cji.qty::text,
+                             ',' ORDER BY cji.order_detail_id, cji.order_id, cji.qty
+                           ) AS detail_signature
+                           FROM cut_job_item cji
+                           WHERE cji.cut_job_id = packet.svg_cut_job_id
+                         ) item_signature ON TRUE
+                         WHERE packet.svg_cut_import_status = 'imported'
+                           AND packet.svg_cut_job_id IS NOT NULL
+                           AND packet.svg_cut_result_id IS NOT NULL
+                           AND packet.cutting_sequence_no IS NOT NULL
+                           AND packet.cut_layout_json->>'status' = 'valid'
+                           AND job.source = 'api'
+                           AND job.selection_criteria->>'source' = 'cnc_telegram_svg'
+                           AND regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\.[^.]+$', '') <> ''
+                       )
+                       SELECT 1
+                       FROM imported canonical
+                       JOIN imported duplicate
+                         ON duplicate.packet_id <> canonical.packet_id
+                        AND duplicate.source_chat_id = canonical.source_chat_id
+                        AND duplicate.workday = canonical.workday
+                        AND duplicate.program_key = canonical.program_key
+                        AND duplicate.material_key = canonical.material_key
+                        AND duplicate.cut_layout_json = canonical.cut_layout_json
+                        AND duplicate.detail_signature IS NOT DISTINCT FROM canonical.detail_signature
+                       WHERE canonical.sheet_image_storage_key IS NULL
+                         AND duplicate.sheet_image_storage_key IS NOT NULL
+                         AND canonical.cutting_sequence_no IS NOT NULL
+                         AND duplicate.cutting_sequence_no IS NOT NULL
+                         AND canonical.cutting_sequence_no < duplicate.cutting_sequence_no
+                       LIMIT 1
+                     );" ;;
     117_mdf_board_manual_moves*) probe_all \
                      "$(q_tbl mdf_board_manual_moves)" \
                      "$(q_col mdf_board_manual_moves move_id)" \

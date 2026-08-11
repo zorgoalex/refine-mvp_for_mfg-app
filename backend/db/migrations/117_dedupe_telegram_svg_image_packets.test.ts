@@ -6,6 +6,7 @@ const sql = readFileSync(
   fileURLToPath(new URL('./117_dedupe_telegram_svg_image_packets.sql', import.meta.url)),
   'utf8',
 );
+const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
 describe('117_dedupe_telegram_svg_image_packets migration', () => {
   it('merges Telegram SVG/image duplicates by source file basename and archives duplicate jobs', () => {
@@ -22,5 +23,13 @@ describe('117_dedupe_telegram_svg_image_packets migration', () => {
     expect(sql).toContain("SET status = 'archived'");
     expect(sql).toContain('UPDATE cnc_telegram_worker_message_logs');
     expect(sql).toContain('UPDATE cnc_telegram_worker_operations');
+  });
+
+  it('has an apply-migrations effect probe for ledger-safe deploys', () => {
+    expect(runner).toContain('117_dedupe_telegram_svg_image_packets*');
+    expect(runner).toContain('duplicate.cutting_sequence_no IS NOT NULL');
+    expect(runner).toContain("duplicate.cut_layout_json = canonical.cut_layout_json");
+    expect(runner).toContain("duplicate.detail_signature IS NOT DISTINCT FROM canonical.detail_signature");
+    expect(runner).toContain('canonical.cutting_sequence_no < duplicate.cutting_sequence_no');
   });
 });

@@ -266,7 +266,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
 
     const migration116Probe = probeFn.slice(
       probeFn.indexOf('116_telegram_svg_cut_job_display_number*'),
-      probeFn.indexOf('117_mdf_board_manual_moves*'),
+      probeFn.indexOf('117_dedupe_telegram_svg_image_packets*'),
     );
     for (const marker of [
       'q_col cut_job source_display_number',
@@ -276,7 +276,19 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'job.source_display_number IS DISTINCT FROM packet.cutting_sequence_no::text',
     ]) expect(migration116Probe).toContain(marker);
 
-    const migration117Probe = probeFn.slice(
+    const migration117DedupeProbe = probeFn.slice(
+      probeFn.indexOf('117_dedupe_telegram_svg_image_packets*'),
+      probeFn.indexOf('117_mdf_board_manual_moves*'),
+    );
+    for (const marker of [
+      'packet.cutting_sequence_no IS NOT NULL',
+      "regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\\.[^.]+$', '') AS program_key",
+      "duplicate.cut_layout_json = canonical.cut_layout_json",
+      'duplicate.detail_signature IS NOT DISTINCT FROM canonical.detail_signature',
+      'canonical.cutting_sequence_no < duplicate.cutting_sequence_no',
+    ]) expect(migration117DedupeProbe).toContain(marker);
+
+    const migration117ManualMovesProbe = probeFn.slice(
       probeFn.indexOf('117_mdf_board_manual_moves*'),
       probeFn.indexOf('*) return 2'),
     );
@@ -286,7 +298,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'chk_mdf_board_manual_moves_kind_target',
       'idx_mdf_board_manual_moves_lookup',
       "LIKE 'mdf-board-manual-moves-v1:%'",
-    ]) expect(migration117Probe).toContain(marker);
+    ]) expect(migration117ManualMovesProbe).toContain(marker);
 
     expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\)/);
   });
