@@ -38,6 +38,12 @@ import {
 } from './OrderDetailColumnSettings';
 import { calculateOrderDetailArea, calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { validateSheetDimensions } from '../../../../utils/materialDimensionValidation';
+import {
+  clearOrderDetailTailRowValues,
+  countOrderDetailsWithRequiredEntryValues,
+  orderDetailIdentityKey,
+  prepareOrderDetailsForSave,
+} from '../../../../utils/orderDetailRows';
 import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
 import { CutJobVersionLines } from '../../CutJobVersionLines';
@@ -204,6 +210,9 @@ const ORDER_DETAIL_COLUMN_WIDTHS = {
   millingCostPerSqm: 78,
   detailCost: 105,
 } as const;
+
+const ORDER_DETAIL_TABLE_MAX_SCROLL_Y = 500;
+const ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT = 39;
 
 const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
   'height',
@@ -643,6 +652,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       area: calculateOrderTotalArea(details),
     };
   }, [details]);
+  const filledDetailRowsCount = useMemo(
+    () => countOrderDetailsWithRequiredEntryValues(details),
+    [details],
+  );
 
   const [form] = Form.useForm();
   const [editingKey, setEditingKey] = useState<number | string | null>(null);
@@ -1086,12 +1099,31 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   };
 
   // Save current editing row and return success status
-  const saveCurrentRow = async (): Promise<boolean> => {
+  const saveCurrentRow = async (
+    options: { allowEmptyTailRow?: boolean } = {},
+  ): Promise<boolean> => {
     if (editingKey === null) return true; // Nothing to save
 
     // Find the record being edited
-    const record = details.find(d => (d.temp_id || d.detail_id) === editingKey);
+    const recordIndex = details.findIndex(d => (d.temp_id || d.detail_id) === editingKey);
+    const record = recordIndex >= 0 ? details[recordIndex] : undefined;
     if (!record) return true;
+
+    if (options.allowEmptyTailRow) {
+      const currentValues = form.getFieldsValue(true);
+      const currentRecord = { ...record, ...currentValues } as OrderDetail;
+      const detailsWithCurrentRow = details.map((detail, index) =>
+        index === recordIndex ? currentRecord : detail,
+      );
+      const preparedDetails = prepareOrderDetailsForSave(detailsWithCurrentRow);
+      const currentKey = orderDetailIdentityKey(currentRecord, recordIndex);
+      if (preparedDetails.emptyTailKeys.has(currentKey)) {
+        const tempId = record.temp_id || record.detail_id!;
+        updateDetail(tempId, clearOrderDetailTailRowValues(currentRecord));
+        cancelEdit();
+        return true;
+      }
+    }
 
     // Recompute on save; state may lag behind the latest InputNumber event.
     const currentDimensionError = validateDimensions();
@@ -1190,7 +1222,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // Apply current edits without starting new row (for form save)
     applyCurrentEdits: async () => {
       if (editingKey === null) return true; // Nothing to save
-      return await saveCurrentRow();
+      return await saveCurrentRow({ allowEmptyTailRow: true });
     },
   }));
 
@@ -3117,6 +3149,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     };
   }, []);
   const mountedTableRows = tableRowsReady ? tableRows : EMPTY_ORDER_DETAIL_TABLE_ROWS;
+  const tableBodyScrollY = useMemo(() => {
+    const minimumRows = details.length > 0 ? 1 : 0;
+    const visibleDetailRows = Math.max(minimumRows, filledDetailRowsCount);
+    const bodyRows = Math.max(1, visibleDetailRows);
+    return Math.min(
+      ORDER_DETAIL_TABLE_MAX_SCROLL_Y,
+      bodyRows * ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT,
+    );
+  }, [details.length, filledDetailRowsCount]);
 
   return (
     <>
@@ -3187,7 +3228,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           }
         }}
         tableLayout="fixed"
-        scroll={{ x: tableScrollWidth, y: 500 }}
+        scroll={{ x: tableScrollWidth, y: tableBodyScrollY }}
         size="small"
         bordered
         rowClassName={(row: any) => {
@@ -3221,7 +3262,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                 if (key === 'detail_number') {
                   return (
                     <Table.Summary.Cell key={key} index={base + index} align="center">
-                      <FitSummaryText align="center" style={{ color: '#666' }}>{details.length}</FitSummaryText>
+                      <FitSummaryText align="center" style={{ color: '#666' }}>{filledDetailRowsCount}</FitSummaryText>
                     </Table.Summary.Cell>
                   );
                 }

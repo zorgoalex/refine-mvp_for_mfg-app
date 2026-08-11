@@ -271,6 +271,82 @@ describe('orderMapper', () => {
     );
   });
 
+  it('omits only new empty tail details from save payloads', () => {
+    const values = createFormValues();
+    values.details = [
+      {
+        ...values.details[1],
+        temp_id: 202,
+        detail_number: 1,
+      },
+      {
+        ...values.details[1],
+        temp_id: 203,
+        detail_number: 2,
+        height: 0,
+        width: 0,
+        quantity: null as unknown as number,
+        area: 0,
+        milling_cost_per_sqm: null,
+        detail_cost: null,
+        note: 'tail draft',
+      },
+    ];
+
+    const dto = mapOrderFormToSaveOrderDto(values);
+
+    expect(dto.details).toHaveLength(1);
+    expect(dto.details[0].clientKey).toBe('202');
+  });
+
+  it('keeps partially filled new tail details for validation', () => {
+    const values = createFormValues();
+    values.details = [
+      {
+        ...values.details[1],
+        temp_id: 202,
+        detail_number: 1,
+      },
+      {
+        ...values.details[1],
+        temp_id: 203,
+        detail_number: 2,
+        height: 50,
+        width: 0,
+        quantity: null as unknown as number,
+        area: 0,
+        milling_cost_per_sqm: null,
+        detail_cost: null,
+      },
+    ];
+
+    expect(() => mapOrderFormToSaveOrderDto(values)).toThrow('Invalid number: detail.quantity');
+  });
+
+  it('keeps incomplete new details before later valid details for validation', () => {
+    const values = createFormValues();
+    values.details = [
+      {
+        ...values.details[1],
+        temp_id: 203,
+        detail_number: 1,
+        height: 0,
+        width: 0,
+        quantity: null as unknown as number,
+        area: 0,
+        milling_cost_per_sqm: null,
+        detail_cost: null,
+      },
+      {
+        ...values.details[1],
+        temp_id: 202,
+        detail_number: 2,
+      },
+    ];
+
+    expect(() => mapOrderFormToSaveOrderDto(values)).toThrow('Invalid number: detail.quantity');
+  });
+
   it('preserves legacy zero version on update payloads', () => {
     const values = createFormValues();
     values.version = 0;

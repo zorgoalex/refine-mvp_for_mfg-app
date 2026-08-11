@@ -65,6 +65,10 @@ import {
   readAddPaymentIntent,
 } from '../orderPaymentIntent';
 import { OperationalPageHeader, useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
+import {
+  orderDetailIdentityKey,
+  prepareOrderDetailsForSave,
+} from '../../../utils/orderDetailRows';
 
 interface OrderFormProps {
   mode: OrderFormMode;
@@ -144,6 +148,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     reset,
     loadOrder,
     getFormValues,
+    updateDetail,
     setDirty,
     setInitializing,
     finalizeInitialization,
@@ -1181,6 +1186,19 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       const formValues = getFormValues();
       console.log('[OrderForm] handleSave - formValues:', formValues);
       console.log('[OrderForm] handleSave - details count:', formValues.details?.length || 0);
+
+      const preparedDetails = prepareOrderDetailsForSave(formValues.details ?? []);
+      if (preparedDetails.emptyTailCount > 0) {
+        (formValues.details ?? []).forEach((detail, index) => {
+          if (!preparedDetails.emptyTailKeys.has(orderDetailIdentityKey(detail, index))) return;
+          const rowKey = detail.temp_id ?? detail.detail_id;
+          if (rowKey != null) {
+            updateDetail(rowKey, preparedDetails.detailsForDisplay[index]);
+          }
+        });
+        formValues.details = preparedDetails.detailsForSave;
+        console.log(`[OrderForm] handleSave - cleared ${preparedDetails.emptyTailCount} empty tail detail row(s)`);
+      }
 
       // Normalize detail_numbers: sort by current number and renumber sequentially 1, 2, 3...
       // This fixes any duplicates or gaps in numbering before validation
