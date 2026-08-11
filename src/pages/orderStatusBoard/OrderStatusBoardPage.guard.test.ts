@@ -1035,7 +1035,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Компактный');
     expect(page).toContain('Минимальный');
     expect(page).toContain('formatStatusBoardOrderNumber(card)');
-    expect(page).toContain('card.orderName.trim() || String(card.orderId)');
+    expect(page).toContain('trimmedText(card.orderName) || String(card.orderId)');
+    expect(page).not.toContain('card.orderName.trim() || String(card.orderId)');
     expect(page).not.toContain('card.fullNumber');
     expect(page).not.toContain('primaryStatusLabel');
     expect(page).not.toContain('status-board-card__status-label');

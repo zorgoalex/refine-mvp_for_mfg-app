@@ -5426,8 +5426,10 @@ const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>((
 ));
 CncOrderMissingDetailsSpoiler.displayName = 'CncOrderMissingDetailsSpoiler';
 
-function formatStatusBoardOrderNumber(card: OrderStatusBoardCard): string {
-  return card.orderName.trim() || String(card.orderId);
+export function formatStatusBoardOrderNumber(
+  card: Pick<OrderStatusBoardCard, 'orderId'> & Partial<Pick<OrderStatusBoardCard, 'orderName'>>,
+): string {
+  return trimmedText(card.orderName) || String(card.orderId);
 }
 
 function resolveStatusBoardStatusColor(
@@ -6277,7 +6279,7 @@ function buildCncOrderSummaries(items: CncSummaryItem[]): CncOrderSummary[] {
     { orderId: number | null; orderDeleted: boolean; details: number }
   >();
   for (const item of items) {
-    const orderName = item.orderName.trim() || 'Без заказа';
+    const orderName = trimmedText(item.orderName) || 'Без заказа';
     const summary = summaries.get(orderName) ?? {
       orderId: null,
       orderDeleted: false,
@@ -6602,7 +6604,7 @@ function cncRelationOrderKeys(
       keys.add(`id:${orderId}`);
     }
   }
-  const normalizedOrderName = orderName.trim();
+  const normalizedOrderName = trimmedText(orderName);
   if (normalizedOrderName) {
     keys.add(cncOrderNameFallbackKey(normalizedOrderName));
   }
@@ -6646,7 +6648,11 @@ function cncRelationFallbackKey(
 }
 
 function cncOrderNameFallbackKey(orderName: string): string {
-  return `name:${orderName.trim().toLocaleLowerCase('ru-RU') || 'без заказа'}`;
+  return `name:${trimmedText(orderName).toLocaleLowerCase('ru-RU') || 'без заказа'}`;
+}
+
+function trimmedText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function cncFingerprintsIntersect(
