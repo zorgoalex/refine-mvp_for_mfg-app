@@ -2,13 +2,35 @@ import type { CutJobDto } from '../dto/cut.dto';
 
 export const VACUUM_CUT_NUMBER_PREFIX = 'В-' as const;
 
-export function formatCutNumber(cutJobId: number, resultNo: number, isVacuum = false): string {
-  const base = `${cutJobId}-${resultNo}`;
-  return isVacuum ? `${VACUUM_CUT_NUMBER_PREFIX}${base}` : base;
+export function normalizeCutJobDisplayNumber(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return normalized === '' ? null : normalized;
 }
 
-export function formatCutJobNumber(cutJobId: number, isVacuum = false): string {
-  return isVacuum ? `${VACUUM_CUT_NUMBER_PREFIX}${cutJobId}` : String(cutJobId);
+export function formatCutNumber(
+  cutJobId: number,
+  resultNo: number,
+  isVacuum = false,
+  sourceDisplayNumber?: string | number | null,
+): string {
+  const jobNumber = normalizeCutJobDisplayNumber(sourceDisplayNumber) ?? String(cutJobId);
+  const base = `${jobNumber}-${resultNo}`;
+  return prefixVacuumCutNumber(base, isVacuum);
+}
+
+export function formatCutJobNumber(
+  cutJobId: number,
+  isVacuum = false,
+  sourceDisplayNumber?: string | number | null,
+): string {
+  const jobNumber = normalizeCutJobDisplayNumber(sourceDisplayNumber) ?? String(cutJobId);
+  return prefixVacuumCutNumber(jobNumber, isVacuum);
+}
+
+function prefixVacuumCutNumber(value: string, isVacuum: boolean): string {
+  if (!isVacuum || value.startsWith(VACUUM_CUT_NUMBER_PREFIX)) return value;
+  return `${VACUUM_CUT_NUMBER_PREFIX}${value}`;
 }
 
 export function cutJobSnapshotUsesVacuumTable(snapshot: Pick<CutJobDto, 'groups'> | null | undefined): boolean {

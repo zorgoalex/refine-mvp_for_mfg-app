@@ -1573,8 +1573,8 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
           return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
         }
-        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status/i.test(text)) {
-          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none' }] };
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 12 }] };
         }
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 700, created_at: '2026-07-24T08:00:00.000Z' }] };
@@ -1610,6 +1610,7 @@ describe('PgCncTelegramRepository', () => {
       dto: {
         ...ingestDto(),
         idempotencyKey: 'cnc:test:repo:svg-cut-ledger',
+        cuttingSequenceNo: 12,
         items: [
           {
             sourceItemKey: '2689:31:497x477',
@@ -1659,14 +1660,17 @@ describe('PgCncTelegramRepository', () => {
     const commandComplete = queries.find((query) => /UPDATE cut_result_command/i.test(query.text));
     const commandInsert = queries[commandInsertIndex];
     const resultInsert = queries[resultInsertIndex];
+    const jobInsert = queries.find((query) => /INSERT INTO cut_job\s*\(/i.test(query.text));
 
     expect(commandInsertIndex).toBeGreaterThan(-1);
     expect(resultInsertIndex).toBeGreaterThan(commandInsertIndex);
     expect(resultInsert?.text).toContain('command_id, command_payload_hash, request_hash');
+    expect(jobInsert?.text).toContain('source_display_number');
+    expect(jobInsert?.params[7]).toBe('12');
     expect(commandInsert?.params[1]).toMatch(/^[0-9a-f-]{36}$/i);
     expect(resultInsert?.params[1]).toBe(commandInsert?.params[1]);
     expect(resultInsert?.params[2]).toBe(commandInsert?.params[2]);
-    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({ unplaced: [] });
+    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({ displayNumber: '12', unplaced: [] });
     expect(commandComplete?.params).toEqual([700, commandInsert?.params[1], 704]);
   });
 

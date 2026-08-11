@@ -6,6 +6,10 @@ describe('cut-numbering', () => {
     expect(formatCutNumber(42, 3)).toBe('42-3');
     expect(formatCutNumber(42, 3, true)).toBe('В-42-3');
     expect(formatCutJobNumber(42, true)).toBe('В-42');
+    expect(formatCutJobNumber(700, false, '12')).toBe('12');
+    expect(formatCutNumber(700, 1, false, '12')).toBe('12-1');
+    expect(formatCutNumber(700, 1, false, '  ')).toBe('700-1');
+    expect(formatCutNumber(700, 1, true, 'В-12')).toBe('В-12-1');
   });
 
   it('detects vacuum-table frozen snapshots from group summaries', () => {

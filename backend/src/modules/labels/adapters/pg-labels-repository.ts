@@ -181,6 +181,7 @@ const DETAIL_CUT_RESULT_VERSION_FIELDS_SQL = `
 LEFT JOIN LATERAL (
   WITH candidates AS (
     SELECT cj.cut_job_id,
+           COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) AS cut_job_display_number,
            cr.result_no,
            COALESCE(
              cj.last_calc_params->>'layout_mode',
@@ -211,8 +212,8 @@ LEFT JOIN LATERAL (
     FROM candidates
   )
   SELECT
-    max(cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number,
-    max('В-' || cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number
+    max(cut_job_display_number || '-' || result_no::text) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number,
+    max('В-' || cut_job_display_number || '-' || result_no::text) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number
   FROM ranked
 ) cut_version_fields ON true
 `;
@@ -262,6 +263,7 @@ interface CutMapOptionRow extends QueryResultRow {
   instance: string | number | null;
   cut_result_id: string | number | null;
   cut_job_id: string | number | null;
+  source_display_number: string | number | null;
   cut_job_name: string | null;
   result_no: string | number | null;
   result_kind: 'auto' | 'manual' | 'legacy' | null;
@@ -280,6 +282,7 @@ interface ResolvedCutMapRow extends QueryResultRow {
   cut_result_sheet_map_id: string | number;
   cut_result_id: string | number;
   cut_job_id: string | number;
+  source_display_number: string | number | null;
   order_id: string | number;
   order_detail_id: string | number;
   instance: string | number;
@@ -1182,6 +1185,7 @@ export class PgLabelsRepository implements LabelsPort {
               maps.cut_job_id, maps.variant, maps.sheet_index, maps.sheet_ordinal,
               r.result_no, r.result_kind, r.created_at,
               COALESCE(r.snapshot_job ->> 'name', 'Раскрой ' || maps.cut_job_id::text) AS cut_job_name,
+              j.source_display_number,
               (current_result.result_no = r.result_no) AS is_current,
               (j.status = 'archived' OR archive.archived_at IS NOT NULL) AS is_archived,
               COALESCE(
@@ -1274,7 +1278,7 @@ export class PgLabelsRepository implements LabelsPort {
           instance: toNumber(row.instance),
           cutResultId: toNumber(row.cut_result_id),
           cutJobId: toNumber(row.cut_job_id),
-          cutNumber: formatCutNumber(toNumber(row.cut_job_id), toNumber(row.result_no), row.is_vacuum === true),
+          cutNumber: formatCutNumber(toNumber(row.cut_job_id), toNumber(row.result_no), row.is_vacuum === true, row.source_display_number),
           cutJobName: row.cut_job_name ?? `Раскрой ${toNumber(row.cut_job_id)}`,
           resultNo: toNumber(row.result_no),
           resultKind: row.result_kind,
@@ -2531,13 +2535,13 @@ export async function resolveLabelCutMaps(
              cpp.params->>'layout_mode',
              j.params->>'layout_mode'
            ) = 'vacuum_table'
-           AND ('В-' || p.cut_job_id::text || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number)
+           AND ('В-' || COALESCE(NULLIF(btrim(j.source_display_number), ''), p.cut_job_id::text) || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number)
            OR ($4::text = 'regular' AND COALESCE(
              j.last_calc_params->>'layout_mode',
              cpp.params->>'layout_mode',
              j.params->>'layout_mode'
            ) IS DISTINCT FROM 'vacuum_table'
-           AND (p.cut_job_id::text || '-' || r.result_no::text) = cut_version_fields.regular_cut_number)
+           AND (COALESCE(NULLIF(btrim(j.source_display_number), ''), p.cut_job_id::text) || '-' || r.result_no::text) = cut_version_fields.regular_cut_number)
          )`,
       [
         unselectedRows.map((row) => row.orderId),
@@ -2579,6 +2583,7 @@ export async function resolveLabelCutMaps(
             r.result_no,
             cut_version_fields.regular_cut_number, cut_version_fields.vacuum_cut_number,
             COALESCE(r.snapshot_job ->> 'name', 'Раскрой ' || p.cut_job_id::text) AS cut_job_name,
+            j.source_display_number,
             ${CUT_RESULT_SHEET_IS_VACUUM_SQL} AS is_vacuum,
             COALESCE(
               EXISTS (
@@ -2627,7 +2632,7 @@ export async function resolveLabelCutMaps(
       if (!cutMapPlacementMatchesSource(placement, cutMapSource)) {
         throw new ApiError(422, 'LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH', 'Раскрой не соответствует выбранному полю детали', {
           cutMapSource,
-          cutNumber: formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true),
+          cutNumber: formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true, placement.source_display_number),
           expectedCutNumber: cutMapSource === 'bath' ? placement.vacuum_cut_number : placement.regular_cut_number,
           cutResultPlacementId: toNumber(placement.cut_result_placement_id),
         });
@@ -2662,7 +2667,7 @@ export async function resolveLabelCutMaps(
       cutResultSheetMapId,
       cutResultId: toNumber(placement.cut_result_id),
       cutJobId: toNumber(placement.cut_job_id),
-      cutNumber: formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true),
+      cutNumber: formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true, placement.source_display_number),
       cutJobName: placement.cut_job_name,
       variant: placement.variant,
       sheetIndex: toNumber(placement.sheet_index),
@@ -3202,7 +3207,7 @@ function cutMapSourceMatches(isVacuum: boolean, source: LabelCutMapSource): bool
 function cutMapPlacementMatchesSource(placement: ResolvedCutMapRow, source: LabelCutMapSource): boolean {
   if (!cutMapSourceMatches(placement.is_vacuum === true, source)) return false;
   const expectedCutNumber = source === 'bath' ? placement.vacuum_cut_number : placement.regular_cut_number;
-  return expectedCutNumber === formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true);
+  return expectedCutNumber === formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true, placement.source_display_number);
 }
 
 async function insertGenerationCutPlacements(

@@ -376,6 +376,7 @@ export class PgCncTelegramRepository
 
       if (existing && command.dto.source.version < Number(existing.source_version)) {
         await ensureCuttingSequenceNo(tx, existing.packet_id, command.dto, Number(command.currentUser.id));
+        await syncExistingSvgCutJobSourceDisplayNumber(tx, existing.packet_id);
         const packet = await loadPacket(tx, existing.packet_id);
         const response: CncTelegramIngestResponseDto = {
           packet,
@@ -1062,6 +1063,7 @@ async function ensureCuttingSequenceNo(
 }
 
 function packetNeedsCuttingSequence(dto: CncTelegramStructuredIngestDto): boolean {
+  if (dto.cutLayout?.status === 'valid') return true;
   return (dto.completionStatus ?? (dto.thumbsUp ? 'completed' : 'pending')) === 'pending';
 }
 
@@ -1137,8 +1139,9 @@ async function syncSvgCutImport(
     svg_cut_job_id: string | number | null;
     svg_cut_result_id: string | number | null;
     svg_cut_import_status: 'none' | 'skipped' | 'needs_review' | 'imported' | null;
+    cutting_sequence_no: string | number | null;
   }>(
-    `SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status
+    `SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no
      FROM cnc_telegram_packets
      WHERE packet_id = $1::uuid
      FOR UPDATE`,
@@ -1147,6 +1150,7 @@ async function syncSvgCutImport(
   const row = state.rows[0];
   if (!row) return;
   if (row.svg_cut_import_status === 'imported' && row.svg_cut_job_id !== null && row.svg_cut_result_id !== null) {
+    await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, row.cutting_sequence_no);
     return;
   }
 
@@ -1166,8 +1170,54 @@ async function syncSvgCutImport(
     return;
   }
 
-  const imported = await createSvgCutJob(tx, packetId, dto, layout, plan, actorUserId);
+  const cuttingSequenceNo = toPositiveInteger(row.cutting_sequence_no);
+  if (cuttingSequenceNo === null) {
+    await setSvgCutImportState(tx, packetId, 'needs_review', 'SVG Telegram packet has no cutting sequence number', null, null);
+    return;
+  }
+
+  const imported = await createSvgCutJob(tx, packetId, dto, layout, plan, cuttingSequenceNo, actorUserId);
   await setSvgCutImportState(tx, packetId, 'imported', 'SVG layout imported into cut job', imported.cutJobId, imported.cutResultId);
+}
+
+async function syncSvgCutJobSourceDisplayNumber(
+  tx: TransactionClient,
+  cutJobId: string | number | null,
+  cuttingSequenceNo: string | number | null,
+): Promise<void> {
+  const displayNumber = sourceDisplayNumberFromCuttingSequence(cuttingSequenceNo);
+  if (cutJobId === null || displayNumber === null) return;
+  await tx.query(
+    `UPDATE cut_job
+     SET source_display_number = $2,
+         updated_at = now()
+     WHERE cut_job_id = $1
+       AND source_display_number IS DISTINCT FROM $2`,
+    [toNumber(cutJobId), displayNumber],
+  );
+}
+
+async function syncExistingSvgCutJobSourceDisplayNumber(
+  tx: TransactionClient,
+  packetId: string,
+): Promise<void> {
+  const result = await tx.query<{
+    svg_cut_job_id: string | number | null;
+    cutting_sequence_no: string | number | null;
+  }>(
+    `SELECT svg_cut_job_id, cutting_sequence_no
+     FROM cnc_telegram_packets
+     WHERE packet_id = $1::uuid`,
+    [packetId],
+  );
+  const row = result.rows[0];
+  if (!row) return;
+  await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, row.cutting_sequence_no);
+}
+
+function sourceDisplayNumberFromCuttingSequence(value: string | number | null): string | null {
+  const cuttingSequenceNo = toPositiveInteger(value);
+  return cuttingSequenceNo === null ? null : String(cuttingSequenceNo);
 }
 
 async function setSvgCutImportState(
@@ -1431,13 +1481,16 @@ async function createSvgCutJob(
   dto: CncTelegramStructuredIngestDto,
   layout: CncTelegramCutLayoutDto,
   plan: Extract<SvgCutImportPlan, { ok: true }>,
+  cuttingSequenceNo: number,
   actorUserId: string,
 ): Promise<{ cutJobId: number; cutResultId: number }> {
   const params = SVG_REVERSE_IMPORT_PARAMS;
+  const sourceDisplayNumber = String(cuttingSequenceNo);
   const selectionCriteria = {
     source: 'cnc_telegram_svg',
     externalPacketKey: dto.externalPacketKey,
     packetId,
+    cuttingSequenceNo,
     sourceVersion: dto.source.version,
     programName: dto.programName ?? null,
     machine: dto.machine ?? null,
@@ -1456,6 +1509,7 @@ async function createSvgCutJob(
     packetId,
     externalPacketKey: dto.externalPacketKey,
     sourceVersion: dto.source.version,
+    cuttingSequenceNo,
     requestHash,
   });
   const job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
@@ -1463,12 +1517,12 @@ async function createSvgCutJob(
     INSERT INTO cut_job (
       name, status, source, selection_criteria, params, request_hash,
       pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
-      sheet_material_type_id, combine_films, split_by_material
+      sheet_material_type_id, combine_films, split_by_material, source_display_number
     )
     VALUES (
       $1, 'ready', 'api', $2::jsonb, $3::jsonb, $4,
       'pending', $5, 1, $3::jsonb, $6,
-      $7, false, true
+      $7, false, true, $8
     )
     RETURNING cut_job_id, created_at
     `,
@@ -1480,6 +1534,7 @@ async function createSvgCutJob(
       toNullableNumber(actorUserId),
       requestHash,
       plan.sheetMaterialTypeId,
+      sourceDisplayNumber,
     ],
   );
   const cutJobId = toNumber(job.rows[0].cut_job_id);
@@ -1537,6 +1592,7 @@ async function createSvgCutJob(
   const totals = buildSvgCutTotals(plan);
   const snapshot: CutJobDto = {
     cutJobId,
+    displayNumber: formatCutJobNumber(cutJobId, false, sourceDisplayNumber),
     createdAt: cutJobCreatedAt,
     name: jobName,
     status: 'ready',

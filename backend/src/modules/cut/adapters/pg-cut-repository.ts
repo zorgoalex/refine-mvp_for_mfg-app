@@ -249,6 +249,7 @@ interface CutJobLockRow extends QueryResultRow {
 interface CutResultRow extends QueryResultRow {
   cut_result_id: string | number;
   cut_job_id: string | number;
+  source_display_number?: string | number | null;
   result_no: string | number;
   revision_no: string | number;
   result_kind: CutResultKind;
@@ -1622,6 +1623,7 @@ export class PgCutRepository implements CutRepositoryPort {
               r.cut_result_id, r.cut_job_id, r.result_no, r.revision_no, r.result_kind,
               r.source_job_version, r.based_on_result_id, r.totals_snapshot,
               r.created_by, r.created_by_name_snapshot, r.created_at,
+              j.source_display_number,
               (current_result.result_no = r.result_no AND archive.archived_at IS NULL) AS is_current,
               archive.archived_at,
               archive.archived_by,
@@ -1646,6 +1648,7 @@ export class PgCutRepository implements CutRepositoryPort {
               r.source_job_version, r.based_on_result_id, r.totals_snapshot,
               r.created_by, r.created_by_name_snapshot, r.created_at,
               j.created_at AS job_created_at,
+              j.source_display_number,
               r.snapshot_job, r.snapshot_digest,
               cut_result_snapshot_digest(r.snapshot_job) AS computed_digest,
               (current_result.result_no = r.result_no AND archive.archived_at IS NULL) AS is_current,
@@ -1671,10 +1674,12 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', 'Исторический раскрой повреждён');
     }
     const summary = mapCutResultSummary(row);
+    const snapshotIsVacuum = cutJobSnapshotUsesVacuumTable(row.snapshot_job);
     return {
       ...summary,
       job: {
         ...row.snapshot_job,
+        displayNumber: formatCutJobNumber(toNum(row.cut_job_id), snapshotIsVacuum, row.source_display_number),
         createdAt: row.snapshot_job.createdAt ?? dateTimeIso(row.job_created_at),
         rotationAllowed: row.snapshot_job.rotationAllowed ?? true,
         textureDirection: row.snapshot_job.textureDirection ?? 'none',
@@ -2819,11 +2824,13 @@ export class PgCutRepository implements CutRepositoryPort {
       profile_name: string | null;
       profile_is_active: boolean | null;
       is_vacuum: boolean;
+      source_display_number: string | number | null;
     }>(
       `
       WITH candidates AS (
         SELECT cji.order_detail_id,
                cj.cut_job_id,
+               cj.source_display_number,
                cj.name,
                cr.result_no,
                cj.param_profile_id,
@@ -2858,7 +2865,7 @@ export class PgCutRepository implements CutRepositoryPort {
         FROM candidates
       )
       SELECT order_detail_id, cut_job_id, result_no, name,
-             param_profile_id, profile_name, profile_is_active, is_vacuum
+             param_profile_id, profile_name, profile_is_active, is_vacuum, source_display_number
       FROM ranked
       WHERE rn = 1
       ORDER BY order_detail_id, is_vacuum
@@ -2878,7 +2885,7 @@ export class PgCutRepository implements CutRepositoryPort {
       const ref = {
         cutJobId,
         resultNo,
-        cutNumber: formatCutNumber(cutJobId, resultNo, row.is_vacuum === true),
+        cutNumber: formatCutNumber(cutJobId, resultNo, row.is_vacuum === true, row.source_display_number),
         name: row.name,
         paramProfileId: row.param_profile_id === null ? null : toNum(row.param_profile_id),
         profileName: row.profile_name,
@@ -3146,10 +3153,12 @@ export class PgCutRepository implements CutRepositoryPort {
     const result = await this.database.query<{
       current_result_no: string | number | null;
       job_is_vacuum: boolean | null;
+      source_display_number: string | number | null;
       current_snapshot_job: CutJobDto | null;
       requested_snapshot_job: CutJobDto | null;
     }>(
       `SELECT current_result.result_no AS current_result_no,
+              j.source_display_number,
               COALESCE(
                 j.last_calc_params->>'layout_mode',
                 cpp.params->>'layout_mode',
@@ -3175,8 +3184,8 @@ export class PgCutRepository implements CutRepositoryPort {
       : cutJobSnapshotUsesVacuumTable(row?.requested_snapshot_job) || row?.job_is_vacuum === true;
     return {
       cutJobId,
-      cutNumber: resultNo === null ? null : formatCutNumber(cutJobId, resultNo, requestedIsVacuum),
-      currentCutNumber: currentResultNo === null ? null : formatCutNumber(cutJobId, currentResultNo, currentIsVacuum),
+      cutNumber: resultNo === null ? null : formatCutNumber(cutJobId, resultNo, requestedIsVacuum, row?.source_display_number),
+      currentCutNumber: currentResultNo === null ? null : formatCutNumber(cutJobId, currentResultNo, currentIsVacuum, row?.source_display_number),
     };
   }
 
@@ -4952,6 +4961,7 @@ interface JobRow extends QueryResultRow {
   name: string;
   status: string;
   source: string;
+  source_display_number: string | number | null;
   version: string | number;
   created_at: Date | string;
   pdf_prewarm_state: string;
@@ -5582,6 +5592,7 @@ async function loadJob(
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
     `SELECT j.cut_job_id, j.name, j.status, j.source, j.version, j.pdf_prewarm_state, j.failure_code, j.failure_reason,
+            j.source_display_number,
             j.param_profile_id, j.sheet_material_type_id, j.pdf_template_code, j.combine_films, j.split_by_material,
             j.rotation_allowed, j.texture_direction, j.created_at, j.last_calc_params,
             cpp.params AS profile_params
@@ -5691,7 +5702,7 @@ async function loadJob(
 
   return {
     cutJobId: jobId,
-    displayNumber: formatCutJobNumber(jobId, isVacuum),
+    displayNumber: formatCutJobNumber(jobId, isVacuum, jobRow.source_display_number),
     isVacuum,
     name: jobRow.name,
     status: jobRow.status,
@@ -5917,7 +5928,7 @@ function mapCutResultSummary(row: CutResultRow): CutResultSummaryDto {
     cutResultId: toNum(row.cut_result_id),
     cutJobId,
     resultNo,
-    cutNumber: formatCutNumber(cutJobId, resultNo, cutJobSnapshotUsesVacuumTable(row.snapshot_job)),
+    cutNumber: formatCutNumber(cutJobId, resultNo, cutJobSnapshotUsesVacuumTable(row.snapshot_job), row.source_display_number),
     resultKind: row.result_kind,
     sourceJobVersion: toNum(row.source_job_version),
     basedOnResultId: numOrNull(row.based_on_result_id),
