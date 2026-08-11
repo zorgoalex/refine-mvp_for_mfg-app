@@ -675,7 +675,6 @@ async def reconcile_pending_processing_attempts(
             packet["externalPacketKey"],
             payload_hash,
             source_version,
-            source_fingerprint,
         ):
             sequence_no = state.cutting_sequence_number(packet["externalPacketKey"])
             audit.finish_saved_operation(

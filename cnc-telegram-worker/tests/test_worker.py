@@ -1178,7 +1178,7 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
                 packet["externalPacketKey"],
                 pending[0]["payloadHash"],
                 packet["source"]["version"],
-                pending[0]["sourceFingerprint"],
+                "sha256:previous-source-fingerprint",
             )
 
             recovery_erp = FakeErpClient()
