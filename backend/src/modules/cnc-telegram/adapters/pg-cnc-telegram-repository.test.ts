@@ -655,6 +655,12 @@ describe('PgCncTelegramRepository', () => {
     expect(basisQuery?.params).toEqual(['2026-07-18', '2026-07-24']);
     expect(basisQuery?.text).toContain('cut_set.created_at,');
     expect(basisQuery?.text).toContain('packed_status_threshold');
+    expect(basisQuery?.text).toContain('issued_status_threshold');
+    expect(basisQuery?.text).toContain('LEFT JOIN order_statuses source_order_status');
+    expect(basisQuery?.text).toContain('LEFT JOIN mdf_board_manual_moves issued_order_move');
+    expect(basisQuery?.text).toContain("issued_order_move.target_column = 'orders_issued'");
+    expect(basisQuery?.text).toContain('source_order_status.sort_order >= issued_status.sort_order');
+    expect(basisQuery?.text).toContain('WHEN issued_order_move.move_id IS NOT NULL THEN true');
     expect(basisQuery?.text).toContain('AS packed_or_later');
     expect(basisQuery?.text).toContain('cut_set.created_at >= $1::date');
     expect(basisQuery?.text).toContain("cut_set.created_at < ($2::date + INTERVAL '1 day')");
