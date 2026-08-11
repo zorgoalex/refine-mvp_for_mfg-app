@@ -5,7 +5,8 @@ import { auditService } from '../../../common/audit/audit.service';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import type { PermissionName } from '../../../permissions/permissions';
+import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
+import type { MdfBoardColumnAutomationInput } from '../../status-automation/application/status-automation-runtime';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
@@ -113,6 +114,11 @@ interface DetailProductionStatusRow extends QueryResultRow {
 interface DetailProductionStatusSnapshot {
   detailIds: number[];
   statusDistribution: Record<string, number>;
+}
+
+interface MdfLaminatedBathAutomationRow extends QueryResultRow {
+  cut_result_id: string | number;
+  order_id: string | number;
 }
 
 interface ProductionStatusCascadeResult {
@@ -743,6 +749,12 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         eventType: 'order.production_status_changed',
         origin: 'user',
         orderId: order.orderId,
+        actor: command.currentUser,
+        requestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey,
+      });
+      await evaluateMdfBoardLaminatedBathAutomationForDetails(tx, {
+        detailIds: cascade.affectedDetailIds,
         actor: command.currentUser,
         requestId,
         sourceIdempotencyKey: command.dto.idempotencyKey,
@@ -1440,6 +1452,12 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
+      await evaluateMdfBoardLaminatedBathAutomationForDetails(tx, {
+        detailIds: changedDetailIds,
+        actor: command.currentUser,
+        requestId,
+        sourceIdempotencyKey: command.dto.idempotencyKey,
+      });
 
       const response: BatchDetailProductionStatusResponseDto = {
         order: {
@@ -2061,6 +2079,12 @@ export async function changeProductionStatusFromDeadlineInTransaction(
       scope: { source: command.source, productionStatusScope: command.productionStatusScope },
     },
   });
+  await evaluateMdfBoardLaminatedBathAutomationForDetails(tx, {
+    detailIds: cascade.affectedDetailIds,
+    actor: deadlineSystemActorAsCurrentUser(command.systemActor),
+    requestId,
+    sourceIdempotencyKey: command.idempotencyKey,
+  });
 
   const response = {
     order: {
@@ -2245,6 +2269,12 @@ export async function changeProductionStatusFromAutomationInTransaction(
       idempotencyKey: ctx.outboxIdempotencyKey,
     },
   });
+  await evaluateMdfBoardLaminatedBathAutomationForDetails(tx, {
+    detailIds: cascade.affectedDetailIds,
+    actor: ctx.actor,
+    requestId: ctx.requestId,
+    sourceIdempotencyKey: ctx.outboxIdempotencyKey,
+  });
 
   return { status: 'executed', auditId };
 }
@@ -2399,8 +2429,26 @@ export async function changeDetailsProductionStatusFromAutomationInTransaction(
       idempotencyKey: ctx.outboxIdempotencyKey,
     },
   });
+  await evaluateMdfBoardLaminatedBathAutomationForDetails(tx, {
+    detailIds: changedDetailIds,
+    actor: ctx.actor,
+    requestId: ctx.requestId,
+    sourceIdempotencyKey: ctx.outboxIdempotencyKey,
+  });
 
   return { status: 'executed', auditId };
+}
+
+function deadlineSystemActorAsCurrentUser(
+  actor: ChangeProductionStatusFromDeadlineCommand['systemActor'],
+): CurrentUser {
+  return {
+    id: actor.actorUserId === null ? '0' : String(actor.actorUserId),
+    username: actor.actorLabel,
+    role: 'admin',
+    roleId: 1,
+    permissions: getPermissionsForRole('admin'),
+  };
 }
 
 function automationMetadata(
@@ -3287,6 +3335,195 @@ async function enqueueOutbox(
   );
 }
 
+async function evaluateMdfBoardLaminatedBathAutomationForDetails(
+  tx: TransactionClient,
+  input: {
+    detailIds: number[];
+    actor: CurrentUser;
+    requestId: string;
+    sourceIdempotencyKey: string;
+  },
+): Promise<void> {
+  const detailIds = Array.from(new Set(input.detailIds.filter((detailId) => Number.isSafeInteger(detailId) && detailId > 0)))
+    .sort((left, right) => left - right);
+  if (detailIds.length === 0) return;
+
+  const rows = await loadMdfLaminatedBathAutomationRows(tx, detailIds);
+  const orderIdsByCutResult = new Map<number, Set<number>>();
+  for (const row of rows) {
+    const cutResultId = toNumber(row.cut_result_id);
+    const orderId = toNumber(row.order_id);
+    const orderIds = orderIdsByCutResult.get(cutResultId) ?? new Set<number>();
+    orderIds.add(orderId);
+    orderIdsByCutResult.set(cutResultId, orderIds);
+  }
+
+  for (const [cutResultId, orderIds] of orderIdsByCutResult) {
+    await evaluateMdfBoardColumnAutomationInTransaction(tx, {
+      eventType: 'mdf.board.baths_laminated',
+      orderIds,
+      actor: input.actor,
+      requestId: input.requestId,
+      sourceIdempotencyKey: `${input.sourceIdempotencyKey}:mdf-board:bath:cut-result-${cutResultId}:baths_laminated`,
+    });
+  }
+}
+
+async function loadMdfLaminatedBathAutomationRows(
+  tx: TransactionClient,
+  detailIds: number[],
+): Promise<MdfLaminatedBathAutomationRow[]> {
+  const result = await tx.query<MdfLaminatedBathAutomationRow>(
+    `
+    WITH laminated_status_threshold AS (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'laminated'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'закатан'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ),
+    changed_jobs AS (
+      SELECT DISTINCT result.cut_job_id
+      FROM cut_result_placement placement
+      JOIN cut_result result
+        ON result.cut_result_id = placement.cut_result_id
+      WHERE placement.order_detail_id = ANY($1::bigint[])
+    ),
+    candidate_vacuum_results AS (
+      SELECT
+        result.cut_result_id,
+        result.cut_job_id,
+        result.result_no,
+        result.revision_no,
+        result.created_at AS result_created_at,
+        (current_result.result_no = result.result_no) AS is_current_result
+      FROM cut_result result
+      JOIN changed_jobs changed
+        ON changed.cut_job_id = result.cut_job_id
+      JOIN cut_job job
+        ON job.cut_job_id = result.cut_job_id
+      LEFT JOIN cut_result current_result
+        ON current_result.cut_result_id = job.current_cut_result_id
+      LEFT JOIN cut_param_profiles profile
+        ON profile.cut_param_profile_id = job.param_profile_id
+      LEFT JOIN cut_result_archive_state archive
+        ON archive.cut_job_id = result.cut_job_id
+       AND archive.result_no = result.result_no
+      WHERE result.snapshot_job IS NOT NULL
+        AND job.status <> 'archived'
+        AND COALESCE(profile.params ->> 'layout_mode', job.params ->> 'layout_mode') = 'vacuum_table'
+        AND archive.archived_at IS NULL
+    ),
+    latest_vacuum_results AS (
+      SELECT DISTINCT ON (candidate.cut_job_id)
+        candidate.cut_result_id,
+        candidate.cut_job_id
+      FROM candidate_vacuum_results candidate
+      ORDER BY
+        candidate.cut_job_id,
+        candidate.is_current_result DESC,
+        candidate.result_created_at DESC,
+        candidate.result_no DESC,
+        candidate.revision_no DESC,
+        candidate.cut_result_id DESC
+    ),
+    result_details AS (
+      SELECT DISTINCT
+        latest.cut_result_id,
+        placement.order_id,
+        placement.order_detail_id
+      FROM latest_vacuum_results latest
+      JOIN cut_result_placement placement
+        ON placement.cut_result_id = latest.cut_result_id
+      JOIN orders order_row
+        ON order_row.order_id = placement.order_id
+       AND COALESCE(order_row.delete_flag, false) = false
+      JOIN order_details detail
+        ON detail.detail_id = placement.order_detail_id
+       AND COALESCE(detail.delete_flag, false) = false
+    ),
+    completed_quantities AS (
+      SELECT
+        item.match_detail_id::bigint AS order_detail_id,
+        SUM(
+          CASE
+            WHEN NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(packet.comments_json) AS packet_comment(comment_text)
+              WHERE lower(packet_comment.comment_text) LIKE ANY (
+                ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+              )
+            )
+              AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
+              THEN GREATEST(item.quantity, 0)
+            ELSE 0
+          END
+        )::integer AS completed_quantity
+      FROM cnc_telegram_packets packet
+      JOIN cnc_telegram_packet_items item
+        ON item.packet_id = packet.packet_id
+      JOIN result_details detail
+        ON detail.order_detail_id = item.match_detail_id
+      WHERE item.match_status = 'matched'
+        AND item.match_detail_id IS NOT NULL
+      GROUP BY item.match_detail_id
+    ),
+    detail_state AS (
+      SELECT
+        placement.cut_result_id,
+        placement.order_id,
+        placement.order_detail_id,
+        COUNT(*)::integer AS quantity,
+        COALESCE(completed.completed_quantity, 0)::integer AS completed_quantity,
+        CASE
+          WHEN detail_status.sort_order IS NOT NULL
+            AND laminated_status.sort_order IS NOT NULL
+            THEN detail_status.sort_order >= laminated_status.sort_order
+          ELSE false
+        END AS laminated_or_later
+      FROM result_details result_detail
+      JOIN cut_result_placement placement
+        ON placement.cut_result_id = result_detail.cut_result_id
+       AND placement.order_id = result_detail.order_id
+       AND placement.order_detail_id = result_detail.order_detail_id
+      JOIN order_details detail
+        ON detail.detail_id = placement.order_detail_id
+       AND COALESCE(detail.delete_flag, false) = false
+      LEFT JOIN production_statuses detail_status
+        ON detail_status.production_status_id = detail.production_status_id
+      CROSS JOIN laminated_status_threshold laminated_status
+      LEFT JOIN completed_quantities completed
+        ON completed.order_detail_id = placement.order_detail_id
+      GROUP BY
+        placement.cut_result_id,
+        placement.order_id,
+        placement.order_detail_id,
+        completed.completed_quantity,
+        detail_status.sort_order,
+        laminated_status.sort_order
+    )
+    SELECT DISTINCT state.cut_result_id, state.order_id
+    FROM detail_state state
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM detail_state candidate
+      WHERE candidate.cut_result_id = state.cut_result_id
+        AND (
+          candidate.completed_quantity < candidate.quantity
+          OR candidate.laminated_or_later = false
+        )
+    )
+    ORDER BY state.cut_result_id, state.order_id
+    `,
+    [detailIds],
+  );
+  return result.rows;
+}
+
 async function evaluateStatusAutomationInTransaction(
   tx: TransactionClient,
   event: StatusAutomationEvent,
@@ -3295,6 +3532,16 @@ async function evaluateStatusAutomationInTransaction(
     '../../status-automation/application/status-automation-runtime'
   );
   await evaluateStatusAutomation(tx, event);
+}
+
+async function evaluateMdfBoardColumnAutomationInTransaction(
+  tx: TransactionClient,
+  input: MdfBoardColumnAutomationInput,
+): Promise<void> {
+  const { evaluateMdfBoardColumnAutomation } = await import(
+    '../../status-automation/application/status-automation-runtime'
+  );
+  await evaluateMdfBoardColumnAutomation(tx, input);
 }
 
 function requestIdOrFallback(requestId: string | undefined): string {

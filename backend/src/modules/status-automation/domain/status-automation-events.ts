@@ -95,6 +95,38 @@ export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescri
     allowedConditions: BASE_CONDITIONS,
     allowedActions: ALLOWED_ACTIONS,
   },
+  {
+    eventType: 'mdf.board.completed',
+    title: 'МДФ-доска распилено',
+    group: 'production',
+    description: 'Когда карточка доски МДФ-работы с заказом попадает в колонку «Распилено».',
+    allowedConditions: BASE_CONDITIONS,
+    allowedActions: ALLOWED_ACTIONS,
+  },
+  {
+    eventType: 'mdf.board.baths',
+    title: 'МДФ-доска карты ванн',
+    group: 'production',
+    description: 'Когда карта ванн с заказом появляется в колонке «Карты ванн» доски МДФ-работы.',
+    allowedConditions: BASE_CONDITIONS,
+    allowedActions: ALLOWED_ACTIONS,
+  },
+  {
+    eventType: 'mdf.board.baths_ready',
+    title: 'МДФ-работы готовы к закатке',
+    group: 'production',
+    description: 'Когда карта ванн с заказом попадает в колонку «Готовы к закатке» доски МДФ-работы.',
+    allowedConditions: BASE_CONDITIONS,
+    allowedActions: ALLOWED_ACTIONS,
+  },
+  {
+    eventType: 'mdf.board.baths_laminated',
+    title: 'МДФ-работы закатаны',
+    group: 'production',
+    description: 'Когда карта ванн с заказом попадает в колонку «Закатаны» доски МДФ-работы.',
+    allowedConditions: BASE_CONDITIONS,
+    allowedActions: ALLOWED_ACTIONS,
+  },
 ];
 
 export function getEventDescriptor(eventType: string): StatusAutomationEventDescriptor | null {

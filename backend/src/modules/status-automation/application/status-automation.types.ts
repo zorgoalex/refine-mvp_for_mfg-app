@@ -8,7 +8,11 @@ export type StatusAutomationEventType =
   | 'order.planned_completion_date_changed'
   | 'order.status_changed'
   | 'order.production_status_changed'
-  | 'mdf.order_machine_files_present';
+  | 'mdf.order_machine_files_present'
+  | 'mdf.board.completed'
+  | 'mdf.board.baths'
+  | 'mdf.board.baths_ready'
+  | 'mdf.board.baths_laminated';
 
 export type StatusAutomationActionType =
   | 'change_order_status'

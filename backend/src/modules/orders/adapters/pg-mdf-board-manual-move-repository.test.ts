@@ -1,14 +1,27 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueryResult, QueryResultRow } from 'pg';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { PgMdfBoardManualMoveRepository } from './pg-mdf-board-manual-move-repository';
 
+const runtimeMocks = vi.hoisted(() => ({
+  evaluateMdfBoardColumnAutomation: vi.fn(async () => undefined),
+}));
+
+vi.mock('../../status-automation/application/status-automation-runtime', () => ({
+  evaluateMdfBoardColumnAutomation: runtimeMocks.evaluateMdfBoardColumnAutomation,
+}));
+
 describe('PgMdfBoardManualMoveRepository', () => {
-  it('creates a shared move and writes transaction-participating audit', async () => {
+  beforeEach(() => {
+    runtimeMocks.evaluateMdfBoardColumnAutomation.mockClear();
+  });
+
+  it('creates a shared move, writes audit, and emits MDF board automation per related order', async () => {
     const tx = fakeTx([
       rows(),
       rows(),
       rows([row({ target_column: 'completed' })]),
+      rows([{ order_id: 1001 }, { order_id: 1002 }]),
       rows([{ audit_id: 'audit-1' }]),
     ]);
     const repo = new PgMdfBoardManualMoveRepository(fakeDatabase(tx));
@@ -24,6 +37,13 @@ describe('PgMdfBoardManualMoveRepository', () => {
     expect(result).toMatchObject({ changed: true, auditId: 'audit-1', move: { targetColumn: 'completed' } });
     expect(tx.texts.some((text) => text.includes('INSERT INTO mdf_board_manual_moves'))).toBe(true);
     expect(tx.texts.some((text) => text.includes('INSERT INTO audit_log'))).toBe(true);
+    expect(runtimeMocks.evaluateMdfBoardColumnAutomation).toHaveBeenCalledWith(expect.anything(), {
+      eventType: 'mdf.board.completed',
+      orderIds: [1001, 1002],
+      actor: user(),
+      requestId: 'req-1',
+      sourceIdempotencyKey: 'mdf-board:manual:packet:packet-1:version-1:completed',
+    });
   });
 
   it('treats same-target PUT as no-op without duplicate audit', async () => {

@@ -3,6 +3,10 @@ import { auditService } from '../../../common/audit/audit.service';
 import type { AuditRelatedEntity } from '../../../common/audit/audit-event.types';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
+import {
+  evaluateMdfBoardColumnAutomation,
+  type MdfBoardColumnAutomationInput,
+} from '../../status-automation/application/status-automation-runtime';
 import type {
   DeleteMdfBoardManualMoveCommand,
   ListMdfBoardManualMovesCommand,
@@ -70,6 +74,7 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
       const saved = current
         ? await updateMove(tx, command, actorUserId)
         : await insertMove(tx, command, actorUserId);
+      const relatedOrderIds = await loadRelatedOrderIds(tx, command.cardKind, command.cardId);
       const auditId = await auditService.record(tx, {
         event: current ? 'mdf_board.manual_move.updated' : 'mdf_board.manual_move.created',
         entityType: 'mdf_board_manual_move',
@@ -94,9 +99,21 @@ export class PgMdfBoardManualMoveRepository implements MdfBoardManualMoveReposit
           operation: current ? 'update' : 'create',
           notificationEventEmitted: false,
           notificationEventDecision: 'polling_refresh_contract',
+          statusAutomationEventType: statusAutomationEventTypeForTargetColumn(command.targetColumn),
+          relatedOrderIds,
         }),
-        relatedEntities: relatedEntities(command.cardKind, command.cardId),
+        relatedEntities: relatedEntities(command.cardKind, command.cardId, relatedOrderIds),
       });
+      const eventType = statusAutomationEventTypeForTargetColumn(command.targetColumn);
+      if (eventType !== null) {
+        await evaluateMdfBoardColumnAutomation(tx, {
+          eventType,
+          orderIds: relatedOrderIds,
+          actor: command.currentUser,
+          requestId: command.requestId ?? 'mdf-board-manual-move',
+          sourceIdempotencyKey: `mdf-board:manual:${command.cardKind}:${command.cardId}:version-${saved.version}:${command.targetColumn}`,
+        });
+      }
       return {
         generatedAt: new Date().toISOString(),
         changed: true,
@@ -290,9 +307,14 @@ function auditMetadata(
 function relatedEntities(
   cardKind: MdfBoardManualMoveDto['cardKind'],
   cardId: string,
+  relatedOrderIds: number[] = [],
 ): AuditRelatedEntity[] {
+  const ids = new Set(relatedOrderIds);
   const orderId = relatedOrderId(cardKind, cardId);
-  return orderId === null ? [] : [{ entityType: 'order', entityId: orderId }];
+  if (orderId !== null) ids.add(orderId);
+  return Array.from(ids)
+    .sort((left, right) => left - right)
+    .map((entityId) => ({ entityType: 'order' as const, entityId }));
 }
 
 function relatedOrderId(
@@ -305,6 +327,115 @@ function relatedOrderId(
 
 function manualMoveEntityId(cardKind: MdfBoardManualMoveDto['cardKind'], cardId: string): string {
   return `${cardKind}:${cardId}`;
+}
+
+function statusAutomationEventTypeForTargetColumn(
+  targetColumn: MdfBoardManualMoveDto['targetColumn'],
+): MdfBoardColumnAutomationInput['eventType'] | null {
+  switch (targetColumn) {
+    case 'completed':
+      return 'mdf.board.completed';
+    case 'baths':
+      return 'mdf.board.baths';
+    case 'baths_ready':
+      return 'mdf.board.baths_ready';
+    case 'baths_laminated':
+      return 'mdf.board.baths_laminated';
+    default:
+      return null;
+  }
+}
+
+async function loadRelatedOrderIds(
+  tx: TransactionClient,
+  cardKind: MdfBoardManualMoveDto['cardKind'],
+  cardId: string,
+): Promise<number[]> {
+  switch (cardKind) {
+    case 'order': {
+      const orderId = relatedOrderId(cardKind, cardId);
+      return orderId === null ? [] : [orderId];
+    }
+    case 'packet':
+      return loadPacketOrderIds(tx, cardId);
+    case 'bazisCutSet':
+      return loadBazisCutSetOrderIds(tx, cardId);
+    case 'bath':
+      return loadBathOrderIds(tx, cardId);
+  }
+}
+
+async function loadPacketOrderIds(tx: TransactionClient, packetId: string): Promise<number[]> {
+  const result = await tx.query<{ order_id: string | number | null }>(
+    `
+    WITH unique_order_keys AS (
+      SELECT lower(trim(o.order_name)) AS order_key, MIN(o.order_id)::bigint AS order_id
+      FROM orders o
+      WHERE COALESCE(o.delete_flag, false) = false
+        AND NULLIF(trim(o.order_name), '') IS NOT NULL
+      GROUP BY lower(trim(o.order_name))
+      HAVING COUNT(*) = 1
+    )
+    SELECT DISTINCT COALESCE(item.match_order_id, order_key.order_id) AS order_id
+    FROM cnc_telegram_packet_items item
+    LEFT JOIN unique_order_keys order_key
+      ON order_key.order_key = lower(trim(item.order_name))
+    WHERE item.packet_id = $1
+      AND COALESCE(item.match_order_id, order_key.order_id) IS NOT NULL
+    ORDER BY order_id
+    `,
+    [packetId],
+  );
+  return normalizeOrderIds(result.rows.map((row) => row.order_id));
+}
+
+async function loadBazisCutSetOrderIds(tx: TransactionClient, cardId: string): Promise<number[]> {
+  const bazisCutSetId = toPositiveSafeInteger(cardId);
+  if (bazisCutSetId === null) return [];
+  const result = await tx.query<{ order_id: string | number | null }>(
+    `
+    SELECT DISTINCT source_order_id AS order_id
+    FROM bazis_cut_set_details
+    WHERE bazis_cut_set_id = $1
+      AND source_order_id IS NOT NULL
+    ORDER BY source_order_id
+    `,
+    [bazisCutSetId],
+  );
+  return normalizeOrderIds(result.rows.map((row) => row.order_id));
+}
+
+async function loadBathOrderIds(tx: TransactionClient, cardId: string): Promise<number[]> {
+  const cutResultId = parseBathCutResultId(cardId);
+  if (cutResultId === null) return [];
+  const result = await tx.query<{ order_id: string | number | null }>(
+    `
+    SELECT DISTINCT placement.order_id
+    FROM cut_result_placement placement
+    JOIN orders o
+      ON o.order_id = placement.order_id
+     AND COALESCE(o.delete_flag, false) = false
+    WHERE placement.cut_result_id = $1
+    ORDER BY placement.order_id
+    `,
+    [cutResultId],
+  );
+  return normalizeOrderIds(result.rows.map((row) => row.order_id));
+}
+
+function parseBathCutResultId(cardId: string): number | null {
+  const match = /^cut-result:(\d+)$/.exec(cardId);
+  return match ? toPositiveSafeInteger(match[1]) : null;
+}
+
+function normalizeOrderIds(values: Iterable<string | number | null>): number[] {
+  const ids = new Set<number>();
+  for (const value of values) {
+    if (value === null) continue;
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed) && parsed > 0) ids.add(parsed);
+  }
+  return Array.from(ids).sort((left, right) => left - right);
 }
 
 function toIso(value: string | Date): string {

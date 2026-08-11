@@ -4,6 +4,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
 import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
 import { formatCutJobNumber, formatCutNumber } from '../../cut/application/cut-numbering';
 import type {
@@ -51,7 +52,11 @@ import type {
   CncTelegramTodayResponseDto,
   CncTelegramToolDto,
 } from '../dto/cnc-telegram.dto';
-import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
+import {
+  evaluateMdfBoardColumnAutomation,
+  evaluateMdfOrderMachineFilesPresentAutomation,
+  type MdfBoardColumnAutomationInput,
+} from '../../status-automation/application/status-automation-runtime';
 import {
   persistTelegramItemEvidence,
   projectTelegramLabelMap,
@@ -221,6 +226,14 @@ interface BathJoinedRow extends QueryResultRow {
   sheet_ordinal: string | number;
   sheet_width_mm: string | number | null;
   sheet_height_mm: string | number | null;
+}
+
+interface BathColumnAutomationRow extends QueryResultRow {
+  order_id: string | number;
+  order_detail_id: string | number;
+  quantity: string | number;
+  completed_quantity: string | number | null;
+  laminated_or_later: boolean | null;
 }
 
 interface BazisCutSetJoinedRow extends QueryResultRow {
@@ -513,7 +526,19 @@ export class PgCncTelegramRepository
           requestId,
           packetAuditId: auditId,
         });
+        await evaluateMdfBoardColumnAutomation(tx, {
+          eventType: 'mdf.board.completed',
+          orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
+          actor: command.currentUser,
+          requestId,
+          sourceIdempotencyKey: `cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
+        });
       }
+      await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
+        packet,
+        actor: command.currentUser,
+        requestId,
+      });
       if (packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
           orderIds: packet.items.map((item) => item.orderId),
@@ -2578,6 +2603,156 @@ function packetIsCompleted(packet: CncTelegramPacketDto): boolean {
   return packet.completionStatus === 'completed' || packet.thumbsUp;
 }
 
+async function evaluateMdfBoardBathColumnAutomationForPacket(
+  tx: TransactionClient,
+  input: {
+    packet: CncTelegramPacketDto;
+    actor: CurrentUser;
+    requestId: string;
+  },
+): Promise<void> {
+  const cutResultId = input.packet.svgCutResultId;
+  if (!isPositiveNumber(cutResultId)) return;
+  const state = await loadMdfBathColumnAutomationState(tx, cutResultId);
+  if (state === null) return;
+  const eventType = mdfBoardBathColumnEventType(state.column);
+  await evaluateMdfBoardColumnAutomation(tx, {
+    eventType,
+    orderIds: state.orderIds,
+    actor: input.actor,
+    requestId: input.requestId,
+    sourceIdempotencyKey: `mdf-board:auto:bath:cut-result-${cutResultId}:${state.column}`,
+  });
+}
+
+function mdfBoardBathColumnEventType(
+  column: 'baths' | 'baths_ready' | 'baths_laminated',
+): MdfBoardColumnAutomationInput['eventType'] {
+  switch (column) {
+    case 'baths':
+      return 'mdf.board.baths';
+    case 'baths_ready':
+      return 'mdf.board.baths_ready';
+    case 'baths_laminated':
+      return 'mdf.board.baths_laminated';
+  }
+}
+
+async function loadMdfBathColumnAutomationState(
+  tx: TransactionClient,
+  cutResultId: number,
+): Promise<{ column: 'baths' | 'baths_ready' | 'baths_laminated'; orderIds: number[] } | null> {
+  const result = await tx.query<BathColumnAutomationRow>(
+    `
+    WITH laminated_status_threshold AS (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'laminated'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'закатан'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ),
+    target_details AS (
+      SELECT DISTINCT
+        placement.order_id,
+        placement.order_detail_id
+      FROM cut_result_placement placement
+      JOIN cut_result result
+        ON result.cut_result_id = placement.cut_result_id
+      JOIN cut_job job
+        ON job.cut_job_id = result.cut_job_id
+      LEFT JOIN cut_param_profiles profile
+        ON profile.cut_param_profile_id = job.param_profile_id
+      LEFT JOIN cut_result_archive_state archive
+        ON archive.cut_job_id = result.cut_job_id
+       AND archive.result_no = result.result_no
+      JOIN orders order_row
+        ON order_row.order_id = placement.order_id
+       AND COALESCE(order_row.delete_flag, false) = false
+      JOIN order_details detail
+        ON detail.detail_id = placement.order_detail_id
+       AND COALESCE(detail.delete_flag, false) = false
+      WHERE placement.cut_result_id = $1
+        AND result.snapshot_job IS NOT NULL
+        AND job.status <> 'archived'
+        AND COALESCE(profile.params ->> 'layout_mode', job.params ->> 'layout_mode') = 'vacuum_table'
+        AND archive.archived_at IS NULL
+    ),
+    completed_quantities AS (
+      SELECT
+        item.match_detail_id::bigint AS order_detail_id,
+        SUM(
+          CASE
+            WHEN NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(packet.comments_json) AS packet_comment(comment_text)
+              WHERE lower(packet_comment.comment_text) LIKE ANY (
+                ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+              )
+            )
+              AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
+              THEN GREATEST(item.quantity, 0)
+            ELSE 0
+          END
+        )::integer AS completed_quantity
+      FROM cnc_telegram_packets packet
+      JOIN cnc_telegram_packet_items item
+        ON item.packet_id = packet.packet_id
+      JOIN target_details target
+        ON target.order_detail_id = item.match_detail_id
+      WHERE item.match_status = 'matched'
+        AND item.match_detail_id IS NOT NULL
+      GROUP BY item.match_detail_id
+    )
+    SELECT
+      placement.order_id,
+      placement.order_detail_id,
+      COUNT(*)::integer AS quantity,
+      COALESCE(completed.completed_quantity, 0)::integer AS completed_quantity,
+      CASE
+        WHEN detail_status.sort_order IS NOT NULL
+          AND laminated_status.sort_order IS NOT NULL
+          THEN detail_status.sort_order >= laminated_status.sort_order
+        ELSE false
+      END AS laminated_or_later
+    FROM cut_result_placement placement
+    JOIN target_details target
+      ON target.order_id = placement.order_id
+     AND target.order_detail_id = placement.order_detail_id
+    JOIN order_details detail
+      ON detail.detail_id = placement.order_detail_id
+     AND COALESCE(detail.delete_flag, false) = false
+    LEFT JOIN production_statuses detail_status
+      ON detail_status.production_status_id = detail.production_status_id
+    CROSS JOIN laminated_status_threshold laminated_status
+    LEFT JOIN completed_quantities completed
+      ON completed.order_detail_id = placement.order_detail_id
+    WHERE placement.cut_result_id = $1
+    GROUP BY
+      placement.order_id,
+      placement.order_detail_id,
+      completed.completed_quantity,
+      detail_status.sort_order,
+      laminated_status.sort_order
+    ORDER BY placement.order_id, placement.order_detail_id
+    `,
+    [cutResultId],
+  );
+  if (result.rows.length === 0) return null;
+
+  const orderIds = positiveNumberArray(result.rows.map((row) => row.order_id));
+  if (orderIds.length === 0) return null;
+  const ready = result.rows.every((row) => toNumber(row.completed_quantity) >= toNumber(row.quantity));
+  const laminated = ready && result.rows.every((row) => row.laminated_or_later === true);
+  return {
+    column: laminated ? 'baths_laminated' : ready ? 'baths_ready' : 'baths',
+    orderIds,
+  };
+}
+
 async function applyCompletedPacketAutoCutStatus(
   tx: TransactionClient,
   input: {
@@ -4399,6 +4574,6 @@ function toDateOnly(value: string | Date): string {
   return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
 }
 
-function isPositiveNumber(value: number | null): value is number {
+function isPositiveNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }

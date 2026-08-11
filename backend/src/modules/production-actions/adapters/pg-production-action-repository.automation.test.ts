@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { TransactionClient } from '../../../database/database.types';
 import {
@@ -7,6 +7,18 @@ import {
   changeProductionStatusFromAutomationInTransaction,
   type AutomationActionContext,
 } from './pg-production-action-repository';
+
+const statusAutomationMocks = vi.hoisted(() => ({
+  evaluateMdfBoardColumnAutomation: vi.fn(),
+}));
+
+vi.mock('../../status-automation/application/status-automation-runtime', () => ({
+  evaluateMdfBoardColumnAutomation: statusAutomationMocks.evaluateMdfBoardColumnAutomation,
+}));
+
+beforeEach(() => {
+  statusAutomationMocks.evaluateMdfBoardColumnAutomation.mockReset();
+});
 
 describe('production-action automation in-transaction actions', () => {
   it('skips an order status action when the target is already current without audit or outbox', async () => {
@@ -29,6 +41,10 @@ describe('production-action automation in-transaction actions', () => {
       ],
       updatedDetailIds: [101, 102],
       recalcOrderProductionStatusId: 7,
+      mdfLaminatedBathRows: [
+        { cut_result_id: 601, order_id: 15 },
+        { cut_result_id: 601, order_id: 22 },
+      ],
     });
 
     await expect(
@@ -44,6 +60,13 @@ describe('production-action automation in-transaction actions', () => {
     expect(database.outboxCalls[0]?.payload).toMatchObject({
       productionStatusFromDetailsEnabled: true,
     });
+    const call = statusAutomationMocks.evaluateMdfBoardColumnAutomation.mock.calls[0];
+    expect(call?.[1]).toMatchObject({
+      eventType: 'mdf.board.baths_laminated',
+      requestId: 'automation-request-1',
+      sourceIdempotencyKey: 'source-key-1:automation:21:mdf-board:bath:cut-result-601:baths_laminated',
+    });
+    expect(Array.from(call?.[1].orderIds as Iterable<number>)).toEqual([15, 22]);
   });
 
   it('writes automation metadata and preserves the supplied outbox idempotency key', async () => {
@@ -120,6 +143,29 @@ describe('production-action automation in-transaction actions', () => {
     expect(detailUpdateIndex).toBeGreaterThan(detailLockIndex);
     expect(database.recalcCalls).toEqual([15]);
   });
+
+  it('emits MDF-board laminated automation after a detail-status automation action', async () => {
+    const database = createAutomationTx({
+      detailRows: [
+        { detail_id: 102, production_status_id: 1 },
+        { detail_id: 101, production_status_id: 2 },
+      ],
+      updatedDetailIds: [101],
+      mdfLaminatedBathRows: [{ cut_result_id: 701, order_id: 15 }],
+    });
+
+    await expect(
+      changeDetailsProductionStatusFromAutomationInTransaction(database.tx, 15, 7, automationContext()),
+    ).resolves.toMatchObject({ status: 'executed', auditId: 42 });
+
+    const call = statusAutomationMocks.evaluateMdfBoardColumnAutomation.mock.calls[0];
+    expect(call?.[1]).toMatchObject({
+      eventType: 'mdf.board.baths_laminated',
+      requestId: 'automation-request-1',
+      sourceIdempotencyKey: 'source-key-1:automation:21:mdf-board:bath:cut-result-701:baths_laminated',
+    });
+    expect(Array.from(call?.[1].orderIds as Iterable<number>)).toEqual([15]);
+  });
 });
 
 interface AutomationTxOptions {
@@ -129,6 +175,7 @@ interface AutomationTxOptions {
   detailRows?: Array<{ detail_id: number; production_status_id: number | null }>;
   updatedDetailIds?: number[];
   recalcOrderProductionStatusId?: number;
+  mdfLaminatedBathRows?: Array<{ cut_result_id: number | string; order_id: number | string }>;
 }
 
 interface AutomationTxState {
@@ -211,6 +258,12 @@ function createAutomationTx(options: AutomationTxOptions = {}): AutomationTxStat
       if (normalized.startsWith('SELECT recalc_order_production_status')) {
         recalcCalls.push(Number(params[0]));
         return { rows: [] as T[] };
+      }
+      if (
+        normalized.startsWith('WITH laminated_status_threshold AS') &&
+        normalized.includes('candidate_vacuum_results')
+      ) {
+        return { rows: (options.mdfLaminatedBathRows ?? []) as T[] };
       }
       if (normalized.startsWith('INSERT INTO audit_log')) {
         const metadata = JSON.parse(String(params[22])) as Record<string, unknown>;

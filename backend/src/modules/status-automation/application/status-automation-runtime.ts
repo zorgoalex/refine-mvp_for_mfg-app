@@ -28,6 +28,17 @@ export interface MdfOrderMachineFilesPresentAutomationInput {
   sourceIdempotencyKey: string;
 }
 
+export interface MdfBoardColumnAutomationInput {
+  eventType: Extract<
+    StatusAutomationEvent['eventType'],
+    'mdf.board.completed' | 'mdf.board.baths' | 'mdf.board.baths_ready' | 'mdf.board.baths_laminated'
+  >;
+  orderIds: Iterable<number | null | undefined>;
+  actor: CurrentUser;
+  requestId: string;
+  sourceIdempotencyKey: string;
+}
+
 const MEANINGFUL_SKIP_REASONS = new Set([
   'same_status',
   'target_status_missing',
@@ -110,6 +121,23 @@ export async function evaluateMdfOrderMachineFilesPresentAutomation(
   for (const orderId of orderIds) {
     await evaluateStatusAutomation(tx, {
       eventType: 'mdf.order_machine_files_present',
+      origin: 'user',
+      orderId,
+      actor: input.actor,
+      requestId: input.requestId,
+      sourceIdempotencyKey: `${input.sourceIdempotencyKey}:order-${orderId}`,
+    });
+  }
+}
+
+export async function evaluateMdfBoardColumnAutomation(
+  tx: TransactionClient,
+  input: MdfBoardColumnAutomationInput,
+): Promise<void> {
+  const orderIds = normalizeAutomationOrderIds(input.orderIds);
+  for (const orderId of orderIds) {
+    await evaluateStatusAutomation(tx, {
+      eventType: input.eventType,
       origin: 'user',
       orderId,
       actor: input.actor,
