@@ -500,6 +500,7 @@ describe('order status board model', () => {
     expect(isCncManualMoveAllowed('bath', 'baths')).toBe(true);
     expect(isCncManualMoveAllowed('bath', 'baths_ready')).toBe(true);
     expect(isCncManualMoveAllowed('bath', 'baths_laminated')).toBe(true);
+    expect(isCncManualMoveAllowed('bath', 'completed_baths')).toBe(true);
     expect(isCncManualMoveAllowed('bath', 'orders_ready')).toBe(false);
     expect(isCncManualMoveAllowed('order', 'orders')).toBe(true);
     expect(isCncManualMoveAllowed('order', 'orders_ready')).toBe(true);
@@ -516,6 +517,11 @@ describe('order status board model', () => {
     expect(cncManualMoveDestinations('packet', 'completed_laminated').map(({ key }) => key)).toEqual([
       'parsed',
       'completed',
+    ]);
+    expect(cncManualMoveDestinations('bath', 'completed_baths').map(({ key }) => key)).toEqual([
+      'baths',
+      'baths_ready',
+      'baths_laminated',
     ]);
   });
 
@@ -543,7 +549,7 @@ describe('order status board model', () => {
     const manualMoves: CncBoardManualMoveState = {
       [cncManualMoveStorageKey('packet', 'packet-pending')]: 'completed_laminated',
       [cncManualMoveStorageKey('bazisCutSet', '9001')]: 'completed_laminated',
-      [cncManualMoveStorageKey('bath', 'bath-ready')]: 'baths_laminated',
+      [cncManualMoveStorageKey('bath', 'bath-ready')]: 'completed_baths',
     };
 
     const moved = applyCncManualMovesToColumns(columns, manualMoves);
@@ -553,10 +559,10 @@ describe('order status board model', () => {
     expect(moved.find((column) => column.key === 'completed_laminated')?.packets.map((packet) => packet.packetId)).toEqual(['packet-pending']);
     expect(moved.find((column) => column.key === 'completed_laminated')?.bazisCutSets?.map((card) => card.bazisCutSetId)).toEqual([9001]);
     expect(moved.find((column) => column.key === 'baths_ready')?.baths).toEqual([]);
-    expect(moved.find((column) => column.key === 'baths_laminated')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-ready']);
+    expect(moved.find((column) => column.key === 'completed_baths')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-ready']);
   });
 
-  it('hides MDF packet and Basis cut cards moved to terminal files when terminal column is disabled', () => {
+  it('hides MDF cards moved to terminal columns when terminal columns are disabled', () => {
     const columns = [
       {
         key: 'parsed',
@@ -568,10 +574,19 @@ describe('order status board model', () => {
           { orderName: '2707', orderId: 2707, detailId: 7001 },
         ])],
       },
+      {
+        key: 'baths_ready',
+        title: 'Готовы к закатке',
+        total: 1,
+        packets: [],
+        baths: [cncBath('bath-ready', ['2708'], [2708])],
+        bazisCutSets: [],
+      },
     ] as CncTelegramTodayColumn[];
     const manualMoves: CncBoardManualMoveState = {
       [cncManualMoveStorageKey('packet', 'packet-pending')]: 'completed_laminated',
       [cncManualMoveStorageKey('bazisCutSet', '9001')]: 'completed_laminated',
+      [cncManualMoveStorageKey('bath', 'bath-ready')]: 'completed_baths',
     };
 
     const hiddenTerminal = applyCncManualMovesToColumns(columns, manualMoves, {
@@ -581,9 +596,12 @@ describe('order status board model', () => {
 
     expect(hiddenTerminal.find((column) => column.key === 'parsed')?.packets).toEqual([]);
     expect(hiddenTerminal.find((column) => column.key === 'parsed')?.bazisCutSets).toEqual([]);
+    expect(hiddenTerminal.find((column) => column.key === 'baths_ready')?.baths).toEqual([]);
     expect(hiddenTerminal.find((column) => column.key === 'completed_laminated')).toBeUndefined();
+    expect(hiddenTerminal.find((column) => column.key === 'completed_baths')).toBeUndefined();
     expect(readiness.get(2706)?.cutDetails).toBe(1);
     expect(readiness.get(2707)?.cutDetails).toBe(1);
+    expect(readiness.get(2708)?.rolledDetails).toBe(1);
   });
 
   it('derives MDF order readiness from completed packets and rolled baths', () => {
@@ -1293,6 +1311,7 @@ function cncBath(
       quantity: 1,
       completedQuantity: 1,
       laminatedOrLater: false,
+      packedOrLater: false,
     })),
   };
 }
@@ -1304,6 +1323,7 @@ function cncBazisCutSet(
     orderId: number | null;
     detailId: number | null;
     materialName?: string;
+    packedOrLater?: boolean;
   }>,
 ) {
   return {
@@ -1321,6 +1341,7 @@ function cncBazisCutSet(
       heightMm: null,
       materialName: item.materialName ?? 'МДФ 16 мм',
       quantity: 1,
+      packedOrLater: item.packedOrLater ?? false,
     })),
   };
 }

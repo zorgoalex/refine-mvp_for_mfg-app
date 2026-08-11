@@ -28,6 +28,7 @@ const moveBodySchema = z.object({
     'baths',
     'baths_ready',
     'baths_laminated',
+    'completed_baths',
     'orders',
     'orders_ready',
     'orders_issued',
@@ -180,7 +181,12 @@ export function assertMdfManualMoveAllowed(
   }
   if (
     cardKind === 'bath'
-    && (targetColumn === 'baths' || targetColumn === 'baths_ready' || targetColumn === 'baths_laminated')
+    && (
+      targetColumn === 'baths'
+      || targetColumn === 'baths_ready'
+      || targetColumn === 'baths_laminated'
+      || targetColumn === 'completed_baths'
+    )
   ) {
     return;
   }

@@ -214,6 +214,7 @@ describe('PgCncTelegramRepository', () => {
       ['baths_ready', 'Готовы к закатке', 0],
       ['completed_laminated', 'Распиленные файлы', 0],
       ['baths_laminated', 'Закатаны/выданы', 0],
+      ['completed_baths', 'Завершенные ванны', 0],
     ]);
     expect(queries[0]).toContain('LEFT JOIN cut_result svg_result');
     expect(queries[0]).toContain('svg_result.result_no AS svg_cut_result_no');
@@ -538,6 +539,7 @@ describe('PgCncTelegramRepository', () => {
       ['baths_ready', 1],
       ['completed_laminated', 0],
       ['baths_laminated', 0],
+      ['completed_baths', 0],
     ]);
     expect(result.columns[2]?.baths[0]).toMatchObject({
       cutJobId: 31,
@@ -582,6 +584,7 @@ describe('PgCncTelegramRepository', () => {
                 height_mm: 477,
                 material_name: 'МДФ 16 мм',
                 quantity: 2,
+                packed_or_later: false,
               },
               {
                 bazis_cut_set_id: 8,
@@ -597,6 +600,7 @@ describe('PgCncTelegramRepository', () => {
                 height_mm: 400,
                 material_name: 'ЛДСП 16 мм',
                 quantity: 3,
+                packed_or_later: false,
               },
               {
                 bazis_cut_set_id: 8,
@@ -612,6 +616,23 @@ describe('PgCncTelegramRepository', () => {
                 height_mm: 300,
                 material_name: null,
                 quantity: 4,
+                packed_or_later: false,
+              },
+              {
+                bazis_cut_set_id: 9,
+                name: 'Завершенный набор МДФ',
+                created_at: '2026-07-22T08:30:00.000Z',
+                sort_order: 0,
+                source_order_detail_id: 3401,
+                source_order_id: 2703,
+                source_order_name: '2703',
+                source_order_deleted: false,
+                detail_number: 43,
+                width_mm: 800,
+                height_mm: 300,
+                material_name: 'МДФ 16 мм',
+                quantity: 1,
+                packed_or_later: true,
               },
             ],
           };
@@ -628,14 +649,19 @@ describe('PgCncTelegramRepository', () => {
       workdayTo: '2026-07-24',
     });
     const parsed = result.columns.find((column) => column.key === 'parsed');
+    const terminalFiles = result.columns.find((column) => column.key === 'completed_laminated');
     const basisQuery = queries.find((query) => /target_bazis_cut_sets/i.test(query.text));
 
     expect(basisQuery?.params).toEqual(['2026-07-18', '2026-07-24']);
     expect(basisQuery?.text).toContain('cut_set.created_at,');
+    expect(basisQuery?.text).toContain('packed_status_threshold');
+    expect(basisQuery?.text).toContain('AS packed_or_later');
     expect(basisQuery?.text).toContain('cut_set.created_at >= $1::date');
     expect(basisQuery?.text).toContain("cut_set.created_at < ($2::date + INTERVAL '1 day')");
     expect(basisQuery?.text).not.toContain('detail.source_order_detail_id = ANY($1::bigint[])');
     expect(parsed?.total).toBe(1);
+    expect(terminalFiles?.total).toBe(1);
+    expect(terminalFiles?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([9]);
     expect(parsed?.bazisCutSets).toEqual([
       {
         bazisCutSetId: 8,
@@ -655,6 +681,7 @@ describe('PgCncTelegramRepository', () => {
             heightMm: 477,
             materialName: 'МДФ 16 мм',
             quantity: 2,
+            packedOrLater: false,
           },
           {
             orderId: 2701,
@@ -666,6 +693,7 @@ describe('PgCncTelegramRepository', () => {
             heightMm: 400,
             materialName: 'ЛДСП 16 мм',
             quantity: 3,
+            packedOrLater: false,
           },
           {
             orderId: 2702,
@@ -677,13 +705,14 @@ describe('PgCncTelegramRepository', () => {
             heightMm: 300,
             materialName: 'Не определён',
             quantity: 4,
+            packedOrLater: false,
           },
         ],
       },
     ]);
   });
 
-  it('archives a ready bath only when every detail is laminated or later', async () => {
+  it('keeps a laminated ready bath visible until every detail is packed or later', async () => {
     const database = {
       query: vi.fn(async (text: string) => {
         if (/latest_vacuum_results/i.test(text)) {
@@ -709,6 +738,41 @@ describe('PgCncTelegramRepository', () => {
     expect(result.columns.find((column) => column.key === 'baths_ready')?.baths).toEqual([]);
     expect(result.columns.find((column) => column.key === 'baths_laminated')?.baths)
       .toMatchObject([{ cutJobId: 30, ready: true }]);
+    expect(result.columns.find((column) => column.key === 'completed_baths')?.baths).toEqual([]);
+  });
+
+  it('moves a bath to the completed bath terminal column when every detail is packed or later', async () => {
+    const database = {
+      query: vi.fn(async (text: string) => {
+        if (/latest_vacuum_results/i.test(text)) {
+          return {
+            rows: [
+              bathPlacementRow({
+                completed_quantity: 0,
+                laminated_or_later: true,
+                packed_or_later: true,
+              }),
+              bathPlacementRow({
+                order_detail_id: 3102,
+                detail_number: 32,
+                completed_quantity: 0,
+                laminated_or_later: true,
+                packed_or_later: true,
+              }),
+            ],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) return { rows: [] };
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+
+    expect(result.columns.find((column) => column.key === 'baths_laminated')?.baths).toEqual([]);
+    expect(result.columns.find((column) => column.key === 'completed_baths')?.baths)
+      .toMatchObject([{ cutJobId: 30, ready: false }]);
   });
 
   it('keeps sheet image metadata when updating a completed packet', async () => {
@@ -2779,6 +2843,7 @@ function bathPlacementRow(overrides: Record<string, unknown> = {}) {
     height_mm: 477,
     completed_quantity: 2,
     laminated_or_later: false,
+    packed_or_later: false,
     cut_group_id: 100,
     variant: 'auto',
     sheet_index: 0,

@@ -1551,7 +1551,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           checked={cncTerminalColumnsVisible}
           onChange={(event) => setCncTerminalColumnsVisible(event.target.checked)}
         >
-          Распиленные файлы
+          Завершенные файлы и ванны
         </Checkbox>
       </div>
       <div
@@ -6188,7 +6188,7 @@ export function cncManualMoveDestinations(
   const keys: Record<CncManualCardKind, CncTelegramTodayDisplayColumnKey[]> = {
     packet: ['parsed', 'completed', 'completed_laminated'],
     bazisCutSet: ['parsed', 'completed', 'completed_laminated'],
-    bath: ['baths', 'baths_ready', 'baths_laminated'],
+    bath: ['baths', 'baths_ready', 'baths_laminated', 'completed_baths'],
     order: ['orders', 'orders_ready', 'orders_issued'],
   };
   return keys[kind]
@@ -6217,6 +6217,7 @@ function isCncManualColumnKey(value: string): value is CncTelegramTodayDisplayCo
     'baths_ready',
     'completed_laminated',
     'baths_laminated',
+    'completed_baths',
     'orders',
     'orders_ready',
     'orders_issued',
@@ -6405,7 +6406,7 @@ export function buildCncOrderReadiness(
         if (!detail) continue;
         const quantity = nonNegativeInteger(item.quantity);
         detail.bathTotal += quantity;
-        if (bathTarget === 'baths_laminated') {
+        if (bathTarget === 'baths_laminated' || bathTarget === 'completed_baths') {
           detail.rolled += quantity;
         }
       }
@@ -6680,6 +6681,7 @@ function cncColumnTitleByKey(
     orders_ready: 'Готов к выдаче',
     orders_issued: 'Выдан',
     completed_laminated: 'Распиленные файлы',
+    completed_baths: 'Завершенные ванны',
   };
   return titles[columnKey] ?? fallback;
 }
@@ -6759,7 +6761,8 @@ function isCncBathColumnKey(
 ): boolean {
   return columnKey === 'baths'
     || columnKey === 'baths_ready'
-    || columnKey === 'baths_laminated';
+    || columnKey === 'baths_laminated'
+    || columnKey === 'completed_baths';
 }
 
 function isCncOrderColumnKey(columnKey: string): columnKey is 'orders' | 'orders_ready' | 'orders_issued' {
@@ -6769,13 +6772,15 @@ function isCncOrderColumnKey(columnKey: string): columnKey is 'orders' | 'orders
 function isCncReadyBathColumnKey(
   columnKey: CncTelegramTodayDisplayColumnKey,
 ): boolean {
-  return columnKey === 'baths_ready' || columnKey === 'baths_laminated';
+  return columnKey === 'baths_ready'
+    || columnKey === 'baths_laminated'
+    || columnKey === 'completed_baths';
 }
 
 function isCncTerminalColumnKey(
   columnKey: CncTelegramTodayDisplayColumnKey,
 ): boolean {
-  return columnKey === 'completed_laminated';
+  return columnKey === 'completed_laminated' || columnKey === 'completed_baths';
 }
 
 function cncItemAreaM2(item: CncColumnTotalItem, quantity: number): number {

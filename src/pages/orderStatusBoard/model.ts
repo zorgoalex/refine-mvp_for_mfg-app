@@ -582,7 +582,10 @@ export function filterCncBathColumnsByOrderStatuses(
 }
 
 function isCncBathColumnKey(key: CncTelegramTodayColumn['key']): boolean {
-  return key === 'baths' || key === 'baths_ready' || key === 'baths_laminated';
+  return key === 'baths'
+    || key === 'baths_ready'
+    || key === 'baths_laminated'
+    || key === 'completed_baths';
 }
 
 export function collectCncOrderIds(columns: CncTelegramTodayColumn[]): number[] {

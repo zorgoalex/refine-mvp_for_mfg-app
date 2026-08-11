@@ -220,6 +220,7 @@ interface BathJoinedRow extends QueryResultRow {
   height_mm: string | number | null;
   completed_quantity: string | number | null;
   laminated_or_later: boolean | null;
+  packed_or_later: boolean | null;
   cut_group_id: string | number;
   variant: 'auto' | 'manual';
   sheet_index: string | number;
@@ -250,6 +251,7 @@ interface BazisCutSetJoinedRow extends QueryResultRow {
   height_mm: string | number | null;
   material_name: string | null;
   quantity: string | number;
+  packed_or_later: boolean | null;
 }
 
 interface OrderCuttingSequenceRow extends QueryResultRow {
@@ -3653,6 +3655,17 @@ async function loadBathCards(
       ) AS sort_order
       FROM production_statuses ps
     ),
+    packed_status_threshold AS (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'packed'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'упакован'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ),
     packet_items AS (
       SELECT
         p.completion_status,
@@ -3874,6 +3887,12 @@ async function loadBathCards(
           THEN detail_status.sort_order >= laminated_status.sort_order
         ELSE false
       END AS laminated_or_later,
+      CASE
+        WHEN detail_status.sort_order IS NOT NULL
+          AND packed_status.sort_order IS NOT NULL
+          THEN detail_status.sort_order >= packed_status.sort_order
+        ELSE false
+      END AS packed_or_later,
       sheet.cut_group_id,
       sheet.variant,
       sheet.sheet_index,
@@ -3895,6 +3914,7 @@ async function loadBathCards(
     LEFT JOIN production_statuses detail_status
       ON detail_status.production_status_id = od.production_status_id
     CROSS JOIN laminated_status_threshold laminated_status
+    CROSS JOIN packed_status_threshold packed_status
     LEFT JOIN target_details target
       ON target.order_id = placement.order_id
      AND target.detail_id = placement.order_detail_id
@@ -3921,9 +3941,11 @@ function buildTodayColumns(
     { key: 'parsed', title: 'Файлы на станке' },
     { key: 'completed', title: 'Выполнено' },
   ];
+  const activeBazisCutSets = bazisCutSets.filter((set) => !allItemsPackedOrLater(set.items));
+  const completedBazisCutSets = bazisCutSets.filter((set) => allItemsPackedOrLater(set.items));
   const packetColumns = definitions.map((definition) => {
     const columnPackets = packets.filter((packet) => packetColumnKey(packet) === definition.key);
-    const columnBazisCutSets = definition.key === 'parsed' ? bazisCutSets : [];
+    const columnBazisCutSets = definition.key === 'parsed' ? activeBazisCutSets : [];
     return {
       ...definition,
       total: columnPackets.length + columnBazisCutSets.length,
@@ -3933,9 +3955,15 @@ function buildTodayColumns(
     };
   });
 
-  const pendingBaths = baths.filter((bath) => !bath.ready);
-  const readyBaths = baths.filter((bath) => bath.ready && !allItemsLaminatedOrLater(bath.items));
-  const laminatedBaths = baths.filter((bath) => bath.ready && allItemsLaminatedOrLater(bath.items));
+  const completedBaths = baths.filter((bath) => allItemsPackedOrLater(bath.items));
+  const activeBaths = baths.filter((bath) => !allItemsPackedOrLater(bath.items));
+  const pendingBaths = activeBaths.filter((bath) => !bath.ready);
+  const readyBaths = activeBaths.filter((bath) =>
+    bath.ready && !allItemsLaminatedOrLater(bath.items),
+  );
+  const laminatedBaths = baths.filter((bath) =>
+    bath.ready && allItemsLaminatedOrLater(bath.items) && !allItemsPackedOrLater(bath.items),
+  );
   const laminatedPackets = packets.filter(
     (packet) => packetColumnKey(packet) === 'completed_laminated',
   );
@@ -3960,10 +3988,10 @@ function buildTodayColumns(
     {
       key: 'completed_laminated',
       title: 'Распиленные файлы',
-      total: laminatedPackets.length,
+      total: laminatedPackets.length + completedBazisCutSets.length,
       packets: laminatedPackets,
       baths: [],
-      bazisCutSets: [],
+      bazisCutSets: completedBazisCutSets,
     },
     {
       key: 'baths_laminated',
@@ -3971,6 +3999,14 @@ function buildTodayColumns(
       total: laminatedBaths.length,
       packets: [],
       baths: laminatedBaths,
+      bazisCutSets: [],
+    },
+    {
+      key: 'completed_baths',
+      title: 'Завершенные ванны',
+      total: completedBaths.length,
+      packets: [],
+      baths: completedBaths,
       bazisCutSets: [],
     },
   ];
@@ -3983,7 +4019,18 @@ async function loadPeriodBazisCutSetCards(
 ): Promise<CncTelegramBazisCutSetCardDto[]> {
   const result = await database.query<BazisCutSetJoinedRow>(
     `
-    WITH target_bazis_cut_sets AS (
+    WITH packed_status_threshold AS (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'packed'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'упакован'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ),
+    target_bazis_cut_sets AS (
       SELECT cut_set.bazis_cut_set_id
       FROM bazis_cut_sets cut_set
       WHERE cut_set.created_at >= $1::date
@@ -4006,7 +4053,13 @@ async function loadPeriodBazisCutSetCards(
       COALESCE(source_detail.width, detail.finished_width_mm) AS width_mm,
       COALESCE(source_detail.height, detail.finished_length_mm) AS height_mm,
       detail.material_name,
-      detail.quantity
+      detail.quantity,
+      CASE
+        WHEN detail_status.sort_order IS NOT NULL
+          AND packed_status.sort_order IS NOT NULL
+          THEN detail_status.sort_order >= packed_status.sort_order
+        ELSE false
+      END AS packed_or_later
     FROM target_bazis_cut_sets target
     JOIN bazis_cut_sets cut_set
       ON cut_set.bazis_cut_set_id = target.bazis_cut_set_id
@@ -4016,6 +4069,9 @@ async function loadPeriodBazisCutSetCards(
       ON source_detail.detail_id = detail.source_order_detail_id
     LEFT JOIN orders source_order
       ON source_order.order_id = COALESCE(detail.source_order_id, source_detail.order_id)
+    LEFT JOIN production_statuses detail_status
+      ON detail_status.production_status_id = source_detail.production_status_id
+    CROSS JOIN packed_status_threshold packed_status
     ORDER BY cut_set.created_at DESC, cut_set.bazis_cut_set_id DESC,
       detail.sort_order, detail.bazis_cut_set_detail_id
     `,
@@ -4065,6 +4121,7 @@ function mapBazisCutSetRows(
       heightMm: toNullableNumber(row.height_mm),
       materialName: normalizeOptional(row.material_name) ?? 'Не определён',
       quantity,
+      packedOrLater: row.packed_or_later === true,
     };
     accumulator.card.items.push(item);
     accumulator.card.positionCount += 1;
@@ -4082,6 +4139,12 @@ function allItemsLaminatedOrLater(
   items: ReadonlyArray<{ laminatedOrLater: boolean }>,
 ): boolean {
   return items.length > 0 && items.every((item) => item.laminatedOrLater);
+}
+
+function allItemsPackedOrLater(
+  items: ReadonlyArray<{ packedOrLater: boolean }>,
+): boolean {
+  return items.length > 0 && items.every((item) => item.packedOrLater);
 }
 
 function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
@@ -4158,6 +4221,7 @@ function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
         completedQuantity: Math.max(0, toNumber(row.completed_quantity)),
         ready: false,
         laminatedOrLater: row.laminated_or_later === true,
+        packedOrLater: row.packed_or_later === true,
       };
       accumulator.itemsByKey.set(itemKey, item);
       accumulator.orderIds.add(orderId);

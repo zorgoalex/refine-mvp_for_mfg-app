@@ -812,6 +812,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-today-column--baths');
     expect(css).toContain('.cnc-today-column--baths_ready');
     expect(css).toContain('.cnc-today-column--baths_laminated');
+    expect(page).toContain("completed_baths: 'Завершенные ванны'");
     expect(css).toContain('.cnc-today-column--orders_ready');
     expect(css).toContain('.cnc-today-column--orders_issued');
     expect(page).toContain("title: 'Готов к выдаче'");
@@ -956,8 +957,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
     expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');
     expect(settings).toContain('checked={cncTerminalColumnsVisible}');
-    expect(settings).toContain('Распиленные файлы');
+    expect(settings).toContain('Завершенные файлы и ванны');
     expect(page).toContain("completed_laminated: 'Распиленные файлы'");
+    expect(page).toContain("completed_baths: 'Завершенные ванны'");
     expect(page).toContain("baths_laminated: 'Закатаны'");
     expect(page).toContain("orders_ready: 'Готов к выдаче'");
     expect(page).toContain("orders_issued: 'Выдан'");

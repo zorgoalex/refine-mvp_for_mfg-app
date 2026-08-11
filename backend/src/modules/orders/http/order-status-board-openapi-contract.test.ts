@@ -65,6 +65,7 @@ describe('order status board OpenAPI contract', () => {
     expect(schemas).toContain('    MdfBoardManualMovesResponse:');
     expect(schemas).toContain('    MdfBoardManualMoveUpsertResponse:');
     expect(schemas).toContain('    MdfBoardManualMoveDeleteResponse:');
+    expect(schemas).toContain('- completed_baths');
     expect(schemas).toContain('- orders_issued');
   });
 

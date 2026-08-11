@@ -14,6 +14,7 @@ export type MdfBoardManualMoveTargetColumn =
   | 'baths'
   | 'baths_ready'
   | 'baths_laminated'
+  | 'completed_baths'
   | 'orders'
   | 'orders_ready'
   | 'orders_issued';

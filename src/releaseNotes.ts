@@ -71,6 +71,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "МДФ-работы: завершенные ванны",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Карточки ванн, у которых все детали уже в статусе «Упакован» или дальше, уходят в скрытую терминальную колонку «Завершенные ванны».",
+      "Карточки Базис-раскроя с полностью упакованными деталями уходят в скрытую терминальную колонку «Распиленные файлы».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "Заказы: липкая сводка формы",
     services: ["ERP"],
     repositories: ["repo_erp"],

@@ -33,7 +33,7 @@ describe('orderStatusBoardApi MDF manual moves', () => {
       move: {
         cardKind: 'bath',
         cardId: 'cut-result:42',
-        targetColumn: 'baths_laminated',
+        targetColumn: 'completed_baths',
         version: 2,
         createdAt: '2026-08-11T00:00:00.000Z',
         createdByUserId: 7,
@@ -52,7 +52,7 @@ describe('orderStatusBoardApi MDF manual moves', () => {
     const fetchMock = mockFetch(upsertResponse, deleteResponse);
 
     await expect(
-      orderStatusBoardApi.upsertMdfManualMove('bath', 'cut-result:42', 'baths_laminated'),
+      orderStatusBoardApi.upsertMdfManualMove('bath', 'cut-result:42', 'completed_baths'),
     ).resolves.toEqual(upsertResponse);
     await expect(
       orderStatusBoardApi.deleteMdfManualMove('bath', 'cut-result:42'),
@@ -60,7 +60,7 @@ describe('orderStatusBoardApi MDF manual moves', () => {
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/orders/status-board/mdf-manual-moves/bath/cut-result%3A42');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('PUT');
-    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ targetColumn: 'baths_laminated' }));
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(JSON.stringify({ targetColumn: 'completed_baths' }));
     expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/orders/status-board/mdf-manual-moves/bath/cut-result%3A42');
     expect(fetchMock.mock.calls[1][1]?.method).toBe('DELETE');
   });

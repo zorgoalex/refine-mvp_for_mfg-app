@@ -36,6 +36,7 @@ describe('MdfBoardManualMoveController parsing', () => {
     expect(parseMdfManualCardKind('bazisCutSet')).toBe('bazisCutSet');
     expect(parseMdfManualCardId('cut-result%3A42')).toBe('cut-result:42');
     expect(parseMdfManualMoveBody({ targetColumn: 'completed_laminated' })).toBe('completed_laminated');
+    expect(parseMdfManualMoveBody({ targetColumn: 'completed_baths' })).toBe('completed_baths');
   });
 
   it('rejects unsafe identities and extra payload fields', () => {
@@ -51,6 +52,7 @@ describe('MdfBoardManualMoveController parsing', () => {
     expect(() => assertMdfManualMoveAllowed('packet', 'completed')).not.toThrow();
     expect(() => assertMdfManualMoveAllowed('bazisCutSet', 'completed_laminated')).not.toThrow();
     expect(() => assertMdfManualMoveAllowed('bath', 'baths_ready')).not.toThrow();
+    expect(() => assertMdfManualMoveAllowed('bath', 'completed_baths')).not.toThrow();
     expect(() => assertMdfManualMoveAllowed('order', 'orders_issued')).not.toThrow();
 
     expect(() => assertMdfManualMoveAllowed('packet', 'baths_ready')).toThrow(ApiError);
