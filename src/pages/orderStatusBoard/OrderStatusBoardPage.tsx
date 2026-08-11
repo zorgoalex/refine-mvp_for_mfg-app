@@ -193,12 +193,14 @@ const CNC_CARD_DISPLAY_OPTIONS: Array<{
   label: string;
   value: CncCardDisplayMode;
 }> = [
-  { label: 'Стандартные', value: 'standard' },
-  { label: 'Компактные', value: 'compact' },
+  { label: 'Стандартный', value: 'standard' },
+  { label: 'Средний', value: 'compact' },
+  { label: 'Компактный', value: 'minimal' },
 ];
 const CNC_CARD_DISPLAY_ICONS: Record<CncCardDisplayMode, React.ReactNode> = {
   standard: <ProfileOutlined />,
   compact: <CompressOutlined />,
+  minimal: <FileTextOutlined />,
 };
 const CNC_SVG_NS = 'http://www.w3.org/2000/svg';
 const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
@@ -1303,7 +1305,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   )?.label ?? 'Сначала срочные';
   const cncCardDisplayModeLabel = CNC_CARD_DISPLAY_OPTIONS.find(
     (option) => option.value === cncCardDisplayMode,
-  )?.label ?? 'Стандартные';
+  )?.label ?? 'Стандартный';
   const focusCncOrderSearch = () => {
     setMobileToolbarExpanded(true);
     window.requestAnimationFrame(() => {
@@ -1774,7 +1776,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 }
               />
             </div>
-            {cncCardDisplayMode === 'compact' && (
+            {cncCardDisplayMode !== 'standard' && (
               <Tooltip title="Печать всех колонок и карточек в альбомном формате">
                 <Button
                   size="small"
@@ -2217,6 +2219,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     [canViewCut, detailedContext?.activeBath, manualDisplayColumns, selectedDetailedDetailId],
   );
   const standardGridMinWidth = displayColumns.length * 220 + Math.max(0, displayColumns.length - 1) * 12;
+  const cncColumnMinWidth = cardDisplayMode === 'minimal' ? 132 : 220;
 
   return (
     <>
@@ -2224,6 +2227,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         className={[
           'status-board-columns status-board-columns--cnc',
           cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : '',
+          cardDisplayMode === 'minimal' ? 'status-board-columns--cnc-minimal' : '',
           detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
         ].filter(Boolean).join(' ')}
         style={
@@ -2232,8 +2236,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
             '--status-board-cnc-side-column-count': Math.max(0, displayColumns.length - 4),
             ...(!detailedBathActive
               ? {
-                gridTemplateColumns: `repeat(${displayColumns.length}, minmax(220px, 1fr))`,
-                minWidth: `${standardGridMinWidth}px`,
+                gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}px, 1fr))`,
+                minWidth: cardDisplayMode === 'standard' ? `${standardGridMinWidth}px` : undefined,
               }
               : {}),
           } as React.CSSProperties
@@ -2377,7 +2381,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         finePointer={false}
                         mutationsEnabled={false}
                         pending={false}
-                        displayMode="standard"
+                        displayMode={cardDisplayMode === 'minimal' ? 'minimal' : 'standard'}
                         actionsVisible={false}
                         cncOrderCard
                         cncMuted={mutedOrderIds.has(card.orderId)}
@@ -2446,6 +2450,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         detailedEnabled={detailedEnabled}
                         detailedPlacement={detailedPlacement}
                         summaryOnly={summaryOnly}
+                        displayMode={cardDisplayMode}
                         displayToggleVisible={cardDisplayMode === 'compact'}
                         selectedDetailId={selectedDetailId}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
@@ -2500,6 +2505,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                             relationsEnabled={relationsEnabled}
                             highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
                             summaryOnly={summaryOnly}
+                            displayMode={cardDisplayMode}
                             displayToggleVisible={cardDisplayMode === 'compact'}
                             onToggleDisplay={() => toggleCardDisplay(cardKey)}
                             onSelectRelation={() =>
@@ -2539,6 +2545,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       relationsEnabled={relationsEnabled}
                       highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
                       summaryOnly={summaryOnly}
+                      displayMode={cardDisplayMode}
                       displayToggleVisible={cardDisplayMode === 'compact'}
                       onToggleDisplay={() => toggleCardDisplay(cardKey)}
                       onSelectRelation={() =>
@@ -2580,6 +2587,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 detailedEnabled
                 detailedPlacement="right"
                 summaryOnly={false}
+                displayMode="standard"
                 displayToggleVisible={false}
                 selectedDetailId={selectedDetailedDetailId}
                 onToggleDisplay={() => undefined}
@@ -3277,6 +3285,7 @@ interface CncBazisCutSetCardViewProps {
   relationsEnabled: boolean;
   highlightEnabled: boolean;
   summaryOnly: boolean;
+  displayMode: CncCardDisplayMode;
   displayToggleVisible: boolean;
   onToggleDisplay: () => void;
   onSelectRelation: () => void;
@@ -3290,6 +3299,7 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
   relationsEnabled,
   highlightEnabled,
   summaryOnly,
+  displayMode,
   displayToggleVisible,
   onToggleDisplay,
   onSelectRelation,
@@ -3298,6 +3308,7 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
 }) => {
   const orderSummaries = buildCncOrderSummaries(card.items);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const minimal = displayMode === 'minimal';
   const openSet = (event: React.MouseEvent) => {
     event.stopPropagation();
     onOpenBazisCut(card.bazisCutSetId);
@@ -3308,13 +3319,14 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
       className={cncRelationCardClassName(
         [
           'status-board-card cnc-packet-card cnc-bazis-cut-card',
+          minimal ? 'cnc-bazis-cut-card--minimal cnc-compact-card' : '',
           summaryOnly ? 'cnc-card--summary-only' : '',
         ].filter(Boolean).join(' '),
         relationState,
         highlightEnabled,
       )}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
-      data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
+      data-cnc-card-view={minimal ? 'minimal' : summaryOnly ? 'compact' : 'standard'}
       data-bazis-cut-set-id={card.bazisCutSetId}
       data-cnc-clickable={relationsEnabled ? 'true' : undefined}
       role={relationsEnabled ? 'button' : undefined}
@@ -3327,6 +3339,17 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
         onSelectRelation();
       }}
     >
+      {minimal ? (
+        <Button
+          type="text"
+          className="cnc-compact-card__number"
+          aria-label={`Открыть Базис-раскрой БР-${card.bazisCutSetId}`}
+          onClick={openSet}
+        >
+          БР-{card.bazisCutSetId}
+        </Button>
+      ) : (
+        <>
       <div className="status-board-card__top">
         <div className="cnc-packet-card__title">
           <div className="cnc-packet-card__summaries" aria-label="Итоги по ERP-заказам набора">
@@ -3434,6 +3457,8 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
           </div>
         </>
       )}
+        </>
+      )}
     </div>
   );
 });
@@ -3445,6 +3470,7 @@ interface CncTelegramPacketCardProps {
   relationsEnabled: boolean;
   highlightEnabled: boolean;
   summaryOnly: boolean;
+  displayMode: CncCardDisplayMode;
   displayToggleVisible: boolean;
   onToggleDisplay: () => void;
   onSelectRelation: () => void;
@@ -3513,6 +3539,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   relationsEnabled,
   highlightEnabled,
   summaryOnly,
+  displayMode,
   displayToggleVisible,
   onToggleDisplay,
   onSelectRelation,
@@ -3535,12 +3562,44 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   );
   const cutMapFallbackImage = useMemo(() => cutMapFallbackImageFromPacket(packet), [packet]);
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
+  const minimal = displayMode === 'minimal';
 
   useEffect(() => {
     if (activeAuxView === 'sheet' && !hasSheetImage) {
       setActiveAuxView(null);
     }
   }, [activeAuxView, hasSheetImage]);
+
+  if (minimal) {
+    return (
+      <div
+        className={cncRelationCardClassName(
+          [
+            'status-board-card cnc-packet-card cnc-packet-card--minimal cnc-compact-card',
+            otherMaterial ? 'cnc-packet-card--other-material' : '',
+          ].filter(Boolean).join(' '),
+          relationState,
+          highlightEnabled,
+        )}
+        data-cnc-card-view="minimal"
+        data-cnc-material-kind={otherMaterial ? 'other' : undefined}
+        data-cnc-relation-state={highlightEnabled ? relationState : undefined}
+        data-cnc-clickable={relationsEnabled ? 'true' : undefined}
+        onClick={relationsEnabled ? onSelectRelation : undefined}
+      >
+        <div className="cnc-compact-card__refs" aria-label="Номера файла станка">
+          <span>
+            <span className="cnc-compact-card__ref-label">Раскрой</span>
+            <strong>{formatCncPacketCutSheetNumbers(packet)}</strong>
+          </span>
+          <span>
+            <span className="cnc-compact-card__ref-label">Базис</span>
+            <strong>{formatCncPacketBasisCutNumber(packet)}</strong>
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -3904,6 +3963,7 @@ interface CncTelegramBathCardViewProps {
   detailedEnabled: boolean;
   detailedPlacement: CncDetailedBathPlacement;
   summaryOnly: boolean;
+  displayMode: CncCardDisplayMode;
   displayToggleVisible: boolean;
   selectedDetailId: number | null;
   onToggleDisplay: () => void;
@@ -3923,6 +3983,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   detailedEnabled,
   detailedPlacement,
   summaryOnly,
+  displayMode,
   displayToggleVisible,
   selectedDetailId,
   onToggleDisplay,
@@ -3936,6 +3997,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   const orderSummaries = buildCncOrderSummaries(bath.items);
   const interactive = relationsEnabled;
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'pdf' | null>(null);
+  const minimal = displayMode === 'minimal' && !detailed;
 
   return (
     <div
@@ -3944,6 +4006,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           'status-board-card cnc-bath-card',
           detailed ? 'cnc-bath-card--detailed' : '',
           detailed ? `cnc-bath-card--detailed-${detailedPlacement}` : '',
+          minimal ? 'cnc-bath-card--minimal cnc-compact-card' : '',
           summaryOnly ? 'cnc-card--summary-only' : '',
         ].filter(Boolean).join(' '),
         relationState,
@@ -3951,10 +4014,19 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
       )}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-detailed-state={detailed ? 'active' : detailedEnabled ? 'available' : undefined}
-      data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
+      data-cnc-card-view={minimal ? 'minimal' : summaryOnly ? 'compact' : 'standard'}
       data-cnc-clickable={interactive ? 'true' : undefined}
       onClick={interactive ? onSelect : undefined}
     >
+      {minimal ? (
+        <span
+          className="cnc-compact-card__number"
+          aria-label={`Номер ванны ${bath.cutNumber}`}
+        >
+          №{bath.cutNumber}
+        </span>
+      ) : (
+        <>
       <div className="status-board-card__top">
         <div className="cnc-packet-card__title">
           <div className="cnc-packet-card__summaries" aria-label="Итоги по заказам">
@@ -4109,6 +4181,8 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           <div className="status-board-card__footer">
             <span>Раскрой {formatDateTime(bath.createdAt)}</span>
           </div>
+        </>
+      )}
         </>
       )}
     </div>
@@ -5166,6 +5240,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   });
   const showCompactDetails = displayMode !== 'minimal';
   const showStandardDetails = displayMode === 'standard';
+  const cncNumberOnly = cncOrderCard && displayMode === 'minimal';
   const paymentSummary = showFinancials ? formatPaymentSummary(card) : null;
   const showUrgentFlag = card.priority <= 50;
   const showOverdueFlag = card.pastPlannedDate;
@@ -5239,6 +5314,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           'status-board-card',
           `status-board-card--${displayMode}`,
           cncOrderCard ? 'cnc-order-card' : '',
+          cncNumberOnly ? 'cnc-order-card--minimal cnc-compact-card' : '',
           cncMuted ? 'cnc-terminal-card--muted' : '',
           cncSummaryOnly ? 'cnc-order-card--summary-only' : '',
           isDragging || isTouchDragging ? 'status-board-card--dragging' : '',
@@ -5249,7 +5325,11 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
       )}
       data-status-board-order-id={card.orderId}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
-      data-cnc-card-view={cncOrderCard ? (cncSummaryOnly ? 'compact' : 'standard') : undefined}
+      data-cnc-card-view={
+        cncOrderCard
+          ? cncNumberOnly ? 'minimal' : cncSummaryOnly ? 'compact' : 'standard'
+          : undefined
+      }
       data-cnc-clickable={relationClickEnabled ? 'true' : undefined}
       role={relationClickEnabled || moveAvailable ? 'button' : undefined}
       tabIndex={relationClickEnabled || moveAvailable ? 0 : -1}
@@ -5282,7 +5362,10 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         <div className="status-board-card__identity">
           <Button
             type="link"
-            className="status-board-card__number"
+            className={[
+              'status-board-card__number',
+              cncNumberOnly ? 'cnc-compact-card__number' : '',
+            ].filter(Boolean).join(' ')}
             data-cnc-manual-drag-ignore="true"
             aria-label={`Открыть заказ ${orderNumber}`}
             onClick={(event) => {
@@ -5293,12 +5376,14 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           >
             {orderNumber}
           </Button>
-          <Tag
-            className="status-board-card__status-badge"
-            color={primaryStatusColor}
-          >
-            {primaryStatus}
-          </Tag>
+          {!cncNumberOnly && (
+            <Tag
+              className="status-board-card__status-badge"
+              color={primaryStatusColor}
+            >
+              {primaryStatus}
+            </Tag>
+          )}
         </div>
         {displayToggleVisible && (
           <div className="status-board-card__actions">
@@ -5317,7 +5402,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </span>
       )}
 
-      {cncOrderCard && !cncSummaryOnly && (
+      {cncOrderCard && !cncSummaryOnly && !cncNumberOnly && (
         <Typography.Text
           className="cnc-order-card__client"
           ellipsis={{ tooltip: card.clientName }}
@@ -5378,7 +5463,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </div>
       )}
 
-      {cncSummaryOnly && (
+      {cncSummaryOnly && !cncNumberOnly && (
         <Typography.Text
           className="cnc-order-card__compact-client"
           ellipsis={{ tooltip: card.clientName }}
@@ -5396,7 +5481,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </div>
       )}
 
-      {cncOrderCard && cncReadiness && (
+      {cncOrderCard && cncReadiness && !cncNumberOnly && (
         <div className="cnc-order-card__readiness">
           <span>Распилено {cncReadiness.cutDetails}</span>
           <span>Закатано {cncReadiness.rolledDetails}</span>
@@ -5404,11 +5489,11 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         </div>
       )}
 
-      {cncOrderCard && cncMissingDetails.length > 0 && (
+      {cncOrderCard && cncMissingDetails.length > 0 && !cncNumberOnly && (
         <CncOrderMissingDetailsSpoiler details={cncMissingDetails} />
       )}
 
-      {cncOrderCard && readinessProgress && (
+      {cncOrderCard && readinessProgress && !cncNumberOnly && (
         <div className="cnc-order-card__footer" aria-label="Готовность деталей заказа">
           <div className="cnc-order-card__progress">
             <span
@@ -6836,6 +6921,26 @@ function cncMachineFileCutPrintHeader(packet: CncTelegramPacket): string | null 
     return `Раскрой №${packet.svgCutJobId}-${packet.svgCutResultNo}`;
   }
   return null;
+}
+
+function formatCncPacketCutSheetNumbers(packet: CncTelegramPacket): string {
+  const sheetNumbers = Array.from(new Set(
+    (packet.svgCutSheets ?? [])
+      .map((sheet) => sheet.sheetNumber)
+      .filter((sheetNumber): sheetNumber is number =>
+        Number.isInteger(sheetNumber) && sheetNumber > 0,
+      ),
+  )).sort((left, right) => left - right);
+
+  if (sheetNumbers.length > 0) {
+    return sheetNumbers.map((sheetNumber) => `№${sheetNumber}`).join(', ');
+  }
+  return packet.cuttingSequenceNo != null ? `№${packet.cuttingSequenceNo}` : '—';
+}
+
+function formatCncPacketBasisCutNumber(packet: CncTelegramPacket): string {
+  if (packet.svgCutResultNo != null) return `БР-${packet.svgCutResultNo}`;
+  return packet.svgCutResultId != null ? `ID ${packet.svgCutResultId}` : '—';
 }
 
 function cncSheetPreviewRotate90(

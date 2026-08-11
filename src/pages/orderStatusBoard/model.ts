@@ -34,7 +34,7 @@ const DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES = [
 const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set(DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1d' | '1w' | '2w' | '1m';
-export type CncCardDisplayMode = 'standard' | 'compact';
+export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal';
 export const DEFAULT_CNC_ORDER_SEARCH_PERIOD: CncOrderSearchPeriod = '1w';
 const CNC_ORDER_SEARCH_PERIODS = new Set<CncOrderSearchPeriod>(['1d', '1w', '2w', '1m']);
 export const DEFAULT_ORDER_STATUS_BOARD_SORT = {
@@ -101,7 +101,9 @@ export function isCncCardSummaryOnly(
   cardKey: string,
   forceStandard = false,
 ): boolean {
-  return !forceStandard && displayMode === 'compact' && !standardOverrides.has(cardKey);
+  if (forceStandard) return false;
+  if (displayMode === 'minimal') return true;
+  return displayMode === 'compact' && !standardOverrides.has(cardKey);
 }
 
 export function filterBoardColumns(

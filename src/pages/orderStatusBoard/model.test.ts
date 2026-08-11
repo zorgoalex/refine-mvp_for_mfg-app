@@ -102,6 +102,7 @@ describe('order status board model', () => {
     expect(first).toEqual(new Set(['packet:p-1']));
     expect(isCncCardSummaryOnly('compact', first, 'packet:p-1')).toBe(false);
     expect(isCncCardSummaryOnly('compact', first, 'bath:b-1')).toBe(true);
+    expect(isCncCardSummaryOnly('minimal', first, 'packet:p-1')).toBe(true);
     expect(isCncCardSummaryOnly('standard', first, 'bath:b-1')).toBe(false);
 
     const second = toggleCncCardStandardOverride(first, 'packet:p-1');
@@ -112,6 +113,9 @@ describe('order status board model', () => {
   it('forces the active detailed bath out of compact summary view', () => {
     expect(
       isCncCardSummaryOnly('compact', new Set(), 'bath:b-1', true),
+    ).toBe(false);
+    expect(
+      isCncCardSummaryOnly('minimal', new Set(), 'bath:b-1', true),
     ).toBe(false);
     expect(
       isCncCardSummaryOnly('compact', new Set(), 'bath:b-2', false),

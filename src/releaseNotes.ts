@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "МДФ-работы: компактный вид карточек",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "На МДФ-доске появился третий режим отображения карточек: «Компактный» показывает только номера раскроев и Базис-раскроев, номера ванн и номера заказов; прежний компактный режим переименован в «Средний».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "МДФ-работы: дата Базис-раскроя",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

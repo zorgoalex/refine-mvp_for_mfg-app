@@ -5,6 +5,7 @@ const page = readFileSync(
   'src/pages/orderStatusBoard/OrderStatusBoardPage.tsx',
   'utf8',
 );
+const model = readFileSync('src/pages/orderStatusBoard/model.ts', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
 const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
@@ -332,7 +333,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('dateTo: displayRange.dateTo');
     expect(page).toContain('datasetKey');
     expect(page).toContain('const standardGridMinWidth = displayColumns.length * 220');
-    expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(220px, 1fr))`');
+    expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}px, 1fr))`');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
     expect(page).toContain('CncBazisCutSetCardView');
     expect(page).toContain('Итоги по ERP-заказам набора');
@@ -491,8 +492,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('type CncCardDisplayMode,');
     expect(page).toContain('const [cncCardDisplayMode, setCncCardDisplayMode]');
     expect(page).toContain('aria-label="Формат карточек МДФ-доски"');
-    expect(page).toContain("label: 'Стандартные'");
-    expect(page).toContain("label: 'Компактные'");
+    expect(page).toContain("label: 'Стандартный'");
+    expect(page).toContain("label: 'Средний'");
+    expect(page).toContain("label: 'Компактный'");
     expect(page).toContain('cardDisplayMode={cncCardDisplayMode}');
     expect(page).toContain("const cardKey = `packet:${packet.packetId}`");
     expect(page).toContain("const cardKey = `bath:${bath.bathCardId}`");
@@ -504,7 +506,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncSummaryOnly={summaryOnly}');
     expect(page).toContain('Показать стандартный вид карточки');
     expect(page).toContain('Вернуть компактный вид карточки');
-    expect(page).toContain("data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}");
+    expect(page).toContain("data-cnc-card-view={minimal ? 'minimal' : summaryOnly ? 'compact' : 'standard'}");
     expect(page).toContain('event.stopPropagation()');
     expect(css).toContain('.cnc-card-display-toggle.ant-btn');
     expect(css).toContain('min-width: 40px');
@@ -514,6 +516,23 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('blur(4px)');
     expect(css).toContain('cubic-bezier(0.2, 0, 0, 1)');
     expect(css).not.toContain('transition: all');
+  });
+
+  it('adds a number-only compact MDF card mode', () => {
+    expect(model).toContain("export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal'");
+    expect(page).toContain("cardDisplayMode === 'minimal' ? 'status-board-columns--cnc-minimal' : ''");
+    expect(page).toContain("const cncColumnMinWidth = cardDisplayMode === 'minimal' ? 132 : 220");
+    expect(page).toContain("displayMode={cardDisplayMode === 'minimal' ? 'minimal' : 'standard'}");
+    expect(page).toContain('formatCncPacketCutSheetNumbers(packet)');
+    expect(page).toContain('formatCncPacketBasisCutNumber(packet)');
+    expect(page).toContain("minimal ? 'cnc-bath-card--minimal cnc-compact-card' : ''");
+    expect(page).toContain("minimal ? 'cnc-bazis-cut-card--minimal cnc-compact-card' : ''");
+    expect(page).toContain("cncNumberOnly ? 'cnc-order-card--minimal cnc-compact-card' : ''");
+    expect(page).toContain('!cncNumberOnly && (');
+    expect(css).toContain('.status-board-columns--cnc-minimal .status-board-column__cards');
+    expect(css).toContain('.cnc-compact-card');
+    expect(css).toContain('.cnc-compact-card__number');
+    expect(css).toContain('.cnc-compact-card__refs');
   });
 
   it('shows detail totals without position counts on every MDF card', () => {
@@ -595,7 +614,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     const printCard = page.slice(printCardStart, printCardEnd);
 
     expect(page).toContain("import { createPortal } from 'react-dom';");
-    expect(page).toContain("cncCardDisplayMode === 'compact'");
+    expect(page).toContain("cncCardDisplayMode !== 'standard'");
     expect(page).toContain('aria-label="Распечатать компактную МДФ-доску"');
     expect(page).toContain('onClick={() => window.print()}');
     expect(page).toContain('<CncTelegramPrintBoard');
