@@ -381,8 +381,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(card).toContain('aria-label="Детали Базис-раскроя"');
     expect(card).toContain('setDetailsOpen((current) => !current)');
     expect(card).toContain('card.items.map((item, index)');
-    expect(card).toContain('Создан {formatDateTime(card.createdAt)}');
+    expect(card).toContain('Создан {formatGmtPlus5Date(card.createdAt)}');
     expect(card).toContain('className="status-board-card__footer"');
+    expect(page).toContain('const GMT_PLUS_5_OFFSET_MS = 5 * 60 * 60 * 1000');
+    expect(page).toContain('date.getUTCDate()');
+    expect(page).toContain('date.getUTCMonth() + 1');
     expect(css).toMatch(
       /\.cnc-bazis-cut-card__tabs\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s,
     );

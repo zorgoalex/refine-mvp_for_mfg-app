@@ -3430,7 +3430,7 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
           )}
 
           <div className="status-board-card__footer">
-            <span>Создан {formatDateTime(card.createdAt)}</span>
+            <span>Создан {formatGmtPlus5Date(card.createdAt)}</span>
           </div>
         </>
       )}
@@ -5508,6 +5508,17 @@ function errorMessage(error: unknown, fallback: string): string {
 function formatDateTime(value: string): string {
   const parsed = dayjs(value);
   return parsed.isValid() ? parsed.format('DD.MM.YYYY HH:mm') : '—';
+}
+
+const GMT_PLUS_5_OFFSET_MS = 5 * 60 * 60 * 1000;
+
+function formatGmtPlus5Date(value: string): string {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return '—';
+  const date = new Date(timestamp + GMT_PLUS_5_OFFSET_MS);
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  return `${day}.${month}.${date.getUTCFullYear()}`;
 }
 
 function formatPaymentSummary(card: OrderStatusBoardCard): string | null {
