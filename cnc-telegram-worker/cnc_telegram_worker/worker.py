@@ -78,9 +78,7 @@ class SvgGroup:
 
     @property
     def source_message(self) -> Any:
-        # Preserve legacy packet keys for SVGs previously anchored to an image.
-        # Standalone and additional SVGs use their own Telegram message id.
-        return self.image_message or self.vector_message
+        return self.vector_message
 
 
 class CncTelegramWorker:
@@ -391,7 +389,6 @@ class CncTelegramWorker:
             )
         run_dir = self.config.temp_dir / f"{chat_id.strip('-')}-{source_message.id}"
         gcode_meta: GcodeMeta | None = None
-        image_path: Path | None = None
         try:
             cutting_sequence_no = group.cutting_sequence_no
             sequence_from_telegram = cutting_sequence_no is not None
@@ -458,34 +455,6 @@ class CncTelegramWorker:
 
             thumbs_up = group_has_thumbs_up(group)
             sheet_image: dict[str, Any] | None = None
-            if group.image_message is not None:
-                try:
-                    image_path = await download_media(group.image_message, run_dir, "sheet")
-                except Exception as exc:
-                    if audit and audit_operation:
-                        error_message = sanitize_text(str(exc), 1000)
-                        with audit.spool.transaction():
-                            audit.mark_message(
-                                group.image_message, "failed", "image_download_failed",
-                                error_message, group.vector_message,
-                            )
-                            mark_unfinished_group_attachments(
-                                audit, group, "Обработка вложения прервана из-за ошибки скачивания изображения",
-                            )
-                            audit.finish_operation(
-                                audit_operation, group.vector_message, "failed", "image_download_failed",
-                                error_message, errorCode="image_download_failed", errorMessage=error_message,
-                            )
-                    raise
-                if image_path is not None:
-                    sheet_image = persist_sheet_image(
-                        self.config.media_dir,
-                        chat_id,
-                        int(source_message.id),
-                        image_path,
-                    )
-                elif audit:
-                    audit.mark_message(group.image_message, "failed", "image_download_failed", "Telegram не вернул изображение", group.vector_message)
             if group.gcode_message is not None:
                 try:
                     gcode_path = await download_media(group.gcode_message, run_dir, "program")
@@ -547,18 +516,7 @@ class CncTelegramWorker:
                 vector_caption = message_text(group.vector_message)
                 if vector_caption and vector_caption not in comments:
                     comments.insert(0, vector_caption)
-            if self.config.enable_glm_ocr and image_path is not None:
-                ocr = await run_ocr_command(
-                    self.config.ocr_command,
-                    image_path,
-                    timeout_seconds=self.config.ocr_command_timeout_seconds,
-                )
-            elif self.config.enable_glm_ocr:
-                ocr = OcrResult(analysis_warnings=[
-                    "GLM-OCR fallback enabled but no screenshot is attached; SVG used without OCR cross-check"
-                ])
-            else:
-                ocr = OcrResult()
+            ocr = OcrResult()
             image = ImageMeta(
                 chat_id=chat_id,
                 message_id=int(source_message.id),
@@ -793,7 +751,6 @@ def group_svg_messages(messages: list[Any]) -> list[SvgGroup]:
             *(legacy_context[1] if legacy_context is not None else []),
             *vector_comments,
         ]))
-        source_message = image_message or vector_message
         gcode_message = select_gcode_message(
             gcode_messages,
             vector_message,
@@ -805,7 +762,7 @@ def group_svg_messages(messages: list[Any]) -> list[SvgGroup]:
             vector_message=vector_message,
             image_message=image_message,
             comments=comments,
-            cutting_sequence_no=cutting_sequence_reply_number(messages, source_message),
+            cutting_sequence_no=cutting_sequence_reply_number(messages, vector_message),
             gcode_message=gcode_message,
         ))
     return groups
@@ -839,16 +796,26 @@ def nearby_comments(messages: list[Any], image_message: Any, next_image_id: int 
 
 def select_gcode_message(
     gcode_messages: list[Any],
-    image_message: Any,
+    vector_message: Any,
     comments: list[str],
     previous_image_id: int | None = None,
     next_image_id: int | None = None,
 ) -> Any | None:
     if not gcode_messages:
         return None
+    vector_base_name = attachment_base_name(vector_message)
+    if not vector_base_name:
+        return None
+    matching_gcode_messages = [
+        message
+        for message in gcode_messages
+        if attachment_base_name(message) == vector_base_name
+    ]
+    if not matching_gcode_messages:
+        return None
     return select_attachment_message(
-        gcode_messages,
-        image_message,
+        matching_gcode_messages,
+        vector_message,
         comments,
         previous_image_id,
         next_image_id,
@@ -876,6 +843,14 @@ def select_vector_message(
             abs(int(message.id) - image_id),
         ),
     )
+
+
+def attachment_base_name(message: Any) -> str | None:
+    filename = message_filename(message)
+    if not filename:
+        return None
+    base_name = Path(filename).stem.strip().lower()
+    return base_name or None
 
 
 def select_attachment_message(
@@ -938,11 +913,6 @@ def group_source_fingerprint(
         "ocrEngine": ocr_engine,
         "cuttingSequenceNo": cutting_sequence_no if cutting_sequence_no is not None and cutting_sequence_no > 0 else None,
         "source": message_identity(group.source_message, include_reactions=True),
-        "image": (
-            message_identity(group.image_message, include_reactions=True)
-            if group.image_message is not None
-            else None
-        ),
         "comments": group.comments,
         "gcode": (
             message_identity(group.gcode_message, include_reactions=True)
@@ -985,8 +955,15 @@ def mark_unfinished_group_attachments(audit: ScanAudit, group: SvgGroup, reason_
 
 
 def mark_used_group_attachments(audit: ScanAudit, group: SvgGroup) -> None:
+    if group.image_message is not None and audit.record_for(group.image_message)["status"] in {"observed", "used"}:
+        audit.mark_message(
+            group.image_message,
+            "skipped",
+            "image_ignored",
+            "Изображение не использовано: SVG распарсен",
+            group.vector_message,
+        )
     for message, reason_code, reason_message in (
-        (group.image_message, "image_selected", "Изображение использовано при создании пакета задания"),
         (group.gcode_message, "gcode_selected", "G-code использован при создании пакета задания"),
     ):
         if message is None or audit.record_for(message)["status"] != "observed":

@@ -205,6 +205,27 @@ class WorkerFingerprintTest(unittest.TestCase):
             group_source_fingerprint(changed_comment, "-100123", date(2026, 7, 24), "parser-v1", "ocr-a"),
         )
 
+    def test_group_source_fingerprint_ignores_screenshot_identity(self) -> None:
+        group = SvgGroup(
+            vector_message=FakeMessage(12, filename="CNC#1_2689.svg"),
+            image_message=FakeMessage(10, text="2689"),
+            comments=["2689 весь"],
+            cutting_sequence_no=None,
+            gcode_message=FakeMessage(11, filename="CNC#1_2689.TXT"),
+        )
+        changed_image = SvgGroup(
+            vector_message=group.vector_message,
+            image_message=FakeMessage(13, text="2689"),
+            comments=group.comments,
+            cutting_sequence_no=None,
+            gcode_message=group.gcode_message,
+        )
+
+        self.assertEqual(
+            group_source_fingerprint(group, "-100123", date(2026, 7, 24), "parser-v1", "ocr-a"),
+            group_source_fingerprint(changed_image, "-100123", date(2026, 7, 24), "parser-v1", "ocr-a"),
+        )
+
     def test_svg_attachment_is_vector_not_sheet_image(self) -> None:
         message = FakeMessage(20, filename="2689.svg", mime_type="image/svg+xml")
 
@@ -214,14 +235,27 @@ class WorkerFingerprintTest(unittest.TestCase):
     def test_groups_nearest_vector_attachment_with_image(self) -> None:
         image = FakeMessage(30, text="2689", filename="sheet.jpg", mime_type="image/jpeg")
         gcode = FakeMessage(31, filename="CNC#1_2689.TXT")
+        vector = FakeMessage(32, filename="CNC#1_2689.svg", mime_type="image/svg+xml")
+
+        groups = group_svg_messages([image, gcode, vector])
+
+        self.assertEqual(len(groups), 1)
+        self.assertIs(groups[0].source_message, vector)
+        self.assertIs(groups[0].image_message, image)
+        self.assertIs(groups[0].gcode_message, gcode)
+        self.assertIs(groups[0].vector_message, vector)
+
+    def test_svg_and_gcode_names_must_match_before_extension(self) -> None:
+        image = FakeMessage(30, text="2689", filename="sheet.jpg", mime_type="image/jpeg")
+        gcode = FakeMessage(31, filename="CNC#1_2689.TXT")
         vector = FakeMessage(32, filename="2689.svg", mime_type="image/svg+xml")
 
         groups = group_svg_messages([image, gcode, vector])
 
         self.assertEqual(len(groups), 1)
-        self.assertIs(groups[0].source_message, image)
+        self.assertIs(groups[0].source_message, vector)
         self.assertIs(groups[0].image_message, image)
-        self.assertIs(groups[0].gcode_message, gcode)
+        self.assertIsNone(groups[0].gcode_message)
         self.assertIs(groups[0].vector_message, vector)
 
     def test_standalone_svg_creates_group_without_image(self) -> None:
@@ -251,7 +285,7 @@ class WorkerFingerprintTest(unittest.TestCase):
 
         self.assertEqual(len(groups), 2)
         self.assertIs(groups[0].vector_message, first_svg)
-        self.assertIs(groups[0].source_message, image)
+        self.assertIs(groups[0].source_message, first_svg)
         self.assertIs(groups[1].vector_message, second_svg)
         self.assertIs(groups[1].source_message, second_svg)
 
@@ -308,18 +342,18 @@ class WorkerFingerprintTest(unittest.TestCase):
             group_source_fingerprint(without_reaction, "-100123", date(2026, 7, 24), "parser-v1", "ocr-a"),
         )
 
-    def test_cutting_sequence_reply_is_bound_to_image_and_not_a_comment(self) -> None:
+    def test_cutting_sequence_reply_is_bound_to_svg_and_not_image_or_comment(self) -> None:
         image = FakeMessage(50, text="2700", mime_type="image/jpeg")
-        reply = FakeMessage(51, text="Раскрой №7", reply_to=50)
+        image_reply = FakeMessage(51, text="Раскрой №99", reply_to=50)
         comment = FakeMessage(52, text="2700 весь")
-
         vector = FakeMessage(53, filename="2700.svg", mime_type="image/svg+xml")
+        svg_reply = FakeMessage(54, text="Раскрой №7", reply_to=53)
 
-        groups = group_svg_messages([image, reply, comment, vector])
+        groups = group_svg_messages([image, image_reply, comment, vector, svg_reply])
 
         self.assertEqual(parse_cutting_sequence_reply("Раскрой №7"), 7)
         self.assertTrue(is_cutting_sequence_reply_text("Раскрой №7"))
-        self.assertEqual(cutting_sequence_reply_number([image, reply], image), 7)
+        self.assertEqual(cutting_sequence_reply_number([vector, svg_reply], vector), 7)
         self.assertEqual(groups[0].cutting_sequence_no, 7)
         self.assertEqual(groups[0].comments, ["2700 весь"])
 
@@ -353,23 +387,23 @@ class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
         image_a = FakeMessage(100, text="2700", mime_type="image/jpeg")
         image_b = FakeMessage(200, text="2718", mime_type="image/jpeg")
         client = FakeTelegramClient([
-            FakeMessage(901, text="Раскрой №8", reply_to=200),
-            FakeMessage(902, text="не номер", reply_to=100),
-            FakeMessage(903, text="Раскрой №7", reply_to=100),
+            FakeMessage(901, text="Раскрой №8", reply_to=201),
+            FakeMessage(902, text="не номер", reply_to=101),
+            FakeMessage(903, text="Раскрой №7", reply_to=101),
             FakeMessage(904, text="Раскрой №99", reply_to=999),
         ])
         for message in client.messages:
             message.out = True
 
-        index = await collect_cutting_sequence_reply_search_index(client, object(), {100, 200})
         vector_a = FakeMessage(101, filename="2700.svg", mime_type="image/svg+xml")
         vector_b = FakeMessage(201, filename="2718.svg", mime_type="image/svg+xml")
+        index = await collect_cutting_sequence_reply_search_index(client, object(), {101, 201})
         groups = apply_cutting_sequence_reply_index(
             group_svg_messages([image_a, vector_a, image_b, vector_b]),
             index,
         )
 
-        self.assertEqual(index, {100: 7, 200: 8})
+        self.assertEqual(index, {101: 7, 201: 8})
         self.assertEqual(groups[0].cutting_sequence_no, 7)
         self.assertEqual(groups[1].cutting_sequence_no, 8)
         self.assertEqual(len(client.iter_messages_calls), 1)
@@ -644,8 +678,8 @@ class WorkerCuttingSequenceStateTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             state = StateStore(Path(temp) / "state.json")
-            key_a = external_packet_key(chat_id, 100)
-            key_b = external_packet_key(chat_id, 200)
+            key_a = external_packet_key(chat_id, 101)
+            key_b = external_packet_key(chat_id, 201)
             state.assign_cutting_sequence_number(key_a, existing_number=7)
             state.mark_cutting_sequence_replied(key_a)
             state.assign_cutting_sequence_number(key_b, existing_number=8)
@@ -697,34 +731,26 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(operation["errorCode"], "svg_download_failed")
             spool.close()
 
-    async def test_raised_associated_media_download_has_specific_terminal_reason(self) -> None:
-        for attachment_type, expected_reason in (("image", "image_download_failed"), ("gcode", "gcode_download_failed")):
-            with self.subTest(attachment_type=attachment_type), tempfile.TemporaryDirectory() as temp:
-                temp_path = Path(temp)
-                worker = make_worker(temp_path)
-                vector = FakeMessage(306, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
-                failing = FailingDownloadMessage(
-                    307,
-                    filename="sheet.jpg" if attachment_type == "image" else "program.txt",
-                    mime_type="image/jpeg" if attachment_type == "image" else "text/plain",
-                )
-                group = SvgGroup(
-                    vector, failing if attachment_type == "image" else None, [], None,
-                    failing if attachment_type == "gcode" else None,
-                )
-                spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
-                audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+    async def test_raised_gcode_download_has_specific_terminal_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            vector = FakeMessage(306, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            failing = FailingDownloadMessage(307, filename="program.txt", mime_type="text/plain")
+            group = SvgGroup(vector, None, [], None, failing)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
 
-                with self.assertRaisesRegex(OSError, "media download failed"):
-                    await worker.process_group(
-                        FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
-                    )
+            with self.assertRaisesRegex(OSError, "media download failed"):
+                await worker.process_group(
+                    FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                )
 
-                operation = latest_operation(spool, "message_processing")
-                self.assertEqual(operation["reasonCode"], expected_reason)
-                self.assertEqual(operation["errorCode"], expected_reason)
-                self.assertEqual(audit.record_for(failing)["reasonCode"], expected_reason)
-                spool.close()
+            operation = latest_operation(spool, "message_processing")
+            self.assertEqual(operation["reasonCode"], "gcode_download_failed")
+            self.assertEqual(operation["errorCode"], "gcode_download_failed")
+            self.assertEqual(audit.record_for(failing)["reasonCode"], "gcode_download_failed")
+            spool.close()
 
     async def test_valid_standalone_svg_posts_one_packet_keyed_by_svg(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -919,7 +945,7 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(any(message["status"] == "used" for message in attachment_updates))
             spool.close()
 
-    async def test_success_marks_parsed_attachments_used_after_packet_build(self) -> None:
+    async def test_success_marks_gcode_used_and_image_ignored_after_packet_build(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_path = Path(temp)
             worker = make_worker(temp_path)
@@ -934,8 +960,8 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
                 FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
             )
 
-            self.assertEqual(audit.record_for(image)["status"], "used")
-            self.assertEqual(audit.record_for(image)["reasonCode"], "image_selected")
+            self.assertEqual(audit.record_for(image)["status"], "skipped")
+            self.assertEqual(audit.record_for(image)["reasonCode"], "image_ignored")
             self.assertEqual(audit.record_for(gcode)["status"], "used")
             self.assertEqual(audit.record_for(gcode)["reasonCode"], "gcode_selected")
             self.assertEqual(latest_operation(spool, "message_processing")["reasonCode"], "backend_ingest_succeeded")
@@ -1024,7 +1050,7 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(worker.state.cutting_sequence_replied("telegram:-100123:320"))
 
-    async def test_glm_fallback_runs_only_when_explicitly_enabled(self) -> None:
+    async def test_valid_svg_ignores_screenshot_ocr_even_when_glm_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_path = Path(temp)
             vector = FakeMessage(
@@ -1076,10 +1102,10 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
                     FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24)
                 )
 
-            run_ocr.assert_awaited_once()
-            self.assertEqual(run_ocr.await_args.kwargs["timeout_seconds"], 720)
+            run_ocr.assert_not_awaited()
             self.assertEqual(fallback.erp.packets[0]["ocrEngine"], "glm-ocr-0.9b-q8")
             self.assertEqual(fallback.erp.packets[0]["items"][0]["orderName"], "1234")
+            self.assertIsNone(fallback.erp.packets[0]["sheetImage"])
 
     async def test_ambiguous_backend_failure_stays_planned_for_idempotent_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

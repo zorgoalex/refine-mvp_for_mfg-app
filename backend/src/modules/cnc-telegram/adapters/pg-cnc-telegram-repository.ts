@@ -126,6 +126,7 @@ interface PacketReplayRow extends QueryResultRow {
   packet_id: string;
   source_version: string | number;
   payload_hash: string;
+  cutting_sequence_no: string | number | null;
   completion_status: CncTelegramPacketDto['completionStatus'];
   thumbs_up: boolean;
 }
@@ -357,26 +358,35 @@ export class PgCncTelegramRepository
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const requestId = command.requestId || 'cnc-telegram-ingest';
-      const payloadHash = hashPayload(command.dto);
+      const incomingPayloadHash = hashPayload(command.dto);
       await reconcileIdempotency(tx, {
         dto: command.dto,
         currentUserId: command.currentUser.id,
-        payloadHash,
+        payloadHash: incomingPayloadHash,
       });
 
-      const replay = await tx.query<PacketReplayRow>(
-        `
-        SELECT packet_id, source_version, payload_hash, completion_status, thumbs_up
-        FROM cnc_telegram_packets
-        WHERE external_packet_key = $1
-        FOR UPDATE
-        `,
-        [command.dto.externalPacketKey],
-      );
-      const existing = replay.rows[0] ?? null;
+      let payloadHash = incomingPayloadHash;
+      let effectiveCommand = command;
+      const exactExisting = await loadPacketReplayByExternalKey(tx, command.dto.externalPacketKey);
+      const existing = exactExisting ?? await findRelatedSvgPacketAlias(tx, command.dto);
 
-      if (existing && command.dto.source.version < Number(existing.source_version)) {
-        await ensureCuttingSequenceNo(tx, existing.packet_id, command.dto, Number(command.currentUser.id));
+      if (!exactExisting && existing) {
+        const existingSourceVersion = Number(existing.source_version);
+        const replayCommand = withPacketReplaySourceVersion(command, existingSourceVersion, existing);
+        const replayPayloadHash = hashPayload(replayCommand.dto);
+        if (replayPayloadHash === existing.payload_hash) {
+          effectiveCommand = replayCommand;
+          payloadHash = replayPayloadHash;
+        } else if (command.dto.source.version <= existingSourceVersion) {
+          effectiveCommand = withPacketReplaySourceVersion(command, existingSourceVersion + 1, existing);
+          payloadHash = hashPayload(effectiveCommand.dto);
+        } else {
+          effectiveCommand = withPacketReplaySourceVersion(command, command.dto.source.version, existing);
+        }
+      }
+
+      if (existing && effectiveCommand.dto.source.version < Number(existing.source_version)) {
+        await ensureCuttingSequenceNo(tx, existing.packet_id, effectiveCommand.dto, Number(command.currentUser.id));
         await syncExistingSvgCutJobSourceDisplayNumber(tx, existing.packet_id);
         const packet = await loadPacket(tx, existing.packet_id);
         const response: CncTelegramIngestResponseDto = {
@@ -391,32 +401,32 @@ export class PgCncTelegramRepository
 
       if (
         existing &&
-        command.dto.source.version === Number(existing.source_version) &&
+        effectiveCommand.dto.source.version === Number(existing.source_version) &&
         existing.payload_hash !== payloadHash
       ) {
-        await failIdempotency(tx, command.dto.idempotencyKey);
+        await failIdempotency(tx, effectiveCommand.dto.idempotencyKey);
         throw new ApiError(
           409,
           'SOURCE_VERSION_CONFLICT',
           'Telegram source version already exists with different parsed payload',
           {
-            externalPacketKey: command.dto.externalPacketKey,
-            sourceVersion: command.dto.source.version,
+            externalPacketKey: effectiveCommand.dto.externalPacketKey,
+            sourceVersion: effectiveCommand.dto.source.version,
           },
         );
       }
 
       if (
         existing &&
-        command.dto.source.version === Number(existing.source_version) &&
+        effectiveCommand.dto.source.version === Number(existing.source_version) &&
         existing.payload_hash === payloadHash
       ) {
-        const matchedDto = await resolveItemMatches(tx, command.dto);
+        const matchedDto = await resolveItemMatches(tx, effectiveCommand.dto);
         const resolvedDto = aggregateMatchedItems(matchedDto);
         await assertMatchedDetailsBelongToOrders(tx, matchedDto);
         await persistTelegramItemEvidence(tx, {
           packetId: existing.packet_id,
-          sourceVersion: command.dto.source.version,
+          sourceVersion: effectiveCommand.dto.source.version,
           payloadHash,
           dto: matchedDto,
           source: 'authoritative_replay',
@@ -428,8 +438,8 @@ export class PgCncTelegramRepository
           },
         });
         await ensureCuttingSequenceNo(tx, existing.packet_id, resolvedDto, Number(command.currentUser.id));
-        await ensureStoredCutLayout(tx, existing.packet_id, command.dto.cutLayout ?? null);
-        await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchedDto, command.currentUser.id);
+        await ensureStoredCutLayout(tx, existing.packet_id, effectiveCommand.dto.cutLayout ?? null);
+        await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchedDto, effectiveCommand.currentUser.id);
         await projectTelegramLabelMap(tx, {
           packetId: existing.packet_id,
           source: 'ingest',
@@ -451,9 +461,9 @@ export class PgCncTelegramRepository
         return response;
       }
 
-      const matchedDto = await resolveItemMatches(tx, command.dto);
+      const matchedDto = await resolveItemMatches(tx, effectiveCommand.dto);
       const resolvedDto = aggregateMatchedItems(matchedDto);
-      const resolvedCommand = resolvedDto === command.dto ? command : { ...command, dto: resolvedDto };
+      const resolvedCommand = resolvedDto === effectiveCommand.dto ? effectiveCommand : { ...effectiveCommand, dto: resolvedDto };
       await assertMatchedDetailsBelongToOrders(tx, matchedDto);
 
       const packetId = existing?.packet_id ?? await insertPacket(tx, resolvedCommand, payloadHash);
@@ -462,7 +472,7 @@ export class PgCncTelegramRepository
       }
       await persistTelegramItemEvidence(tx, {
         packetId,
-        sourceVersion: command.dto.source.version,
+        sourceVersion: effectiveCommand.dto.source.version,
         payloadHash,
         dto: matchedDto,
         source: 'ingest',
@@ -830,6 +840,158 @@ async function loadPacket(tx: TransactionClient, packetId: string): Promise<CncT
     });
   }
   return packet;
+}
+
+async function loadPacketReplayByExternalKey(
+  tx: TransactionClient,
+  externalPacketKey: string,
+): Promise<PacketReplayRow | null> {
+  const replay = await tx.query<PacketReplayRow>(
+    `
+    SELECT packet_id, source_version, payload_hash, cutting_sequence_no, completion_status, thumbs_up
+    FROM cnc_telegram_packets
+    WHERE external_packet_key = $1
+    FOR UPDATE
+    `,
+    [externalPacketKey],
+  );
+  return replay.rows[0] ?? null;
+}
+
+async function findRelatedSvgPacketAlias(
+  tx: TransactionClient,
+  dto: CncTelegramStructuredIngestDto,
+): Promise<PacketReplayRow | null> {
+  const layout = dto.cutLayout ?? null;
+  const sheetImageStorageKey = normalizeOptional(dto.sheetImage?.storageKey);
+  const programBaseName = telegramProgramBaseName(dto.programName);
+  const materialName = normalizeOptional(dto.materialName) ?? 'МДФ 16мм';
+  const sourceInstant = dto.source.createdAt ?? dto.source.updatedAt ?? null;
+  const itemSignature = telegramPacketItemSignature(dto);
+  if (
+    layout?.status !== 'valid' ||
+    !sheetImageStorageKey ||
+    !dto.workday ||
+    !programBaseName ||
+    !itemSignature
+  ) {
+    return null;
+  }
+
+  const replay = await tx.query<PacketReplayRow>(
+    `
+    /* cnc_telegram_svg_packet_alias */
+    SELECT
+      packet.packet_id,
+      packet.source_version,
+      packet.payload_hash,
+      packet.cutting_sequence_no,
+      packet.completion_status,
+      packet.thumbs_up
+    FROM cnc_telegram_packets packet
+    JOIN LATERAL (
+      SELECT string_agg(part.item_signature, ',' ORDER BY part.item_signature) AS item_signature
+      FROM (
+        SELECT
+          lower(trim(COALESCE(item.order_name, ''))) || ':' ||
+            COALESCE(item.detail_number::text, '') || ':' ||
+            COALESCE(trim(trailing '.' from trim(trailing '0' from item.width_mm::text)), '') || ':' ||
+            COALESCE(trim(trailing '.' from trim(trailing '0' from item.height_mm::text)), '') || ':' ||
+            item.quantity::text AS item_signature
+        FROM cnc_telegram_packet_items item
+        WHERE item.packet_id = packet.packet_id
+      ) part
+    ) packet_items ON TRUE
+    WHERE packet.external_packet_key <> $1
+      AND packet.source_chat_id = $2
+      AND packet.workday = $3::date
+      AND regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\\.[^.]+$', '') = $4
+      AND lower(trim(COALESCE(packet.material_name, 'МДФ 16мм'))) = lower(trim($5))
+      AND packet.cut_layout_json = $6::jsonb
+      AND packet.cut_layout_json->>'status' = 'valid'
+      AND packet.svg_cut_import_status = 'imported'
+      AND packet.svg_cut_job_id IS NOT NULL
+      AND packet.cutting_sequence_no IS NOT NULL
+      AND packet_items.item_signature = $9
+      AND (
+        packet.sheet_image_storage_key = $7
+        OR packet.sheet_image_storage_key IS NULL
+      )
+    ORDER BY
+      CASE WHEN packet.sheet_image_storage_key = $7 THEN 0 ELSE 1 END,
+      CASE
+        WHEN $8::timestamptz IS NOT NULL
+         AND ABS(EXTRACT(EPOCH FROM (
+           COALESCE(packet.source_created_at, packet.source_updated_at, packet.created_at) - $8::timestamptz
+         ))) <= 600
+        THEN 0 ELSE 1
+      END,
+      CASE
+        WHEN $8::timestamptz IS NULL THEN NULL
+        ELSE ABS(EXTRACT(EPOCH FROM (
+          COALESCE(packet.source_created_at, packet.source_updated_at, packet.created_at) - $8::timestamptz
+        )))
+      END ASC NULLS LAST,
+      packet.cutting_sequence_no ASC,
+      packet.source_created_at ASC NULLS LAST,
+      packet.packet_id ASC
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [
+      dto.externalPacketKey,
+      dto.source.chatId,
+      dto.workday,
+      programBaseName,
+      materialName,
+      JSON.stringify(layout),
+      sheetImageStorageKey,
+      sourceInstant,
+      itemSignature,
+    ],
+  );
+  return replay.rows[0] ?? null;
+}
+
+function telegramProgramBaseName(programName: string | null | undefined): string | null {
+  const normalized = normalizeOptional(programName)?.toLowerCase();
+  if (!normalized) return null;
+  return normalized.replace(/\.[^.]+$/, '');
+}
+
+function telegramPacketItemSignature(dto: CncTelegramStructuredIngestDto): string | null {
+  const parts = dto.items.map((item) => [
+    normalizeOptional(item.orderName)?.toLowerCase() ?? '',
+    item.detailNumber == null ? '' : String(item.detailNumber),
+    item.widthMm == null ? '' : compactNumber(item.widthMm),
+    item.heightMm == null ? '' : compactNumber(item.heightMm),
+    String(item.quantity),
+  ].join(':'));
+  if (parts.length === 0) return null;
+  return parts.sort().join(',');
+}
+
+function compactNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(value).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function withPacketReplaySourceVersion(
+  command: IngestCncTelegramPacketCommand,
+  sourceVersion: number,
+  replay: PacketReplayRow,
+): IngestCncTelegramPacketCommand {
+  const cuttingSequenceNo = toPositiveInteger(replay.cutting_sequence_no);
+  return {
+    ...command,
+    dto: {
+      ...command.dto,
+      cuttingSequenceNo: cuttingSequenceNo ?? command.dto.cuttingSequenceNo,
+      source: {
+        ...command.dto.source,
+        version: sourceVersion,
+      },
+    },
+  };
 }
 
 async function insertPacket(

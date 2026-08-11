@@ -766,6 +766,105 @@ describe('PgCncTelegramRepository', () => {
     expect(update?.params[14]).toBe(12345);
   });
 
+  it('merges a later Telegram SVG sheet image into the existing SVG cut packet', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/cnc_telegram_svg_packet_alias/i.test(text)) {
+          return {
+            rows: [{
+              packet_id: '00000000-0000-0000-0000-000000000061',
+              source_version: 1,
+              payload_hash: 'sha256:svg-only',
+              cutting_sequence_no: 61,
+              completion_status: 'completed',
+              thumbs_up: true,
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              packet_id: '00000000-0000-0000-0000-000000000061',
+              external_packet_key: 'telegram:-1001996415689:10947',
+              cutting_sequence_no: 61,
+              source_message_id: 10948,
+              source_version: 2,
+              program_name: 'CNC#2_2723-18MM.TXT',
+              material_name: 'МДФ 18мм',
+              sheet_image_storage_key: 'telegram/-1001996415689/10948.jpg',
+            })],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:repo:svg-image-alias',
+      externalPacketKey: 'telegram:-1001996415689:10948',
+      source: {
+        ...ingestDto().source,
+        chatId: '-1001996415689',
+        messageId: 10948,
+        createdAt: '2026-08-11T10:35:14.000Z',
+        updatedAt: '2026-08-11T10:37:26.000Z',
+      },
+      workday: '2026-08-11',
+      programName: 'CNC#2_2723-18MM.TXT',
+      materialName: 'МДФ 18мм',
+      sheetImage: {
+        storageKey: 'telegram/-1001996415689/10948.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 98765,
+      },
+      cutLayout: validCutLayout(),
+    };
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto,
+      requestId: 'request-cnc-svg-image-alias',
+    });
+
+    const sql = queries.map((query) => query.text).join('\n');
+    const packetInsert = queries.find((query) => /INSERT INTO cnc_telegram_packets/i.test(query.text));
+    const packetUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) && /source_chat_id = \$2/i.test(query.text),
+    );
+    const sequenceUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets[\s\S]*cutting_sequence_no = \$2::integer/i.test(query.text),
+    );
+
+    expect(sql).toContain('cnc_telegram_svg_packet_alias');
+    expect(packetInsert).toBeUndefined();
+    expect(packetUpdate?.params[0]).toBe('00000000-0000-0000-0000-000000000061');
+    expect(packetUpdate?.params[2]).toBe(10948);
+    expect(packetUpdate?.params[4]).toBe(2);
+    expect(packetUpdate?.params[12]).toBe('telegram/-1001996415689/10948.jpg');
+    expect(sequenceUpdate?.params).toEqual([
+      '00000000-0000-0000-0000-000000000061',
+      61,
+      42,
+    ]);
+    expect(result.applied).toBe(true);
+    expect(result.packet.cuttingSequenceNo).toBe(61);
+  });
+
   it('assigns a cutting sequence number for pending machine packets after item replacement', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
@@ -2276,6 +2375,30 @@ function ingestDto() {
 function payloadHashForTest(dto: ReturnType<typeof ingestDto> & { cuttingSequenceNo?: number }) {
   const { idempotencyKey: _idempotencyKey, cuttingSequenceNo: _cuttingSequenceNo, ...payload } = dto;
   return `sha256:${createHash('sha256').update(stableStringifyForTest(payload)).digest('hex')}`;
+}
+
+function validCutLayout() {
+  return {
+    status: 'valid' as const,
+    reasons: [],
+    sheet: { widthMm: 2800, heightMm: 2070 },
+    items: [
+      {
+        orderName: '2723',
+        detailNumber: 1,
+        widthMm: 500,
+        heightMm: 350,
+        quantity: 1,
+        confidence: 1,
+        sourceElementId: 'part-2723-1',
+        xMm: 10,
+        yMm: 20,
+        placedWidthMm: 500,
+        placedHeightMm: 350,
+        rotated: false,
+      },
+    ],
+  };
 }
 
 function stableStringifyForTest(value: unknown): string {
