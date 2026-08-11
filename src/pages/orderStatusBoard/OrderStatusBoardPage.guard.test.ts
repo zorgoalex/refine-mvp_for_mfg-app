@@ -382,9 +382,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(card).toContain('aria-label="Детали Базис-раскроя"');
     expect(card).toContain('setDetailsOpen((current) => !current)');
     expect(card).toContain('card.items.map((item, index)');
-    expect(card).toContain('Создан {formatGmtPlus5Date(card.createdAt)}');
+    expect(card).toContain('<span>Создан</span>');
+    expect(card).toContain('<span>{formatGmtPlus5Date(card.createdAt)}</span>');
     expect(card).toContain('className="status-board-card__footer"');
     expect(page).toContain('const GMT_PLUS_5_OFFSET_MS = 5 * 60 * 60 * 1000');
+    expect(page).toContain("function formatGmtPlus5Date(value: string | null | undefined): string");
     expect(page).toContain('date.getUTCDate()');
     expect(page).toContain('date.getUTCMonth() + 1');
     expect(css).toMatch(
@@ -404,6 +406,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const fetchFreshPdf = useCallback');
     expect(page).toContain('const downloadPdf = useCallback(async () =>');
     expect(page).toContain('const printPdf = useCallback(async () =>');
+    expect(page).toContain('<span>Раскрой</span>');
+    expect(page).toContain('<span>{formatGmtPlus5Date(bath.createdAt)}</span>');
+    expect(page).not.toContain('formatDateTime(bath.createdAt)');
     expect(page).toContain('triggerBlobDownload(result.blob');
     expect(page).toContain('const freshUrl = URL.createObjectURL(result.blob)');
     expect(page).toContain("CNC_BATH_DEFAULT_PDF_TEMPLATE = 'bath_profiles'");

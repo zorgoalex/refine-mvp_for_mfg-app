@@ -3453,7 +3453,8 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
           )}
 
           <div className="status-board-card__footer">
-            <span>Создан {formatGmtPlus5Date(card.createdAt)}</span>
+            <span>Создан</span>
+            <span>{formatGmtPlus5Date(card.createdAt)}</span>
           </div>
         </>
       )}
@@ -4179,7 +4180,8 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           )}
 
           <div className="status-board-card__footer">
-            <span>Раскрой {formatDateTime(bath.createdAt)}</span>
+            <span>Раскрой</span>
+            <span>{formatGmtPlus5Date(bath.createdAt)}</span>
           </div>
         </>
       )}
@@ -5597,7 +5599,8 @@ function formatDateTime(value: string): string {
 
 const GMT_PLUS_5_OFFSET_MS = 5 * 60 * 60 * 1000;
 
-function formatGmtPlus5Date(value: string): string {
+function formatGmtPlus5Date(value: string | null | undefined): string {
+  if (typeof value !== 'string' || value.trim().length === 0) return '—';
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return '—';
   const date = new Date(timestamp + GMT_PLUS_5_OFFSET_MS);
