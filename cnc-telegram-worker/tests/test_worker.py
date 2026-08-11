@@ -1155,6 +1155,43 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             ))
             spool.close()
 
+    async def test_processing_recovery_uses_state_when_packet_was_already_posted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            worker.erp = FailingErpClient()
+            vector = FakeMessage(338, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            group = SvgGroup(vector, None, [], None, None)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with self.assertRaisesRegex(RuntimeError, "ERP unavailable"):
+                await worker.process_group(
+                    FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                )
+
+            pending = spool.pending_processing_attempts()
+            self.assertEqual(len(pending), 1)
+            packet = pending[0]["packet"]
+            worker.state.assign_cutting_sequence_number(packet["externalPacketKey"], existing_number=61)
+            worker.state.mark_posted(
+                packet["externalPacketKey"],
+                pending[0]["payloadHash"],
+                packet["source"]["version"],
+                pending[0]["sourceFingerprint"],
+            )
+
+            recovery_erp = FakeErpClient()
+            recovered = await reconcile_pending_processing_attempts(spool, recovery_erp, worker.state)
+
+            self.assertEqual(len(recovered), 1)
+            self.assertEqual(recovery_erp.packets, [])
+            operation = latest_processing_attempt(spool)
+            self.assertEqual(operation["status"], "succeeded")
+            self.assertEqual(operation["cuttingSequenceNo"], 61)
+            self.assertEqual(spool.pending_processing_attempts(), [])
+            spool.close()
+
     async def test_processing_recovery_defers_transient_backend_failure_with_saved_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_path = Path(temp)
