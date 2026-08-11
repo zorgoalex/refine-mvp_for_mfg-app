@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "МДФ-работы: плановая дата сегодня",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В настройках МДФ-доски появился режим «Плановая дата сегодня»: он оставляет только карточки файлов станка, Базис-раскроя, ванн и заказов, связанные с заказами с плановой датой завершения на сегодня.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "Заказы: сохранение с пустыми строками деталей",
     services: ["ERP"],
     repositories: ["repo_erp"],

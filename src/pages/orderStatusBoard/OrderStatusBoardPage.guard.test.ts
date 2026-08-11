@@ -309,6 +309,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('aria-label="Дата CNC-работ"');
     expect(page).toContain('buildCncOrderFilterOptions');
     expect(page).toContain('filterCncTodayColumnsByOrders');
+    expect(page).toContain('filterCncTodayColumnsByPlannedOrderDate');
+    expect(page).toContain('filterCncOrderCardsByPlannedOrderDate');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches');
     expect(page).toContain('status-board-toolbar__cnc-order-search');
     expect(page).toContain('mode="multiple"');
@@ -316,6 +318,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
     expect(page).toContain('() => filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters)');
+    expect(page).toContain('viewState.cncPlannedTodayOnly');
+    expect(page).toContain('cncPlannedTodayDate');
     expect(page).not.toContain('filterCncBazisCutSetsByMissingBathDetails');
     expect(page).toContain('status-board-toolbar__cnc-period');
     expect(page).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
@@ -629,7 +633,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('resolveMdfBoardHiddenProductionStatusIds(');
     expect(page).toContain('cncHiddenOrderStatusIds');
     expect(page).toContain('cncHiddenProductionStatusIds');
-    expect(page).toContain('cncOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId))');
+    expect(page).toContain('cncDisplayOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId))');
   });
 
   it('keeps visible MDF columns fluid and switches narrow boards to order numbers only', () => {
@@ -897,6 +901,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-terminal-card--muted');
     expect(settings).toContain('checked={viewState.hideEmpty}');
     expect(settings).toContain('Скрыть пустые');
+    expect(settings).toContain('checked={viewState.cncPlannedTodayOnly}');
+    expect(settings).toContain('Плановая дата сегодня');
+    expect(settings).toContain('updateViewState({ cncPlannedTodayOnly: checked })');
     expect(cncToolbar).not.toContain('Вчера');
     expect(cncToolbar).not.toContain('checked={viewState.hideEmpty}');
     expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');

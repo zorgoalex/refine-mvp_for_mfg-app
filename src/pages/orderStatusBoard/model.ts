@@ -71,6 +71,7 @@ export interface OrderStatusBoardViewState {
   cncWorkday?: string;
   cncOrderSearchPeriod?: CncOrderSearchPeriod;
   cncOrderFilters: string[];
+  cncPlannedTodayOnly: boolean;
   hideEmpty: boolean;
   sortBy: OrderStatusBoardSortBy;
   sortOrder: OrderStatusBoardSortOrder;
@@ -155,6 +156,7 @@ export function parseOrderStatusBoardViewState(
     ...(cncWorkday ? { cncWorkday } : {}),
     ...(view === 'cnc_today' && cncOrderSearchPeriod ? { cncOrderSearchPeriod } : {}),
     cncOrderFilters: normalizeCncOrderFilterValues(params.getAll('order')),
+    cncPlannedTodayOnly: view === 'cnc_today' && params.get('plannedToday') === '1',
     hideEmpty: params.get('hideEmpty') === '1',
     sortBy,
     sortOrder,
@@ -184,6 +186,9 @@ export function serializeOrderStatusBoardViewState(
     for (const orderName of normalizeCncOrderFilterValues(state.cncOrderFilters)) {
       params.append('order', orderName);
     }
+  }
+  if (state.view === 'cnc_today' && state.cncPlannedTodayOnly) {
+    params.set('plannedToday', '1');
   }
   if (state.hideEmpty) params.set('hideEmpty', '1');
   params.set('sort', state.sortBy);
@@ -272,6 +277,50 @@ export function filterCncTodayColumnsByOrders(
     );
     const bazisCutSets = (column.bazisCutSets ?? []).filter((set) =>
       set.items.some((item) => orderKeys.has(normalizeCncOrderKey(item.orderName))),
+    );
+    const total = isCncBathColumnKey(column.key)
+      ? baths.length
+      : packets.length + bazisCutSets.length;
+    return { ...column, baths, packets, bazisCutSets, total };
+  });
+}
+
+export function filterCncOrderCardsByPlannedOrderDate(
+  cards: readonly OrderStatusBoardCard[],
+  plannedDate: string,
+): OrderStatusBoardCard[] {
+  const plannedDateOnly = dateOnlyPrefix(plannedDate);
+  if (!plannedDateOnly) return [...cards];
+  return cards.filter((card) =>
+    dateOnlyPrefix(card.plannedCompletionDate) === plannedDateOnly);
+}
+
+export function filterCncTodayColumnsByPlannedOrderDate(
+  columns: CncTelegramTodayColumn[],
+  orderCards: readonly OrderStatusBoardCard[],
+  plannedDate: string,
+): CncTelegramTodayColumn[] {
+  const plannedDateOnly = dateOnlyPrefix(plannedDate);
+  if (!plannedDateOnly) return columns;
+  const matcher = buildCncPlannedOrderMatcher(orderCards, plannedDateOnly);
+
+  return columns.map((column) => {
+    const baths = (column.baths ?? []).filter((bath) =>
+      bath.items.some((item) =>
+        cncItemMatchesPlannedOrder(matcher, item.orderName, item.orderId)),
+    );
+    const packets = (column.packets ?? []).filter((packet) =>
+      packet.items.some((item) =>
+        cncItemMatchesPlannedOrder(
+          matcher,
+          item.orderName,
+          item.orderId,
+          item.matchOrderId,
+        )),
+    );
+    const bazisCutSets = (column.bazisCutSets ?? []).filter((set) =>
+      set.items.some((item) =>
+        cncItemMatchesPlannedOrder(matcher, item.orderName, item.orderId)),
     );
     const total = isCncBathColumnKey(column.key)
       ? baths.length
@@ -679,6 +728,48 @@ function subtractDateOnlyDays(value: string, days: number): string {
   const date = new Date(Date.UTC(year, month - 1, day));
   date.setUTCDate(date.getUTCDate() - days);
   return date.toISOString().slice(0, 10);
+}
+
+function dateOnlyPrefix(value: string | null | undefined): string | undefined {
+  const match = value?.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? dateOnly(match[1] ?? null) : undefined;
+}
+
+interface CncPlannedOrderMatcher {
+  orderIds: Set<number>;
+  orderKeys: Set<string>;
+}
+
+function buildCncPlannedOrderMatcher(
+  cards: readonly OrderStatusBoardCard[],
+  plannedDate: string,
+): CncPlannedOrderMatcher {
+  const orderIds = new Set<number>();
+  const orderKeys = new Set<string>();
+  for (const card of cards) {
+    if (dateOnlyPrefix(card.plannedCompletionDate) !== plannedDate) continue;
+    if (isPositiveInteger(card.orderId)) orderIds.add(card.orderId);
+    addCncPlannedOrderKey(orderKeys, card.orderName);
+    addCncPlannedOrderKey(orderKeys, card.fullNumber);
+  }
+  return { orderIds, orderKeys };
+}
+
+function cncItemMatchesPlannedOrder(
+  matcher: CncPlannedOrderMatcher,
+  orderName: string | null | undefined,
+  ...orderIds: Array<number | null | undefined>
+): boolean {
+  for (const orderId of orderIds) {
+    if (isPositiveInteger(orderId) && matcher.orderIds.has(orderId)) return true;
+  }
+  const orderKey = normalizeCncOrderKey(orderName);
+  return Boolean(orderKey && matcher.orderKeys.has(orderKey));
+}
+
+function addCncPlannedOrderKey(target: Set<string>, value: string | null | undefined): void {
+  const orderKey = normalizeCncOrderKey(value);
+  if (orderKey) target.add(orderKey);
 }
 
 function normalizeCncOrderKey(value: string | null | undefined): string {

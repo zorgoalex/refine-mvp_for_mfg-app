@@ -32,7 +32,9 @@ import {
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncBathColumnsByOrderStatuses,
+  filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
+  filterCncTodayColumnsByPlannedOrderDate,
   isCncCardSummaryOnly,
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
@@ -222,7 +224,7 @@ describe('order status board model', () => {
   it('keeps CNC today as visual flow without changing status-board API type', () => {
     const disabled = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc'));
     const state = parseOrderStatusBoardViewState(
-      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712'),
+      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712&plannedToday=1'),
       {
         cncTelegram: true,
       },
@@ -233,10 +235,12 @@ describe('order status board model', () => {
     expect(state.cncWorkday).toBe('2026-07-23');
     expect(state.cncOrderSearchPeriod).toBe('2w');
     expect(state.cncOrderFilters).toEqual(['2706', '2712']);
+    expect(state.cncPlannedTodayOnly).toBe(true);
     const serialized = serializeOrderStatusBoardViewState(state);
     expect(serialized.toString()).toContain('flow=cnc');
     expect(serialized.toString()).toContain('date=2026-07-23');
     expect(serialized.toString()).toContain('period=2w');
+    expect(serialized.toString()).toContain('plannedToday=1');
     expect(serialized.getAll('order')).toEqual(['2706', '2712']);
     expect(toOrderStatusBoardQuery(state)).toMatchObject({ board: 'order' });
 
@@ -326,6 +330,70 @@ describe('order status board model', () => {
     expect(partial[0]?.total).toBe(0);
     expect(partial[1]?.baths).toEqual([]);
     expect(partial[1]?.total).toBe(0);
+  });
+
+  it('filters MDF cards by orders planned for the given date', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 4,
+        packets: [
+          cncPacket('p-today', ['2706', '2707'], [2706, 2707]),
+          cncPacket('p-name-fallback', ['A-2800']),
+          cncPacket('p-other', ['2712'], [2712]),
+        ],
+        baths: [],
+        bazisCutSets: [
+          cncBazisCutSet(8, [
+            { orderName: '2706', orderId: 2706, detailId: 8001 },
+            { orderName: '9999', orderId: 9999, detailId: 8002 },
+          ]),
+        ],
+      },
+      {
+        key: 'baths',
+        title: 'Ванны',
+        total: 3,
+        packets: [],
+        baths: [
+          cncBath('b-today', ['2706'], [2706]),
+          cncBath('b-name-fallback', ['A-2800'], [0]),
+          cncBath('b-other', ['2712'], [2712]),
+        ],
+      },
+    ] as CncTelegramTodayColumn[];
+    const orderCards = [
+      card(2706, { orderName: '2706', plannedCompletionDate: '2026-08-11' }),
+      card(2800, {
+        orderName: '2800',
+        fullNumber: 'A-2800',
+        plannedCompletionDate: '2026-08-11T12:00:00+05:00',
+      }),
+      card(2712, { orderName: '2712', plannedCompletionDate: '2026-08-12' }),
+    ];
+
+    const filteredColumns = filterCncTodayColumnsByPlannedOrderDate(
+      columns,
+      orderCards,
+      '2026-08-11',
+    );
+
+    expect(filteredColumns[0]?.packets.map((packet) => packet.packetId)).toEqual([
+      'p-today',
+      'p-name-fallback',
+    ]);
+    expect(filteredColumns[0]?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([8]);
+    expect(filteredColumns[0]?.total).toBe(3);
+    expect(filteredColumns[1]?.baths.map((bath) => bath.bathCardId)).toEqual([
+      'b-today',
+      'b-name-fallback',
+    ]);
+    expect(filteredColumns[1]?.total).toBe(2);
+    expect(
+      filterCncOrderCardsByPlannedOrderDate(orderCards, '2026-08-11')
+        .map((order) => order.orderId),
+    ).toEqual([2706, 2800]);
   });
 
   it('keeps only bath cards with order numbers present in machine file cards', () => {
@@ -1092,7 +1160,10 @@ function column(
   };
 }
 
-function card(orderId: number): OrderStatusBoardCard {
+function card(
+  orderId: number,
+  overrides: Partial<OrderStatusBoardCard> = {},
+): OrderStatusBoardCard {
   return {
     orderId,
     orderName: String(orderId),
@@ -1122,6 +1193,7 @@ function card(orderId: number): OrderStatusBoardCard {
     version: 1,
     canChangeOrderStatus: false,
     canChangeProductionStatus: false,
+    ...overrides,
   };
 }
 

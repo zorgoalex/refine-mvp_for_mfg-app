@@ -113,7 +113,9 @@ import {
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncBathColumnsByOrderStatuses,
+  filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
+  filterCncTodayColumnsByPlannedOrderDate,
   isCncCardSummaryOnly,
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
@@ -967,6 +969,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
   const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD;
+  const cncPlannedTodayDate = dayjs().format('YYYY-MM-DD');
   const cncPeriodColumns = cncToday?.columns ?? [];
   const cncOrderFilterOptions = useMemo(
     () =>
@@ -999,6 +1002,34 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     () => buildCncOrderStatusCards(cncOrderBoardColumns, cncOrderIds),
     [cncOrderBoardColumns, cncOrderIds],
   );
+  const cncPlannedDateColumns = useMemo(
+    () => viewState.cncPlannedTodayOnly
+      ? filterCncTodayColumnsByPlannedOrderDate(
+          cncFilteredColumns,
+          cncOrderStatusCards,
+          cncPlannedTodayDate,
+        )
+      : cncFilteredColumns,
+    [
+      cncFilteredColumns,
+      cncOrderStatusCards,
+      cncPlannedTodayDate,
+      viewState.cncPlannedTodayOnly,
+    ],
+  );
+  const cncDisplayOrderStatusCards = useMemo(
+    () => viewState.cncPlannedTodayOnly
+      ? filterCncOrderCardsByPlannedOrderDate(
+          cncOrderStatusCards,
+          cncPlannedTodayDate,
+        )
+      : cncOrderStatusCards,
+    [
+      cncOrderStatusCards,
+      cncPlannedTodayDate,
+      viewState.cncPlannedTodayOnly,
+    ],
+  );
   const cncHiddenProductionStatusIds = useMemo(
     () => resolveMdfBoardHiddenProductionStatusIds(
       cncOrderBoardColumns,
@@ -1012,16 +1043,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   );
   const cncActiveColumns = useMemo(
     () => filterCncBathColumnsByOrderStatuses(
-      cncFilteredColumns,
-      cncOrderStatusCards,
+      cncPlannedDateColumns,
+      cncDisplayOrderStatusCards,
       cncHiddenProductionStatusIds,
       cncHiddenOrderStatusIds,
     ),
     [
-      cncFilteredColumns,
-      cncOrderStatusCards,
+      cncDisplayOrderStatusCards,
       cncHiddenOrderStatusIds,
       cncHiddenProductionStatusIds,
+      cncPlannedDateColumns,
     ],
   );
   const cncShownDataColumns = useMemo(
@@ -1032,7 +1063,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   );
   const cncMutedOrderIds = useMemo(
     () => new Set(
-      cncOrderStatusCards
+      cncDisplayOrderStatusCards
         .filter((card) => isCncOrderHiddenFromMdfBoard(
           card,
           cncHiddenProductionStatusIds,
@@ -1040,13 +1071,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         ))
         .map((card) => card.orderId),
     ),
-    [cncHiddenOrderStatusIds, cncHiddenProductionStatusIds, cncOrderStatusCards],
+    [cncDisplayOrderStatusCards, cncHiddenOrderStatusIds, cncHiddenProductionStatusIds],
   );
   const cncOrderCards = useMemo(
     () => cncTerminalColumnsVisible
-      ? cncOrderStatusCards
-      : cncOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId)),
-    [cncMutedOrderIds, cncOrderStatusCards, cncTerminalColumnsVisible],
+      ? cncDisplayOrderStatusCards
+      : cncDisplayOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId)),
+    [cncDisplayOrderStatusCards, cncMutedOrderIds, cncTerminalColumnsVisible],
   );
   const cncOrderSortPreference = useMemo(
     () => ({ sortBy: viewState.sortBy, sortOrder: viewState.sortOrder }),
@@ -1164,7 +1195,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
 
   useEffect(() => {
     setActiveCncRelation(null);
-  }, [cncOrderFilterKey, isCncToday, viewState.cncOrderSearchPeriod, viewState.cncWorkday]);
+  }, [
+    cncOrderFilterKey,
+    isCncToday,
+    viewState.cncOrderSearchPeriod,
+    viewState.cncPlannedTodayOnly,
+    viewState.cncWorkday,
+  ]);
 
   useEffect(() => {
     if (!cncDetailedEnabled) {
@@ -1176,7 +1213,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   useEffect(() => {
     setActiveCncDetailedBathId(null);
     setActiveCncDetailedDetail(null);
-  }, [cncOrderFilterKey, isCncToday, viewState.cncOrderSearchPeriod, viewState.cncWorkday]);
+  }, [
+    cncOrderFilterKey,
+    isCncToday,
+    viewState.cncOrderSearchPeriod,
+    viewState.cncPlannedTodayOnly,
+    viewState.cncWorkday,
+  ]);
 
   const selectCncDetailedBath = useCallback((bathId: string) => {
     setActiveCncDetailedBathId(bathId);
@@ -1306,6 +1349,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const cncCardDisplayModeLabel = CNC_CARD_DISPLAY_OPTIONS.find(
     (option) => option.value === cncCardDisplayMode,
   )?.label ?? 'Стандартный';
+  const cncPlannedTodaySummary = viewState.cncPlannedTodayOnly ? ' · План сегодня' : '';
   const focusCncOrderSearch = () => {
     setMobileToolbarExpanded(true);
     window.requestAnimationFrame(() => {
@@ -1324,6 +1368,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           onChange={(checked) => updateViewState({ hideEmpty: checked })}
         />
         Скрыть пустые
+      </label>
+      <label className="status-board-toolbar__switch">
+        <Switch
+          size="small"
+          checked={viewState.cncPlannedTodayOnly}
+          onChange={(checked) => updateViewState({ cncPlannedTodayOnly: checked })}
+        />
+        Плановая дата сегодня
       </label>
       <label className="status-board-toolbar__switch">
         <Switch
@@ -1665,7 +1717,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             contentId="status-board-toolbar-controls"
             expanded={mobileToolbarExpanded}
             label="Настройки МДФ"
-            summary={`${cncSelectedDate?.format(DATE_FORMAT) ?? 'Сегодня'} · ${cncCardDisplayModeLabel}`}
+            summary={`${cncSelectedDate?.format(DATE_FORMAT) ?? 'Сегодня'} · ${cncCardDisplayModeLabel}${cncPlannedTodaySummary}`}
             onToggle={() => setMobileToolbarExpanded((current) => !current)}
           >
           <div className="status-board-toolbar status-board-toolbar--cnc" aria-label="Фильтры CNC-работ">
@@ -1903,6 +1955,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 description={
                   allCncColumnsHidden
                     ? 'Все колонки скрыты в настройках'
+                    : viewState.cncPlannedTodayOnly
+                    ? 'По плановой дате сегодня МДФ-работ нет'
                     : cncOrderFilters.length > 0
                     ? 'По выбранному заказу МДФ-работ нет'
                     : 'CNC-работ на сегодня нет'
