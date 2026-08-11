@@ -109,6 +109,7 @@ import {
   cutJobStatusLabel,
   filterJobsByProfile,
   filterJobsByStatus,
+  formatCutJobDisplayNumber,
   formatGroupSummary,
   noSheetSpecMessage,
   parseIdCsv,
@@ -848,6 +849,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const jobCalculatedEngine = typeof rawJobCalculatedEngine === 'string'
     ? rawJobCalculatedEngine
     : undefined;
+  const jobDisplayNumber = job ? formatCutJobDisplayNumber(job, profiles) : null;
   // Per-user, per-job sheet preview orientation, persisted in localStorage.
   // Vacuum-table jobs default to landscape; other profiles default to portrait.
   // Landscape rotates the render server-side (labels stay upright).
@@ -2207,7 +2209,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setPdfPreview({
       ...EMPTY_PDF_PREVIEW,
       open: true,
-      title: `Предпросмотр PDF · раскрой #${job.cutJobId}`,
+      title: `Предпросмотр PDF · раскрой ${formatCutJobDisplayNumber(job, profiles)}`,
       loading: true,
       fileName: `cut-job-${job.cutJobId}.pdf`,
     });
@@ -2220,7 +2222,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       setPdfPreview({
         open: true,
         group: null,
-        title: `Предпросмотр PDF · раскрой #${job.cutJobId}`,
+        title: `Предпросмотр PDF · раскрой ${formatCutJobDisplayNumber(job, profiles)}`,
         loading: false,
         url,
         blob: result.blob,
@@ -2234,7 +2236,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } finally {
       setBusy(false);
     }
-  }, [handleError, isHistoricalResult, job, pdfTemplateForJob, revokePdfPreviewUrl, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait]);
+  }, [handleError, isHistoricalResult, job, pdfTemplateForJob, profiles, revokePdfPreviewUrl, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait]);
 
   // ── Manual layout editor callbacks ─────────────────────────────────────────
 
@@ -2427,7 +2429,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     return scoped.filter((candidate) => {
       if (
         query &&
-        !`${candidate.cutJobId} ${candidate.name} ${candidate.materialNames.join(' ')}`
+        !`${candidate.cutJobId} ${formatCutJobDisplayNumber(candidate, profiles)} ${candidate.name} ${candidate.materialNames.join(' ')}`
           .toLocaleLowerCase('ru-RU')
           .includes(query)
       ) {
@@ -2465,6 +2467,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     operationalFilmFilter,
     operationalSheetFilter,
     profileFilter,
+    profiles,
     statusFilter,
   ]);
 
@@ -2496,7 +2499,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     const cells = [
       ['#', 'Дата', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Материал'],
       ...filteredJobs.map((candidate) => [
-        candidate.cutJobId,
+        formatCutJobDisplayNumber(candidate, profiles),
         formatCutJobCreatedDate(candidate.createdAt),
         candidate.name,
         cutJobStatusLabel(candidate.status),
@@ -2577,7 +2580,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const jobColumns: ColumnsType<CutJobDto> = useMemo(
     () => [
-      { title: '#', dataIndex: 'cutJobId', key: 'id', width: 70 },
+      {
+        title: '#',
+        dataIndex: 'cutJobId',
+        key: 'id',
+        width: 70,
+        render: (_: unknown, row: CutJobDto) => formatCutJobDisplayNumber(row, profiles),
+      },
       {
         title: 'Дата',
         dataIndex: 'createdAt',
@@ -3074,7 +3083,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     </div>
   ) : (
     <Space className="cut-job-card-title" size={8} wrap>
-      <Text strong>Задание на раскрой #{job.cutJobId}</Text>
+      <Text strong>Задание на раскрой {jobDisplayNumber}</Text>
       <Text type="secondary">—</Text>
       {isEditingJobName ? (
         <Space.Compact className="cut-job-name-editor">
@@ -3150,8 +3159,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           <>
             <OperationalPageHeader
               compact
-              breadcrumbs={job ? `Производство › Раскрой › Задание #${job.cutJobId}` : 'Производство › Раскрой'}
-              title={job ? `Задание на раскрой #${job.cutJobId}` : 'Раскрой'}
+              breadcrumbs={job ? `Производство › Раскрой › Задание ${jobDisplayNumber}` : 'Производство › Раскрой'}
+              title={job ? `Задание на раскрой ${jobDisplayNumber}` : 'Раскрой'}
               description={job
                 ? `${job.name} · рабочая карточка расчёта и печати производственных материалов.`
                 : 'Единый список заданий, версий расчета и производственной готовности.'}
@@ -3564,7 +3573,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 }}
               >
                 <span className="cut-jobs-operational-list__head">
-                  <strong>{`#${candidate.cutJobId} · ${candidate.name}`}</strong>
+                  <strong>{`${formatCutJobDisplayNumber(candidate, profiles)} · ${candidate.name}`}</strong>
                   <Tag color={STATUS_TAG_COLORS[candidate.status] ?? 'default'}>
                     {cutJobStatusLabel(candidate.status)}
                   </Tag>

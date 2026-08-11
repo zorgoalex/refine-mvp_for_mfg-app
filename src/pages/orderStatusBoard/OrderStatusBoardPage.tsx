@@ -2546,7 +2546,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           <section
             className="cnc-detailed-workspace"
             style={{ gridColumn: '1 / span 4', gridRow: 1 }}
-            aria-label={`Подробный раскрой ${detailedContext.activeBath.cutNumber}`}
+            aria-label={`Подробный раскрой ${formatCncBathCardCutNumber(detailedContext.activeBath)}`}
           >
             <div className="cnc-detailed-workspace__machine">
               <CncDetailedMachineMaps
@@ -4513,6 +4513,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath, open, onClo
   const requestSeqRef = useRef(0);
   const loadedPdfKeyRef = useRef<string | null>(null);
   const pagePreviewUrlsRef = useRef<string[]>([]);
+  const bathDisplayCutNumber = formatCncBathCardCutNumber(bath);
   const [template, setTemplate] = useState(CNC_BATH_DEFAULT_PDF_TEMPLATE);
   const [templateOptions, setTemplateOptions] = useState(CNC_BATH_PDF_TEMPLATE_OPTIONS);
   const [url, setUrl] = useState<string | null>(null);
@@ -4700,7 +4701,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath, open, onClo
       title={(
         <div className="cnc-bath-card__block-heading cnc-bath-card__block-heading--modal">
           <span className="cnc-bath-card__block-label">
-            Предпросмотр PDF · раскрой №{bath.cutNumber}
+            Предпросмотр PDF · раскрой {bathDisplayCutNumber}
           </span>
           <span className="cnc-bath-card__block-job" title={bath.cutJobName}>
             {bath.cutJobName}
@@ -4755,7 +4756,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath, open, onClo
           {pagePreviews.length > 0 && (
             <div
               className="cnc-bath-card__pdf-pages"
-              aria-label={`PDF ${bath.cutJobName} ${bath.cutNumber}`}
+              aria-label={`PDF ${bath.cutJobName} ${bathDisplayCutNumber}`}
               data-testid="cnc-bath-pdf-preview-pages"
             >
               {pagePreviews.map((preview) => (
@@ -4764,7 +4765,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath, open, onClo
                   <img
                     className="cnc-bath-card__pdf-page-image"
                     src={preview.url}
-                    alt={`PDF ${bath.cutJobName} ${bath.cutNumber}, страница ${preview.pageNumber}`}
+                    alt={`PDF ${bath.cutJobName} ${bathDisplayCutNumber}, страница ${preview.pageNumber}`}
                   />
                 </figure>
               ))}

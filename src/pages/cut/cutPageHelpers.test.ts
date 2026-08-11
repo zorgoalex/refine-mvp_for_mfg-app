@@ -11,7 +11,9 @@ import {
   distinctOrderIdsFromItems,
   filterJobsByStatus,
   filterJobsByProfile,
+  formatCutJobDisplayNumber,
   formatGroupSummary,
+  isVacuumCutJobDisplayNumber,
   noSheetSpecMessage,
   parseIdCsv,
   parseJobQueryParam,
@@ -132,6 +134,20 @@ describe('cutPageHelpers', () => {
     expect(filterJobsByProfile(jobs, CUT_JOB_PROFILE_FILTER_DEFAULT).map((job) => job.cutJobId)).toEqual([1]);
     expect(filterJobsByProfile(jobs, 7).map((job) => job.cutJobId)).toEqual([2, 4]);
     expect(filterJobsByProfile(jobs, 99).map((job) => job.cutJobId)).toEqual([3]);
+  });
+
+  it('formats vacuum-table cut job numbers with the В- prefix', () => {
+    const profiles = [
+      { cutParamProfileId: 7, params: { layout_mode: 'vacuum_table' } },
+      { cutParamProfileId: 8, params: { layout_mode: 'guillotine' } },
+    ];
+    expect(formatCutJobDisplayNumber({ cutJobId: 42, paramProfileId: 7 }, profiles)).toBe('В-42');
+    expect(formatCutJobDisplayNumber({ cutJobId: 43, paramProfileId: 8 }, profiles)).toBe('#43');
+    expect(isVacuumCutJobDisplayNumber({
+      cutJobId: 44,
+      paramProfileId: 99,
+      currentCutResult: { cutNumber: 'В-44-3' },
+    }, profiles)).toBe(true);
   });
 
   it('builds a reason-aware add-to-cut warning (no_sheet_spec / wrong_status counts)', () => {
