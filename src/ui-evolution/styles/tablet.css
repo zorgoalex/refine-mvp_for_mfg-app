@@ -711,6 +711,7 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-column__cards {
+  max-height: none;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior-x: auto;

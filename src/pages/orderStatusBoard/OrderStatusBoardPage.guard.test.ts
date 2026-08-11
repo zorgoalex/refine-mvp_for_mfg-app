@@ -238,6 +238,34 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*overflow-y: visible;/s,
     );
+    expect(css).toContain('--status-board-cnc-order-cards-max-height');
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*max-height: var\(--status-board-cnc-order-cards-max-height\);[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
+    );
+    expect(page).toContain('type CncOrderDisplayColumnKey = Extract<');
+    expect(page).toContain('scrolledOrderColumns');
+    expect(page).toContain('updateOrderColumnScroll(orderColumnKey, event.currentTarget)');
+    expect(page).toContain('scrollOrderColumnToTop(orderColumnKey, event.currentTarget)');
+    expect(page).toContain('className="cnc-order-column-scroll-top"');
+    expect(page).toContain('Прокрутить колонку «${title}» наверх');
+    expect(css).toContain('.cnc-order-column-scroll-top.ant-btn');
+    expect(css).toContain('padding-bottom: calc(clamp(3px, 0.65vw, 10px) + 52px)');
+    expect(css).toContain('bottom: 10px');
+    expect(css).toContain('height: 40px');
+    expect(css).toContain('min-height: 40px');
+    expect(css).toContain('background: rgba(17, 24, 39, 0.66)');
+    expect(css).toContain('transform: translateX(-50%) scale(0.96)');
+    expect(page).toContain('function statusBoardCanScrollRight');
+    expect(page).toContain('const [cncScrollRightVisible, setCncScrollRightVisible] = useState(false);');
+    expect(page).toContain('setCncScrollRightVisible(isCncToday && statusBoardCanScrollRight');
+    expect(page).toContain("viewport.scrollTo({ left: nextLeft, behavior: 'smooth' })");
+    expect(page).toContain('className="cnc-board-scroll-right"');
+    expect(page).toContain('aria-label="Прокрутить МДФ-доску вправо"');
+    expect(css).toContain('.cnc-board-scroll-right.ant-btn');
+    expect(css).toContain('inset-block-start: 50dvh');
+    expect(css).toContain('inset-inline-end: 10px');
+    expect(css).toContain('background: rgba(17, 24, 39, 0.58)');
+    expect(css).toContain('transform: translateY(-50%) scale(0.96)');
     expect(css).toMatch(
       /\.status-board-page--cnc \.cnc-detailed-workspace\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
     );
@@ -246,6 +274,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(tabletCss).toMatch(
       /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: calc\(100% - var\(--tablet-sticky-row\)\);[^}]*overflow-x: auto;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: auto;/s,
     );
     expect(tabletCss).toContain('.status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
     expect(tabletCss).toContain('clamp(240px, 24vw, 276px)');

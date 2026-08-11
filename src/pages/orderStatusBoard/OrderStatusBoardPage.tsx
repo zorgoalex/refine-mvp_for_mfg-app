@@ -52,6 +52,7 @@ import {
   ToolOutlined,
   TagsOutlined,
   UserOutlined,
+  UpOutlined,
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { createPortal } from 'react-dom';
@@ -251,6 +252,11 @@ function scrollStatusBoardColumnCardsToTop(viewport: HTMLElement | null): void {
   }
 }
 
+function statusBoardCanScrollRight(viewport: HTMLElement | null): boolean {
+  if (!viewport) return false;
+  return viewport.scrollWidth - viewport.clientWidth - viewport.scrollLeft > 2;
+}
+
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 interface StatusBoardCardStatusBadgeOverride {
   name: string;
@@ -434,6 +440,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const topScrollbarRef = useRef<HTMLDivElement | null>(null);
   const topScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const boardViewportRef = useRef<HTMLElement | null>(null);
+  const [cncScrollRightVisible, setCncScrollRightVisible] = useState(false);
   const [announcement, setAnnouncement] = useState('');
   const finePointer = useFinePointer();
   const viewStateRef = useRef(viewState);
@@ -1370,6 +1377,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     const updateTrackWidth = () => {
       topScrollbarTrack.style.width = `${viewport.scrollWidth}px`;
       topScrollbar.scrollLeft = viewport.scrollLeft;
+      setCncScrollRightVisible(isCncToday && statusBoardCanScrollRight(viewport));
     };
     updateTrackWidth();
 
@@ -1384,6 +1392,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     cncVisibleColumns.length,
     columns.length,
     datasetKey,
+    isCncToday,
     loading,
   ]);
 
@@ -1392,9 +1401,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       const viewport = boardViewportRef.current;
       if (viewport && viewport.scrollLeft !== event.currentTarget.scrollLeft) {
         viewport.scrollLeft = event.currentTarget.scrollLeft;
+        setCncScrollRightVisible(isCncToday && statusBoardCanScrollRight(viewport));
       }
     },
-    [],
+    [isCncToday],
   );
 
   const scrollTopFromBoard = useCallback(
@@ -1403,9 +1413,24 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       if (topScrollbar && topScrollbar.scrollLeft !== event.currentTarget.scrollLeft) {
         topScrollbar.scrollLeft = event.currentTarget.scrollLeft;
       }
+      setCncScrollRightVisible(isCncToday && statusBoardCanScrollRight(event.currentTarget));
     },
-    [],
+    [isCncToday],
   );
+
+  const scrollCncBoardRight = useCallback(() => {
+    const viewport = boardViewportRef.current;
+    if (!viewport) return;
+    const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
+    const nextLeft = Math.min(
+      maxLeft,
+      viewport.scrollLeft + Math.max(180, Math.round(viewport.clientWidth * 0.82)),
+    );
+    viewport.scrollTo({ left: nextLeft, behavior: 'smooth' });
+    const topScrollbar = topScrollbarRef.current;
+    if (topScrollbar) topScrollbar.scrollLeft = nextLeft;
+    setCncScrollRightVisible(nextLeft < maxLeft - 2);
+  }, []);
 
   const dateRange: [Dayjs | null, Dayjs | null] = [
     viewState.plannedFrom ? dayjs(viewState.plannedFrom) : null,
@@ -2131,6 +2156,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             </div>
           )}
         </section>
+        {isCncToday && cncScrollRightVisible && (
+          <Button
+            className="cnc-board-scroll-right"
+            type="default"
+            shape="circle"
+            icon={<RightOutlined />}
+            aria-label="Прокрутить МДФ-доску вправо"
+            onClick={scrollCncBoardRight}
+          />
+        )}
       </main>
     </DndProvider>
   );
@@ -2201,6 +2236,11 @@ export type CncTelegramTodayDisplayColumnKey =
   | 'orders_ready'
   | 'orders_issued';
 
+type CncOrderDisplayColumnKey = Extract<
+  CncTelegramTodayDisplayColumnKey,
+  'orders' | 'orders_ready' | 'orders_issued'
+>;
+
 export type CncBoardManualMoveState = Partial<Record<string, CncTelegramTodayDisplayColumnKey>>;
 
 export interface CncOrderReadiness {
@@ -2256,6 +2296,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   const isOperational = useOperationalUi();
   const [standardCardOverrides, setStandardCardOverrides] =
     useState<Set<string>>(() => new Set());
+  const [scrolledOrderColumns, setScrolledOrderColumns] =
+    useState<Partial<Record<CncOrderDisplayColumnKey, boolean>>>({});
 
   useEffect(() => {
     if (cardDisplayMode !== 'standard') return;
@@ -2267,6 +2309,30 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   const toggleCardDisplay = useCallback((cardKey: string) => {
     setStandardCardOverrides((current) =>
       toggleCncCardStandardOverride(current, cardKey),
+    );
+  }, []);
+  const updateOrderColumnScroll = useCallback((
+    columnKey: CncOrderDisplayColumnKey,
+    cardList: HTMLElement,
+  ) => {
+    const scrolled = cardList.scrollTop > 1;
+    setScrolledOrderColumns((current) =>
+      current[columnKey] === scrolled
+        ? current
+        : { ...current, [columnKey]: scrolled },
+    );
+  }, []);
+  const scrollOrderColumnToTop = useCallback((
+    columnKey: CncOrderDisplayColumnKey,
+    trigger: HTMLElement | null,
+  ) => {
+    const cardList = trigger
+      ?.closest<HTMLElement>('.status-board-column')
+      ?.querySelector<HTMLElement>('.status-board-column__cards');
+    if (!cardList) return;
+    cardList.scrollTo({ top: 0, behavior: 'smooth' });
+    setScrolledOrderColumns((current) =>
+      current[columnKey] ? { ...current, [columnKey]: false } : current,
     );
   }, []);
   const orderReadinessByOrderId = useMemo(
@@ -2396,7 +2462,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       >
       {displayColumns.map((column, columnIndex) => {
         const bathColumn = isCncBathColumnKey(column.key);
-        const orderColumn = isCncOrderColumnKey(column.key);
+        const orderColumnKey = isCncOrderColumnKey(column.key) ? column.key : null;
+        const orderColumn = orderColumnKey !== null;
         const terminalColumn = isCncTerminalColumnKey(column.key);
         const columnClassNames = [`cnc-today-column--${column.key}`];
         const title = cncColumnDisplayTitle(column);
@@ -2494,7 +2561,14 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               )}
             </header>
 
-            <div className="status-board-column__cards">
+            <div
+              className="status-board-column__cards"
+              onScroll={
+                orderColumnKey
+                  ? (event) => updateOrderColumnScroll(orderColumnKey, event.currentTarget)
+                  : undefined
+              }
+            >
               {orderColumn ? (
                 orderCardsLoading && sortedOrderCards.length === 0 ? (
                   <div className="status-board-column__empty">
@@ -2714,6 +2788,20 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 </>
               )}
             </div>
+            {orderColumnKey && scrolledOrderColumns[orderColumnKey] && (
+              <Button
+                className="cnc-order-column-scroll-top"
+                type="default"
+                size="small"
+                icon={<UpOutlined />}
+                aria-label={`Прокрутить колонку «${title}» наверх`}
+                onClick={(event) =>
+                  scrollOrderColumnToTop(orderColumnKey, event.currentTarget)
+                }
+              >
+                Наверх
+              </Button>
+            )}
           </article>
             )}
           </CncColumnDropZone>
