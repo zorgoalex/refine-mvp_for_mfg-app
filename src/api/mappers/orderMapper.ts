@@ -24,6 +24,7 @@ import type {
   SaveOrderWorkshopDto,
 } from '../types/orderApi.types';
 import { calculateOrderDetailArea } from '../../utils/orderArea';
+import { prepareOrderDetailsForSave } from '../../utils/orderDetailRows';
 
 type DateLike = {
   format: (format: string) => string;
@@ -380,9 +381,8 @@ export function stripFrontendOnlyFields<T extends object>(value: T): Partial<T> 
 }
 
 function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
-  return details
+  return prepareOrderDetailsForSave(details).detailsForSave
     .map((detail, index) => ({ detail, index }))
-    .filter(({ detail }) => !isNewEmptyDetail(detail))
     .sort((left, right) => {
       const byDetailNumber =
         normalizeNumber(left.detail.detail_number, 0) -
@@ -650,22 +650,8 @@ function isSheetDetail(detail: OrderDetail): boolean {
   return sheetId !== null && sheetId > 0;
 }
 
-function isNewEmptyDetail(detail: OrderDetail): boolean {
-  return (
-    !detail.detail_id &&
-    isZeroish(detail.height) &&
-    isZeroish(detail.width) &&
-    isZeroish(detail.area)
-  );
-}
-
 function isNewEmptyPayment(payment: Payment): boolean {
   return !payment.payment_id && !optionalNumber(payment.amount);
-}
-
-function isZeroish(value: unknown): boolean {
-  const numberValue = optionalNumber(value);
-  return numberValue === null || numberValue === 0;
 }
 
 function requiredString(value: unknown, field: string): string {

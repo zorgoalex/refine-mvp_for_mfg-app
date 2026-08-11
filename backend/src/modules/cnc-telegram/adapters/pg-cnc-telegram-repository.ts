@@ -4,6 +4,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
 import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
 import { formatCutJobNumber, formatCutNumber } from '../../cut/application/cut-numbering';
 import type {
@@ -51,6 +52,11 @@ import type {
   CncTelegramTodayResponseDto,
   CncTelegramToolDto,
 } from '../dto/cnc-telegram.dto';
+import {
+  evaluateMdfBoardColumnAutomation,
+  evaluateMdfOrderMachineFilesPresentAutomation,
+  type MdfBoardColumnAutomationInput,
+} from '../../status-automation/application/status-automation-runtime';
 import {
   persistTelegramItemEvidence,
   projectTelegramLabelMap,
@@ -125,6 +131,7 @@ interface PacketReplayRow extends QueryResultRow {
   packet_id: string;
   source_version: string | number;
   payload_hash: string;
+  cutting_sequence_no: string | number | null;
   completion_status: CncTelegramPacketDto['completionStatus'];
   thumbs_up: boolean;
 }
@@ -213,6 +220,7 @@ interface BathJoinedRow extends QueryResultRow {
   height_mm: string | number | null;
   completed_quantity: string | number | null;
   laminated_or_later: boolean | null;
+  packed_or_later: boolean | null;
   cut_group_id: string | number;
   variant: 'auto' | 'manual';
   sheet_index: string | number;
@@ -221,9 +229,18 @@ interface BathJoinedRow extends QueryResultRow {
   sheet_height_mm: string | number | null;
 }
 
+interface BathColumnAutomationRow extends QueryResultRow {
+  order_id: string | number;
+  order_detail_id: string | number;
+  quantity: string | number;
+  completed_quantity: string | number | null;
+  laminated_or_later: boolean | null;
+}
+
 interface BazisCutSetJoinedRow extends QueryResultRow {
   bazis_cut_set_id: string | number;
   name: string;
+  created_at: string | Date;
   sort_order: string | number;
   source_order_detail_id: string | number | null;
   source_order_id: string | number | null;
@@ -234,6 +251,7 @@ interface BazisCutSetJoinedRow extends QueryResultRow {
   height_mm: string | number | null;
   material_name: string | null;
   quantity: string | number;
+  packed_or_later: boolean | null;
 }
 
 interface OrderCuttingSequenceRow extends QueryResultRow {
@@ -355,26 +373,36 @@ export class PgCncTelegramRepository
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const requestId = command.requestId || 'cnc-telegram-ingest';
-      const payloadHash = hashPayload(command.dto);
+      const incomingPayloadHash = hashPayload(command.dto);
       await reconcileIdempotency(tx, {
         dto: command.dto,
         currentUserId: command.currentUser.id,
-        payloadHash,
+        payloadHash: incomingPayloadHash,
       });
 
-      const replay = await tx.query<PacketReplayRow>(
-        `
-        SELECT packet_id, source_version, payload_hash, completion_status, thumbs_up
-        FROM cnc_telegram_packets
-        WHERE external_packet_key = $1
-        FOR UPDATE
-        `,
-        [command.dto.externalPacketKey],
-      );
-      const existing = replay.rows[0] ?? null;
+      let payloadHash = incomingPayloadHash;
+      let effectiveCommand = command;
+      const exactExisting = await loadPacketReplayByExternalKey(tx, command.dto.externalPacketKey);
+      const existing = exactExisting ?? await findRelatedSvgPacketAlias(tx, command.dto);
 
-      if (existing && command.dto.source.version < Number(existing.source_version)) {
-        await ensureCuttingSequenceNo(tx, existing.packet_id, command.dto, Number(command.currentUser.id));
+      if (!exactExisting && existing) {
+        const existingSourceVersion = Number(existing.source_version);
+        const replayCommand = withPacketReplaySourceVersion(command, existingSourceVersion, existing);
+        const replayPayloadHash = hashPayload(replayCommand.dto);
+        if (replayPayloadHash === existing.payload_hash) {
+          effectiveCommand = replayCommand;
+          payloadHash = replayPayloadHash;
+        } else if (command.dto.source.version <= existingSourceVersion) {
+          effectiveCommand = withPacketReplaySourceVersion(command, existingSourceVersion + 1, existing);
+          payloadHash = hashPayload(effectiveCommand.dto);
+        } else {
+          effectiveCommand = withPacketReplaySourceVersion(command, command.dto.source.version, existing);
+        }
+      }
+
+      if (existing && effectiveCommand.dto.source.version < Number(existing.source_version)) {
+        await ensureCuttingSequenceNo(tx, existing.packet_id, effectiveCommand.dto, Number(command.currentUser.id));
+        await syncExistingSvgCutJobSourceDisplayNumber(tx, existing.packet_id);
         const packet = await loadPacket(tx, existing.packet_id);
         const response: CncTelegramIngestResponseDto = {
           packet,
@@ -388,32 +416,32 @@ export class PgCncTelegramRepository
 
       if (
         existing &&
-        command.dto.source.version === Number(existing.source_version) &&
+        effectiveCommand.dto.source.version === Number(existing.source_version) &&
         existing.payload_hash !== payloadHash
       ) {
-        await failIdempotency(tx, command.dto.idempotencyKey);
+        await failIdempotency(tx, effectiveCommand.dto.idempotencyKey);
         throw new ApiError(
           409,
           'SOURCE_VERSION_CONFLICT',
           'Telegram source version already exists with different parsed payload',
           {
-            externalPacketKey: command.dto.externalPacketKey,
-            sourceVersion: command.dto.source.version,
+            externalPacketKey: effectiveCommand.dto.externalPacketKey,
+            sourceVersion: effectiveCommand.dto.source.version,
           },
         );
       }
 
       if (
         existing &&
-        command.dto.source.version === Number(existing.source_version) &&
+        effectiveCommand.dto.source.version === Number(existing.source_version) &&
         existing.payload_hash === payloadHash
       ) {
-        const matchedDto = await resolveItemMatches(tx, command.dto);
+        const matchedDto = await resolveItemMatches(tx, effectiveCommand.dto);
         const resolvedDto = aggregateMatchedItems(matchedDto);
         await assertMatchedDetailsBelongToOrders(tx, matchedDto);
         await persistTelegramItemEvidence(tx, {
           packetId: existing.packet_id,
-          sourceVersion: command.dto.source.version,
+          sourceVersion: effectiveCommand.dto.source.version,
           payloadHash,
           dto: matchedDto,
           source: 'authoritative_replay',
@@ -425,8 +453,8 @@ export class PgCncTelegramRepository
           },
         });
         await ensureCuttingSequenceNo(tx, existing.packet_id, resolvedDto, Number(command.currentUser.id));
-        await ensureStoredCutLayout(tx, existing.packet_id, command.dto.cutLayout ?? null);
-        await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchedDto, command.currentUser.id);
+        await ensureStoredCutLayout(tx, existing.packet_id, effectiveCommand.dto.cutLayout ?? null);
+        await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchedDto, effectiveCommand.currentUser.id);
         await projectTelegramLabelMap(tx, {
           packetId: existing.packet_id,
           source: 'ingest',
@@ -448,9 +476,9 @@ export class PgCncTelegramRepository
         return response;
       }
 
-      const matchedDto = await resolveItemMatches(tx, command.dto);
+      const matchedDto = await resolveItemMatches(tx, effectiveCommand.dto);
       const resolvedDto = aggregateMatchedItems(matchedDto);
-      const resolvedCommand = resolvedDto === command.dto ? command : { ...command, dto: resolvedDto };
+      const resolvedCommand = resolvedDto === effectiveCommand.dto ? effectiveCommand : { ...effectiveCommand, dto: resolvedDto };
       await assertMatchedDetailsBelongToOrders(tx, matchedDto);
 
       const packetId = existing?.packet_id ?? await insertPacket(tx, resolvedCommand, payloadHash);
@@ -459,7 +487,7 @@ export class PgCncTelegramRepository
       }
       await persistTelegramItemEvidence(tx, {
         packetId,
-        sourceVersion: command.dto.source.version,
+        sourceVersion: effectiveCommand.dto.source.version,
         payloadHash,
         dto: matchedDto,
         source: 'ingest',
@@ -499,6 +527,26 @@ export class PgCncTelegramRepository
           packet,
           requestId,
           packetAuditId: auditId,
+        });
+        await evaluateMdfBoardColumnAutomation(tx, {
+          eventType: 'mdf.board.completed',
+          orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
+          actor: command.currentUser,
+          requestId,
+          sourceIdempotencyKey: `cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
+        });
+      }
+      await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
+        packet,
+        actor: command.currentUser,
+        requestId,
+      });
+      if (packetColumnKey(packet) === 'parsed') {
+        await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+          orderIds: packet.items.map((item) => item.orderId),
+          actor: command.currentUser,
+          requestId,
+          sourceIdempotencyKey: `cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:machine-files`,
         });
       }
       await enqueuePacketEvents(tx, resolvedCommand, packet, requestId, auditId);
@@ -821,6 +869,158 @@ async function loadPacket(tx: TransactionClient, packetId: string): Promise<CncT
   return packet;
 }
 
+async function loadPacketReplayByExternalKey(
+  tx: TransactionClient,
+  externalPacketKey: string,
+): Promise<PacketReplayRow | null> {
+  const replay = await tx.query<PacketReplayRow>(
+    `
+    SELECT packet_id, source_version, payload_hash, cutting_sequence_no, completion_status, thumbs_up
+    FROM cnc_telegram_packets
+    WHERE external_packet_key = $1
+    FOR UPDATE
+    `,
+    [externalPacketKey],
+  );
+  return replay.rows[0] ?? null;
+}
+
+async function findRelatedSvgPacketAlias(
+  tx: TransactionClient,
+  dto: CncTelegramStructuredIngestDto,
+): Promise<PacketReplayRow | null> {
+  const layout = dto.cutLayout ?? null;
+  const sheetImageStorageKey = normalizeOptional(dto.sheetImage?.storageKey);
+  const programBaseName = telegramProgramBaseName(dto.programName);
+  const materialName = normalizeOptional(dto.materialName) ?? 'МДФ 16мм';
+  const sourceInstant = dto.source.createdAt ?? dto.source.updatedAt ?? null;
+  const itemSignature = telegramPacketItemSignature(dto);
+  if (
+    layout?.status !== 'valid' ||
+    !sheetImageStorageKey ||
+    !dto.workday ||
+    !programBaseName ||
+    !itemSignature
+  ) {
+    return null;
+  }
+
+  const replay = await tx.query<PacketReplayRow>(
+    `
+    /* cnc_telegram_svg_packet_alias */
+    SELECT
+      packet.packet_id,
+      packet.source_version,
+      packet.payload_hash,
+      packet.cutting_sequence_no,
+      packet.completion_status,
+      packet.thumbs_up
+    FROM cnc_telegram_packets packet
+    JOIN LATERAL (
+      SELECT string_agg(part.item_signature, ',' ORDER BY part.item_signature) AS item_signature
+      FROM (
+        SELECT
+          lower(trim(COALESCE(item.order_name, ''))) || ':' ||
+            COALESCE(item.detail_number::text, '') || ':' ||
+            COALESCE(trim(trailing '.' from trim(trailing '0' from item.width_mm::text)), '') || ':' ||
+            COALESCE(trim(trailing '.' from trim(trailing '0' from item.height_mm::text)), '') || ':' ||
+            item.quantity::text AS item_signature
+        FROM cnc_telegram_packet_items item
+        WHERE item.packet_id = packet.packet_id
+      ) part
+    ) packet_items ON TRUE
+    WHERE packet.external_packet_key <> $1
+      AND packet.source_chat_id = $2
+      AND packet.workday = $3::date
+      AND regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\\.[^.]+$', '') = $4
+      AND lower(trim(COALESCE(packet.material_name, 'МДФ 16мм'))) = lower(trim($5))
+      AND packet.cut_layout_json = $6::jsonb
+      AND packet.cut_layout_json->>'status' = 'valid'
+      AND packet.svg_cut_import_status = 'imported'
+      AND packet.svg_cut_job_id IS NOT NULL
+      AND packet.cutting_sequence_no IS NOT NULL
+      AND packet_items.item_signature = $9
+      AND (
+        packet.sheet_image_storage_key = $7
+        OR packet.sheet_image_storage_key IS NULL
+      )
+    ORDER BY
+      CASE WHEN packet.sheet_image_storage_key = $7 THEN 0 ELSE 1 END,
+      CASE
+        WHEN $8::timestamptz IS NOT NULL
+         AND ABS(EXTRACT(EPOCH FROM (
+           COALESCE(packet.source_created_at, packet.source_updated_at, packet.created_at) - $8::timestamptz
+         ))) <= 600
+        THEN 0 ELSE 1
+      END,
+      CASE
+        WHEN $8::timestamptz IS NULL THEN NULL
+        ELSE ABS(EXTRACT(EPOCH FROM (
+          COALESCE(packet.source_created_at, packet.source_updated_at, packet.created_at) - $8::timestamptz
+        )))
+      END ASC NULLS LAST,
+      packet.cutting_sequence_no ASC,
+      packet.source_created_at ASC NULLS LAST,
+      packet.packet_id ASC
+    LIMIT 1
+    FOR UPDATE
+    `,
+    [
+      dto.externalPacketKey,
+      dto.source.chatId,
+      dto.workday,
+      programBaseName,
+      materialName,
+      JSON.stringify(layout),
+      sheetImageStorageKey,
+      sourceInstant,
+      itemSignature,
+    ],
+  );
+  return replay.rows[0] ?? null;
+}
+
+function telegramProgramBaseName(programName: string | null | undefined): string | null {
+  const normalized = normalizeOptional(programName)?.toLowerCase();
+  if (!normalized) return null;
+  return normalized.replace(/\.[^.]+$/, '');
+}
+
+function telegramPacketItemSignature(dto: CncTelegramStructuredIngestDto): string | null {
+  const parts = dto.items.map((item) => [
+    normalizeOptional(item.orderName)?.toLowerCase() ?? '',
+    item.detailNumber == null ? '' : String(item.detailNumber),
+    item.widthMm == null ? '' : compactNumber(item.widthMm),
+    item.heightMm == null ? '' : compactNumber(item.heightMm),
+    String(item.quantity),
+  ].join(':'));
+  if (parts.length === 0) return null;
+  return parts.sort().join(',');
+}
+
+function compactNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(value).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function withPacketReplaySourceVersion(
+  command: IngestCncTelegramPacketCommand,
+  sourceVersion: number,
+  replay: PacketReplayRow,
+): IngestCncTelegramPacketCommand {
+  const cuttingSequenceNo = toPositiveInteger(replay.cutting_sequence_no);
+  return {
+    ...command,
+    dto: {
+      ...command.dto,
+      cuttingSequenceNo: cuttingSequenceNo ?? command.dto.cuttingSequenceNo,
+      source: {
+        ...command.dto.source,
+        version: sourceVersion,
+      },
+    },
+  };
+}
+
 async function insertPacket(
   tx: TransactionClient,
   command: IngestCncTelegramPacketCommand,
@@ -1061,6 +1261,7 @@ async function ensureCuttingSequenceNo(
 }
 
 function packetNeedsCuttingSequence(dto: CncTelegramStructuredIngestDto): boolean {
+  if (dto.cutLayout?.status === 'valid') return true;
   return (dto.completionStatus ?? (dto.thumbsUp ? 'completed' : 'pending')) === 'pending';
 }
 
@@ -1136,8 +1337,9 @@ async function syncSvgCutImport(
     svg_cut_job_id: string | number | null;
     svg_cut_result_id: string | number | null;
     svg_cut_import_status: 'none' | 'skipped' | 'needs_review' | 'imported' | null;
+    cutting_sequence_no: string | number | null;
   }>(
-    `SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status
+    `SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no
      FROM cnc_telegram_packets
      WHERE packet_id = $1::uuid
      FOR UPDATE`,
@@ -1146,6 +1348,7 @@ async function syncSvgCutImport(
   const row = state.rows[0];
   if (!row) return;
   if (row.svg_cut_import_status === 'imported' && row.svg_cut_job_id !== null && row.svg_cut_result_id !== null) {
+    await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, row.cutting_sequence_no);
     return;
   }
 
@@ -1165,8 +1368,54 @@ async function syncSvgCutImport(
     return;
   }
 
-  const imported = await createSvgCutJob(tx, packetId, dto, layout, plan, actorUserId);
+  const cuttingSequenceNo = toPositiveInteger(row.cutting_sequence_no);
+  if (cuttingSequenceNo === null) {
+    await setSvgCutImportState(tx, packetId, 'needs_review', 'SVG Telegram packet has no cutting sequence number', null, null);
+    return;
+  }
+
+  const imported = await createSvgCutJob(tx, packetId, dto, layout, plan, cuttingSequenceNo, actorUserId);
   await setSvgCutImportState(tx, packetId, 'imported', 'SVG layout imported into cut job', imported.cutJobId, imported.cutResultId);
+}
+
+async function syncSvgCutJobSourceDisplayNumber(
+  tx: TransactionClient,
+  cutJobId: string | number | null,
+  cuttingSequenceNo: string | number | null,
+): Promise<void> {
+  const displayNumber = sourceDisplayNumberFromCuttingSequence(cuttingSequenceNo);
+  if (cutJobId === null || displayNumber === null) return;
+  await tx.query(
+    `UPDATE cut_job
+     SET source_display_number = $2,
+         updated_at = now()
+     WHERE cut_job_id = $1
+       AND source_display_number IS DISTINCT FROM $2`,
+    [toNumber(cutJobId), displayNumber],
+  );
+}
+
+async function syncExistingSvgCutJobSourceDisplayNumber(
+  tx: TransactionClient,
+  packetId: string,
+): Promise<void> {
+  const result = await tx.query<{
+    svg_cut_job_id: string | number | null;
+    cutting_sequence_no: string | number | null;
+  }>(
+    `SELECT svg_cut_job_id, cutting_sequence_no
+     FROM cnc_telegram_packets
+     WHERE packet_id = $1::uuid`,
+    [packetId],
+  );
+  const row = result.rows[0];
+  if (!row) return;
+  await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, row.cutting_sequence_no);
+}
+
+function sourceDisplayNumberFromCuttingSequence(value: string | number | null): string | null {
+  const cuttingSequenceNo = toPositiveInteger(value);
+  return cuttingSequenceNo === null ? null : String(cuttingSequenceNo);
 }
 
 async function setSvgCutImportState(
@@ -1430,13 +1679,16 @@ async function createSvgCutJob(
   dto: CncTelegramStructuredIngestDto,
   layout: CncTelegramCutLayoutDto,
   plan: Extract<SvgCutImportPlan, { ok: true }>,
+  cuttingSequenceNo: number,
   actorUserId: string,
 ): Promise<{ cutJobId: number; cutResultId: number }> {
   const params = SVG_REVERSE_IMPORT_PARAMS;
+  const sourceDisplayNumber = String(cuttingSequenceNo);
   const selectionCriteria = {
     source: 'cnc_telegram_svg',
     externalPacketKey: dto.externalPacketKey,
     packetId,
+    cuttingSequenceNo,
     sourceVersion: dto.source.version,
     programName: dto.programName ?? null,
     machine: dto.machine ?? null,
@@ -1455,6 +1707,7 @@ async function createSvgCutJob(
     packetId,
     externalPacketKey: dto.externalPacketKey,
     sourceVersion: dto.source.version,
+    cuttingSequenceNo,
     requestHash,
   });
   const job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
@@ -1462,12 +1715,12 @@ async function createSvgCutJob(
     INSERT INTO cut_job (
       name, status, source, selection_criteria, params, request_hash,
       pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
-      sheet_material_type_id, combine_films, split_by_material
+      sheet_material_type_id, combine_films, split_by_material, source_display_number
     )
     VALUES (
       $1, 'ready', 'api', $2::jsonb, $3::jsonb, $4,
       'pending', $5, 1, $3::jsonb, $6,
-      $7, false, true
+      $7, false, true, $8
     )
     RETURNING cut_job_id, created_at
     `,
@@ -1479,6 +1732,7 @@ async function createSvgCutJob(
       toNullableNumber(actorUserId),
       requestHash,
       plan.sheetMaterialTypeId,
+      sourceDisplayNumber,
     ],
   );
   const cutJobId = toNumber(job.rows[0].cut_job_id);
@@ -1536,6 +1790,7 @@ async function createSvgCutJob(
   const totals = buildSvgCutTotals(plan);
   const snapshot: CutJobDto = {
     cutJobId,
+    displayNumber: formatCutJobNumber(cutJobId, false, sourceDisplayNumber),
     createdAt: cutJobCreatedAt,
     name: jobName,
     status: 'ready',
@@ -2348,6 +2603,156 @@ function packetOutboxPayload(
 
 function packetIsCompleted(packet: CncTelegramPacketDto): boolean {
   return packet.completionStatus === 'completed' || packet.thumbsUp;
+}
+
+async function evaluateMdfBoardBathColumnAutomationForPacket(
+  tx: TransactionClient,
+  input: {
+    packet: CncTelegramPacketDto;
+    actor: CurrentUser;
+    requestId: string;
+  },
+): Promise<void> {
+  const cutResultId = input.packet.svgCutResultId;
+  if (!isPositiveNumber(cutResultId)) return;
+  const state = await loadMdfBathColumnAutomationState(tx, cutResultId);
+  if (state === null) return;
+  const eventType = mdfBoardBathColumnEventType(state.column);
+  await evaluateMdfBoardColumnAutomation(tx, {
+    eventType,
+    orderIds: state.orderIds,
+    actor: input.actor,
+    requestId: input.requestId,
+    sourceIdempotencyKey: `mdf-board:auto:bath:cut-result-${cutResultId}:${state.column}`,
+  });
+}
+
+function mdfBoardBathColumnEventType(
+  column: 'baths' | 'baths_ready' | 'baths_laminated',
+): MdfBoardColumnAutomationInput['eventType'] {
+  switch (column) {
+    case 'baths':
+      return 'mdf.board.baths';
+    case 'baths_ready':
+      return 'mdf.board.baths_ready';
+    case 'baths_laminated':
+      return 'mdf.board.baths_laminated';
+  }
+}
+
+async function loadMdfBathColumnAutomationState(
+  tx: TransactionClient,
+  cutResultId: number,
+): Promise<{ column: 'baths' | 'baths_ready' | 'baths_laminated'; orderIds: number[] } | null> {
+  const result = await tx.query<BathColumnAutomationRow>(
+    `
+    WITH laminated_status_threshold AS (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'laminated'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'закатан'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ),
+    target_details AS (
+      SELECT DISTINCT
+        placement.order_id,
+        placement.order_detail_id
+      FROM cut_result_placement placement
+      JOIN cut_result result
+        ON result.cut_result_id = placement.cut_result_id
+      JOIN cut_job job
+        ON job.cut_job_id = result.cut_job_id
+      LEFT JOIN cut_param_profiles profile
+        ON profile.cut_param_profile_id = job.param_profile_id
+      LEFT JOIN cut_result_archive_state archive
+        ON archive.cut_job_id = result.cut_job_id
+       AND archive.result_no = result.result_no
+      JOIN orders order_row
+        ON order_row.order_id = placement.order_id
+       AND COALESCE(order_row.delete_flag, false) = false
+      JOIN order_details detail
+        ON detail.detail_id = placement.order_detail_id
+       AND COALESCE(detail.delete_flag, false) = false
+      WHERE placement.cut_result_id = $1
+        AND result.snapshot_job IS NOT NULL
+        AND job.status <> 'archived'
+        AND COALESCE(profile.params ->> 'layout_mode', job.params ->> 'layout_mode') = 'vacuum_table'
+        AND archive.archived_at IS NULL
+    ),
+    completed_quantities AS (
+      SELECT
+        item.match_detail_id::bigint AS order_detail_id,
+        SUM(
+          CASE
+            WHEN NOT EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements_text(packet.comments_json) AS packet_comment(comment_text)
+              WHERE lower(packet_comment.comment_text) LIKE ANY (
+                ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+              )
+            )
+              AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
+              THEN GREATEST(item.quantity, 0)
+            ELSE 0
+          END
+        )::integer AS completed_quantity
+      FROM cnc_telegram_packets packet
+      JOIN cnc_telegram_packet_items item
+        ON item.packet_id = packet.packet_id
+      JOIN target_details target
+        ON target.order_detail_id = item.match_detail_id
+      WHERE item.match_status = 'matched'
+        AND item.match_detail_id IS NOT NULL
+      GROUP BY item.match_detail_id
+    )
+    SELECT
+      placement.order_id,
+      placement.order_detail_id,
+      COUNT(*)::integer AS quantity,
+      COALESCE(completed.completed_quantity, 0)::integer AS completed_quantity,
+      CASE
+        WHEN detail_status.sort_order IS NOT NULL
+          AND laminated_status.sort_order IS NOT NULL
+          THEN detail_status.sort_order >= laminated_status.sort_order
+        ELSE false
+      END AS laminated_or_later
+    FROM cut_result_placement placement
+    JOIN target_details target
+      ON target.order_id = placement.order_id
+     AND target.order_detail_id = placement.order_detail_id
+    JOIN order_details detail
+      ON detail.detail_id = placement.order_detail_id
+     AND COALESCE(detail.delete_flag, false) = false
+    LEFT JOIN production_statuses detail_status
+      ON detail_status.production_status_id = detail.production_status_id
+    CROSS JOIN laminated_status_threshold laminated_status
+    LEFT JOIN completed_quantities completed
+      ON completed.order_detail_id = placement.order_detail_id
+    WHERE placement.cut_result_id = $1
+    GROUP BY
+      placement.order_id,
+      placement.order_detail_id,
+      completed.completed_quantity,
+      detail_status.sort_order,
+      laminated_status.sort_order
+    ORDER BY placement.order_id, placement.order_detail_id
+    `,
+    [cutResultId],
+  );
+  if (result.rows.length === 0) return null;
+
+  const orderIds = positiveNumberArray(result.rows.map((row) => row.order_id));
+  if (orderIds.length === 0) return null;
+  const ready = result.rows.every((row) => toNumber(row.completed_quantity) >= toNumber(row.quantity));
+  const laminated = ready && result.rows.every((row) => row.laminated_or_later === true);
+  return {
+    column: laminated ? 'baths_laminated' : ready ? 'baths_ready' : 'baths',
+    orderIds,
+  };
 }
 
 async function applyCompletedPacketAutoCutStatus(
@@ -3250,6 +3655,17 @@ async function loadBathCards(
       ) AS sort_order
       FROM production_statuses ps
     ),
+    packed_status_threshold AS (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'packed'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'упакован'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ),
     packet_items AS (
       SELECT
         p.completion_status,
@@ -3471,6 +3887,12 @@ async function loadBathCards(
           THEN detail_status.sort_order >= laminated_status.sort_order
         ELSE false
       END AS laminated_or_later,
+      CASE
+        WHEN detail_status.sort_order IS NOT NULL
+          AND packed_status.sort_order IS NOT NULL
+          THEN detail_status.sort_order >= packed_status.sort_order
+        ELSE false
+      END AS packed_or_later,
       sheet.cut_group_id,
       sheet.variant,
       sheet.sheet_index,
@@ -3492,6 +3914,7 @@ async function loadBathCards(
     LEFT JOIN production_statuses detail_status
       ON detail_status.production_status_id = od.production_status_id
     CROSS JOIN laminated_status_threshold laminated_status
+    CROSS JOIN packed_status_threshold packed_status
     LEFT JOIN target_details target
       ON target.order_id = placement.order_id
      AND target.detail_id = placement.order_detail_id
@@ -3518,9 +3941,11 @@ function buildTodayColumns(
     { key: 'parsed', title: 'Файлы на станке' },
     { key: 'completed', title: 'Выполнено' },
   ];
+  const activeBazisCutSets = bazisCutSets.filter((set) => !allItemsPackedOrLater(set.items));
+  const completedBazisCutSets = bazisCutSets.filter((set) => allItemsPackedOrLater(set.items));
   const packetColumns = definitions.map((definition) => {
     const columnPackets = packets.filter((packet) => packetColumnKey(packet) === definition.key);
-    const columnBazisCutSets = definition.key === 'parsed' ? bazisCutSets : [];
+    const columnBazisCutSets = definition.key === 'parsed' ? activeBazisCutSets : [];
     return {
       ...definition,
       total: columnPackets.length + columnBazisCutSets.length,
@@ -3530,9 +3955,15 @@ function buildTodayColumns(
     };
   });
 
-  const pendingBaths = baths.filter((bath) => !bath.ready);
-  const readyBaths = baths.filter((bath) => bath.ready && !allItemsLaminatedOrLater(bath.items));
-  const laminatedBaths = baths.filter((bath) => bath.ready && allItemsLaminatedOrLater(bath.items));
+  const completedBaths = baths.filter((bath) => allItemsPackedOrLater(bath.items));
+  const activeBaths = baths.filter((bath) => !allItemsPackedOrLater(bath.items));
+  const pendingBaths = activeBaths.filter((bath) => !bath.ready);
+  const readyBaths = activeBaths.filter((bath) =>
+    bath.ready && !allItemsLaminatedOrLater(bath.items),
+  );
+  const laminatedBaths = baths.filter((bath) =>
+    bath.ready && allItemsLaminatedOrLater(bath.items) && !allItemsPackedOrLater(bath.items),
+  );
   const laminatedPackets = packets.filter(
     (packet) => packetColumnKey(packet) === 'completed_laminated',
   );
@@ -3557,10 +3988,10 @@ function buildTodayColumns(
     {
       key: 'completed_laminated',
       title: 'Распиленные файлы',
-      total: laminatedPackets.length,
+      total: laminatedPackets.length + completedBazisCutSets.length,
       packets: laminatedPackets,
       baths: [],
-      bazisCutSets: [],
+      bazisCutSets: completedBazisCutSets,
     },
     {
       key: 'baths_laminated',
@@ -3568,6 +3999,14 @@ function buildTodayColumns(
       total: laminatedBaths.length,
       packets: [],
       baths: laminatedBaths,
+      bazisCutSets: [],
+    },
+    {
+      key: 'completed_baths',
+      title: 'Завершенные ванны',
+      total: completedBaths.length,
+      packets: [],
+      baths: completedBaths,
       bazisCutSets: [],
     },
   ];
@@ -3580,7 +4019,29 @@ async function loadPeriodBazisCutSetCards(
 ): Promise<CncTelegramBazisCutSetCardDto[]> {
   const result = await database.query<BazisCutSetJoinedRow>(
     `
-    WITH target_bazis_cut_sets AS (
+    WITH packed_status_threshold AS (
+      SELECT COALESCE(
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(ps.production_status_code, ''))) = 'packed'
+        ),
+        MIN(ps.sort_order) FILTER (
+          WHERE lower(trim(ps.production_status_name)) = 'упакован'
+        )
+      ) AS sort_order
+      FROM production_statuses ps
+    ),
+    issued_status_threshold AS (
+      SELECT COALESCE(
+        MIN(os.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(os.order_status_code, ''))) = 'issued'
+        ),
+        MIN(os.sort_order) FILTER (
+          WHERE lower(trim(os.order_status_name)) = 'выдан'
+        )
+      ) AS sort_order
+      FROM order_statuses os
+    ),
+    target_bazis_cut_sets AS (
       SELECT cut_set.bazis_cut_set_id
       FROM bazis_cut_sets cut_set
       WHERE cut_set.created_at >= $1::date
@@ -3589,6 +4050,7 @@ async function loadPeriodBazisCutSetCards(
     SELECT
       cut_set.bazis_cut_set_id,
       cut_set.name,
+      cut_set.created_at,
       detail.sort_order,
       detail.source_order_detail_id,
       COALESCE(detail.source_order_id, source_detail.order_id) AS source_order_id,
@@ -3602,7 +4064,21 @@ async function loadPeriodBazisCutSetCards(
       COALESCE(source_detail.width, detail.finished_width_mm) AS width_mm,
       COALESCE(source_detail.height, detail.finished_length_mm) AS height_mm,
       detail.material_name,
-      detail.quantity
+      detail.quantity,
+      CASE
+        WHEN (
+          detail_status.sort_order IS NOT NULL
+          AND packed_status.sort_order IS NOT NULL
+          AND detail_status.sort_order >= packed_status.sort_order
+        ) THEN true
+        WHEN (
+          source_order_status.sort_order IS NOT NULL
+          AND issued_status.sort_order IS NOT NULL
+          AND source_order_status.sort_order >= issued_status.sort_order
+        ) THEN true
+        WHEN issued_order_move.move_id IS NOT NULL THEN true
+        ELSE false
+      END AS packed_or_later
     FROM target_bazis_cut_sets target
     JOIN bazis_cut_sets cut_set
       ON cut_set.bazis_cut_set_id = target.bazis_cut_set_id
@@ -3612,6 +4088,16 @@ async function loadPeriodBazisCutSetCards(
       ON source_detail.detail_id = detail.source_order_detail_id
     LEFT JOIN orders source_order
       ON source_order.order_id = COALESCE(detail.source_order_id, source_detail.order_id)
+    LEFT JOIN order_statuses source_order_status
+      ON source_order_status.order_status_id = source_order.order_status_id
+    LEFT JOIN production_statuses detail_status
+      ON detail_status.production_status_id = source_detail.production_status_id
+    LEFT JOIN mdf_board_manual_moves issued_order_move
+      ON issued_order_move.card_kind = 'order'
+      AND issued_order_move.card_id = source_order.order_id::text
+      AND issued_order_move.target_column = 'orders_issued'
+    CROSS JOIN packed_status_threshold packed_status
+    CROSS JOIN issued_status_threshold issued_status
     ORDER BY cut_set.created_at DESC, cut_set.bazis_cut_set_id DESC,
       detail.sort_order, detail.bazis_cut_set_detail_id
     `,
@@ -3637,6 +4123,7 @@ function mapBazisCutSetRows(
         card: {
           bazisCutSetId,
           name: normalizeOptional(row.name) ?? `БР-${bazisCutSetId}`,
+          createdAt: toIso(row.created_at),
           orderCount: 0,
           positionCount: 0,
           itemQuantityTotal: 0,
@@ -3660,6 +4147,7 @@ function mapBazisCutSetRows(
       heightMm: toNullableNumber(row.height_mm),
       materialName: normalizeOptional(row.material_name) ?? 'Не определён',
       quantity,
+      packedOrLater: row.packed_or_later === true,
     };
     accumulator.card.items.push(item);
     accumulator.card.positionCount += 1;
@@ -3677,6 +4165,12 @@ function allItemsLaminatedOrLater(
   items: ReadonlyArray<{ laminatedOrLater: boolean }>,
 ): boolean {
   return items.length > 0 && items.every((item) => item.laminatedOrLater);
+}
+
+function allItemsPackedOrLater(
+  items: ReadonlyArray<{ packedOrLater: boolean }>,
+): boolean {
+  return items.length > 0 && items.every((item) => item.packedOrLater);
 }
 
 function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
@@ -3753,6 +4247,7 @@ function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
         completedQuantity: Math.max(0, toNumber(row.completed_quantity)),
         ready: false,
         laminatedOrLater: row.laminated_or_later === true,
+        packedOrLater: row.packed_or_later === true,
       };
       accumulator.itemsByKey.set(itemKey, item);
       accumulator.orderIds.add(orderId);
@@ -4169,6 +4664,6 @@ function toDateOnly(value: string | Date): string {
   return value instanceof Date ? value.toISOString().slice(0, 10) : value.slice(0, 10);
 }
 
-function isPositiveNumber(value: number | null): value is number {
+function isPositiveNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }

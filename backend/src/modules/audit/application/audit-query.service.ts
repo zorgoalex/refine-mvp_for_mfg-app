@@ -1,7 +1,17 @@
 import { ApiError } from '../../../common/errors/api-error';
 import { PermissionsService } from '../../../permissions/permissions.service';
-import type { AuditFilterOptionsResponseDto, AuditLogListResponseDto } from '../dto/audit.dto';
-import type { AuditFilterOptionsCommand, AuditLogRepositoryPort, ListAuditCommand } from './audit-query.types';
+import type {
+  AuditFilterOptionsResponseDto,
+  AuditLogListResponseDto,
+  AuditOrderFilterOptionsResponseDto,
+  AuditParticipantFilterOptionsResponseDto,
+} from '../dto/audit.dto';
+import type {
+  AuditFilterOptionsCommand,
+  AuditLogRepositoryPort,
+  AuditLookupOptionsCommand,
+  ListAuditCommand,
+} from './audit-query.types';
 
 export interface AuditQueryServicePorts {
   repository: AuditLogRepositoryPort;
@@ -22,6 +32,16 @@ export class AuditQueryService {
   async filterOptions(command: AuditFilterOptionsCommand): Promise<AuditFilterOptionsResponseDto> {
     this.assertCanViewAudit(command.currentUser);
     return this.ports.repository.filterOptions(command);
+  }
+
+  async orderOptions(command: AuditLookupOptionsCommand): Promise<AuditOrderFilterOptionsResponseDto> {
+    this.assertCanViewAudit(command.currentUser);
+    return this.ports.repository.orderOptions(command);
+  }
+
+  async participantOptions(command: AuditLookupOptionsCommand): Promise<AuditParticipantFilterOptionsResponseDto> {
+    this.assertCanViewAudit(command.currentUser);
+    return this.ports.repository.participantOptions(command);
   }
 
   private assertCanViewAudit(currentUser: ListAuditCommand['currentUser']): void {

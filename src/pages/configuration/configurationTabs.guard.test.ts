@@ -30,6 +30,13 @@ describe('configuration tabs layout', () => {
     expect(source).toContain('<ExportTemplatesConfigTab />');
   });
 
+  it('does not register journals inside the configuration screen', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+    expect(source).not.toContain("key: 'history-journal'");
+    expect(source).not.toContain('HistoryJournalTable');
+    expect(source).not.toContain('mode="business-history"');
+  });
+
   it('embeds the financial layer matrix in finance settings', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
     const matrixSource = fs.readFileSync(
@@ -87,6 +94,21 @@ describe('configuration tabs layout', () => {
     ]);
     expect(filterConfigurationTabItems(items, true, true)).toEqual(items);
     expect(filterConfigurationTabItems(items, false, false)).toEqual([]);
+  });
+
+  it('does not show configuration tabs to audit-only viewers', () => {
+    const items = [
+      { key: 'orders' },
+      { key: 'production' },
+      { key: 'finance' },
+    ];
+
+    expect(filterConfigurationTabItems(items, false, false)).toEqual([]);
+    expect(filterConfigurationTabItems(items, true, true)).toEqual([
+      { key: 'orders' },
+      { key: 'production' },
+      { key: 'finance' },
+    ]);
   });
 
   it('restores the last active configuration tab when it is still available', () => {

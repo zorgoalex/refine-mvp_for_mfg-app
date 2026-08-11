@@ -96,4 +96,14 @@ describe('order detail inline Tab navigation', () => {
 
     expect(onQuickAdd).not.toHaveBeenCalled();
   });
+
+  it('returns false when quick add rejects the new row after a successful save', async () => {
+    const result = await finishOrderDetailInlineTab({
+      saveCurrentRow: vi.fn().mockResolvedValue(true),
+      isLastRow: true,
+      onQuickAdd: vi.fn().mockResolvedValue(false),
+    });
+
+    expect(result).toBe(false);
+  });
 });

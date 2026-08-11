@@ -1,5 +1,6 @@
 import { auditService } from '../../../common/audit/audit.service';
 import type { TransactionClient } from '../../../database/database.types';
+import type { CurrentUser } from '../../../permissions/current-user';
 import {
   changeDetailsProductionStatusFromAutomationInTransaction,
   changeOrderStatusFromAutomationInTransaction,
@@ -19,6 +20,24 @@ import type {
   StatusAutomationEvent,
   StatusAutomationRule,
 } from './status-automation.types';
+
+export interface MdfOrderMachineFilesPresentAutomationInput {
+  orderIds: Iterable<number | null | undefined>;
+  actor: CurrentUser;
+  requestId: string;
+  sourceIdempotencyKey: string;
+}
+
+export interface MdfBoardColumnAutomationInput {
+  eventType: Extract<
+    StatusAutomationEvent['eventType'],
+    'mdf.board.completed' | 'mdf.board.baths' | 'mdf.board.baths_ready' | 'mdf.board.baths_laminated'
+  >;
+  orderIds: Iterable<number | null | undefined>;
+  actor: CurrentUser;
+  requestId: string;
+  sourceIdempotencyKey: string;
+}
 
 const MEANINGFUL_SKIP_REASONS = new Set([
   'same_status',
@@ -92,6 +111,52 @@ export async function evaluateStatusAutomation(
       await recordRuleSkipped(tx, event, rule, skippedRule.reason);
     }
   }
+}
+
+export async function evaluateMdfOrderMachineFilesPresentAutomation(
+  tx: TransactionClient,
+  input: MdfOrderMachineFilesPresentAutomationInput,
+): Promise<void> {
+  const orderIds = normalizeAutomationOrderIds(input.orderIds);
+  for (const orderId of orderIds) {
+    await evaluateStatusAutomation(tx, {
+      eventType: 'mdf.order_machine_files_present',
+      origin: 'user',
+      orderId,
+      actor: input.actor,
+      requestId: input.requestId,
+      sourceIdempotencyKey: `${input.sourceIdempotencyKey}:order-${orderId}`,
+    });
+  }
+}
+
+export async function evaluateMdfBoardColumnAutomation(
+  tx: TransactionClient,
+  input: MdfBoardColumnAutomationInput,
+): Promise<void> {
+  const orderIds = normalizeAutomationOrderIds(input.orderIds);
+  for (const orderId of orderIds) {
+    await evaluateStatusAutomation(tx, {
+      eventType: input.eventType,
+      origin: 'user',
+      orderId,
+      actor: input.actor,
+      requestId: input.requestId,
+      sourceIdempotencyKey: `${input.sourceIdempotencyKey}:order-${orderId}`,
+    });
+  }
+}
+
+function normalizeAutomationOrderIds(
+  values: Iterable<number | null | undefined>,
+): number[] {
+  const ids = new Set<number>();
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+      ids.add(value);
+    }
+  }
+  return Array.from(ids).sort((left, right) => left - right);
 }
 
 function buildOutboxIdempotencyKey(

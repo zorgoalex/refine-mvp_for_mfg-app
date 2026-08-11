@@ -18,6 +18,7 @@ const EVENT_GROUPS = [
   { key: 'order', label: 'Заказ' },
   { key: 'dates', label: 'Даты' },
   { key: 'statuses', label: 'Статусы' },
+  { key: 'production', label: 'Производство' },
   { key: 'payments', label: 'Оплаты' },
   { key: 'other', label: 'Другие' },
 ] as const;
@@ -28,6 +29,7 @@ const LEGACY_EVENT_GROUPS: Partial<Record<StatusAutomationEventType, Exclude<(ty
   'order.planned_completion_date_changed': 'dates',
   'order.status_changed': 'statuses',
   'order.production_status_changed': 'statuses',
+  'mdf.order_machine_files_present': 'production',
   'payment.created': 'payments',
   'order.payment_status_changed': 'payments',
 };

@@ -29,10 +29,17 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     );
     expect(config).toContain('DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES');
     expect(config).toContain('MdfBoardHiddenStatusesSetting');
+    expect(config).toContain('normalizeMdfBoardHiddenCardRules');
+    expect(config).toContain('MDF_BOARD_HIDDEN_CARD_KINDS');
     expect(config).toContain('title="МДФ-доска"');
     expect(config).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
     expect(config).toContain('productionStatusIds: nextProductionStatusIds');
     expect(config).toContain('orderStatusIds: nextOrderStatusIds');
+    expect(config).toContain('cardRules: nextCardRules');
+    expect(config).toContain('Файлы станка');
+    expect(config).toContain('Базис-раскрой');
+    expect(config).toContain('Карты ванн');
+    expect(config).toContain('Переносить, когда все заказы в статусах');
     expect(config).toContain('aria-label="Производственные статусы, скрывающие карточки с МДФ-доски"');
     expect(config).toContain('aria-label="Статусы заказа, скрывающие карточки с МДФ-доски"');
     expect(config).toContain('Обычные статусы заказа');

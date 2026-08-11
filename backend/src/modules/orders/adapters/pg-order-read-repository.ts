@@ -160,12 +160,14 @@ interface OrderDetailRow extends QueryResultRow {
   ref_key_1c: string | null;
   cut_job_id: string | number | null;
   cut_result_no: string | number | null;
+  cut_job_source_display_number: string | number | null;
   cut_job_name: string | null;
   cut_job_param_profile_id: string | number | null;
   cut_job_profile_name: string | null;
   cut_job_profile_is_active: boolean | null;
   bath_cut_job_id: string | number | null;
   bath_cut_result_no: string | number | null;
+  bath_cut_job_source_display_number: string | number | null;
   bath_cut_job_name: string | null;
   bath_cut_job_param_profile_id: string | number | null;
   bath_cut_job_profile_name: string | null;
@@ -510,8 +512,8 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
                 cpp.params->>'layout_mode',
                 cj.params->>'layout_mode'
               ) = 'vacuum_table'
-                THEN 'В-' || cj.cut_job_id::text || '-' || cr.result_no::text
-              ELSE cj.cut_job_id::text || '-' || cr.result_no::text
+                THEN 'В-' || COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) || '-' || cr.result_no::text
+              ELSE COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) || '-' || cr.result_no::text
             END AS cut_number,
             COALESCE(
               cj.last_calc_params->>'layout_mode',
@@ -739,6 +741,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       cut_candidates AS (
         SELECT cji.order_detail_id,
                cj.cut_job_id,
+               cj.source_display_number,
                cj.name,
                cr.result_no,
                cj.param_profile_id,
@@ -776,12 +779,14 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
              ${detailSheetName},
              regular.cut_job_id AS cut_job_id,
              regular.result_no AS cut_result_no,
+             regular.source_display_number AS cut_job_source_display_number,
              regular.name AS cut_job_name,
              regular.param_profile_id AS cut_job_param_profile_id,
              regular.profile_name AS cut_job_profile_name,
              regular.profile_is_active AS cut_job_profile_is_active,
              bath.cut_job_id AS bath_cut_job_id,
              bath.result_no AS bath_cut_result_no,
+             bath.source_display_number AS bath_cut_job_source_display_number,
              bath.name AS bath_cut_job_name,
              bath.param_profile_id AS bath_cut_job_param_profile_id,
              bath.profile_name AS bath_cut_job_profile_name,
@@ -1560,10 +1565,11 @@ function mapDetailCutJob(row: OrderDetailRow, kind: 'cut' | 'bath') {
   const resultNo = toNullableNumber(kind === 'cut' ? row.cut_result_no : row.bath_cut_result_no);
   if (cutJobId == null || resultNo == null) return null;
   const name = kind === 'cut' ? row.cut_job_name : row.bath_cut_job_name;
+  const sourceDisplayNumber = kind === 'cut' ? row.cut_job_source_display_number : row.bath_cut_job_source_display_number;
   return {
     cutJobId,
     resultNo,
-    cutNumber: formatCutNumber(cutJobId, resultNo, kind === 'bath'),
+    cutNumber: formatCutNumber(cutJobId, resultNo, kind === 'bath', sourceDisplayNumber),
     name: name ?? `Раскрой ${cutJobId}`,
     paramProfileId: toNullableNumber(kind === 'cut' ? row.cut_job_param_profile_id : row.bath_cut_job_param_profile_id),
     profileName: kind === 'cut' ? row.cut_job_profile_name : row.bath_cut_job_profile_name,

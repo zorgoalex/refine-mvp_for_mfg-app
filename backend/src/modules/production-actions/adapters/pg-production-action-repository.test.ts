@@ -9,13 +9,16 @@ import {
 } from './pg-production-action-repository';
 
 const evaluateStatusAutomationMock = vi.hoisted(() => vi.fn());
+const evaluateMdfBoardColumnAutomationMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../status-automation/application/status-automation-runtime', () => ({
   evaluateStatusAutomation: evaluateStatusAutomationMock,
+  evaluateMdfBoardColumnAutomation: evaluateMdfBoardColumnAutomationMock,
 }));
 
 beforeEach(() => {
   evaluateStatusAutomationMock.mockReset();
+  evaluateMdfBoardColumnAutomationMock.mockReset();
 });
 
 describe('PgProductionActionRepository', () => {
@@ -1732,6 +1735,43 @@ describe('assigned-worker audit metadata across production commands', () => {
       expect(payload.statusDistributionBasis).toBe('command-start-snapshot');
     });
 
+    it('emits MDF-board laminated automation when changed details complete vacuum bath cards', async () => {
+      const database = createDatabase({
+        detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
+        updatedDetailIds: [100],
+        mdfLaminatedBathRows: [
+          { cut_result_id: 501, order_id: 15 },
+          { cut_result_id: 501, order_id: 22 },
+          { cut_result_id: 502, order_id: 15 },
+        ],
+      });
+      const repository = new PgProductionActionRepository(database.service);
+
+      await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
+
+      const calls = evaluateMdfBoardColumnAutomationMock.mock.calls.map(([, input]) => ({
+        eventType: input.eventType,
+        orderIds: Array.from(input.orderIds as Iterable<number>),
+        requestId: input.requestId,
+        sourceIdempotencyKey: input.sourceIdempotencyKey,
+      }));
+      expect(calls).toEqual([
+        {
+          eventType: 'mdf.board.baths_laminated',
+          orderIds: [15, 22],
+          requestId: 'req-batch-1',
+          sourceIdempotencyKey: 'batch-key-1:mdf-board:bath:cut-result-501:baths_laminated',
+        },
+        {
+          eventType: 'mdf.board.baths_laminated',
+          orderIds: [15],
+          requestId: 'req-batch-1',
+          sourceIdempotencyKey: 'batch-key-1:mdf-board:bath:cut-result-502:baths_laminated',
+        },
+      ]);
+      expect(normalizedSql(database.queries)).toContain('candidate_vacuum_results');
+    });
+
     it('rejects a reused idempotency key with a different payload (same key, changed request)', async () => {
       const database = createDatabase({
         idempotencyExistingRequestHash: hashStable({
@@ -1835,6 +1875,7 @@ function createDatabase(options: {
   recalcOrderProductionStatusId?: number | null;
   assignedUserIds?: Array<number | string>;
   updatedDetailIds?: number[];
+  mdfLaminatedBathRows?: Array<{ cut_result_id: number | string; order_id: number | string }>;
   /** Suffix appended to the fake order status name — used to inject a token for redaction tests */
   orderStatusNameOverride?: string;
   orderStatusName?: string;
@@ -1952,6 +1993,14 @@ function createDatabase(options: {
 
       if (normalized.startsWith('SELECT recalc_order_production_status')) {
         return { rows: [], rowCount: 0 };
+      }
+
+      if (
+        normalized.startsWith('WITH laminated_status_threshold AS') &&
+        normalized.includes('candidate_vacuum_results')
+      ) {
+        const rows = options.mdfLaminatedBathRows ?? [];
+        return { rows, rowCount: rows.length };
       }
 
       if (normalized.startsWith('SELECT event_id FROM production_status_events WHERE detail_id')) {

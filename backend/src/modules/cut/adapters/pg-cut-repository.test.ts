@@ -47,7 +47,7 @@ describe('cut PDF sheet context fields', () => {
     expect(repositorySource).toContain('cutJobId: pdfIdentity.cutJobId');
     expect(repositorySource).toContain('cutNumber: pdfIdentity.cutNumber');
     expect(repositorySource).toContain('currentCutNumber: pdfIdentity.currentCutNumber');
-    expect(repositorySource).toContain('currentCutNumber: currentResultNo === null ? null : formatCutNumber(cutJobId, currentResultNo, currentIsVacuum)');
+    expect(repositorySource).toContain('currentCutNumber: currentResultNo === null ? null : formatCutNumber(cutJobId, currentResultNo, currentIsVacuum, row?.source_display_number)');
     expect(repositorySource).toContain('filmRequirementLinearMeters: showBathMeterGuides');
     expect(repositorySource).toContain('calculateBathSheetFilmUsage(s.placements)?.linearMeters');
     expect(repositorySource).toContain('bathDetailInfoFor:');
@@ -63,8 +63,8 @@ describe('cut PDF sheet context fields', () => {
 
 describe('cut job display numbering', () => {
   it('loads backend-authoritative display numbers for list and card views', () => {
-    expect(repositorySource).toContain('formatCutJobNumber(jobId, isVacuum)');
-    expect(repositorySource).toContain('displayNumber: formatCutJobNumber(jobId, isVacuum)');
+    expect(repositorySource).toContain('formatCutJobNumber(jobId, isVacuum, jobRow.source_display_number)');
+    expect(repositorySource).toContain('displayNumber: formatCutJobNumber(jobId, isVacuum, jobRow.source_display_number)');
     expect(repositorySource).toContain('cpp.params AS profile_params');
     expect(repositorySource).toContain("layout_mode === 'vacuum_table'");
   });

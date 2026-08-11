@@ -15,6 +15,13 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
   });
 
+  it('emits the MDF machine-files automation event from pending board cards', () => {
+    expect(repositorySource).toContain('evaluateMdfOrderMachineFilesPresentAutomation');
+    expect(repositorySource).toContain("packetColumnKey(packet) === 'parsed'");
+    expect(repositorySource).toContain('orderIds: packet.items.map((item) => item.orderId)');
+    expect(repositorySource).toContain('cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:machine-files');
+  });
+
   it('uses database current date for today when caller omits date', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const database = {
@@ -207,6 +214,7 @@ describe('PgCncTelegramRepository', () => {
       ['baths_ready', 'Готовы к закатке', 0],
       ['completed_laminated', 'Распиленные файлы', 0],
       ['baths_laminated', 'Закатаны/выданы', 0],
+      ['completed_baths', 'Завершенные ванны', 0],
     ]);
     expect(queries[0]).toContain('LEFT JOIN cut_result svg_result');
     expect(queries[0]).toContain('svg_result.result_no AS svg_cut_result_no');
@@ -531,6 +539,7 @@ describe('PgCncTelegramRepository', () => {
       ['baths_ready', 1],
       ['completed_laminated', 0],
       ['baths_laminated', 0],
+      ['completed_baths', 0],
     ]);
     expect(result.columns[2]?.baths[0]).toMatchObject({
       cutJobId: 31,
@@ -564,6 +573,7 @@ describe('PgCncTelegramRepository', () => {
               {
                 bazis_cut_set_id: 8,
                 name: 'Набор МДФ',
+                created_at: '2026-07-21T08:30:00.000Z',
                 sort_order: 0,
                 source_order_detail_id: 3101,
                 source_order_id: 2689,
@@ -574,10 +584,12 @@ describe('PgCncTelegramRepository', () => {
                 height_mm: 477,
                 material_name: 'МДФ 16 мм',
                 quantity: 2,
+                packed_or_later: false,
               },
               {
                 bazis_cut_set_id: 8,
                 name: 'Набор МДФ',
+                created_at: '2026-07-21T08:30:00.000Z',
                 sort_order: 1,
                 source_order_detail_id: 3201,
                 source_order_id: 2701,
@@ -588,10 +600,12 @@ describe('PgCncTelegramRepository', () => {
                 height_mm: 400,
                 material_name: 'ЛДСП 16 мм',
                 quantity: 3,
+                packed_or_later: false,
               },
               {
                 bazis_cut_set_id: 8,
                 name: 'Набор МДФ',
+                created_at: '2026-07-21T08:30:00.000Z',
                 sort_order: 2,
                 source_order_detail_id: 3301,
                 source_order_id: 2702,
@@ -602,6 +616,23 @@ describe('PgCncTelegramRepository', () => {
                 height_mm: 300,
                 material_name: null,
                 quantity: 4,
+                packed_or_later: false,
+              },
+              {
+                bazis_cut_set_id: 9,
+                name: 'Завершенный набор МДФ',
+                created_at: '2026-07-22T08:30:00.000Z',
+                sort_order: 0,
+                source_order_detail_id: 3401,
+                source_order_id: 2703,
+                source_order_name: '2703',
+                source_order_deleted: false,
+                detail_number: 43,
+                width_mm: 800,
+                height_mm: 300,
+                material_name: 'МДФ 16 мм',
+                quantity: 1,
+                packed_or_later: true,
               },
             ],
           };
@@ -618,17 +649,30 @@ describe('PgCncTelegramRepository', () => {
       workdayTo: '2026-07-24',
     });
     const parsed = result.columns.find((column) => column.key === 'parsed');
+    const terminalFiles = result.columns.find((column) => column.key === 'completed_laminated');
     const basisQuery = queries.find((query) => /target_bazis_cut_sets/i.test(query.text));
 
     expect(basisQuery?.params).toEqual(['2026-07-18', '2026-07-24']);
+    expect(basisQuery?.text).toContain('cut_set.created_at,');
+    expect(basisQuery?.text).toContain('packed_status_threshold');
+    expect(basisQuery?.text).toContain('issued_status_threshold');
+    expect(basisQuery?.text).toContain('LEFT JOIN order_statuses source_order_status');
+    expect(basisQuery?.text).toContain('LEFT JOIN mdf_board_manual_moves issued_order_move');
+    expect(basisQuery?.text).toContain("issued_order_move.target_column = 'orders_issued'");
+    expect(basisQuery?.text).toContain('source_order_status.sort_order >= issued_status.sort_order');
+    expect(basisQuery?.text).toContain('WHEN issued_order_move.move_id IS NOT NULL THEN true');
+    expect(basisQuery?.text).toContain('AS packed_or_later');
     expect(basisQuery?.text).toContain('cut_set.created_at >= $1::date');
     expect(basisQuery?.text).toContain("cut_set.created_at < ($2::date + INTERVAL '1 day')");
     expect(basisQuery?.text).not.toContain('detail.source_order_detail_id = ANY($1::bigint[])');
     expect(parsed?.total).toBe(1);
+    expect(terminalFiles?.total).toBe(1);
+    expect(terminalFiles?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([9]);
     expect(parsed?.bazisCutSets).toEqual([
       {
         bazisCutSetId: 8,
         name: 'Набор МДФ',
+        createdAt: '2026-07-21T08:30:00.000Z',
         orderCount: 3,
         positionCount: 3,
         itemQuantityTotal: 9,
@@ -643,6 +687,7 @@ describe('PgCncTelegramRepository', () => {
             heightMm: 477,
             materialName: 'МДФ 16 мм',
             quantity: 2,
+            packedOrLater: false,
           },
           {
             orderId: 2701,
@@ -654,6 +699,7 @@ describe('PgCncTelegramRepository', () => {
             heightMm: 400,
             materialName: 'ЛДСП 16 мм',
             quantity: 3,
+            packedOrLater: false,
           },
           {
             orderId: 2702,
@@ -665,13 +711,14 @@ describe('PgCncTelegramRepository', () => {
             heightMm: 300,
             materialName: 'Не определён',
             quantity: 4,
+            packedOrLater: false,
           },
         ],
       },
     ]);
   });
 
-  it('archives a ready bath only when every detail is laminated or later', async () => {
+  it('keeps a laminated ready bath visible until every detail is packed or later', async () => {
     const database = {
       query: vi.fn(async (text: string) => {
         if (/latest_vacuum_results/i.test(text)) {
@@ -697,6 +744,41 @@ describe('PgCncTelegramRepository', () => {
     expect(result.columns.find((column) => column.key === 'baths_ready')?.baths).toEqual([]);
     expect(result.columns.find((column) => column.key === 'baths_laminated')?.baths)
       .toMatchObject([{ cutJobId: 30, ready: true }]);
+    expect(result.columns.find((column) => column.key === 'completed_baths')?.baths).toEqual([]);
+  });
+
+  it('moves a bath to the completed bath terminal column when every detail is packed or later', async () => {
+    const database = {
+      query: vi.fn(async (text: string) => {
+        if (/latest_vacuum_results/i.test(text)) {
+          return {
+            rows: [
+              bathPlacementRow({
+                completed_quantity: 0,
+                laminated_or_later: true,
+                packed_or_later: true,
+              }),
+              bathPlacementRow({
+                order_detail_id: 3102,
+                detail_number: 32,
+                completed_quantity: 0,
+                laminated_or_later: true,
+                packed_or_later: true,
+              }),
+            ],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) return { rows: [] };
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+
+    expect(result.columns.find((column) => column.key === 'baths_laminated')?.baths).toEqual([]);
+    expect(result.columns.find((column) => column.key === 'completed_baths')?.baths)
+      .toMatchObject([{ cutJobId: 30, ready: false }]);
   });
 
   it('keeps sheet image metadata when updating a completed packet', async () => {
@@ -752,6 +834,105 @@ describe('PgCncTelegramRepository', () => {
     expect(update?.params[12]).toBe('tg_100_10.jpg');
     expect(update?.params[13]).toBe('image/jpeg');
     expect(update?.params[14]).toBe(12345);
+  });
+
+  it('merges a later Telegram SVG sheet image into the existing SVG cut packet', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/cnc_telegram_svg_packet_alias/i.test(text)) {
+          return {
+            rows: [{
+              packet_id: '00000000-0000-0000-0000-000000000061',
+              source_version: 1,
+              payload_hash: 'sha256:svg-only',
+              cutting_sequence_no: 61,
+              completion_status: 'completed',
+              thumbs_up: true,
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              packet_id: '00000000-0000-0000-0000-000000000061',
+              external_packet_key: 'telegram:-1001996415689:10947',
+              cutting_sequence_no: 61,
+              source_message_id: 10948,
+              source_version: 2,
+              program_name: 'CNC#2_2723-18MM.TXT',
+              material_name: 'МДФ 18мм',
+              sheet_image_storage_key: 'telegram/-1001996415689/10948.jpg',
+            })],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:repo:svg-image-alias',
+      externalPacketKey: 'telegram:-1001996415689:10948',
+      source: {
+        ...ingestDto().source,
+        chatId: '-1001996415689',
+        messageId: 10948,
+        createdAt: '2026-08-11T10:35:14.000Z',
+        updatedAt: '2026-08-11T10:37:26.000Z',
+      },
+      workday: '2026-08-11',
+      programName: 'CNC#2_2723-18MM.TXT',
+      materialName: 'МДФ 18мм',
+      sheetImage: {
+        storageKey: 'telegram/-1001996415689/10948.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 98765,
+      },
+      cutLayout: validCutLayout(),
+    };
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto,
+      requestId: 'request-cnc-svg-image-alias',
+    });
+
+    const sql = queries.map((query) => query.text).join('\n');
+    const packetInsert = queries.find((query) => /INSERT INTO cnc_telegram_packets/i.test(query.text));
+    const packetUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) && /source_chat_id = \$2/i.test(query.text),
+    );
+    const sequenceUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets[\s\S]*cutting_sequence_no = \$2::integer/i.test(query.text),
+    );
+
+    expect(sql).toContain('cnc_telegram_svg_packet_alias');
+    expect(packetInsert).toBeUndefined();
+    expect(packetUpdate?.params[0]).toBe('00000000-0000-0000-0000-000000000061');
+    expect(packetUpdate?.params[2]).toBe(10948);
+    expect(packetUpdate?.params[4]).toBe(2);
+    expect(packetUpdate?.params[12]).toBe('telegram/-1001996415689/10948.jpg');
+    expect(sequenceUpdate?.params).toEqual([
+      '00000000-0000-0000-0000-000000000061',
+      61,
+      42,
+    ]);
+    expect(result.applied).toBe(true);
+    expect(result.packet.cuttingSequenceNo).toBe(61);
   });
 
   it('assigns a cutting sequence number for pending machine packets after item replacement', async () => {
@@ -1568,8 +1749,8 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
           return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
         }
-        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status/i.test(text)) {
-          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none' }] };
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 12 }] };
         }
         if (/INSERT INTO cut_job\s*\(/i.test(text)) {
           return { rows: [{ cut_job_id: 700, created_at: '2026-07-24T08:00:00.000Z' }] };
@@ -1605,6 +1786,7 @@ describe('PgCncTelegramRepository', () => {
       dto: {
         ...ingestDto(),
         idempotencyKey: 'cnc:test:repo:svg-cut-ledger',
+        cuttingSequenceNo: 12,
         items: [
           {
             sourceItemKey: '2689:31:497x477',
@@ -1654,14 +1836,17 @@ describe('PgCncTelegramRepository', () => {
     const commandComplete = queries.find((query) => /UPDATE cut_result_command/i.test(query.text));
     const commandInsert = queries[commandInsertIndex];
     const resultInsert = queries[resultInsertIndex];
+    const jobInsert = queries.find((query) => /INSERT INTO cut_job\s*\(/i.test(query.text));
 
     expect(commandInsertIndex).toBeGreaterThan(-1);
     expect(resultInsertIndex).toBeGreaterThan(commandInsertIndex);
     expect(resultInsert?.text).toContain('command_id, command_payload_hash, request_hash');
+    expect(jobInsert?.text).toContain('source_display_number');
+    expect(jobInsert?.params[7]).toBe('12');
     expect(commandInsert?.params[1]).toMatch(/^[0-9a-f-]{36}$/i);
     expect(resultInsert?.params[1]).toBe(commandInsert?.params[1]);
     expect(resultInsert?.params[2]).toBe(commandInsert?.params[2]);
-    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({ unplaced: [] });
+    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({ displayNumber: '12', unplaced: [] });
     expect(commandComplete?.params).toEqual([700, commandInsert?.params[1], 704]);
   });
 
@@ -2262,6 +2447,30 @@ function payloadHashForTest(dto: ReturnType<typeof ingestDto> & { cuttingSequenc
   return `sha256:${createHash('sha256').update(stableStringifyForTest(payload)).digest('hex')}`;
 }
 
+function validCutLayout() {
+  return {
+    status: 'valid' as const,
+    reasons: [],
+    sheet: { widthMm: 2800, heightMm: 2070 },
+    items: [
+      {
+        orderName: '2723',
+        detailNumber: 1,
+        widthMm: 500,
+        heightMm: 350,
+        quantity: 1,
+        confidence: 1,
+        sourceElementId: 'part-2723-1',
+        xMm: 10,
+        yMm: 20,
+        placedWidthMm: 500,
+        placedHeightMm: 350,
+        rotated: false,
+      },
+    ],
+  };
+}
+
 function stableStringifyForTest(value: unknown): string {
   if (value === undefined) return '"__undefined__"';
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -2640,6 +2849,7 @@ function bathPlacementRow(overrides: Record<string, unknown> = {}) {
     height_mm: 477,
     completed_quantity: 2,
     laminated_or_later: false,
+    packed_or_later: false,
     cut_group_id: 100,
     variant: 'auto',
     sheet_index: 0,

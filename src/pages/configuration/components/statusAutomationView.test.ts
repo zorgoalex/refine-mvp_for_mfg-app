@@ -89,6 +89,11 @@ describe('statusAutomationView', () => {
           title: 'Изменился статус заказа',
           group: 'statuses',
         }),
+        eventDescriptor({
+          eventType: 'mdf.order_machine_files_present',
+          title: 'Файлы заказа на станке',
+          group: 'production',
+        }),
       ]),
     ).toEqual([
       { label: 'Заказ', options: [{ value: 'order.created', label: 'Заказ создан' }] },
@@ -104,6 +109,12 @@ describe('statusAutomationView', () => {
       {
         label: 'Статусы',
         options: [{ value: 'order.status_changed', label: 'Изменился статус заказа' }],
+      },
+      {
+        label: 'Производство',
+        options: [
+          { value: 'mdf.order_machine_files_present', label: 'Файлы заказа на станке' },
+        ],
       },
       { label: 'Оплаты', options: [{ value: 'payment.created', label: 'Платёж создан' }] },
     ]);

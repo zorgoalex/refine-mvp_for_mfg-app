@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -227,7 +227,6 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'idx_cnc_telegram_media_restore_packet_history',
     ]) expect(migration111Probe).toContain(marker);
   });
-
   it('pins migrations 112/113 cut-job orientation and 115 vacuum numbering end states', () => {
     const migration112Probe = probeFn.slice(
       probeFn.indexOf('112_cut_job_rotation_allowed*'),
@@ -265,7 +264,54 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "source_bath_cut_number ~ '^[0-9]+-[0-9]+$'",
     ]) expect(migration115Probe).toContain(marker);
 
-    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\)/);
+    const migration116Probe = probeFn.slice(
+      probeFn.indexOf('116_telegram_svg_cut_job_display_number*'),
+      probeFn.indexOf('117_dedupe_telegram_svg_image_packets*'),
+    );
+    for (const marker of [
+      'q_col cut_job source_display_number',
+      "LIKE 'Operator-facing cut job number from the source system;%'",
+      "packet.svg_cut_import_status = 'imported'",
+      "job.selection_criteria->>'source' = 'cnc_telegram_svg'",
+      'job.source_display_number IS DISTINCT FROM packet.cutting_sequence_no::text',
+    ]) expect(migration116Probe).toContain(marker);
+
+    const migration117DedupeProbe = probeFn.slice(
+      probeFn.indexOf('117_dedupe_telegram_svg_image_packets*'),
+      probeFn.indexOf('117_mdf_board_manual_moves*'),
+    );
+    for (const marker of [
+      'packet.cutting_sequence_no IS NOT NULL',
+      "regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\\.[^.]+$', '') AS program_key",
+      "duplicate.cut_layout_json = canonical.cut_layout_json",
+      'duplicate.detail_signature IS NOT DISTINCT FROM canonical.detail_signature',
+      'canonical.cutting_sequence_no < duplicate.cutting_sequence_no',
+    ]) expect(migration117DedupeProbe).toContain(marker);
+
+    const migration117ManualMovesProbe = probeFn.slice(
+      probeFn.indexOf('117_mdf_board_manual_moves*'),
+      probeFn.indexOf('118_mdf_board_completed_baths_terminal*'),
+    );
+    for (const marker of [
+      'q_tbl mdf_board_manual_moves',
+      'uq_mdf_board_manual_moves_card',
+      'chk_mdf_board_manual_moves_kind_target',
+      'idx_mdf_board_manual_moves_lookup',
+      "LIKE 'mdf-board-manual-moves-v1:%'",
+    ]) expect(migration117ManualMovesProbe).toContain(marker);
+
+    const migration118Probe = probeFn.slice(
+      probeFn.indexOf('118_mdf_board_completed_baths_terminal*'),
+      probeFn.indexOf('*) return 2'),
+    );
+    for (const marker of [
+      'q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_target_column',
+      'q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_kind_target',
+      'completed_baths',
+      "obj_description(oid, 'pg_constraint') LIKE 'mdf-board-manual-moves-v2:%'",
+    ]) expect(migration118Probe).toContain(marker);
+
+    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\)/);
   });
 });
 

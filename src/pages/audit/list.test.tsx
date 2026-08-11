@@ -2,6 +2,8 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import dayjs from 'dayjs';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { AuditLogEventDto } from '../../api/types/auditApi.types';
 import { buildAuditQuery, RelatedIds, ContextBlock, ReadableAuditEvent, isRowExpandable } from './list';
 
@@ -65,6 +67,64 @@ describe('buildAuditQuery', () => {
   it('omits empty/undefined values', () => {
     const q = buildAuditQuery({ role: '', relatedUserId: undefined }, 50);
     expect(q).toEqual({ page: 1, pageSize: 50 });
+  });
+
+  it('maps business-history multi-select filters and RangePicker period', () => {
+    const from = dayjs('2026-01-01T00:00:00.000Z');
+    const to = dayjs('2026-01-02T00:00:00.000Z');
+    const q = buildAuditQuery(
+      {
+        events: ['orders.update', 'payments.create'],
+        orderIds: [2678],
+        participantUserIds: [7, 8],
+        createdRange: [from, to],
+      },
+      50,
+      'business',
+    );
+    expect(q).toEqual({
+      page: 1,
+      pageSize: 50,
+      scope: 'business',
+      events: ['orders.update', 'payments.create'],
+      orderIds: [2678],
+      participantUserIds: [7, 8],
+      createdFrom: '2026-01-01T00:00:00.000Z',
+      createdTo: '2026-01-02T00:00:00.000Z',
+    });
+  });
+});
+
+describe('Journals source guards', () => {
+  it('keeps a single journals page with business history and technical audit tabs', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'list.tsx'), 'utf8');
+
+    expect(source).toContain("className=\"journals-top-tabs\"");
+    expect(source).toContain("label: 'История бизнеса'");
+    expect(source).toContain("label: 'Технический аудит'");
+    expect(source).toContain("className=\"technical-audit-tabs\"");
+    expect(source).toContain("label: 'Действия ERP'");
+    expect(source).toContain("label: 'Telegram-бот'");
+  });
+
+  it('keeps business history filters visible, scoped and multi-select based', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'list.tsx'), 'utf8');
+
+    expect(source).toContain("mode === 'business-history'");
+    expect(source).toContain("scope: 'business'");
+    expect(source).toContain('DatePicker.RangePicker');
+    expect(source).toContain('name="events"');
+    expect(source).toContain('name="orderIds"');
+    expect(source).toContain('name="participantUserIds"');
+    expect(source.match(/mode="multiple"/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not expose technical view controls in business history mode', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'list.tsx'), 'utf8');
+
+    expect(source).toContain('!businessHistoryMode && (');
+    expect(source).toContain("businessHistoryMode || viewMode === 'readable'");
+    expect(source).toContain("businessHistoryMode ? 'Нет записей истории бизнеса' : 'Нет записей аудита'");
   });
 });
 

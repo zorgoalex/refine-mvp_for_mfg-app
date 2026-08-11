@@ -19,10 +19,12 @@ import { PgOrderExporter } from './adapters/pg-order-exporter';
 import { PgOrderReadRepository } from './adapters/pg-order-read-repository';
 import { PgOrderResourceDemandRepository } from './adapters/pg-order-resource-demand-repository';
 import { PgOrderStatusBoardRepository } from './adapters/pg-order-status-board-repository';
+import { PgMdfBoardManualMoveRepository } from './adapters/pg-mdf-board-manual-move-repository';
 import { PgOrderSnapshot } from './adapters/pg-order-snapshot';
 import { PgOrderGroupLinkRepository, UnavailableOrderGroupLinkRepository } from './adapters/pg-order-group-link-repository';
 import { PgOrderTransactionManager } from './adapters/pg-order-transaction-manager';
 import { assertBazisPanelOrderLinkSchema } from './adapters/pg-bazis-panel-order-link-reconciler';
+import { UnavailableMdfBoardManualMoveRepository } from './adapters/unavailable-mdf-board-manual-move-repository';
 import { UnavailableOrderExporter } from './adapters/unavailable-order-exporter';
 import { UnavailableOrderReadRepository } from './adapters/unavailable-order-read-repository';
 import { UnavailableOrderStatusBoardRepository } from './adapters/unavailable-order-status-board-repository';
@@ -36,11 +38,13 @@ import { OrderQueryService } from './application/order-query.service';
 import { OrderRefreshService } from './application/order-refresh.service';
 import { OrderResourceDemandService } from './application/order-resource-demand.service';
 import { OrderStatusBoardService } from './application/order-status-board.service';
+import { MdfBoardManualMoveService } from './application/mdf-board-manual-move.service';
 import { RateLimitService } from '../../rate-limit/rate-limit.service';
 import { UnavailableOrderTransactionManager } from './adapters/unavailable-order-transaction-manager';
 import { SharedOrderExportRateLimiter } from './application/order-export-rate-limiter';
 import { OrderExportController } from './http/order-export.controller';
 import { OrderGroupLinksController } from './http/order-group-links.controller';
+import { MdfBoardManualMoveController } from './http/mdf-board-manual-move.controller';
 import { OrderResourceDemandController } from './http/order-resource-demand.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
@@ -65,6 +69,7 @@ export function shouldEnableOrderDeadlineSync(input: {
   imports: [DatabaseModule],
   controllers: [
     // Register static `/orders/*` routes before the generic `/orders/:orderId`.
+    MdfBoardManualMoveController,
     OrderStatusBoardController,
     OrderExportController,
     OrderSnapshotController,
@@ -187,6 +192,16 @@ export function shouldEnableOrderDeadlineSync(input: {
           boards: database.isConfigured
             ? new PgOrderStatusBoardRepository(database)
             : new UnavailableOrderStatusBoardRepository(),
+        }),
+      inject: [DatabaseService],
+    },
+    {
+      provide: MdfBoardManualMoveService,
+      useFactory: (database: DatabaseService) =>
+        new MdfBoardManualMoveService({
+          moves: database.isConfigured
+            ? new PgMdfBoardManualMoveRepository(database)
+            : new UnavailableMdfBoardManualMoveRepository(),
         }),
       inject: [DatabaseService],
     },

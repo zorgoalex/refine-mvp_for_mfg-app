@@ -122,6 +122,7 @@ export interface CncTelegramBathItemDto {
   completedQuantity: number;
   ready: boolean;
   laminatedOrLater: boolean;
+  packedOrLater: boolean;
 }
 
 export interface CncTelegramBathSheetDto {
@@ -162,11 +163,13 @@ export interface CncTelegramBazisCutSetItemDto {
   heightMm: number | null;
   materialName: string;
   quantity: number;
+  packedOrLater: boolean;
 }
 
 export interface CncTelegramBazisCutSetCardDto {
   bazisCutSetId: number;
   name: string;
+  createdAt: string;
   orderCount: number;
   positionCount: number;
   itemQuantityTotal: number;
@@ -180,7 +183,8 @@ export interface CncTelegramTodayColumnDto {
     | 'baths'
     | 'baths_ready'
     | 'completed_laminated'
-    | 'baths_laminated';
+    | 'baths_laminated'
+    | 'completed_baths';
   title: string;
   total: number;
   packets: CncTelegramPacketDto[];

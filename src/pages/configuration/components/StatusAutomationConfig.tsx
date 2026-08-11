@@ -34,7 +34,11 @@ import { SETTING_KEYS, useAppSettings } from '../../../hooks/useAppSettings';
 import { can } from '../../../utils/permissions';
 import {
   DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES,
+  MDF_BOARD_HIDDEN_CARD_KINDS,
+  normalizeMdfBoardHiddenCardRules,
   resolveDefaultMdfBoardHiddenOrderStatusIds,
+  type MdfBoardHiddenCardKind,
+  type MdfBoardHiddenCardRule,
   type MdfBoardHiddenStatusesSetting,
 } from '../../orderStatusBoard/model';
 import { DeadlineTransitionRulesConfig } from './DeadlineTransitionRulesConfig';
@@ -72,6 +76,13 @@ interface ProductionStatusRow {
   is_active?: boolean;
 }
 
+interface MdfBoardHiddenCardRuleRow {
+  cardKind: MdfBoardHiddenCardKind;
+  title: string;
+  target: string;
+  orderStatusIds: number[];
+}
+
 type EditorMode =
   | { kind: 'closed' }
   | { kind: 'create' }
@@ -88,6 +99,15 @@ const SOURCE_OPTIONS: Array<{ value: StatusAutomationOrderSource; label: string 
   { value: 'bazis', label: 'Базис' },
   { value: 'import', label: 'Импорт' },
 ];
+
+const MDF_BOARD_CARD_RULE_LABELS: Record<
+  MdfBoardHiddenCardKind,
+  { title: string; target: string }
+> = {
+  packet: { title: 'Файлы станка', target: 'Распиленные файлы' },
+  bazisCutSet: { title: 'Базис-раскрой', target: 'Распиленные файлы' },
+  bath: { title: 'Карты ванн', target: 'Завершённые ванны' },
+};
 
 const ALL_STATUS_FILTER = [{ field: 'is_active', operator: 'in' as const, value: [true, false] }];
 
@@ -155,6 +175,16 @@ function statusIdsEqual(left: readonly number[], right: readonly number[]): bool
   return left.every((value, index) => value === right[index]);
 }
 
+function cardRulesEqual(
+  left: readonly MdfBoardHiddenCardRule[],
+  right: readonly MdfBoardHiddenCardRule[],
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((rule, index) =>
+    rule.cardKind === right[index]?.cardKind
+    && statusIdsEqual(rule.orderStatusIds, right[index]?.orderStatusIds ?? []));
+}
+
 export function StatusAutomationConfig() {
   const canView = !featureFlags.useBackendPermissions || can('status_automation.view');
   const canManage = !featureFlags.useBackendPermissions || can('status_automation.manage');
@@ -174,6 +204,8 @@ export function StatusAutomationConfig() {
   const [mdfBoardHiddenProductionStatusIds, setMdfBoardHiddenProductionStatusIds] =
     useState<number[]>([]);
   const [mdfBoardHiddenOrderStatusIds, setMdfBoardHiddenOrderStatusIds] = useState<number[]>([]);
+  const [mdfBoardHiddenCardRules, setMdfBoardHiddenCardRules] =
+    useState<MdfBoardHiddenCardRule[]>([]);
   const [deletingRuleId, setDeletingRuleId] = useState<number | null>(null);
   const [updatingRuleId, setUpdatingRuleId] = useState<number | null>(null);
   const {
@@ -290,12 +322,42 @@ export function StatusAutomationConfig() {
     storedMdfBoardHiddenStatusSetting && Array.isArray(storedMdfBoardHiddenStatusSetting.orderStatusIds)
       ? storedMdfBoardHiddenOrderStatusIds
       : defaultMdfBoardHiddenOrderStatusIds;
+  const defaultMdfBoardHiddenCardRules = useMemo(
+    () => MDF_BOARD_HIDDEN_CARD_KINDS.map((cardKind) => ({
+      cardKind,
+      orderStatusIds: [...defaultMdfBoardHiddenOrderStatusIds],
+    })),
+    [defaultMdfBoardHiddenOrderStatusIds],
+  );
+  const effectiveMdfBoardHiddenCardRules = useMemo(
+    () => Array.isArray(storedMdfBoardHiddenStatusSetting?.cardRules)
+      ? normalizeMdfBoardHiddenCardRules(storedMdfBoardHiddenStatusSetting)
+      : normalizeMdfBoardHiddenCardRules(
+          null,
+          effectiveMdfBoardHiddenOrderStatusIds,
+        ),
+    [effectiveMdfBoardHiddenOrderStatusIds, storedMdfBoardHiddenStatusSetting],
+  );
   const mdfBoardHiddenStatusesDirty = !statusIdsEqual(
     mdfBoardHiddenProductionStatusIds,
     effectiveMdfBoardHiddenProductionStatusIds,
   ) || !statusIdsEqual(
     mdfBoardHiddenOrderStatusIds,
     effectiveMdfBoardHiddenOrderStatusIds,
+  ) || !cardRulesEqual(
+    mdfBoardHiddenCardRules,
+    effectiveMdfBoardHiddenCardRules,
+  );
+  const mdfBoardHiddenCardRuleRows = useMemo<MdfBoardHiddenCardRuleRow[]>(
+    () => MDF_BOARD_HIDDEN_CARD_KINDS.map((cardKind) => {
+      const rule = mdfBoardHiddenCardRules.find((candidate) => candidate.cardKind === cardKind);
+      return {
+        cardKind,
+        orderStatusIds: rule?.orderStatusIds ?? [],
+        ...MDF_BOARD_CARD_RULE_LABELS[cardKind],
+      };
+    }),
+    [mdfBoardHiddenCardRules],
   );
   const catalogs = useMemo<StatusAutomationCatalogs>(
     () => ({
@@ -364,7 +426,9 @@ export function StatusAutomationConfig() {
     if (mdfBoardHiddenStatusesSaving) return;
     setMdfBoardHiddenProductionStatusIds(effectiveMdfBoardHiddenProductionStatusIds);
     setMdfBoardHiddenOrderStatusIds(effectiveMdfBoardHiddenOrderStatusIds);
+    setMdfBoardHiddenCardRules(effectiveMdfBoardHiddenCardRules);
   }, [
+    effectiveMdfBoardHiddenCardRules,
     effectiveMdfBoardHiddenOrderStatusIds,
     effectiveMdfBoardHiddenProductionStatusIds,
     mdfBoardHiddenStatusesSaving,
@@ -543,16 +607,21 @@ export function StatusAutomationConfig() {
     setMdfBoardHiddenStatusesSaving(true);
     const nextProductionStatusIds = normalizeStatusIds(mdfBoardHiddenProductionStatusIds);
     const nextOrderStatusIds = normalizeStatusIds(mdfBoardHiddenOrderStatusIds);
+    const nextCardRules = normalizeMdfBoardHiddenCardRules({
+      cardRules: mdfBoardHiddenCardRules,
+    });
     setMdfBoardHiddenProductionStatusIds(nextProductionStatusIds);
     setMdfBoardHiddenOrderStatusIds(nextOrderStatusIds);
+    setMdfBoardHiddenCardRules(nextCardRules);
     try {
       await saveSetting(
         SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
         {
           productionStatusIds: nextProductionStatusIds,
           orderStatusIds: nextOrderStatusIds,
+          cardRules: nextCardRules,
         },
-        'Статусы заказов и производства, скрывающие карточки заказов и ванн на доске МДФ-работы',
+        'Правила автопереноса карточек МДФ-доски в служебные колонки',
       );
       message.success('Настройка МДФ-доски сохранена');
     } catch (error) {
@@ -565,6 +634,22 @@ export function StatusAutomationConfig() {
   const handleMdfBoardHiddenStatusesReset = () => {
     setMdfBoardHiddenProductionStatusIds(defaultMdfBoardHiddenProductionStatusIds);
     setMdfBoardHiddenOrderStatusIds(defaultMdfBoardHiddenOrderStatusIds);
+    setMdfBoardHiddenCardRules(defaultMdfBoardHiddenCardRules);
+  };
+
+  const updateMdfBoardHiddenCardRule = (
+    cardKind: MdfBoardHiddenCardKind,
+    orderStatusIds: readonly unknown[],
+  ) => {
+    const nextOrderStatusIds = normalizeStatusIds(orderStatusIds);
+    setMdfBoardHiddenCardRules((current) =>
+      normalizeMdfBoardHiddenCardRules({
+        cardRules: normalizeMdfBoardHiddenCardRules({ cardRules: current }).map((rule) =>
+          rule.cardKind === cardKind
+            ? { ...rule, orderStatusIds: nextOrderStatusIds }
+            : rule,
+        ),
+      }));
   };
 
   if (!canView) {
@@ -622,8 +707,55 @@ export function StatusAutomationConfig() {
       <Card size="small" title="МДФ-доска">
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Text type="secondary">
-            Заказ скрывается из колонки, если его обычный статус заказа или производственный
-            статус выбран ниже. Ванна исчезает, когда условие выполнено для всех связанных заказов.
+            Карточка переносится в служебную колонку, если все заказы на этой карточке
+            находятся в одном из выбранных обычных статусов заказа.
+          </Text>
+          <Table<MdfBoardHiddenCardRuleRow>
+            size="small"
+            pagination={false}
+            rowKey="cardKind"
+            dataSource={mdfBoardHiddenCardRuleRows}
+            columns={[
+              {
+                title: 'Тип карточки',
+                dataIndex: 'title',
+                key: 'title',
+                width: 190,
+                render: (value, row) => (
+                  <Space direction="vertical" size={0}>
+                    <Text strong>{value}</Text>
+                    <Text type="secondary">→ {row.target}</Text>
+                  </Space>
+                ),
+              },
+              {
+                title: 'Переносить, когда все заказы в статусах',
+                key: 'orderStatusIds',
+                render: (_, row) => (
+                  <Select<number[]>
+                    mode="multiple"
+                    value={row.orderStatusIds}
+                    onChange={(value) => updateMdfBoardHiddenCardRule(
+                      row.cardKind,
+                      value,
+                    )}
+                    options={orderStatusOptions}
+                    disabled={!canManage || appSettingsLoading || orderStatusesLoading}
+                    loading={appSettingsLoading || orderStatusesLoading}
+                    placeholder="Выберите статусы заказа"
+                    style={{ width: '100%' }}
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    maxTagCount="responsive"
+                    aria-label={`Статусы заказа для переноса карточек ${row.title}`}
+                  />
+                ),
+              },
+            ]}
+          />
+          <Text type="secondary">
+            Настройки ниже управляют видимостью карточек заказов на МДФ-доске.
           </Text>
           <div>
             <Text strong>Обычные статусы заказа</Text>

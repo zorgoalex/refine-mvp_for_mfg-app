@@ -85,7 +85,7 @@ const updateSchema = z
 export interface StatusAutomationEventTypeDto {
   eventType: StatusAutomationEventType;
   title: string;
-  group: 'order' | 'dates' | 'statuses' | 'payments';
+  group: 'order' | 'dates' | 'statuses' | 'payments' | 'production';
   description: string;
   allowedConditions: Array<keyof StatusAutomationConditions>;
   allowedActions: StatusAutomationActionType[];

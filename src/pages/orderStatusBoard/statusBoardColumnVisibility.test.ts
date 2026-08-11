@@ -19,6 +19,7 @@ describe('status board column visibility', () => {
   it('keeps terminal MDF columns behind the dedicated visibility toggle', () => {
     expect(CNC_TERMINAL_COLUMN_DEFINITIONS).toEqual([
       { key: 'completed_laminated', label: 'Распиленные файлы' },
+      { key: 'completed_baths', label: 'Завершенные ванны' },
     ]);
   });
 

@@ -27,12 +27,13 @@ import { SIDER_RESOURCE_ICONS } from '../../components/siderResourceIcons';
 // Keep the shared permission-bearing category ID `Настройки`; only its visual
 // label changes in the evolution shell. buildCategorizedResources deliberately
 // applies canViewSettings to this exact stable ID.
-export const EVOLUTION_CATEGORY_ORDER = ['CRM', 'Производство', 'Данные', 'Настройки'] as const;
+export const EVOLUTION_CATEGORY_ORDER = ['CRM', 'Производство', 'Данные', 'Журналы', 'Настройки'] as const;
 
 export const EVOLUTION_CATEGORY_LABELS: Record<(typeof EVOLUTION_CATEGORY_ORDER)[number], string> = {
   CRM: 'CRM',
   Производство: 'Производство',
   Данные: 'Данные',
+  Журналы: 'Журналы',
   Настройки: 'Система',
 };
 
@@ -77,7 +78,7 @@ export const EVOLUTION_CATEGORY_MAP: Record<string, (typeof EVOLUTION_CATEGORY_O
   employees: 'Настройки',
   users: 'Настройки',
   configuration: 'Настройки',
-  audit: 'Настройки',
+  audit: 'Журналы',
 };
 
 export function useEvolutionNavigation(onNavigate?: () => void) {

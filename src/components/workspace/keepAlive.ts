@@ -4,7 +4,9 @@ const CALENDAR_KEY = '/calendar';
 // restores that state instead of remounting to a collapsed list.
 // /bazis и карточки проектов держат локальное состояние страницы: модалки,
 // фильтры, сортировки и выделение. Ремаунт также повторно загружает проект.
-const ALWAYS_KEEP = new Set(['/orders', '/cut', '/bazis', '/configuration']);
+// /mdf-work-board держит тяжелую доску в памяти, чтобы возврат во вкладку не
+// показывал общий спиннер поверх уже загруженных карточек.
+const ALWAYS_KEEP = new Set(['/orders', '/cut', '/bazis', '/configuration', '/mdf-work-board']);
 
 const isOrderFormKey = (key: string): boolean =>
   key === '/orders/create' || key.startsWith('/orders/edit/');

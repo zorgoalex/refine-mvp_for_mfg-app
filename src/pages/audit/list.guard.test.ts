@@ -3,6 +3,13 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 const src = readFileSync(resolve(__dirname, 'list.tsx'), 'utf8');
 describe('audit list related-entity UI', () => {
+  it('exposes one journals section with business history and technical audit tabs', () => {
+    expect(src).toContain("className=\"journals-top-tabs\"");
+    expect(src).toContain("label: 'История бизнеса'");
+    expect(src).toContain("label: 'Технический аудит'");
+    expect(src).toContain("defaultActiveKey=\"business-history\"");
+  });
+
   it('adds related entity filter fields', () => {
     expect(src).toContain('relatedEntityType');
     expect(src).toContain('relatedEntityId');

@@ -35,6 +35,40 @@ describe('order status board OpenAPI contract', () => {
     expect(route).toContain("'503':");
   });
 
+  it('documents MDF manual moves as shared production-task state', () => {
+    const listRoute = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-manual-moves:',
+      '  /api/v1/orders/status-board/mdf-manual-moves/{cardKind}/{cardId}:',
+    );
+    expect(listRoute).toContain('operationId: listMdfBoardManualMoves');
+    expect(listRoute).toContain('x-permission: production.tasks.view');
+    expect(listRoute).toContain("$ref: '#/components/schemas/MdfBoardManualMovesResponse'");
+    expect(listRoute).toContain('Клиенты не хранят это состояние локально');
+
+    const writeRoute = sectionBetween(
+      contract,
+      '  /api/v1/orders/status-board/mdf-manual-moves/{cardKind}/{cardId}:',
+      '  /api/v1/orders/resource-demands:',
+    );
+    expect(writeRoute).toContain('operationId: upsertMdfBoardManualMove');
+    expect(writeRoute).toContain('operationId: deleteMdfBoardManualMove');
+    expect(writeRoute).toContain('x-permission: production.tasks.update');
+    expect(writeRoute).toContain('enum: [packet, bazisCutSet, bath, order]');
+    expect(writeRoute).toContain("pattern: '^[A-Za-z0-9._:-]+$'");
+
+    const schemas = sectionBetween(
+      contract,
+      '    MdfBoardManualMoveTargetColumn:',
+      '    OrderStatusBoardResponse:',
+    );
+    expect(schemas).toContain('    MdfBoardManualMovesResponse:');
+    expect(schemas).toContain('    MdfBoardManualMoveUpsertResponse:');
+    expect(schemas).toContain('    MdfBoardManualMoveDeleteResponse:');
+    expect(schemas).toContain('- completed_baths');
+    expect(schemas).toContain('- orders_issued');
+  });
+
   it('keeps pagination, capabilities and nullable financials explicit', () => {
     const response = sectionBetween(
       contract,

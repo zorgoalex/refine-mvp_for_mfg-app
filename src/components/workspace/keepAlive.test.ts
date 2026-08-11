@@ -31,6 +31,18 @@ describe('keep-alive policy', () => {
     });
     expect(next.has('/cut')).toBe(true); // retained while inactive (order tab active)
   });
+  it('keeps the MDF board mounted so returning to its tab does not remount into a full spinner', () => {
+    expect(isKeepAliveEligible('/mdf-work-board', { dirty: false })).toBe(true);
+    const cache = new Set(['/mdf-work-board']);
+    const next = nextKeepAliveCache(cache, {
+      activeKey: '/orders',
+      tabs: [
+        { key: '/mdf-work-board', dirty: false },
+        { key: '/orders', dirty: false },
+      ],
+    });
+    expect(next.has('/mdf-work-board')).toBe(true);
+  });
   it('keeps configuration mounted across the first clean-to-dirty edit', () => {
     expect(isKeepAliveEligible('/configuration', { dirty: false })).toBe(true);
     expect(isKeepAliveEligible('/configuration', { dirty: true })).toBe(true);

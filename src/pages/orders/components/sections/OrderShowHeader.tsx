@@ -16,13 +16,13 @@ import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { RowSeparator } from './RowSeparator';
-import { collectOrderBasisProjects } from './orderBasisProjects';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { resolveCurrentProductionStatusCodes } from '../../currentProductionStatus';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 import { can } from '../../../../utils/permissions';
 import { featureFlags } from '../../../../config/featureFlags';
+import { collectOrderBasisProjects } from './orderBasisProjects';
 
 const { Text } = Typography;
 
@@ -179,7 +179,6 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     ? resolvedMaterialNames.join(', ')
     : '—';
   const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);
-
   // Load all production statuses for mapping
   const { data: allProductionStatusesData } = useList({
     resource: 'production_statuses',
@@ -230,10 +229,12 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     [productionStatusIdToCode, record?.production_status_id, record?.production_status_name],
   );
 
-  const compactDowelingName =
+  const fallbackBasisProjectName =
     latestDowelingLink?.doweling_order?.doweling_order_name ||
     record?.doweling_order_name ||
     null;
+  const basisProjectSummary =
+    basisProjects.length > 0 ? basisProjects.join(', ') : fallbackBasisProjectName;
   const totalAmount = Number(record?.total_amount) || 0;
   const finalAmount = Number(record?.final_amount) || totalAmount || 0;
   const paidAmount = Number(record?.paid_amount) || 0;
@@ -247,11 +248,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     paidAmount > 0 ? `опл. ${formatNumber(paidAmount, 2)} ${CURRENCY_SYMBOL}` : null,
     remainingAmount > 0 ? `ост. ${formatNumber(remainingAmount, 2)} ${CURRENCY_SYMBOL}` : null,
   ].filter(Boolean);
-  const compactBasisProjectsSummary = basisProjects.join(', ');
-  const compactMaterialSummary = [
-    materialsSummary,
-    basisProjects.length > 0 ? `Базис: ${compactBasisProjectsSummary}` : null,
-  ].filter(Boolean).join(' · ');
+  const compactMaterialSummary = materialsSummary;
 
   if (isOperational) {
     const deadlineAt = record?.planned_completion_date ? dayjs(record.planned_completion_date) : null;
@@ -369,9 +366,9 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
               />
             ) : null}
           </span>
-          {compactDowelingName ? (
-            <span className="order-show-header__compact-item order-show-header__compact-doweling" title={compactDowelingName}>
-              Присадка: <Text strong className="order-show-header__compact-text">{compactDowelingName}</Text>
+          {basisProjectSummary ? (
+            <span className="order-show-header__compact-item order-show-header__compact-doweling" title={basisProjectSummary}>
+              Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectSummary}</Text>
             </span>
           ) : null}
           <span className="order-show-header__compact-item order-show-header__compact-material" title={compactMaterialSummary}>
@@ -654,21 +651,25 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           background: 'var(--app-surface-muted)',
         }}
       >
-        {/* Doweling Order (Присадка) - показываем последнюю из many-to-many */}
-        {latestDowelingLink && (
+        {basisProjectSummary ? (
           <>
             <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
-              Присадка: <Text strong style={{ color: '#DC2626' }}>
-                {latestDowelingLink.doweling_order?.doweling_order_name || '—'}
+              Базис-проект: <Text strong style={{ color: '#DC2626' }}>
+                {basisProjectSummary}
               </Text>
-              {latestDowelingLink.doweling_order?.design_engineer_id && (
+              {basisProjects.length === 0 && latestDowelingLink?.doweling_order?.design_engineer_id && (
                 <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>
                   Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text)' }}>
                     {employeesMap.get(latestDowelingLink.doweling_order.design_engineer_id) || '—'}
                   </Text>
                 </span>
               )}
-              {dowelingLinks.length > 1 && (
+              {basisProjects.length === 0 && !latestDowelingLink && record?.design_engineer && (
+                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>
+                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text)' }}>{record.design_engineer}</Text>
+                </span>
+              )}
+              {basisProjects.length === 0 && dowelingLinks.length > 1 && (
                 <span style={{ marginLeft: 4, color: 'var(--app-text-muted)' }}>
                   +{dowelingLinks.length - 1}
                 </span>
@@ -676,21 +677,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
             </Text>
             <div style={{ width: 1, height: 12, background: 'var(--app-border)' }} />
           </>
-        )}
-        {/* Fallback для обратной совместимости (из orders_view) */}
-        {!latestDowelingLink && record?.doweling_order_name && (
-          <>
-            <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
-              Присадка: <Text strong style={{ color: '#DC2626' }}>{record.doweling_order_name}</Text>
-              {record?.design_engineer && (
-                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>
-                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text)' }}>{record.design_engineer}</Text>
-                </span>
-              )}
-            </Text>
-            <div style={{ width: 1, height: 12, background: 'var(--app-border)' }} />
-          </>
-        )}
+        ) : null}
 
         {/* Materials */}
         <div style={{ flex: 1 }}>
@@ -710,14 +697,6 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
                 </React.Fragment>
               );
             })
-          )}
-          {basisProjects.length > 0 && (
-            <span style={{ marginLeft: 12 }}>
-              <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>Базис-проект: </Text>
-              <Text strong style={{ fontSize: 12, color: 'var(--app-text)' }}>
-                {basisProjects.join(', ')}
-              </Text>
-            </span>
           )}
         </div>
 

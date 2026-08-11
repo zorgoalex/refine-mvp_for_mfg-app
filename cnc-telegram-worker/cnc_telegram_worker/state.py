@@ -81,6 +81,20 @@ class StateStore:
             and isinstance(packet.get("payloadHash"), str)
         )
 
+    def posted_packet_matches(
+        self,
+        external_packet_key: str,
+        payload_hash: str,
+        source_version: int,
+    ) -> bool:
+        packet = self._state.setdefault("packets", {}).get(external_packet_key)
+        if not isinstance(packet, dict):
+            return False
+        return (
+            packet.get("payloadHash") == payload_hash
+            and packet.get("sourceVersion") == source_version
+        )
+
     def mark_posted(
         self,
         external_packet_key: str,

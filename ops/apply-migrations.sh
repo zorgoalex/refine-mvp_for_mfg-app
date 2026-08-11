@@ -1165,6 +1165,122 @@ probe_file() {
                        FROM bazis_cut_set_details
                        WHERE source_bath_cut_number ~ '^[0-9]+-[0-9]+$'
                      );" ;;
+    116_telegram_svg_cut_job_display_number*) probe_all \
+                     "$(q_col cut_job source_display_number)" \
+                     "SELECT col_description(
+                       'cut_job'::regclass,
+                       (SELECT attnum FROM pg_attribute
+                        WHERE attrelid='cut_job'::regclass
+                          AND attname='source_display_number')
+                     ) LIKE 'Operator-facing cut job number from the source system;%';" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM cnc_telegram_packets packet
+                       JOIN cut_job job
+                         ON job.cut_job_id = packet.svg_cut_job_id
+                       WHERE packet.svg_cut_job_id IS NOT NULL
+                         AND packet.svg_cut_result_id IS NOT NULL
+                         AND packet.svg_cut_import_status = 'imported'
+                         AND packet.cutting_sequence_no IS NOT NULL
+                         AND packet.cut_layout_json->>'status' = 'valid'
+                         AND job.source = 'api'
+                         AND job.selection_criteria->>'source' = 'cnc_telegram_svg'
+                         AND job.source_display_number IS DISTINCT FROM packet.cutting_sequence_no::text
+                     );" ;;
+    117_dedupe_telegram_svg_image_packets*) probe_true "SELECT NOT EXISTS (
+                       WITH imported AS (
+                         SELECT
+                           packet.packet_id,
+                           packet.source_chat_id,
+                           COALESCE(packet.source_created_at, packet.source_updated_at, packet.created_at) AS source_at,
+                           packet.workday,
+                           regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\.[^.]+$', '') AS program_key,
+                           lower(trim(COALESCE(packet.material_name, 'МДФ 16мм'))) AS material_key,
+                           packet.cut_layout_json,
+                           packet.sheet_image_storage_key,
+                           packet.cutting_sequence_no,
+                           item_signature.detail_signature
+                         FROM cnc_telegram_packets packet
+                         JOIN cut_job job
+                           ON job.cut_job_id = packet.svg_cut_job_id
+                         LEFT JOIN LATERAL (
+                           SELECT string_agg(
+                             cji.order_detail_id::text || ':' || cji.order_id::text || ':' || cji.qty::text,
+                             ',' ORDER BY cji.order_detail_id, cji.order_id, cji.qty
+                           ) AS detail_signature
+                           FROM cut_job_item cji
+                           WHERE cji.cut_job_id = packet.svg_cut_job_id
+                         ) item_signature ON TRUE
+                         WHERE packet.svg_cut_import_status = 'imported'
+                           AND packet.svg_cut_job_id IS NOT NULL
+                           AND packet.svg_cut_result_id IS NOT NULL
+                           AND packet.cutting_sequence_no IS NOT NULL
+                           AND packet.cut_layout_json->>'status' = 'valid'
+                           AND job.source = 'api'
+                           AND job.selection_criteria->>'source' = 'cnc_telegram_svg'
+                           AND regexp_replace(lower(trim(COALESCE(packet.program_name, ''))), '\.[^.]+$', '') <> ''
+                       )
+                       SELECT 1
+                       FROM imported canonical
+                       JOIN imported duplicate
+                         ON duplicate.packet_id <> canonical.packet_id
+                        AND duplicate.source_chat_id = canonical.source_chat_id
+                        AND duplicate.workday = canonical.workday
+                        AND duplicate.program_key = canonical.program_key
+                        AND duplicate.material_key = canonical.material_key
+                        AND duplicate.cut_layout_json = canonical.cut_layout_json
+                        AND duplicate.detail_signature IS NOT DISTINCT FROM canonical.detail_signature
+                       WHERE canonical.sheet_image_storage_key IS NULL
+                         AND duplicate.sheet_image_storage_key IS NOT NULL
+                         AND canonical.cutting_sequence_no IS NOT NULL
+                         AND duplicate.cutting_sequence_no IS NOT NULL
+                         AND canonical.cutting_sequence_no < duplicate.cutting_sequence_no
+                       LIMIT 1
+                     );" ;;
+    117_mdf_board_manual_moves*) probe_all \
+                     "$(q_tbl mdf_board_manual_moves)" \
+                     "$(q_col mdf_board_manual_moves move_id)" \
+                     "$(q_col mdf_board_manual_moves card_kind)" \
+                     "$(q_col mdf_board_manual_moves card_id)" \
+                     "$(q_col mdf_board_manual_moves target_column)" \
+                     "$(q_col mdf_board_manual_moves version)" \
+                     "$(q_col mdf_board_manual_moves created_by_user_id)" \
+                     "$(q_col mdf_board_manual_moves updated_by_user_id)" \
+                     "$(q_col mdf_board_manual_moves created_at)" \
+                     "$(q_col mdf_board_manual_moves updated_at)" \
+                     "$(q_con_on mdf_board_manual_moves mdf_board_manual_moves_pkey)" \
+                     "$(q_con_on mdf_board_manual_moves uq_mdf_board_manual_moves_card)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_card_kind)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_card_id)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_target_column)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_kind_target)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_version)" \
+                     "$(q_idx idx_mdf_board_manual_moves_lookup)" \
+                     "$(q_idx idx_mdf_board_manual_moves_updated)" \
+                     "SELECT obj_description('mdf_board_manual_moves'::regclass) LIKE 'mdf-board-manual-moves-v1:%';" ;;
+    118_mdf_board_completed_baths_terminal*) probe_all \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_target_column)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_kind_target)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM pg_constraint
+                        WHERE conname = 'chk_mdf_board_manual_moves_target_column'
+                          AND conrelid = 'public.mdf_board_manual_moves'::regclass
+                          AND pg_get_constraintdef(oid) LIKE '%completed_baths%'
+                     );" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM pg_constraint
+                        WHERE conname = 'chk_mdf_board_manual_moves_kind_target'
+                          AND conrelid = 'public.mdf_board_manual_moves'::regclass
+                          AND pg_get_constraintdef(oid) LIKE '%completed_baths%'
+                     );" \
+                     "SELECT COALESCE((
+                       SELECT obj_description(oid, 'pg_constraint') LIKE 'mdf-board-manual-moves-v2:%'
+                         FROM pg_constraint
+                        WHERE conname = 'chk_mdf_board_manual_moves_target_column'
+                          AND conrelid = 'public.mdf_board_manual_moves'::regclass
+                     ), false);" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1176,7 +1292,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

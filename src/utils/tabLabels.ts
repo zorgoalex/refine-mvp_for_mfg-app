@@ -37,7 +37,7 @@ export const RESOURCE_LABELS: Record<string, string> = {
   order_workshops: 'Цеха заказа',
   doweling_orders_view: 'Присадка',
   configuration: 'Конфигурация',
-  audit: 'Аудит',
+  audit: 'Журналы',
   sheet_material_types: 'Листовые материалы',
   cut: 'Раскрой',
   bazis: 'Базис-проекты',

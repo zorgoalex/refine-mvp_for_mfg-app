@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  listStatusAutomationEventTypes,
   parseCreateStatusAutomationRuleRequest,
   parseUpdateStatusAutomationRuleRequest,
 } from './status-automation.dto';
 
 describe('status automation DTO', () => {
+  it('publishes MDF board events for the AutoStatuses event select', () => {
+    const titlesByEventType = new Map(
+      listStatusAutomationEventTypes().map((eventType) => [eventType.eventType, eventType.title]),
+    );
+
+    expect(titlesByEventType.get('mdf.board.completed')).toBe('МДФ-доска распилено');
+    expect(titlesByEventType.get('mdf.board.baths')).toBe('МДФ-доска карты ванн');
+    expect(titlesByEventType.get('mdf.board.baths_ready')).toBe('МДФ-работы готовы к закатке');
+    expect(titlesByEventType.get('mdf.board.baths_laminated')).toBe('МДФ-работы закатаны');
+  });
+
   describe('parseCreateStatusAutomationRuleRequest', () => {
     it('parses and normalizes a valid rule', () => {
       expect(
@@ -53,6 +65,28 @@ describe('status automation DTO', () => {
           targetStatusId: 3,
         }),
       ).toMatchObject({ conditions: {}, priority: 100, isEnabled: false });
+    });
+
+    it.each([
+      ['Файлы заказа на станке', 'mdf.order_machine_files_present'],
+      ['МДФ-доска распилено', 'mdf.board.completed'],
+      ['МДФ-доска карты ванн', 'mdf.board.baths'],
+      ['МДФ-работы готовы к закатке', 'mdf.board.baths_ready'],
+      ['МДФ-работы закатаны', 'mdf.board.baths_laminated'],
+    ] as const)('accepts the MDF production event: %s', (name, eventType) => {
+      expect(
+        parseCreateStatusAutomationRuleRequest({
+          name,
+          eventType,
+          actionType: 'change_production_status',
+          targetStatusId: 3,
+          conditions: { currentOrderStatusIn: [1] },
+        }),
+      ).toMatchObject({
+        eventType,
+        actionType: 'change_production_status',
+        conditions: { currentOrderStatusIn: [1] },
+      });
     });
 
     it.each([

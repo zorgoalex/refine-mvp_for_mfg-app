@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 
 export const findTableHorizontalScroller = (root: ParentNode): HTMLElement | null =>
   (root.querySelector('.ant-table-body') as HTMLElement | null) ??
@@ -6,6 +7,8 @@ export const findTableHorizontalScroller = (root: ParentNode): HTMLElement | nul
 
 interface TableTopScrollState {
   scrollWidth: number;
+  clientWidth: number;
+  scrollLeft: number;
   visible: boolean;
 }
 
@@ -13,9 +16,26 @@ interface TableTopScrollProps {
   children: React.ReactNode;
   className?: string;
   manageAntTableScroll?: boolean;
+  horizontalEdgeScrollButton?: boolean;
 }
 
 const VERTICAL_WHEEL_SCROLL_QUIET_MS = 160;
+
+const createScrollState = (scroller: HTMLElement | null): TableTopScrollState => {
+  if (!scroller) {
+    return { scrollWidth: 0, clientWidth: 0, scrollLeft: 0, visible: false };
+  }
+  const scrollWidth = scroller.scrollWidth;
+  const clientWidth = scroller.clientWidth;
+  const maxScrollLeft = Math.max(0, scrollWidth - clientWidth);
+  const scrollLeft = Math.max(0, Math.min(scroller.scrollLeft, maxScrollLeft));
+  return {
+    scrollWidth,
+    clientWidth,
+    scrollLeft,
+    visible: scrollWidth > clientWidth + 1,
+  };
+};
 
 export const isPrimarilyVerticalWheel = (
   event: Pick<WheelEvent, 'deltaX' | 'deltaY'>,
@@ -40,13 +60,19 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
   children,
   className,
   manageAntTableScroll = false,
+  horizontalEdgeScrollButton = false,
 }) => {
   const wrapRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLElement | null>(null);
   const [scrollState, setScrollState] = useState<TableTopScrollState>({
     scrollWidth: 0,
+    clientWidth: 0,
+    scrollLeft: 0,
     visible: false,
   });
+  const maxScrollLeft = Math.max(0, scrollState.scrollWidth - scrollState.clientWidth);
+  const edgeButtonScrollsBack = scrollState.visible && scrollState.scrollLeft >= maxScrollLeft - 1;
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -62,16 +88,40 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
     let resizeObserver: ResizeObserver | null = null;
     let headerScroller: HTMLElement | null = null;
     let verticalWheelScrollUntil = 0;
+    let edgeButtonFrame = 0;
+
+    const updateEdgeButtonTop = () => {
+      if (!horizontalEdgeScrollButton) return;
+      const rect = wrap.getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      const visibleTop = Math.max(rect.top, 0);
+      const visibleBottom = Math.min(rect.bottom, viewportHeight);
+      const rawTop = visibleBottom > visibleTop
+        ? ((visibleTop + visibleBottom) / 2) - rect.top
+        : rect.height / 2;
+      const minTop = 28;
+      const maxTop = Math.max(minTop, rect.height - 28);
+      const top = Math.min(maxTop, Math.max(minTop, rawTop));
+      wrap.style.setProperty('--app-table-horizontal-edge-button-top', `${top}px`);
+    };
+
+    const scheduleEdgeButtonTop = () => {
+      if (!horizontalEdgeScrollButton) return;
+      window.cancelAnimationFrame(edgeButtonFrame);
+      edgeButtonFrame = window.requestAnimationFrame(updateEdgeButtonTop);
+    };
 
     const measure = () => {
-      if (!scroller) return;
-      const nextScrollWidth = scroller.scrollWidth;
-      const nextVisible = nextScrollWidth > scroller.clientWidth + 1;
+      const next = createScrollState(scroller);
       setScrollState((current) =>
-        current.scrollWidth === nextScrollWidth && current.visible === nextVisible
+        current.scrollWidth === next.scrollWidth
+          && current.clientWidth === next.clientWidth
+          && current.scrollLeft === next.scrollLeft
+          && current.visible === next.visible
           ? current
-          : { scrollWidth: nextScrollWidth, visible: nextVisible },
+          : next,
       );
+      scheduleEdgeButtonTop();
     };
 
     const onTopScroll = () => {
@@ -90,6 +140,7 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
       if (manageAntTableScroll && headerScroller && headerScroller.scrollLeft !== scrollLeft) {
         headerScroller.scrollLeft = scrollLeft;
       }
+      measure();
       syncingScroller = false;
     };
 
@@ -119,14 +170,15 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
 
     const attach = () => {
       const s = findScroller();
-      if (s && s !== scroller) {
+      if (s !== scroller) {
         scroller?.removeEventListener('scroll', onScrollerScroll);
         if (scroller && resizeObserver) resizeObserver.unobserve(scroller);
         scroller = s;
-        if (!manageAntTableScroll) {
+        if (scroller && !manageAntTableScroll) {
           scroller.addEventListener('scroll', onScrollerScroll, { passive: true });
         }
-        resizeObserver?.observe(scroller);
+        scrollerRef.current = scroller;
+        if (scroller) resizeObserver?.observe(scroller);
       }
       headerScroller = wrap.querySelector('.ant-table-header');
       measure();
@@ -142,6 +194,11 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
       wrap.addEventListener('wheel', onManagedWheelCapture, { capture: true, passive: true });
       wrap.addEventListener('scroll', onManagedScrollCapture, { capture: true, passive: true });
     }
+    if (horizontalEdgeScrollButton) {
+      window.addEventListener('scroll', scheduleEdgeButtonTop, { passive: true });
+      window.addEventListener('resize', scheduleEdgeButtonTop, { passive: true });
+      scheduleEdgeButtonTop();
+    }
 
     resizeObserver = new ResizeObserver(scheduleAttach);
     resizeObserver.observe(wrap);
@@ -153,17 +210,36 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
 
     return () => {
       window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(edgeButtonFrame);
       top.removeEventListener('scroll', onTopScroll);
       wrap.removeEventListener('wheel', onManagedWheelCapture, true);
       wrap.removeEventListener('scroll', onManagedScrollCapture, true);
+      window.removeEventListener('scroll', scheduleEdgeButtonTop);
+      window.removeEventListener('resize', scheduleEdgeButtonTop);
       scroller?.removeEventListener('scroll', onScrollerScroll);
       resizeObserver?.disconnect();
       mo.disconnect();
     };
-  }, [manageAntTableScroll]);
+  }, [horizontalEdgeScrollButton, manageAntTableScroll]);
+
+  const scrollTableFromEdgeButton = () => {
+    const scroller = scrollerRef.current ?? (wrapRef.current ? findTableHorizontalScroller(wrapRef.current) : null);
+    if (!scroller) return;
+    const maxLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+    const step = Math.max(160, Math.floor(scroller.clientWidth * 0.82));
+    const nextLeft = scroller.scrollLeft >= maxLeft - 1
+      ? 0
+      : Math.min(maxLeft, scroller.scrollLeft + step);
+    scroller.scrollTo({ left: nextLeft, behavior: 'smooth' });
+    if (topRef.current) topRef.current.scrollTo({ left: nextLeft, behavior: 'smooth' });
+  };
 
   return (
-    <div ref={wrapRef} className={className} data-table-top-scroll-managed="true">
+    <div
+      ref={wrapRef}
+      className={['app-table-top-scroll-container', className].filter(Boolean).join(' ') || undefined}
+      data-table-top-scroll-managed="true"
+    >
       <div
         ref={topRef}
         aria-hidden
@@ -177,6 +253,17 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
         <div style={{ width: scrollState.scrollWidth, height: 1 }} />
       </div>
       {children}
+      {horizontalEdgeScrollButton && scrollState.visible ? (
+        <button
+          type="button"
+          className="app-table-horizontal-edge-button"
+          aria-label={edgeButtonScrollsBack ? 'Прокрутить список деталей влево' : 'Прокрутить список деталей вправо'}
+          title={edgeButtonScrollsBack ? 'Прокрутить влево' : 'Прокрутить вправо'}
+          onClick={scrollTableFromEdgeButton}
+        >
+          {edgeButtonScrollsBack ? <LeftOutlined aria-hidden /> : <RightOutlined aria-hidden />}
+        </button>
+      ) : null}
     </div>
   );
 };

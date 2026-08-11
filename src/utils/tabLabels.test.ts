@@ -44,6 +44,7 @@ describe('resolveTabLabel', () => {
     expect(RESOURCE_LABELS.groups).toBe('Группы');
     expect(RESOURCE_LABELS['order-status-board']).toBe('Доски статусов');
     expect(RESOURCE_LABELS['mdf-work-board']).toBe('МДФ-работы');
+    expect(RESOURCE_LABELS.audit).toBe('Журналы');
   });
 });
 

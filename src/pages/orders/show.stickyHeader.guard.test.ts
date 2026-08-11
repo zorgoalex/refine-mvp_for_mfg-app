@@ -3,9 +3,12 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const showSource = readFileSync(fileURLToPath(new URL('./show.tsx', import.meta.url)), 'utf8');
+const orderFormSource = readFileSync(fileURLToPath(new URL('./components/OrderForm.tsx', import.meta.url)), 'utf8');
 const headerSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderShowHeader.tsx', import.meta.url)), 'utf8');
 const editHeaderSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderHeaderSummary.tsx', import.meta.url)), 'utf8');
+const editDetailTableSource = readFileSync(fileURLToPath(new URL('./components/tables/OrderDetailTable.tsx', import.meta.url)), 'utf8');
 const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
+const operationalCss = readFileSync(fileURLToPath(new URL('../../ui-operational/operational.css', import.meta.url)), 'utf8');
 const operationalHeaderSource = headerSource.match(/if \(isOperational\) \{[\s\S]*?\n  \}\n\n  if \(compactSticky\)/)?.[0] ?? '';
 const operationalEditHeaderSource = editHeaderSource.match(/if \(isOperational\) \{[\s\S]*?\n  \}\n\n  return \(/)?.[0] ?? '';
 const compactHeaderSource = headerSource.match(/if \(compactSticky\) \{[\s\S]*?\n  \}\n\n  return \(/)?.[0] ?? '';
@@ -18,6 +21,22 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('order-show-details-toolbar');
     expect(showSource).toContain('order-show-details-table');
     expect(showSource).toContain('orderShowStickyEnabled');
+  });
+
+  it('keeps the order edit summary sticky only when the details list exceeds the viewport', () => {
+    expect(orderFormSource).toContain('orderFormDetailsBlockRef');
+    expect(orderFormSource).toContain('orderFormStickyEnabled');
+    expect(orderFormSource).toContain("activeTab === 'details'");
+    expect(orderFormSource).toContain('block.scrollHeight > Math.max(320, availableHeight)');
+    expect(orderFormSource).toContain('order-show-page--sticky-enabled');
+    expect(orderFormSource).toContain('order-show-summary-tabs-sticky');
+    expect(orderFormSource).toContain('compactSticky={orderFormStickyEnabled && orderFormSummaryStuck}');
+    expect(orderFormSource).toContain('<OrderHeaderSummary compactSticky={orderFormStickyEnabled && orderFormSummaryStuck} />\n              </div>\n              <Tabs');
+    expect(orderFormSource).toContain('<OrderHeaderSummary compactSticky={orderFormStickyEnabled && orderFormSummaryStuck} />\n        </div>\n\n        {/* Editable tabs */}\n        <Tabs');
+    expect(editHeaderSource).toContain('compactSticky?: boolean');
+    expect(editHeaderSource).toContain("order-show-operational-summary--compact");
+    expect(editHeaderSource).toContain('order-show-header--compact-sticky');
+    expect(operationalCss).toMatch(/\.order-form-operational__workspace[\s\S]*overflow:\s*visible/);
   });
 
   it('switches the order summary to the compact one-line variant only when stuck', () => {
@@ -53,6 +72,25 @@ describe('OrderShow sticky detail header guards', () => {
     expect(compactHeaderSource).not.toContain('Площадь: <Text strong>{formatNumber(totals.total_area');
     expect(compactLineCss).toContain('overflow: hidden;');
     expect(compactLineCss).not.toContain('overflow-x: auto;');
+  });
+
+  it('shows detail Basis project numbers before the doweling fallback in the order summary', () => {
+    expect(headerSource).toContain("import { collectOrderBasisProjects } from './orderBasisProjects';");
+    expect(editHeaderSource).toContain("import { collectOrderBasisProjects } from './orderBasisProjects';");
+    expect(headerSource).toContain('const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);');
+    expect(editHeaderSource).toContain('const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);');
+    expect(headerSource).toContain('basisProjects.length > 0 ? basisProjects.join');
+    expect(editHeaderSource).toContain('basisProjects.length > 0 ? basisProjects.join');
+    expect(headerSource).toContain('latestDowelingLink?.doweling_order?.doweling_order_name');
+    expect(editHeaderSource).toContain('latestDowelingLink?.doweling_order?.doweling_order_name');
+    expect(headerSource).toContain('record?.doweling_order_name');
+    expect(editHeaderSource).toContain('header.doweling_order_name');
+    expect(headerSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectSummary}</Text>');
+    expect(editHeaderSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectSummary}</Text>');
+    expect(headerSource).not.toContain('Присадка: <Text strong');
+    expect(editHeaderSource).not.toContain('Присадка: <Text strong');
+    expect(headerSource).not.toContain('basisProjects.length > 0 ? `Базис:');
+    expect(editHeaderSource).not.toContain('basisProjects.length > 0 ? `Базис:');
   });
 
   it('pins the stack below workspace tabs and keeps table headers below the sticky toolbar', () => {
@@ -109,5 +147,17 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('onMouseEnter: _onMouseEnter');
     expect(showSource).toContain('onMouseLeave: _onMouseLeave');
     expect(showSource).toContain('body: { cell: OrderShowDetailBodyCell }');
+  });
+
+  it('keeps show details sortable with a fixed position column and horizontal edge button', () => {
+    expect(showSource).toContain("const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(null);");
+    expect(showSource).toContain("lockVisible: true, lockPosition: 'start'");
+    expect(showSource).toContain("key: 'detail_number',");
+    expect(showSource).toContain("fixed: 'left',");
+    expect(showSource).toContain('sorter: true');
+    expect(showSource).toContain('sortOrder: column.key === orderShowActiveSorter?.key ? orderShowActiveSorter.order : null');
+    expect(showSource).toContain('setOrderShowActiveSorter({ key: String(next.columnKey), order: next.order });');
+    expect(showSource).toContain('<TableTopScroll className="order-show-details-table-wrap" horizontalEdgeScrollButton>');
+    expect(editDetailTableSource).toContain('horizontalEdgeScrollButton');
   });
 });

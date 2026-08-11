@@ -67,7 +67,7 @@ export function focusOrderDetailInlineEditorAtEnd(editor: HTMLElement | null): v
 interface FinishOrderDetailInlineTabOptions {
   saveCurrentRow: () => Promise<boolean>;
   isLastRow: boolean;
-  onQuickAdd?: () => void;
+  onQuickAdd?: () => boolean | Promise<boolean>;
 }
 
 export async function finishOrderDetailInlineTab({
@@ -76,6 +76,8 @@ export async function finishOrderDetailInlineTab({
   onQuickAdd,
 }: FinishOrderDetailInlineTabOptions): Promise<boolean> {
   const saved = await saveCurrentRow();
-  if (saved && isLastRow) onQuickAdd?.();
+  if (saved && isLastRow) {
+    return (await onQuickAdd?.()) !== false;
+  }
   return saved;
 }

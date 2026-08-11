@@ -113,6 +113,7 @@ const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 96;
 const ORDER_DETAIL_SHOW_BAZIS_CUT_COLUMN_WIDTH = 104;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 const ORDER_DETAIL_STATUS_REFRESH_MS = 15_000;
+const ORDER_SHOW_SORT_COLLATOR = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' });
 
 function cncOrderCuttingSequenceStatusLabel(status: CncTelegramOrderCuttingSequence['completionStatus']): string {
   return status === 'completed' ? 'распилено' : 'не распилено';
@@ -125,6 +126,11 @@ type OrderShowStickyStyle = CSSProperties & {
   '--order-show-details-toolbar-height': string;
   '--order-show-table-header-top': string;
 };
+
+type OrderShowActiveSorter = {
+  key: string;
+  order: 'ascend' | 'descend';
+} | null;
 
 function useWorkspaceTabsHeight(): number {
   const [height, setHeight] = useState(0);
@@ -177,7 +183,7 @@ function useMeasuredElementHeight<T extends HTMLElement>() {
 }
 
 const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
-  { key: 'detail_number', label: '№', lockVisible: true },
+  { key: 'detail_number', label: '№', lockVisible: true, lockPosition: 'start' },
   { key: 'height', label: 'Высота' },
   { key: 'width', label: 'Ширина' },
   { key: 'quantity', label: 'Кол-во' },
@@ -301,6 +307,28 @@ const unwrapOrderShowDetailRow = (row: any) =>
       ? null
       : row;
 
+const compareOrderShowNumbers = (left: unknown, right: unknown): number =>
+  (Number(left) || 0) - (Number(right) || 0);
+
+const compareOrderShowText = (left: unknown, right: unknown): number =>
+  ORDER_SHOW_SORT_COLLATOR.compare(
+    left === null || left === undefined ? '' : String(left).trim(),
+    right === null || right === undefined ? '' : String(right).trim(),
+  );
+
+const orderShowBasisProjectSortValue = (detail: any): string => {
+  const projects = detail?.bazis_projects ?? [];
+  return String(detail?.basis_project || projects[0]?.name || '').trim();
+};
+
+const orderShowBazisCutSortValue = (detail: any): string => {
+  const cutSets = detail?.bazis_cut_sets ?? [];
+  return cutSets
+    .map((cutSet: any) => cutSet?.name || (cutSet?.bazisCutSetId ? `БР-${cutSet.bazisCutSetId}` : ''))
+    .filter(Boolean)
+    .join(', ');
+};
+
 const OrderDetailProductionStatusTag = memo(function OrderDetailProductionStatusTag({
   statusId,
   name,
@@ -401,6 +429,7 @@ function useStableOrderShowColumns(
     String(column.width ?? ''),
     String(column.fixed ?? ''),
     String(column.align ?? ''),
+    String(column.sortOrder ?? ''),
   ].join(':')).join('|');
 
   return useMemo(() => columns.map((column: any) => {
@@ -477,6 +506,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [moveTargetProjectId, setMoveTargetProjectId] = useState<number | undefined>(undefined);
   const [moveCreateNew, setMoveCreateNew] = useState(false);
   const [deletedOrder, setDeletedOrder] = useState<OrderDto | null>(null);
+  const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(null);
 
   const { queryResult } = useShow({
     meta: {
@@ -1298,15 +1328,103 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     }
   }, [millingTypesMap, materialsMap, resolvedNameByDetailId, filmsMap, edgeTypesMap]);
 
-  // Grouped (clustered + separators) only when active; otherwise RAW order.
+  const sortedDetails = useMemo(() => {
+    if (!orderShowActiveSorter) return details;
+    const direction = orderShowActiveSorter.order === 'descend' ? -1 : 1;
+    const compare = (left: any, right: any): number => {
+      switch (orderShowActiveSorter.key) {
+        case 'detail_number':
+          return compareOrderShowNumbers(left?.detail_number, right?.detail_number);
+        case 'height':
+          return compareOrderShowNumbers(left?.height, right?.height);
+        case 'width':
+          return compareOrderShowNumbers(left?.width, right?.width);
+        case 'quantity':
+          return compareOrderShowNumbers(left?.quantity, right?.quantity);
+        case 'area':
+          return compareOrderShowNumbers(left?.area, right?.area);
+        case 'milling_type':
+          return compareOrderShowText(
+            millingTypesMap.get(left?.milling_type_id) || left?.milling_type_name,
+            millingTypesMap.get(right?.milling_type_id) || right?.milling_type_name,
+          );
+        case 'edge_type':
+          return compareOrderShowText(
+            edgeTypesMap.get(left?.edge_type_id) || left?.edge_type_name,
+            edgeTypesMap.get(right?.edge_type_id) || right?.edge_type_name,
+          );
+        case 'material':
+          return compareOrderShowText(
+            resolveDetailMaterialName(left, resolvedNameByDetailId, materialsMap),
+            resolveDetailMaterialName(right, resolvedNameByDetailId, materialsMap),
+          );
+        case 'note':
+          return compareOrderShowText(left?.note, right?.note);
+        case 'milling_cost_per_sqm':
+          return compareOrderShowNumbers(left?.milling_cost_per_sqm, right?.milling_cost_per_sqm);
+        case 'detail_cost':
+          return compareOrderShowNumbers(left?.detail_cost, right?.detail_cost);
+        case 'film':
+          return compareOrderShowText(
+            left?.film_id ? filmsMap.get(left.film_id) : '',
+            right?.film_id ? filmsMap.get(right.film_id) : '',
+          );
+        case 'production_status_id': {
+          const leftId = Number(left?.detail_id);
+          const rightId = Number(right?.detail_id);
+          const leftStatusId = Number.isInteger(leftId) && currentDetailProductionStatusById.has(leftId)
+            ? currentDetailProductionStatusById.get(leftId)
+            : normalizeProductionStatusId(left?.production_status_id);
+          const rightStatusId = Number.isInteger(rightId) && currentDetailProductionStatusById.has(rightId)
+            ? currentDetailProductionStatusById.get(rightId)
+            : normalizeProductionStatusId(right?.production_status_id);
+          return compareOrderShowText(
+            leftStatusId == null ? '' : productionStatusesById.get(leftStatusId)?.name || left?.production_status_name || leftStatusId,
+            rightStatusId == null ? '' : productionStatusesById.get(rightStatusId)?.name || right?.production_status_name || rightStatusId,
+          );
+        }
+        case 'doweling':
+          return compareOrderShowNumbers(left?.doweling === true ? 1 : 0, right?.doweling === true ? 1 : 0);
+        case 'cut_job':
+          return compareOrderShowText(cutJobByDetailId.get(left?.detail_id)?.name, cutJobByDetailId.get(right?.detail_id)?.name);
+        case 'bath_cut_job':
+          return compareOrderShowText(bathCutJobByDetailId.get(left?.detail_id)?.name, bathCutJobByDetailId.get(right?.detail_id)?.name);
+        case 'basis_project':
+          return compareOrderShowText(orderShowBasisProjectSortValue(left), orderShowBasisProjectSortValue(right));
+        case 'bazis_cut_sets':
+          return compareOrderShowText(orderShowBazisCutSortValue(left), orderShowBazisCutSortValue(right));
+        default:
+          return 0;
+      }
+    };
+    return [...details].sort((left, right) => {
+      const primary = compare(left, right);
+      const fallback = primary === 0 ? compareOrderShowNumbers(left?.detail_number, right?.detail_number) : primary;
+      return fallback * direction;
+    });
+  }, [
+    bathCutJobByDetailId,
+    currentDetailProductionStatusById,
+    cutJobByDetailId,
+    details,
+    edgeTypesMap,
+    filmsMap,
+    materialsMap,
+    millingTypesMap,
+    orderShowActiveSorter,
+    productionStatusesById,
+    resolvedNameByDetailId,
+  ]);
+
+  // Grouped (clustered + separators) only when active; otherwise sorted order.
   // During cut-select we include a leading separator so the first group also
   // gets a header checkbox. No explicit annotation: show.tsx does NOT import
   // OrderDetail; let TS infer.
   const groupedDataSource = useMemo(
     () => (groupingActive
-      ? buildGroupedRows(details, grouping.state.field!, { includeLeadingSeparator: cutSelectMode, groupLabelOf })
-      : details),
-    [groupingActive, details, grouping.state.field, cutSelectMode, groupLabelOf],
+      ? buildGroupedRows(sortedDetails, grouping.state.field!, { includeLeadingSeparator: cutSelectMode, groupLabelOf })
+      : sortedDetails),
+    [groupingActive, sortedDetails, grouping.state.field, cutSelectMode, groupLabelOf],
   );
   const orderShowLiveRowsRef = useRef<any[]>([]);
   const orderShowDetailsDataSource = useMemo(() => {
@@ -1675,7 +1793,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       dataIndex: 'detail_number',
       key: 'detail_number',
       width: 43,
+      fixed: 'left',
       align: 'center',
+      sorter: true,
     },
     {
       title: 'Высота',
@@ -1683,6 +1803,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'height',
       width: ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH,
       align: 'center',
+      sorter: true,
     },
     {
       title: 'Ширина',
@@ -1690,6 +1811,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'width',
       width: ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH,
       align: 'center',
+      sorter: true,
     },
     {
       title: 'Кол-во',
@@ -1697,6 +1819,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'quantity',
       width: ORDER_DETAIL_SHOW_QUANTITY_COLUMN_WIDTH,
       align: 'center',
+      sorter: true,
     },
     {
       title: 'м²',
@@ -1704,18 +1827,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'area',
       width: ORDER_DETAIL_SHOW_DIMENSION_COLUMN_WIDTH,
       align: 'center',
+      sorter: true,
       render: (value) => value ? value.toFixed(2) : '0.00',
     },
     {
       title: 'Фрезеровка',
       key: 'milling_type',
       width: 128,
+      sorter: true,
       render: (_, detail) => millingTypesMap.get(detail.milling_type_id) || '—',
     },
     {
       title: 'Обкат',
       key: 'edge_type',
       width: ORDER_DETAIL_SHOW_EDGE_COLUMN_WIDTH,
+      sorter: true,
       render: (_, detail) => {
         const edgeTypeName = edgeTypesMap.get(detail.edge_type_id) || '—';
         return <span style={{ fontSize: '0.86em' }}>{edgeTypeName}</span>;
@@ -1725,6 +1851,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       title: 'Материал',
       key: 'material',
       width: 77,
+      sorter: true,
       render: (_, detail) => {
         const materialName =
           resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap) || '—';
@@ -1736,6 +1863,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       dataIndex: 'note',
       key: 'note',
       width: ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH,
+      sorter: true,
       render: (value) => (
         <span style={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
           {value || ''}
@@ -1748,6 +1876,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'milling_cost_per_sqm',
       width: 70,
       align: 'right',
+      sorter: true,
       render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
     },
     {
@@ -1756,12 +1885,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'detail_cost',
       width: ORDER_DETAIL_SHOW_DETAIL_COST_COLUMN_WIDTH,
       align: 'right',
+      sorter: true,
       render: (value) => (value !== null && value !== undefined) ? value.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }) : '—',
     },
     {
       title: 'Пленка',
       key: 'film',
       width: 104,
+      sorter: true,
       render: (_, detail) => {
         if (!detail.film_id) return '';
         const filmName = filmsMap.get(detail.film_id);
@@ -1780,6 +1911,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'production_status_id',
       width: 60,
       align: 'center',
+      sorter: true,
       render: (_value, detail) => {
         const detailId = Number(detail.detail_id);
         const hasLiveStatus = Number.isInteger(detailId) && currentDetailProductionStatusById.has(detailId);
@@ -1806,6 +1938,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       key: 'doweling',
       width: 72,
       align: 'center',
+      sorter: true,
       render: (value) => value === true
         ? <CheckOutlined style={{ color: '#1890ff' }} />
         : null,
@@ -1816,6 +1949,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             title: 'Раскрой',
             key: 'cut_job',
             width: 150,
+            sorter: true,
             render: (_: unknown, detail: any) => {
               const ref = cutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
@@ -1826,6 +1960,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             title: 'Расчет ванны',
             key: 'bath_cut_job',
             width: 150,
+            sorter: true,
             render: (_: unknown, detail: any) => {
               const ref = bathCutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
@@ -1843,6 +1978,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       dataIndex: 'basis_project',
       key: 'basis_project',
       width: ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH,
+      sorter: true,
       render: (value, row) => {
         const projects = row.bazis_projects ?? [];
         return (
@@ -1860,6 +1996,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       dataIndex: 'bazis_cut_sets',
       key: 'bazis_cut_sets',
       width: ORDER_DETAIL_SHOW_BAZIS_CUT_COLUMN_WIDTH,
+      sorter: true,
       render: (value: Array<{ bazisCutSetId: number; name: string }> | undefined) => {
         const cutSets = value ?? [];
         if (cutSets.length === 0) return '—';
@@ -1934,6 +2071,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               : null;
         return {
           ...column,
+          sortOrder: column.key === orderShowActiveSorter?.key ? orderShowActiveSorter.order : null,
           shouldCellUpdate: (row: any, previousRow: any) => {
             if (liveVersionKey) return row?.[liveVersionKey] !== previousRow?.[liveVersionKey];
             if (row?.kind !== 'detail' || previousRow?.kind !== 'detail') return row !== previousRow;
@@ -1962,7 +2100,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           },
         };
       }),
-    [renderGroupedSummaryValue, visibleDetailColumns],
+    [orderShowActiveSorter, renderGroupedSummaryValue, visibleDetailColumns],
   );
   const stableRenderedDetailColumns = useStableOrderShowColumns(
     renderedDetailColumns,
@@ -3000,7 +3138,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 bazisCutLinkEnabled={bazisCutLinkEnabled}
                 bazisProjectLinkEnabled={bazisProjectLinkEnabled} />
             ) : (
-            <TableTopScroll className="order-show-details-table-wrap">
+            <TableTopScroll className="order-show-details-table-wrap" horizontalEdgeScrollButton>
             <MemoizedOrderShowTable
               renderVersion={orderShowDetailTableRenderVersion}
               className={`${groupingActive ? 'details-grouped ' : ''}order-show-details-table`}
@@ -3039,6 +3177,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               size="small"
               pagination={false}
               bordered
+              showSorterTooltip={false}
+              onChange={(_pagination, _filters, sorter) => {
+                const next = Array.isArray(sorter) ? sorter[0] : sorter;
+                if (next?.columnKey && (next.order === 'ascend' || next.order === 'descend')) {
+                  setOrderShowActiveSorter({ key: String(next.columnKey), order: next.order });
+                } else {
+                  setOrderShowActiveSorter(null);
+                }
+              }}
               sticky={orderShowDetailTableSticky}
               tableLayout="fixed"
               style={{ fontSize: 12 }}

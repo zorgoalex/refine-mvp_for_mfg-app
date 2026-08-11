@@ -661,7 +661,7 @@ const ThemedApp = () => {
                 {
                   name: "audit",
                   list: "/audit",
-                  meta: { label: "Аудит" },
+                  meta: { label: "Журналы" },
                 },
               ]}
               options={{

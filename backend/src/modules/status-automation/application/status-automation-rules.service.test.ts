@@ -127,7 +127,7 @@ describe('StatusAutomationRulesService', () => {
     const { service } = buildService();
     const catalog = await service.listEventTypes(user(['status_automation.view']), 'req-event-types');
 
-    expect(catalog).toHaveLength(7);
+    expect(catalog).toHaveLength(8);
     expect(catalog).toContainEqual({
       eventType: 'payment.created',
       title: 'Платёж создан',
@@ -140,6 +140,13 @@ describe('StatusAutomationRulesService', () => {
       expect.objectContaining({
         eventType: 'order.planned_completion_date_changed',
         group: 'dates',
+      }),
+    );
+    expect(catalog).toContainEqual(
+      expect.objectContaining({
+        eventType: 'mdf.order_machine_files_present',
+        title: 'Файлы заказа на станке',
+        group: 'production',
       }),
     );
   });

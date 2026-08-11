@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { auditApi } from './auditApi';
+import { auditApi, withAuditQuery } from './auditApi';
 import type { AuditLogEventDto } from './types/auditApi.types';
 
 describe('auditApi', () => {
@@ -96,13 +96,45 @@ describe('auditApi', () => {
     );
   });
 
+  it('serializes arrays as repeated query params and omits empty arrays', async () => {
+    expect(
+      withAuditQuery('/api/v1/audit', {
+        events: ['orders.update', 'payments.create'],
+        orderIds: [2678, 2679],
+        participantUserIds: [],
+        scope: 'business',
+      }),
+    ).toBe('/api/v1/audit?events=orders.update&events=payments.create&orderIds=2678&orderIds=2679&scope=business');
+  });
+
   it('calls GET /api/v1/audit/filter-options for dropdown values', async () => {
     const fetchMock = mockFetch(createFilterOptionsResponse());
 
-    const result = await auditApi.filterOptions();
+    const result = await auditApi.filterOptions({ scope: 'business' });
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/audit/filter-options', expect.objectContaining({ method: 'GET' }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/audit/filter-options?scope=business', expect.objectContaining({ method: 'GET' }));
     expect(result.data.events).toContain('orders.detail_transfer');
+  });
+
+  it('calls lookup endpoints with search, ids and limit', async () => {
+    const fetchMock = mockFetch(
+      { data: [{ orderId: 2678, orderName: '2678' }], requestId: 'orders' },
+      { data: [{ userId: 7, username: 'manager', role: 'manager' }], requestId: 'users' },
+    );
+
+    await auditApi.orderOptions({ search: '2678', ids: [2678, 2679], limit: 50 });
+    await auditApi.participantOptions({ search: 'manager', ids: [7], limit: 20 });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/audit/order-options?search=2678&ids=2678&ids=2679&limit=50',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/audit/participant-options?search=manager&ids=7&limit=20',
+      expect.objectContaining({ method: 'GET' }),
+    );
   });
 });
 

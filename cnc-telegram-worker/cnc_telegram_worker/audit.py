@@ -455,6 +455,9 @@ class ScanAudit:
 
     def defer_processing_reconciliation(self, key: str, message: Any, error_message: str) -> None:
         record = self.record_for(message)
+        self.defer_saved_processing_reconciliation(key, record, error_message)
+
+    def defer_saved_processing_reconciliation(self, key: str, record: dict[str, Any], error_message: str) -> None:
         operation = self.operations[key]
         operation.update({
             "errorCode": "backend_ingest_failed",
@@ -651,6 +654,44 @@ async def reconcile_pending_processing_attempts(
             )
             reconciled.append(audit.operations[operation["operationKey"]])
             continue
+        packet_source = packet.get("source") if isinstance(packet.get("source"), dict) else {}
+        packet_source_version = packet_source.get("version") if isinstance(packet_source, dict) else None
+        if isinstance(packet_source_version, int) and not isinstance(packet_source_version, bool):
+            source_version = packet_source_version
+        else:
+            try:
+                source_version = int(packet_source_version)
+            except (TypeError, ValueError):
+                audit.finish_saved_operation(
+                    operation["operationKey"], message, "failed",
+                    "worker_restarted_before_scan_completion",
+                    "Worker restarted before the ERP request source version was durably prepared",
+                    errorCode="worker_restarted_before_scan_completion",
+                    errorMessage="Worker restarted before the ERP request source version was durably prepared",
+                )
+                reconciled.append(audit.operations[operation["operationKey"]])
+                continue
+        if state.posted_packet_matches(
+            packet["externalPacketKey"],
+            payload_hash,
+            source_version,
+        ):
+            sequence_no = state.cutting_sequence_number(packet["externalPacketKey"])
+            audit.finish_saved_operation(
+                operation["operationKey"], message, "succeeded", "backend_ingest_succeeded",
+                "ERP ingest was already confirmed before worker restart",
+                externalPacketKey=packet["externalPacketKey"],
+                sourceVersion=str(source_version),
+                cuttingSequenceNo=sequence_no,
+                backendApplied=None,
+                backendStale=None,
+                responses=[*operation.get("responses", []), {
+                    "responseId": f"backend-recovered-from-state:{uuid.uuid4()}",
+                    "kind": "backend_ingest", "status": "reconciled", "at": utc_now(),
+                }],
+            )
+            reconciled.append(audit.operations[operation["operationKey"]])
+            continue
         try:
             response = await erp.ingest_packet(packet, idem)
         except Exception as exc:
@@ -672,7 +713,7 @@ async def reconcile_pending_processing_attempts(
                 )
                 reconciled.append(audit.operations[operation["operationKey"]])
                 continue
-            audit.defer_processing_reconciliation(operation["operationKey"], message, error_message)
+            audit.defer_saved_processing_reconciliation(operation["operationKey"], message, error_message)
             raise
         response_packet = response.get("packet") if isinstance(response, dict) else None
         audit.finish_saved_operation(
@@ -695,7 +736,7 @@ async def reconcile_pending_processing_attempts(
         if isinstance(sequence_no, int) and not isinstance(sequence_no, bool) and sequence_no > 0:
             state.assign_cutting_sequence_number(packet["externalPacketKey"], existing_number=sequence_no)
         state.mark_posted(
-            packet["externalPacketKey"], payload_hash, int(packet["source"]["version"]), source_fingerprint,
+            packet["externalPacketKey"], payload_hash, source_version, source_fingerprint,
         )
         reconciled.append(audit.operations[operation["operationKey"]])
     return reconciled

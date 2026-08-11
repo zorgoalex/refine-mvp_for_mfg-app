@@ -6,6 +6,7 @@ import type { DatabaseClient, TransactionClient } from '../../../database/databa
 import { DatabaseService } from '../../../database/database.service';
 import { appendOrderReadScopeSql } from '../../../permissions/policies/order-read-scope-sql';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 import { buildBazisCutXls, buildBazisCutXlsFromTemplate } from '../application/bazis-xls-writer';
 import { ExportTemplatesService } from '../../export-templates/application/export-templates.service';
 import {
@@ -276,6 +277,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.created', setId,
         command.idempotencyKey, null, summaryAudit(set), set, set.details,
         { addedDetailIds: snapshots.map((item) => item.provenance.sourceOrderDetailId) });
+      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'created');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     });
@@ -319,6 +321,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
           creationSource: 'picker', criteriaHash: canonicalHash,
           addedDetailIds: snapshots.map((item) => item.provenance.sourceOrderDetailId),
         });
+      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'created');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     });
@@ -392,6 +395,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         command.idempotencyKey, null, { addedCount: additions.length, version: set.version }, set,
         set.details.filter((detail) => additions.some((item) => item.provenance.sourceOrderDetailId === detail.sourceOrderDetailId)),
         { addedDetailIds: additions.map((item) => item.provenance.sourceOrderDetailId) });
+      await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'details-added');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     });
@@ -793,6 +797,21 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
     bazisProjects: labelRefs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
     bazisOrders: labelRefs(details, 'sourceBazisRevisionId', 'sourceBazisOrderNo'),
   };
+}
+
+async function evaluateBazisCutSetMachineFilesPresentAutomation(
+  tx: TransactionClient,
+  currentUser: CurrentUser,
+  requestId: string | undefined,
+  set: BazisCutSetDto,
+  eventSource: 'created' | 'details-added',
+): Promise<void> {
+  await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+    orderIds: set.details.map((detail) => detail.sourceOrderId),
+    actor: currentUser,
+    requestId: requestId ?? `bazis-cut-set-${eventSource}-${set.bazisCutSetId}`,
+    sourceIdempotencyKey: `bazis-cut-set:${set.bazisCutSetId}:version-${set.version}:${eventSource}:machine-files`,
+  });
 }
 
 function mapSummaryRow(row: ListRow): BazisCutSetSummaryDto {

@@ -17,6 +17,16 @@ describe('KeepAliveOutlet guards', () => {
     expect(outlet).toContain('tabKey: key');
     expect(outlet).toContain('tabKey: activeKey');
   });
+  it('keeps an already cached route node instead of replacing it on return', () => {
+    expect(outlet).toContain('!cacheRef.current.has(activeKey)');
+    expect(outlet).toContain('cacheRef.current.set(activeKey, outlet)');
+  });
+  it('can cache always-keep routes before tab sync opens their workspace tab', () => {
+    expect(outlet).toContain('const activeDirty = activeTab?.dirty ?? false');
+    expect(outlet).toContain('const eligible = isKeepAliveEligible(activeKey, { dirty: activeDirty })');
+    expect(outlet).toContain('tabsWithActive');
+    expect(outlet).toContain("{ key: activeKey, dirty: activeDirty }");
+  });
   it('excludes /calendar from keep-alive (B7)', () => {
     expect(policy).toContain("'/calendar'");
   });

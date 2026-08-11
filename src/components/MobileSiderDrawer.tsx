@@ -29,6 +29,7 @@ const CATEGORY_ORDER = [
   "Материалы",
   "Данные",
   "Справочники",
+  "Журналы",
   "Настройки",
 ] as const;
 
@@ -57,7 +58,7 @@ const CATEGORY_MAP: Record<string, string> = {
   employees: "Настройки",
   users: "Настройки",
   configuration: "Настройки",
-  audit: "Настройки",
+  audit: "Журналы",
 };
 
 const RESOURCE_LABELS: Record<string, string> = {

@@ -59,11 +59,11 @@ export const filterConfigurationTabItems = <T extends { key: string },>(
   generalSettingsVisible: boolean,
   deadlineSettingsVisible: boolean,
 ): T[] =>
-  generalSettingsVisible
-    ? items
-    : deadlineSettingsVisible
-      ? items.filter((item) => item.key === 'production')
-      : [];
+  items.filter((item) => {
+    if (generalSettingsVisible) return true;
+    if (deadlineSettingsVisible && item.key === 'production') return true;
+    return false;
+  });
 
 const readStoredConfigurationActiveTab = (): string | null => {
   try {

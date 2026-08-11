@@ -32,7 +32,11 @@ vi.mock('../../../common/audit/audit.service', () => ({
   auditService: { record: mocks.record },
 }));
 
-import { evaluateStatusAutomation } from './status-automation-runtime';
+import {
+  evaluateMdfBoardColumnAutomation,
+  evaluateMdfOrderMachineFilesPresentAutomation,
+  evaluateStatusAutomation,
+} from './status-automation-runtime';
 
 describe('evaluateStatusAutomation', () => {
   beforeEach(() => {
@@ -111,6 +115,61 @@ describe('evaluateStatusAutomation', () => {
     );
     expect(keys).toHaveLength(2);
     expect(new Set(keys).size).toBe(2);
+  });
+
+  it('evaluates the MDF machine-files event for each unique order id from a card', async () => {
+    const rule = makeRule({ id: 10, eventType: 'mdf.order_machine_files_present' });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({
+      status: 'executed',
+      auditId: 'command-audit-id',
+    });
+
+    await evaluateMdfOrderMachineFilesPresentAutomation(tx(), {
+      orderIds: [200, null, 100, 100, 0],
+      actor: currentUser(),
+      requestId: 'request-2',
+      sourceIdempotencyKey: 'cnc-card-1',
+    });
+
+    expect(mocks.listEnabledRulesForEvent).toHaveBeenCalledTimes(2);
+    expect(mocks.listEnabledRulesForEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'mdf.order_machine_files_present',
+    );
+    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map((call) => call[1])).toEqual([100, 200]);
+    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map((call) => call[3].outboxIdempotencyKey)).toEqual([
+      'cnc-card-1:order-100:automation-10:order-100',
+      'cnc-card-1:order-200:automation-10:order-200',
+    ]);
+  });
+
+  it('evaluates an MDF board column event for each unique order id from a moved card', async () => {
+    const rule = makeRule({ id: 11, eventType: 'mdf.board.baths_ready' });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({
+      status: 'executed',
+      auditId: 'command-audit-id',
+    });
+
+    await evaluateMdfBoardColumnAutomation(tx(), {
+      eventType: 'mdf.board.baths_ready',
+      orderIds: [300, 100, 300, null],
+      actor: currentUser(),
+      requestId: 'request-3',
+      sourceIdempotencyKey: 'bath-card-1',
+    });
+
+    expect(mocks.listEnabledRulesForEvent).toHaveBeenCalledTimes(2);
+    expect(mocks.listEnabledRulesForEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'mdf.board.baths_ready',
+    );
+    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map((call) => call[1])).toEqual([100, 300]);
+    expect(mocks.changeOrderStatusFromAutomationInTransaction.mock.calls.map((call) => call[3].outboxIdempotencyKey)).toEqual([
+      'bath-card-1:order-100:automation-11:order-100',
+      'bath-card-1:order-300:automation-11:order-300',
+    ]);
   });
 
   it('continues after a target-status-not-found error and audits the skip', async () => {
@@ -286,7 +345,6 @@ function event(overrides: Partial<StatusAutomationEvent> = {}): StatusAutomation
 function makeRule(overrides: Partial<StatusAutomationRule> = {}): StatusAutomationRule {
   return {
     id: 1,
-    name: 'Rule 1',
     eventType: 'order.created',
     actionType: 'change_order_status',
     targetStatusId: 2,

@@ -136,7 +136,7 @@ describe('order detail required numeric validation', () => {
     ]));
   });
 
-  it('keeps invalid rows for validation and visibly scrolls to the first one', () => {
+  it('keeps non-tail invalid rows for validation and skips only empty tail rows on save', () => {
     const orderFormSource = readFileSync(
       new URL('../../pages/orders/components/OrderForm.tsx', import.meta.url),
       'utf8',
@@ -149,6 +149,13 @@ describe('order detail required numeric validation', () => {
 
     expect(orderFormSource).not.toContain('filtered out ${skippedCount} unfilled detail(s)');
     expect(tableSource).not.toContain('empty detail detected, removing from store');
+    expect(orderFormSource).toContain('prepareOrderDetailsForSave(formValues.details ?? [])');
+    expect(orderFormSource).toContain('collectOrderDetailEmptyTailRowsForDisplay(formValues.details ?? [])');
+    expect(orderFormSource).toContain('appendOrderDetailEmptyTailRowsForDisplay(');
+    expect(tableSource).toContain('saveCurrentRow({ allowEmptyTailRow: true })');
+    expect(tableSource).toContain('clearOrderDetailTailRowValues(currentRecord)');
+    expect(tableSource).toContain('countOrderDetailsWithRequiredEntryValues(details)');
+    expect(tableSource).toContain('scroll={{ x: tableScrollWidth, y: tableBodyScrollY }}');
     expect(tableSource).toContain("classes.push('order-detail-validation-error')");
     expect(tableSource).toContain('setValidationScrollTargetKey(firstInvalidRowKey)');
     expect(tableSource).toContain("row?.scrollIntoView({ behavior: 'smooth', block: 'center' })");
