@@ -4030,6 +4030,17 @@ async function loadPeriodBazisCutSetCards(
       ) AS sort_order
       FROM production_statuses ps
     ),
+    issued_status_threshold AS (
+      SELECT COALESCE(
+        MIN(os.sort_order) FILTER (
+          WHERE lower(trim(COALESCE(os.order_status_code, ''))) = 'issued'
+        ),
+        MIN(os.sort_order) FILTER (
+          WHERE lower(trim(os.order_status_name)) = 'выдан'
+        )
+      ) AS sort_order
+      FROM order_statuses os
+    ),
     target_bazis_cut_sets AS (
       SELECT cut_set.bazis_cut_set_id
       FROM bazis_cut_sets cut_set
@@ -4055,9 +4066,17 @@ async function loadPeriodBazisCutSetCards(
       detail.material_name,
       detail.quantity,
       CASE
-        WHEN detail_status.sort_order IS NOT NULL
+        WHEN (
+          detail_status.sort_order IS NOT NULL
           AND packed_status.sort_order IS NOT NULL
-          THEN detail_status.sort_order >= packed_status.sort_order
+          AND detail_status.sort_order >= packed_status.sort_order
+        ) THEN true
+        WHEN (
+          source_order_status.sort_order IS NOT NULL
+          AND issued_status.sort_order IS NOT NULL
+          AND source_order_status.sort_order >= issued_status.sort_order
+        ) THEN true
+        WHEN issued_order_move.move_id IS NOT NULL THEN true
         ELSE false
       END AS packed_or_later
     FROM target_bazis_cut_sets target
@@ -4069,9 +4088,16 @@ async function loadPeriodBazisCutSetCards(
       ON source_detail.detail_id = detail.source_order_detail_id
     LEFT JOIN orders source_order
       ON source_order.order_id = COALESCE(detail.source_order_id, source_detail.order_id)
+    LEFT JOIN order_statuses source_order_status
+      ON source_order_status.order_status_id = source_order.order_status_id
     LEFT JOIN production_statuses detail_status
       ON detail_status.production_status_id = source_detail.production_status_id
+    LEFT JOIN mdf_board_manual_moves issued_order_move
+      ON issued_order_move.card_kind = 'order'
+      AND issued_order_move.card_id = source_order.order_id::text
+      AND issued_order_move.target_column = 'orders_issued'
     CROSS JOIN packed_status_threshold packed_status
+    CROSS JOIN issued_status_threshold issued_status
     ORDER BY cut_set.created_at DESC, cut_set.bazis_cut_set_id DESC,
       detail.sort_order, detail.bazis_cut_set_detail_id
     `,
