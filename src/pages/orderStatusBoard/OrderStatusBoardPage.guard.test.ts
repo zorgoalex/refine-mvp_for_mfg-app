@@ -341,7 +341,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('buildCncOrderSearchDateRange');
     expect(page).toContain('dateFrom: displayRange.dateFrom');
     expect(page).toContain('dateTo: displayRange.dateTo');
-    expect(page).toContain('datasetKey');
+    expect(page).toContain('buildOrderStatusBoardDatasetKey(');
+    expect(model).toContain('export function buildOrderStatusBoardDatasetKey(');
+    expect(model).toContain("state.view === 'cnc_today'");
+    expect(model).toContain("key.set('date', state.cncWorkday ?? defaultCncWorkday)");
+    expect(model).toContain("key.set('period', state.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD)");
+    expect(page).not.toContain("if (params.get('flow') === 'cnc') params.delete('order');");
     expect(page).toContain('const standardGridMinWidth = displayColumns.length * 220');
     expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}px, 1fr))`');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');

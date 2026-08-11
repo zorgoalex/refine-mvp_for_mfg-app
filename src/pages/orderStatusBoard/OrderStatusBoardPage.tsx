@@ -109,6 +109,7 @@ import {
 import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
+  buildOrderStatusBoardDatasetKey,
   buildCncOrderMissingDetails,
   collectCncOrderIds,
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
@@ -396,10 +397,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
     );
   const datasetKey = useMemo(() => {
-    const params = new URLSearchParams(searchParams);
-    if (params.get('flow') === 'cnc') params.delete('order');
-    return params.toString();
-  }, [searchParams]);
+    return buildOrderStatusBoardDatasetKey(
+      searchParams,
+      viewState,
+      dayjs().format('YYYY-MM-DD'),
+    );
+  }, [
+    searchParams,
+    viewState.cncOrderSearchPeriod,
+    viewState.cncWorkday,
+    viewState.view,
+  ]);
   const [searchDraft, setSearchDraft] = useState(viewState.search);
   const [board, setBoard] = useState<OrderStatusBoardResponse | null>(null);
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);

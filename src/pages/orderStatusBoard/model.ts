@@ -196,6 +196,24 @@ export function serializeOrderStatusBoardViewState(
   return params;
 }
 
+export function buildOrderStatusBoardDatasetKey(
+  params: URLSearchParams,
+  state: Pick<
+    OrderStatusBoardViewState,
+    'view' | 'cncWorkday' | 'cncOrderSearchPeriod'
+  >,
+  defaultCncWorkday: string,
+): string {
+  if (state.view === 'cnc_today') {
+    const key = new URLSearchParams();
+    key.set('flow', 'cnc');
+    key.set('date', state.cncWorkday ?? defaultCncWorkday);
+    key.set('period', state.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD);
+    return key.toString();
+  }
+  return params.toString();
+}
+
 export function toOrderStatusBoardQuery(
   state: OrderStatusBoardViewState,
   override: Partial<Pick<OrderStatusBoardQuery, 'column' | 'cursor'>> = {},

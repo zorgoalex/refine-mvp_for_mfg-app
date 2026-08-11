@@ -27,6 +27,7 @@ import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   buildCncOrderMissingDetails,
+  buildOrderStatusBoardDatasetKey,
   collectCncOrderIds,
   DEFAULT_MDF_ORDER_CARD_SORT,
   filterBoardColumns,
@@ -257,6 +258,59 @@ describe('order status board model', () => {
     expect(fixedMdfState.view).toBe('cnc_today');
     expect(fixedMdfState.cncOrderSearchPeriod).toBe('1m');
     expect(fixedMdfState.cncOrderFilters).toEqual(['2707']);
+  });
+
+  it('keeps MDF dataset reloads tied only to server-side date range inputs', () => {
+    const baseParams = new URLSearchParams('flow=cnc&date=2026-08-11&period=1w');
+    const baseState = parseOrderStatusBoardViewState(baseParams, {
+      cncTelegram: true,
+    });
+    const uiParams = new URLSearchParams(
+      'flow=cnc&date=2026-08-11&period=1w&order=2707&plannedToday=1&hideEmpty=1&sort=plannedDate&direction=desc',
+    );
+    const uiState = parseOrderStatusBoardViewState(uiParams, {
+      cncTelegram: true,
+    });
+    const nextDateParams = new URLSearchParams('flow=cnc&date=2026-08-12&period=1w');
+    const nextDateState = parseOrderStatusBoardViewState(nextDateParams, {
+      cncTelegram: true,
+    });
+    const nextPeriodParams = new URLSearchParams('flow=cnc&date=2026-08-11&period=2w');
+    const nextPeriodState = parseOrderStatusBoardViewState(nextPeriodParams, {
+      cncTelegram: true,
+    });
+
+    const baseKey = buildOrderStatusBoardDatasetKey(
+      baseParams,
+      baseState,
+      '2026-08-11',
+    );
+
+    expect(buildOrderStatusBoardDatasetKey(uiParams, uiState, '2026-08-11')).toBe(
+      baseKey,
+    );
+    expect(buildOrderStatusBoardDatasetKey(
+      nextDateParams,
+      nextDateState,
+      '2026-08-11',
+    )).not.toBe(baseKey);
+    expect(buildOrderStatusBoardDatasetKey(
+      nextPeriodParams,
+      nextPeriodState,
+      '2026-08-11',
+    )).not.toBe(baseKey);
+
+    const fixedMdfParams = new URLSearchParams('hideEmpty=1&plannedToday=1');
+    const fixedMdfState = parseOrderStatusBoardViewState(fixedMdfParams, {
+      cncTelegram: true,
+      fixedView: 'cnc_today',
+    });
+
+    expect(buildOrderStatusBoardDatasetKey(
+      fixedMdfParams,
+      fixedMdfState,
+      '2026-08-11',
+    )).toBe('flow=cnc&date=2026-08-11&period=1w');
   });
 
   it('builds CNC order search ranges from the selected board date', () => {
