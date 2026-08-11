@@ -292,7 +292,7 @@ SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision,
              'bathCutJob', CASE WHEN d.bath_cut_job_id IS NULL THEN NULL ELSE jsonb_build_object(
                'cutJobId', d.bath_cut_job_id,
                'resultNo', d.bath_result_no,
-               'cutNumber', d.bath_cut_job_id::text || '-' || d.bath_result_no::text,
+               'cutNumber', 'В-' || d.bath_cut_job_id::text || '-' || d.bath_result_no::text,
                'name', d.bath_name,
                'paramProfileId', d.bath_profile_id,
                'profileName', d.bath_profile_name,

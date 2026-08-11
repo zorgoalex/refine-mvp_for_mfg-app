@@ -128,7 +128,7 @@ describe('label row builder', () => {
         detail({
           detailFields: {
             cut_result_version_no: '45-1',
-            bath_cut_result_version_no: '28-2',
+            bath_cut_result_version_no: 'В-28-2',
           },
         }),
       ],
@@ -136,7 +136,7 @@ describe('label row builder', () => {
 
     expect(row.values).toMatchObject({
       'detail.cut_result_version_no': '45-1',
-      'detail.bath_cut_result_version_no': '28-2',
+      'detail.bath_cut_result_version_no': 'В-28-2',
     });
   });
 

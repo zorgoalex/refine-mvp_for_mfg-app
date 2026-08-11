@@ -87,8 +87,8 @@ describe('order cut-map selection', () => {
       details: [{
         ...data.details[0],
         options: [
-          { ...option(501, 1, 20, '28-2', true), isCurrent: true, isVacuum: true },
-          { ...option(502, 2, 20, '28-2', true), isCurrent: true, isVacuum: true },
+          { ...option(501, 1, 20, 'В-28-2', true), isCurrent: true, isVacuum: true },
+          { ...option(502, 2, 20, 'В-28-2', true), isCurrent: true, isVacuum: true },
           { ...option(601, 1, 21, '45-1', true), isCurrent: true, isVacuum: false },
           { ...option(602, 2, 21, '45-1', true), isCurrent: true, isVacuum: false },
           { ...option(701, 1, 22, '40-9', true), isCurrent: false, isVacuum: false },
@@ -107,24 +107,24 @@ describe('order cut-map selection', () => {
         ...data.details[0],
         quantity: 5,
         cutJobCutNumber: '45-1',
-        bathCutJobCutNumber: '28-2',
+        bathCutJobCutNumber: 'В-28-2',
         options: [
           option(601, 1, 21, '45-1', true),
           option(602, 2, 21, '45-1', true),
           option(603, 3, 21, '45-1', true),
           option(604, 4, 21, '45-1', true),
-          { ...option(501, 1, 20, '28-2', true), isVacuum: true },
-          { ...option(502, 2, 20, '28-2', true), isVacuum: true },
-          { ...option(503, 3, 20, '28-2', true), isVacuum: true },
-          { ...option(504, 4, 20, '28-2', true), isVacuum: true },
-          { ...option(505, 5, 20, '28-2', true), isVacuum: true },
+          { ...option(501, 1, 20, 'В-28-2', true), isVacuum: true },
+          { ...option(502, 2, 20, 'В-28-2', true), isVacuum: true },
+          { ...option(503, 3, 20, 'В-28-2', true), isVacuum: true },
+          { ...option(504, 4, 20, 'В-28-2', true), isVacuum: true },
+          { ...option(505, 5, 20, 'В-28-2', true), isVacuum: true },
         ],
       }],
     });
 
     expect(pickDefaultOrderCutMapSource(rows)).toBe('regular');
     expect(orderCutMapSourceCutNumbers(rows, 'regular')).toEqual(['45-1']);
-    expect(orderCutMapSourceCutNumbers(rows, 'bath')).toEqual(['28-2']);
+    expect(orderCutMapSourceCutNumbers(rows, 'bath')).toEqual(['В-28-2']);
     expect(buildOrderCutMapSelectionForSource(rows, 'regular')).toEqual({
       '11:1': 601,
       '11:2': 602,
@@ -144,30 +144,30 @@ describe('order cut-map selection', () => {
       details: [{
         ...data.details[0],
         cutJobCutNumber: '45-1',
-        bathCutJobCutNumber: '28-2',
+        bathCutJobCutNumber: 'В-28-2',
         options: [
           option(601, 1, 21, '45-1', true),
           option(602, 2, 21, '45-1', true),
-          { ...option(501, 1, 20, '28-2', true), isVacuum: true },
-          { ...option(502, 2, 20, '28-2', true), isVacuum: true },
+          { ...option(501, 1, 20, 'В-28-2', true), isVacuum: true },
+          { ...option(502, 2, 20, 'В-28-2', true), isVacuum: true },
         ],
       }],
     });
 
     expect(buildOrderCutMapSelectionForSource(rows, 'bath')).toEqual({ '11:1': 501, '11:2': 502 });
-    expect(filterOrderCutMapRowOptions(rows[0], 'bath').map((item) => item.cutNumber)).toEqual(['28-2']);
+    expect(filterOrderCutMapRowOptions(rows[0], 'bath').map((item) => item.cutNumber)).toEqual(['В-28-2']);
   });
 
   it('matches stale raw options against the selected source cut number', () => {
     const detail = {
       ...data.details[0],
       cutJobCutNumber: '45-1',
-      bathCutJobCutNumber: '28-2',
+      bathCutJobCutNumber: 'В-28-2',
     };
 
     expect(orderCutMapRawOptionMatchesSource(detail, option(601, 1, 21, '45-1', false), 'regular')).toBe(true);
-    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, '28-2', false), isVacuum: true }, 'bath')).toBe(true);
-    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, '28-2', false), isVacuum: true }, 'regular')).toBe(false);
+    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, 'В-28-2', false), isVacuum: true }, 'bath')).toBe(true);
+    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, 'В-28-2', false), isVacuum: true }, 'regular')).toBe(false);
   });
 
   it('treats Telegram SVG and screenshot fallbacks as regular-source coverage', () => {

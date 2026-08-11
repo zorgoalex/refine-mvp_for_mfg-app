@@ -9,11 +9,11 @@ import {
 
 describe('buildBazisBathCutNumber', () => {
   it.each([
-    [28, 2, '28-2'],
+    [28, 2, 'В-28-2'],
     [null, 2, ''],
     [28, null, ''],
     [0, 2, ''],
-  ])('keeps only the cut-job and result version numbers', (jobId, resultNo, expected) => {
+  ])('adds the vacuum prefix to valid cut-job and result version numbers', (jobId, resultNo, expected) => {
     expect(buildBazisBathCutNumber(jobId, resultNo)).toBe(expected);
   });
 });

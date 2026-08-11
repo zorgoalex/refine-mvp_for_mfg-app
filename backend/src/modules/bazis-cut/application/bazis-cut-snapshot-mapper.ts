@@ -1,4 +1,5 @@
 import { bazisCutDetailFieldsSchema, type BazisCutDetailFields } from '../dto/bazis-cut.dto';
+import { formatCutNumber } from '../../cut/application/cut-numbering';
 
 export interface BazisCutSnapshotSource {
   materialName: string;
@@ -100,7 +101,7 @@ export function buildBazisBathCutNumber(
 ): string {
   return typeof cutJobId === 'number' && Number.isInteger(cutJobId) && cutJobId > 0
     && typeof resultNo === 'number' && Number.isInteger(resultNo) && resultNo > 0
-    ? `${cutJobId}-${resultNo}`
+    ? formatCutNumber(cutJobId, resultNo, true)
     : '';
 }
 

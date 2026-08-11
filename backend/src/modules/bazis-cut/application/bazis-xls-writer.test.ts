@@ -26,7 +26,7 @@ describe('buildBazisCutXls', () => {
     expect(rows[1]?.[4]).toBe(18);
     expect(rows[1]?.[29]).toBeNull();
     expect(rows[1]?.[30]).toBe('=literal');
-    expect(rows[1]?.[35]).toBe('28-2');
+    expect(rows[1]?.[35]).toBe('В-28-2');
     expect(sheet.AE2?.f).toBeUndefined();
   });
 
@@ -121,7 +121,7 @@ function detail(overrides: Partial<BazisCutSetDetailDto> = {}): BazisCutSetDetai
     sourceBazisProjectId: 2, sourceBazisRevisionId: 4, sourceBazisNodeId: 5,
     sourceOrderName: '1491', sourceOrderFullNumber: 'МП-1-1491', sourceProjectCode: 'МП-1',
     sourceBazisProjectName: 'BP-7', sourceBazisOrderNo: 'BZ-100', sourceBazisProductName: 'Кухня',
-    sourceBathCutNumber: '28-2',
+    sourceBathCutNumber: 'В-28-2',
     cutEnabled: true, materialType: 'Площадной', materialName: 'ЛДСП Белый', materialArticle: '',
     thicknessMm: 18, position: '01.00.01', partName: 'Панель', finishedLengthMm: 410.99,
     finishedWidthMm: 374.5, cutLengthMm: 411, cutWidthMm: 374.5, quantity: 2,

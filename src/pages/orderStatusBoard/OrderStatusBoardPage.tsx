@@ -3080,6 +3080,10 @@ type CncPrintCard =
   | { kind: 'bazis-cut'; bazisCutSet: CncTelegramBazisCutSetCard }
   | { kind: 'order'; order: OrderStatusBoardCard };
 
+function formatCncBathCardCutNumber(bath: Pick<CncTelegramBathCard, 'cutJobId'>): string {
+  return `В-${bath.cutJobId}`;
+}
+
 interface CncPrintColumn {
   key: CncTelegramTodayDisplayColumnKey;
   title: string;
@@ -3183,6 +3187,7 @@ const CncTelegramPrintCard: React.FC<{
     );
   }
 
+  const bathCutNumber = card.kind === 'bath' ? formatCncBathCardCutNumber(card.bath) : null;
   const summaries = buildCncOrderSummaries(
     card.kind === 'bath'
       ? card.bath.items
@@ -3216,9 +3221,9 @@ const CncTelegramPrintCard: React.FC<{
       {card.kind === 'bath' && (
         <span
           className="cnc-print-card__bath-cut-number"
-          aria-label={`Номер карты раскроя ${card.bath.cutNumber}`}
+          aria-label={`Номер карты раскроя ${bathCutNumber}`}
         >
-          {card.bath.cutNumber}
+          {bathCutNumber}
         </span>
       )}
       {card.kind === 'bazis-cut' && (
@@ -4000,6 +4005,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   const interactive = relationsEnabled;
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'pdf' | null>(null);
   const minimal = displayMode === 'minimal' && !detailed;
+  const bathCutNumber = formatCncBathCardCutNumber(bath);
 
   return (
     <div
@@ -4021,12 +4027,12 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
       onClick={interactive ? onSelect : undefined}
     >
       {minimal ? (
-        <span
-          className="cnc-compact-card__number"
-          aria-label={`Номер ванны ${bath.cutNumber}`}
-        >
-          {bath.cutNumber}
-        </span>
+          <span
+            className="cnc-compact-card__number"
+            aria-label={`Номер карты раскроя ${bathCutNumber}`}
+          >
+            {bathCutNumber}
+          </span>
       ) : (
         <>
       <div className="status-board-card__top">
@@ -4064,9 +4070,9 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           )}
           <Tag
             className="cnc-bath-card__cut-result-badge"
-            aria-label={`Номер карты раскроя ${bath.cutNumber}`}
+            aria-label={`Номер карты раскроя ${bathCutNumber}`}
           >
-            {bath.cutNumber}
+            {bathCutNumber}
           </Tag>
         </div>
       </div>

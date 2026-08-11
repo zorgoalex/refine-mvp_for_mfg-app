@@ -45,7 +45,8 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toContain("cpp.params->>'layout_mode'");
     expect(source).toContain("= 'vacuum_table' AS is_vacuum");
     expect(source).toContain('PARTITION BY (is_vacuum IS TRUE)');
-    expect(source).toContain("cut_job_id::text || '-' || result_no::text");
+    expect(source).toContain("max(cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number");
+    expect(source).toContain("max('В-' || cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number");
     expect(source).toContain('FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number');
     expect(source).toContain('FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number');
   });
@@ -128,7 +129,7 @@ describe('PgLabelsRepository structural guards', () => {
   it('filters required label cut-map selections by selected source', () => {
     expect(source).toContain("$4::text = 'bath'");
     expect(source).toContain("$4::text = 'regular'");
-    expect(source).toContain("= cut_version_fields.vacuum_cut_number");
+    expect(source).toContain("'В-' || p.cut_job_id::text || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number");
     expect(source).toContain("= cut_version_fields.regular_cut_number");
     expect(source).toContain('LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH');
     expect(source).toContain('cutMapSourceMatches');

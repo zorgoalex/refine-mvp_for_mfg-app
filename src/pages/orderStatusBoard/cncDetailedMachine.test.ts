@@ -407,7 +407,7 @@ function bath(): CncTelegramBathCard {
     cutResultId: 40,
     resultNo: 2,
     revisionNo: 1,
-    cutNumber: '20-2',
+    cutNumber: 'В-20-2',
     cutJobName: 'Ванна 2701',
     createdAt: '2026-08-01T09:00:00.000Z',
     ready: false,

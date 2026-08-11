@@ -4,6 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { auditService } from '../../../common/audit/audit.service';
 import type { DatabaseClient } from '../../../database/database.types';
 import { DatabaseService } from '../../../database/database.service';
+import { formatCutNumber } from '../../cut/application/cut-numbering';
 import { actorId } from '../application/labels.service';
 import {
   buildLabelRows,
@@ -211,7 +212,7 @@ LEFT JOIN LATERAL (
   )
   SELECT
     max(cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number,
-    max(cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number
+    max('В-' || cut_job_id::text || '-' || result_no::text) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number
   FROM ranked
 ) cut_version_fields ON true
 `;
@@ -1273,7 +1274,7 @@ export class PgLabelsRepository implements LabelsPort {
           instance: toNumber(row.instance),
           cutResultId: toNumber(row.cut_result_id),
           cutJobId: toNumber(row.cut_job_id),
-          cutNumber: `${toNumber(row.cut_job_id)}-${toNumber(row.result_no)}`,
+          cutNumber: formatCutNumber(toNumber(row.cut_job_id), toNumber(row.result_no), row.is_vacuum === true),
           cutJobName: row.cut_job_name ?? `Раскрой ${toNumber(row.cut_job_id)}`,
           resultNo: toNumber(row.result_no),
           resultKind: row.result_kind,
@@ -2530,7 +2531,7 @@ export async function resolveLabelCutMaps(
              cpp.params->>'layout_mode',
              j.params->>'layout_mode'
            ) = 'vacuum_table'
-           AND (p.cut_job_id::text || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number)
+           AND ('В-' || p.cut_job_id::text || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number)
            OR ($4::text = 'regular' AND COALESCE(
              j.last_calc_params->>'layout_mode',
              cpp.params->>'layout_mode',
@@ -2626,7 +2627,7 @@ export async function resolveLabelCutMaps(
       if (!cutMapPlacementMatchesSource(placement, cutMapSource)) {
         throw new ApiError(422, 'LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH', 'Раскрой не соответствует выбранному полю детали', {
           cutMapSource,
-          cutNumber: `${toNumber(placement.cut_job_id)}-${toNumber(placement.result_no)}`,
+          cutNumber: formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true),
           expectedCutNumber: cutMapSource === 'bath' ? placement.vacuum_cut_number : placement.regular_cut_number,
           cutResultPlacementId: toNumber(placement.cut_result_placement_id),
         });
@@ -2661,7 +2662,7 @@ export async function resolveLabelCutMaps(
       cutResultSheetMapId,
       cutResultId: toNumber(placement.cut_result_id),
       cutJobId: toNumber(placement.cut_job_id),
-      cutNumber: `${toNumber(placement.cut_job_id)}-${toNumber(placement.result_no)}`,
+      cutNumber: formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true),
       cutJobName: placement.cut_job_name,
       variant: placement.variant,
       sheetIndex: toNumber(placement.sheet_index),
@@ -3201,7 +3202,7 @@ function cutMapSourceMatches(isVacuum: boolean, source: LabelCutMapSource): bool
 function cutMapPlacementMatchesSource(placement: ResolvedCutMapRow, source: LabelCutMapSource): boolean {
   if (!cutMapSourceMatches(placement.is_vacuum === true, source)) return false;
   const expectedCutNumber = source === 'bath' ? placement.vacuum_cut_number : placement.regular_cut_number;
-  return expectedCutNumber === `${toNumber(placement.cut_job_id)}-${toNumber(placement.result_no)}`;
+  return expectedCutNumber === formatCutNumber(toNumber(placement.cut_job_id), toNumber(placement.result_no), placement.is_vacuum === true);
 }
 
 async function insertGenerationCutPlacements(

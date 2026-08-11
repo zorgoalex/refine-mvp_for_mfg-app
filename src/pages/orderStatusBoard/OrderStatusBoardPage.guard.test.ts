@@ -598,12 +598,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
   });
 
-  it('shows the bath cut-result version without a readiness check and removes terminal work', () => {
+  it('shows the bath cut-job number without a readiness check and removes terminal work', () => {
     const actionsStart = page.indexOf('<div className="cnc-bath-card__actions">');
     const actionsEnd = page.indexOf('</div>', actionsStart);
     const actions = page.slice(actionsStart, actionsEnd);
+    expect(page).toContain('function formatCncBathCardCutNumber(');
+    expect(page).toContain('return `В-${bath.cutJobId}`;');
+    expect(page).toContain('const bathCutNumber = formatCncBathCardCutNumber(bath);');
     expect(actions).toContain('className="cnc-bath-card__cut-result-badge"');
-    expect(actions).toMatch(/>\s*\{bath\.cutNumber\}\s*<\/Tag>/);
+    expect(actions).toMatch(/>\s*\{bathCutNumber\}\s*<\/Tag>/);
     expect(actions).not.toContain('№{bath.cutNumber}');
     expect(actions).not.toContain('cnc-bath-card__ready-icon');
     expect(css).toMatch(
@@ -664,7 +667,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(printCard).toContain('className="cnc-print-card__bath-cut-number"');
     expect(printCard).toContain('className="cnc-order-details-separator"');
     expect(printCard).toContain('{CNC_ORDER_DETAILS_SEPARATOR}');
-    expect(printCard).toContain('{card.bath.cutNumber}');
+    expect(printCard).toContain('formatCncBathCardCutNumber(card.bath)');
+    expect(printCard).toContain('{bathCutNumber}');
     expect(printCard).not.toContain('№{card.bath.cutNumber}');
     expect(css).toMatch(
       /\.cnc-print-card__bath-cut-number\s*\{[^}]*border-radius: 1mm;[^}]*font-variant-numeric: tabular-nums;/s,
