@@ -557,6 +557,7 @@ describe('PgCncTelegramRepository', () => {
               {
                 bazis_cut_set_id: 8,
                 name: 'Набор МДФ',
+                created_at: '2026-07-21T08:30:00.000Z',
                 sort_order: 0,
                 source_order_detail_id: 3101,
                 source_order_id: 2689,
@@ -571,6 +572,7 @@ describe('PgCncTelegramRepository', () => {
               {
                 bazis_cut_set_id: 8,
                 name: 'Набор МДФ',
+                created_at: '2026-07-21T08:30:00.000Z',
                 sort_order: 1,
                 source_order_detail_id: 3201,
                 source_order_id: 2701,
@@ -585,6 +587,7 @@ describe('PgCncTelegramRepository', () => {
               {
                 bazis_cut_set_id: 8,
                 name: 'Набор МДФ',
+                created_at: '2026-07-21T08:30:00.000Z',
                 sort_order: 2,
                 source_order_detail_id: 3301,
                 source_order_id: 2702,
@@ -614,6 +617,7 @@ describe('PgCncTelegramRepository', () => {
     const basisQuery = queries.find((query) => /target_bazis_cut_sets/i.test(query.text));
 
     expect(basisQuery?.params).toEqual(['2026-07-18', '2026-07-24']);
+    expect(basisQuery?.text).toContain('cut_set.created_at,');
     expect(basisQuery?.text).toContain('cut_set.created_at >= $1::date');
     expect(basisQuery?.text).toContain("cut_set.created_at < ($2::date + INTERVAL '1 day')");
     expect(basisQuery?.text).not.toContain('detail.source_order_detail_id = ANY($1::bigint[])');
@@ -622,6 +626,7 @@ describe('PgCncTelegramRepository', () => {
       {
         bazisCutSetId: 8,
         name: 'Набор МДФ',
+        createdAt: '2026-07-21T08:30:00.000Z',
         orderCount: 3,
         positionCount: 3,
         itemQuantityTotal: 9,

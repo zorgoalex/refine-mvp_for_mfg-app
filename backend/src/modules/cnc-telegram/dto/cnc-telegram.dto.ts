@@ -165,6 +165,7 @@ export interface CncTelegramBazisCutSetItemDto {
 export interface CncTelegramBazisCutSetCardDto {
   bazisCutSetId: number;
   name: string;
+  createdAt: string;
   orderCount: number;
   positionCount: number;
   itemQuantityTotal: number;

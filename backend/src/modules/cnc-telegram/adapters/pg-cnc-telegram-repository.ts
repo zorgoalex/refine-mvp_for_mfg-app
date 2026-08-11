@@ -223,6 +223,7 @@ interface BathJoinedRow extends QueryResultRow {
 interface BazisCutSetJoinedRow extends QueryResultRow {
   bazis_cut_set_id: string | number;
   name: string;
+  created_at: string | Date;
   sort_order: string | number;
   source_order_detail_id: string | number | null;
   source_order_id: string | number | null;
@@ -3588,6 +3589,7 @@ async function loadPeriodBazisCutSetCards(
     SELECT
       cut_set.bazis_cut_set_id,
       cut_set.name,
+      cut_set.created_at,
       detail.sort_order,
       detail.source_order_detail_id,
       COALESCE(detail.source_order_id, source_detail.order_id) AS source_order_id,
@@ -3636,6 +3638,7 @@ function mapBazisCutSetRows(
         card: {
           bazisCutSetId,
           name: normalizeOptional(row.name) ?? `БР-${bazisCutSetId}`,
+          createdAt: toIso(row.created_at),
           orderCount: 0,
           positionCount: 0,
           itemQuantityTotal: 0,

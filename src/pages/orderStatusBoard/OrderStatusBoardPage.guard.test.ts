@@ -381,6 +381,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(card).toContain('aria-label="Детали Базис-раскроя"');
     expect(card).toContain('setDetailsOpen((current) => !current)');
     expect(card).toContain('card.items.map((item, index)');
+    expect(card).toContain('Создан {formatDateTime(card.createdAt)}');
+    expect(card).toContain('className="status-board-card__footer"');
     expect(css).toMatch(
       /\.cnc-bazis-cut-card__tabs\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);/s,
     );

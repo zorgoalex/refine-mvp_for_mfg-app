@@ -3398,6 +3398,10 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
               </div>
             </div>
           )}
+
+          <div className="status-board-card__footer">
+            <span>Создан {formatDateTime(card.createdAt)}</span>
+          </div>
         </>
       )}
     </div>

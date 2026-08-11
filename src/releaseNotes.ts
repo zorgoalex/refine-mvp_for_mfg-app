@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-11",
+    title: "МДФ-работы: дата Базис-раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "На карточке Базис-раскроя на МДФ-доске отображается дата и время создания набора.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-10",
     title: "МДФ-работы: Базис-раскрои как файлы станка",
     services: ["ERP", "Cutting"],

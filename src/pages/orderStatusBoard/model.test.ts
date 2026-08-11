@@ -1084,6 +1084,7 @@ function cncBazisCutSet(
   return {
     bazisCutSetId,
     name: `БР-${bazisCutSetId}`,
+    createdAt: '2026-08-01T08:00:00.000Z',
     orderCount: new Set(items.map((item) => item.orderId)).size,
     positionCount: items.length,
     itemQuantityTotal: items.length,
