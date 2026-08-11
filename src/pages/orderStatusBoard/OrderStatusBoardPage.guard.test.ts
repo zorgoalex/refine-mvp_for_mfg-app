@@ -243,25 +243,30 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*max-height: var\(--status-board-cnc-order-cards-max-height\);[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
     );
     expect(page).toContain('type CncOrderDisplayColumnKey = Extract<');
-    expect(page).toContain('scrolledOrderColumns');
-    expect(page).toContain('updateOrderColumnScroll(orderColumnKey, event.currentTarget)');
-    expect(page).toContain('scrollOrderColumnToTop(orderColumnKey, event.currentTarget)');
+    expect(page).toContain('orderColumnScrollTopState');
+    expect(page).toContain('syncOrderColumnScrollTopButton(orderColumnKey, event.currentTarget)');
+    expect(page).toContain('scrollOrderColumnToTop(columnKey, event.currentTarget)');
     expect(page).toContain('className="cnc-order-column-scroll-top"');
+    expect(page).toContain('style={{ left: scrollTopButton.left }}');
     expect(page).toContain('Прокрутить колонку «${title}» наверх');
     expect(css).toContain('.cnc-order-column-scroll-top.ant-btn');
     expect(css).toContain('padding-bottom: calc(clamp(3px, 0.65vw, 10px) + 52px)');
-    expect(css).toContain('bottom: 10px');
+    expect(css).toContain('position: fixed');
+    expect(css).toContain('inset-block-end: calc(14px + env(safe-area-inset-bottom, 0px))');
     expect(css).toContain('height: 40px');
     expect(css).toContain('min-height: 40px');
     expect(css).toContain('background: rgba(17, 24, 39, 0.66)');
     expect(css).toContain('transform: translateX(-50%) scale(0.96)');
-    expect(page).toContain('function statusBoardCanScrollRight');
-    expect(page).toContain('const [cncScrollRightVisible, setCncScrollRightVisible] = useState(false);');
-    expect(page).toContain('setCncScrollRightVisible(isCncToday && statusBoardCanScrollRight');
+    expect(page).toContain('function statusBoardHorizontalScrollDirection');
+    expect(page).toContain("type CncBoardHorizontalScrollDirection = 'left' | 'right';");
+    expect(page).toContain('const [cncBoardScrollDirection, setCncBoardScrollDirection] =');
+    expect(page).toContain('setCncBoardScrollDirection(');
     expect(page).toContain("viewport.scrollTo({ left: nextLeft, behavior: 'smooth' })");
-    expect(page).toContain('className="cnc-board-scroll-right"');
-    expect(page).toContain('aria-label="Прокрутить МДФ-доску вправо"');
-    expect(css).toContain('.cnc-board-scroll-right.ant-btn');
+    expect(page).toContain('className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}');
+    expect(page).toContain("cncBoardScrollDirection === 'left'");
+    expect(page).toContain('Прокрутить МДФ-доску влево');
+    expect(page).toContain('Прокрутить МДФ-доску вправо');
+    expect(css).toContain('.cnc-board-scroll-edge.ant-btn');
     expect(css).toContain('inset-block-start: 50dvh');
     expect(css).toContain('inset-inline-end: 10px');
     expect(css).toContain('background: rgba(17, 24, 39, 0.58)');
@@ -277,6 +282,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(tabletCss).toMatch(
       /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: auto;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*max-height: var\(--status-board-cnc-order-cards-max-height\);[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
     );
     expect(tabletCss).toContain('.status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
     expect(tabletCss).toContain('clamp(240px, 24vw, 276px)');

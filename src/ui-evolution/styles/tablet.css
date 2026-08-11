@@ -719,6 +719,15 @@
   touch-action: pan-x pan-y;
 }
 
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders .status-board-column__cards,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders_ready .status-board-column__cards,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders_issued .status-board-column__cards {
+  max-height: var(--status-board-cnc-order-cards-max-height);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] :where(
   .status-board-page__header,
   .operational-page-head,

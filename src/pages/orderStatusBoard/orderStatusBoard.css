@@ -2676,10 +2676,9 @@
 }
 
 .cnc-order-column-scroll-top.ant-btn {
-  position: absolute;
-  inset-inline-start: 50%;
-  bottom: 10px;
-  z-index: 8;
+  position: fixed;
+  inset-block-end: calc(14px + env(safe-area-inset-bottom, 0px));
+  z-index: 38;
   min-width: 104px;
   height: 40px;
   min-height: 40px;
@@ -2694,6 +2693,7 @@
   transition-duration: 140ms;
   transition-timing-function: ease;
   backdrop-filter: blur(8px);
+  pointer-events: auto;
 }
 
 .cnc-order-column-scroll-top.ant-btn:hover,
@@ -2709,7 +2709,7 @@
   transform: translateX(-50%) scale(0.96);
 }
 
-.cnc-board-scroll-right.ant-btn {
+.cnc-board-scroll-edge.ant-btn {
   position: fixed;
   inset-block-start: 50dvh;
   inset-inline-end: 10px;
@@ -2730,8 +2730,8 @@
   backdrop-filter: blur(8px);
 }
 
-.cnc-board-scroll-right.ant-btn:hover,
-.cnc-board-scroll-right.ant-btn:focus-visible {
+.cnc-board-scroll-edge.ant-btn:hover,
+.cnc-board-scroll-edge.ant-btn:focus-visible {
   border-color: rgba(17, 24, 39, 0.34);
   background: rgba(17, 24, 39, 0.72);
   color: #fff;
@@ -2739,7 +2739,7 @@
   opacity: 0.94;
 }
 
-.cnc-board-scroll-right.ant-btn:active {
+.cnc-board-scroll-edge.ant-btn:active {
   transform: translateY(-50%) scale(0.96);
 }
 
