@@ -112,4 +112,12 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain('nameFontSize={ORDER_DETAIL_TABLE_CUT_JOB_NAME_FONT_SIZE}');
     expect(table).toContain('cutJobDeepLink(ref)');
   });
+  it('quick-adds a new detail row on ArrowDown from the last row and preserves the target column', () => {
+    expect(table).toContain('requestQuickAddFromLastRow');
+    expect(table).toContain("direction === 'down' && isLastOrderDetailRow(sortedDetails, record)");
+    expect(table).toContain("editorDirection === 'down'");
+    expect(table).toContain('pendingQuickAddFocusFieldRef.current = columnKey');
+    expect(table).toContain('focusSpreadsheetCoordinate({');
+    expect(tab).toContain('const handleQuickAdd = async (): Promise<boolean>');
+  });
 });

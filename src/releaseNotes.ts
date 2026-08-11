@@ -42,6 +42,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "Заказы: добавление строки стрелкой вниз",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В таблице деталей заказа стрелка вниз из любой ячейки последней строки создает новую пустую строку ниже и переносит выделение в соответствующую колонку.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "МДФ-работы: переделки и отсутствующие детали",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

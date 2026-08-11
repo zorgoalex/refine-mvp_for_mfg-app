@@ -69,7 +69,7 @@ import { BasisProjectLink } from '../BasisProjectLink';
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
   onDelete: (tempId: number, detailId?: number) => void;
-  onQuickAdd?: () => void;
+  onQuickAdd?: () => boolean | Promise<boolean>;
   onInsertAfter?: (detail: OrderDetail) => void;
   onCopyRow?: (detail: OrderDetail) => void;
   onTransferRows?: (rowKeys: React.Key[]) => void;
@@ -225,6 +225,18 @@ const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
   'basis_designation',
   'detail_name',
 ]);
+
+const orderDetailRowKey = (detail: OrderDetail): number | undefined =>
+  detail.temp_id ?? detail.detail_id;
+
+export function isLastOrderDetailRow(
+  details: readonly OrderDetail[],
+  target: OrderDetail,
+): boolean {
+  const targetKey = orderDetailRowKey(target);
+  if (targetKey === undefined || details.length === 0) return false;
+  return orderDetailRowKey(details[details.length - 1]) === targetKey;
+}
 
 const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
   display: 'block',
@@ -568,6 +580,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const scrollToEditingRowRef = useRef(false);
+  const pendingQuickAddFocusFieldRef = useRef<React.Key | null>(null);
+  const arrowDownQuickAddInFlightRef = useRef(false);
 
   // Find actual scroll container (.ant-table-body) after mount
   useEffect(() => {
@@ -1103,25 +1117,71 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   // Save on Tab past the last inline-entry field and optionally add a new row.
   const finishInlineEditOnTab = async (record: OrderDetail) => {
-    const recordKey = record.temp_id || record.detail_id;
-    const lastDetail = sortedDetails[sortedDetails.length - 1];
-    const lastKey = lastDetail?.temp_id || lastDetail?.detail_id;
     return await finishOrderDetailInlineTab({
       saveCurrentRow,
-      isLastRow: recordKey === lastKey,
+      isLastRow: isLastOrderDetailRow(sortedDetails, record),
       onQuickAdd,
     });
   };
 
+  const requestQuickAddFromLastRow = async (
+    record: OrderDetail,
+    columnKey: React.Key,
+  ): Promise<boolean> => {
+    if (!onQuickAdd || !isLastOrderDetailRow(sortedDetails, record)) return false;
+    if (arrowDownQuickAddInFlightRef.current) return true;
+    arrowDownQuickAddInFlightRef.current = true;
+    pendingQuickAddFocusFieldRef.current = columnKey;
+    try {
+      const added = await onQuickAdd();
+      if (added === false) {
+        pendingQuickAddFocusFieldRef.current = null;
+        return false;
+      }
+      return true;
+    } catch (error) {
+      pendingQuickAddFocusFieldRef.current = null;
+      throw error;
+    } finally {
+      arrowDownQuickAddInFlightRef.current = false;
+    }
+  };
+
   // Expose methods via ref for external calls (e.g., quick add)
   useImperativeHandle(ref, () => ({
-    startEditRow: (detail) => startEdit(detail, true),
+    startEditRow: (detail) => {
+      const requestedField = pendingQuickAddFocusFieldRef.current;
+      pendingQuickAddFocusFieldRef.current = null;
+      if (requestedField !== null) {
+        const rowKey = orderDetailRowKey(detail);
+        if (rowKey !== undefined) {
+          focusSpreadsheetCoordinate({
+            rowKey: String(rowKey),
+            columnKey: String(requestedField),
+          });
+          return;
+        }
+      }
+      startEdit(detail, true);
+    },
     isEditing: () => editingKey !== null,
     saveCurrentAndStartNew: async (newDetail: OrderDetail) => {
+      const requestedField = pendingQuickAddFocusFieldRef.current;
       const saved = await saveCurrentRow();
+      pendingQuickAddFocusFieldRef.current = null;
       if (saved) {
         // Start editing the new detail after a short delay
         setTimeout(() => {
+          if (requestedField !== null) {
+            const rowKey = orderDetailRowKey(newDetail);
+            if (rowKey !== undefined) {
+              focusSpreadsheetCoordinate({
+                rowKey: String(rowKey),
+                columnKey: String(requestedField),
+              });
+              return;
+            }
+          }
           startEdit(newDetail, true);
         }, 50);
       }
@@ -2057,6 +2117,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const direction = directionByKey[event.key];
     if (direction) {
       event.preventDefault();
+      if (direction === 'down' && isLastOrderDetailRow(sortedDetails, record)) {
+        void requestQuickAddFromLastRow(record, columnKey);
+        return;
+      }
       moveSpreadsheetFocus(record, columnKey, direction);
       return;
     }
@@ -2121,6 +2185,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if (editorDirection) {
       event.preventDefault();
       event.stopPropagation();
+      if (editorDirection === 'down') {
+        const currentRecord = details.find((detail) =>
+          (detail.temp_id || detail.detail_id) === editingKey,
+        );
+        if (currentRecord && isLastOrderDetailRow(sortedDetails, currentRecord)) {
+          void requestQuickAddFromLastRow(currentRecord, currentField);
+          return;
+        }
+      }
       const nextCell = moveOrderDetailSpreadsheetCell(
         getSpreadsheetNavigationRowKeys(),
         spreadsheetColumnKeys,
