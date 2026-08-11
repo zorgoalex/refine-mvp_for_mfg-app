@@ -1085,6 +1085,7 @@
 .cnc-relation-card--dimmed .cnc-packet-card__program,
 .cnc-relation-card--dimmed .cnc-packet-card__notes,
 .cnc-relation-card--dimmed .cnc-packet-card__note-file,
+.cnc-relation-card--dimmed .cnc-packet-card__note-rework,
 .cnc-relation-card--dimmed .cnc-bath-card__block-job,
 .cnc-relation-card--dimmed .status-board-card__number,
 .cnc-relation-card--dimmed .status-board-card__standard-cell,
@@ -1845,6 +1846,15 @@
 
 .cnc-packet-card__note-file {
   color: var(--app-text-muted);
+}
+
+.cnc-packet-card__note-rework {
+  color: #cf1322;
+  font-weight: 700;
+}
+
+.cnc-packet-card__note-rework.ant-typography {
+  color: #cf1322;
 }
 
 .cnc-packet-card__order-summary {

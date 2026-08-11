@@ -3662,7 +3662,15 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
           {(displayComments.length > 0 || packet.dowelingLinks.length > 0) && (
             <div className="cnc-packet-card__notes">
               {displayComments.map((comment, index) => (
-                isCncProgramFilename(comment) ? (
+                isCncReworkComment(comment) ? (
+                  <Typography.Text
+                    key={`${packet.packetId}:comment:${index}`}
+                    strong
+                    className="cnc-packet-card__note-rework"
+                  >
+                    {comment}
+                  </Typography.Text>
+                ) : isCncProgramFilename(comment) ? (
                   <Typography.Text
                     key={`${packet.packetId}:comment:${index}`}
                     strong
@@ -5532,7 +5540,7 @@ const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>((
   >
     <summary className="cnc-order-card__missing-summary">
       <span className="cnc-order-card__missing-label">
-        {formatCncMissingPositionsLabel(details.length)}
+        {formatCncMissingDetailsSummary(details)}
       </span>
     </summary>
     <ul className="cnc-order-card__missing-list">
@@ -5616,8 +5624,10 @@ function formatArea(value: number): string {
   return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value)} м²`;
 }
 
-function formatCncMissingPositionsLabel(count: number): string {
-  return `Отсутствует ${count} ${pluralRu(count, 'позиция', 'позиции', 'позиций')}`;
+function formatCncMissingDetailsSummary(details: readonly CncOrderMissingDetail[]): string {
+  const positionCount = details.length;
+  const detailCount = details.reduce((sum, detail) => sum + detail.missingQuantity, 0);
+  return `Отсутствуют - позиций - ${positionCount}, деталей - ${detailCount}`;
 }
 
 function formatCncMissingDetailLine(detail: CncOrderMissingDetail): string {
@@ -7038,6 +7048,10 @@ function isCncMachineOnlyComment(comment: string): boolean {
 
 function isCncProgramFilename(comment: string): boolean {
   return /^CNC\s*#?\s*\d+_.+\.(?:txt|nc|cnc|iso)$/i.test(comment.trim());
+}
+
+function isCncReworkComment(comment: string): boolean {
+  return /(?:^|[^а-яё])переделк[а-яё]*(?=$|[^а-яё])/i.test(comment.trim());
 }
 
 function cncItemQuantityWarningTitle(item: CncTelegramPacket['items'][number]): string {

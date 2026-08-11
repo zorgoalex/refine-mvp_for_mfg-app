@@ -352,6 +352,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('<Collapse.Panel');
     expect(page).toContain('<details');
     expect(page).toContain('className="cnc-order-card__missing-summary"');
+    expect(page).toContain('formatCncMissingDetailsSummary(details)');
+    expect(page).toContain('Отсутствуют - позиций - ${positionCount}, деталей - ${detailCount}');
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('data-cnc-manual-drag-ignore="true"');
     expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');
@@ -488,6 +490,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(/\.cnc-packet-card__sequence\s*\{[^}]*color: #000;/);
     expect(css).toMatch(/\.cnc-packet-card__sequence-sign\s*\{[^}]*font-size: 0\.5em;/);
     expect(css).toContain('font-variant-numeric: tabular-nums');
+    expect(page).toContain('isCncReworkComment(comment)');
+    expect(css).toMatch(/\.cnc-packet-card__note-rework\s*\{[^}]*color: #cf1322;[^}]*font-weight: 700;/);
+    expect(css).toMatch(/\.cnc-packet-card__note-rework\.ant-typography\s*\{[^}]*color: #cf1322;/);
     const cncFileNameRules = css.match(/\.cnc-packet-card__note-file\s*\{[^}]*\}/g) ?? [];
     expect(cncFileNameRules.length).toBeGreaterThan(0);
     expect(cncFileNameRules.every((rule) => rule.includes('color: var(--app-text-muted);'))).toBe(true);

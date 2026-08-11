@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "МДФ-работы: переделки и отсутствующие детали",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Комментарии файлов станка со словом «переделка» теперь выделяются красным жирным текстом.",
+      "В карточке заказа на МДФ-доске сводка отсутствующих позиций показывает количество позиций и суммарное количество деталей.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "МДФ-работы: компактный вид карточек",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
