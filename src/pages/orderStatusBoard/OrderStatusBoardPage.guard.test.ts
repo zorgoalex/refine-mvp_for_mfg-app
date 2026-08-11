@@ -705,6 +705,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("title: 'Готов к выдаче'");
     expect(page).toContain("title: 'Выдан'");
     expect(page).toContain('Распилено {cncReadiness.cutDetails}');
+    expect(page).toContain('if (packet.rework) continue;');
     expect(page).toContain('if (!cncPacketCountsForMdfReadiness(packet)) continue;');
     expect(page).toContain('if (!cncMaterialNameIsMdf(item.materialName)) continue;');
     expect(page).toContain('Закатано {cncReadiness.rolledDetails}');

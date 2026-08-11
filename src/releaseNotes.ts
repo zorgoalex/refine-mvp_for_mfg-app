@@ -41,6 +41,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "МДФ-работы: точнее счетчик распиленных деталей",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В карточках заказов на МДФ-доске счетчик «Распилено» больше не завышается готовыми ваннами и файлами переделки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "МДФ-работы: дата Базис-раскроя",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

@@ -585,6 +585,53 @@ describe('order status board model', () => {
     expect(readiness.has(2710)).toBe(false);
   });
 
+  it('does not inflate MDF cut readiness from bath completed quantities or rework files', () => {
+    const packet = cncPacket('packet-2678', ['2678'], [2678], [2678], [267801]);
+    packet.items[0] = { ...packet.items[0], quantity: 20 };
+    const reworkPacket = cncPacket('packet-2678-rework', ['2678'], [2678], [2678], [267803]);
+    reworkPacket.rework = true;
+    reworkPacket.items[0] = { ...reworkPacket.items[0], quantity: 5 };
+    const bazisCutSet = cncBazisCutSet(9003, [
+      { orderName: '2678', orderId: 2678, detailId: 267802, materialName: 'МДФ 16 мм' },
+    ]);
+    bazisCutSet.items[0] = { ...bazisCutSet.items[0], quantity: 13 };
+    const bath = cncBath('bath-2678', ['2678'], [2678]);
+    bath.items[0] = { ...bath.items[0], quantity: 38, completedQuantity: 38 };
+    const columns = [
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 3,
+        packets: [packet, reworkPacket],
+        baths: [],
+        bazisCutSets: [bazisCutSet],
+      },
+      {
+        key: 'baths_ready',
+        title: 'Готовы к закатке',
+        total: 1,
+        packets: [],
+        baths: [bath],
+        bazisCutSets: [],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const readiness = buildCncOrderReadiness(columns, {});
+    const split = splitCncOrderCardsByManualColumn(
+      [{ ...card(2678), orderName: '2678', partsCount: 80 }],
+      readiness,
+      {},
+    );
+
+    expect(readiness.get(2678)?.cutDetails).toBe(33);
+    expect(split.orders[0]?.readiness).toEqual({
+      totalDetails: 80,
+      cutDetails: 33,
+      rolledDetails: 0,
+      remainingDetails: 47,
+    });
+  });
+
   it('keeps MDF order readiness total at least the order detail count', () => {
     const split = splitCncOrderCardsByManualColumn(
       [{ ...card(501), partsCount: 50 }],
@@ -1093,6 +1140,7 @@ function cncPacket(
     comments: [],
     completionStatus: 'pending',
     thumbsUp: false,
+    rework: false,
     items: orderNames.map((orderName, index) => ({
       packetItemId: `${packetId}-${index}`,
       orderName,

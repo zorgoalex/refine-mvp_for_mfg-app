@@ -5912,7 +5912,6 @@ export function buildCncOrderReadiness(
     if (current) return current;
     current = {
       bathTotal: 0,
-      bathCut: 0,
       packetTotal: 0,
       packetCut: 0,
       bazisCutTotal: 0,
@@ -5925,6 +5924,7 @@ export function buildCncOrderReadiness(
 
   for (const column of columns) {
     for (const packet of column.packets) {
+      if (packet.rework) continue;
       if (!cncPacketCountsForMdfReadiness(packet)) continue;
       const packetTarget = resolveCncManualTarget(
         'packet',
@@ -5991,8 +5991,6 @@ export function buildCncOrderReadiness(
         detail.bathTotal += quantity;
         if (bathTarget === 'baths_laminated') {
           detail.rolled += quantity;
-        } else {
-          detail.bathCut += Math.min(nonNegativeInteger(item.completedQuantity), quantity);
         }
       }
     }
@@ -6011,16 +6009,15 @@ export function buildCncOrderReadiness(
         accumulator.packetTotal += sourceTotal;
         accumulator.packetCut += sourceCut;
         accumulator.bathTotal += bathTotal;
-        accumulator.bathCut += Math.min(detail.bathCut, bathTotal);
         accumulator.rolled += Math.min(detail.rolled, Math.max(sourceTotal, bathTotal));
         return accumulator;
       },
-      { bathTotal: 0, bathCut: 0, packetTotal: 0, packetCut: 0, rolled: 0 },
+      { bathTotal: 0, packetTotal: 0, packetCut: 0, rolled: 0 },
     );
     const totalDetails = Math.max(order.bathTotal, order.packetTotal);
     const rolledDetails = Math.min(order.rolled, totalDetails);
     const cutDetails = Math.min(
-      Math.max(order.bathCut, order.packetCut - rolledDetails),
+      Math.max(0, order.packetCut - rolledDetails),
       Math.max(0, totalDetails - rolledDetails),
     );
     result.set(orderId, {
@@ -6035,7 +6032,6 @@ export function buildCncOrderReadiness(
 
 interface CncReadinessDetailTotals {
   bathTotal: number;
-  bathCut: number;
   packetTotal: number;
   packetCut: number;
   bazisCutTotal: number;
