@@ -73,19 +73,23 @@ describe('OrderShow sticky detail header guards', () => {
     expect(compactLineCss).not.toContain('overflow-x: auto;');
   });
 
-  it('shows the doweling order number as Basis project in the order summary without a duplicate material suffix', () => {
-    expect(headerSource).toContain('const compactBasisProjectName =');
-    expect(editHeaderSource).toContain('const compactBasisProjectName =');
+  it('shows detail Basis project numbers before the doweling fallback in the order summary', () => {
+    expect(headerSource).toContain("import { collectOrderBasisProjects } from './orderBasisProjects';");
+    expect(editHeaderSource).toContain("import { collectOrderBasisProjects } from './orderBasisProjects';");
+    expect(headerSource).toContain('const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);');
+    expect(editHeaderSource).toContain('const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);');
+    expect(headerSource).toContain('basisProjects.length > 0 ? basisProjects.join');
+    expect(editHeaderSource).toContain('basisProjects.length > 0 ? basisProjects.join');
+    expect(headerSource).toContain('latestDowelingLink?.doweling_order?.doweling_order_name');
+    expect(editHeaderSource).toContain('latestDowelingLink?.doweling_order?.doweling_order_name');
     expect(headerSource).toContain('record?.doweling_order_name');
     expect(editHeaderSource).toContain('header.doweling_order_name');
-    expect(headerSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{compactBasisProjectName}</Text>');
-    expect(editHeaderSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{compactBasisProjectName}</Text>');
+    expect(headerSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectSummary}</Text>');
+    expect(editHeaderSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectSummary}</Text>');
     expect(headerSource).not.toContain('Присадка: <Text strong');
     expect(editHeaderSource).not.toContain('Присадка: <Text strong');
     expect(headerSource).not.toContain('basisProjects.length > 0 ? `Базис:');
     expect(editHeaderSource).not.toContain('basisProjects.length > 0 ? `Базис:');
-    expect(headerSource).not.toContain('collectOrderBasisProjects');
-    expect(editHeaderSource).not.toContain('collectOrderBasisProjects');
   });
 
   it('pins the stack below workspace tabs and keeps table headers below the sticky toolbar', () => {

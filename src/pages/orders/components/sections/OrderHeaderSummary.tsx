@@ -20,6 +20,7 @@ import { RowSeparator } from './RowSeparator';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
+import { collectOrderBasisProjects } from './orderBasisProjects';
 
 const { Text } = Typography;
 
@@ -269,6 +270,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
   const materialsSummary = resolvedMaterialNames.length > 0
     ? resolvedMaterialNames.join(', ')
     : '—';
+  const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);
 
   // Load milling types, edge types, films для lookup
   const { data: millingTypesData } = useList({
@@ -350,8 +352,10 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     paidAmount > 0 ? `опл. ${formatNumber(paidAmount, 2)} ${CURRENCY_SYMBOL}` : null,
     remainingAmount > 0 ? `ост. ${formatNumber(remainingAmount, 2)} ${CURRENCY_SYMBOL}` : null,
   ].filter(Boolean);
-  const compactBasisProjectName =
+  const fallbackBasisProjectName =
     latestDowelingLink?.doweling_order?.doweling_order_name || header.doweling_order_name || null;
+  const basisProjectSummary =
+    basisProjects.length > 0 ? basisProjects.join(', ') : fallbackBasisProjectName;
   const compactMaterialSummary = materialsSummary;
 
   if (isOperational) {
@@ -472,9 +476,9 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
                 />
               ) : null}
             </span>
-            {compactBasisProjectName ? (
-              <span className="order-show-header__compact-item order-show-header__compact-doweling" title={compactBasisProjectName}>
-                Базис-проект: <Text strong className="order-show-header__compact-text">{compactBasisProjectName}</Text>
+            {basisProjectSummary ? (
+              <span className="order-show-header__compact-item order-show-header__compact-doweling" title={basisProjectSummary}>
+                Базис-проект: <Text strong className="order-show-header__compact-text">{basisProjectSummary}</Text>
               </span>
             ) : null}
             <span className="order-show-header__compact-item order-show-header__compact-material" title={compactMaterialSummary}>
@@ -765,21 +769,27 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
           background: 'var(--app-surface-muted)',
         }}
       >
-        {/* Basis project number is still stored in doweling_order_name. */}
-        {latestDowelingLink && (
+        {basisProjectSummary ? (
           <>
             <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
               Базис-проект: <Text strong style={{ color: '#DC2626' }}>
-                {latestDowelingLink.doweling_order?.doweling_order_name || '—'}
+                {basisProjectSummary}
               </Text>
-              {latestDowelingLink.doweling_order?.design_engineer_id && (
+              {basisProjects.length === 0 && latestDowelingLink?.doweling_order?.design_engineer_id && (
                 <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>
                   Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text)' }}>
                     {employeesMap.get(latestDowelingLink.doweling_order.design_engineer_id) || '—'}
                   </Text>
                 </span>
               )}
-              {dowelingLinks.length > 1 && (
+              {basisProjects.length === 0 && !latestDowelingLink && header.design_engineer_id && (
+                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>
+                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text)' }}>
+                    {employeesMap.get(header.design_engineer_id) || '—'}
+                  </Text>
+                </span>
+              )}
+              {basisProjects.length === 0 && dowelingLinks.length > 1 && (
                 <span style={{ marginLeft: 4, color: 'var(--app-text-muted)' }}>
                   +{dowelingLinks.length - 1}
                 </span>
@@ -787,23 +797,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
             </Text>
             <div style={{ width: 1, height: 12, background: 'var(--app-border)' }} />
           </>
-        )}
-        {/* Fallback для обратной совместимости */}
-        {!latestDowelingLink && header.doweling_order_id && (
-          <>
-            <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>
-              Базис-проект: <Text strong style={{ color: '#DC2626' }}>{header.doweling_order_name || '—'}</Text>
-              {header.design_engineer_id && (
-                <span style={{ marginLeft: 8, fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text-muted)' }}>
-                  Конструктор: <Text style={{ fontSize: 11.8, fontStyle: 'italic', letterSpacing: '0.3px', color: 'var(--app-text)' }}>
-                    {employeesMap.get(header.design_engineer_id) || '—'}
-                  </Text>
-                </span>
-              )}
-            </Text>
-            <div style={{ width: 1, height: 12, background: 'var(--app-border)' }} />
-          </>
-        )}
+        ) : null}
 
         {/* Materials */}
         <div style={{ flex: 1 }}>
