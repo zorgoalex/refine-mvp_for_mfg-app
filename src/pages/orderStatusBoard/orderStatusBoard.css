@@ -1645,6 +1645,10 @@
   color: #1677ff;
 }
 
+.cnc-bath-card--minimal .cnc-compact-card__number {
+  font-size: 9.8px;
+}
+
 .cnc-order-card__client {
   min-width: 0;
   margin-top: 2px;
@@ -2283,7 +2287,7 @@
   padding-inline: 6px;
   border-radius: 4px;
   color: var(--app-text);
-  font-size: 1.2em;
+  font-size: 0.84em;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.6;

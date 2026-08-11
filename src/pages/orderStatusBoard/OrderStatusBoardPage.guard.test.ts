@@ -559,6 +559,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-columns--cnc-minimal .status-board-column__cards');
     expect(css).toContain('.cnc-compact-card');
     expect(css).toContain('.cnc-compact-card__number');
+    expect(css).toMatch(
+      /\.cnc-bath-card--minimal \.cnc-compact-card__number\s*\{[^}]*font-size: 9\.8px;/s,
+    );
     expect(css).not.toContain('.cnc-compact-card__refs');
   });
 
@@ -618,7 +621,7 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.cnc-bath-card__actions\s*\{[^}]*align-items: center;/s,
     );
     expect(css).toMatch(
-      /\.cnc-bath-card__cut-result-badge\.ant-tag\s*\{[^}]*padding-inline: 6px;[^}]*border-radius: 4px;[^}]*font-size: 1\.2em;[^}]*font-variant-numeric: tabular-nums;/s,
+      /\.cnc-bath-card__cut-result-badge\.ant-tag\s*\{[^}]*padding-inline: 6px;[^}]*border-radius: 4px;[^}]*font-size: 0\.84em;[^}]*font-variant-numeric: tabular-nums;/s,
     );
     expect(page).toContain('filterCncBathColumnsByOrderStatuses(');
     expect(page).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
