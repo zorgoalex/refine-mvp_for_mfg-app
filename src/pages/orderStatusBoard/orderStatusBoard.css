@@ -1647,30 +1647,43 @@
 
 .cnc-order-card__missing {
   margin-top: 7px;
+  width: 100%;
+  min-width: 0;
+  display: block;
+  grid-column: 1 / -1;
   font-size: 12px;
   line-height: 1.3;
-}
-
-.cnc-order-card__missing.ant-collapse,
-.cnc-order-card__missing .ant-collapse {
   color: #cf1322;
 }
 
-.cnc-order-card__missing .ant-collapse-header {
+.cnc-order-card__missing-summary {
   min-height: 24px;
-  padding: 0 !important;
-  align-items: center !important;
-  color: #cf1322 !important;
-}
-
-.cnc-order-card__missing .ant-collapse-expand-icon {
-  height: 24px;
-  padding-inline-end: 4px !important;
+  width: 100%;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   color: #cf1322;
+  cursor: pointer;
+  list-style: none;
 }
 
-.cnc-order-card__missing .ant-collapse-content-box {
-  padding: 3px 0 0 !important;
+.cnc-order-card__missing-summary::-webkit-details-marker {
+  display: none;
+}
+
+.cnc-order-card__missing-summary::after {
+  content: '›';
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.cnc-order-card__missing[open] .cnc-order-card__missing-summary::after {
+  transform: rotate(90deg);
 }
 
 .cnc-order-card__missing-label {
@@ -1680,7 +1693,7 @@
 }
 
 .cnc-order-card__missing-list {
-  margin: 0;
+  margin: 3px 0 0;
   padding: 0;
   display: grid;
   gap: 2px;

@@ -10,6 +10,7 @@ import {
   buildCncOrderReadiness,
   cncManualMoveDestinations,
   cncManualMoveStorageKey,
+  formatStatusBoardOrderNumber,
   isCncManualMoveAllowed,
   splitCncOrderCardsByManualColumn,
   type CncBoardManualMoveState,
@@ -37,6 +38,17 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it('formats MDF order card numbers safely when compact cards receive incomplete live data', () => {
+    expect(formatStatusBoardOrderNumber({ orderId: 2707, orderName: ' 2707 ' })).toBe('2707');
+    expect(formatStatusBoardOrderNumber({ orderId: 2708 })).toBe('2708');
+    expect(
+      formatStatusBoardOrderNumber({
+        orderId: 2709,
+        orderName: undefined,
+      } as unknown as OrderStatusBoardCard),
+    ).toBe('2709');
+  });
+
   it('toggles a temporary standard-view override for only one compact MDF card', () => {
     const first = toggleCncCardStandardOverride(new Set(), 'packet:p-1');
 

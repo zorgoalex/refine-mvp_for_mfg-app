@@ -195,8 +195,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
-  it('scrolls MDF column card lists to top after relation selection', () => {
+  it('scrolls MDF board and column card lists to top after relation selection', () => {
     expect(page).toContain('function scrollStatusBoardColumnCardsToTop');
+    expect(page).toContain("viewport.closest<HTMLElement>('.status-board-page')");
+    expect(page).toContain("block: 'start'");
+    expect(page).toContain("inline: 'nearest'");
+    expect(page).toContain("viewport.scrollTo({ top: 0, behavior: 'smooth' })");
     expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
     expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
     expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
@@ -327,6 +331,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('dateFrom: displayRange.dateFrom');
     expect(page).toContain('dateTo: displayRange.dateTo');
     expect(page).toContain('datasetKey');
+    expect(page).toContain('const standardGridMinWidth = displayColumns.length * 220');
+    expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(220px, 1fr))`');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
     expect(page).toContain('CncBazisCutSetCardView');
     expect(page).toContain('Итоги по ERP-заказам набора');
@@ -343,10 +349,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('По выбранному заказу МДФ-работ нет');
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
-    expect(page).toContain('key="missing-details"');
+    expect(page).toContain('<details');
+    expect(page).toContain('className="cnc-order-card__missing-summary"');
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('data-cnc-manual-drag-ignore="true"');
     expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');
+    expect(css).toContain('grid-column: 1 / -1');
+    expect(css).toContain('width: 100%');
+    expect(css).toContain('.cnc-order-card__missing-summary::after');
+    expect(css).toContain('.cnc-order-card__missing[open] .cnc-order-card__missing-summary::after');
     expect(page).toContain('cncColumnDisplayTitle(column)');
     expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
@@ -1026,7 +1037,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Компактный');
     expect(page).toContain('Минимальный');
     expect(page).toContain('formatStatusBoardOrderNumber(card)');
-    expect(page).toContain('card.orderName.trim() || String(card.orderId)');
+    expect(page).toContain('trimmedText(card.orderName) || String(card.orderId)');
+    expect(page).not.toContain('card.orderName.trim() || String(card.orderId)');
     expect(page).not.toContain('card.fullNumber');
     expect(page).not.toContain('primaryStatusLabel');
     expect(page).not.toContain('status-board-card__status-label');
