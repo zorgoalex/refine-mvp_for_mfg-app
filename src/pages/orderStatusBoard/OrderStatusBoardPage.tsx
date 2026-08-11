@@ -1784,9 +1784,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                   icon={<PrinterOutlined />}
                   aria-label="Распечатать компактную МДФ-доску"
                   onClick={() => window.print()}
-                >
-                  Печать
-                </Button>
+                />
               </Tooltip>
             )}
             <Tooltip

@@ -647,11 +647,16 @@ describe('OrderStatusBoardPage UX guards', () => {
     const printCardStart = page.indexOf('const CncTelegramPrintCard');
     const printCardEnd = page.indexOf('interface CncCardDisplayToggleProps', printCardStart);
     const printCard = page.slice(printCardStart, printCardEnd);
+    const toolbarPrintButtonStart = page.indexOf('className="status-board-toolbar__cnc-print"');
+    const toolbarPrintButtonEnd = page.indexOf('</Tooltip>', toolbarPrintButtonStart);
+    const toolbarPrintButton = page.slice(toolbarPrintButtonStart, toolbarPrintButtonEnd);
 
     expect(page).toContain("import { createPortal } from 'react-dom';");
     expect(page).toContain("cncCardDisplayMode !== 'standard'");
     expect(page).toContain('aria-label="Распечатать компактную МДФ-доску"');
     expect(page).toContain('onClick={() => window.print()}');
+    expect(toolbarPrintButton).toContain('icon={<PrinterOutlined />}');
+    expect(toolbarPrintButton).not.toContain('>Печать');
     expect(page).toContain("cardDisplayMode !== 'standard' && createPortal(");
     expect(page).toContain('<CncTelegramPrintBoard');
     expect(page).toContain('card.packet.cuttingSequenceNo');
