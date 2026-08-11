@@ -643,6 +643,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("cncCardDisplayMode !== 'standard'");
     expect(page).toContain('aria-label="Распечатать компактную МДФ-доску"');
     expect(page).toContain('onClick={() => window.print()}');
+    expect(page).toContain("cardDisplayMode !== 'standard' && createPortal(");
     expect(page).toContain('<CncTelegramPrintBoard');
     expect(page).toContain('card.packet.cuttingSequenceNo');
     expect(page).toContain('cnc-print-card__sequence');

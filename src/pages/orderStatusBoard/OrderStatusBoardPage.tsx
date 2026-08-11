@@ -2603,7 +2603,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           </section>
         )}
       </div>
-      {cardDisplayMode === 'compact' && createPortal(
+      {cardDisplayMode !== 'standard' && createPortal(
         <CncTelegramPrintBoard
           columns={displayColumns}
           orderStatusColumns={orderStatusColumns}
