@@ -3930,6 +3930,25 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const cutMapFallbackImage = useMemo(() => cutMapFallbackImageFromPacket(packet), [packet]);
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
   const minimal = displayMode === 'minimal';
+  const navigate = useNavigate();
+  const cutJobPath = cncPacketCutJobPath(packet);
+  const compactCutNumber = formatCncPacketCompactNumber(packet);
+  const handleCutJobLinkClick = useCallback((event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.stopPropagation();
+    if (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      cutJobPath === null
+    ) {
+      return;
+    }
+    event.preventDefault();
+    navigate(cutJobPath);
+  }, [cutJobPath, navigate]);
 
   useEffect(() => {
     if (activeAuxView === 'sheet' && !hasSheetImage) {
@@ -3954,9 +3973,20 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         data-cnc-clickable={relationsEnabled ? 'true' : undefined}
         onClick={relationsEnabled ? onSelectRelation : undefined}
       >
-        <span className="cnc-compact-card__number" aria-label="Номер раскроя файла станка">
-          {formatCncPacketCompactNumber(packet)}
-        </span>
+        {cutJobPath ? (
+          <a
+            className="cnc-compact-card__number cnc-compact-card__number--link"
+            href={cutJobPath}
+            aria-label={`Открыть задание на раскрой ${compactCutNumber}`}
+            onClick={handleCutJobLinkClick}
+          >
+            {compactCutNumber}
+          </a>
+        ) : (
+          <span className="cnc-compact-card__number" aria-label="Номер раскроя файла станка">
+            {compactCutNumber}
+          </span>
+        )}
       </div>
     );
   }
@@ -4014,11 +4044,23 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               onToggle={onToggleDisplay}
             />
             {packet.cuttingSequenceNo != null && (
-              <Tooltip title="Номер раскроя файла станка">
-                <span className="cnc-packet-card__sequence">
-                  <span className="cnc-packet-card__sequence-sign">№</span>
-                  {packet.cuttingSequenceNo}
-                </span>
+              <Tooltip title={cutJobPath ? 'Открыть задание на раскрой' : 'Номер раскроя файла станка'}>
+                {cutJobPath ? (
+                  <a
+                    className="cnc-packet-card__sequence cnc-packet-card__sequence--link"
+                    href={cutJobPath}
+                    aria-label={`Открыть задание на раскрой ${packet.cuttingSequenceNo}`}
+                    onClick={handleCutJobLinkClick}
+                  >
+                    <span className="cnc-packet-card__sequence-sign">№</span>
+                    {packet.cuttingSequenceNo}
+                  </a>
+                ) : (
+                  <span className="cnc-packet-card__sequence">
+                    <span className="cnc-packet-card__sequence-sign">№</span>
+                    {packet.cuttingSequenceNo}
+                  </span>
+                )}
               </Tooltip>
             )}
           </div>
@@ -7310,6 +7352,12 @@ function cncMachineFileCutPrintHeader(packet: CncTelegramPacket): string | null 
 
 function formatCncPacketCompactNumber(packet: CncTelegramPacket): string {
   return packet.cuttingSequenceNo != null ? String(packet.cuttingSequenceNo) : '—';
+}
+
+function cncPacketCutJobPath(packet: CncTelegramPacket): string | null {
+  return packet.cuttingSequenceNo != null && packet.svgCutJobId != null
+    ? `/cut?job=${packet.svgCutJobId}`
+    : null;
 }
 
 function cncSheetPreviewRotate90(

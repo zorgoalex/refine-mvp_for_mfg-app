@@ -1661,6 +1661,24 @@
   white-space: nowrap;
 }
 
+.cnc-packet-card__sequence--link {
+  cursor: pointer;
+  text-decoration: none;
+  transition-duration: 0.16s;
+  transition-property: background-color, box-shadow, color, transform;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cnc-packet-card__sequence--link:hover {
+  color: #0958d9;
+  background: color-mix(in srgb, #1677ff 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #1677ff 42%, transparent);
+}
+
+.cnc-packet-card__sequence--link:active {
+  transform: scale(0.96);
+}
+
 .cnc-packet-card__sequence-sign {
   font-size: 0.5em;
   line-height: 1;
@@ -1741,6 +1759,24 @@
 
 .cnc-order-card--minimal .cnc-compact-card__number.ant-btn {
   color: #1677ff;
+}
+
+.cnc-compact-card__number--link {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  text-decoration: none;
+  transition-duration: 0.16s;
+  transition-property: color, transform;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cnc-compact-card__number--link:hover {
+  color: #0958d9;
+}
+
+.cnc-compact-card__number--link:active {
+  transform: scale(0.96);
 }
 
 .cnc-bath-card--minimal .cnc-compact-card__number {

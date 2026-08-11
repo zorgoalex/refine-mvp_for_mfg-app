@@ -595,7 +595,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("cardDisplayMode === 'minimal' ? 'status-board-columns--cnc-minimal' : ''");
     expect(page).toContain("const cncColumnMinWidth = cardDisplayMode === 'minimal' ? 132 : 220");
     expect(page).toContain("displayMode={cardDisplayMode === 'minimal' ? 'minimal' : 'standard'}");
-    expect(packetMinimal).toContain('formatCncPacketCompactNumber(packet)');
+    expect(page).toContain('const compactCutNumber = formatCncPacketCompactNumber(packet);');
+    expect(packetMinimal).toContain('href={cutJobPath}');
+    expect(packetMinimal).toContain('cnc-compact-card__number cnc-compact-card__number--link');
+    expect(page).toContain('const cutJobPath = cncPacketCutJobPath(packet);');
+    expect(page).toContain('function cncPacketCutJobPath(packet: CncTelegramPacket): string | null');
+    expect(page).toContain('packet.cuttingSequenceNo != null && packet.svgCutJobId != null');
     expect(page).toContain("return packet.cuttingSequenceNo != null ? String(packet.cuttingSequenceNo) : '—';");
     expect(page).not.toContain('formatCncPacketBasisCutNumber');
     expect(page).not.toContain('packet.svgCutSheets ?? []');
@@ -611,6 +616,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-columns--cnc-minimal .status-board-column__cards');
     expect(css).toContain('.cnc-compact-card');
     expect(css).toContain('.cnc-compact-card__number');
+    expect(css).toContain('.cnc-compact-card__number--link');
     expect(css).toMatch(
       /\.cnc-bath-card--minimal \.cnc-compact-card__number\s*\{[^}]*font-size: 9\.8px;/s,
     );
