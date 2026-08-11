@@ -66,6 +66,8 @@ import {
 } from '../orderPaymentIntent';
 import { OperationalPageHeader, useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
+  appendOrderDetailEmptyTailRowsForDisplay,
+  collectOrderDetailEmptyTailRowsForDisplay,
   orderDetailIdentityKey,
   prepareOrderDetailsForSave,
 } from '../../../utils/orderDetailRows';
@@ -1188,6 +1190,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - details count:', formValues.details?.length || 0);
 
       const preparedDetails = prepareOrderDetailsForSave(formValues.details ?? []);
+      const emptyTailRowsForDisplay = collectOrderDetailEmptyTailRowsForDisplay(formValues.details ?? []);
       if (preparedDetails.emptyTailCount > 0) {
         (formValues.details ?? []).forEach((detail, index) => {
           if (!preparedDetails.emptyTailKeys.has(orderDetailIdentityKey(detail, index))) return;
@@ -1253,6 +1256,23 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           if (mode === 'create' && !header.order_id) {
             console.log('[OrderForm] handleSave - setting header.order_id to:', savedOrderId);
             setHeader({ order_id: savedOrderId });
+          }
+
+          if (emptyTailRowsForDisplay.length > 0) {
+            const savedFormValues = getFormValues();
+            loadOrder({
+              ...savedFormValues,
+              header: {
+                ...savedFormValues.header,
+                order_id: savedOrderId,
+              },
+              details: appendOrderDetailEmptyTailRowsForDisplay(
+                savedFormValues.details ?? [],
+                emptyTailRowsForDisplay,
+                savedOrderId,
+              ),
+            });
+            setInitializing(false);
           }
 
           console.log('[OrderForm] handleSave - setting dirty to false');

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../types/orders';
 import {
+  appendOrderDetailEmptyTailRowsForDisplay,
   clearOrderDetailTailRowValues,
+  collectOrderDetailEmptyTailRowsForDisplay,
   collectNewEmptyTailDetailKeys,
   countOrderDetailsWithRequiredEntryValues,
   hasOrderDetailRequiredEntryValues,
@@ -150,6 +152,66 @@ describe('order detail tail row preparation', () => {
     expect(cleared.note).toBeNull();
     expect(cleared.basis_designation).toBeNull();
     expect(cleared.height).toBeNull();
+  });
+
+  it('collects display-only empty tail rows separately from save rows', () => {
+    const rows = [
+      validDetail({ temp_id: 1, detail_number: 1 }),
+      validDetail({
+        temp_id: 2,
+        detail_number: 2,
+        height: 0,
+        width: 0,
+        quantity: 1,
+        milling_cost_per_sqm: null,
+        detail_cost: null,
+        note: 'tail draft',
+      }),
+    ];
+
+    expect(collectOrderDetailEmptyTailRowsForDisplay(rows)).toEqual([
+      expect.objectContaining({
+        temp_id: 2,
+        detail_number: 2,
+        height: null,
+        width: null,
+        quantity: null,
+        detail_cost: null,
+        note: null,
+      }),
+    ]);
+  });
+
+  it('appends display-only tail rows after backend rows without persisting ids', () => {
+    const restored = appendOrderDetailEmptyTailRowsForDisplay(
+      [
+        validDetail({ detail_id: 10, temp_id: 10, detail_number: 1 }),
+        validDetail({ detail_id: 11, temp_id: 11, detail_number: 2 }),
+      ],
+      [
+        validDetail({
+          temp_id: 44,
+          detail_number: 99,
+          height: null as unknown as number,
+          width: null as unknown as number,
+          quantity: null as unknown as number,
+          milling_cost_per_sqm: null,
+          detail_cost: null,
+        }),
+      ],
+      77,
+    );
+
+    expect(restored.map((row) => row.detail_number)).toEqual([1, 2, 3]);
+    expect(restored[2]).toMatchObject({
+      detail_id: undefined,
+      order_id: 77,
+      delete_flag: false,
+      height: null,
+      width: null,
+      quantity: null,
+      detail_cost: null,
+    });
   });
 
   it('uses detail_number order when collecting empty tail rows', () => {

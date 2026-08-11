@@ -91,6 +91,39 @@ export function clearOrderDetailTailRowValues(detail: OrderDetail): OrderDetail 
   } as OrderDetail;
 }
 
+export function collectOrderDetailEmptyTailRowsForDisplay(
+  details: readonly OrderDetail[],
+): OrderDetail[] {
+  const emptyTailKeys = collectNewEmptyTailDetailKeys(details);
+  return details
+    .map((detail, index) => ({ detail, index }))
+    .filter(({ detail, index }) => emptyTailKeys.has(orderDetailIdentityKey(detail, index)))
+    .map(({ detail }) => clearOrderDetailTailRowValues(detail));
+}
+
+export function appendOrderDetailEmptyTailRowsForDisplay(
+  savedDetails: readonly OrderDetail[],
+  emptyTailRows: readonly OrderDetail[],
+  orderId?: number | null,
+): OrderDetail[] {
+  if (emptyTailRows.length === 0) return [...savedDetails];
+
+  const maxDetailNumber = savedDetails.reduce(
+    (max, detail) => Math.max(max, normalizeNumber(detail.detail_number)),
+    0,
+  );
+
+  const restoredTailRows = emptyTailRows.map((detail, index) => ({
+    ...clearOrderDetailTailRowValues(detail),
+    detail_id: undefined,
+    order_id: orderId ?? detail.order_id ?? undefined,
+    delete_flag: false,
+    detail_number: maxDetailNumber + index + 1,
+  }));
+
+  return [...savedDetails, ...restoredTailRows];
+}
+
 export function prepareOrderDetailsForSave(
   details: readonly OrderDetail[],
 ): OrderDetailsSavePreparation {
