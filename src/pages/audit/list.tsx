@@ -22,6 +22,8 @@ import type {
   AuditFilterOptions,
   AuditLogEventDto,
   AuditLogListQuery,
+  AuditOrderFilterOption,
+  AuditParticipantFilterOption,
   AuditRelatedEntity,
   AuditRelatedEntityFilterOption,
   AuditUserFilterOption,
@@ -39,6 +41,7 @@ const { Text } = Typography;
 const PAGE_SIZE_DEFAULT = 50;
 
 type AuditViewMode = 'readable' | 'technical';
+type AuditTableMode = 'audit' | 'business-history';
 type FilterSelectOption = { value: string | number; label: string };
 
 const AUDIT_ENTITY_LABELS: Record<string, string> = {
@@ -73,9 +76,12 @@ const EMPTY_FILTER_OPTIONS: AuditFilterOptions = {
 
 export interface FilterValues {
   event?: string;
+  events?: string[];
   entityType?: string;
   entityId?: string;
   userId?: number;
+  orderIds?: number[];
+  participantUserIds?: number[];
   role?: string;
   source?: string;
   relatedOrderId?: number;
@@ -87,6 +93,7 @@ export interface FilterValues {
   relatedEntityType?: string;
   relatedEntityId?: number;
   requestId?: string;
+  createdRange?: [Dayjs, Dayjs];
   createdFrom?: Dayjs;
   createdTo?: Dayjs;
 }
@@ -105,6 +112,21 @@ function numberSelectOptions(values: readonly number[], prefix: string): FilterS
 }
 
 function userSelectOptions(values: readonly AuditUserFilterOption[]): FilterSelectOption[] {
+  return values.map((value) => {
+    const name = value.username?.trim() || `Пользователь #${value.userId}`;
+    const role = value.role ? ` · ${value.role}` : '';
+    return { value: value.userId, label: `${name} (#${value.userId})${role}` };
+  });
+}
+
+function orderLookupSelectOptions(values: readonly AuditOrderFilterOption[]): FilterSelectOption[] {
+  return values.map((value) => ({
+    value: value.orderId,
+    label: orderLabel(value.orderId, value.orderName),
+  }));
+}
+
+function participantLookupSelectOptions(values: readonly AuditParticipantFilterOption[]): FilterSelectOption[] {
   return values.map((value) => {
     const name = value.username?.trim() || `Пользователь #${value.userId}`;
     const role = value.role ? ` · ${value.role}` : '';
@@ -212,12 +234,22 @@ function JsonCell({ value }: { value: unknown }) {
   );
 }
 
-export function buildAuditQuery(values: FilterValues, pageSize: number): AuditLogListQuery {
+export function buildAuditQuery(
+  values: FilterValues,
+  pageSize: number,
+  scope: AuditLogListQuery['scope'] = 'all',
+): AuditLogListQuery {
   const next: AuditLogListQuery = { page: 1, pageSize };
+  if (scope && scope !== 'all') next.scope = scope;
   if (values.event) next.event = values.event;
+  if (values.events && values.events.length > 0) next.events = values.events;
   if (values.entityType) next.entityType = values.entityType;
   if (values.entityId) next.entityId = values.entityId;
   if (values.userId != null) next.userId = values.userId;
+  if (values.orderIds && values.orderIds.length > 0) next.orderIds = values.orderIds;
+  if (values.participantUserIds && values.participantUserIds.length > 0) {
+    next.participantUserIds = values.participantUserIds;
+  }
   if (values.role) next.role = values.role;
   if (values.source) next.source = values.source;
   if (values.relatedOrderId != null) next.relatedOrderId = values.relatedOrderId;
@@ -229,8 +261,10 @@ export function buildAuditQuery(values: FilterValues, pageSize: number): AuditLo
   if (values.relatedEntityType) next.relatedEntityType = values.relatedEntityType;
   if (values.relatedEntityId != null) next.relatedEntityId = values.relatedEntityId;
   if (values.requestId) next.requestId = values.requestId;
-  if (values.createdFrom) next.createdFrom = values.createdFrom.toISOString();
-  if (values.createdTo) next.createdTo = values.createdTo.toISOString();
+  if (values.createdRange?.[0]) next.createdFrom = values.createdRange[0].toISOString();
+  if (values.createdRange?.[1]) next.createdTo = values.createdRange[1].toISOString();
+  if (!values.createdRange?.[0] && values.createdFrom) next.createdFrom = values.createdFrom.toISOString();
+  if (!values.createdRange?.[1] && values.createdTo) next.createdTo = values.createdTo.toISOString();
   return next;
 }
 
@@ -377,17 +411,32 @@ export function ReadableAuditEvent({ record }: { record: AuditLogEventDto }) {
   );
 }
 
-const ErpAuditList: React.FC = () => {
+export interface HistoryJournalTableProps {
+  mode?: AuditTableMode;
+  embedded?: boolean;
+  title?: string;
+  defaultFiltersVisible?: boolean;
+}
+
+export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
+  mode = 'audit',
+  embedded = false,
+  title,
+  defaultFiltersVisible = false,
+}) => {
+  const businessHistoryMode = mode === 'business-history';
+  const resolvedTitle = title ?? (businessHistoryMode ? 'Журнал истории' : 'Журнал аудита');
   const [form] = Form.useForm<FilterValues>();
-  const [filtersVisible, setFiltersVisible] = useState(false);
+  const [filtersVisible, setFiltersVisible] = useState(defaultFiltersVisible);
   const [viewMode, setViewMode] = useState<AuditViewMode>('readable');
   const { pageSize: preferredPageSize, setPageSize: rememberPageSize } = usePageSizePreference(
-    'audit:list',
+    businessHistoryMode ? 'history-journal:list' : 'audit:list',
     PAGE_SIZE_DEFAULT
   );
   const [query, setQuery] = useState<AuditLogListQuery>({
     page: 1,
     pageSize: preferredPageSize,
+    ...(businessHistoryMode ? { scope: 'business' as const } : {}),
   });
   const [data, setData] = useState<AuditLogEventDto[]>([]);
   const [pagination, setPagination] = useState({
@@ -400,9 +449,17 @@ const ErpAuditList: React.FC = () => {
   const [filterOptionsLoading, setFilterOptionsLoading] = useState(false);
   const [filterOptionsLoaded, setFilterOptionsLoaded] = useState(false);
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [orderOptions, setOrderOptions] = useState<AuditOrderFilterOption[]>([]);
+  const [participantOptions, setParticipantOptions] = useState<AuditParticipantFilterOption[]>([]);
+  const [orderOptionsLoading, setOrderOptionsLoading] = useState(false);
+  const [participantOptionsLoading, setParticipantOptionsLoading] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
   const filterOptionsAbortRef = useRef<AbortController | null>(null);
+  const orderOptionsSeqRef = useRef(0);
+  const participantOptionsSeqRef = useRef(0);
+  const orderSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const participantSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relatedEntityType = Form.useWatch('relatedEntityType', form);
 
   // Permission check: audit.view is required when backend permissions are on
@@ -450,7 +507,7 @@ const ErpAuditList: React.FC = () => {
     setFilterOptionsLoading(true);
 
     try {
-      const response = await auditApi.filterOptions();
+      const response = await auditApi.filterOptions(businessHistoryMode ? { scope: 'business' } : {});
       setFilterOptions(response.data);
       setFilterOptionsLoaded(true);
     } catch (err) {
@@ -464,7 +521,57 @@ const ErpAuditList: React.FC = () => {
     } finally {
       setFilterOptionsLoading(false);
     }
-  }, [hasPermission]);
+  }, [businessHistoryMode, hasPermission]);
+
+  const fetchOrderOptions = useCallback(
+    async (search?: string) => {
+      if (!hasPermission || !businessHistoryMode) return;
+      const seq = ++orderOptionsSeqRef.current;
+      setOrderOptionsLoading(true);
+      try {
+        const selectedIds = form.getFieldValue('orderIds') as number[] | undefined;
+        const response = await auditApi.orderOptions({ search, ids: selectedIds, limit: 50 });
+        if (orderOptionsSeqRef.current === seq) setOrderOptions(response.data);
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') setOrderOptions([]);
+      } finally {
+        if (orderOptionsSeqRef.current === seq) setOrderOptionsLoading(false);
+      }
+    },
+    [businessHistoryMode, form, hasPermission],
+  );
+
+  const fetchParticipantOptions = useCallback(
+    async (search?: string) => {
+      if (!hasPermission || !businessHistoryMode) return;
+      const seq = ++participantOptionsSeqRef.current;
+      setParticipantOptionsLoading(true);
+      try {
+        const selectedIds = form.getFieldValue('participantUserIds') as number[] | undefined;
+        const response = await auditApi.participantOptions({ search, ids: selectedIds, limit: 50 });
+        if (participantOptionsSeqRef.current === seq) setParticipantOptions(response.data);
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') setParticipantOptions([]);
+      } finally {
+        if (participantOptionsSeqRef.current === seq) setParticipantOptionsLoading(false);
+      }
+    },
+    [businessHistoryMode, form, hasPermission],
+  );
+
+  const scheduleOrderSearch = useCallback((value: string) => {
+    if (orderSearchTimerRef.current) clearTimeout(orderSearchTimerRef.current);
+    orderSearchTimerRef.current = setTimeout(() => {
+      void fetchOrderOptions(value);
+    }, 250);
+  }, [fetchOrderOptions]);
+
+  const scheduleParticipantSearch = useCallback((value: string) => {
+    if (participantSearchTimerRef.current) clearTimeout(participantSearchTimerRef.current);
+    participantSearchTimerRef.current = setTimeout(() => {
+      void fetchParticipantOptions(value);
+    }, 250);
+  }, [fetchParticipantOptions]);
 
   useEffect(() => {
     void fetchData(query);
@@ -476,18 +583,33 @@ const ErpAuditList: React.FC = () => {
   }, [fetchFilterOptions, filterOptionsLoaded, filterOptionsLoading, filtersVisible]);
 
   useEffect(() => {
+    if (!filtersVisible || !businessHistoryMode) return;
+    void fetchOrderOptions();
+    void fetchParticipantOptions();
+  }, [businessHistoryMode, fetchOrderOptions, fetchParticipantOptions, filtersVisible]);
+
+  useEffect(() => () => {
+    if (orderSearchTimerRef.current) clearTimeout(orderSearchTimerRef.current);
+    if (participantSearchTimerRef.current) clearTimeout(participantSearchTimerRef.current);
+  }, []);
+
+  useEffect(() => {
     setQuery((current) =>
       current.pageSize === preferredPageSize ? current : { ...current, page: 1, pageSize: preferredPageSize }
     );
   }, [preferredPageSize]);
 
   const handleFilter = (values: FilterValues) => {
-    setQuery(buildAuditQuery(values, query.pageSize ?? PAGE_SIZE_DEFAULT));
+    setQuery(buildAuditQuery(values, query.pageSize ?? PAGE_SIZE_DEFAULT, businessHistoryMode ? 'business' : 'all'));
   };
 
   const handleClearFilters = () => {
     form.resetFields();
-    setQuery({ page: 1, pageSize: query.pageSize ?? PAGE_SIZE_DEFAULT });
+    setQuery({
+      page: 1,
+      pageSize: query.pageSize ?? PAGE_SIZE_DEFAULT,
+      ...(businessHistoryMode ? { scope: 'business' as const } : {}),
+    });
   };
 
   const handleTableChange = (pag: { current?: number; pageSize?: number }) => {
@@ -518,8 +640,10 @@ const ErpAuditList: React.FC = () => {
       relatedEntityTypes: stringSelectOptions(filterOptions.relatedEntityTypes),
       relatedEntityIds: relatedEntityIdSelectOptions(filterOptions.relatedEntities, relatedEntityType),
       requestIds: stringSelectOptions(filterOptions.requestIds),
+      orderLookups: orderLookupSelectOptions(orderOptions),
+      participantLookups: participantLookupSelectOptions(participantOptions),
     }),
-    [filterOptions, relatedEntityType]
+    [filterOptions, orderOptions, participantOptions, relatedEntityType]
   );
 
   const commonSelectProps = {
@@ -563,7 +687,7 @@ const ErpAuditList: React.FC = () => {
 
   if (!hasPermission) {
     return (
-      <div style={{ padding: 32 }}>
+      <div style={{ padding: embedded ? 0 : 32 }}>
         <Alert
           type="warning"
           showIcon
@@ -575,7 +699,7 @@ const ErpAuditList: React.FC = () => {
   }
 
   return (
-    <div style={{ padding: '16px 24px' }}>
+    <div style={{ padding: embedded ? 0 : '16px 24px' }}>
       <div
         style={{
           display: 'flex',
@@ -587,19 +711,21 @@ const ErpAuditList: React.FC = () => {
         <Space>
           <AuditOutlined style={{ fontSize: 18, color: '#1677ff' }} />
           <Text strong style={{ fontSize: 16 }}>
-            Журнал аудита
+            {resolvedTitle}
           </Text>
         </Space>
         <Space size="small" wrap>
-          <Segmented
-            size="small"
-            value={viewMode}
-            options={[
-              { label: 'Понятный', value: 'readable' },
-              { label: 'Технический', value: 'technical' },
-            ]}
-            onChange={(value) => setViewMode(value as AuditViewMode)}
-          />
+          {!businessHistoryMode && (
+            <Segmented
+              size="small"
+              value={viewMode}
+              options={[
+                { label: 'Понятный', value: 'readable' },
+                { label: 'Технический', value: 'technical' },
+              ]}
+              onChange={(value) => setViewMode(value as AuditViewMode)}
+            />
+          )}
           <Button
             type={filtersVisible ? 'primary' : 'default'}
             icon={<FilterOutlined />}
@@ -622,6 +748,81 @@ const ErpAuditList: React.FC = () => {
             .audit-filters-grid > .aff-item { flex-shrink: 0; }
           `}</style>
           <Form form={form} layout="vertical" onFinish={handleFilter} className="audit-filters">
+            {businessHistoryMode ? (
+              <div className="audit-filters-grid">
+                <div className="aff-item">
+                  <Form.Item name="createdRange" label="Период">
+                    <DatePicker.RangePicker
+                      showTime
+                      allowClear
+                      format="DD.MM.YYYY HH:mm:ss"
+                      size="small"
+                      style={{ width: 330 }}
+                    />
+                  </Form.Item>
+                </div>
+                <div className="aff-item">
+                  <Form.Item name="events" label="События">
+                    <Select
+                      {...commonSelectProps}
+                      mode="multiple"
+                      placeholder="События"
+                      options={filterSelectOptions.events}
+                      maxTagCount="responsive"
+                      style={{ width: 260 }}
+                    />
+                  </Form.Item>
+                </div>
+                <div className="aff-item">
+                  <Form.Item name="orderIds" label="Заказы">
+                    <Select
+                      allowClear
+                      showSearch
+                      mode="multiple"
+                      size="small"
+                      loading={orderOptionsLoading}
+                      filterOption={false}
+                      onSearch={scheduleOrderSearch}
+                      onFocus={() => fetchOrderOptions()}
+                      placeholder="Заказы"
+                      options={filterSelectOptions.orderLookups}
+                      maxTagCount="responsive"
+                      style={{ width: 260 }}
+                    />
+                  </Form.Item>
+                </div>
+                <div className="aff-item">
+                  <Form.Item name="participantUserIds" label="Участники">
+                    <Select
+                      allowClear
+                      showSearch
+                      mode="multiple"
+                      size="small"
+                      loading={participantOptionsLoading}
+                      filterOption={false}
+                      onSearch={scheduleParticipantSearch}
+                      onFocus={() => fetchParticipantOptions()}
+                      placeholder="Участники"
+                      options={filterSelectOptions.participantLookups}
+                      maxTagCount="responsive"
+                      style={{ width: 260 }}
+                    />
+                  </Form.Item>
+                </div>
+                <div className="aff-item">
+                  <Form.Item label=" " colon={false}>
+                    <Space size="small">
+                      <Button type="primary" htmlType="submit" icon={<FilterOutlined />} size="small">
+                        Применить
+                      </Button>
+                      <Button onClick={handleClearFilters} icon={<ClearOutlined />} size="small">
+                        Сбросить
+                      </Button>
+                    </Space>
+                  </Form.Item>
+                </div>
+              </div>
+            ) : (
             <div className="audit-filters-grid">
               <div className="aff-item">
                 <Form.Item name="event" label="Событие">
@@ -797,11 +998,12 @@ const ErpAuditList: React.FC = () => {
                 </Form.Item>
               </div>
             </div>
+            )}
           </Form>
         </Card>
       )}
 
-      {viewMode === 'readable' ? (
+      {businessHistoryMode || viewMode === 'readable' ? (
         <Table<AuditLogEventDto>
           rowKey="auditId"
           loading={loading}
@@ -818,7 +1020,7 @@ const ErpAuditList: React.FC = () => {
             showTotal: (total) => `Всего: ${total}`,
           }}
           onChange={(pag) => handleTableChange(pag)}
-          locale={{ emptyText: <Empty description="Нет записей аудита" /> }}
+          locale={{ emptyText: <Empty description={businessHistoryMode ? 'Нет записей истории' : 'Нет записей аудита'} /> }}
         >
           <Table.Column<AuditLogEventDto>
             dataIndex="createdAt"
@@ -940,7 +1142,7 @@ export const AuditList: React.FC = () => (
       className="audit-top-tabs"
       defaultActiveKey="erp"
       items={[
-        { key: 'erp', label: 'Действия ERP', children: <ErpAuditList /> },
+        { key: 'erp', label: 'Действия ERP', children: <HistoryJournalTable /> },
         { key: 'telegram', label: 'Telegram-бот', children: <TelegramWorkerAudit /> },
       ]}
     />

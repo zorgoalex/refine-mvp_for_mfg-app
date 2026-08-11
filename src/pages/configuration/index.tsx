@@ -16,6 +16,7 @@ import {
   ScissorOutlined,
   TagsOutlined,
   FileExcelOutlined,
+  AuditOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
@@ -30,6 +31,7 @@ import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
+import { HistoryJournalTable } from '../audit/list';
 import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
@@ -58,12 +60,14 @@ export const filterConfigurationTabItems = <T extends { key: string },>(
   items: T[],
   generalSettingsVisible: boolean,
   deadlineSettingsVisible: boolean,
+  auditHistoryVisible = false,
 ): T[] =>
-  generalSettingsVisible
-    ? items
-    : deadlineSettingsVisible
-      ? items.filter((item) => item.key === 'production')
-      : [];
+  items.filter((item) => {
+    if (item.key === 'history-journal') return auditHistoryVisible;
+    if (generalSettingsVisible) return true;
+    if (deadlineSettingsVisible && item.key === 'production') return true;
+    return false;
+  });
 
 const readStoredConfigurationActiveTab = (): string | null => {
   try {
@@ -526,6 +530,8 @@ export const ConfigurationPage: React.FC = () => {
     (!featureFlags.useBackendPermissions || can('deadlines.view') || can('settings.manage'));
   const generalSettingsVisible =
     !featureFlags.useBackendPermissions || can('settings.view') || can('settings.manage');
+  const auditHistoryVisible =
+    !featureFlags.useBackendPermissions || can('audit.view');
 
   const allTabItems = [
     {
@@ -642,6 +648,23 @@ export const ConfigurationPage: React.FC = () => {
       ),
       children: <ExportTemplatesConfigTab />,
     },
+    {
+      key: 'history-journal',
+      label: (
+        <span>
+          <AuditOutlined />
+          Журнал истории
+        </span>
+      ),
+      children: (
+        <HistoryJournalTable
+          mode="business-history"
+          embedded
+          title="Журнал истории"
+          defaultFiltersVisible
+        />
+      ),
+    },
     ...(featureFlags.labels && can('labels.view')
       ? [
           {
@@ -661,6 +684,7 @@ export const ConfigurationPage: React.FC = () => {
     allTabItems,
     generalSettingsVisible,
     deadlineSettingsVisible,
+    auditHistoryVisible,
   );
 
   const availableTabKeys = tabItems.map((item) => item.key);

@@ -359,6 +359,61 @@ describe('PgAuditLogRepository.list', () => {
     expect(calls[0].params).toContain(3);
   });
 
+  it('filters business history by event array with backend-owned predicate', async () => {
+    const { client, calls } = db([{ rows: [{ total: 0 }] }, { rows: [] }]);
+    const repo = new PgAuditLogRepository(client);
+    await repo.list({
+      currentUser: undefined,
+      filters: { scope: 'business', events: ['orders.update', 'payments.create'] },
+      page: 1,
+      pageSize: 50,
+      requestId: 'rq',
+    });
+
+    expect(calls[0].text).toMatch(/audit_log\.event LIKE ANY\(\$1::text\[\]\)/);
+    expect(calls[0].text).toMatch(/NOT \(audit_log\.event LIKE ANY\(\$2::text\[\]\)\)/);
+    expect(calls[0].text).toMatch(/audit_log\.event = ANY\(\$3::text\[\]\)/);
+    expect(calls[0].params[0]).toContain('orders.%');
+    expect(calls[0].params[1]).toContain('%.permission_denied');
+    expect(calls[0].params[2]).toEqual(['orders.update', 'payments.create']);
+  });
+
+  it('filters orderIds across direct related order, entity order and bridge order with regex cast guard', async () => {
+    const { client, calls } = db([{ rows: [{ total: 0 }] }, { rows: [] }]);
+    const repo = new PgAuditLogRepository(client);
+    await repo.list({
+      currentUser: undefined,
+      filters: { orderIds: [42, 43] },
+      page: 1,
+      pageSize: 50,
+      requestId: 'rq',
+    });
+
+    expect(calls[0].text).toMatch(/audit_log\.related_order_id = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].text).toMatch(/audit_log\.entity_type = 'order'/);
+    expect(calls[0].text).toMatch(/audit_log\.entity_id ~ '\^\[0-9\]\{1,18\}\$'/);
+    expect(calls[0].text).toMatch(/audit_log\.entity_id::bigint = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].text).toMatch(/r\.entity_type = 'order' AND r\.entity_id = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].params[0]).toEqual([42, 43]);
+  });
+
+  it('filters participantUserIds across actor, related user and bridge user', async () => {
+    const { client, calls } = db([{ rows: [{ total: 0 }] }, { rows: [] }]);
+    const repo = new PgAuditLogRepository(client);
+    await repo.list({
+      currentUser: undefined,
+      filters: { participantUserIds: [7, 8] },
+      page: 1,
+      pageSize: 50,
+      requestId: 'rq',
+    });
+
+    expect(calls[0].text).toMatch(/audit_log\.user_id = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].text).toMatch(/audit_log\.related_user_id = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].text).toMatch(/r\.entity_type = 'user' AND r\.entity_id = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].params[0]).toEqual([7, 8]);
+  });
+
   it('mapRow returns relatedEntities: [] when related_entities is absent or not an array', async () => {
     const { client } = db([
       { rows: [{ total: 1 }] },
@@ -469,5 +524,74 @@ describe('PgAuditLogRepository.filterOptions', () => {
       relatedEntities: [{ entityType: 'order_detail', entityId: 1001, detailNumber: 3 }],
       requestIds: ['req-1'],
     });
+  });
+
+  it('limits business filter options to business history scope', async () => {
+    const { client, calls } = db([{ rows: [{ events: ['orders.update'] }] }]);
+    const repo = new PgAuditLogRepository(client);
+
+    await repo.filterOptions({
+      currentUser: undefined,
+      requestId: 'rq-options',
+      scope: 'business',
+    });
+
+    expect(calls[0].text).toMatch(/WITH recent AS/i);
+    expect(calls[0].text).toMatch(/FROM audit_log\s+WHERE \(audit_log\.event LIKE ANY\(\$1::text\[\]\)/i);
+    expect(calls[0].params[0]).toContain('orders.%');
+    expect(calls[0].params[1]).toContain('%_worker_%');
+    expect(calls[0].params[2]).toBe(5000);
+    expect(calls[0].params[3]).toBe(200);
+  });
+});
+
+describe('PgAuditLogRepository lookup options', () => {
+  it('loads order options with id hydration, escaped search and minimal fields', async () => {
+    const { client, calls } = db([
+      { rows: [{ order_id: '2678', order_name: '2678' }] },
+    ]);
+    const repo = new PgAuditLogRepository(client);
+
+    const res = await repo.orderOptions({
+      currentUser: undefined,
+      requestId: 'rq-orders',
+      query: { ids: [2678], search: '%_2678', limit: 20 },
+    });
+
+    expect(calls[0].text).toMatch(/SELECT o\.order_id, o\.order_name/i);
+    expect(calls[0].text).toMatch(/WITH selected AS/i);
+    expect(calls[0].text).toMatch(/searched AS/i);
+    expect(calls[0].text).toMatch(/UNION ALL/i);
+    expect(calls[0].text).not.toMatch(/delete_flag/);
+    expect(calls[0].text).toMatch(/o\.order_id = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].text).toMatch(/NOT \(o\.order_id = ANY\(\$1::bigint\[\]\)\)/);
+    expect(calls[0].text).toMatch(/o\.order_name ILIKE \$2 ESCAPE '\\'/);
+    expect(calls[0].text).toMatch(/LIMIT \$3/);
+    expect(calls[0].params).toEqual([[2678], '%\\%\\_2678%', 20]);
+    expect(res).toEqual({ data: [{ orderId: 2678, orderName: '2678' }], requestId: 'rq-orders' });
+  });
+
+  it('loads participant options with role and minimal fields', async () => {
+    const { client, calls } = db([
+      { rows: [{ user_id: '7', username: 'manager', role: 'manager' }] },
+    ]);
+    const repo = new PgAuditLogRepository(client);
+
+    const res = await repo.participantOptions({
+      currentUser: undefined,
+      requestId: 'rq-users',
+      query: { ids: [7], search: 'manager', limit: 10 },
+    });
+
+    expect(calls[0].text).toMatch(/SELECT u\.user_id, u\.username::text AS username, r\.role_code AS role/i);
+    expect(calls[0].text).toMatch(/LEFT JOIN roles r ON r\.role_id = u\.role_id/i);
+    expect(calls[0].text).toMatch(/WITH selected AS/i);
+    expect(calls[0].text).toMatch(/searched AS/i);
+    expect(calls[0].text).toMatch(/UNION ALL/i);
+    expect(calls[0].text).toMatch(/u\.user_id = ANY\(\$1::bigint\[\]\)/);
+    expect(calls[0].text).toMatch(/NOT \(u\.user_id = ANY\(\$1::bigint\[\]\)\)/);
+    expect(calls[0].text).toMatch(/u\.username::text ILIKE \$2 ESCAPE '\\'/);
+    expect(calls[0].params).toEqual([[7], '%manager%', 10]);
+    expect(res).toEqual({ data: [{ userId: 7, username: 'manager', role: 'manager' }], requestId: 'rq-users' });
   });
 });

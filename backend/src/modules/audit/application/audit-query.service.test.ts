@@ -29,11 +29,15 @@ const okFilterOptions = {
   },
   requestId: 'rq',
 };
+const okOrderOptions = { data: [], requestId: 'rq' };
+const okParticipantOptions = { data: [], requestId: 'rq' };
 
 function repo(): AuditLogRepositoryPort {
   return {
     list: vi.fn(async () => okResult),
     filterOptions: vi.fn(async () => okFilterOptions),
+    orderOptions: vi.fn(async () => okOrderOptions),
+    participantOptions: vi.fn(async () => okParticipantOptions),
   };
 }
 
@@ -78,5 +82,30 @@ describe('AuditQueryService.filterOptions', () => {
     const service = new AuditQueryService({ repository });
     await service.filterOptions({ currentUser: user('admin'), requestId: 'rq' });
     expect(repository.filterOptions).toHaveBeenCalledWith({ currentUser: user('admin'), requestId: 'rq' });
+  });
+});
+
+describe('AuditQueryService lookup options', () => {
+  it('rejects users without audit.view', async () => {
+    const repository = repo();
+    const service = new AuditQueryService({ repository });
+    await expect(
+      service.orderOptions({ currentUser: user('manager'), requestId: 'rq', query: { limit: 20 } }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' } satisfies Partial<ApiError>);
+    await expect(
+      service.participantOptions({ currentUser: user('manager'), requestId: 'rq', query: { limit: 20 } }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'PERMISSION_DENIED' } satisfies Partial<ApiError>);
+    expect(repository.orderOptions).not.toHaveBeenCalled();
+    expect(repository.participantOptions).not.toHaveBeenCalled();
+  });
+
+  it('delegates to the repository for audit.view holders', async () => {
+    const repository = repo();
+    const service = new AuditQueryService({ repository });
+    const command = { currentUser: user('admin'), requestId: 'rq', query: { ids: [7], limit: 20 } };
+    await service.orderOptions(command);
+    await service.participantOptions(command);
+    expect(repository.orderOptions).toHaveBeenCalledWith(command);
+    expect(repository.participantOptions).toHaveBeenCalledWith(command);
   });
 });
