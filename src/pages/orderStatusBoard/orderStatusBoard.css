@@ -2156,6 +2156,21 @@
   white-space: normal;
 }
 
+.cnc-order-number--highlighted,
+.cnc-order-number--highlighted.ant-btn {
+  background: #ffeb00;
+  border-radius: 3px;
+  box-decoration-break: clone;
+  color: #111827 !important;
+  padding-inline: 3px;
+  -webkit-box-decoration-break: clone;
+}
+
+.cnc-order-number--highlighted.ant-btn:hover,
+.cnc-order-number--highlighted.ant-btn:focus-visible {
+  color: #111827 !important;
+}
+
 .cnc-packet-card__item.order-deleted-reference-line,
 .cnc-packet-card__item.order-deleted-reference-line .cnc-packet-card__order-link,
 .cnc-packet-card__item.order-deleted-reference-line .cnc-packet-card__size,

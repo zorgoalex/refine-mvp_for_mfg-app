@@ -726,6 +726,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('openOrderOnNumber={!relationsEnabled}');
     expect(page).toContain('const orderNumberOpensOrder = openOrderOnNumber || cncOrderCard');
     expect(page).toContain('if (!orderNumberOpensOrder) return;');
+    expect(page).toContain('activeOrderKeys: ReadonlySet<string> | null;');
+    expect(page).toContain('activeOrderKeys: fingerprint.orderKeys,');
+    expect(page).toContain('const highlightedOrderKeys = relationContext?.activeOrderKeys ?? null;');
+    expect(page).toContain('highlightedOrderKeys={highlightedOrderKeys}');
+    expect(page).toContain('highlightedOrderKeys.has(orderKey)');
+    expect(page).toContain('cncRelationOrderKeys(');
+    expect(page).toContain('cnc-order-number--highlighted');
     expect(page).toContain('const bathCards = relationContext');
     expect(page).toContain('const machineFileCards = buildCncMachineColumnCards(');
     expect(page).toContain('machineFileCards.map((entry) =>');
@@ -754,6 +761,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('0 0 0 2px #fa541c');
     expect(css).toContain('filter: grayscale(0.9)');
     expect(css).toContain('opacity: 0.62');
+    expect(css).toContain('.cnc-order-number--highlighted');
+    expect(css).toContain('background: #ffeb00');
     expect(css).toContain('.cnc-today-column--parsed');
     expect(css).toContain('.cnc-today-column--completed');
     expect(css).toContain('background: #edf7ff');

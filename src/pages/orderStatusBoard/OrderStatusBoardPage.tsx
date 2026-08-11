@@ -2370,6 +2370,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   );
   const standardGridMinWidth = displayColumns.length * 220 + Math.max(0, displayColumns.length - 1) * 12;
   const cncColumnMinWidth = cardDisplayMode === 'minimal' ? 132 : 220;
+  const highlightedOrderKeys = relationContext?.activeOrderKeys ?? null;
 
   return (
     <>
@@ -2596,6 +2597,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         relationState={getCncBathRelationState(bath, relationContext)}
                         relationsEnabled={relationsEnabled}
                         highlightEnabled={relationsEnabled}
+                        highlightedOrderKeys={highlightedOrderKeys}
                         detailed={detailed}
                         detailedEnabled={detailedEnabled}
                         detailedPlacement={detailedPlacement}
@@ -2654,6 +2656,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                             relationState={state}
                             relationsEnabled={relationsEnabled}
                             highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
+                            highlightedOrderKeys={highlightedOrderKeys}
                             summaryOnly={summaryOnly}
                             displayMode={cardDisplayMode}
                             displayToggleVisible={cardDisplayMode === 'compact'}
@@ -2694,6 +2697,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       relationState={packetState}
                       relationsEnabled={relationsEnabled}
                       highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
+                      highlightedOrderKeys={highlightedOrderKeys}
                       summaryOnly={summaryOnly}
                       displayMode={cardDisplayMode}
                       displayToggleVisible={cardDisplayMode === 'compact'}
@@ -2733,6 +2737,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 relationState={getCncBathRelationState(detailedContext.activeBath, relationContext)}
                 relationsEnabled={relationsEnabled}
                 highlightEnabled={relationsEnabled}
+                highlightedOrderKeys={highlightedOrderKeys}
                 detailed
                 detailedEnabled
                 detailedPlacement="right"
@@ -3172,14 +3177,25 @@ const CncDetailedMachineScreenshot: React.FC<CncDetailedMachineScreenshotProps> 
 
 interface CncOrderSummaryLineProps {
   summary: CncOrderSummary;
+  highlightedOrderKeys: ReadonlySet<string> | null;
   onOpenOrder: (orderId: number) => void;
 }
 
 const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
   summary,
+  highlightedOrderKeys,
   onOpenOrder,
 }) => {
   const orderId = summary.orderId;
+  const highlighted =
+    highlightedOrderKeys !== null &&
+    cncRelationOrderKeys(summary.orderName, orderId).some((orderKey) =>
+      highlightedOrderKeys.has(orderKey),
+    );
+  const orderClassName = [
+    'cnc-packet-card__summary-order',
+    highlighted ? 'cnc-order-number--highlighted' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <Typography.Text
@@ -3192,7 +3208,7 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
         {orderId !== null ? (
           <Button
             type="link"
-            className="cnc-packet-card__summary-order"
+            className={orderClassName}
             aria-label={`Открыть заказ ${summary.orderName}`}
             onClick={(event) => {
               event.stopPropagation();
@@ -3202,7 +3218,7 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
             {summary.orderName}
           </Button>
         ) : (
-          <span className="cnc-packet-card__summary-order">
+          <span className={orderClassName}>
             {summary.orderName}
           </span>
         )}
@@ -3441,6 +3457,7 @@ interface CncBazisCutSetCardViewProps {
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
   highlightEnabled: boolean;
+  highlightedOrderKeys: ReadonlySet<string> | null;
   summaryOnly: boolean;
   displayMode: CncCardDisplayMode;
   displayToggleVisible: boolean;
@@ -3455,6 +3472,7 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
   relationState,
   relationsEnabled,
   highlightEnabled,
+  highlightedOrderKeys,
   summaryOnly,
   displayMode,
   displayToggleVisible,
@@ -3514,6 +3532,7 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
               <CncOrderSummaryLine
                 key={summary.orderName}
                 summary={summary}
+                highlightedOrderKeys={highlightedOrderKeys}
                 onOpenOrder={onOpenOrder}
               />
             ))}
@@ -3627,6 +3646,7 @@ interface CncTelegramPacketCardProps {
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
   highlightEnabled: boolean;
+  highlightedOrderKeys: ReadonlySet<string> | null;
   summaryOnly: boolean;
   displayMode: CncCardDisplayMode;
   displayToggleVisible: boolean;
@@ -3696,6 +3716,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   relationState,
   relationsEnabled,
   highlightEnabled,
+  highlightedOrderKeys,
   summaryOnly,
   displayMode,
   displayToggleVisible,
@@ -3776,6 +3797,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               <CncOrderSummaryLine
                 key={summary.orderName}
                 summary={summary}
+                highlightedOrderKeys={highlightedOrderKeys}
                 onOpenOrder={onOpenOrder}
               />
             ))}
@@ -4118,6 +4140,7 @@ interface CncTelegramBathCardViewProps {
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
   highlightEnabled: boolean;
+  highlightedOrderKeys: ReadonlySet<string> | null;
   detailed: boolean;
   detailedEnabled: boolean;
   detailedPlacement: CncDetailedBathPlacement;
@@ -4138,6 +4161,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   relationState,
   relationsEnabled,
   highlightEnabled,
+  highlightedOrderKeys,
   detailed,
   detailedEnabled,
   detailedPlacement,
@@ -4194,6 +4218,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
               <CncOrderSummaryLine
                 key={summary.orderName}
                 summary={summary}
+                highlightedOrderKeys={highlightedOrderKeys}
                 onOpenOrder={onOpenOrder}
               />
             ))}
@@ -6556,6 +6581,7 @@ interface CncRelationFingerprint {
 
 interface CncRelationContext {
   active: CncRelationTarget;
+  activeOrderKeys: ReadonlySet<string> | null;
   fingerprint: CncRelationFingerprint;
 }
 
@@ -6603,11 +6629,13 @@ function buildCncRelationContext(
 
   if (active.kind === 'order') {
     const card = orderCards.find((item) => item.orderId === active.id);
+    const fingerprint = card
+      ? buildCncOrderCardFingerprint(card)
+      : buildCncOrderIdFingerprint(active.id);
     return {
       active,
-      fingerprint: card
-        ? buildCncOrderCardFingerprint(card)
-        : buildCncOrderIdFingerprint(active.id),
+      activeOrderKeys: fingerprint.orderKeys,
+      fingerprint,
     };
   }
 
@@ -6615,19 +6643,31 @@ function buildCncRelationContext(
     if (active.kind === 'packet') {
       const packet = column.packets.find((item) => item.packetId === active.id);
       if (packet) {
-        return { active, fingerprint: buildCncPacketFingerprint(packet) };
+        return {
+          active,
+          activeOrderKeys: null,
+          fingerprint: buildCncPacketFingerprint(packet),
+        };
       }
     } else if (active.kind === 'bazisCutSet') {
       const bazisCutSet = column.bazisCutSets?.find(
         (item) => item.bazisCutSetId === active.id,
       );
       if (bazisCutSet) {
-        return { active, fingerprint: buildCncBazisCutSetFingerprint(bazisCutSet) };
+        return {
+          active,
+          activeOrderKeys: null,
+          fingerprint: buildCncBazisCutSetFingerprint(bazisCutSet),
+        };
       }
     } else {
       const bath = column.baths.find((item) => item.bathCardId === active.id);
       if (bath) {
-        return { active, fingerprint: buildCncBathFingerprint(bath) };
+        return {
+          active,
+          activeOrderKeys: null,
+          fingerprint: buildCncBathFingerprint(bath),
+        };
       }
     }
   }
