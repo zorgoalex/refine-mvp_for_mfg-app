@@ -64,9 +64,9 @@ describe('pg-order-snapshot orderHeaderInsertParams', () => {
     expect(params[8]).toBe(true);
   });
 
-  it('includes production_status_from_details_enabled = false when flag is false', () => {
+  it('forces production_status_from_details_enabled=true even when incoming flag is false', () => {
     const params = insertParams(header({ productionStatusFromDetailsEnabled: false }), totals(), 501);
-    expect(params[8]).toBe(false);
+    expect(params[8]).toBe(true);
   });
 
   it('returns 32 elements matching INSERT columns ($1..$32, with project_id as $32)', () => {
@@ -90,31 +90,29 @@ describe('pg-order-snapshot orderHeaderInsertParams', () => {
 });
 
 describe('pg-order-snapshot orderHeaderUpdateParams', () => {
-  it('does NOT include production_status_from_details_enabled', () => {
+  it('does NOT include production status mode or current status', () => {
     const params = updateParams(header({ productionStatusFromDetailsEnabled: false }), totals());
-    // Verify the flag value does not appear (false would be at old index 8; check neighboring values instead)
-    // productionStatusId is at index 7, plannedCompletionDate is at index 8 (shifted)
-    expect(params[7]).toBeNull(); // productionStatusId
-    expect(params[8]).toBe('2026-06-01'); // plannedCompletionDate — was $11 before, now $10 (index 8)
+    expect(params[7]).toBe('2026-06-01'); // plannedCompletionDate follows paymentStatusId
+    expect(params).not.toContain(false);
   });
 
-  it('returns 30 elements (insert has productionStatusFromDetailsEnabled and projectId, update does not)', () => {
+  it('returns 29 elements (insert has production mode, current status and projectId; update does not)', () => {
     const insert = insertParams(header(), totals(), 501);
     const update = updateParams(header(), totals());
-    expect(update).toHaveLength(insert.length - 2);
-    expect(update).toHaveLength(30);
+    expect(update).toHaveLength(insert.length - 3);
+    expect(update).toHaveLength(29);
   });
 
-  it('places refKey1c at index 28 and sheetMaterialTypeId last (index 29) matching $30/$31 in UPDATE SQL', () => {
+  it('places refKey1c at index 27 and sheetMaterialTypeId last (index 28) matching $29/$30 in UPDATE SQL', () => {
     const params = updateParams(header({ refKey1c: 'update-key', sheetMaterialTypeId: null }), totals());
-    expect(params[28]).toBe('update-key');
-    expect(params[29]).toBeNull(); // sheetMaterialTypeId
+    expect(params[27]).toBe('update-key');
+    expect(params[28]).toBeNull(); // sheetMaterialTypeId
   });
 
   it('forces materialId to null when sheetMaterialTypeId is set (header invariant — update path)', () => {
     const params = updateParams(header({ materialId: 7, sheetMaterialTypeId: 99 }), totals());
-    expect(params[24]).toBeNull(); // materialId forced null (index 24 = $26 with orderId $1 prefix)
-    expect(params[29]).toBe(99);  // sheetMaterialTypeId at end
+    expect(params[23]).toBeNull(); // materialId forced null (index 23 = $25 with orderId $1 prefix)
+    expect(params[28]).toBe(99);  // sheetMaterialTypeId at end
   });
 
   it('passing productionStatusFromDetailsEnabled=false does not appear in returned array', () => {
@@ -124,11 +122,11 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
     expect(params).not.toContain(false);
   });
 
-  it('correctly positions discount (index 12, placeholder $14 with orderId as $1)', () => {
-    // updateParams is tested in isolation: index 12 = discount (maps to $14 in the UPDATE SQL,
+  it('correctly positions discount (index 11, placeholder $13 with orderId as $1)', () => {
+    // updateParams is tested in isolation: index 11 = discount (maps to $13 in the UPDATE SQL,
     // where $1=orderId, $2=orderName, …, since updateOrderHeader binds [orderId, ...updateParams])
     const params = updateParams(header(), totals({ discount: 15 }));
-    expect(params[12]).toBe(15); // discount
+    expect(params[11]).toBe(15); // discount
   });
 
   it('header materialId is always null regardless of sheetMaterialTypeId (Variant B sunset)', () => {
@@ -136,7 +134,7 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
     // even when sheetMaterialTypeId is absent. The 034 DB invariant chk_orders_material_id_null
     // enforces NULL; the param helper must not reintroduce a non-null value.
     const params = updateParams(header({ sheetMaterialTypeId: null, materialId: 3 }), totals());
-    expect(params[24]).toBeNull(); // materialId always null (Variant B invariant)
-    expect(params[29]).toBeNull(); // sheetMaterialTypeId
+    expect(params[23]).toBeNull(); // materialId always null (Variant B invariant)
+    expect(params[28]).toBeNull(); // sheetMaterialTypeId
   });
 });

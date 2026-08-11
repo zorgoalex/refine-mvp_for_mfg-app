@@ -15,6 +15,7 @@ import {
   bazisCutPickerPeriodSchema,
   createBazisCutSetSchema,
   createBazisCutSetFromPickerSchema,
+  deleteBazisCutSetSchema,
   deleteBazisCutSetDetailSchema,
   listBazisCutSetsSchema,
   renameBazisCutSetSchema,
@@ -63,7 +64,8 @@ const summaryProperties: NonNullable<SchemaObject['properties']> = {
   bazisCutSetId: { type: 'integer', format: 'int64' }, name: { type: 'string' },
   version: { type: 'integer', minimum: 0 }, createdAt: { type: 'string', format: 'date-time' },
   updatedAt: { type: 'string', format: 'date-time' }, quantity: { type: 'integer', minimum: 0 },
-  positionCount: { type: 'integer', minimum: 0 }, orders: sourceRefs(), projects: sourceRefs(),
+  positionCount: { type: 'integer', minimum: 0 }, totalAreaM2: { type: 'number', minimum: 0 },
+  orders: sourceRefs(), projects: sourceRefs(),
   bazisProjects: sourceRefs(), bazisOrders: sourceRefs(),
 };
 const summaryRequired = Object.keys(summaryProperties);
@@ -96,6 +98,10 @@ const setResponseSchema: SchemaObject = { type: 'object', additionalProperties: 
   } };
 const mutationResponseSchema: SchemaObject = { type: 'object', required: ['set'], properties: {
   set: setResponseSchema, addedCount: { type: 'integer', minimum: 0 },
+} };
+const deleteSetResponseSchema: SchemaObject = { type: 'object', required: ['deleted', 'set'], properties: {
+  deleted: { type: 'boolean', enum: [true] },
+  set: { type: 'object', required: summaryRequired, properties: summaryProperties },
 } };
 
 @ApiTags('BazisCutSets')
@@ -251,6 +257,22 @@ export class BazisCutSetsController {
     this.assertEnabled();
     const parsed = parse(renameBazisCutSetSchema, body);
     return this.service.rename({ currentUser: requireUser(request), requestId: request.requestId,
+      setId: parseId(setId), idempotencyKey: parseIdempotencyKey(key), ...parsed });
+  }
+
+  @ApiOperation({ operationId: 'deleteBazisCutSet', summary: 'Delete an empty Basis-cut set' })
+  @ApiParam(idParameter)
+  @ApiHeader(commandHeader)
+  @ApiBody({ schema: { type: 'object', required: ['expectedVersion'], properties: {
+    expectedVersion: { type: 'integer', minimum: 0 },
+  } } })
+  @ApiResponse({ status: 200, description: 'Deleted empty set summary', schema: deleteSetResponseSchema })
+  @Delete(':setId')
+  deleteEmptySet(@Req() request: RequestWithCurrentUser, @Param('setId') setId: string,
+    @Headers('idempotency-key') key: string | string[] | undefined, @Body() body: unknown) {
+    this.assertEnabled();
+    const parsed = parse(deleteBazisCutSetSchema, body);
+    return this.service.deleteEmptySet({ currentUser: requireUser(request), requestId: request.requestId,
       setId: parseId(setId), idempotencyKey: parseIdempotencyKey(key), ...parsed });
   }
 

@@ -22,7 +22,6 @@ import type {
 
 const MEANINGFUL_SKIP_REASONS = new Set([
   'same_status',
-  'auto_mode_from_details',
   'target_status_missing',
   'no_details',
   'lower_priority_same_target',

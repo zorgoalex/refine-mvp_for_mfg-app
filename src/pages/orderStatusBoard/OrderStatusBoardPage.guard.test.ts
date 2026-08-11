@@ -42,23 +42,51 @@ const imagePrintPreview = readFileSync(
 
 describe('OrderStatusBoardPage UX guards', () => {
   it('keeps keyboard move, live announcements and focus restoration', () => {
-    expect(page).toContain('aria-label={`Переместить заказ');
+    expect(page).toContain('cardRef.current');
+    expect(page).toContain('function isKeyboardMoveMenuTrigger');
+    expect(page).toContain('onKeyDown={(event) =>');
+    expect(page).toContain("aria-haspopup={moveAvailable ? 'menu' : undefined}");
+    expect(page).toContain('aria-expanded={moveAvailable ? menuOpen : undefined}');
+    expect(page).toContain('setMenuOpen(true)');
     expect(page).toContain('aria-live="polite"');
     expect(page).toContain('aria-describedby');
     expect(page).toContain('restoreOrderStatusBoardFocus');
     expect(page).toContain('data-status-board-order-id');
   });
 
-  it('keeps production auto-mode side effects behind explicit confirmation', () => {
-    expect(interaction).toContain('productionStatusFromDetailsEnabled');
-    expect(page).toContain('Перевести заказ в ручной режим?');
-    expect(page).toContain('отключит авторасчёт');
-    expect(interaction).toContain('if (!confirmed)');
+  it('moves production cards without the obsolete manual-mode confirmation', () => {
+    expect(page).not.toContain('Перевести заказ в ручной режим?');
+    expect(page).not.toContain('отключит авторасчёт');
+    expect(page).not.toContain('confirmManualProductionMove');
+    expect(interaction).not.toContain('confirmManualProductionMove');
+    expect(interaction).not.toContain("kind: 'cancelled'");
   });
 
-  it('keeps desktop DnD and adds explicit, accessible touch drag without enabling CNC', () => {
+  it('keeps regular status DnD guarded and MDF manual drag touch-capable', () => {
+    expect(page).toContain("import { TouchBackend } from 'react-dnd-touch-backend'");
+    expect(page).toContain('enableMouseEvents: true');
+    expect(page).toContain('delayTouchStart');
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
-    expect(page).toContain('canDrag: moveAvailable && finePointer');
+    expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
+    expect(page).toContain('CNC_BOARD_DRAG_TYPE');
+    expect(page).toContain('CncManualCardFrame');
+    expect(page).toContain('isCncManualMoveAllowed(item.kind, columnKey)');
+    expect(page).toContain('includeTerminalManualMoves: terminalColumnsVisible');
+    expect(page).toContain('applyCncManualMovesToColumns(readinessColumns, manualMoves)');
+    expect(page).toContain('kind="bazisCutSet"');
+    expect(page).toContain('completed_laminated');
+    expect(page).toContain('cncOrderStatusBadgeOverride(column.key)');
+    expect(page).toContain('statusBadgeOverride?.name');
+    expect(page).toContain("label: 'Переместить'");
+    expect(page).toContain('trigger={[');
+    expect(page).toContain('trigger: shellRef.current');
+    expect(page).toContain('trigger: cardRef.current');
+    expect(page).toContain('dragRef(node)');
+    expect(page).toContain('isCncManualDragIgnored(event.target)');
+    expect(page).not.toContain('CncCardMoveActions');
+    expect(page).not.toContain('cncMoveControls');
+    expect(page).not.toContain('DragOutlined');
+    expect(page).not.toContain('MoreOutlined');
     expect(page).toContain('const touchBoardDragEnabled = useCoarsePointer()');
     expect(page).toContain('touchDragEnabled={touchBoardDragEnabled}');
     expect(page).toContain('touchDragEnabled={mutationsEnabled && touchDragEnabled}');
@@ -69,14 +97,26 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(touchDrag).toContain('document.elementFromPoint');
     expect(page).toContain('data-status-board-column-key={column.key}');
     expect(page).toContain('status-board-touch-drag-instructions');
-    expect(page).toContain('actionsVisible && (finePointer || touchDragEnabled)');
     expect(page).not.toContain('touchDragEnabled={false}');
-    expect(css).toContain('.status-board-card__drag--touch');
+    expect(css).toContain('.cnc-board-card-shell--draggable');
+    expect(css).not.toContain('.cnc-card-move-actions');
     expect(css).toContain('touch-action: none');
     expect(css).toContain('.status-board-viewport--touch-dragging');
     expect(css).toContain('scroll-snap-type: none');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     expect(css).toContain('scroll-snap-type: x mandatory');
+  });
+
+  it('keeps order status badge in the header and overdue as a clock icon', () => {
+    expect(page).toContain('status-board-card__identity');
+    expect(page).toContain('status-board-card__status-badge');
+    expect(page).toContain('status-board-card__overdue-icon');
+    expect(page).toContain('aria-label="Плановая дата прошла"');
+    expect(page).not.toContain('<Tag color="blue">Авто</Tag>');
+    expect(page).not.toContain('<Tag color="volcano">Плановая дата прошла</Tag>');
+    expect(css).toContain('.status-board-card__identity');
+    expect(css).toContain('.status-board-card__overdue-icon');
+    expect(css).toContain('color: #cf1322');
   });
 
   it('keeps every tablet board action in the forced one-row toolbar', () => {
@@ -116,8 +156,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-column__cards \{[^}]*overscroll-behavior-x: auto;[^}]*overscroll-behavior-y: contain;[^}]*touch-action: pan-x pan-y;/,
     );
-    expect(css).toContain('.status-board-card__drag--touch');
-    expect(css).toContain('touch-action: none');
+    expect(page).toContain('{...touchDragHandleProps}');
+    expect(css).not.toContain('.status-board-card__drag--touch');
   });
 
   it('focuses and reveals a card after a successful touch move', () => {
@@ -153,6 +193,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('aria-controls="status-board-viewport"');
     expect(css).toContain('.status-board-scrollbar');
     expect(css).toContain('overflow-x: auto');
+  });
+
+  it('scrolls MDF column card lists to top after relation selection', () => {
+    expect(page).toContain('function scrollStatusBoardColumnCardsToTop');
+    expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
+    expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
+    expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
+    expect(page).toContain('[activeCncRelation, cncRelationsEnabled, isCncToday]');
   });
 
   it('loads the next column page before vertical scroll reaches the bottom', () => {
@@ -227,10 +275,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('status-board-toolbar__sort-settings');
     expect(page).toContain('switchStatusBoardView');
     expect(page).toContain('readStatusBoardSortPreference(currentUser?.id, view)');
+    expect(page).toContain('DEFAULT_MDF_ORDER_CARD_SORT');
+    expect(page).toContain('Сортировка заказов');
+    expect(page).toContain('Свойство сортировки заказов МДФ-доски');
+    expect(page).toContain('Направление сортировки заказов МДФ-доски');
+    expect(page).toContain('fetchCncOrderStatusBoard(cncOrderIds, {');
+    expect(page).toContain('orderSort={cncOrderSortPreference}');
+    expect(page).toContain('compareCncOrderBoardCards');
   });
 
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
+    expect(page).toContain('fixedView ? { fixedView } : {}');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
     expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
     expect(page).toContain('{!fixedView && (');
@@ -254,6 +310,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('suffixIcon={<SearchOutlined />}');
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
+    expect(page).toContain('() => filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters)');
+    expect(page).not.toContain('filterCncBazisCutSetsByMissingBathDetails');
     expect(page).toContain('status-board-toolbar__cnc-period');
     expect(page).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
     expect(page).toContain('DEFAULT_CNC_ORDER_SEARCH_PERIOD');
@@ -285,6 +343,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('По выбранному заказу МДФ-работ нет');
     expect(page).toContain('В чате {formatDateTime');
     expect(page).toContain('<Collapse.Panel');
+    expect(page).toContain('key="missing-details"');
+    expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
+    expect(page).toContain('data-cnc-manual-drag-ignore="true"');
+    expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');
     expect(page).toContain('cncColumnDisplayTitle(column)');
     expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
@@ -316,6 +378,12 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('keeps bath cards printable with SVG and PDF previews', () => {
     expect(page).toContain('cutApi.fetchSheetSvg');
     expect(page).toContain('cutApi.fetchJobPdf');
+    expect(page).toContain('CutSheetLabelGenerateAction');
+    expect(page).toContain('detailInstancesFromRepeatedDetailIds(svgCutSheet.detailIds)');
+    expect(page).toContain('detailInstancesFromPacketItems(packet.items)');
+    expect(page).toContain('cutMapFallbackImageFromPacket(packet)');
+    expect(page).toContain('ImagePrintPreviewModal');
+    expect(page).toContain('aria-label={`Печать скрина листа ${title}`}');
     expect(page).toContain('const fetchFreshPdf = useCallback');
     expect(page).toContain('const downloadPdf = useCallback(async () =>');
     expect(page).toContain('const printPdf = useCallback(async () =>');
@@ -330,24 +398,35 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('triggerBlobDownload(blob, fileName');
     expect(page).not.toContain("window.open(url, '_blank')");
     expect(page).toContain('PrinterOutlined');
+    expect(page).toContain('TagsOutlined');
     expect(page).toContain('DownloadOutlined');
+    expect(css).toContain('.cnc-packet-card__sheet-actions');
+    expect(css).toContain('flex-wrap: nowrap');
     expect(css).toContain('.cnc-bath-card__pdf-pages');
     expect(css).toContain('.cnc-bath-card__pdf-page-image');
-    expect(css).toContain('.cnc-bath-card__ready-icon--pending');
+    expect(css).not.toContain('.cnc-bath-card__ready-icon');
   });
 
-  it('keeps the completed CNC card check marker understandable', () => {
-    expect(page).toContain("packet.completionStatus === 'completed'");
-    expect(page).toContain('<CheckCircleOutlined />');
-    expect(page).toContain('Распилено на станке');
-    expect(css).toContain('.cnc-packet-card__status-icon--completed');
-    expect(css).toContain('border-radius: 50%');
+  it('does not duplicate the completed CNC file state with a check marker', () => {
+    const cardStart = page.indexOf('const CncTelegramPacketCard =');
+    const cardEnd = page.indexOf('interface CncPacketSheetPreviewModalProps', cardStart);
+    const packetCard = page.slice(cardStart, cardEnd);
+
+    expect(packetCard).not.toContain("packet.completionStatus === 'completed'");
+    expect(packetCard).not.toContain('<CheckCircleOutlined />');
+    expect(packetCard).not.toContain('Распилено на станке');
+    expect(css).not.toContain('.cnc-packet-card__status-icon--completed');
   });
 
-  it('hides the red bath readiness check in «Карты ванн» and keeps it in ready columns', () => {
-    expect(page).toContain('showReadyIcon={isCncReadyBathColumnKey(column.key)}');
-    expect(page).toContain('!summaryOnly && showReadyIcon && (');
-    expect(page).toContain('<CheckCircleFilled');
+  it('does not duplicate bath readiness with a check marker', () => {
+    const cardStart = page.indexOf('const CncTelegramBathCardView =');
+    const cardEnd = page.indexOf('function buildCncOrderSummaries', cardStart);
+    const bathCard = page.slice(cardStart, cardEnd);
+
+    expect(page).not.toContain('showReadyIcon');
+    expect(page).not.toContain('<CheckCircleFilled');
+    expect(bathCard).not.toContain('cnc-bath-card__ready-icon');
+    expect(css).not.toContain('.cnc-bath-card__ready-icon');
   });
 
   it('shows CNC order totals directly on each card', () => {
@@ -457,16 +536,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
   });
 
-  it('shows the bath cut-result version before readiness and removes terminal work', () => {
+  it('shows the bath cut-result version without a readiness check and removes terminal work', () => {
     const actionsStart = page.indexOf('<div className="cnc-bath-card__actions">');
     const actionsEnd = page.indexOf('</div>', actionsStart);
     const actions = page.slice(actionsStart, actionsEnd);
     expect(actions).toContain('className="cnc-bath-card__cut-result-badge"');
     expect(actions).toMatch(/>\s*\{bath\.cutNumber\}\s*<\/Tag>/);
     expect(actions).not.toContain('№{bath.cutNumber}');
-    expect(actions.indexOf('cnc-bath-card__cut-result-badge')).toBeLessThan(
-      actions.indexOf('cnc-bath-card__ready-icon'),
-    );
+    expect(actions).not.toContain('cnc-bath-card__ready-icon');
     expect(css).toMatch(
       /\.cnc-bath-card__actions\s*\{[^}]*align-items: center;/s,
     );
@@ -492,7 +569,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('container-name: status-board-viewport');
     expect(css).toContain('@container status-board-viewport (max-width: 960px)');
     expect(css).toContain('.status-board-columns--cnc .cnc-packet-card__summary-meta');
-    expect(css).toContain('.status-board-columns--cnc .status-board-card__status-row');
+    expect(css).toContain('.status-board-columns--cnc .status-board-card__standard-grid');
     expect(css).toContain('.status-board-columns--cnc .cnc-order-card__compact-client');
   });
 
@@ -581,6 +658,28 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('background: #edf7ff');
     expect(css).toContain('.cnc-today-column--baths');
     expect(css).toContain('.cnc-today-column--baths_ready');
+    expect(css).toContain('.cnc-today-column--baths_laminated');
+    expect(css).toContain('.cnc-today-column--orders_ready');
+    expect(css).toContain('.cnc-today-column--orders_issued');
+    expect(page).toContain("title: 'Готов к выдаче'");
+    expect(page).toContain("title: 'Выдан'");
+    expect(page).toContain('Распилено {cncReadiness.cutDetails}');
+    expect(page).toContain('if (!cncPacketCountsForMdfReadiness(packet)) continue;');
+    expect(page).toContain('if (!cncMaterialNameIsMdf(item.materialName)) continue;');
+    expect(page).toContain('Закатано {cncReadiness.rolledDetails}');
+    expect(page).toContain('Осталось {cncReadiness.remainingDetails}');
+    expect(page).toContain('className="cnc-order-card__client"');
+    expect(page).toContain("cncOrderCard ? 'cnc-order-card__parts-total' : ''");
+    expect(page).toContain('paymentSummary && !cncOrderCard');
+    expect(css).toMatch(/\.cnc-order-card__readiness\s*\{[^}]*display: grid;/s);
+    expect(css).toContain('.cnc-order-card__client');
+    expect(css).toContain('justify-content: flex-start;');
+    expect(css).toContain('gap: 6px;');
+    expect(css).toContain('font-size: clamp(14px, 4.8cqw, 16px)');
+    expect(css).toContain('font-size: clamp(11px, 3.8cqw, 12.5px)');
+    expect(css).toMatch(/\.cnc-order-card__parts-total\s*\{[^}]*white-space: nowrap;/s);
+    expect(css).toContain('.cnc-order-card__progress-segment--cut');
+    expect(css).toContain('.cnc-order-card__progress-segment--rolled');
     expect(css).toContain('background: #fff7e6');
     expect(css).toContain('.status-board-columns--cnc > .status-board-column');
     expect(css).toContain(
@@ -601,6 +700,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(detailedMachine).toContain("packet.programName ?? ''");
     expect(detailedMachine).toContain('...packet.comments');
     expect(detailedMachine).toContain('CNC_OTHER_MATERIAL_MARKER_PATTERN');
+    expect(detailedMachine).toContain('export function cncMaterialNameIsMdf');
+    expect(detailedMachine).toContain('export function cncPacketCountsForMdfReadiness');
     expect(css).toMatch(
       /\.cnc-packet-card--other-material\s*\{[^}]*border-color: #8b5a2b;[^}]*box-shadow:/s,
     );
@@ -685,10 +786,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('checked={cncBathsRequireMachineFiles}');
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)');
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
+    expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');
     expect(settings).toContain('checked={cncTerminalColumnsVisible}');
-    expect(settings).toContain('Закатан/выдан');
+    expect(settings).toContain('Распиленные файлы');
     expect(page).toContain("completed_laminated: 'Распиленные файлы'");
-    expect(page).toContain("baths_laminated: 'Закатаны/выданы'");
+    expect(page).toContain("baths_laminated: 'Закатаны'");
+    expect(page).toContain("orders_ready: 'Готов к выдаче'");
+    expect(page).toContain("orders_issued: 'Выдан'");
     expect(page).toContain('...terminalColumns');
     expect(page).toContain('cncMuted={mutedOrderIds.has(card.orderId)}');
     expect(css).toMatch(
@@ -866,10 +970,26 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('if (!open) return null;');
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-panel"');
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-actions"');
+    expect(sheetPreview).toContain('const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null)');
+    expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
     expect(sheetPreview).toContain('status="Скрин из Telegram-чата"');
+    expect(sheetPreview).toContain('printHeader={printHeader}');
+    expect(sheetPreview).toContain('printMode="stretch-page-height"');
+    expect(packetCard).toContain('const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);');
+    expect(page).toContain('function cncMachineFileCutPrintHeader(packet: CncTelegramPacket)');
+    expect(page).toContain('return `Раскрой №${cardNumber}`;');
     expect(imagePrintPreview).toContain('export const DEFAULT_IMAGE_PREVIEW_SCALE = 0.25;');
+    expect(imagePrintPreview).toContain('printHeader?: string;');
+    expect(imagePrintPreview).toContain("type ImagePrintMode = 'contain' | 'stretch-page-height';");
+    expect(imagePrintPreview).toContain('printMode?: ImagePrintMode;');
+    expect(imagePrintPreview).toContain('printImage(imageUrl, printTitle, printHeader, printMode)');
+    expect(imagePrintPreview).toContain('class="image-print-header"');
+    expect(imagePrintPreview).toContain('font-size:20px');
+    expect(imagePrintPreview).toContain('@page{size:portrait;margin:8mm}');
+    expect(imagePrintPreview).toContain('min-height:85vh');
+    expect(imagePrintPreview).toContain('object-fit:fill');
     expect(imagePrintPreview).toContain('ZoomOutOutlined');
     expect(imagePrintPreview).toContain('ZoomInOutlined');
     expect(imagePrintPreview).toContain('Печать скрина');
@@ -912,7 +1032,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('status-board-card__status-label');
     expect(page).toContain('resolveStatusBoardStatusColor(board, card, allColumns)');
     expect(page).toContain('color={primaryStatusColor}');
-    expect(page).toContain('status-board-card__status-row');
+    expect(page).toContain('status-board-card__identity');
     expect(page).toContain('status-board-card__status-badge');
     expect(page).toContain('status-board-card__standard-grid');
     expect(page).toContain('productionToolbarCompact');
@@ -940,7 +1060,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('width: 182px');
     expect(css).toContain('min-width: 182px');
     expect(css).toContain('width: calc((100vw - 48px) * 0.6)');
-    expect(css).toContain('.status-board-card__status-row');
+    expect(css).toContain('.status-board-card__identity');
     expect(css).toContain('.status-board-card__status-badge.ant-tag');
     expect(css).toContain('.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__number.ant-btn');
     expect(css).toContain('.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__status-badge.ant-tag');

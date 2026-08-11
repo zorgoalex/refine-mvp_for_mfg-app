@@ -52,6 +52,18 @@ export function findOrderDetailInlineEditor(
   ) ?? null;
 }
 
+export function focusOrderDetailInlineEditorAtEnd(editor: HTMLElement | null): void {
+  if (!editor) return;
+  editor.focus({ preventScroll: true });
+  const input = editor as HTMLElement & {
+    value?: string;
+    setSelectionRange?: (selectionStart: number, selectionEnd: number) => void;
+  };
+  if (typeof input.value !== 'string' || typeof input.setSelectionRange !== 'function') return;
+  const end = input.value.length;
+  input.setSelectionRange(end, end);
+}
+
 interface FinishOrderDetailInlineTabOptions {
   saveCurrentRow: () => Promise<boolean>;
   isLastRow: boolean;

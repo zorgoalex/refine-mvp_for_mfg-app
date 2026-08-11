@@ -19,10 +19,10 @@ describe('order status board interactions', () => {
     expect(reserveOrderStatusBoardMutation(reserved!, 11)).toBeNull();
   });
 
-  it('cancel of production auto-mode performs zero command/refetch requests', async () => {
+  it('moves production auto-mode cards without a confirmation step', async () => {
     const changeOrderStatus = vi.fn();
-    const changeProductionStatus = vi.fn();
-    const refetch = vi.fn();
+    const changeProductionStatus = vi.fn().mockResolvedValue({});
+    const refetch = vi.fn().mockResolvedValue(true);
     const afterCommand = vi.fn();
 
     const result = await executeOrderStatusBoardMove(
@@ -31,10 +31,9 @@ describe('order status board interactions', () => {
         card: card({ productionStatusFromDetailsEnabled: true }),
         targetStatusId: 7,
         targetName: 'Упаковка',
-        idempotencyKey: 'board:test-cancel',
+        idempotencyKey: 'board:test-auto',
       },
       {
-        confirmManualProductionMove: vi.fn().mockResolvedValue(false),
         changeOrderStatus,
         changeProductionStatus,
         afterCommand,
@@ -42,11 +41,15 @@ describe('order status board interactions', () => {
       },
     );
 
-    expect(result).toEqual({ kind: 'cancelled' });
+    expect(result).toEqual({ kind: 'refreshed' });
     expect(changeOrderStatus).not.toHaveBeenCalled();
-    expect(changeProductionStatus).not.toHaveBeenCalled();
-    expect(afterCommand).not.toHaveBeenCalled();
-    expect(refetch).not.toHaveBeenCalled();
+    expect(changeProductionStatus).toHaveBeenCalledWith(10, {
+      productionStatusId: 7,
+      version: 3,
+      idempotencyKey: 'board:test-auto',
+    });
+    expect(afterCommand).toHaveBeenCalledTimes(1);
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it('sends version/idempotency once and reports write-success/refetch-failure as stale', async () => {
@@ -64,7 +67,6 @@ describe('order status board interactions', () => {
         idempotencyKey: 'board:test-stale',
       },
       {
-        confirmManualProductionMove: vi.fn(),
         changeOrderStatus,
         changeProductionStatus: vi.fn(),
         afterCommand,
@@ -256,6 +258,7 @@ function card(
     debtAmount: null,
     partsCount: 0,
     totalArea: 0,
+    details: [],
     managerId: null,
     managerName: null,
     updatedAt: '2026-07-19T00:00:00.000Z',

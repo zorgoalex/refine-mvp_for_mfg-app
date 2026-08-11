@@ -226,11 +226,17 @@ export class LabelsService {
 
   async previewDetailLabels(command: PreviewDetailLabelsCommand): Promise<DetailLabelsPreviewDto> {
     await this.require(command, [VIEW, GENERATE, MANAGE_TEMPLATES]);
+    if (command.input.cutSheetScope || command.input.cutMapFallbackImage) {
+      await this.require(command, [CUT_VIEW]);
+    }
     return this.repo.previewDetailLabels(command);
   }
 
   async generateDetailLabels(command: GenerateDetailLabelsCommand): Promise<OrderLabelGenerationDto> {
     await this.require(command, [GENERATE]);
+    if (command.input.cutSheetScope || command.input.cutMapFallbackImage) {
+      await this.require(command, [CUT_VIEW]);
+    }
     return this.repo.generateDetailLabels(command);
   }
 

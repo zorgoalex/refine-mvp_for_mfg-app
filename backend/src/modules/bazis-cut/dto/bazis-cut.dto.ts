@@ -110,6 +110,10 @@ export const deleteBazisCutSetDetailSchema = z.object({
   expectedVersion: z.number().int().min(0),
 }).strict();
 
+export const deleteBazisCutSetSchema = z.object({
+  expectedVersion: z.number().int().min(0),
+}).strict();
+
 export const listBazisCutSetsSchema = z.object({
   search: z.string().trim().max(200).optional().default(''),
   page: z.coerce.number().int().positive().optional().default(1),
@@ -158,6 +162,7 @@ export interface BazisCutSetSummaryDto {
   updatedAt: string;
   quantity: number;
   positionCount: number;
+  totalAreaM2: number;
   orders: BazisCutSourceRefDto[];
   projects: BazisCutSourceRefDto[];
   bazisProjects: BazisCutSourceRefDto[];
@@ -202,6 +207,11 @@ export interface BazisCutSetListDto {
 export interface BazisCutMutationResultDto {
   set: BazisCutSetDto;
   addedCount?: number;
+}
+
+export interface BazisCutDeleteSetResultDto {
+  deleted: true;
+  set: BazisCutSetSummaryDto;
 }
 
 export interface BazisCutPickerOptionDto {

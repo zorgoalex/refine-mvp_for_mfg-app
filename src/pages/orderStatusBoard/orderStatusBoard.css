@@ -811,9 +811,24 @@
   background: #fff7e6;
 }
 
+.cnc-today-column--baths_laminated {
+  --status-color: #13c2c2;
+  background: #f6fffb;
+}
+
 .cnc-today-column--orders {
   --status-color: #722ed1;
   background: #f9f0ff;
+}
+
+.cnc-today-column--orders_ready {
+  --status-color: #389e0d;
+  background: #f6ffed;
+}
+
+.cnc-today-column--orders_issued {
+  --status-color: #595959;
+  background: #f5f5f5;
 }
 
 .status-board-column.cnc-today-column--terminal {
@@ -827,12 +842,18 @@
 }
 
 .cnc-today-column--baths .status-board-column__header,
-.cnc-today-column--baths_ready .status-board-column__header {
+.cnc-today-column--baths_ready .status-board-column__header,
+.cnc-today-column--baths_laminated .status-board-column__header {
   background: #fffaf0;
 }
 
-.cnc-today-column--orders .status-board-column__header {
+.cnc-today-column--orders .status-board-column__header,
+.cnc-today-column--orders_ready .status-board-column__header {
   background: #fcf7ff;
+}
+
+.cnc-today-column--orders_issued .status-board-column__header {
+  background: #fafafa;
 }
 
 .cnc-today-column--terminal .status-board-column__header {
@@ -1127,6 +1148,15 @@
   white-space: normal;
 }
 
+.status-board-card__identity {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__number.ant-btn {
   min-height: 26px;
   padding: 2px 0;
@@ -1156,19 +1186,6 @@
 .status-board-card--minimal .status-board-card__actions .ant-btn {
   width: 32px;
   height: 32px;
-}
-
-.status-board-card__drag {
-  cursor: grab;
-}
-
-.status-board-card__drag--touch {
-  touch-action: none;
-  -webkit-touch-callout: none;
-}
-
-.status-board-card__drag:active {
-  cursor: grabbing;
 }
 
 .status-board-viewport--touch-dragging {
@@ -1201,54 +1218,75 @@
   white-space: nowrap;
 }
 
-@media (pointer: coarse) {
-  .status-board-card__drag--touch.ant-btn {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
-    border: 1px solid color-mix(in srgb, #1677ff 34%, transparent);
-    background: color-mix(in srgb, #1677ff 10%, var(--app-surface));
-    color: #1677ff;
-  }
-
-  .status-board-card__drag--touch.ant-btn:active,
-  .status-board-card__drag--touch.ant-btn[data-touch-drag-active="true"] {
-    background: color-mix(in srgb, #1677ff 20%, var(--app-surface));
-    box-shadow: 0 0 0 3px color-mix(in srgb, #1677ff 16%, transparent);
-  }
-}
-
 .status-board-card__client {
   display: block;
   margin-bottom: 7px;
   color: var(--app-text-muted);
 }
 
-.status-board-card__status-row {
-  min-width: 0;
-  margin: 2px 0 7px;
-  display: flex;
-  align-items: center;
-}
-
-.status-board-card--minimal .status-board-card__status-row {
-  margin-bottom: 0;
-}
-
-.status-board-card--compact .status-board-card__status-row {
-  margin: 1px 0 4px;
-}
-
 .status-board-card__status-badge.ant-tag {
-  max-width: 100%;
+  max-width: 45%;
   min-width: 0;
+  flex: 0 1 auto;
   margin: 0;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 650;
   line-height: 1.35;
   white-space: normal;
+}
+
+.status-board-card__overdue-icon {
+  color: #cf1322;
+}
+
+.status-board-columns--cnc .cnc-order-card {
+  container-type: inline-size;
+  container-name: cnc-order-card;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__top,
+.status-board-columns--cnc .cnc-order-card .status-board-card__identity {
+  min-width: 0;
+  align-items: center;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__top {
+  justify-content: flex-start;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__identity {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__number.ant-btn {
+  min-height: 0;
+  padding: 0;
+  flex: 0 1 auto;
+  font-size: clamp(14px, 4.8cqw, 16px);
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__number.ant-btn > span {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-board-columns--cnc .cnc-order-card .status-board-card__status-badge.ant-tag {
+  max-width: 58%;
+  padding-inline: clamp(6px, 1.8cqw, 8px);
+  display: block;
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-size: clamp(11px, 3.8cqw, 12.5px);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card__status-badge.ant-tag {
@@ -1326,6 +1364,30 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.cnc-board-card-shell {
+  display: block;
+}
+
+.cnc-board-card-shell--draggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.cnc-board-card-shell--draggable:active {
+  cursor: grabbing;
+}
+
+.cnc-board-card-shell--dragging .status-board-card {
+  opacity: 0.42;
+}
+
+.cnc-card-context-menu .ant-dropdown-menu,
+.status-board-card-context-menu .ant-dropdown-menu {
+  min-width: 190px;
 }
 
 .status-board-card__standard-client {
@@ -1547,12 +1609,112 @@
   font-weight: 700;
 }
 
+.cnc-order-card__client {
+  min-width: 0;
+  margin-top: 2px;
+  display: block;
+  overflow: hidden;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cnc-order-card__parts-total {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cnc-order-card__compact-client {
   min-width: 0;
   display: block;
   color: var(--app-text-muted);
   font-size: 12px;
   line-height: 1.3;
+}
+
+.cnc-order-card__readiness {
+  margin-top: 8px;
+  display: grid;
+  gap: 2px;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+.cnc-order-card__missing {
+  margin-top: 7px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.cnc-order-card__missing.ant-collapse,
+.cnc-order-card__missing .ant-collapse {
+  color: #cf1322;
+}
+
+.cnc-order-card__missing .ant-collapse-header {
+  min-height: 24px;
+  padding: 0 !important;
+  align-items: center !important;
+  color: #cf1322 !important;
+}
+
+.cnc-order-card__missing .ant-collapse-expand-icon {
+  height: 24px;
+  padding-inline-end: 4px !important;
+  color: #cf1322;
+}
+
+.cnc-order-card__missing .ant-collapse-content-box {
+  padding: 3px 0 0 !important;
+}
+
+.cnc-order-card__missing-label {
+  color: #cf1322;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.cnc-order-card__missing-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  color: #cf1322;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  list-style: none;
+}
+
+.cnc-order-card__footer {
+  margin-top: 8px;
+}
+
+.cnc-order-card__progress {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  display: flex;
+  border-radius: 999px;
+  background: var(--app-border-soft);
+}
+
+.cnc-order-card__progress-segment {
+  height: 100%;
+  flex: 0 0 auto;
+}
+
+.cnc-order-card__progress-segment--cut {
+  background: #1677ff;
+}
+
+.cnc-order-card__progress-segment--rolled {
+  background: #722ed1;
 }
 
 .cnc-card-display-toggle.ant-btn {
@@ -1622,12 +1784,6 @@
 .cnc-packet-card__status-icon:focus-visible {
   outline: 2px solid var(--status-color);
   outline-offset: 2px;
-}
-
-.cnc-packet-card__status-icon--completed {
-  color: #389e0d;
-  background: color-mix(in srgb, #389e0d 14%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #389e0d 32%, transparent);
 }
 
 .cnc-packet-card__notes {
@@ -1846,12 +2002,21 @@
 
 .cnc-packet-card__sheet-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 6px;
   margin-bottom: 8px;
 }
 
 .cnc-packet-card__sheet-actions .ant-btn {
+  flex: 0 0 auto;
   min-height: 40px;
+  white-space: nowrap;
+}
+
+.cnc-packet-card__sheet-actions > span {
+  flex: 0 0 auto;
 }
 
 .status-board-columns--cnc-detailed .cnc-today-column--parsed .cnc-packet-card__collapse .ant-collapse-header,
@@ -2055,11 +2220,6 @@
   flex: 0 0 auto;
 }
 
-.cnc-bath-card__ready-icon {
-  min-width: 22px;
-  font-size: 22px;
-}
-
 .cnc-bath-card__cut-result-badge.ant-tag {
   margin: 0;
   padding-inline: 6px;
@@ -2069,14 +2229,6 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.6;
-}
-
-.cnc-bath-card__ready-icon--ready {
-  color: #389e0d;
-}
-
-.cnc-bath-card__ready-icon--pending {
-  color: #cf1322;
 }
 
 .cnc-bath-card__sheet-figure {
@@ -2337,7 +2489,6 @@
   .status-board-columns--cnc .cnc-packet-card__sheet,
   .status-board-columns--cnc .status-board-card__footer,
   .status-board-columns--cnc .cnc-bath-card__actions,
-  .status-board-columns--cnc .status-board-card__status-row,
   .status-board-columns--cnc .status-board-card__standard-grid,
   .status-board-columns--cnc .status-board-card__compact-text,
   .status-board-columns--cnc .cnc-order-card__compact-client {
@@ -2404,9 +2555,15 @@
   }
 
   .status-board-columns--cnc .cnc-packet-card__summary-order,
-  .status-board-columns--cnc .cnc-packet-card__summary-order.ant-btn,
-  .status-board-columns--cnc .cnc-order-card .status-board-card__number {
+  .status-board-columns--cnc .cnc-packet-card__summary-order.ant-btn {
     font-size: clamp(10px, 1.5vw, 15px);
+    color: var(--app-text);
+    font-weight: 700;
+    line-height: 1.15;
+  }
+
+  .status-board-columns--cnc .cnc-order-card .status-board-card__number {
+    font-size: clamp(14px, 4.8cqw, 16px);
     color: var(--app-text);
     font-weight: 700;
     line-height: 1.15;

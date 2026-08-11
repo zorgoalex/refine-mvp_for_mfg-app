@@ -1,10 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
-import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PrinterOutlined, TagsOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../api/labelsApi';
-import type { DetailLabelsPreview, LabelExportFormat, LabelTemplate } from '../../api/types/labelsApi.types';
+import type {
+  DetailLabelsPreview,
+  LabelCutMapFallbackImage,
+  LabelCutSheetDetailInstance,
+  LabelExportFormat,
+  LabelTemplate,
+  PreviewDetailLabelsInput,
+} from '../../api/types/labelsApi.types';
 import { can } from '../../utils/permissions';
 import { saveLabelBlob } from '../orders/components/labels/labelDownloads';
+import { printLabelSvgPages } from '../orders/components/labels/labelPrint';
 
 const { Text } = Typography;
 
@@ -16,19 +24,26 @@ const EXPORT_FORMAT_OPTIONS: { value: LabelExportFormat; label: string }[] = [
 ];
 
 interface CutSheetLabelGenerateActionProps {
-  detailIds: number[];
-  cutJobId: number;
-  cutGroupId: number;
+  detailInstances: LabelCutSheetDetailInstance[];
+  cutJobId?: number | null;
+  cutGroupId?: number | null;
   sheetIndex: number;
+  sheetLabel?: string;
+  cutMapFallbackImage?: LabelCutMapFallbackImage | null;
 }
 
+export type CutSheetLabelDetailInstance = LabelCutSheetDetailInstance;
+
 export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionProps> = ({
-  detailIds,
+  detailInstances,
   cutJobId,
   cutGroupId,
   sheetIndex,
+  sheetLabel,
+  cutMapFallbackImage,
 }) => {
-  const canGenerate = can('labels.generate');
+  const hasCutMapContext = Boolean((cutJobId && cutGroupId) || cutMapFallbackImage);
+  const canGenerate = can('labels.generate') && (!hasCutMapContext || can('cut.view'));
   const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -37,12 +52,29 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   const [preview, setPreview] = useState<DetailLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const previewRequestRef = useRef(0);
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
     [templateId, templates],
   );
-  const disabled = !canGenerate || detailIds.length === 0;
+  const detailIds = useMemo(() => detailInstances.map((instance) => instance.detailId), [detailInstances]);
+  const cutSheetScope = useMemo(() => (
+    cutJobId && cutGroupId
+      ? { cutJobId, cutGroupId, sheetIndex, detailInstances }
+      : undefined
+  ), [cutGroupId, cutJobId, detailInstances, sheetIndex]);
+  const resolvedSheetLabel = sheetLabel ?? `листа ${sheetIndex + 1}`;
+  const disabled = !canGenerate || detailInstances.length === 0;
+
+  const buildRequest = useCallback((template: LabelTemplate): PreviewDetailLabelsInput => ({
+    templateId: template.labelTemplateId,
+    templateVersion: template.version,
+    detailIds,
+    useBasisFields,
+    ...(cutSheetScope ? { cutSheetScope } : { detailInstances }),
+    ...(cutMapFallbackImage ? { cutMapFallbackImage } : {}),
+  }), [cutMapFallbackImage, cutSheetScope, detailIds, detailInstances, useBasisFields]);
 
   // Seed the export-format checkboxes from the selected template's defaults
   // whenever the chosen template changes; the operator can then toggle them.
@@ -55,15 +87,11 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     setLoading(true);
     labelsApi.listTemplates(true)
       .then((next) => {
-        // A cut-map label is intentionally configured from the order card,
-        // where every physical copy can be bound to an exact immutable
-        // placement. The sheet shortcut only carries de-duplicated detail IDs.
-        const supported = next.filter((template) => !template.elements.some((element) => element.kind === 'cut_map'));
-        setTemplates(supported);
+        setTemplates(next);
         setTemplateId((current) => (
-          current && supported.some((template) => template.labelTemplateId === current)
+          current && next.some((template) => template.labelTemplateId === current)
             ? current
-            : supported.find((template) => template.isActive)?.labelTemplateId ?? null
+            : next.find((template) => template.isActive)?.labelTemplateId ?? null
         ));
       })
       .catch(() => message.error('Не удалось загрузить шаблоны бирок'))
@@ -77,10 +105,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     setLoading(true);
     try {
       const nextPreview = await labelsApi.previewDetailLabels({
-        templateId: selectedTemplate.labelTemplateId,
-        templateVersion: selectedTemplate.version,
-        detailIds,
-        useBasisFields,
+        ...buildRequest(selectedTemplate),
       });
       if (previewRequestRef.current === requestId) setPreview(nextPreview);
     } catch {
@@ -88,7 +113,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     } finally {
       if (previewRequestRef.current === requestId) setLoading(false);
     }
-  }, [detailIds, selectedTemplate, useBasisFields]);
+  }, [buildRequest, detailIds.length, selectedTemplate]);
 
   useEffect(() => {
     if (!open || !selectedTemplate || generating) return;
@@ -100,19 +125,13 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     setGenerating(true);
     try {
       const generationPreview = await labelsApi.previewDetailLabels({
-        templateId: selectedTemplate.labelTemplateId,
-        templateVersion: selectedTemplate.version,
-        detailIds,
-        useBasisFields,
+        ...buildRequest(selectedTemplate),
       });
       const generation = await labelsApi.generateDetailLabels({
-        templateId: selectedTemplate.labelTemplateId,
-        templateVersion: selectedTemplate.version,
-        detailIds,
+        ...buildRequest(selectedTemplate),
         previewToken: generationPreview.previewToken,
         exportFormats,
-        useBasisFields,
-        idempotencyKey: `cut-sheet-labels-${cutJobId}-${cutGroupId}-${sheetIndex}-${Date.now()}`,
+        idempotencyKey: `cut-sheet-labels-${cutJobId ?? 'image'}-${cutGroupId ?? 0}-${sheetIndex}-${Date.now()}`,
       });
       const downloaded = await labelsApi.downloadDetailGeneration(generation.generationId);
       saveLabelBlob(
@@ -128,6 +147,23 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     }
   };
 
+  const runPrint = async () => {
+    if (!selectedTemplate || detailIds.length === 0) return;
+    setPrinting(true);
+    try {
+      const printPreview = await labelsApi.previewDetailLabels({
+        ...buildRequest(selectedTemplate),
+      });
+      setPreview(printPreview);
+      const printed = printLabelSvgPages(printPreview.svgPages, `Бирки ${resolvedSheetLabel}`);
+      if (!printed) message.warning('Нет бирок для печати');
+    } catch {
+      message.error('Не удалось открыть печать бирок');
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   return (
     <>
       <Button
@@ -140,12 +176,21 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
         Бирки
       </Button>
       <Modal
-        title={`Бирки листа ${sheetIndex + 1}`}
+        title={`Бирки ${resolvedSheetLabel}`}
         open={open}
         onCancel={() => !generating && setOpen(false)}
         footer={[
           <Button key="preview" onClick={runPreview} loading={loading} disabled={!selectedTemplate || generating}>
             Предпросмотр
+          </Button>,
+          <Button
+            key="print"
+            icon={<PrinterOutlined />}
+            onClick={runPrint}
+            loading={printing}
+            disabled={!selectedTemplate || detailIds.length === 0 || generating}
+          >
+            Печать
           </Button>,
           <Button
             key="generate"
@@ -155,7 +200,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
             loading={generating}
             disabled={!preview || exportFormats.length === 0}
           >
-            Сформировать и скачать
+            Скачать ZIP
           </Button>,
         ]}
         width={680}
@@ -172,12 +217,6 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
         `}</style>
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           {detailIds.length === 0 && <Alert type="warning" showIcon message="На листе нет деталей для бирок" />}
-          <Alert
-            type="info"
-            showIcon
-            message="Шаблоны с миниатюрой раскроя доступны в карточке заказа"
-            description="Там раскрой выбирается отдельно для каждого физического экземпляра детали."
-          />
           <Select
             style={{ width: '100%' }}
             value={templateId}

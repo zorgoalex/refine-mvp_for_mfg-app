@@ -267,6 +267,71 @@ describe('label cut-map resolution', () => {
     }
   });
 
+  it('uses the selected Telegram cutting sequence and sheet size for screenshot fallback labels', async () => {
+    const mediaDir = await mkdtemp(join(tmpdir(), 'telegram-label-cut-number-'));
+    const image = await sharp({
+      create: { width: 16, height: 24, channels: 3, background: '#ffffff' },
+    }).jpeg().toBuffer();
+    await writeFile(join(mediaDir, 'sheet-47.jpg'), image);
+    const client = databaseReturningSequence(
+      [],
+      [],
+      [{
+        packet_id: '47474747-4747-4747-8747-474747474747',
+        source_version: 2,
+        source_message_id: 10847,
+        cutting_sequence_no: 47,
+        order_id: 20,
+        order_detail_id: 10,
+        instance: 1,
+        sheet_image_storage_key: 'sheet-47.jpg',
+        sheet_image_content_type: 'image/jpeg',
+        sheet_image_size_bytes: image.length,
+        sheet_width_mm: 2070.2,
+        sheet_height_mm: 2800.2,
+        evidence_quantity: 1,
+        evidence_eligible: true,
+      }],
+    );
+    let resolved: Awaited<ReturnType<typeof resolveLabelCutMaps>> | null = null;
+    try {
+      resolved = await resolveLabelCutMaps(
+        client,
+        template(),
+        [labelRow({
+          values: {
+            'detail.cut_result_version_no': '30-4',
+            'detail.bath_cut_result_version_no': '31-1',
+          },
+        })],
+        [],
+        20,
+        'regular',
+        { enabled: true, capability: 'v1', mediaDir, imageMode: 'prepare' },
+      );
+
+      expect(resolved.rows[0].cutMap).toMatchObject({
+        source: 'telegram_image',
+        cutNumber: '№47',
+        cutJobName: 'Раскрой №47',
+        sheetWidthMm: 2070.2,
+        sheetHeightMm: 2800.2,
+      });
+      expect(resolved.rows[0].values).toMatchObject({
+        'cut.number': '№47',
+        'detail.cut_result_version_no': '№47',
+        'detail.bath_cut_result_version_no': '31-1',
+      });
+      const svg = renderSvgPages(template(), resolved.rows, resolved.assets).pages[0];
+      expect(svg).toContain('data-cut-number="№47"');
+      expect(svg).toContain('viewBox="0 0 2800.2 2070.2"');
+      expect(svg).toContain('transform="matrix(0 1 1 0 0 0)"');
+    } finally {
+      if (resolved) await closePreparedTelegramImages(resolved.preparedImages.values());
+      await rm(mediaDir, { recursive: true, force: true });
+    }
+  });
+
   it('marks every requested copy unavailable when newest screenshot winner is ambiguous and quantity one', async () => {
     const newest = {
       packet_id: '33333333-3333-4333-8333-333333333333',

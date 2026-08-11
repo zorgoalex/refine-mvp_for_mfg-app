@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -255,7 +255,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "LIKE '%none%'",
     ]) expect(migration113Probe).toContain(marker);
 
-    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\)/);
+    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\)/);
   });
 });
 

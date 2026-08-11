@@ -74,6 +74,8 @@ export interface TelegramImageLabelRowCutMapSnapshot {
   variant: 'telegram';
   sheetIndex: number;
   sheetNumber: number;
+  sheetWidthMm?: number;
+  sheetHeightMm?: number;
 }
 
 export type LabelRowCutMapSnapshot =

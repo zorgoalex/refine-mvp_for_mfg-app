@@ -1001,14 +1001,14 @@ html {
   --order-detail-grid-accent: #217346;
   --order-detail-grid-line: #b7b7b7;
   --order-detail-grid-header: #f3f3f3;
-  --order-detail-grid-letter: #e5e5e5;
+  --order-detail-grid-index: #e5e5e5;
 }
 
 [data-theme="dark"] .order-details-table {
   --order-detail-grid-accent: #58a66f;
   --order-detail-grid-line: #555;
   --order-detail-grid-header: #292929;
-  --order-detail-grid-letter: #343434;
+  --order-detail-grid-index: #343434;
 }
 
 .order-details-table .ant-table,
@@ -1019,60 +1019,51 @@ html {
 }
 
 .order-details-table .ant-table-cell {
+  box-sizing: border-box;
   border-color: var(--order-detail-grid-line) !important;
 }
 
 .order-details-table .ant-table-thead > tr > th {
-  height: 46px;
+  height: 30px;
   padding: 0 !important;
   background: var(--order-detail-grid-header) !important;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .order-detail-spreadsheet-header {
-  display: grid;
-  grid-template-rows: 18px minmax(27px, auto);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 0;
+  min-height: 30px;
   height: 100%;
-}
-
-.order-detail-spreadsheet-header__letter {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
-  border-bottom: 1px solid var(--order-detail-grid-line);
-  background: var(--order-detail-grid-letter);
-  color: var(--app-text-muted);
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 18px;
-  user-select: none;
-}
-
-.order-detail-spreadsheet-header__label {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 0;
   padding: 2px 5px;
-  overflow: hidden;
+  line-height: 18px;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.order-details-table .ant-table-tbody > tr > td {
+  height: 20px;
+  padding: 0 4px !important;
+  line-height: 18px;
+  vertical-align: middle;
 }
 
 .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
   position: relative;
-  height: 30px;
-  min-height: 30px;
-  padding: 0 6px !important;
+  height: 20px;
+  padding: 0 2px !important;
   cursor: cell;
+  line-height: 18px;
   outline: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell[data-order-detail-column-key="detail_number"] {
-  background: var(--order-detail-grid-letter) !important;
+  background: var(--order-detail-grid-index) !important;
   text-align: center;
 }
 
@@ -1082,29 +1073,18 @@ html {
   box-shadow: inset 0 0 0 2px var(--order-detail-grid-accent) !important;
 }
 
-.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus::after {
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--app-surface);
-  background: var(--order-detail-grid-accent);
-  content: '';
-  pointer-events: none;
-}
-
 .order-details-table td.order-detail-spreadsheet-cell .ant-form-item {
   width: 100%;
   margin: 0 !important;
+  padding: 0 !important;
 }
 
 .order-details-table td.order-detail-spreadsheet-cell .ant-input,
 .order-details-table td.order-detail-spreadsheet-cell .ant-input-number,
 .order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input,
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selector {
-  height: 28px !important;
-  min-height: 28px !important;
+  height: 20px !important;
+  min-height: 20px !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
@@ -1113,27 +1093,32 @@ html {
 
 .order-details-table td.order-detail-spreadsheet-cell .ant-input,
 .order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input {
-  padding-block: 2px !important;
+  padding: 2px !important;
+}
+
+.order-details-table td.order-detail-spreadsheet-cell .ant-select-selector {
+  padding-inline: 2px !important;
 }
 
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-item,
 .order-details-table td.order-detail-spreadsheet-cell .ant-select-selection-placeholder {
-  line-height: 26px !important;
+  line-height: 18px !important;
 }
 
-@media (pointer: coarse) {
-  .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {
-    height: 40px;
-    min-height: 40px;
-  }
+.order-details-table td.order-detail-spreadsheet-cell .ant-input:focus,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number:focus,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number-focused,
+.order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input:focus,
+.order-details-table td.order-detail-spreadsheet-cell .ant-select-focused .ant-select-selector {
+  outline: none !important;
+  box-shadow: none !important;
+}
 
-  .order-details-table td.order-detail-spreadsheet-cell .ant-input,
-  .order-details-table td.order-detail-spreadsheet-cell .ant-input-number,
-  .order-details-table td.order-detail-spreadsheet-cell .ant-input-number-input,
-  .order-details-table td.order-detail-spreadsheet-cell .ant-select-selector {
-    height: 38px !important;
-    min-height: 38px !important;
-  }
+.order-details-table .ant-table-tbody > tr > td .ant-btn-sm {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 2px !important;
+  line-height: 18px;
 }
 
 :root {

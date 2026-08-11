@@ -23,9 +23,18 @@ describe('OrderDetailTable reference cells', () => {
 
   it('keeps fixed numeric columns readable at the right scroll edge', () => {
     expect(source).toContain("key: 'doweling',\n      width: 64");
-    expect(source).toContain("key: 'milling_cost_per_sqm',\n      width: 140");
+    expect(source).toContain(
+      "key: 'milling_cost_per_sqm',\n      width: ORDER_DETAIL_COLUMN_WIDTHS.millingCostPerSqm",
+    );
     expect(source).toContain("fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums'");
     expect(source).toContain('scroll={{ x: tableScrollWidth, y: 500 }}');
+  });
+
+  it('uses integer-first editors for every editable numeric detail cell', () => {
+    expect(source.match(/<CurrencyInput/g)).toHaveLength(6);
+    expect(source).not.toContain('formatter={currencySmartFormatter}');
+    expect(source).toContain('precision={0}\n              onChange={handleQuantityChange}');
+    expect(source).toContain('precision={0}\n              min={1}\n              max={999}');
   });
 
   it('keeps the detail production status column compact in the order card table', () => {

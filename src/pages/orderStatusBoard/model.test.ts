@@ -6,11 +6,21 @@ import type {
   OrderStatusBoardResponse,
 } from '../../api/types/orderStatusBoardApi.types';
 import {
+  applyCncManualMovesToColumns,
+  buildCncOrderReadiness,
+  cncManualMoveDestinations,
+  cncManualMoveStorageKey,
+  isCncManualMoveAllowed,
+  splitCncOrderCardsByManualColumn,
+  type CncBoardManualMoveState,
+} from './OrderStatusBoardPage';
+import {
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
+  buildCncOrderMissingDetails,
   collectCncOrderIds,
+  DEFAULT_MDF_ORDER_CARD_SORT,
   filterBoardColumns,
-  filterCncBazisCutSetsByMissingBathDetails,
   filterCncBathColumnsByMachineOrderMatches,
   filterCncBathColumnsByOrderStatuses,
   filterCncTodayColumnsByOrders,
@@ -172,6 +182,14 @@ describe('order status board model', () => {
       { cncTelegram: true },
     );
     expect(defaultPeriodState.cncOrderSearchPeriod).toBe('1w');
+
+    const fixedMdfState = parseOrderStatusBoardViewState(
+      new URLSearchParams('period=1m&order=2707'),
+      { cncTelegram: true, fixedView: 'cnc_today' },
+    );
+    expect(fixedMdfState.view).toBe('cnc_today');
+    expect(fixedMdfState.cncOrderSearchPeriod).toBe('1m');
+    expect(fixedMdfState.cncOrderFilters).toEqual(['2707']);
   });
 
   it('builds CNC order search ranges from the selected board date', () => {
@@ -287,12 +305,376 @@ describe('order status board model', () => {
     expect(filtered[2]?.total).toBe(3);
   });
 
-  it('keeps Basis-cut cards only for bath details missing from machine files', () => {
+  it('allows MDF manual moves only inside card-specific column groups', () => {
+    expect(isCncManualMoveAllowed('packet', 'parsed')).toBe(true);
+    expect(isCncManualMoveAllowed('packet', 'completed')).toBe(true);
+    expect(isCncManualMoveAllowed('packet', 'completed_laminated')).toBe(true);
+    expect(isCncManualMoveAllowed('packet', 'baths_laminated')).toBe(false);
+    expect(isCncManualMoveAllowed('bazisCutSet', 'completed')).toBe(true);
+    expect(isCncManualMoveAllowed('bazisCutSet', 'completed_laminated')).toBe(true);
+    expect(isCncManualMoveAllowed('bath', 'baths')).toBe(true);
+    expect(isCncManualMoveAllowed('bath', 'baths_ready')).toBe(true);
+    expect(isCncManualMoveAllowed('bath', 'baths_laminated')).toBe(true);
+    expect(isCncManualMoveAllowed('bath', 'orders_ready')).toBe(false);
+    expect(isCncManualMoveAllowed('order', 'orders')).toBe(true);
+    expect(isCncManualMoveAllowed('order', 'orders_ready')).toBe(true);
+    expect(isCncManualMoveAllowed('order', 'orders_issued')).toBe(true);
+    expect(isCncManualMoveAllowed('order', 'completed')).toBe(false);
+    expect(cncManualMoveDestinations('packet', 'parsed').map(({ key }) => key)).toEqual([
+      'completed',
+      'completed_laminated',
+    ]);
+    expect(cncManualMoveDestinations('bazisCutSet', 'parsed').map(({ key }) => key)).toEqual([
+      'completed',
+      'completed_laminated',
+    ]);
+    expect(cncManualMoveDestinations('packet', 'completed_laminated').map(({ key }) => key)).toEqual([
+      'parsed',
+      'completed',
+    ]);
+  });
+
+  it('applies MDF manual moves to packet, bath, and Basis cut set display columns', () => {
     const columns = [
       {
         key: 'parsed',
         title: 'Файлы на станке',
         total: 2,
+        packets: [cncPacket('packet-pending', ['2706'], [2706])],
+        baths: [],
+        bazisCutSets: [cncBazisCutSet(9001, [
+          { orderName: '2707', orderId: 2707, detailId: null },
+        ])],
+      },
+      {
+        key: 'baths_ready',
+        title: 'Готовы к закатке',
+        total: 1,
+        packets: [],
+        baths: [cncBath('bath-ready', ['3000'], [3000])],
+        bazisCutSets: [],
+      },
+    ] as CncTelegramTodayColumn[];
+    const manualMoves: CncBoardManualMoveState = {
+      [cncManualMoveStorageKey('packet', 'packet-pending')]: 'completed_laminated',
+      [cncManualMoveStorageKey('bazisCutSet', '9001')]: 'completed_laminated',
+      [cncManualMoveStorageKey('bath', 'bath-ready')]: 'baths_laminated',
+    };
+
+    const moved = applyCncManualMovesToColumns(columns, manualMoves);
+
+    expect(moved.find((column) => column.key === 'parsed')?.packets).toEqual([]);
+    expect(moved.find((column) => column.key === 'parsed')?.bazisCutSets).toEqual([]);
+    expect(moved.find((column) => column.key === 'completed_laminated')?.packets.map((packet) => packet.packetId)).toEqual(['packet-pending']);
+    expect(moved.find((column) => column.key === 'completed_laminated')?.bazisCutSets?.map((card) => card.bazisCutSetId)).toEqual([9001]);
+    expect(moved.find((column) => column.key === 'baths_ready')?.baths).toEqual([]);
+    expect(moved.find((column) => column.key === 'baths_laminated')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-ready']);
+  });
+
+  it('hides MDF packet and Basis cut cards moved to terminal files when terminal column is disabled', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 2,
+        packets: [cncPacket('packet-pending', ['2706'], [2706])],
+        baths: [],
+        bazisCutSets: [cncBazisCutSet(9001, [
+          { orderName: '2707', orderId: 2707, detailId: 7001 },
+        ])],
+      },
+    ] as CncTelegramTodayColumn[];
+    const manualMoves: CncBoardManualMoveState = {
+      [cncManualMoveStorageKey('packet', 'packet-pending')]: 'completed_laminated',
+      [cncManualMoveStorageKey('bazisCutSet', '9001')]: 'completed_laminated',
+    };
+
+    const hiddenTerminal = applyCncManualMovesToColumns(columns, manualMoves, {
+      includeTerminalManualMoves: false,
+    });
+    const readiness = buildCncOrderReadiness(columns, manualMoves);
+
+    expect(hiddenTerminal.find((column) => column.key === 'parsed')?.packets).toEqual([]);
+    expect(hiddenTerminal.find((column) => column.key === 'parsed')?.bazisCutSets).toEqual([]);
+    expect(hiddenTerminal.find((column) => column.key === 'completed_laminated')).toBeUndefined();
+    expect(readiness.get(2706)?.cutDetails).toBe(1);
+    expect(readiness.get(2707)?.cutDetails).toBe(1);
+  });
+
+  it('derives MDF order readiness from completed packets and rolled baths', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 1,
+        packets: [cncPacket('packet-pending', ['2706'], [2706])],
+        baths: [],
+      },
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 1,
+        packets: [cncPacket('packet-ready', ['2712'], [2712])],
+        baths: [],
+      },
+      {
+        key: 'baths_ready',
+        title: 'Готовы к закатке',
+        total: 1,
+        packets: [],
+        baths: [cncBath('bath-ready', ['3000'], [3000])],
+      },
+    ] as CncTelegramTodayColumn[];
+    const manualMoves: CncBoardManualMoveState = {
+      [cncManualMoveStorageKey('packet', 'packet-pending')]: 'completed',
+      [cncManualMoveStorageKey('bath', 'bath-ready')]: 'baths_laminated',
+    };
+
+    const readiness = buildCncOrderReadiness(columns, manualMoves);
+
+    expect(readiness.get(2706)).toEqual({
+      totalDetails: 1,
+      cutDetails: 1,
+      rolledDetails: 0,
+      remainingDetails: 0,
+    });
+    expect(readiness.get(2712)).toEqual({
+      totalDetails: 1,
+      cutDetails: 1,
+      rolledDetails: 0,
+      remainingDetails: 0,
+    });
+    expect(readiness.get(3000)).toEqual({
+      totalDetails: 1,
+      cutDetails: 0,
+      rolledDetails: 1,
+      remainingDetails: 0,
+    });
+  });
+
+  it('deduplicates MDF order readiness between machine files and Basis-cut sets', () => {
+    const packet = cncPacket('packet-ready', ['2705'], [2705], [2705], [101]);
+    packet.items[0] = {
+      ...packet.items[0],
+      detailNumber: 1,
+      quantity: 2,
+    };
+    const bazisCutSet = cncBazisCutSet(9001, [
+      { orderName: '2705', orderId: 2705, detailId: 101 },
+    ]);
+    bazisCutSet.items[0] = {
+      ...bazisCutSet.items[0],
+      detailNumber: 1,
+      quantity: 2,
+    };
+    const columns = [
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 2,
+        packets: [packet],
+        baths: [],
+        bazisCutSets: [bazisCutSet],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const readiness = buildCncOrderReadiness(columns, {});
+
+    expect(readiness.get(2705)).toEqual({
+      totalDetails: 2,
+      cutDetails: 2,
+      rolledDetails: 0,
+      remainingDetails: 0,
+    });
+  });
+
+  it('counts only MDF machine files and Basis-cut details for MDF order cut readiness', () => {
+    const mdfPacket = cncPacket('packet-mdf', ['2705'], [2705], [2705], [101]);
+    mdfPacket.items[0] = { ...mdfPacket.items[0], quantity: 2 };
+    const hdfPacket = cncPacket('packet-hdf', ['2706'], [2706], [2706], [102]);
+    hdfPacket.materialName = 'ХДФ 3 мм';
+    hdfPacket.items[0] = { ...hdfPacket.items[0], quantity: 3 };
+    const unknownPacket = cncPacket('packet-unknown', ['2707'], [2707], [2707], [103]);
+    unknownPacket.materialName = 'Не определён';
+    const bazisCutSet = cncBazisCutSet(9002, [
+      { orderName: '2708', orderId: 2708, detailId: 108, materialName: 'МДФ 16 мм' },
+      { orderName: '2709', orderId: 2709, detailId: 109, materialName: 'ЛДСП 16 мм' },
+      { orderName: '2710', orderId: 2710, detailId: 110, materialName: 'Фанера 12 мм' },
+    ]);
+    const columns = [
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 4,
+        packets: [mdfPacket, hdfPacket, unknownPacket],
+        baths: [],
+        bazisCutSets: [bazisCutSet],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const readiness = buildCncOrderReadiness(columns, {});
+
+    expect(readiness.get(2705)?.cutDetails).toBe(2);
+    expect(readiness.get(2708)?.cutDetails).toBe(1);
+    expect(readiness.has(2706)).toBe(false);
+    expect(readiness.has(2707)).toBe(false);
+    expect(readiness.has(2709)).toBe(false);
+    expect(readiness.has(2710)).toBe(false);
+  });
+
+  it('keeps MDF order readiness total at least the order detail count', () => {
+    const split = splitCncOrderCardsByManualColumn(
+      [{ ...card(501), partsCount: 50 }],
+      new Map([
+        [501, {
+          totalDetails: 40,
+          cutDetails: 25,
+          rolledDetails: 15,
+          remainingDetails: 0,
+        }],
+      ]),
+      {},
+    );
+
+    expect(split.orders.map(({ card: item }) => item.orderId)).toEqual([501]);
+    expect(split.orders[0]?.readiness).toEqual({
+      totalDetails: 50,
+      cutDetails: 25,
+      rolledDetails: 15,
+      remainingDetails: 10,
+    });
+    expect(split.orders_ready).toEqual([]);
+  });
+
+  it('caps MDF order readiness by the order detail count', () => {
+    const split = splitCncOrderCardsByManualColumn(
+      [{ ...card(2705), partsCount: 34 }],
+      new Map([
+        [2705, {
+          totalDetails: 53,
+          cutDetails: 53,
+          rolledDetails: 0,
+          remainingDetails: 0,
+        }],
+      ]),
+      {},
+    );
+
+    expect(split.orders).toEqual([]);
+    expect(split.orders_ready.map(({ card: item }) => item.orderId)).toEqual([2705]);
+    expect(split.orders_ready[0]?.readiness).toEqual({
+      totalDetails: 34,
+      cutDetails: 34,
+      rolledDetails: 0,
+      remainingDetails: 0,
+    });
+  });
+
+  it('sorts MDF order cards by order number by default and supports selected direction', () => {
+    const cards = [
+      { ...card(10), orderName: '10', updatedAt: '2026-07-19T09:00:00.000Z' },
+      { ...card(2), orderName: '2', updatedAt: '2026-07-19T11:00:00.000Z' },
+      { ...card(1), orderName: '1', updatedAt: '2026-07-19T10:00:00.000Z' },
+    ];
+
+    const defaultSplit = splitCncOrderCardsByManualColumn(cards, new Map(), {});
+    expect(DEFAULT_MDF_ORDER_CARD_SORT).toEqual({
+      sortBy: 'orderNumber',
+      sortOrder: 'asc',
+    });
+    expect(defaultSplit.orders.map(({ card: item }) => item.orderName)).toEqual([
+      '1',
+      '2',
+      '10',
+    ]);
+
+    const updatedDescSplit = splitCncOrderCardsByManualColumn(cards, new Map(), {}, {
+      sortBy: 'updatedAt',
+      sortOrder: 'desc',
+    });
+    expect(updatedDescSplit.orders.map(({ card: item }) => item.orderName)).toEqual([
+      '2',
+      '1',
+      '10',
+    ]);
+  });
+
+  it('lists MDF order positions missing from machine files and Basis-cut sets', () => {
+    const orderCard = {
+      ...card(2705),
+      details: [
+        { detailId: 101, detailNumber: 1, quantity: 2, bazisCutQuantity: 0 },
+        { detailId: 102, detailNumber: 2, quantity: 3, bazisCutQuantity: 0 },
+        { detailId: 103, detailNumber: 3, quantity: 1, bazisCutQuantity: 1 },
+        { detailId: 104, detailNumber: 4, quantity: 1, bazisCutQuantity: 0 },
+      ],
+    };
+    const columns = [
+      {
+        key: 'completed',
+        title: 'Распилено',
+        total: 1,
+        packets: [{
+          ...cncPacket('p-2705', ['2705', '2705']),
+          items: [
+            {
+              packetItemId: 'p-2705-1',
+              orderName: '2705',
+              orderId: 2705,
+              matchOrderId: 2705,
+              matchDetailId: 101,
+              detailNumber: 1,
+              quantity: 1,
+            },
+            {
+              packetItemId: 'p-2705-2',
+              orderName: '2705',
+              orderId: null,
+              matchOrderId: null,
+              matchDetailId: null,
+              detailNumber: 2,
+              quantity: 1,
+            },
+          ],
+        }],
+        baths: [],
+        bazisCutSets: [],
+      },
+    ] as CncTelegramTodayColumn[];
+
+    const missing = buildCncOrderMissingDetails([orderCard], columns);
+
+    expect(missing.get(2705)).toEqual([
+      {
+        detailId: 101,
+        detailNumber: 1,
+        requiredQuantity: 2,
+        presentQuantity: 1,
+        missingQuantity: 1,
+      },
+      {
+        detailId: 102,
+        detailNumber: 2,
+        requiredQuantity: 3,
+        presentQuantity: 1,
+        missingQuantity: 2,
+      },
+      {
+        detailId: 104,
+        detailNumber: 4,
+        requiredQuantity: 1,
+        presentQuantity: 0,
+        missingQuantity: 1,
+      },
+    ]);
+  });
+
+  it('keeps Basis-cut cards as machine-file cards even when bath details have packet files', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 3,
         packets: [cncPacket('p-2712', ['2712'], [2712], [2712], [7002])],
         baths: [],
         bazisCutSets: [
@@ -323,9 +705,9 @@ describe('order status board model', () => {
       },
     ] as CncTelegramTodayColumn[];
 
-    const filtered = filterCncBazisCutSetsByMissingBathDetails(columns);
+    const filtered = filterCncTodayColumnsByOrders(columns, ['2712']);
 
-    expect(filtered[0]?.bazisCutSets?.map((card) => card.bazisCutSetId)).toEqual([8]);
+    expect(filtered[0]?.bazisCutSets?.map((card) => card.bazisCutSetId)).toEqual([9]);
     expect(filtered[0]?.total).toBe(2);
   });
 
@@ -500,7 +882,7 @@ describe('order status board model', () => {
       },
       {
         key: 'baths_laminated',
-        title: 'Закатаны/выданы',
+        title: 'Закатаны',
         total: 1,
         packets: [],
         baths: [cncBath('archived', ['2700'], [2700])],
@@ -623,6 +1005,7 @@ function card(orderId: number): OrderStatusBoardCard {
     debtAmount: null,
     partsCount: 0,
     totalArea: 0,
+    details: [],
     managerId: null,
     managerName: null,
     updatedAt: '2026-07-19T00:00:00.000Z',
@@ -653,6 +1036,8 @@ function cncPacket(
       orderId: orderIds[index] ?? null,
       matchOrderId: matchOrderIds[index] ?? null,
       matchDetailId: matchDetailIds[index] ?? null,
+      quantity: 1,
+      laminatedOrLater: false,
     })),
   };
 }
@@ -668,13 +1053,21 @@ function cncBath(
       bathItemId: `${bathCardId}-${index}`,
       orderName,
       orderId: orderIds[index] ?? Number(orderName),
+      quantity: 1,
+      completedQuantity: 1,
+      laminatedOrLater: false,
     })),
   };
 }
 
 function cncBazisCutSet(
   bazisCutSetId: number,
-  items: Array<{ orderName: string; orderId: number | null; detailId: number | null }>,
+  items: Array<{
+    orderName: string;
+    orderId: number | null;
+    detailId: number | null;
+    materialName?: string;
+  }>,
 ) {
   return {
     bazisCutSetId,
@@ -688,6 +1081,7 @@ function cncBazisCutSet(
       detailNumber: null,
       widthMm: null,
       heightMm: null,
+      materialName: item.materialName ?? 'МДФ 16 мм',
       quantity: 1,
     })),
   };

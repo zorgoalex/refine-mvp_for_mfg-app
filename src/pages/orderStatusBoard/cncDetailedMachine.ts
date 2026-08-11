@@ -127,6 +127,24 @@ export function cncPacketHasOtherMaterialMarker(packet: CncTelegramPacket): bool
   return !CNC_MDF_MATERIAL_PATTERN.test(materialName);
 }
 
+export function cncMaterialNameIsMdf(materialName: string | null | undefined): boolean {
+  const normalized = materialName?.trim() ?? '';
+  if (!normalized || CNC_UNKNOWN_MATERIAL_PATTERN.test(normalized)) return false;
+  if (CNC_OTHER_MATERIAL_MARKER_PATTERN.test(normalized)) return false;
+  return CNC_MDF_MATERIAL_PATTERN.test(normalized);
+}
+
+export function cncPacketCountsForMdfReadiness(packet: CncTelegramPacket): boolean {
+  const metadata = [
+    packet.materialName,
+    packet.programName ?? '',
+    packet.externalPacketKey,
+    ...packet.comments,
+  ];
+  if (metadata.some((text) => CNC_OTHER_MATERIAL_MARKER_PATTERN.test(text))) return false;
+  return cncMaterialNameIsMdf(packet.materialName);
+}
+
 function isExactMatch(item: CncTelegramPacketItem, bathItem: CncTelegramBathItem): boolean {
   return item.matchOrderId === bathItem.orderId
     && item.matchDetailId === bathItem.detailId;

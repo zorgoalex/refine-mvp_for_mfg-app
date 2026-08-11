@@ -16,13 +16,13 @@ import { can } from '../../utils/permissions';
 import {
   buildBazisCutCardPosition,
   buildBazisCutQrCode,
+  formatBazisCutAreaM2,
   summarizeBazisCutDetails,
 } from './bazisCutDetailPresentation';
 import { saveBazisCutFile, type BazisCutSaveHandle } from './bazisCutSaveFile';
 import './BazisCutSetPage.css';
 
 const { Title, Text } = Typography;
-const AREA_FORMATTER = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 type FieldKey = keyof BazisCutDetailFields;
 interface FieldDefinition { key: FieldKey; label: string; group: 'Основное' | 'Размеры' | 'Кромки' | 'Дополнительно'; kind: 'text' | 'long' | 'number' | 'integer' | 'boolean'; }
@@ -152,7 +152,7 @@ export const BazisCutSetPage: React.FC = () => {
       <Descriptions.Item label="Сформирован">{new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(set.createdAt))}</Descriptions.Item>
       <Descriptions.Item label="Деталей"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{set.quantity}</span></Descriptions.Item>
       <Descriptions.Item label="Позиций"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{set.positionCount}</span></Descriptions.Item>
-      <Descriptions.Item label="Общая площадь"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{AREA_FORMATTER.format(setTotals.totalAreaM2)} м²</span></Descriptions.Item>
+      <Descriptions.Item label="Общая площадь"><span style={{ fontVariantNumeric: 'tabular-nums' }}>{formatBazisCutAreaM2(setTotals.totalAreaM2)} м²</span></Descriptions.Item>
       <Descriptions.Item label="ERP-заказы"><SourceRefs refs={set.orders} href={(refId) => `/orders/show/${refId}`} /></Descriptions.Item>
       <Descriptions.Item label="ERP-проекты"><SourceRefs refs={set.projects} /></Descriptions.Item>
       <Descriptions.Item label="Базис-проекты"><SourceRefs refs={set.bazisProjects} href={(refId) => `/bazis/projects/${refId}`} /></Descriptions.Item>

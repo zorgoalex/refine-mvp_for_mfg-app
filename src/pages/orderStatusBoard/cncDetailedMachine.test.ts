@@ -10,6 +10,8 @@ import {
   CNC_MACHINE_DETAIL_SIZE_TOLERANCE_MM,
   buildCncDetailedMachineSources,
   cncBathDetailHasMachineFile,
+  cncMaterialNameIsMdf,
+  cncPacketCountsForMdfReadiness,
   cncPacketHasOtherMaterialMarker,
   selectCncMachineResultSheets,
 } from './cncDetailedMachine';
@@ -207,6 +209,21 @@ describe('CNC detailed machine sources', () => {
     expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'МДФ 16 мм' }))).toBe(false);
     expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'Не определён' }))).toBe(false);
     expect(cncPacketHasOtherMaterialMarker(packet({ materialName: 'Не определено' }))).toBe(false);
+  });
+
+  it('counts only explicit MDF material for cut readiness', () => {
+    expect(cncMaterialNameIsMdf('МДФ 16 мм')).toBe(true);
+    expect(cncMaterialNameIsMdf('MDF 18')).toBe(true);
+    expect(cncMaterialNameIsMdf('ХДФ 3 мм')).toBe(false);
+    expect(cncMaterialNameIsMdf('ЛДСП 16 мм')).toBe(false);
+    expect(cncMaterialNameIsMdf('Фанера 12 мм')).toBe(false);
+    expect(cncMaterialNameIsMdf('Не определён')).toBe(false);
+    expect(cncPacketCountsForMdfReadiness(packet({ materialName: 'МДФ 16 мм' }))).toBe(true);
+    expect(cncPacketCountsForMdfReadiness(packet({ materialName: 'МДФ / ХДФ' }))).toBe(false);
+    expect(cncPacketCountsForMdfReadiness(packet({
+      materialName: 'МДФ 16 мм',
+      comments: ['ЛДСП белый'],
+    }))).toBe(false);
   });
 
   it('shows cards for every bath detail before a concrete detail is selected', () => {

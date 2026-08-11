@@ -589,6 +589,8 @@ describe('PgProductionActionRepository', () => {
         { detail_id: 101, production_status_id: 6 },
         { detail_id: 102, production_status_id: 6 },
       ],
+      updatedDetailIds: [101, 102],
+      recalcOrderProductionStatusId: 6,
     });
     const repository = new PgProductionActionRepository(database.service);
 
@@ -628,7 +630,9 @@ describe('PgProductionActionRepository', () => {
     expect(sql).not.toContain('SELECT set_session_user($1)');
     expect(sql).toContain('SELECT production_status_id, production_status_name, production_status_code');
     expect(sql).toContain('SELECT detail_id, production_status_id FROM order_details');
-    expect(sql).toContain('UPDATE orders SET production_status_id');
+    expect(sql).toContain('UPDATE order_details SET production_status_id = $2');
+    expect(sql).toContain('SELECT recalc_order_production_status($1)');
+    expect(sql).toContain('UPDATE orders SET production_status_id = CASE WHEN $2 THEN $3 ELSE production_status_id END');
     expect(sql).toContain('INSERT INTO audit_log');
     expect(sql).toContain('INSERT INTO outbox_events');
 
@@ -711,6 +715,8 @@ describe('PgProductionActionRepository', () => {
         { detail_id: 101, production_status_id: 2 },
         { detail_id: 102, production_status_id: 2 },
       ],
+      updatedDetailIds: [101, 102],
+      recalcOrderProductionStatusId: 2,
     });
     const repository = new PgProductionActionRepository(database.service);
 
@@ -735,9 +741,11 @@ describe('PgProductionActionRepository', () => {
     expect(sql).toContain(
       'FROM order_details WHERE order_id = $1 AND COALESCE(delete_flag, false) = false ORDER BY detail_id FOR UPDATE',
     );
+    expect(sql).toContain('UPDATE order_details SET production_status_id = $2');
     expect(sql).toContain(
-      'UPDATE orders SET production_status_id = $2, production_status_from_details_enabled = false, version = version + 1',
+      'UPDATE orders SET production_status_id = CASE WHEN $2 THEN $3 ELSE production_status_id END, production_status_from_details_enabled = true, version = version + 1',
     );
+    expect(sql).toContain('SELECT recalc_order_production_status($1)');
     expect(sql).not.toContain('production_status_events');
     expect(sql).toContain('INSERT INTO audit_log');
     expect(sql).toContain('INSERT INTO outbox_events');
@@ -774,6 +782,8 @@ describe('PgProductionActionRepository', () => {
         { detail_id: 101, production_status_id: 2 },
         { detail_id: 102, production_status_id: 2 },
       ],
+      updatedDetailIds: [101, 102],
+      recalcOrderProductionStatusId: 2,
     });
     const repository = new PgProductionActionRepository(database.service);
 
@@ -788,15 +798,22 @@ describe('PgProductionActionRepository', () => {
       requestId: 'request-production-status-derived',
     });
 
-    expect(result.order).toEqual({ orderId: 15, productionStatusId: 2, version: 4 });
+    expect(result.order).toEqual({
+      orderId: 15,
+      productionStatusId: 2,
+      productionStatusFromDetailsEnabled: true,
+      version: 4,
+    });
     expect(result).toMatchObject({
       auditId: 'audit-id-1',
       requestId: 'request-production-status-derived',
     });
     const sql = normalizedSql(database.queries);
+    expect(sql).toContain('UPDATE order_details SET production_status_id = $2');
     expect(sql).toContain(
-      'UPDATE orders SET production_status_id = $2, production_status_from_details_enabled = false, version = version + 1',
+      'UPDATE orders SET production_status_id = CASE WHEN $2 THEN $3 ELSE production_status_id END, production_status_from_details_enabled = true, version = version + 1',
     );
+    expect(sql).toContain('SELECT recalc_order_production_status($1)');
     expect(sql).toContain('SELECT detail_id, production_status_id FROM order_details');
     expect(sql).toContain('INSERT INTO audit_log');
     expect(sql).toContain('INSERT INTO outbox_events');
@@ -804,7 +821,7 @@ describe('PgProductionActionRepository', () => {
     const params = normalizedParams(database.queries);
     expect(params).toContain('orders.production_status_change');
     expect(params).toContain('order.production_status_changed');
-    expect(params).toContain('"productionStatusFromDetailsEnabled":false');
+    expect(params).toContain('"productionStatusFromDetailsEnabled":true');
     expect(params).toContain('"previousProductionStatusFromDetailsEnabled":true');
     expect(params).toContain('"affectedDetailIds":[101,102]');
     expect(params).toContain('"affectedDetailCount":2');
@@ -815,7 +832,7 @@ describe('PgProductionActionRepository', () => {
   it('completes same manual production status command without duplicate audit or outbox', async () => {
     const database = createDatabase({
       orderProductionStatusId: 2,
-      productionStatusFromDetailsEnabled: false,
+      productionStatusFromDetailsEnabled: true,
     });
     const repository = new PgProductionActionRepository(database.service);
 
@@ -994,16 +1011,17 @@ describe('PgProductionActionRepository', () => {
 
   // ─── enter-manual tests ──────────────────────────────────────────────────
 
-  it('enter-manual happy path: sets flag=false, version bumps, detail diff in audit+outbox', async () => {
+  it('enter-manual compatibility path: restores flag=true, recalculates order, and writes audit+outbox', async () => {
     const database = createDatabase({
       orderProductionStatusId: 3,
-      productionStatusFromDetailsEnabled: true,
+      recalcOrderProductionStatusId: 1,
+      productionStatusFromDetailsEnabled: false,
       detailStatusRowsBefore: [
         { detail_id: 101, production_status_id: 1 },
         { detail_id: 102, production_status_id: 3 },
       ],
       detailStatusRowsAfter: [
-        { detail_id: 101, production_status_id: 3 },
+        { detail_id: 101, production_status_id: 1 },
         { detail_id: 102, production_status_id: 3 },
       ],
     });
@@ -1019,8 +1037,8 @@ describe('PgProductionActionRepository', () => {
     expect(result).toMatchObject({
       order: {
         orderId: 15,
-        productionStatusId: 3,
-        productionStatusFromDetailsEnabled: false,
+        productionStatusId: 1,
+        productionStatusFromDetailsEnabled: true,
         version: 4,
       },
       auditId: 'audit-id-1',
@@ -1028,8 +1046,8 @@ describe('PgProductionActionRepository', () => {
     });
 
     const sql = normalizedSql(database.queries);
-    expect(sql).toContain('UPDATE orders SET production_status_from_details_enabled = false, version = version + 1');
-    expect(sql).not.toContain('SELECT recalc_order_production_status');
+    expect(sql).toContain('UPDATE orders SET production_status_from_details_enabled = true, version = version + 1');
+    expect(sql).toContain('SELECT recalc_order_production_status($1)');
     expect(sql).toContain('SELECT detail_id, production_status_id FROM order_details');
     expect(sql).toContain('INSERT INTO audit_log');
     expect(sql).toContain('INSERT INTO outbox_events');
@@ -1037,19 +1055,18 @@ describe('PgProductionActionRepository', () => {
 
     const params = normalizedParams(database.queries);
     expect(params).toContain('orders.production_status_mode_manual');
-    expect(params).toContain('order.production_status_mode_set_manual');
-    expect(params).toContain('"productionStatusFromDetailsEnabled":false');
-    expect(params).toContain('"mode":"manual"');
-    expect(params).toContain('"action":"production_status_mode_manual"');
-    // detail 101 changed from 1 to 3 → affectedDetailIds=[101]
-    expect(params).toContain('"affectedDetailIds":[101]');
-    expect(params).toContain('"affectedDetailCount":1');
+    expect(params).toContain('order.production_status_mode_restored');
+    expect(params).toContain('"productionStatusFromDetailsEnabled":true');
+    expect(params).toContain('"mode":"auto"');
+    expect(params).toContain('"action":"production_status_mode_restore"');
+    expect(params).toContain('"affectedDetailIds":[]');
+    expect(params).toContain('"affectedDetailCount":0');
   });
 
-  it('enter-manual no-op (already false): no version bump, no audit, no outbox', async () => {
+  it('enter-manual compatibility no-op (already true): no version bump, no audit, no outbox', async () => {
     const database = createDatabase({
       orderProductionStatusId: 3,
-      productionStatusFromDetailsEnabled: false,
+      productionStatusFromDetailsEnabled: true,
     });
     const repository = new PgProductionActionRepository(database.service);
 
@@ -1064,7 +1081,7 @@ describe('PgProductionActionRepository', () => {
       order: {
         orderId: 15,
         productionStatusId: 3,
-        productionStatusFromDetailsEnabled: false,
+        productionStatusFromDetailsEnabled: true,
         version: 3,
       },
       requestId: 'request-enter-manual-noop',
@@ -1073,6 +1090,8 @@ describe('PgProductionActionRepository', () => {
 
     const sql = normalizedSql(database.queries);
     expect(sql).not.toContain('UPDATE orders SET production_status_from_details_enabled = false');
+    expect(sql).not.toContain('UPDATE orders SET production_status_from_details_enabled = true');
+    expect(sql).not.toContain('SELECT recalc_order_production_status');
     expect(sql).not.toContain('INSERT INTO audit_log');
     expect(sql).not.toContain('INSERT INTO outbox_events');
     expect(sql).toContain('UPDATE command_idempotency_keys SET status =');
@@ -1112,6 +1131,7 @@ describe('PgProductionActionRepository', () => {
 
     const sql = normalizedSql(database.queries);
     expect(sql).not.toContain('UPDATE orders SET production_status_from_details_enabled = false');
+    expect(sql).not.toContain('UPDATE orders SET production_status_from_details_enabled = true');
   });
 
   it('restore-auto: idempotency replay returns stored response', async () => {
@@ -1495,24 +1515,25 @@ describe('assigned-worker audit metadata across production commands', () => {
       expect(sql).toContain('UPDATE order_details SET production_status_id = $1');
       expect(sql).toContain('production_status_id IS DISTINCT FROM $1');
       expect(sql).toContain('SELECT recalc_order_production_status');
-      expect(sql).toContain('UPDATE orders SET version = version + 1');
+      expect(sql).toContain('UPDATE orders SET production_status_from_details_enabled = true, version = version + 1');
       expect(sql).toContain('INSERT INTO audit_log');
       expect(sql).toContain('INSERT INTO outbox_events');
     });
 
-    it('does NOT recalc in manual mode but still bumps version', async () => {
+    it('recalcs even when the order previously had the legacy manual flag', async () => {
       const database = createDatabase({
         productionStatusFromDetailsEnabled: false,
         detailStatusRowsBefore: [{ detail_id: 100, production_status_id: 1 }],
         updatedDetailIds: [100],
+        recalcOrderProductionStatusId: 5,
       });
       const repository = new PgProductionActionRepository(database.service);
 
       await repository.changeBatchDetailProductionStatus(cmd({ detailIds: [100] }));
 
       const sql = normalizedSql(database.queries);
-      expect(sql).not.toContain('SELECT recalc_order_production_status');
-      expect(sql).toContain('UPDATE orders SET version = version + 1');
+      expect(sql).toContain('SELECT recalc_order_production_status');
+      expect(sql).toContain('UPDATE orders SET production_status_from_details_enabled = true, version = version + 1');
     });
 
     it('never writes production_status_events', async () => {
@@ -2003,10 +2024,15 @@ function createDatabase(options: {
         normalized.startsWith('UPDATE orders SET production_status_from_details_enabled') ||
         normalized.startsWith('UPDATE orders SET version = version + 1')
       ) {
-        const productionStatusId =
-          options.recalcOrderProductionStatusId !== undefined
-            ? options.recalcOrderProductionStatusId
-            : (options.orderProductionStatusId ?? 1);
+        const productionStatusId = normalized.startsWith(
+          'UPDATE orders SET production_status_id = CASE',
+        )
+          ? (options.recalcOrderProductionStatusId !== undefined
+              ? options.recalcOrderProductionStatusId
+              : (params[2] as number | undefined) ?? options.orderProductionStatusId ?? 1)
+          : (options.recalcOrderProductionStatusId !== undefined
+              ? options.recalcOrderProductionStatusId
+              : (options.orderProductionStatusId ?? 1));
         return { rows: [{ version: 4, production_status_id: productionStatusId }], rowCount: 1 };
       }
 

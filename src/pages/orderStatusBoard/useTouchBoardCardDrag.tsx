@@ -30,7 +30,7 @@ interface TouchBoardGesture {
   completed: boolean;
   destinations: Map<string, TouchBoardDragDestination>;
   frame: number | null;
-  handle: HTMLButtonElement;
+  handle: HTMLElement;
   keydown: (event: KeyboardEvent) => void;
   orientationChange: () => void;
   overKey: string | null;
@@ -52,13 +52,12 @@ interface TouchBoardDragVisual {
 }
 
 export interface TouchBoardDragHandleProps {
-  onClickCapture: React.MouseEventHandler<HTMLButtonElement>;
-  onContextMenu: React.MouseEventHandler<HTMLButtonElement>;
-  onLostPointerCapture: React.PointerEventHandler<HTMLButtonElement>;
-  onPointerCancel: React.PointerEventHandler<HTMLButtonElement>;
-  onPointerDown: React.PointerEventHandler<HTMLButtonElement>;
-  onPointerMove: React.PointerEventHandler<HTMLButtonElement>;
-  onPointerUp: React.PointerEventHandler<HTMLButtonElement>;
+  onClickCapture: React.MouseEventHandler<HTMLElement>;
+  onLostPointerCapture: React.PointerEventHandler<HTMLElement>;
+  onPointerCancel: React.PointerEventHandler<HTMLElement>;
+  onPointerDown: React.PointerEventHandler<HTMLElement>;
+  onPointerMove: React.PointerEventHandler<HTMLElement>;
+  onPointerUp: React.PointerEventHandler<HTMLElement>;
 }
 
 const TOUCH_CLICK_SUPPRESSION_MS = 420;
@@ -180,7 +179,7 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
     gesture.frame = window.requestAnimationFrame(tick);
   }, [updateOverColumn]);
 
-  const onPointerDown = useCallback<React.PointerEventHandler<HTMLButtonElement>>((event) => {
+  const onPointerDown = useCallback<React.PointerEventHandler<HTMLElement>>((event) => {
     if (
       !optionsRef.current.enabled ||
       event.pointerType !== 'touch' ||
@@ -190,7 +189,6 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
       return;
     }
     cleanup();
-    event.preventDefault();
     const start = { x: event.clientX, y: event.clientY };
     const handle = event.currentTarget;
     const destinations = new Map(
@@ -260,7 +258,7 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
     gesture.timer = window.setTimeout(activate, TOUCH_BOARD_LONG_PRESS_MS);
   }, [cancelActive, cleanup, startAutoScroll]);
 
-  const onPointerMove = useCallback<React.PointerEventHandler<HTMLButtonElement>>((event) => {
+  const onPointerMove = useCallback<React.PointerEventHandler<HTMLElement>>((event) => {
     const gesture = gestureRef.current;
     if (!gesture || event.pointerId !== gesture.pointerId) return;
     gesture.point = { x: event.clientX, y: event.clientY };
@@ -273,7 +271,7 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
     setVisual((current) => current ? { ...current, x: event.clientX, y: event.clientY } : current);
   }, [cleanup, updateOverColumn]);
 
-  const onPointerUp = useCallback<React.PointerEventHandler<HTMLButtonElement>>((event) => {
+  const onPointerUp = useCallback<React.PointerEventHandler<HTMLElement>>((event) => {
     const gesture = gestureRef.current;
     if (!gesture || event.pointerId !== gesture.pointerId) return;
     if (!gesture.activated) {
@@ -306,23 +304,18 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
     optionsRef.current.onDrop(destination, trigger);
   }, [cleanup, updateOverColumn]);
 
-  const onPointerCancel = useCallback<React.PointerEventHandler<HTMLButtonElement>>((event) => {
+  const onPointerCancel = useCallback<React.PointerEventHandler<HTMLElement>>((event) => {
     if (gestureRef.current?.pointerId === event.pointerId) cancelActive(true);
   }, [cancelActive]);
 
-  const onLostPointerCapture = useCallback<React.PointerEventHandler<HTMLButtonElement>>((event) => {
+  const onLostPointerCapture = useCallback<React.PointerEventHandler<HTMLElement>>((event) => {
     if (gestureRef.current?.pointerId === event.pointerId) cancelActive(true);
   }, [cancelActive]);
 
-  const onClickCapture = useCallback<React.MouseEventHandler<HTMLButtonElement>>((event) => {
+  const onClickCapture = useCallback<React.MouseEventHandler<HTMLElement>>((event) => {
     if (Date.now() >= suppressClickUntilRef.current) return;
     event.preventDefault();
     event.stopPropagation();
-  }, []);
-
-  const onContextMenu = useCallback<React.MouseEventHandler<HTMLButtonElement>>((event) => {
-    if (!optionsRef.current.enabled) return;
-    event.preventDefault();
   }, []);
 
   useEffect(() => {
@@ -351,7 +344,6 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
     ghost,
     handleProps: {
       onClickCapture,
-      onContextMenu,
       onLostPointerCapture,
       onPointerCancel,
       onPointerDown,

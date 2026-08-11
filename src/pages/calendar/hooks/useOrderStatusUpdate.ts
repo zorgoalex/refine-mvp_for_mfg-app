@@ -144,11 +144,6 @@ export const useOrderStatusUpdate = (): UseOrderStatusUpdateResult => {
       [dbField]: statusId,
     };
 
-    // Для статуса производства - отключаем автообновление
-    if (fieldName === 'production_status') {
-      updateValues.production_status_from_details_enabled = false;
-    }
-
     try {
       await new Promise<void>((resolve, reject) => {
         updateOrder(

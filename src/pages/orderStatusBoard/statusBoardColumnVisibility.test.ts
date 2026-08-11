@@ -19,17 +19,19 @@ describe('status board column visibility', () => {
   it('keeps terminal MDF columns behind the dedicated visibility toggle', () => {
     expect(CNC_TERMINAL_COLUMN_DEFINITIONS).toEqual([
       { key: 'completed_laminated', label: 'Распиленные файлы' },
-      { key: 'baths_laminated', label: 'Закатаны/выданы' },
     ]);
   });
 
-  it('includes all five MDF board columns', () => {
+  it('includes MDF work and handoff columns', () => {
     expect(CNC_STATUS_BOARD_COLUMN_DEFINITIONS.map(({ key }) => key)).toEqual([
       'parsed',
       'completed',
       'baths',
       'baths_ready',
+      'baths_laminated',
       'orders',
+      'orders_ready',
+      'orders_issued',
     ]);
   });
 

@@ -21,12 +21,14 @@ export const CNC_STATUS_BOARD_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] 
   { key: 'completed', label: 'Распилено' },
   { key: 'baths', label: 'Карты ванн' },
   { key: 'baths_ready', label: 'Готовы к закатке' },
+  { key: 'baths_laminated', label: 'Закатаны' },
   { key: 'orders', label: 'Заказы' },
+  { key: 'orders_ready', label: 'Готов к выдаче' },
+  { key: 'orders_issued', label: 'Выдан' },
 ];
 
 export const CNC_TERMINAL_COLUMN_DEFINITIONS = [
   { key: 'completed_laminated', label: 'Распиленные файлы' },
-  { key: 'baths_laminated', label: 'Закатаны/выданы' },
 ] as const;
 
 export function filterVisibleStatusBoardColumns<T extends { key: string }>(

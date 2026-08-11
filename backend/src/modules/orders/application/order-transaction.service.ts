@@ -910,6 +910,7 @@ export class OrderTransactionService {
   ): Promise<Map<string, number>> {
     await unitOfWork.upsertDetails(orderId, prepared.details);
     await unitOfWork.deleteDetails(orderId, prepared.order.deleted.detailIds);
+    await unitOfWork.recalcOrderProductionStatus(orderId);
     await unitOfWork.upsertPayments(orderId, prepared.order.payments);
     await unitOfWork.deletePayments(orderId, prepared.order.deleted.paymentIds);
     await unitOfWork.deleteWorkshops(orderId, prepared.order.deleted.workshopIds);

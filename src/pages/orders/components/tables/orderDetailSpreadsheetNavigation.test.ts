@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   moveOrderDetailSpreadsheetCell,
   orderDetailSpreadsheetColumnKeys,
-  orderDetailSpreadsheetColumnLabel,
   orderDetailSpreadsheetPastedValue,
   orderDetailSpreadsheetTypedValue,
 } from './orderDetailSpreadsheetNavigation';
@@ -48,13 +47,9 @@ describe('order detail spreadsheet navigation', () => {
     }, 'previous')).toEqual({ rowKey: '101', columnKey: 'width' });
   });
 
-  it('generates Excel column letters beyond Z', () => {
-    expect([0, 25, 26, 27, 51, 52].map(orderDetailSpreadsheetColumnLabel))
-      .toEqual(['A', 'Z', 'AA', 'AB', 'AZ', 'BA']);
-  });
-
   it('starts direct typing only for compatible text and number cells', () => {
     expect(orderDetailSpreadsheetTypedValue('height', '7')).toBe(7);
+    expect(orderDetailSpreadsheetTypedValue('detail_cost', '8')).toBe(8);
     expect(orderDetailSpreadsheetTypedValue('note', 'П')).toBe('П');
     expect(orderDetailSpreadsheetTypedValue('film_id', '7')).toBeNull();
     expect(orderDetailSpreadsheetTypedValue('height', '.')).toBeNull();

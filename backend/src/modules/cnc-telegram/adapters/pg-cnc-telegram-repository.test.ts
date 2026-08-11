@@ -93,6 +93,7 @@ describe('PgCncTelegramRepository', () => {
         cuttingSequenceNo: 12,
         itemCount: 1,
         itemQuantityTotal: 4,
+        svgCutSheets: [{ cutGroupId: 100, sheetIndex: 0, sheetNumber: 1, detailIds: [3101, 3101] }],
         sourceCreatedAt: '2026-07-24T07:59:00.000Z',
       },
     });
@@ -101,6 +102,8 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('INSERT INTO outbox_events');
     expect(sql).toContain('UPDATE command_idempotency_keys');
     expect(sql).toContain('FROM unnest($1::bigint[], $2::bigint[])');
+    expect(sql).toContain('svg_cut_sheets_json');
+    expect(sql).toContain('cut_result_placement placement');
     expect(sql).not.toMatch(/\b(raw_gcode|screenshot_path|file_path)\b/i);
     const idempotencyInsert = queries.find((query) =>
       /INSERT INTO command_idempotency_keys/i.test(query.text),
@@ -540,13 +543,13 @@ describe('PgCncTelegramRepository', () => {
     });
   });
 
-  it('returns Basis-cut set cards for ERP details present in bath cards', async () => {
+  it('returns Basis-cut set cards created in the requested date range', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const database = {
       query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
         queries.push({ text, params });
         if (/latest_vacuum_results/i.test(text)) {
-          return { rows: [bathPlacementRow({ order_detail_id: 3101 })] };
+          return { rows: [] };
         }
         if (/target_bazis_cut_sets/i.test(text)) {
           return {
@@ -562,6 +565,7 @@ describe('PgCncTelegramRepository', () => {
                 detail_number: 31,
                 width_mm: 497,
                 height_mm: 477,
+                material_name: 'МДФ 16 мм',
                 quantity: 2,
               },
               {
@@ -575,7 +579,22 @@ describe('PgCncTelegramRepository', () => {
                 detail_number: 41,
                 width_mm: 600,
                 height_mm: 400,
+                material_name: 'ЛДСП 16 мм',
                 quantity: 3,
+              },
+              {
+                bazis_cut_set_id: 8,
+                name: 'Набор МДФ',
+                sort_order: 2,
+                source_order_detail_id: 3301,
+                source_order_id: 2702,
+                source_order_name: '2702',
+                source_order_deleted: false,
+                detail_number: 42,
+                width_mm: 700,
+                height_mm: 300,
+                material_name: null,
+                quantity: 4,
               },
             ],
           };
@@ -586,20 +605,26 @@ describe('PgCncTelegramRepository', () => {
     };
     const repo = new PgCncTelegramRepository(database as never);
 
-    const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
+    const result = await repo.listToday({
+      currentUser: user(),
+      workdayFrom: '2026-07-18',
+      workdayTo: '2026-07-24',
+    });
     const parsed = result.columns.find((column) => column.key === 'parsed');
     const basisQuery = queries.find((query) => /target_bazis_cut_sets/i.test(query.text));
 
-    expect(basisQuery?.params).toEqual([[3101]]);
-    expect(basisQuery?.text).toContain('detail.source_order_detail_id = ANY($1::bigint[])');
+    expect(basisQuery?.params).toEqual(['2026-07-18', '2026-07-24']);
+    expect(basisQuery?.text).toContain('cut_set.created_at >= $1::date');
+    expect(basisQuery?.text).toContain("cut_set.created_at < ($2::date + INTERVAL '1 day')");
+    expect(basisQuery?.text).not.toContain('detail.source_order_detail_id = ANY($1::bigint[])');
     expect(parsed?.total).toBe(1);
     expect(parsed?.bazisCutSets).toEqual([
       {
         bazisCutSetId: 8,
         name: 'Набор МДФ',
-        orderCount: 2,
-        positionCount: 2,
-        itemQuantityTotal: 5,
+        orderCount: 3,
+        positionCount: 3,
+        itemQuantityTotal: 9,
         items: [
           {
             orderId: 2689,
@@ -609,6 +634,7 @@ describe('PgCncTelegramRepository', () => {
             detailNumber: 31,
             widthMm: 497,
             heightMm: 477,
+            materialName: 'МДФ 16 мм',
             quantity: 2,
           },
           {
@@ -619,7 +645,19 @@ describe('PgCncTelegramRepository', () => {
             detailNumber: 41,
             widthMm: 600,
             heightMm: 400,
+            materialName: 'ЛДСП 16 мм',
             quantity: 3,
+          },
+          {
+            orderId: 2702,
+            orderName: '2702',
+            orderDeleted: false,
+            detailId: 3301,
+            detailNumber: 42,
+            widthMm: 700,
+            heightMm: 300,
+            materialName: 'Не определён',
+            quantity: 4,
           },
         ],
       },
@@ -2261,11 +2299,20 @@ function packetRowBase() {
     ocr_engine: 'glm-ocr-0.9b-q8-llama.cpp',
     parser_version: 'cnc-telegram-structured-v1',
     cut_layout_json: null,
-    svg_cut_job_id: null,
-    svg_cut_result_id: null,
+    svg_cut_job_id: 30,
+    svg_cut_result_id: 500,
     svg_cut_result_no: null,
-    svg_cut_import_status: null,
+    svg_cut_import_status: 'imported',
     svg_cut_import_note: null,
+    svg_cut_sheets_json: [
+      {
+        cutGroupId: 100,
+        sheetIndex: 0,
+        sheetNumber: 1,
+        variant: 'auto',
+        detailIds: [3101, 3101],
+      },
+    ],
     updated_at: '2026-07-24T08:00:10.000Z',
     packet_item_id: '00000000-0000-0000-0000-000000000002',
     source_item_key: '2689:31:497x477',

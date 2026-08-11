@@ -14,6 +14,7 @@ import type {
 } from '../application/order-status-board.types';
 import type {
   OrderStatusBoardCardDto,
+  OrderStatusBoardCardDetailDto,
   OrderStatusBoardColumnDto,
   OrderStatusBoardResponseDto,
   OrderStatusBoardType,
@@ -71,6 +72,7 @@ interface BoardRow extends QueryResultRow {
   paid_amount: string | number | null;
   parts_count: string | number | null;
   total_area: string | number | null;
+  details_json: unknown;
   manager_id: string | number | null;
   manager_name: string | null;
   created_by: string | number | null;
@@ -235,6 +237,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
         o.paid_amount,
         o.parts_count,
         o.total_area,
+        COALESCE(order_details_projection.details_json, '[]'::jsonb) AS details_json,
         o.manager_id,
         COALESCE(manager_employee.full_name, manager_user.full_name, manager_user.username)
           AS manager_name,
@@ -259,6 +262,25 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
       LEFT JOIN production_statuses prod_s
         ON prod_s.production_status_id = o.production_status_id
       LEFT JOIN payment_statuses pay_s ON pay_s.payment_status_id = o.payment_status_id
+      LEFT JOIN LATERAL (
+        SELECT jsonb_agg(
+          jsonb_build_object(
+            'detailId', od.detail_id,
+            'detailNumber', od.detail_number,
+            'quantity', GREATEST(od.quantity, 0),
+            'bazisCutQuantity', COALESCE(bazis_cut.quantity, 0)
+          )
+          ORDER BY od.detail_number ASC NULLS LAST, od.detail_id ASC
+        ) AS details_json
+        FROM order_details od
+        LEFT JOIN LATERAL (
+          SELECT SUM(GREATEST(detail.quantity, 0))::integer AS quantity
+          FROM bazis_cut_set_details detail
+          WHERE detail.source_order_detail_id = od.detail_id
+        ) bazis_cut ON true
+        WHERE od.order_id = o.order_id
+          AND od.delete_flag = false
+      ) order_details_projection ON true
       LEFT JOIN users manager_user ON manager_user.user_id = o.manager_id
       LEFT JOIN employees manager_employee
         ON manager_employee.employee_id = manager_user.employee_id
@@ -684,6 +706,7 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
       finalAmount === null ? null : roundMoney(finalAmount - (paidAmount ?? 0)),
     partsCount: toNumber(row.parts_count),
     totalArea: toNumber(row.total_area),
+    details: mapBoardCardDetails(row.details_json),
     managerId: toNullableNumber(row.manager_id),
     managerName: row.manager_name,
     updatedAt: toIsoString(row.updated_at),
@@ -691,6 +714,30 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
     canChangeOrderStatus,
     canChangeProductionStatus,
   };
+}
+
+function mapBoardCardDetails(value: unknown): OrderStatusBoardCardDetailDto[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): OrderStatusBoardCardDetailDto[] => {
+    if (!item || typeof item !== 'object') return [];
+    const record = item as Record<string, unknown>;
+    const detailId = numberFromUnknown(record.detailId);
+    if (detailId === null || !Number.isSafeInteger(detailId) || detailId <= 0) return [];
+    const detailNumber = numberFromUnknown(record.detailNumber);
+    const quantity = numberFromUnknown(record.quantity) ?? 0;
+    const bazisCutQuantity = numberFromUnknown(record.bazisCutQuantity) ?? 0;
+    return [{
+      detailId,
+      detailNumber:
+        detailNumber !== null && Number.isSafeInteger(detailNumber) && detailNumber > 0
+          ? detailNumber
+          : null,
+      quantity: Number.isFinite(quantity) ? Math.max(0, Math.trunc(quantity)) : 0,
+      bazisCutQuantity: Number.isFinite(bazisCutQuantity)
+        ? Math.max(0, Math.trunc(bazisCutQuantity))
+        : 0,
+    }];
+  });
 }
 
 export function createOrderStatusBoardFilterKey(query: OrderStatusBoardQuery): string {
@@ -805,6 +852,12 @@ function toNumber(value: string | number | null | undefined): number {
 function toNullableNumber(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === '') return null;
   return Number(value);
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  return typeof value === 'number' || typeof value === 'string'
+    ? toNullableNumber(value)
+    : null;
 }
 
 function nullableString(value: string | number | null | undefined): string | null {

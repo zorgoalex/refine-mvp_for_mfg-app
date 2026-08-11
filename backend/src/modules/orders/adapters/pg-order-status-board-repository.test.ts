@@ -50,6 +50,7 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(result.columns[0]?.nextCursor).toEqual(expect.any(String));
     expect(database.queries[0]?.text).toContain('ROW_NUMBER() OVER');
     expect(database.queries[0]?.text).toContain('assigned_ow.delete_flag = false');
+    expect(database.queries[0]?.text).toContain('order_details_projection.details_json');
     expect(database.queries[0]?.text).toContain('ranked.row_number <=');
     expect(database.queries[0]?.text).toContain('issued_order_status.sort_order');
     expect(database.queries[0]?.params).toContain(3);
@@ -607,6 +608,10 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(board.columns[0]?.cards[0]).toMatchObject({
       canChangeOrderStatus: true,
       canChangeProductionStatus: false,
+      details: [
+        { detailId: 1001, detailNumber: 1, quantity: 2, bazisCutQuantity: 1 },
+        { detailId: 1002, detailNumber: 2, quantity: 3, bazisCutQuantity: 0 },
+      ],
     });
   });
 });
@@ -653,6 +658,12 @@ function boardRow(orderId: number | null, plannedCompletionDate: string | null) 
     paid_amount: orderId === null ? null : 0,
     parts_count: orderId === null ? null : 5,
     total_area: orderId === null ? null : 2.5,
+    details_json: orderId === null
+      ? []
+      : [
+        { detailId: 1001, detailNumber: 1, quantity: 2, bazisCutQuantity: 1 },
+        { detailId: 1002, detailNumber: 2, quantity: 3, bazisCutQuantity: 0 },
+      ],
     manager_id: orderId === null ? null : null,
     manager_name: null,
     created_by: null,

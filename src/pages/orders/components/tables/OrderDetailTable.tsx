@@ -18,7 +18,7 @@ import { useSelect } from '@refinedev/antd';
 import { OrderDetail } from '../../../../types/orders';
 import { TableTopScroll } from '../../../../components/TableTopScroll';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../../../hooks/usePageSizePreference';
-import { formatNumber, currencySmartFormatter, numberParser } from '../../../../utils/numberFormat';
+import { formatNumber } from '../../../../utils/numberFormat';
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { getMaterialColor, getMillingBgColor } from '../../../../config/displayColors';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
@@ -51,18 +51,19 @@ import {
 import {
   findOrderDetailInlineEditor,
   finishOrderDetailInlineTab,
+  focusOrderDetailInlineEditorAtEnd,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
 import {
   moveOrderDetailSpreadsheetCell,
   orderDetailSpreadsheetColumnKeys,
-  orderDetailSpreadsheetColumnLabel,
   orderDetailSpreadsheetPastedValue,
   orderDetailSpreadsheetTypedValue,
   type OrderDetailSpreadsheetCell,
   type OrderDetailSpreadsheetDirection,
 } from './orderDetailSpreadsheetNavigation';
+import { calculateLiveOrderDetailCostTotal } from './orderDetailSummary';
 import { BasisProjectLink } from '../BasisProjectLink';
 
 interface OrderDetailTableProps {
@@ -191,11 +192,17 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
 
 const ORDER_DETAIL_EDIT_DEFAULT_ORDER = ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS.map((definition) => definition.key);
 
-const ORDER_DETAIL_TOTAL_COLUMN_WIDTHS = {
+const ORDER_DETAIL_COLUMN_WIDTHS = {
   detailNumber: 44,
-  quantity: 96,
-  area: 128,
-  detailCost: 150,
+  height: 67,
+  width: 67,
+  quantity: 54,
+  area: 90,
+  millingType: 119,
+  edgeType: 73,
+  sheetMaterial: 126,
+  millingCostPerSqm: 78,
+  detailCost: 105,
 } as const;
 
 const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
@@ -224,7 +231,7 @@ const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
   width: 'max-content',
   maxWidth: 'none',
   whiteSpace: 'nowrap',
-  fontSize: 13,
+  fontSize: 13.2,
   lineHeight: 1.2,
   fontVariantNumeric: 'tabular-nums',
   letterSpacing: 0,
@@ -496,6 +503,22 @@ const FitSummaryText: React.FC<{
   );
 };
 
+const LiveOrderDetailCostSummary: React.FC<{
+  details: readonly OrderDetail[];
+  editingKey: number | string | null;
+  form: ReturnType<typeof Form.useForm>[0];
+}> = ({ details, editingKey, form }) => {
+  const editingValue = Form.useWatch('detail_cost', form);
+  const total = calculateLiveOrderDetailCostTotal(details, editingKey, editingValue);
+  const formattedTotal = formatNumber(total, 2);
+
+  return (
+    <FitSummaryText align="right" style={{ color: '#52c41a' }}>
+      <span title={`Итого по сумме: ${formattedTotal}`}>{formattedTotal}</span>
+    </FitSummaryText>
+  );
+};
+
 export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTableProps>(({
   onEdit,
   onDelete,
@@ -604,7 +627,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     return {
       quantity: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
       area: calculateOrderTotalArea(details),
-      detail_cost: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
     };
   }, [details]);
 
@@ -1189,6 +1211,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     recalcSum('milling_cost_per_sqm', value);
   }, [recalcSum]);
 
+  const handleMillingCostBlur = useCallback(() => {
+    queueMicrotask(() => {
+      const value = form.getFieldValue('milling_cost_per_sqm') as number | null;
+      recalcSum('milling_cost_per_sqm', value);
+    });
+  }, [form, recalcSum]);
+
   const { settings: columnSettings, saveSettings: saveColumnSettings } = useOrderDetailColumnPreferences(
     'orderEdit',
     ORDER_DETAIL_EDIT_DEFAULT_ORDER,
@@ -1200,7 +1229,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '70%' }}>№</div>,
       dataIndex: 'detail_number',
       key: 'detail_number',
-      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailNumber,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.detailNumber,
       fixed: 'left',
       sorter: (a: OrderDetail, b: OrderDetail) => a.detail_number - b.detail_number,
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: DATA_COLUMN_COUNT } : {},
@@ -1223,7 +1252,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ),
       dataIndex: 'height',
       key: 'height',
-      width: 96,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.height,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.height || 0) - (b.height || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1246,6 +1275,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <CurrencyInput
               controls={false}
+              keyboard={false}
               style={{ width: '100%', ...getRequiredFieldStyle(watchedHeight) }}
               min={0.01}
               precision={2}
@@ -1267,7 +1297,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ),
       dataIndex: 'width',
       key: 'width',
-      width: 96,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.width,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.width || 0) - (b.width || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1290,6 +1320,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           >
             <CurrencyInput
               controls={false}
+              keyboard={false}
               style={{ width: '100%', ...getRequiredFieldStyle(watchedWidth) }}
               min={0.01}
               precision={2}
@@ -1305,7 +1336,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Кол-во</div>,
       dataIndex: 'quantity',
       key: 'quantity',
-      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.quantity,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.quantity,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.quantity || 0) - (b.quantity || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1322,8 +1353,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               { type: 'number', min: 1, message: 'Количество должно быть больше 0' },
             ]}
           >
-            <InputNumber
+            <CurrencyInput
               controls={false}
+              keyboard={false}
               style={{ width: '100%' }}
               min={1}
               precision={0}
@@ -1346,7 +1378,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       ),
       dataIndex: 'area',
       key: 'area',
-      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.area,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.area,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.area || 0) - (b.area || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1355,7 +1387,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         if (!d) return null;
         return isEditingField(d, 'area') ? (
           <Form.Item name="area" style={{ margin: 0, padding: '0 4px' }}>
-            <InputNumber style={{ width: '100%' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+            <InputNumber keyboard={false} style={{ width: '100%' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
           </Form.Item>
         ) : (
           formatNumber(getDisplayedField(d, 'area'), 2) + ' м²'
@@ -1366,7 +1398,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Фрезеровка</div>,
       dataIndex: 'milling_type_id',
       key: 'milling_type_id',
-      width: 170,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.millingType,
       align: 'center',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.milling_type_id || 0) - (b.milling_type_id || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1397,7 +1429,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center' }}><span style={{ fontSize: '75%' }}>Обкат</span></div>,
       dataIndex: 'edge_type_id',
       key: 'edge_type_id',
-      width: 130,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.edgeType,
       align: 'center',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
@@ -1427,7 +1459,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Материал</div>,
       dataIndex: 'sheet_material_type_id',
       key: 'sheet_material_type_id',
-      width: 180,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.sheetMaterial,
       align: 'center' as const,
       sorter: (a: OrderDetail, b: OrderDetail) => {
         const nameA = sheetMaterials.byId.get(a.sheet_material_type_id ?? 0)?.label ?? '';
@@ -1505,7 +1537,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Цена за кв.м.</div>,
       dataIndex: 'milling_cost_per_sqm',
       key: 'milling_cost_per_sqm',
-      width: 140,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.millingCostPerSqm,
       align: 'right',
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
@@ -1521,14 +1553,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               { type: 'number', min: 0.01, message: 'Цена за кв.м. должна быть больше 0' },
             ]}
           >
-            <InputNumber
+            <CurrencyInput
               controls={false}
+              keyboard={false}
               style={{ width: '100%' }}
               precision={2}
               min={0.01}
-              formatter={currencySmartFormatter}
-              parser={numberParser}
+              emptyWhenUnset
               onChange={handleMillingCostChange}
+              onBlur={handleMillingCostBlur}
               onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
             />
           </Form.Item>
@@ -1546,7 +1579,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       title: <div style={{ textAlign: 'center', fontSize: '75%' }}>Сумма</div>,
       dataIndex: 'detail_cost',
       key: 'detail_cost',
-      width: ORDER_DETAIL_TOTAL_COLUMN_WIDTHS.detailCost,
+      width: ORDER_DETAIL_COLUMN_WIDTHS.detailCost,
       align: 'right',
       sorter: (a: OrderDetail, b: OrderDetail) => (a.detail_cost || 0) - (b.detail_cost || 0),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
@@ -1564,13 +1597,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                 { type: 'number', min: 0.01, message: 'Сумма детали должна быть больше 0' },
               ]}
             >
-              <InputNumber
+              <CurrencyInput
                 controls={false}
+                keyboard={false}
                 style={{ width: '100%' }}
                 precision={2}
                 min={0.01}
-                formatter={currencySmartFormatter}
-                parser={numberParser}
+                emptyWhenUnset
                 disabled={!isSumEditable}
                 onContextMenu={(e) => {
                   if (!isSumEditable) {
@@ -1727,9 +1760,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         if (!d) return null;
         return isEditingField(d, 'priority') ? (
           <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
-            <InputNumber
+            <CurrencyInput
               controls={false}
+              keyboard={false}
               style={{ width: '100%' }}
+              precision={0}
               min={1}
               max={999}
               tabIndex={-1}
@@ -2010,7 +2045,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     record: OrderDetail,
     columnKey: string,
   ) => {
-    if (editingKey !== null || event.defaultPrevented) return;
+    if ((editingKey !== null && editingField !== null) || event.defaultPrevented) return;
     if (event.target !== event.currentTarget) return;
 
     const directionByKey: Partial<Record<string, OrderDetailSpreadsheetDirection>> = {
@@ -2036,9 +2071,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       void beginSpreadsheetCellEdit(record, columnKey);
       return;
     }
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (
+      event.altKey
+      || event.ctrlKey
+      || event.metaKey
+      || event.key.length !== 1
+      || !isSpreadsheetCellEditable(columnKey)
+    ) return;
     const initialValue = orderDetailSpreadsheetTypedValue(columnKey, event.key);
-    if (initialValue === null || !isSpreadsheetCellEditable(columnKey)) return;
+    if (initialValue === null) return;
     event.preventDefault();
     void beginSpreadsheetCellEdit(record, columnKey, initialValue);
   };
@@ -2068,6 +2109,27 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       event.stopPropagation();
       cancelEdit();
       focusSpreadsheetCell(currentCell);
+      return;
+    }
+    const editorDirectionByKey: Partial<Record<string, OrderDetailSpreadsheetDirection>> = {
+      ArrowUp: 'up',
+      ArrowDown: 'down',
+      ArrowLeft: 'left',
+      ArrowRight: 'right',
+    };
+    const editorDirection = editorDirectionByKey[event.key];
+    if (editorDirection) {
+      event.preventDefault();
+      event.stopPropagation();
+      const nextCell = moveOrderDetailSpreadsheetCell(
+        getSpreadsheetNavigationRowKeys(),
+        spreadsheetColumnKeys,
+        currentCell,
+        editorDirection,
+      ) ?? currentCell;
+      void saveCurrentRow().then((saved) => {
+        if (saved) focusSpreadsheetCoordinate(nextCell);
+      });
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -2260,7 +2322,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
             if (editingKey === null) return;
             if (String(editingKey) === rowKey) {
-              if (editable) setEditingField(column.key);
+              if (!clickedInteractiveChild) setEditingField(null);
               return;
             }
             void saveCurrentRow().then((saved) => {
@@ -2312,23 +2374,20 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     };
   });
 
-  const renderedColumnsWithoutExcelHeaders = groupingActive
+  const baseRenderedColumns = groupingActive
     ? summaryAwareColumns.map((col: any) => {
         const { sorter, defaultSortOrder, sortOrder, ...rest } = col;
         return rest;
       })
     : summaryAwareColumns;
-  const renderedColumns = renderedColumnsWithoutExcelHeaders.map((column: any, columnIndex: number) => {
+  const renderedColumns = baseRenderedColumns.map((column: any) => {
     const columnKey = String(column.key ?? column.dataIndex ?? '');
     if (!columnKey) return column;
     return {
       ...column,
       title: (
         <div className="order-detail-spreadsheet-header">
-          <span className="order-detail-spreadsheet-header__letter">
-            {orderDetailSpreadsheetColumnLabel(columnIndex)}
-          </span>
-          <div className="order-detail-spreadsheet-header__label">{column.title}</div>
+          {column.title}
         </div>
       ),
     };
@@ -2399,8 +2458,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         scrollToEditingRowRef.current = false;
       }
       focusFrame = requestAnimationFrame(() => {
-        findOrderDetailInlineEditor(row ?? null, String(editingField))
-          ?.focus({ preventScroll: true });
+        focusOrderDetailInlineEditorAtEnd(
+          findOrderDetailInlineEditor(row ?? null, String(editingField)),
+        );
       });
     });
     return () => {
@@ -3111,7 +3171,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                 if (key === 'detail_cost') {
                   return (
                     <Table.Summary.Cell key={key} index={base + index} align="right">
-                      <FitSummaryText align="right" style={{ color: '#52c41a' }}>{formatNumber(totals.detail_cost, 2)}</FitSummaryText>
+                      <LiveOrderDetailCostSummary
+                        details={details}
+                        editingKey={editingKey}
+                        form={form}
+                      />
                     </Table.Summary.Cell>
                   );
                 }

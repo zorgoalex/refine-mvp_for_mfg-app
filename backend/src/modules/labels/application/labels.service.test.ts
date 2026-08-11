@@ -564,6 +564,29 @@ describe('LabelsService', () => {
     });
     expect(repo.generateDetailLabels).toHaveBeenCalledOnce();
 
+    await service.previewDetailLabels({
+      currentUser: { ...manager, permissions: ['labels.view', 'cut.view'] },
+      requestId: 'req-preview-sheet',
+      input: {
+        templateId: 1,
+        templateVersion: 1,
+        detailIds: [101],
+        cutSheetScope: {
+          cutJobId: 7,
+          cutGroupId: 3,
+          sheetIndex: 0,
+          detailInstances: [{ detailId: 101, instance: 2 }],
+        },
+      },
+    });
+    expect(repo.previewDetailLabels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          cutSheetScope: expect.objectContaining({ cutJobId: 7 }),
+        }),
+      }),
+    );
+
     await service.exportDetailLabels({
       currentUser: manager,
       requestId: 'req-export',

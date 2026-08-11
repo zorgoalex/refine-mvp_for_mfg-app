@@ -25,9 +25,10 @@ describe('Basis-cut UI integration guards', () => {
   });
 
   it('renders the exact requested list columns and source categories', () => {
-    for (const label of ['Название набора', 'Дата формирования', 'Заказы / Базис-проекты / Базис-заказы', 'Количество деталей']) {
+    for (const label of ['Название набора', 'Дата формирования', 'Заказы / Базис-проекты / Базис-заказы', 'Количество деталей', 'Площадь, м²']) {
       expect(list).toContain(label);
     }
+    expect(list).toContain("dataIndex: 'totalAreaM2'");
     expect(list).toContain('ERP-заказы');
     expect(list).toContain('Базис-проекты');
     expect(list).toContain('Базис-заказы');
@@ -36,6 +37,15 @@ describe('Basis-cut UI integration guards', () => {
     expect(list).toContain('orderDeletedReferenceClassName');
     expect(card).toContain('rowClassName={(row) => orderDeletedReferenceClassName(row.sourceOrderDeleted)}');
     expect(styles).toContain('order-deleted-reference-row');
+  });
+
+  it('offers deletion only for empty Basis-cut sets from the list', () => {
+    expect(list).toContain("can('cut.manage')");
+    expect(list).toContain('bazisCutApi.removeSet(');
+    expect(list).toContain('row.positionCount === 0');
+    expect(list).toContain('Удалять можно только наборы без деталей');
+    expect(list).toContain('Удалить пустой набор?');
+    expect(list).toContain('event.stopPropagation()');
   });
 
   it('supports new/existing searchable set selection', () => {
@@ -49,6 +59,7 @@ describe('Basis-cut UI integration guards', () => {
 
   it('wires the action into order edit/show and blocks dirty edit drafts', () => {
     expect(editDetails).toContain('Добавить в Базис раскрой');
+    expect(editDetails).toMatch(/icon=\{<TableOutlined \/>}\s*[\s\S]{0,240}aria-label="Добавить в Базис раскрой"/);
     expect(editDetails).toContain('Сначала сохраните изменения заказа');
     expect(editDetails).toContain('const disabled = !bazisCutManage || isDirty');
     expect(editDetails).toContain('disabled={disabled}');
@@ -107,5 +118,6 @@ describe('Basis-cut UI integration guards', () => {
     expect(card).toContain('scroll={{ x: 5750, y: 480 }}');
     expect(card).toContain('<Table.Summary fixed="bottom">');
     expect(card).toContain('Итого позиций:');
+    expect(card).toContain('formatBazisCutAreaM2(setTotals.totalAreaM2)');
   });
 });

@@ -425,13 +425,9 @@ export class OrderDetailTransferService {
         movedDetailIds,
       });
 
-      if (toBoolean(source.production_status_from_details_enabled)) {
-        await recalcOrderProductionStatus(tx, command.sourceOrderId);
-      }
+      await recalcOrderProductionStatus(tx, command.sourceOrderId);
       if (command.dto.target.mode === 'existing') {
-        if (target && toBoolean(target.production_status_from_details_enabled)) {
-          await recalcOrderProductionStatus(tx, targetOrderId);
-        }
+        await recalcOrderProductionStatus(tx, targetOrderId);
       } else {
         await recalcOrderProductionStatus(tx, targetOrderId);
       }
@@ -800,10 +796,8 @@ async function createSplitTargetOrder(
       toNullableNumber(input.source.manager_id) ?? actorUserIdOf(input.currentUser),
       toNumber(input.source.order_status_id),
       input.totals.paymentStatusId,
-      toBoolean(input.source.production_status_from_details_enabled)
-        ? null
-        : toNullableNumber(input.source.production_status_id),
-      toBoolean(input.source.production_status_from_details_enabled),
+      null,
+      true,
       dateOnlyOrNull(input.source.planned_completion_date),
       input.totals.paymentDate,
       input.totals.discount,
@@ -953,6 +947,15 @@ async function updateDenormalizedReferences(
 }
 
 async function recalcOrderProductionStatus(tx: TransactionClient, orderId: number): Promise<void> {
+  await tx.query(
+    `
+    UPDATE orders
+    SET production_status_from_details_enabled = true
+    WHERE order_id = $1
+      AND production_status_from_details_enabled IS DISTINCT FROM true
+    `,
+    [orderId],
+  );
   await tx.query('SELECT recalc_order_production_status($1)', [orderId]);
 }
 
@@ -1410,10 +1413,6 @@ function toNullableString(value: unknown): string | null {
     return null;
   }
   return String(value);
-}
-
-function toBoolean(value: unknown): boolean {
-  return value === true || value === 'true' || value === 1 || value === '1';
 }
 
 function dateOnly(value: string | Date): string {

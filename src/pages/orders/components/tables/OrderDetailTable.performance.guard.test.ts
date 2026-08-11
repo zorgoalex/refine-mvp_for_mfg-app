@@ -37,7 +37,7 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(editingFocusEffect).toContain(
       'findOrderDetailInlineEditor(row ?? null, String(editingField))',
     );
-    expect(editingFocusEffect).toContain('focus({ preventScroll: true })');
+    expect(editingFocusEffect).toContain('focusOrderDetailInlineEditorAtEnd(');
     expect(editingFocusEffect).not.toContain(
       "row?.querySelector<HTMLElement>('input, textarea, [role=\"combobox\"]')",
     );
@@ -92,7 +92,8 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain('const [editingField, setEditingField] = useState<React.Key | null>(null);');
     expect(source).toContain("isEditing(record) && editingField === field");
     expect(source).toContain('isSpreadsheetCellEditable(column.key)');
-    expect(source).toContain('setEditingField(column.key)');
+    expect(source).toContain('setEditingField(columnKey)');
+    expect(source).toContain('if (!clickedInteractiveChild) setEditingField(null);');
     expect(source).toContain('onKeyDownCapture={handleInlineEditorKeyDown}');
     expect(source).toContain('nextOrderDetailInlineTabField(');
     expect(source).toContain('void finishInlineEditOnTab(record).then((saved) =>');
@@ -106,13 +107,86 @@ describe('OrderDetailTable interaction performance guards', () => {
     expect(source).toContain("ArrowDown: 'down'");
     expect(source).toContain("event.key === 'Enter' || event.key === 'F2'");
     expect(source).toContain('orderDetailSpreadsheetTypedValue(columnKey, event.key)');
+    expect(source).toContain('if (initialValue === null) return;');
+    expect(source).toContain('editingKey !== null && editingField !== null');
+    expect(source).toContain('focusOrderDetailInlineEditorAtEnd(');
+    expect(source).toContain('if (!clickedInteractiveChild) setEditingField(null);');
     expect(source).toContain('orderDetailSpreadsheetPastedValue(');
     expect(source).toContain("event.clipboardData.setData('text/plain'");
     expect(source).toContain('void beginSpreadsheetCellEdit(detail, column.key)');
     expect(source).toContain('focusSpreadsheetCoordinate(nextCell)');
     expect(source).toContain('cancelEdit();');
-    expect(appStyles).toContain('.order-detail-spreadsheet-header__letter');
+    expect(source).not.toContain('orderDetailSpreadsheetColumnLabel');
+    expect(source).not.toContain('order-detail-spreadsheet-header__letter');
+    expect(appStyles).not.toContain('.order-detail-spreadsheet-header__letter');
     expect(appStyles).toContain('border-spacing: 0 !important');
+  });
+
+  it('keeps one-line spreadsheet rows compact and grows only for wrapped content', () => {
+    const rowCellStyleStart = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr > td {',
+    );
+    const rowCellStyleEnd = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {',
+      rowCellStyleStart,
+    );
+    const rowCellStyles = appStyles.slice(rowCellStyleStart, rowCellStyleEnd);
+    const cellStyleStart = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell {',
+    );
+    const cellStyleEnd = appStyles.indexOf(
+      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell[data-order-detail-column-key="detail_number"]',
+      cellStyleStart,
+    );
+    const cellStyles = appStyles.slice(cellStyleStart, cellStyleEnd);
+
+    expect(rowCellStyles).toContain('height: 20px');
+    expect(rowCellStyles).toContain('padding: 0 4px !important');
+    expect(rowCellStyles).toContain('vertical-align: middle');
+    expect(cellStyles).toContain('height: 20px');
+    expect(cellStyles).toContain('padding: 0 2px !important');
+    expect(cellStyles).toContain('line-height: 18px');
+    expect(cellStyles).toContain('white-space: normal');
+    expect(cellStyles).toContain('overflow-wrap: anywhere');
+    expect(cellStyles).not.toContain('white-space: nowrap');
+    expect(appStyles).not.toContain(
+      '@media (pointer: coarse) {\n  .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell',
+    );
+    expect(appStyles).toContain(
+      '.order-details-table .ant-table-tbody > tr > td .ant-btn-sm',
+    );
+    expect(appStyles).toContain('box-sizing: border-box');
+    expect(appStyles).toContain('padding: 0 !important;\n}\n\n.order-details-table td.order-detail-spreadsheet-cell .ant-input,');
+    expect(appStyles).toContain('padding: 2px !important;');
+    expect(appStyles).toContain('padding-inline: 2px !important;');
+  });
+
+  it('commits the latest price value and recalculates the sum on blur', () => {
+    expect(source).toContain('const handleMillingCostBlur = useCallback(() => {');
+    expect(source).toContain("form.getFieldValue('milling_cost_per_sqm')");
+    expect(source).toContain("recalcSum('milling_cost_per_sqm', value)");
+    expect(source).toContain('onBlur={handleMillingCostBlur}');
+  });
+
+  it('uses arrow keys for cell selection instead of changing editor values', () => {
+    expect(source).toContain('const editorDirectionByKey: Partial<Record<string, OrderDetailSpreadsheetDirection>>');
+    expect(source).toContain('const editorDirection = editorDirectionByKey[event.key]');
+    expect(source).toContain("moveOrderDetailSpreadsheetCell(\n        getSpreadsheetNavigationRowKeys(),");
+    expect(source).toContain('if (saved) focusSpreadsheetCoordinate(nextCell)');
+    expect(source.match(/keyboard=\{false\}/g)?.length ?? 0).toBeGreaterThanOrEqual(7);
+    expect(source).toContain('event.key.length !== 1');
+    expect(source).toContain('void beginSpreadsheetCellEdit(record, columnKey, initialValue);');
+  });
+
+  it('keeps only the spreadsheet cell frame around an active editor', () => {
+    expect(appStyles).toContain(
+      'td.order-detail-spreadsheet-cell .ant-input-number-input:focus',
+    );
+    expect(appStyles).toContain(
+      'td.order-detail-spreadsheet-cell .ant-select-focused .ant-select-selector',
+    );
+    expect(appStyles).toContain('outline: none !important');
+    expect(appStyles).toContain('box-shadow: none !important');
   });
 
   it('frames only the active cell without replacing the row background', () => {
@@ -120,13 +194,14 @@ describe('OrderDetailTable interaction performance guards', () => {
       '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus,',
     );
     const styleEnd = appStyles.indexOf(
-      '.order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus::after',
+      '.order-details-table td.order-detail-spreadsheet-cell .ant-form-item',
       styleStart,
     );
     const activeCellStyles = appStyles.slice(styleStart, styleEnd);
 
     expect(activeCellStyles).toContain('var(--order-detail-grid-accent)');
     expect(activeCellStyles).not.toContain('background-color');
+    expect(appStyles).not.toContain('td.order-detail-spreadsheet-cell:focus::after');
     expect(appStyles).not.toContain('tr.order-detail-row-editing > td');
     expect(appStyles).not.toContain('tr.dg-editing > td { background-color: var(--app-highlight)');
   });

@@ -390,6 +390,7 @@ export interface OrderWriteUnitOfWork {
   }): Promise<void>;
   upsertDetails(orderId: number, details: readonly CalculatedOrderDetailDto[]): Promise<void>;
   deleteDetails(orderId: number, ids: readonly number[]): Promise<void>;
+  recalcOrderProductionStatus(orderId: number): Promise<void>;
   upsertPayments(orderId: number, payments: readonly NormalizedSaveOrderPaymentDto[]): Promise<void>;
   deletePayments(orderId: number, ids: readonly number[]): Promise<void>;
   upsertWorkshops(

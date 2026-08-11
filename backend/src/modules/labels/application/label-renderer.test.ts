@@ -154,6 +154,44 @@ describe('label renderer', () => {
     expect(svg).not.toContain('fill="#000000" stroke="#000000"');
   });
 
+  it('orients Telegram screenshot fallback like an SVG cut sheet before template rotation', () => {
+    const base = cutMapTemplate();
+    base.elements[0] = {
+      ...base.elements[0],
+      rotationDeg: 90,
+    };
+    const mapped: LabelRow = {
+      ...row({}),
+      cutMap: {
+        source: 'telegram_image',
+        assetKey: 'telegram_image:packet:47',
+        packetId: '11111111-1111-4111-8111-111111111111',
+        sourceVersion: 2,
+        sourceMessageId: 10847,
+        sourceDigest: 'sha256:image',
+        rawSha256: 'sha256:raw',
+        normalizedSha256: 'sha256:normalized',
+        cutNumber: '№47',
+        cutJobName: 'Раскрой №47',
+        variant: 'telegram',
+        sheetIndex: 0,
+        sheetNumber: 1,
+        sheetWidthMm: 2070,
+        sheetHeightMm: 2800,
+      },
+    };
+    const svg = renderSvgPages(base, [mapped], new Map([['telegram_image:packet:47', {
+      kind: 'image',
+      dataUri: 'data:image/png;base64,iVBORw0KGgo=',
+    }]])).pages[0];
+
+    expect(svg).toContain('transform="rotate(90 5 7)"');
+    expect(svg).toContain('data-cut-number="№47"');
+    expect(svg).toContain('width="42" height="18" viewBox="0 0 2800 2070"');
+    expect(svg).toContain('transform="matrix(0 1 1 0 0 0)"');
+    expect(svg).not.toContain('fill="#000000" stroke="#000000"');
+  });
+
   it('mirrors the final cut-map thumbnail horizontally, vertically, or on both axes', () => {
     const render = (
       flipHorizontal: boolean,

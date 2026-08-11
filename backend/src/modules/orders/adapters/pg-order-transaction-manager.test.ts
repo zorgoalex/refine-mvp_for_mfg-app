@@ -96,6 +96,7 @@ describe('PgOrderTransactionManager', () => {
       await uow.upsertDetails(orderId, [detail()]);
       await uow.upsertPayments(orderId, [payment()]);
       await uow.deleteDetails(orderId, [200]);
+      await uow.recalcOrderProductionStatus(orderId);
       await expect(
         uow.updateOrderTotalsAndVersion({
           orderId,
@@ -123,6 +124,7 @@ describe('PgOrderTransactionManager', () => {
     expect(detailInsert?.params.at(-1)).toBe(false);
     expect(sql).toContain('INSERT INTO payments');
     expect(sql).toContain('DELETE FROM order_details');
+    expect(sql).toContain('SELECT recalc_order_production_status($1)');
     expect(sql).toContain('INSERT INTO audit_log');
   });
 
@@ -297,13 +299,13 @@ describe('PgOrderTransactionManager', () => {
       normalizeSql(query.text).startsWith('UPDATE orders SET order_name'),
     );
 
-    // After removing the flag from UPDATE, discount shifts from $13 to $12
+    // Header UPDATE no longer writes production_status_from_details_enabled or production_status_id.
     expect(normalizeSql(updateQuery?.text ?? '')).toContain(
-      'discount = $12, surcharge = $13, total_amount = $14, final_amount = $15',
+      'discount = $11, surcharge = $12, total_amount = $13, final_amount = $14',
     );
-    expect(updateQuery?.params[11]).toBe(20);  // discount at bind index 11 ($12)
-    expect(updateQuery?.params[13]).toBe(120); // totalAmount at bind index 13 ($14)
-    expect(updateQuery?.params[14]).toBe(100); // finalAmount at bind index 14 ($15)
+    expect(updateQuery?.params[10]).toBe(20);  // discount at bind index 10 ($11)
+    expect(updateQuery?.params[12]).toBe(120); // totalAmount at bind index 12 ($13)
+    expect(updateQuery?.params[13]).toBe(100); // finalAmount at bind index 13 ($14)
   });
 
   it('updateOrderHeader does not include production_status_from_details_enabled in UPDATE SQL', async () => {
@@ -328,11 +330,11 @@ describe('PgOrderTransactionManager', () => {
     expect(updateQuery).toBeDefined();
     // Flag must NOT appear in the SQL
     expect(normalizeSql(updateQuery!.text)).not.toContain('production_status_from_details_enabled');
-    // Params: $1=orderId + 25 SET fields = 26 total; highest placeholder is $26
-    // (SP3 added sheet_material_type_id = $26).
-    expect(updateQuery!.params).toHaveLength(26);
-    expect(normalizeSql(updateQuery!.text)).toContain('ref_key_1c = $25');
-    expect(normalizeSql(updateQuery!.text)).toContain('sheet_material_type_id = $26');
+    expect(normalizeSql(updateQuery!.text)).not.toContain('production_status_id =');
+    // Params: $1=orderId + 24 SET fields = 25 total; highest placeholder is $25.
+    expect(updateQuery!.params).toHaveLength(25);
+    expect(normalizeSql(updateQuery!.text)).toContain('ref_key_1c = $24');
+    expect(normalizeSql(updateQuery!.text)).toContain('sheet_material_type_id = $25');
     // Flag value (false) must not appear in bind params (boolean false could be ambiguous, check no flag column)
   });
 
@@ -846,8 +848,8 @@ describe('PgOrderTransactionManager', () => {
       normalizeSql(q.text).startsWith('UPDATE orders SET order_name'),
     );
     expect(updateQuery).toBeDefined();
-    // material_id = $21 in UPDATE → bind index 20
-    expect(updateQuery!.params[20]).toBeNull();
+    // material_id = $20 in UPDATE → bind index 19
+    expect(updateQuery!.params[19]).toBeNull();
   });
 
   it('orderDeleteDiffJson uses {from,to} shape (not {before,after})', async () => {

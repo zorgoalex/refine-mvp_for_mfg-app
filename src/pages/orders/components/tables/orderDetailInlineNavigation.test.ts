@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   findOrderDetailInlineEditor,
   finishOrderDetailInlineTab,
+  focusOrderDetailInlineEditorAtEnd,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
@@ -52,6 +53,19 @@ describe('order detail inline Tab navigation', () => {
     expect(editingCellQuery).toHaveBeenCalledWith('input, textarea, [role="combobox"]');
     expect(editor).toBe(activeEditor);
     expect(editor).not.toBe(selectionCheckbox);
+  });
+
+  it('focuses a double-click editor with the caret after its current value', () => {
+    const editor = {
+      value: 'Существующее значение',
+      focus: vi.fn(),
+      setSelectionRange: vi.fn(),
+    };
+
+    focusOrderDetailInlineEditorAtEnd(editor as unknown as HTMLElement);
+
+    expect(editor.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(editor.setSelectionRange).toHaveBeenCalledWith(21, 21);
   });
 
   it('saves and adds a new row after Tab on the final field', async () => {

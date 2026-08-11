@@ -186,6 +186,26 @@ export interface LabelCutMapSelection {
   cutResultPlacementId: number;
 }
 
+export interface LabelCutSheetDetailInstance {
+  detailId: number;
+  instance: number;
+}
+
+export interface LabelCutSheetScope {
+  cutJobId: number;
+  cutGroupId: number;
+  sheetIndex: number;
+  detailInstances: LabelCutSheetDetailInstance[];
+}
+
+export interface LabelCutMapFallbackImage {
+  packetId: string;
+  sourceVersion: number;
+  storageKey: string;
+  contentType?: string | null;
+  sizeBytes?: number | null;
+}
+
 export interface LabelCutMapOption {
   cutResultPlacementId: number;
   detailId: number;
@@ -237,6 +257,9 @@ export interface PreviewDetailLabelsInput {
   /** May include repeated ids; repeated ids represent physical instances on a cut sheet. */
   detailIds: number[];
   useBasisFields?: boolean;
+  detailInstances?: LabelCutSheetDetailInstance[];
+  cutSheetScope?: LabelCutSheetScope;
+  cutMapFallbackImage?: LabelCutMapFallbackImage;
 }
 
 export interface GenerateDetailLabelsInput extends PreviewDetailLabelsInput {

@@ -20,6 +20,7 @@ import type {
   CreateBazisCutSetFromPickerCommand,
   CreateBazisCutSetCommand,
   DeleteBazisCutDetailCommand,
+  DeleteBazisCutSetCommand,
   RenameBazisCutSetCommand,
   UpdateBazisCutDetailCommand,
 } from '../application/bazis-cut.types';
@@ -31,6 +32,7 @@ import {
   type PickerRow,
 } from './pg-bazis-cut-picker';
 import type {
+  BazisCutDeleteSetResultDto,
   BazisCutDetailFields,
   BazisCutMutationResultDto,
   BazisCutSetDetailDto,
@@ -64,6 +66,7 @@ interface SetRow extends QueryResultRow {
 interface ListRow extends SetRow {
   quantity: string | number;
   position_count: string | number;
+  total_area_m2: string | number;
   orders: unknown;
   projects: unknown;
   bazis_projects: unknown;
@@ -148,6 +151,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       `SELECT s.*,
               COALESCE(SUM(d.quantity), 0)::bigint AS quantity,
               COUNT(d.bazis_cut_set_detail_id)::bigint AS position_count,
+              COALESCE(SUM(d.finished_length_mm * d.finished_width_mm * d.quantity / 1000000.0), 0)::numeric AS total_area_m2,
               COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
                 'id', d.source_order_id,
                 'label', d.source_order_name,
@@ -260,12 +264,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         'bazis_cut_set.create', actorId(command.currentUser), 'bazis_cut_set', 'pending', requestHash);
       if (replay) return replay;
 
-      const inserted = await tx.query<{ bazis_cut_set_id: string | number }>(
-        `INSERT INTO bazis_cut_sets (name, created_by, updated_by)
-         VALUES ($1,$2,$2) RETURNING bazis_cut_set_id`,
-        ['БР', actorId(command.currentUser)],
-      );
-      const setId = toNumber(inserted.rows[0].bazis_cut_set_id);
+      const setId = await insertSetHeader(tx, 'БР', actorId(command.currentUser));
       await tx.query(
         'UPDATE bazis_cut_sets SET name=$2 WHERE bazis_cut_set_id=$1',
         [setId, buildBazisCutSetName(setId)],
@@ -309,12 +308,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       const detailIds = fresh.rows.map((row) => toNumber(row.detail_id));
       const snapshots = await loadSnapshots(tx, null, detailIds);
 
-      const inserted = await tx.query<{ bazis_cut_set_id: string | number }>(
-        `INSERT INTO bazis_cut_sets (name, created_by, updated_by)
-         VALUES ($1,$2,$2) RETURNING bazis_cut_set_id`,
-        ['БР', actorId(command.currentUser)],
-      );
-      const setId = toNumber(inserted.rows[0].bazis_cut_set_id);
+      const setId = await insertSetHeader(tx, 'БР', actorId(command.currentUser));
       await tx.query('UPDATE bazis_cut_sets SET name=$2 WHERE bazis_cut_set_id=$1',
         [setId, buildBazisCutSetName(setId)]);
       await insertSnapshots(tx, setId, snapshots, 0, actorId(command.currentUser));
@@ -466,6 +460,32 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.detail_removed', command.setId,
         command.idempotencyKey, fieldsAudit(before), null, set, [before],
         { removedDetailId: command.detailId });
+      await completeIdempotency(tx, command.idempotencyKey, result);
+      return result;
+    });
+  }
+
+  async deleteEmptySet(command: DeleteBazisCutSetCommand): Promise<BazisCutDeleteSetResultDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser);
+      const requestHash = hashRequest('bazis_cut_set.delete_empty', command.currentUser,
+        { setId: command.setId, expectedVersion: command.expectedVersion });
+      const replay = await claimIdempotency<BazisCutDeleteSetResultDto>(tx, command.idempotencyKey,
+        'bazis_cut_set.delete_empty', actorId(command.currentUser), 'bazis_cut_set', String(command.setId), requestHash);
+      if (replay) return replay;
+      await lockSet(tx, command.setId, command.expectedVersion);
+      const detailCount = await countSetDetails(tx, command.setId);
+      if (detailCount !== 0) {
+        throw new ApiError(409, 'BAZIS_CUT_SET_NOT_EMPTY', 'Удалять можно только пустые наборы', {
+          setId: command.setId, positionCount: detailCount,
+        });
+      }
+      const before = await loadSet(tx, command.setId);
+      const result = { deleted: true as const, set: setSummary(before) };
+      await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.deleted', command.setId,
+        command.idempotencyKey, summaryAudit(before), null, before, [],
+        { deletedSetId: command.setId });
+      await tx.query(`DELETE FROM bazis_cut_sets WHERE bazis_cut_set_id=$1`, [command.setId]);
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
     });
@@ -718,6 +738,37 @@ async function insertSnapshots(client: DatabaseClient, setId: number, snapshots:
   }
 }
 
+async function insertSetHeader(client: TransactionClient, name: string, userId: number | null): Promise<number> {
+  await client.query('LOCK TABLE bazis_cut_sets IN SHARE ROW EXCLUSIVE MODE');
+  const inserted = await client.query<{ bazis_cut_set_id: string | number }>(
+    `WITH next_id AS (
+       SELECT candidate AS bazis_cut_set_id
+       FROM generate_series(
+         1::bigint,
+         COALESCE((SELECT MAX(bazis_cut_set_id) FROM bazis_cut_sets), 0) + 1
+       ) AS generated(candidate)
+       WHERE NOT EXISTS (
+         SELECT 1 FROM bazis_cut_sets WHERE bazis_cut_set_id=generated.candidate
+       )
+       ORDER BY generated.candidate
+       LIMIT 1
+     )
+     INSERT INTO bazis_cut_sets (bazis_cut_set_id, name, created_by, updated_by)
+     SELECT bazis_cut_set_id, $1, $2, $2 FROM next_id
+     RETURNING bazis_cut_set_id`,
+    [name, userId],
+  );
+  const setId = toNumber(inserted.rows[0].bazis_cut_set_id);
+  await client.query(
+    `SELECT setval(
+       pg_get_serial_sequence('bazis_cut_sets','bazis_cut_set_id'),
+       (SELECT GREATEST(COALESCE(MAX(bazis_cut_set_id), 1), 1) FROM bazis_cut_sets),
+       true
+     )`,
+  );
+  return setId;
+}
+
 async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutSetDto> {
   const headerResult = await client.query<SetRow>(`SELECT * FROM bazis_cut_sets WHERE bazis_cut_set_id=$1`, [setId]);
   const header = headerResult.rows[0];
@@ -736,6 +787,7 @@ async function loadSet(client: DatabaseClient, setId: number): Promise<BazisCutS
     createdBy: nullableNumber(header.created_by), updatedBy: nullableNumber(header.updated_by),
     createdAt: iso(header.created_at), updatedAt: iso(header.updated_at), details,
     quantity: details.reduce((sum, detail) => sum + detail.quantity, 0), positionCount: details.length,
+    totalAreaM2: totalAreaM2(details),
     orders: refs(details, 'sourceOrderId', 'sourceOrderName', 'sourceOrderDeleted'),
     projects: refs(details, 'sourceProjectId', 'sourceProjectCode'),
     bazisProjects: labelRefs(details, 'sourceBazisProjectId', 'sourceBazisProjectName'),
@@ -747,7 +799,8 @@ function mapSummaryRow(row: ListRow): BazisCutSetSummaryDto {
   return {
     bazisCutSetId: toNumber(row.bazis_cut_set_id), name: row.name, version: Number(row.version),
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at), quantity: toNumber(row.quantity),
-    positionCount: toNumber(row.position_count), orders: parseRefs(row.orders), projects: parseRefs(row.projects),
+    positionCount: toNumber(row.position_count), totalAreaM2: toNumber(row.total_area_m2),
+    orders: parseRefs(row.orders), projects: parseRefs(row.projects),
     bazisProjects: parseRefs(row.bazis_projects), bazisOrders: parseRefs(row.bazis_orders),
   };
 }
@@ -1031,7 +1084,21 @@ function parseMembershipRefs(value: unknown): Array<{ bazisCutSetId: number; nam
 
 function summaryAudit(set: BazisCutSetDto): Record<string, unknown> {
   return { setId: set.bazisCutSetId, name: set.name, version: set.version,
-    quantity: set.quantity, positionCount: set.positionCount };
+    quantity: set.quantity, positionCount: set.positionCount, totalAreaM2: set.totalAreaM2 };
+}
+
+function setSummary(set: BazisCutSetDto): BazisCutSetSummaryDto {
+  return {
+    bazisCutSetId: set.bazisCutSetId, name: set.name, version: set.version,
+    createdAt: set.createdAt, updatedAt: set.updatedAt, quantity: set.quantity,
+    positionCount: set.positionCount, totalAreaM2: set.totalAreaM2,
+    orders: set.orders, projects: set.projects, bazisProjects: set.bazisProjects,
+    bazisOrders: set.bazisOrders,
+  };
+}
+
+function totalAreaM2(details: readonly Pick<BazisCutSetDetailDto, 'finishedLengthMm' | 'finishedWidthMm' | 'quantity'>[]): number {
+  return details.reduce((sum, detail) => sum + detail.finishedLengthMm * detail.finishedWidthMm * detail.quantity / 1_000_000, 0);
 }
 
 async function setSessionUser(client: TransactionClient, user: CurrentUser): Promise<void> {

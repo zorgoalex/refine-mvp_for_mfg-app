@@ -569,6 +569,17 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     order.details = order.details.filter((detail) => !ids.includes(detail.id as number));
   }
 
+  async recalcOrderProductionStatus(orderId: number): Promise<void> {
+    this.call('recalcOrderProductionStatus');
+    const order = this.getOrder(orderId);
+    const detailStatusId = order.details
+      .map((detail) => detail.productionStatusId ?? null)
+      .find((productionStatusId) => productionStatusId !== null);
+    if (detailStatusId !== undefined) {
+      order.header = { ...order.header, productionStatusId: detailStatusId };
+    }
+  }
+
   async upsertPayments(orderId: number, payments: readonly NormalizedSaveOrderPaymentDto[]): Promise<void> {
     this.call('upsertPayments');
     const order = this.getOrder(orderId);
@@ -1367,6 +1378,7 @@ describe('OrderTransactionService', () => {
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
+      'recalcOrderProductionStatus',
       'upsertPayments',
       'deletePayments',
       'deleteWorkshops',
@@ -2050,9 +2062,9 @@ describe('OrderTransactionService', () => {
     expect(productionStatusEvent).toMatchObject({
       orderId: 42,
       statusField: 'productionCurrentStatus',
-      statusId: 2002,
-      statusName: 'Производственный статус 2002',
-      statusCode: 'production_2002',
+      statusId: 3002,
+      statusName: 'Производственный статус 3002',
+      statusCode: 'production_3002',
     });
     expect(productionStatusEvent?.before).toMatchObject({
       productionStatusId: 2001,
@@ -2060,9 +2072,9 @@ describe('OrderTransactionService', () => {
       productionStatusCode: 'production_2001',
     });
     expect(productionStatusEvent?.after).toMatchObject({
-      productionStatusId: 2002,
-      productionStatusName: 'Производственный статус 2002',
-      productionStatusCode: 'production_2002',
+      productionStatusId: 3002,
+      productionStatusName: 'Производственный статус 3002',
+      productionStatusCode: 'production_3002',
     });
 
     const detailStatusEvents = transactions.state.auditEvents.filter(
@@ -2151,7 +2163,7 @@ describe('OrderTransactionService', () => {
     transactions.seedOrder({
       orderId: 42,
       version: 3,
-      header: createHeader({ orderStatusId: 1001, productionStatusId: 2001 }),
+      header: createHeader({ orderStatusId: 1001, productionStatusId: 3001 }),
       details: [calculatedDetail({ id: 11, detailCost: 10000, productionStatusId: 3001 })],
       payments: [],
     });
@@ -2167,7 +2179,7 @@ describe('OrderTransactionService', () => {
           clientId: 1001,
           orderDate: '2026-04-30',
           orderStatusId: 1001,
-          productionStatusId: 2001,
+          productionStatusId: 3001,
           discount: 0,
           surcharge: 0,
         },
@@ -3808,6 +3820,7 @@ describe('OrderTransactionService', () => {
       'createOrderHeader',
       'upsertDetails',
       'deleteDetails',
+      'recalcOrderProductionStatus',
       'upsertPayments',
       'rollback',
     ]);

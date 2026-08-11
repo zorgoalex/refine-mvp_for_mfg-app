@@ -1149,6 +1149,9 @@ probe_file() {
                            AND pg_get_constraintdef(oid) LIKE '%horizontal%'
                            AND pg_get_constraintdef(oid) LIKE '%none%'
                       );" ;;
+    114_production_status_always_from_details*) probe_all \
+                     "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='recalc_order_production_status' AND prosrc LIKE '%erp.order_status_to_details_sync%' AND prosrc NOT LIKE '%v_enabled%');" \
+                     "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='trg_orders_sync_details_status' AND prosrc LIKE '%erp.detail_status_to_order_recalc%' AND prosrc NOT LIKE '%NEW.production_status_from_details_enabled%');" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1160,7 +1163,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
