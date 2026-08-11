@@ -247,7 +247,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   };
 
   // Handle quick inline add
-  const handleQuickAdd = async () => {
+  const handleQuickAdd = async (): Promise<boolean> => {
     // Add new detail with defaults
     addDetail(QUICK_ADD_DEFAULTS as Omit<OrderDetail, 'temp_id'>);
 
@@ -256,7 +256,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     const updatedDetails = storeApi.getState().details;
     const lastDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
 
-    if (!lastDetail || !tableRef.current) return;
+    if (!lastDetail || !tableRef.current) return false;
 
     // If currently editing another row, save it first then start new
     if (tableRef.current.isEditing()) {
@@ -268,10 +268,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
           deleteDetail(tempId, lastDetail.detail_id);
         }
         message.warning('Сначала заполните обязательные поля текущей позиции');
+        return false;
       }
+      return true;
     } else {
       // No row being edited, just start editing the new one
       tableRef.current.startEditRow(lastDetail);
+      return true;
     }
   };
 

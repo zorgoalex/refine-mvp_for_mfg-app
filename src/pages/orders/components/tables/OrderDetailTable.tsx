@@ -44,7 +44,7 @@ import { cutJobDeepLink } from '../../cutColumnHelpers';
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
   onDelete: (tempId: number, detailId?: number) => void;
-  onQuickAdd?: () => void;
+  onQuickAdd?: () => boolean | Promise<boolean>;
   onInsertAfter?: (detail: OrderDetail) => void;
   onCopyRow?: (detail: OrderDetail) => void;
   onTransferRows?: (rowKeys: React.Key[]) => void;
@@ -92,6 +92,41 @@ interface DetailSorterState {
   order: DetailSortOrder;
 }
 
+type OrderDetailEditorField =
+  | 'height'
+  | 'width'
+  | 'quantity'
+  | 'area'
+  | 'milling_type_id'
+  | 'edge_type_id'
+  | 'sheet_material_type_id'
+  | 'note'
+  | 'doweling'
+  | 'milling_cost_per_sqm'
+  | 'detail_cost'
+  | 'film_id'
+  | 'priority'
+  | 'production_status_id'
+  | 'basis_project'
+  | 'basis_product'
+  | 'basis_data'
+  | 'basis_designation'
+  | 'detail_name';
+
+const orderDetailEditorFieldClassName = (field: OrderDetailEditorField) =>
+  `order-detail-editor-field order-detail-editor-field-${field}`;
+
+const orderDetailRowKey = (detail: OrderDetail): number | undefined =>
+  detail.temp_id ?? detail.detail_id;
+
+const isOrderDetailSelectDropdownNavigation = (e: React.KeyboardEvent): boolean => {
+  const target = e.target;
+  if (!(target instanceof HTMLElement)) return false;
+
+  return target.closest('.ant-select-open') !== null ||
+    target.getAttribute('aria-expanded') === 'true';
+};
+
 export function sortOrderDetailsForPagination(
   details: readonly OrderDetail[],
   compare: ((left: OrderDetail, right: OrderDetail) => number) | undefined,
@@ -120,6 +155,16 @@ export function pageContainingOrderDetail(
     (detail.temp_id ?? detail.detail_id) === targetKey,
   );
   return index < 0 ? 1 : Math.floor(index / Math.max(1, pageSize)) + 1;
+}
+
+export function isLastOrderDetailRow(
+  details: readonly OrderDetail[],
+  target: OrderDetail,
+): boolean {
+  const targetKey = orderDetailRowKey(target);
+  if (targetKey == null || details.length === 0) return false;
+
+  return orderDetailRowKey(details[details.length - 1]) === targetKey;
 }
 
 const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -351,6 +396,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     y: number;
     record: OrderDetail;
   } | null>(null);
+  const pendingFocusFieldRef = useRef<OrderDetailEditorField | null>(null);
+  const arrowDownQuickAddInFlightRef = useRef(false);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
 
   // ============================================================================
@@ -662,19 +709,40 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       // Save current row
       const saved = await saveCurrentRow();
       if (saved) {
-        // Check if current row is the last one in the list
-        const recordKey = record.temp_id || record.detail_id;
-        const lastDetail = sortedDetails[sortedDetails.length - 1];
-        const lastKey = lastDetail?.temp_id || lastDetail?.detail_id;
-        const isLastRow = recordKey === lastKey;
-
         // Only add new row if current row is the last one
-        if (isLastRow && onQuickAdd) {
-          onQuickAdd();
+        if (isLastOrderDetailRow(sortedDetails, record) && onQuickAdd) {
+          await onQuickAdd();
         }
       }
     }
   };
+
+  const handleArrowDownFromEditableCell = useCallback(async (
+    e: React.KeyboardEvent,
+    record: OrderDetail,
+    field: OrderDetailEditorField,
+  ) => {
+    if (e.key !== 'ArrowDown') return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (isOrderDetailSelectDropdownNavigation(e)) return;
+    if (!onQuickAdd || !isLastOrderDetailRow(sortedDetails, record)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (arrowDownQuickAddInFlightRef.current) return;
+    arrowDownQuickAddInFlightRef.current = true;
+    pendingFocusFieldRef.current = field;
+
+    try {
+      const added = await onQuickAdd();
+      if (added === false) {
+        pendingFocusFieldRef.current = null;
+      }
+    } finally {
+      arrowDownQuickAddInFlightRef.current = false;
+    }
+  }, [onQuickAdd, sortedDetails]);
 
   // Expose methods via ref for external calls (e.g., quick add)
   useImperativeHandle(ref, () => ({
@@ -813,7 +881,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
-          <Form.Item name="height" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item name="height" className={orderDetailEditorFieldClassName('height')} style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <CurrencyInput
               autoFocus
               controls={false}
@@ -822,7 +890,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               precision={2}
               emptyWhenUnset
               onChange={handleHeightChange}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'height');
+              }}
             />
           </Form.Item>
         );
@@ -850,7 +921,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return formatNumber(num, num % 1 === 0 ? 0 : 2);
         }
         return (
-          <Form.Item name="width" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item name="width" className={orderDetailEditorFieldClassName('width')} style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <CurrencyInput
               controls={false}
               style={{ width: '100%', minWidth: '80px', ...getRequiredFieldStyle(watchedWidth) }}
@@ -858,7 +929,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               precision={2}
               emptyWhenUnset
               onChange={handleWidthChange}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'width');
+              }}
             />
           </Form.Item>
         );
@@ -876,14 +950,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="quantity" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item name="quantity" className={orderDetailEditorFieldClassName('quantity')} style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
               controls={false}
               style={{ width: '100%', minWidth: '70px' }}
               min={1}
               precision={0}
               onChange={handleQuantityChange}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'quantity');
+              }}
             />
           </Form.Item>
         ) : (
@@ -909,8 +986,16 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="area" style={{ margin: 0, padding: '0 4px' }}>
-            <InputNumber style={{ width: '100%', minWidth: '85px' }} precision={2} disabled onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="area" className={orderDetailEditorFieldClassName('area')} style={{ margin: 0, padding: '0 4px' }}>
+            <InputNumber
+              style={{ width: '100%', minWidth: '85px' }}
+              precision={2}
+              disabled
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'area');
+              }}
+            />
           </Form.Item>
         ) : (
           formatNumber(d.area, 2) + ' м²'
@@ -929,7 +1014,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="milling_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item name="milling_type_id" className={orderDetailEditorFieldClassName('milling_type_id')} style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               {...resolvedMillingTypeSelectProps}
               placeholder="Тип фрезеровки"
@@ -937,6 +1022,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
               style={{ minWidth: 150, textAlign: 'left', ...getRequiredFieldStyle(watchedMillingTypeId) }}
+              onKeyDown={(e) => void handleArrowDownFromEditableCell(e, d, 'milling_type_id')}
             />
           </Form.Item>
         ) : (
@@ -959,7 +1045,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="edge_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item name="edge_type_id" className={orderDetailEditorFieldClassName('edge_type_id')} style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               {...resolvedEdgeTypeSelectProps}
               placeholder="Тип кромки"
@@ -967,6 +1053,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
               dropdownMatchSelectWidth={false}
               style={{ minWidth: 120, textAlign: 'left', ...getRequiredFieldStyle(watchedEdgeTypeId) }}
+              onKeyDown={(e) => void handleArrowDownFromEditableCell(e, d, 'edge_type_id')}
             />
           </Form.Item>
         ) : (
@@ -994,7 +1081,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item name="sheet_material_type_id" className={orderDetailEditorFieldClassName('sheet_material_type_id')} style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options).filter(o => o.isActive !== false || o.value === watchedSheetId), watchedSheetId)}
               loading={sheetMaterials.isLoading}
@@ -1007,6 +1094,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               optionFilterProp="label"
               dropdownMatchSelectWidth={false}
               style={{ minWidth: 160, textAlign: 'left' }}
+              onKeyDown={(e) => void handleArrowDownFromEditableCell(e, d, 'sheet_material_type_id')}
             />
           </Form.Item>
         ) : (
@@ -1026,8 +1114,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="note" style={{ margin: 0, padding: '0 4px' }}>
-            <Input placeholder="Примечание" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="note" className={orderDetailEditorFieldClassName('note')} style={{ margin: 0, padding: '0 4px' }}>
+            <Input
+              placeholder="Примечание"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'note');
+              }}
+            />
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>{d.note || ''}</span>
@@ -1045,8 +1139,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="doweling" valuePropName="checked" style={{ margin: 0, padding: '0 4px' }}>
-            <Checkbox />
+          <Form.Item name="doweling" className={orderDetailEditorFieldClassName('doweling')} valuePropName="checked" style={{ margin: 0, padding: '0 4px' }}>
+            <Checkbox onKeyDown={(e) => void handleArrowDownFromEditableCell(e, d, 'doweling')} />
           </Form.Item>
         ) : (
           d.doweling ? <CheckOutlined style={{ color: '#1890ff' }} /> : null
@@ -1064,7 +1158,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="milling_cost_per_sqm" style={{ margin: 0, padding: '0 4px' }}>
+          <Form.Item name="milling_cost_per_sqm" className={orderDetailEditorFieldClassName('milling_cost_per_sqm')} style={{ margin: 0, padding: '0 4px' }}>
             <InputNumber
               controls={false}
               style={{ width: '100%', minWidth: '90px' }}
@@ -1073,7 +1167,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               formatter={currencySmartFormatter}
               parser={numberParser}
               onChange={handleMillingCostChange}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'milling_cost_per_sqm');
+              }}
             />
           </Form.Item>
         ) : (
@@ -1098,6 +1195,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return (
             <Form.Item
               name="detail_cost"
+              className={orderDetailEditorFieldClassName('detail_cost')}
               style={{ margin: 0, padding: '0 4px' }}
             >
               <InputNumber
@@ -1115,7 +1213,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                     setSumContextMenu({ x: e.clientX, y: e.clientY });
                   }
                 }}
-                onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.preventDefault();
+                  void handleArrowDownFromEditableCell(e, d, 'detail_cost');
+                }}
               />
             </Form.Item>
           );
@@ -1153,7 +1254,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="film_id" style={{ margin: 0, padding: '0 4px' }}>
+          <Form.Item name="film_id" className={orderDetailEditorFieldClassName('film_id')} style={{ margin: 0, padding: '0 4px' }}>
             <Select
               {...resolvedFilmSelectProps}
               allowClear
@@ -1163,6 +1264,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               dropdownMatchSelectWidth={false}
               style={{ minWidth: 200, textAlign: 'left' }}
               onKeyDown={(e) => {
+                void handleArrowDownFromEditableCell(e, d, 'film_id');
                 if (e.key === 'Tab' && !e.shiftKey) {
                   handleTabOnLastField(e, d);
                 }
@@ -1244,14 +1346,17 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="priority" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
+          <Form.Item name="priority" className={orderDetailEditorFieldClassName('priority')} style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <InputNumber
               controls={false}
               style={{ width: '100%', minWidth: '60px' }}
               min={1}
               max={999}
               tabIndex={-1}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'priority');
+              }}
             />
           </Form.Item>
         ) : (
@@ -1271,7 +1376,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="production_status_id" style={{ margin: 0, padding: '0 4px' }}>
+          <Form.Item name="production_status_id" className={orderDetailEditorFieldClassName('production_status_id')} style={{ margin: 0, padding: '0 4px' }}>
             <Select
               {...resolvedProductionStatusSelectProps}
               allowClear
@@ -1281,6 +1386,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               dropdownMatchSelectWidth={false}
               style={{ minWidth: 150, textAlign: 'left' }}
               tabIndex={-1}
+              onKeyDown={(e) => void handleArrowDownFromEditableCell(e, d, 'production_status_id')}
             />
           </Form.Item>
         ) : (
@@ -1304,8 +1410,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="basis_project" style={{ margin: 0, padding: '0 4px' }}>
-            <Input placeholder="Базис проект" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="basis_project" className={orderDetailEditorFieldClassName('basis_project')} style={{ margin: 0, padding: '0 4px' }}>
+            <Input
+              placeholder="Базис проект"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'basis_project');
+              }}
+            />
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>{d.basis_project || ''}</span>
@@ -1322,8 +1434,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="basis_product" style={{ margin: 0, padding: '0 4px' }}>
-            <Input placeholder="Обозн. изделия" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="basis_product" className={orderDetailEditorFieldClassName('basis_product')} style={{ margin: 0, padding: '0 4px' }}>
+            <Input
+              placeholder="Обозн. изделия"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'basis_product');
+              }}
+            />
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>{d.basis_product || ''}</span>
@@ -1340,8 +1458,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="basis_data" style={{ margin: 0, padding: '0 4px' }}>
-            <Input placeholder="Номер/Обозначение/Наименование" onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="basis_data" className={orderDetailEditorFieldClassName('basis_data')} style={{ margin: 0, padding: '0 4px' }}>
+            <Input
+              placeholder="Номер/Обозначение/Наименование"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'basis_data');
+              }}
+            />
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>{d.basis_data || ''}</span>
@@ -1358,8 +1482,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="basis_designation" style={{ margin: 0, padding: '0 4px' }}>
-            <Input placeholder="Обозн." onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }} />
+          <Form.Item name="basis_designation" className={orderDetailEditorFieldClassName('basis_designation')} style={{ margin: 0, padding: '0 4px' }}>
+            <Input
+              placeholder="Обозн."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'basis_designation');
+              }}
+            />
           </Form.Item>
         ) : (
           <span style={{ fontSize: '90%' }}>{d.basis_designation || ''}</span>
@@ -1380,11 +1510,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const d = asDetail(row);
         if (!d) return null;
         return isEditing(d) ? (
-          <Form.Item name="detail_name" style={{ margin: 0, padding: '0 4px' }}>
+          <Form.Item name="detail_name" className={orderDetailEditorFieldClassName('detail_name')} style={{ margin: 0, padding: '0 4px' }}>
             <Input
               placeholder="Название детали"
               tabIndex={-1}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); } }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'detail_name');
+              }}
             />
           </Form.Item>
         ) : (
@@ -1518,6 +1651,30 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       })
     : summaryAwareColumns;
 
+  const focusEditorField = useCallback((
+    row: HTMLElement,
+    field: OrderDetailEditorField | null,
+  ) => {
+    const fieldContainer = field
+      ? row.querySelector<HTMLElement>(`.order-detail-editor-field-${field}`)
+      : null;
+    const focusScope = fieldContainer ?? row;
+    const target = focusScope.querySelector<HTMLElement>(
+      'input:not([disabled]), textarea:not([disabled]), .ant-select-selector, [role="combobox"], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+
+    target?.focus();
+
+    if (
+      target instanceof HTMLInputElement &&
+      ['text', 'number', 'search'].includes(target.type)
+    ) {
+      target.select();
+    } else if (target instanceof HTMLTextAreaElement) {
+      target.select();
+    }
+  }, []);
+
   useEffect(() => {
     if (groupingActive) return;
     const lastPage = Math.max(1, Math.ceil(paginatedDetails.length / pageSize));
@@ -1547,10 +1704,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         `[data-row-key="${String(editingKey)}"]`,
       );
       row?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      row?.querySelector<HTMLElement>('input, textarea, [role="combobox"]')?.focus();
+      if (row) {
+        focusEditorField(row, pendingFocusFieldRef.current);
+        pendingFocusFieldRef.current = null;
+      }
     });
     return () => cancelAnimationFrame(frame);
-  }, [currentPage, editingKey, groupingActive]);
+  }, [currentPage, editingKey, focusEditorField, groupingActive]);
 
   const rowSelection = onSelectChange
     ? {

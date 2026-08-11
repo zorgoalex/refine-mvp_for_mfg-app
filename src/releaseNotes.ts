@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-11",
+    title: "Карточка заказа: добавление детали стрелкой вниз",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В форме создания и редактирования заказа стрелка вниз из любой ячейки последней строки деталей добавляет новую строку и переносит фокус в ту же колонку новой строки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-10",
     title: "Базис-раскрой: удаление пустых наборов",
     services: ["ERP", "Cutting"],

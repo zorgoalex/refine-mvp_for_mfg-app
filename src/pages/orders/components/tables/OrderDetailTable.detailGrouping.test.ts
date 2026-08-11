@@ -67,4 +67,13 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain("key: 'bath_cut_job'");
     expect(table).toContain('cutJobDeepLink(ref)');
   });
+  it('wires ArrowDown on the last edited detail row to quick-add and same-field focus', () => {
+    expect(table).toContain('handleArrowDownFromEditableCell');
+    expect(table).toContain("e.key !== 'ArrowDown'");
+    expect(table).toContain('pendingFocusFieldRef.current = field');
+    expect(table).toContain('focusEditorField(row, pendingFocusFieldRef.current)');
+    expect(table).toContain("orderDetailEditorFieldClassName('height')");
+    expect(table).toContain("orderDetailEditorFieldClassName('detail_name')");
+    expect(tab).toContain('const handleQuickAdd = async (): Promise<boolean>');
+  });
 });

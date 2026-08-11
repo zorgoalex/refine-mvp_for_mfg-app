@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../../../../types/orders';
 import {
+  isLastOrderDetailRow,
   pageContainingOrderDetail,
   sortOrderDetailsForPagination,
 } from './OrderDetailTable';
@@ -44,5 +45,20 @@ describe('order detail controlled pagination', () => {
     ] as OrderDetail[];
     expect(sortOrderDetailsForPagination(tied, () => 0, 'ascend').map((row) => row.temp_id))
       .toEqual([1, 2, 3]);
+  });
+
+  it('detects the logical last detail row for ArrowDown quick-add', () => {
+    expect(isLastOrderDetailRow(details, details[50])).toBe(true);
+    expect(isLastOrderDetailRow(details, details[49])).toBe(false);
+  });
+
+  it('uses persisted ids for last-row detection when temp ids are absent', () => {
+    const persisted = [
+      { detail_id: 10, detail_number: 1 },
+      { detail_id: 11, detail_number: 2 },
+    ] as OrderDetail[];
+
+    expect(isLastOrderDetailRow(persisted, { detail_id: 11 } as OrderDetail)).toBe(true);
+    expect(isLastOrderDetailRow(persisted, { detail_id: 10 } as OrderDetail)).toBe(false);
   });
 });
