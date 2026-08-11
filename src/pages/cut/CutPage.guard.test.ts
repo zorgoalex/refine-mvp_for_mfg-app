@@ -62,6 +62,17 @@ describe('CutPage source guards', () => {
     expect(source).toContain('noSheetSpecCount');
   });
 
+  it('uses display cut-job numbers on visible job list and headers', () => {
+    expect(source).toContain('formatCutJobDisplayNumber');
+    expect(source).toContain('const jobDisplayNumber = job ? formatCutJobDisplayNumber(job, profiles) : null;');
+    expect(source).toContain('render: (_: unknown, row: CutJobDto) => formatCutJobDisplayNumber(row, profiles)');
+    expect(source).toContain('Задание на раскрой {jobDisplayNumber}');
+    expect(source).toContain('Производство › Раскрой › Задание ${jobDisplayNumber}');
+    expect(source).toContain('`${formatCutJobDisplayNumber(candidate, profiles)} · ${candidate.name}`');
+    expect(source).not.toContain('Задание на раскрой #{job.cutJobId}');
+    expect(source).not.toContain('`#${candidate.cutJobId} · ${candidate.name}`');
+  });
+
   it('gates mutations behind cut.manage', () => {
     expect(source).toContain("can('cut.manage')");
     expect(source).toContain("can('cut.view')");

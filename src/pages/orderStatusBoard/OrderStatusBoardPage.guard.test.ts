@@ -1096,7 +1096,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('className="cnc-bath-card__block-heading cnc-bath-card__block-heading--modal"');
     expect(page).toContain('className="cnc-bath-card__block-job" title={bath.cutJobName}');
     expect(page).toContain('Список деталей');
-    expect(page).toContain('Предпросмотр PDF · раскрой №{bath.cutNumber}');
+    expect(page).toContain('const bathDisplayCutNumber = formatCncBathCardCutNumber(bath);');
+    expect(page).toContain('Предпросмотр PDF · раскрой {bathDisplayCutNumber}');
+    expect(page).not.toContain('Предпросмотр PDF · раскрой №{bath.cutNumber}');
     expect(css).toContain('.cnc-bath-card__block-heading');
     expect(css).toContain('.cnc-bath-card__block-job');
   });

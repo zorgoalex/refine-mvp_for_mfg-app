@@ -202,6 +202,38 @@ export function formatPlacementsMessage(
   return segments.join(' ');
 }
 
+type CutJobDisplayProfile = {
+  cutParamProfileId: number;
+  params?: { layout_mode?: unknown } | null;
+};
+
+type CutJobDisplayNumberSource = {
+  cutJobId: number;
+  paramProfileId: number | null;
+  currentCutResult?: { cutNumber?: string | null } | null;
+};
+
+export function isVacuumCutJobDisplayNumber(
+  job: CutJobDisplayNumberSource,
+  profiles: ReadonlyArray<CutJobDisplayProfile>,
+): boolean {
+  const currentCutNumber = job.currentCutResult?.cutNumber;
+  if (typeof currentCutNumber === 'string' && currentCutNumber.trimStart().startsWith('В-')) {
+    return true;
+  }
+  return profiles.some((profile) =>
+    profile.cutParamProfileId === job.paramProfileId
+    && profile.params?.layout_mode === 'vacuum_table',
+  );
+}
+
+export function formatCutJobDisplayNumber(
+  job: CutJobDisplayNumberSource,
+  profiles: ReadonlyArray<CutJobDisplayProfile>,
+): string {
+  return isVacuumCutJobDisplayNumber(job, profiles) ? `В-${job.cutJobId}` : `#${job.cutJobId}`;
+}
+
 /**
  * Detail-level "add to cut": keep only the operator-chosen detail ids that are
  * also eligible. Order follows `selectableEligible`; result is distinct.
