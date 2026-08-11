@@ -3,9 +3,11 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const showSource = readFileSync(fileURLToPath(new URL('./show.tsx', import.meta.url)), 'utf8');
+const orderFormSource = readFileSync(fileURLToPath(new URL('./components/OrderForm.tsx', import.meta.url)), 'utf8');
 const headerSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderShowHeader.tsx', import.meta.url)), 'utf8');
 const editHeaderSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderHeaderSummary.tsx', import.meta.url)), 'utf8');
 const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
+const operationalCss = readFileSync(fileURLToPath(new URL('../../ui-operational/operational.css', import.meta.url)), 'utf8');
 const operationalHeaderSource = headerSource.match(/if \(isOperational\) \{[\s\S]*?\n  \}\n\n  if \(compactSticky\)/)?.[0] ?? '';
 const operationalEditHeaderSource = editHeaderSource.match(/if \(isOperational\) \{[\s\S]*?\n  \}\n\n  return \(/)?.[0] ?? '';
 const compactHeaderSource = headerSource.match(/if \(compactSticky\) \{[\s\S]*?\n  \}\n\n  return \(/)?.[0] ?? '';
@@ -18,6 +20,22 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('order-show-details-toolbar');
     expect(showSource).toContain('order-show-details-table');
     expect(showSource).toContain('orderShowStickyEnabled');
+  });
+
+  it('keeps the order edit summary sticky only when the details list exceeds the viewport', () => {
+    expect(orderFormSource).toContain('orderFormDetailsBlockRef');
+    expect(orderFormSource).toContain('orderFormStickyEnabled');
+    expect(orderFormSource).toContain("activeTab === 'details'");
+    expect(orderFormSource).toContain('block.scrollHeight > Math.max(320, availableHeight)');
+    expect(orderFormSource).toContain('order-show-page--sticky-enabled');
+    expect(orderFormSource).toContain('order-show-summary-tabs-sticky');
+    expect(orderFormSource).toContain('compactSticky={orderFormStickyEnabled && orderFormSummaryStuck}');
+    expect(orderFormSource).toContain('<OrderHeaderSummary compactSticky={orderFormStickyEnabled && orderFormSummaryStuck} />\n              </div>\n              <Tabs');
+    expect(orderFormSource).toContain('<OrderHeaderSummary compactSticky={orderFormStickyEnabled && orderFormSummaryStuck} />\n        </div>\n\n        {/* Editable tabs */}\n        <Tabs');
+    expect(editHeaderSource).toContain('compactSticky?: boolean');
+    expect(editHeaderSource).toContain("order-show-operational-summary--compact");
+    expect(editHeaderSource).toContain('order-show-header--compact-sticky');
+    expect(operationalCss).toMatch(/\.order-form-operational__workspace[\s\S]*overflow:\s*visible/);
   });
 
   it('switches the order summary to the compact one-line variant only when stuck', () => {

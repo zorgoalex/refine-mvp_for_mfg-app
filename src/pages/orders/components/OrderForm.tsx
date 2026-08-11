@@ -1,7 +1,7 @@
 // Main Order Form Component
 // Master-Detail form with Tabs for child entities
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Tooltip, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
@@ -24,6 +24,7 @@ import { loadOrderViaBackend } from '../../../hooks/useOrderBackendRead';
 import { useOrderSave } from '../../../hooks/useOrderSave';
 import { OrderSaveValidationContext } from '../../../hooks/orderSaveValidation';
 import { useOrderExport } from '../../../hooks/useOrderExport';
+import { useIsMobile } from '../../../hooks/useDeviceTier';
 import { projectsApi, type ProjectDto } from '../../../api/projectsApi';
 import { OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
@@ -88,6 +89,48 @@ interface BazisDraftRuntime {
   idempotencyKey: string;
 }
 
+const ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT = 40;
+
+type OrderFormStickyStyle = CSSProperties & {
+  '--order-show-sticky-top': string;
+  '--order-show-compact-header-height': string;
+  '--order-show-tabs-shell-height': string;
+  '--order-show-details-toolbar-height': string;
+  '--order-show-table-header-top': string;
+};
+
+function useWorkspaceTabsHeight(): number {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    let ro: ResizeObserver | null = null;
+    const attach = (): boolean => {
+      const tabs = document.querySelector('.workspace-tabs');
+      if (!tabs) return false;
+      const measure = () => setHeight(tabs.getBoundingClientRect().height);
+      measure();
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(measure);
+        ro.observe(tabs);
+      }
+      return true;
+    };
+
+    if (attach()) return () => ro?.disconnect();
+
+    const mo = new MutationObserver(() => {
+      if (attach()) mo.disconnect();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      ro?.disconnect();
+    };
+  }, []);
+
+  return height;
+}
+
 function createOrderSaveIdempotencyKey(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -126,6 +169,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const location = useLocation();
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
+  const isMobile = useIsMobile();
+  const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
   const tabKey = useWorkspaceTabKey(location.pathname);
   const bazisDraft = readBazisDraftFromLocationState(location.state);
@@ -160,6 +205,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Refs for tabs to apply current edits before save
   const detailsTabRef = useRef<OrderDetailsTabRef>(null);
   const paymentsTabRef = useRef<OrderPaymentsTabRef>(null);
+  const orderFormDetailsBlockRef = useRef<HTMLDivElement>(null);
+  const orderFormStickySentinelRef = useRef<HTMLDivElement>(null);
   const handledAddPaymentIntentRef = useRef<string | null>(null);
   const saveKeyRef = useRef<string | undefined>(undefined);
   const saveKeySignatureRef = useRef<string | undefined>(undefined);
@@ -173,6 +220,21 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     [],
   );
   const [projectsLoading, setProjectsLoading] = useState(false);
+  const [orderFormStickyEnabled, setOrderFormStickyEnabled] = useState(false);
+  const [orderFormSummaryStuck, setOrderFormSummaryStuck] = useState(false);
+  const orderFormStickyStyle = useMemo<OrderFormStickyStyle>(() => ({
+    '--order-show-sticky-top': `${workspaceTabsHeight}px`,
+    '--order-show-compact-header-height': `${ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT}px`,
+    '--order-show-tabs-shell-height': '0px',
+    '--order-show-details-toolbar-height': '0px',
+    '--order-show-table-header-top': '0px',
+  }), [workspaceTabsHeight]);
+  const orderFormPageClassName = useMemo(() => [
+    'order-show-page',
+    'order-form-sticky-page',
+    isOperational ? 'order-show-page--operational' : '',
+    orderFormStickyEnabled ? 'order-show-page--sticky-enabled' : '',
+  ].filter(Boolean).join(' '), [isOperational, orderFormStickyEnabled]);
 
   const {
     defaultOrderStatus,
@@ -1395,9 +1457,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'details',
         label: isOperational ? 'Состав' : 'Детали заказа',
         children: (
-          <OrderSaveValidationContext.Provider value={saveValidation}>
-            <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />
-          </OrderSaveValidationContext.Provider>
+          <div ref={orderFormDetailsBlockRef} className="order-form-details-section">
+            <OrderSaveValidationContext.Provider value={saveValidation}>
+              <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />
+            </OrderSaveValidationContext.Provider>
+          </div>
         ),
       },
       {
@@ -1540,6 +1604,48 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [enabledTabKeys, activeTab]);
 
+  useEffect(() => {
+    const update = () => {
+      const block = orderFormDetailsBlockRef.current;
+      const availableHeight = window.innerHeight - workspaceTabsHeight;
+      const next =
+        !isMobile &&
+        activeTab === 'details' &&
+        details.length > 0 &&
+        !!block &&
+        block.scrollHeight > Math.max(320, availableHeight);
+      setOrderFormStickyEnabled((prev) => (prev === next ? prev : next));
+    };
+
+    update();
+    window.addEventListener('resize', update);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    if (orderFormDetailsBlockRef.current) ro?.observe(orderFormDetailsBlockRef.current);
+    return () => {
+      window.removeEventListener('resize', update);
+      ro?.disconnect();
+    };
+  }, [activeTab, details.length, isMobile, workspaceTabsHeight]);
+
+  useEffect(() => {
+    const update = () => {
+      const node = orderFormStickySentinelRef.current;
+      const next =
+        orderFormStickyEnabled &&
+        !!node &&
+        node.getBoundingClientRect().top <= workspaceTabsHeight;
+      setOrderFormSummaryStuck((prev) => (prev === next ? prev : next));
+    };
+
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [orderFormStickyEnabled, workspaceTabsHeight]);
+
   // Handle cancel / close requests
   const handleCancel = () => {
     if (isSaving) return; // disabled mid-save
@@ -1656,13 +1762,20 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             )}
           />
           <div className="order-form-operational__workspace">
-            <OrderHeaderSummary />
-            <Tabs
-              activeKey={activeTab}
-              onChange={(key) => setActiveTab(key)}
-              items={headerTabItems}
-              type="card"
-            />
+            <div className={orderFormPageClassName} style={orderFormStickyStyle}>
+              <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
+              <div
+                className={`order-show-summary-tabs-sticky${orderFormSummaryStuck ? ' order-show-summary-tabs-sticky--stuck' : ''}`}
+              >
+                <OrderHeaderSummary compactSticky={orderFormStickyEnabled && orderFormSummaryStuck} />
+              </div>
+              <Tabs
+                activeKey={activeTab}
+                onChange={(key) => setActiveTab(key)}
+                items={headerTabItems}
+                type="card"
+              />
+            </div>
           </div>
         </div>
       </OrderDraftStoreProvider>
@@ -1741,15 +1854,22 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       }
     >
       {/* Read-only header with order summary (both create and edit modes) */}
-      <OrderHeaderSummary />
+      <div className={orderFormPageClassName} style={orderFormStickyStyle}>
+        <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
+        <div
+          className={`order-show-summary-tabs-sticky${orderFormSummaryStuck ? ' order-show-summary-tabs-sticky--stuck' : ''}`}
+        >
+          <OrderHeaderSummary compactSticky={orderFormStickyEnabled && orderFormSummaryStuck} />
+        </div>
 
-      {/* Editable tabs */}
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => setActiveTab(key)}
-        items={headerTabItems}
-        type="card"
-      />
+        {/* Editable tabs */}
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key)}
+          items={headerTabItems}
+          type="card"
+        />
+      </div>
     </Card>
     </OrderDraftStoreProvider>
   );

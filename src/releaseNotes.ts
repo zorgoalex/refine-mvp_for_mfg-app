@@ -41,6 +41,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "Заказы: липкая сводка формы",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В просмотре и редактировании заказа сводная строка снова закрепляется сверху при прокрутке, если список деталей выше экрана.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "Автостатусы: файлы заказа на станке",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

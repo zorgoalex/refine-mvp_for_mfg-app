@@ -24,7 +24,11 @@ import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitiv
 
 const { Text } = Typography;
 
-export const OrderHeaderSummary: React.FC = () => {
+interface OrderHeaderSummaryProps {
+  compactSticky?: boolean;
+}
+
+export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactSticky = false }) => {
   const isOperational = useOperationalUi();
   const { header, details, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
   const { getSetting } = useAppSettings();
@@ -334,18 +338,36 @@ export const OrderHeaderSummary: React.FC = () => {
     };
   }, [details, millingTypesMap, edgeTypesMap, filmsMap]);
 
+  const orderStatusName = orderStatusData?.data?.order_status_name || 'Не назначен';
+  const paymentStatusName = paymentStatusData?.data?.payment_status_name || 'Не назначен';
+  const finalAmount = Number(header.final_amount) || Number(header.total_amount) || totals.total_amount || 0;
+  const paidAmount = Number(header.paid_amount) || totals.total_paid || 0;
+  const discount = Number(header.discount) || 0;
+  const surcharge = Number(header.surcharge) || 0;
+  const remainingAmount = Math.max(0, finalAmount - paidAmount);
+  const compactFinanceItems = [
+    `${formatNumber(finalAmount, 2)} ${CURRENCY_SYMBOL}`,
+    discount > 0 ? `скид. ${formatNumber(discount, 2)} ${CURRENCY_SYMBOL}` : null,
+    surcharge > 0 ? `нац. ${formatNumber(surcharge, 2)} ${CURRENCY_SYMBOL}` : null,
+    paidAmount > 0 ? `опл. ${formatNumber(paidAmount, 2)} ${CURRENCY_SYMBOL}` : null,
+    remainingAmount > 0 ? `ост. ${formatNumber(remainingAmount, 2)} ${CURRENCY_SYMBOL}` : null,
+  ].filter(Boolean);
+  const compactDowelingName =
+    latestDowelingLink?.doweling_order?.doweling_order_name || header.doweling_order_name || null;
+  const compactMaterialSummary = [
+    materialsSummary,
+    basisProjects.length > 0 ? `Базис: ${basisProjects.join(', ')}` : null,
+  ].filter(Boolean).join(' · ');
+
   if (isOperational) {
-    const finalAmount = Number(header.final_amount) || Number(header.total_amount) || totals.total_amount || 0;
-    const paidAmount = Number(header.paid_amount) || totals.total_paid || 0;
     const deadlineAt = header.planned_completion_date ? dayjs(header.planned_completion_date) : null;
     const daysToDeadline = deadlineAt ? deadlineAt.startOf('day').diff(dayjs().startOf('day'), 'day') : null;
-    const orderStatusName = orderStatusData?.data?.order_status_name || 'Не назначен';
-    const paymentStatusName = paymentStatusData?.data?.payment_status_name || 'Не назначен';
 
     return (
       <>
         <div
-          className="order-show-operational-summary"
+          className={`order-show-operational-summary${compactSticky ? ' order-show-operational-summary--compact' : ''}`}
+          aria-label="Сводка заказа"
           onContextMenu={handleContextMenu}
           title="ПКМ — изменить статусы"
           >
@@ -393,6 +415,83 @@ export const OrderHeaderSummary: React.FC = () => {
           <div className="order-show-operational-summary__money">
             <strong>{formatNumber(finalAmount, 0)} {CURRENCY_SYMBOL}</strong>
             <small>{`Оплачено ${formatNumber(paidAmount, 0)} ${CURRENCY_SYMBOL}`}</small>
+          </div>
+        </div>
+        <OrderHeaderContextMenu
+          visible={contextMenu.visible}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={closeContextMenu}
+        />
+      </>
+    );
+  }
+
+  if (compactSticky) {
+    return (
+      <>
+        <div
+          className="order-show-header order-show-header--compact-sticky"
+          aria-label="Сводка заказа"
+          onContextMenu={handleContextMenu}
+          title="ПКМ — изменить статусы"
+        >
+          <div className="order-show-header__compact-line">
+            <span className="order-show-header__compact-primary">
+              <Text strong className="order-show-header__compact-text">{header.order_name || 'Новый заказ'}</Text>
+              <span
+                className="order-show-header__compact-priority"
+                title={`Приоритет ${header.priority !== undefined ? formatNumber(header.priority, 0) : '—'}`}
+                aria-label={`Приоритет ${header.priority !== undefined ? formatNumber(header.priority, 0) : '—'}`}
+              >
+                <StarOutlined aria-hidden style={{ color: header.priority && header.priority <= 50 ? '#D97706' : 'var(--app-text-muted)' }} />
+                {header.priority !== undefined ? formatNumber(header.priority, 0) : '—'}
+              </span>
+              <Tag color={orderStatusName === 'Готов к выдаче' ? '#059669' : orderStatusName === 'Предварительный' ? '#91caff' : '#4F46E5'}>
+                {orderStatusName}
+              </Tag>
+            </span>
+            <span className="order-show-header__compact-item order-show-header__compact-client" title={clientData?.data?.client_name || ''}>
+              <Text strong className="order-show-header__compact-text">{clientData?.data?.client_name || '—'}</Text>
+              {primaryPhone ? <a href={`tel:${primaryPhone.replace(/[^+\d]/g, '')}`}>{primaryPhone}</a> : null}
+            </span>
+            <span className="order-show-header__compact-item order-show-header__compact-money">
+              <span className="order-show-header__compact-text">{compactFinanceItems.join(' / ')}</span>
+              <Tag color={paymentStatusName === 'Оплачен' ? '#059669' : '#D97706'}>
+                {paymentStatusName}
+              </Tag>
+            </span>
+            <span className="order-show-header__compact-item order-show-header__compact-dates">
+              {header.order_date ? dayjs(header.order_date).format('DD.MM.YYYY') : '—'}
+              {' → '}
+              {header.planned_completion_date ? dayjs(header.planned_completion_date).format('DD.MM.YYYY') : '—'}
+              {passedProductionCodes.length > 0 ? (
+                <ProductionStagesDisplay
+                  passedCodes={passedProductionCodes}
+                  displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                  codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                  codeToName={productionWorkflowDisplay?.codeToName}
+                  fontSize={11}
+                  passedColor="#52c41a"
+                  showTooltip
+                />
+              ) : null}
+            </span>
+            {compactDowelingName ? (
+              <span className="order-show-header__compact-item order-show-header__compact-doweling" title={compactDowelingName}>
+                Присадка: <Text strong className="order-show-header__compact-text">{compactDowelingName}</Text>
+              </span>
+            ) : null}
+            <span className="order-show-header__compact-item order-show-header__compact-material" title={compactMaterialSummary}>
+              <Text strong className="order-show-header__compact-text">{compactMaterialSummary}</Text>
+            </span>
+            <span className="order-show-header__compact-item order-show-header__compact-metrics">
+              поз. <Text strong>{formatNumber(totals.positions_count, 0)}</Text>
+              {' · '}
+              дет. <Text strong>{formatNumber(totals.parts_count, 0)}</Text>
+              {' · '}
+              <Text strong>{formatNumber(totals.total_area, 2)} м²</Text>
+            </span>
           </div>
         </div>
         <OrderHeaderContextMenu
