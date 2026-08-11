@@ -51,6 +51,7 @@ import type {
   CncTelegramTodayResponseDto,
   CncTelegramToolDto,
 } from '../dto/cnc-telegram.dto';
+import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 import {
   persistTelegramItemEvidence,
   projectTelegramLabelMap,
@@ -501,6 +502,14 @@ export class PgCncTelegramRepository
           packet,
           requestId,
           packetAuditId: auditId,
+        });
+      }
+      if (packetColumnKey(packet) === 'parsed') {
+        await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+          orderIds: packet.items.map((item) => item.orderId),
+          actor: command.currentUser,
+          requestId,
+          sourceIdempotencyKey: `cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:machine-files`,
         });
       }
       await enqueuePacketEvents(tx, resolvedCommand, packet, requestId, auditId);

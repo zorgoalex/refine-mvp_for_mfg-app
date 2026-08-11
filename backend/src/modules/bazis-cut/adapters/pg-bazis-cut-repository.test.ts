@@ -44,6 +44,14 @@ describe('PgBazisCutRepository security and event contract', () => {
     expect(repositorySource).toContain('bazisNodeDesignation: null');
   });
 
+  it('emits the MDF machine-files automation event from visible Basis-cut cards', () => {
+    expect(repositorySource).toContain('evaluateMdfOrderMachineFilesPresentAutomation');
+    expect(repositorySource).toContain('orderIds: set.details.map((detail) => detail.sourceOrderId)');
+    expect(repositorySource).toContain('bazis-cut-set:${set.bazisCutSetId}:version-${set.version}:${eventSource}:machine-files');
+    expect(repositorySource).toContain("evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'created')");
+    expect(repositorySource).toContain("evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'details-added')");
+  });
+
   it('uses unprefixed ERP order numbers in the list', async () => {
     const query = vi.fn(async (_sql: string, _params?: readonly unknown[]) => result([]));
     const database = { query, transaction: vi.fn() } as unknown as DatabaseService;

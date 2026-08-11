@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "Автостатусы: файлы заказа на станке",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "Во вкладке «Автостатусы» появилось событие «Файлы заказа на станке»: при появлении карточки в колонке «Файлы на станке» на МДФ-доске автоматика срабатывает для каждого заказа, найденного в этой карточке.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "МДФ-работы: плановая дата сегодня",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

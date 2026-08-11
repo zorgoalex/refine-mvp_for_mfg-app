@@ -55,6 +55,22 @@ describe('status automation DTO', () => {
       ).toMatchObject({ conditions: {}, priority: 100, isEnabled: false });
     });
 
+    it('accepts the MDF order machine files event', () => {
+      expect(
+        parseCreateStatusAutomationRuleRequest({
+          name: 'Файлы заказа на станке',
+          eventType: 'mdf.order_machine_files_present',
+          actionType: 'change_production_status',
+          targetStatusId: 3,
+          conditions: { currentOrderStatusIn: [1] },
+        }),
+      ).toMatchObject({
+        eventType: 'mdf.order_machine_files_present',
+        actionType: 'change_production_status',
+        conditions: { currentOrderStatusIn: [1] },
+      });
+    });
+
     it.each([
       ['unknown event type', { eventType: 'payment.deleted' }],
       ['invalid action type', { actionType: 'delete_order' }],

@@ -12,6 +12,7 @@ const expectedEventTypes = [
   'order.planned_completion_date_changed',
   'order.status_changed',
   'order.production_status_changed',
+  'mdf.order_machine_files_present',
 ] as const;
 
 const baseConditions = [
@@ -32,22 +33,26 @@ const actionTypes = [
 ] as const;
 
 describe('status automation event catalog', () => {
-  it('contains exactly the seven supported events', () => {
-    expect(STATUS_AUTOMATION_EVENTS).toHaveLength(7);
+  it('contains exactly the eight supported events', () => {
+    expect(STATUS_AUTOMATION_EVENTS).toHaveLength(8);
     expect(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).toEqual(
       expectedEventTypes,
     );
   });
 
   it('exposes unique event types, groups, and user-facing descriptions', () => {
-    expect(new Set(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).size).toBe(7);
+    expect(new Set(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).size).toBe(8);
     for (const descriptor of STATUS_AUTOMATION_EVENTS) {
-      expect(['order', 'dates', 'statuses', 'payments']).toContain(descriptor.group);
+      expect(['order', 'dates', 'statuses', 'payments', 'production']).toContain(descriptor.group);
       expect(descriptor.description.trim().length).toBeGreaterThan(10);
     }
     expect(getEventDescriptor('order.planned_completion_date_changed')).toMatchObject({
       group: 'dates',
       title: 'Изменилась плановая дата готовности',
+    });
+    expect(getEventDescriptor('mdf.order_machine_files_present')).toMatchObject({
+      group: 'production',
+      title: 'Файлы заказа на станке',
     });
   });
 

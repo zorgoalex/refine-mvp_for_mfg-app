@@ -15,6 +15,13 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
   });
 
+  it('emits the MDF machine-files automation event from pending board cards', () => {
+    expect(repositorySource).toContain('evaluateMdfOrderMachineFilesPresentAutomation');
+    expect(repositorySource).toContain("packetColumnKey(packet) === 'parsed'");
+    expect(repositorySource).toContain('orderIds: packet.items.map((item) => item.orderId)');
+    expect(repositorySource).toContain('cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:machine-files');
+  });
+
   it('uses database current date for today when caller omits date', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const database = {
