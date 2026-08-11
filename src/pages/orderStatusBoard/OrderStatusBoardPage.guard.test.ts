@@ -524,12 +524,28 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 
   it('adds a number-only compact MDF card mode', () => {
+    const packetCardStart = page.indexOf('const CncTelegramPacketCard =');
+    const packetMinimalStart = page.indexOf('if (minimal) {', packetCardStart);
+    const packetMinimalEnd = page.indexOf('\n\n  return (', packetMinimalStart);
+    const packetMinimal = page.slice(packetMinimalStart, packetMinimalEnd);
+    const bathCardStart = page.indexOf('const CncTelegramBathCardView =');
+    const bathMinimalStart = page.indexOf('{minimal ? (', bathCardStart);
+    const bathMinimalEnd = page.indexOf(') : (', bathMinimalStart);
+    const bathMinimal = page.slice(bathMinimalStart, bathMinimalEnd);
+
     expect(model).toContain("export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal'");
     expect(page).toContain("cardDisplayMode === 'minimal' ? 'status-board-columns--cnc-minimal' : ''");
     expect(page).toContain("const cncColumnMinWidth = cardDisplayMode === 'minimal' ? 132 : 220");
     expect(page).toContain("displayMode={cardDisplayMode === 'minimal' ? 'minimal' : 'standard'}");
-    expect(page).toContain('formatCncPacketCutSheetNumbers(packet)');
-    expect(page).toContain('formatCncPacketBasisCutNumber(packet)');
+    expect(packetMinimal).toContain('formatCncPacketCompactNumber(packet)');
+    expect(page).toContain("return packet.cuttingSequenceNo != null ? String(packet.cuttingSequenceNo) : '—';");
+    expect(page).not.toContain('formatCncPacketBasisCutNumber');
+    expect(page).not.toContain('packet.svgCutSheets ?? []');
+    expect(packetMinimal).not.toContain('<span className="cnc-compact-card__ref-label">Раскрой</span>');
+    expect(packetMinimal).not.toContain('<span className="cnc-compact-card__ref-label">Базис</span>');
+    expect(packetMinimal).not.toContain('Базис');
+    expect(bathMinimal).toContain('{bath.cutNumber}');
+    expect(bathMinimal).not.toContain('№');
     expect(page).toContain("minimal ? 'cnc-bath-card--minimal cnc-compact-card' : ''");
     expect(page).toContain("minimal ? 'cnc-bazis-cut-card--minimal cnc-compact-card' : ''");
     expect(page).toContain("cncNumberOnly ? 'cnc-order-card--minimal cnc-compact-card' : ''");
@@ -537,7 +553,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-columns--cnc-minimal .status-board-column__cards');
     expect(css).toContain('.cnc-compact-card');
     expect(css).toContain('.cnc-compact-card__number');
-    expect(css).toContain('.cnc-compact-card__refs');
+    expect(css).not.toContain('.cnc-compact-card__refs');
   });
 
   it('shows detail totals without position counts on every MDF card', () => {

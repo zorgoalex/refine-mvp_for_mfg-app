@@ -3588,16 +3588,9 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         data-cnc-clickable={relationsEnabled ? 'true' : undefined}
         onClick={relationsEnabled ? onSelectRelation : undefined}
       >
-        <div className="cnc-compact-card__refs" aria-label="Номера файла станка">
-          <span>
-            <span className="cnc-compact-card__ref-label">Раскрой</span>
-            <strong>{formatCncPacketCutSheetNumbers(packet)}</strong>
-          </span>
-          <span>
-            <span className="cnc-compact-card__ref-label">Базис</span>
-            <strong>{formatCncPacketBasisCutNumber(packet)}</strong>
-          </span>
-        </div>
+        <span className="cnc-compact-card__number" aria-label="Номер раскроя файла станка">
+          {formatCncPacketCompactNumber(packet)}
+        </span>
       </div>
     );
   }
@@ -4024,7 +4017,7 @@ const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
           className="cnc-compact-card__number"
           aria-label={`Номер ванны ${bath.cutNumber}`}
         >
-          №{bath.cutNumber}
+          {bath.cutNumber}
         </span>
       ) : (
         <>
@@ -6922,24 +6915,8 @@ function cncMachineFileCutPrintHeader(packet: CncTelegramPacket): string | null 
   return null;
 }
 
-function formatCncPacketCutSheetNumbers(packet: CncTelegramPacket): string {
-  const sheetNumbers = Array.from(new Set(
-    (packet.svgCutSheets ?? [])
-      .map((sheet) => sheet.sheetNumber)
-      .filter((sheetNumber): sheetNumber is number =>
-        Number.isInteger(sheetNumber) && sheetNumber > 0,
-      ),
-  )).sort((left, right) => left - right);
-
-  if (sheetNumbers.length > 0) {
-    return sheetNumbers.map((sheetNumber) => `№${sheetNumber}`).join(', ');
-  }
-  return packet.cuttingSequenceNo != null ? `№${packet.cuttingSequenceNo}` : '—';
-}
-
-function formatCncPacketBasisCutNumber(packet: CncTelegramPacket): string {
-  if (packet.svgCutResultNo != null) return `БР-${packet.svgCutResultNo}`;
-  return packet.svgCutResultId != null ? `ID ${packet.svgCutResultId}` : '—';
+function formatCncPacketCompactNumber(packet: CncTelegramPacket): string {
+  return packet.cuttingSequenceNo != null ? String(packet.cuttingSequenceNo) : '—';
 }
 
 function cncSheetPreviewRotate90(
