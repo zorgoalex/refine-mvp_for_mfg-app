@@ -359,6 +359,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');
     expect(css).toContain('grid-column: 1 / -1');
     expect(css).toContain('width: 100%');
+    expect(css).toMatch(/\.cnc-order-card__missing-label\s*\{[^}]*font-weight: 400;/);
     expect(css).toContain('.cnc-order-card__missing-summary::after');
     expect(css).toContain('.cnc-order-card__missing[open] .cnc-order-card__missing-summary::after');
     expect(page).toContain('cncColumnDisplayTitle(column)');
