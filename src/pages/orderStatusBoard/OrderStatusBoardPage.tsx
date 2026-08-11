@@ -117,9 +117,9 @@ import {
   DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   DEFAULT_MDF_ORDER_CARD_SORT,
   DEFAULT_ORDER_STATUS_BOARD_SORT,
+  applyMdfBoardHiddenCardRulesToColumns,
   filterBoardColumns,
   filterCncBathColumnsByMachineOrderMatches,
-  filterCncBathColumnsByOrderStatuses,
   filterCncOrderCardsByPlannedOrderDate,
   filterCncTodayColumnsByOrders,
   filterCncTodayColumnsByPlannedOrderDate,
@@ -1066,9 +1066,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     [mdfBoardHiddenStatusesSetting],
   );
   const cncActiveColumns = useMemo(
-    () => filterCncBathColumnsByOrderStatuses(
+    () => applyMdfBoardHiddenCardRulesToColumns(
       cncPlannedDateColumns,
       cncDisplayOrderStatusCards,
+      mdfBoardHiddenStatusesSetting,
       cncHiddenProductionStatusIds,
       cncHiddenOrderStatusIds,
     ),
@@ -1077,6 +1078,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       cncHiddenOrderStatusIds,
       cncHiddenProductionStatusIds,
       cncPlannedDateColumns,
+      mdfBoardHiddenStatusesSetting,
     ],
   );
   const cncShownDataColumns = useMemo(

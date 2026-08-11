@@ -24,6 +24,7 @@ import {
   type CncRelationCardState,
 } from './OrderStatusBoardPage';
 import {
+  applyMdfBoardHiddenCardRulesToColumns,
   buildCncOrderSearchDateRange,
   buildCncOrderFilterOptions,
   buildCncOrderMissingDetails,
@@ -39,6 +40,7 @@ import {
   isCncCardSummaryOnly,
   isCncOrderHiddenFromMdfBoard,
   mergeOrderStatusBoardColumnPage,
+  normalizeMdfBoardHiddenCardRules,
   parseOrderStatusBoardViewState,
   resolveDefaultMdfBoardHiddenOrderStatusIds,
   resolveMdfBoardHiddenOrderStatusIds,
@@ -1106,6 +1108,85 @@ describe('order status board model', () => {
       { id: 8, name: 'Выдан' },
       { id: 10, name: 'Завершен', sortOrder: 10 },
     ])).toEqual([8, 10]);
+  });
+
+  it('normalizes per-card MDF hidden rules for every supported card type', () => {
+    expect(normalizeMdfBoardHiddenCardRules({
+      cardRules: [
+        { cardKind: 'packet', orderStatusIds: [9, 9, 0, Number.NaN, 7] },
+        { cardKind: 'bath', orderStatusIds: [8] },
+      ],
+    })).toEqual([
+      { cardKind: 'packet', orderStatusIds: [7, 9] },
+      { cardKind: 'bazisCutSet', orderStatusIds: [] },
+      { cardKind: 'bath', orderStatusIds: [8] },
+    ]);
+    expect(normalizeMdfBoardHiddenCardRules(null, [8, 8, 7])).toEqual([
+      { cardKind: 'packet', orderStatusIds: [7, 8] },
+      { cardKind: 'bazisCutSet', orderStatusIds: [7, 8] },
+      { cardKind: 'bath', orderStatusIds: [7, 8] },
+    ]);
+  });
+
+  it('moves MDF file, Basis-cut, and bath cards only when every linked order status matches its card rule', () => {
+    const columns = [
+      {
+        key: 'parsed',
+        title: 'Файлы на станке',
+        total: 4,
+        packets: [
+          cncPacket('packet-terminal', ['2700', '2701'], [2700, 2701]),
+          cncPacket('packet-mixed', ['2700', '2702'], [2700, 2702]),
+          cncPacket('packet-missing-order', ['9999'], [9999]),
+        ],
+        baths: [],
+        bazisCutSets: [
+          cncBazisCutSet(901, [
+            { orderName: '2700', orderId: 2700, detailId: 7001 },
+            { orderName: '2701', orderId: 2701, detailId: 7002 },
+          ]),
+          cncBazisCutSet(902, [
+            { orderName: '2702', orderId: 2702, detailId: 7003 },
+          ]),
+        ],
+      },
+      {
+        key: 'baths',
+        title: 'Карты ванн',
+        total: 2,
+        packets: [],
+        baths: [
+          cncBath('bath-terminal', ['2700', '2701'], [2700, 2701]),
+          cncBath('bath-mixed', ['2700', '2702'], [2700, 2702]),
+        ],
+        bazisCutSets: [],
+      },
+    ] as CncTelegramTodayColumn[];
+    const cards = [
+      card(2700, { orderStatusId: 8, orderStatusName: 'Выдан' }),
+      card(2701, { orderStatusId: 8, orderStatusName: 'Выдан' }),
+      card(2702, { orderStatusId: 5, orderStatusName: 'В работе' }),
+    ];
+
+    const moved = applyMdfBoardHiddenCardRulesToColumns(columns, cards, {
+      cardRules: [
+        { cardKind: 'packet', orderStatusIds: [8] },
+        { cardKind: 'bazisCutSet', orderStatusIds: [8] },
+        { cardKind: 'bath', orderStatusIds: [8] },
+      ],
+    });
+
+    expect(moved.find((column) => column.key === 'parsed')?.packets.map((packet) => packet.packetId)).toEqual([
+      'packet-mixed',
+      'packet-missing-order',
+    ]);
+    expect(moved.find((column) => column.key === 'parsed')?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([902]);
+    expect(moved.find((column) => column.key === 'completed_laminated')?.packets.map((packet) => packet.packetId)).toEqual(['packet-terminal']);
+    expect(moved.find((column) => column.key === 'completed_laminated')?.bazisCutSets?.map((set) => set.bazisCutSetId)).toEqual([901]);
+    expect(moved.find((column) => column.key === 'completed_laminated')?.title).toBe('Распиленные файлы');
+    expect(moved.find((column) => column.key === 'baths')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-mixed']);
+    expect(moved.find((column) => column.key === 'baths_laminated')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-terminal']);
+    expect(moved.find((column) => column.key === 'baths_laminated')?.title).toBe('Завершённые ванны');
   });
 
   it('removes a bath only when every linked order has left the MDF board', () => {
