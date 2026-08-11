@@ -19,6 +19,7 @@ import {
   Modal,
   Segmented,
   Select,
+  Skeleton,
   Spin,
   Switch,
   Tabs,
@@ -1132,12 +1133,41 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       ),
     [cncColumnPreferences.settings.hidden, cncShownDataColumns, viewState.hideEmpty],
   );
+  const cncPlaceholderColumns = useMemo(
+    () =>
+      filterVisibleStatusBoardColumns(
+        [
+          ...CNC_STATUS_BOARD_COLUMN_DEFINITIONS
+            .filter((definition) => !isCncOrderColumnKey(definition.key))
+            .map((definition) =>
+              createCncPlaceholderColumn(
+                definition.key as CncTelegramTodayColumn['key'],
+                definition.label,
+              )),
+          ...(cncTerminalColumnsVisible
+            ? CNC_TERMINAL_COLUMN_DEFINITIONS.map((definition) =>
+                createCncPlaceholderColumn(definition.key, definition.label))
+            : []),
+        ],
+        cncColumnPreferences.settings.hidden,
+      ),
+    [cncColumnPreferences.settings.hidden, cncTerminalColumnsVisible],
+  );
   const cncDetailedWorkspaceActive = cncDetailedEnabled && cncDetailedContext !== null;
   const cncOrdersColumnVisible =
     !cncColumnPreferences.settings.hidden.includes('orders');
+  const cncColumnsLoading = isCncToday && loading;
+  const cncRenderColumns = cncColumnsLoading
+    ? cncPlaceholderColumns
+    : cncDetailedWorkspaceActive
+      ? cncShownDataColumns
+      : cncVisibleColumns;
   const cncHasVisibleColumns = cncDetailedWorkspaceActive
     || cncVisibleColumns.length > 0
     || cncOrdersColumnVisible;
+  const cncHasRenderableColumns = cncColumnsLoading
+    ? cncDetailedWorkspaceActive || cncPlaceholderColumns.length > 0 || cncOrdersColumnVisible
+    : cncHasVisibleColumns;
   const allCncColumnsHidden = CNC_STATUS_BOARD_COLUMN_DEFINITIONS.every(
     (definition) => cncColumnPreferences.settings.hidden.includes(definition.key),
   );
@@ -1380,8 +1410,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     }
     return () => resizeObserver.disconnect();
   }, [
-    cncHasVisibleColumns,
-    cncVisibleColumns.length,
+    cncHasRenderableColumns,
+    cncRenderColumns.length,
     columns.length,
     datasetKey,
     loading,
@@ -2011,7 +2041,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           Для выбора статуса без жеста используйте кнопку меню рядом.
         </div>
 
-        {(isCncToday ? cncHasVisibleColumns : columns.length > 0) && (
+        {(isCncToday ? cncHasRenderableColumns : columns.length > 0) && (
           <div
             ref={topScrollbarRef}
             className="status-board-scrollbar"
@@ -2043,12 +2073,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           aria-busy={loading}
           onScroll={scrollTopFromBoard}
         >
-          {loading && (isCncToday ? !cncToday : !board) ? (
+          {loading && !isCncToday && !board ? (
             <div className="status-board-loading">
               <Spin size="large" tip="Загрузка доски…" />
             </div>
           ) : isCncToday ? (
-            !cncHasVisibleColumns ? (
+            !cncHasRenderableColumns ? (
               <Empty
                 description={
                   allCncColumnsHidden
@@ -2062,7 +2092,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               />
             ) : (
               <CncTelegramTodayColumns
-                columns={cncDetailedWorkspaceActive ? cncShownDataColumns : cncVisibleColumns}
+                columns={cncRenderColumns}
                 readinessColumns={cncShownDataColumns}
                 orderCards={cncOrderCards}
                 manualMoves={cncManualMoves}
@@ -2078,6 +2108,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 canViewCut={canViewCncCutMaps}
                 cardDisplayMode={cncCardDisplayMode}
                 showOrdersColumn={cncDetailedWorkspaceActive || cncOrdersColumnVisible}
+                loading={cncColumnsLoading}
                 printDate={cncNavigationDate.format(DATE_FORMAT)}
                 onSelectRelation={toggleCncRelation}
                 onSelectDetailedBath={selectCncDetailedBath}
@@ -2178,6 +2209,7 @@ interface CncTelegramTodayColumnsProps {
   canViewCut: boolean;
   cardDisplayMode: CncCardDisplayMode;
   showOrdersColumn: boolean;
+  loading: boolean;
   printDate: string;
   onSelectRelation: (target: CncRelationTarget) => void;
   onSelectDetailedBath: (bathId: string) => void;
@@ -2226,6 +2258,20 @@ export interface CncTelegramTodayDisplayColumn {
   orderCards?: CncOrderBoardCard[];
 }
 
+function createCncPlaceholderColumn(
+  key: CncTelegramTodayColumn['key'],
+  title: string,
+): CncTelegramTodayColumn {
+  return {
+    key,
+    title,
+    total: 0,
+    packets: [],
+    baths: [],
+    bazisCutSets: [],
+  };
+}
+
 const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   columns,
   readinessColumns,
@@ -2243,6 +2289,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   canViewCut,
   cardDisplayMode,
   showOrdersColumn,
+  loading,
   printDate,
   onSelectRelation,
   onSelectDetailedBath,
@@ -2324,36 +2371,36 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
               {
                 key: 'orders' as const,
                 title: 'Заказы',
-                total: orderDisplayCards.orders.length,
+                total: loading ? 0 : orderDisplayCards.orders.length,
                 packets: [],
                 baths: [],
                 bazisCutSets: [],
-                orderCards: orderDisplayCards.orders,
+                orderCards: loading ? [] : orderDisplayCards.orders,
               },
               {
                 key: 'orders_ready' as const,
                 title: 'Готов к выдаче',
-                total: orderDisplayCards.orders_ready.length,
+                total: loading ? 0 : orderDisplayCards.orders_ready.length,
                 packets: [],
                 baths: [],
                 bazisCutSets: [],
-                orderCards: orderDisplayCards.orders_ready,
+                orderCards: loading ? [] : orderDisplayCards.orders_ready,
               },
               {
                 key: 'orders_issued' as const,
                 title: 'Выдан',
-                total: orderDisplayCards.orders_issued.length,
+                total: loading ? 0 : orderDisplayCards.orders_issued.length,
                 packets: [],
                 baths: [],
                 bazisCutSets: [],
-                orderCards: orderDisplayCards.orders_issued,
+                orderCards: loading ? [] : orderDisplayCards.orders_issued,
               },
             ]
           : []),
         ...terminalColumns,
       ];
     },
-    [detailedBathActive, manualDisplayColumns, orderDisplayCards, showOrdersColumn],
+    [detailedBathActive, loading, manualDisplayColumns, orderDisplayCards, showOrdersColumn],
   );
   const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
   const selectedDetailedDetailId = detailedContext?.activeDetail?.detailId ?? null;
@@ -2466,17 +2513,31 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   <span className="status-board-column__marker" aria-hidden="true" />
                   <Typography.Text strong>{title}</Typography.Text>
                 </div>
-                <Badge
-                  count={column.total}
-                  overflowCount={9999}
-                  showZero
-                  color={cncColumnBadgeColor(column.key)}
-                />
+                {loading ? (
+                  <Skeleton.Button
+                    active
+                    size="small"
+                    className="cnc-today-column__badge-placeholder"
+                  />
+                ) : (
+                  <Badge
+                    count={column.total}
+                    overflowCount={9999}
+                    showZero
+                    color={cncColumnBadgeColor(column.key)}
+                  />
+                )}
               </div>
-              <Typography.Text className="cnc-today-column__totals" type="secondary">
-                {totals.details} дет. · {formatArea(totals.areaM2)}
-              </Typography.Text>
-              {!orderColumn && (
+              {loading ? (
+                <div className="cnc-today-column__totals-placeholder" aria-hidden="true">
+                  <Skeleton.Input active size="small" />
+                </div>
+              ) : (
+                <Typography.Text className="cnc-today-column__totals" type="secondary">
+                  {totals.details} дет. · {formatArea(totals.areaM2)}
+                </Typography.Text>
+              )}
+              {!orderColumn && !loading && (
                 <div className="cnc-today-column__load">
                   {isOperational ? (
                     <div className="cnc-today-column__load-label">
@@ -2495,11 +2556,11 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
             </header>
 
             <div className="status-board-column__cards">
-              {orderColumn ? (
+              {loading ? (
+                <CncColumnCardPlaceholders displayMode={cardDisplayMode} />
+              ) : orderColumn ? (
                 orderCardsLoading && sortedOrderCards.length === 0 ? (
-                  <div className="status-board-column__empty">
-                    <Spin size="small" /> Загрузка заказов…
-                  </div>
+                  <CncColumnCardPlaceholders displayMode={cardDisplayMode} />
                 ) : sortedOrderCards.length === 0 ? (
                   <div className="status-board-column__empty">
                     <span className="status-board-column__empty-icon"><FileTextOutlined /></span>
@@ -2767,6 +2828,45 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         document.body,
       )}
     </>
+  );
+};
+
+const CncColumnCardPlaceholders: React.FC<{ displayMode: CncCardDisplayMode }> = ({
+  displayMode,
+}) => {
+  const count = displayMode === 'minimal' ? 5 : displayMode === 'compact' ? 4 : 3;
+  return (
+    <div className="cnc-column-placeholders" aria-hidden="true">
+      {Array.from({ length: count }, (_, index) => (
+        <div
+          key={index}
+          className={[
+            'cnc-column-placeholder-card',
+            `cnc-column-placeholder-card--${displayMode}`,
+          ].join(' ')}
+        >
+          <Skeleton.Input
+            active
+            size="small"
+            className="cnc-column-placeholder-card__title"
+          />
+          {displayMode !== 'minimal' && (
+            <>
+              <Skeleton.Input
+                active
+                size="small"
+                className="cnc-column-placeholder-card__meta"
+              />
+              <Skeleton.Input
+                active
+                size="small"
+                className="cnc-column-placeholder-card__line"
+              />
+            </>
+          )}
+        </div>
+      ))}
+    </div>
   );
 };
 
