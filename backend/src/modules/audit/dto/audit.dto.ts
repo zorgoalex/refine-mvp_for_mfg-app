@@ -88,3 +88,24 @@ export interface AuditFilterOptionsResponseDto {
   data: AuditFilterOptionsDto;
   requestId: string;
 }
+
+export interface AuditOrderFilterOptionDto {
+  orderId: number;
+  orderName: string;
+}
+
+export interface AuditParticipantFilterOptionDto {
+  userId: number;
+  username: string;
+  role: string | null;
+}
+
+export interface AuditOrderFilterOptionsResponseDto {
+  data: AuditOrderFilterOptionDto[];
+  requestId: string;
+}
+
+export interface AuditParticipantFilterOptionsResponseDto {
+  data: AuditParticipantFilterOptionDto[];
+  requestId: string;
+}

@@ -41,6 +41,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "Конфигурация: журнал истории",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В конфигурации появилась вкладка «Журнал истории» с фильтрами по периоду, событиям, заказам и участникам; журнал показывает бизнес-события из audit log и доступен по праву audit.view.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "МДФ-работы: общие ручные перемещения",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

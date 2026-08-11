@@ -50,5 +50,9 @@ describe('apiRoutes', () => {
     expect(apiRoutes.vlm.analyze).toBe('/api/v1/vlm/analyze');
     expect(apiRoutes.labels.scanResolve()).toBe('/api/v1/labels/scan-resolve');
     expect(apiRoutes.labels.scanResolveImage()).toBe('/api/v1/labels/scan-resolve-image');
+    expect(apiRoutes.audit.list).toBe('/api/v1/audit');
+    expect(apiRoutes.audit.filterOptions).toBe('/api/v1/audit/filter-options');
+    expect(apiRoutes.audit.orderOptions).toBe('/api/v1/audit/order-options');
+    expect(apiRoutes.audit.participantOptions).toBe('/api/v1/audit/participant-options');
   });
 });

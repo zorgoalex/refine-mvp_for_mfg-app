@@ -89,13 +89,43 @@ export interface AuditFilterOptionsResponse {
   requestId: string;
 }
 
+export interface AuditOrderFilterOption {
+  orderId: number;
+  orderName: string;
+}
+
+export interface AuditParticipantFilterOption {
+  userId: number;
+  username: string;
+  role: string | null;
+}
+
+export interface AuditOrderFilterOptionsResponse {
+  data: AuditOrderFilterOption[];
+  requestId: string;
+}
+
+export interface AuditParticipantFilterOptionsResponse {
+  data: AuditParticipantFilterOption[];
+  requestId: string;
+}
+
+export interface AuditLookupOptionsQuery {
+  ids?: number[];
+  search?: string;
+  limit?: number;
+}
+
 export interface AuditLogListQuery {
   page?: number;
   pageSize?: number;
   event?: string;
+  events?: string[];
   entityType?: string;
   entityId?: string;
   userId?: number;
+  orderIds?: number[];
+  participantUserIds?: number[];
   role?: string;
   source?: string;
   relatedOrderId?: number;
@@ -109,4 +139,5 @@ export interface AuditLogListQuery {
   requestId?: string;
   createdFrom?: string;
   createdTo?: string;
+  scope?: 'all' | 'business';
 }

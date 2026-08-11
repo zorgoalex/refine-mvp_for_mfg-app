@@ -6,6 +6,10 @@ import type {
   AuditFilterOptionsResponseDto,
   AuditLogEventDto,
   AuditLogListResponseDto,
+  AuditOrderFilterOptionDto,
+  AuditOrderFilterOptionsResponseDto,
+  AuditParticipantFilterOptionDto,
+  AuditParticipantFilterOptionsResponseDto,
   AuditRelatedEntityFilterOptionDto,
   AuditUserFilterOptionDto,
 } from '../dto/audit.dto';
@@ -13,8 +17,13 @@ import type {
   AuditFilterOptionsCommand,
   AuditLogFilters,
   AuditLogRepositoryPort,
+  AuditLookupOptionsCommand,
   ListAuditCommand,
 } from '../application/audit-query.types';
+import {
+  BUSINESS_HISTORY_EVENT_LIKE_PATTERNS,
+  BUSINESS_HISTORY_EXCLUDED_EVENT_LIKE_PATTERNS,
+} from '../application/business-history-events';
 
 const FILTER_OPTIONS_RECENT_LIMIT = 5000;
 const FILTER_OPTION_LIMIT = 200;
@@ -73,6 +82,17 @@ interface AuditFilterOptionsRow extends QueryResultRow {
   related_entity_types: unknown;
   related_entities: unknown;
   request_ids: unknown;
+}
+
+interface AuditOrderOptionRow extends QueryResultRow {
+  order_id: string | number;
+  order_name: string;
+}
+
+interface AuditParticipantOptionRow extends QueryResultRow {
+  user_id: string | number;
+  username: string;
+  role: string | null;
 }
 
 const SELECT_COLUMNS = `
@@ -147,14 +167,16 @@ const AUDIT_LABEL_JOINS = `
     END
 `;
 
-const FILTER_OPTIONS_SQL = `
+function filterOptionsSql(where: string, recentLimitParam: number, optionLimitParam: number): string {
+  return `
 WITH recent AS (
   SELECT audit_id, event, entity_type, entity_id, user_id, username, role, source,
          related_order_id, related_client_id, related_payment_id, related_deadline_id,
          related_production_event_id, related_user_id, request_id, created_at
   FROM audit_log
+  ${where}
   ORDER BY created_at DESC, audit_id DESC
-  LIMIT $1
+  LIMIT $${recentLimitParam}
 ),
 related AS (
   SELECT r.entity_type, r.entity_id, max(recent.created_at) AS latest
@@ -186,32 +208,32 @@ related_enriched AS (
 )
 SELECT
   COALESCE((SELECT jsonb_agg(event ORDER BY latest DESC, event)
-    FROM (SELECT event, max(created_at) AS latest FROM recent WHERE event IS NOT NULL GROUP BY event ORDER BY latest DESC, event LIMIT $2) s), '[]'::jsonb) AS events,
+    FROM (SELECT event, max(created_at) AS latest FROM recent WHERE event IS NOT NULL GROUP BY event ORDER BY latest DESC, event LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS events,
   COALESCE((SELECT jsonb_agg(entity_type ORDER BY latest DESC, entity_type)
-    FROM (SELECT entity_type, max(created_at) AS latest FROM recent WHERE entity_type IS NOT NULL GROUP BY entity_type ORDER BY latest DESC, entity_type LIMIT $2) s), '[]'::jsonb) AS entity_types,
+    FROM (SELECT entity_type, max(created_at) AS latest FROM recent WHERE entity_type IS NOT NULL GROUP BY entity_type ORDER BY latest DESC, entity_type LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS entity_types,
   COALESCE((SELECT jsonb_agg(entity_id ORDER BY latest DESC, entity_id)
-    FROM (SELECT entity_id, max(created_at) AS latest FROM recent WHERE entity_id IS NOT NULL GROUP BY entity_id ORDER BY latest DESC, entity_id LIMIT $2) s), '[]'::jsonb) AS entity_ids,
+    FROM (SELECT entity_id, max(created_at) AS latest FROM recent WHERE entity_id IS NOT NULL GROUP BY entity_id ORDER BY latest DESC, entity_id LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS entity_ids,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('userId', user_id, 'username', username, 'role', role) ORDER BY created_at DESC, user_id)
     FROM (
       SELECT user_id, username, role, created_at
       FROM (SELECT DISTINCT ON (user_id) user_id, username, role, created_at FROM recent WHERE user_id IS NOT NULL ORDER BY user_id, created_at DESC) distinct_users
       ORDER BY created_at DESC, user_id
-      LIMIT $2
+      LIMIT $${optionLimitParam}
     ) s), '[]'::jsonb) AS users,
   COALESCE((SELECT jsonb_agg(role ORDER BY latest DESC, role)
-    FROM (SELECT role, max(created_at) AS latest FROM recent WHERE role IS NOT NULL GROUP BY role ORDER BY latest DESC, role LIMIT $2) s), '[]'::jsonb) AS roles,
+    FROM (SELECT role, max(created_at) AS latest FROM recent WHERE role IS NOT NULL GROUP BY role ORDER BY latest DESC, role LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS roles,
   COALESCE((SELECT jsonb_agg(source ORDER BY latest DESC, source)
-    FROM (SELECT source, max(created_at) AS latest FROM recent WHERE source IS NOT NULL GROUP BY source ORDER BY latest DESC, source LIMIT $2) s), '[]'::jsonb) AS sources,
+    FROM (SELECT source, max(created_at) AS latest FROM recent WHERE source IS NOT NULL GROUP BY source ORDER BY latest DESC, source LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS sources,
   COALESCE((SELECT jsonb_agg(related_order_id ORDER BY latest DESC, related_order_id)
-    FROM (SELECT related_order_id, max(created_at) AS latest FROM recent WHERE related_order_id IS NOT NULL GROUP BY related_order_id ORDER BY latest DESC, related_order_id LIMIT $2) s), '[]'::jsonb) AS related_order_ids,
+    FROM (SELECT related_order_id, max(created_at) AS latest FROM recent WHERE related_order_id IS NOT NULL GROUP BY related_order_id ORDER BY latest DESC, related_order_id LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS related_order_ids,
   COALESCE((SELECT jsonb_agg(related_client_id ORDER BY latest DESC, related_client_id)
-    FROM (SELECT related_client_id, max(created_at) AS latest FROM recent WHERE related_client_id IS NOT NULL GROUP BY related_client_id ORDER BY latest DESC, related_client_id LIMIT $2) s), '[]'::jsonb) AS related_client_ids,
+    FROM (SELECT related_client_id, max(created_at) AS latest FROM recent WHERE related_client_id IS NOT NULL GROUP BY related_client_id ORDER BY latest DESC, related_client_id LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS related_client_ids,
   COALESCE((SELECT jsonb_agg(related_payment_id ORDER BY latest DESC, related_payment_id)
-    FROM (SELECT related_payment_id, max(created_at) AS latest FROM recent WHERE related_payment_id IS NOT NULL GROUP BY related_payment_id ORDER BY latest DESC, related_payment_id LIMIT $2) s), '[]'::jsonb) AS related_payment_ids,
+    FROM (SELECT related_payment_id, max(created_at) AS latest FROM recent WHERE related_payment_id IS NOT NULL GROUP BY related_payment_id ORDER BY latest DESC, related_payment_id LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS related_payment_ids,
   COALESCE((SELECT jsonb_agg(related_deadline_id ORDER BY latest DESC, related_deadline_id)
-    FROM (SELECT related_deadline_id, max(created_at) AS latest FROM recent WHERE related_deadline_id IS NOT NULL GROUP BY related_deadline_id ORDER BY latest DESC, related_deadline_id LIMIT $2) s), '[]'::jsonb) AS related_deadline_ids,
+    FROM (SELECT related_deadline_id, max(created_at) AS latest FROM recent WHERE related_deadline_id IS NOT NULL GROUP BY related_deadline_id ORDER BY latest DESC, related_deadline_id LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS related_deadline_ids,
   COALESCE((SELECT jsonb_agg(related_production_event_id ORDER BY latest DESC, related_production_event_id)
-    FROM (SELECT related_production_event_id, max(created_at) AS latest FROM recent WHERE related_production_event_id IS NOT NULL GROUP BY related_production_event_id ORDER BY latest DESC, related_production_event_id LIMIT $2) s), '[]'::jsonb) AS related_production_event_ids,
+    FROM (SELECT related_production_event_id, max(created_at) AS latest FROM recent WHERE related_production_event_id IS NOT NULL GROUP BY related_production_event_id ORDER BY latest DESC, related_production_event_id LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS related_production_event_ids,
   COALESCE((SELECT jsonb_agg(id ORDER BY latest DESC, id)
     FROM (
       SELECT id, max(latest) AS latest
@@ -222,15 +244,16 @@ SELECT
       ) related_users
       GROUP BY id
       ORDER BY latest DESC, id
-      LIMIT $2
+      LIMIT $${optionLimitParam}
     ) s), '[]'::jsonb) AS related_user_ids,
   COALESCE((SELECT jsonb_agg(entity_type ORDER BY latest DESC, entity_type)
-    FROM (SELECT entity_type, max(latest) AS latest FROM related_enriched GROUP BY entity_type ORDER BY latest DESC, entity_type LIMIT $2) s), '[]'::jsonb) AS related_entity_types,
+    FROM (SELECT entity_type, max(latest) AS latest FROM related_enriched GROUP BY entity_type ORDER BY latest DESC, entity_type LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS related_entity_types,
   COALESCE((SELECT jsonb_agg(jsonb_build_object('entityType', entity_type, 'entityId', entity_id, 'entityName', entity_name, 'detailNumber', detail_number) ORDER BY latest DESC, entity_type, entity_id)
-    FROM (SELECT entity_type, entity_id, entity_name, detail_number, latest FROM related_enriched ORDER BY latest DESC, entity_type, entity_id LIMIT $2) s), '[]'::jsonb) AS related_entities,
+    FROM (SELECT entity_type, entity_id, entity_name, detail_number, latest FROM related_enriched ORDER BY latest DESC, entity_type, entity_id LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS related_entities,
   COALESCE((SELECT jsonb_agg(request_id ORDER BY latest DESC, request_id)
-    FROM (SELECT request_id, max(created_at) AS latest FROM recent WHERE request_id IS NOT NULL GROUP BY request_id ORDER BY latest DESC, request_id LIMIT $2) s), '[]'::jsonb) AS request_ids
+    FROM (SELECT request_id, max(created_at) AS latest FROM recent WHERE request_id IS NOT NULL GROUP BY request_id ORDER BY latest DESC, request_id LIMIT $${optionLimitParam}) s), '[]'::jsonb) AS request_ids
 `;
+}
 
 function buildWhere(filters: AuditLogFilters): {
   where: string;
@@ -242,10 +265,48 @@ function buildWhere(filters: AuditLogFilters): {
     params.push(value);
     clauses.push(`${column} ${op} $${params.length}`);
   };
-  if (filters.event) add('audit_log.event', '=', filters.event);
+  const addArrayParam = (value: readonly number[] | readonly string[]): number => {
+    params.push(value);
+    return params.length;
+  };
+  if (filters.scope === 'business') {
+    const includeParam = addArrayParam(BUSINESS_HISTORY_EVENT_LIKE_PATTERNS);
+    const excludeParam = addArrayParam(BUSINESS_HISTORY_EXCLUDED_EVENT_LIKE_PATTERNS);
+    clauses.push(
+      `(audit_log.event LIKE ANY($${includeParam}::text[]) ` +
+        `AND NOT (audit_log.event LIKE ANY($${excludeParam}::text[])))`,
+    );
+  }
+  if (filters.events && filters.events.length > 0) {
+    const p = addArrayParam(filters.events);
+    clauses.push(`audit_log.event = ANY($${p}::text[])`);
+  } else if (filters.event) add('audit_log.event', '=', filters.event);
   if (filters.entityType) add('audit_log.entity_type', '=', filters.entityType);
   if (filters.entityId) add('audit_log.entity_id', '=', filters.entityId);
   if (filters.userId != null) add('audit_log.user_id', '=', filters.userId);
+  if (filters.orderIds && filters.orderIds.length > 0) {
+    const p = addArrayParam(filters.orderIds);
+    clauses.push(
+      `(` +
+        `audit_log.related_order_id = ANY($${p}::bigint[]) OR ` +
+        `(audit_log.entity_type = 'order' AND audit_log.entity_id ~ '^[0-9]{1,18}$' ` +
+        `AND audit_log.entity_id::bigint = ANY($${p}::bigint[])) OR ` +
+        `EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
+        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = 'order' AND r.entity_id = ANY($${p}::bigint[]))` +
+      `)`,
+    );
+  }
+  if (filters.participantUserIds && filters.participantUserIds.length > 0) {
+    const p = addArrayParam(filters.participantUserIds);
+    clauses.push(
+      `(` +
+        `audit_log.user_id = ANY($${p}::bigint[]) OR ` +
+        `audit_log.related_user_id = ANY($${p}::bigint[]) OR ` +
+        `EXISTS (SELECT 1 FROM audit_log_related_entity r ` +
+        `WHERE r.audit_id = audit_log.audit_id AND r.entity_type = 'user' AND r.entity_id = ANY($${p}::bigint[]))` +
+      `)`,
+    );
+  }
   if (filters.role) add('audit_log.role', '=', filters.role);
   if (filters.source) add('audit_log.source', '=', filters.source);
   if (filters.relatedOrderId != null) add('audit_log.related_order_id', '=', filters.relatedOrderId);
@@ -439,6 +500,37 @@ function mapFilterOptions(row: AuditFilterOptionsRow | undefined): AuditFilterOp
   };
 }
 
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function buildLookupParams(query: AuditLookupOptionsCommand['query']): {
+  ids: readonly number[];
+  search: string | null;
+  limit: number;
+} {
+  return {
+    ids: query.ids ?? [],
+    search: query.search ? `%${escapeLike(query.search)}%` : null,
+    limit: query.limit,
+  };
+}
+
+function mapOrderOption(row: AuditOrderOptionRow): AuditOrderFilterOptionDto {
+  return {
+    orderId: num(row.order_id) ?? 0,
+    orderName: row.order_name,
+  };
+}
+
+function mapParticipantOption(row: AuditParticipantOptionRow): AuditParticipantFilterOptionDto {
+  return {
+    userId: num(row.user_id) ?? 0,
+    username: row.username,
+    role: row.role,
+  };
+}
+
 export class PgAuditLogRepository implements AuditLogRepositoryPort {
   constructor(private readonly database: DatabaseClient) {}
 
@@ -468,12 +560,89 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
   }
 
   async filterOptions(command: AuditFilterOptionsCommand): Promise<AuditFilterOptionsResponseDto> {
-    const result = await this.database.query<AuditFilterOptionsRow>(FILTER_OPTIONS_SQL, [
+    const { where, params } = buildWhere({ scope: command.scope });
+    const recentLimitParam = params.length + 1;
+    const optionLimitParam = params.length + 2;
+    const result = await this.database.query<AuditFilterOptionsRow>(filterOptionsSql(where, recentLimitParam, optionLimitParam), [
+      ...params,
       FILTER_OPTIONS_RECENT_LIMIT,
       FILTER_OPTION_LIMIT,
     ]);
     return {
       data: mapFilterOptions(result.rows[0]),
+      requestId: command.requestId,
+    };
+  }
+
+  async orderOptions(command: AuditLookupOptionsCommand): Promise<AuditOrderFilterOptionsResponseDto> {
+    const lookup = buildLookupParams(command.query);
+    const result = await this.database.query<AuditOrderOptionRow>(
+      `
+      WITH selected AS (
+        SELECT o.order_id, o.order_name, o.order_date, 0 AS selected_rank
+        FROM orders o
+        WHERE o.order_id = ANY($1::bigint[])
+      ),
+      searched AS (
+        SELECT o.order_id, o.order_name, o.order_date, 1 AS selected_rank
+        FROM orders o
+        WHERE NOT (o.order_id = ANY($1::bigint[]))
+          AND ($2::text IS NULL OR o.order_id::text ILIKE $2 ESCAPE '\\' OR o.order_name ILIKE $2 ESCAPE '\\')
+        ORDER BY o.order_date DESC NULLS LAST, o.order_id DESC
+        LIMIT $3
+      )
+      SELECT order_id, order_name
+      FROM (
+        SELECT * FROM selected
+        UNION ALL
+        SELECT * FROM searched
+      ) options
+      ORDER BY selected_rank ASC, order_date DESC NULLS LAST, order_id DESC
+      `,
+      [lookup.ids, lookup.search, lookup.limit],
+    );
+    return {
+      data: result.rows.map(mapOrderOption),
+      requestId: command.requestId,
+    };
+  }
+
+  async participantOptions(command: AuditLookupOptionsCommand): Promise<AuditParticipantFilterOptionsResponseDto> {
+    const lookup = buildLookupParams(command.query);
+    const result = await this.database.query<AuditParticipantOptionRow>(
+      `
+      WITH selected AS (
+        SELECT u.user_id, u.username::text AS username, r.role_code AS role, u.is_active, 0 AS selected_rank
+        FROM users u
+        LEFT JOIN roles r ON r.role_id = u.role_id
+        WHERE u.user_id = ANY($1::bigint[])
+      ),
+      searched AS (
+        SELECT u.user_id, u.username::text AS username, r.role_code AS role, u.is_active, 1 AS selected_rank
+        FROM users u
+        LEFT JOIN roles r ON r.role_id = u.role_id
+        WHERE NOT (u.user_id = ANY($1::bigint[]))
+          AND (
+            $2::text IS NULL
+            OR u.user_id::text ILIKE $2 ESCAPE '\\'
+            OR u.username::text ILIKE $2 ESCAPE '\\'
+            OR COALESCE(r.role_code, '') ILIKE $2 ESCAPE '\\'
+          )
+        ORDER BY u.is_active DESC, u.username ASC, u.user_id ASC
+        LIMIT $3
+      )
+      SELECT user_id, username, role
+      FROM (
+        SELECT * FROM selected
+        UNION ALL
+        SELECT * FROM searched
+      ) options
+      ORDER BY selected_rank ASC, is_active DESC, username ASC, user_id ASC
+      `,
+      [lookup.ids, lookup.search, lookup.limit],
+    );
+    return {
+      data: result.rows.map(mapParticipantOption),
       requestId: command.requestId,
     };
   }
