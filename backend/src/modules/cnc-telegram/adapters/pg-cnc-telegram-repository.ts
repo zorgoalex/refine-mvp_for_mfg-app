@@ -5,7 +5,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { DatabaseClient, TransactionClient } from '../../../database/database.types';
 import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
-import { formatCutNumber } from '../../cut/application/cut-numbering';
+import { formatCutJobNumber, formatCutNumber } from '../../cut/application/cut-numbering';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -3709,6 +3709,7 @@ function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
         resultNo,
         revisionNo,
         cutNumber: formatCutNumber(cutJobId, resultNo, true),
+        displayCutNumber: formatCutJobNumber(cutJobId, true),
         cutJobName: normalizeOptional(row.cut_job_name) ?? `Раскрой ${cutJobId}`,
         createdAt: toIso(row.result_created_at),
         ready: false,

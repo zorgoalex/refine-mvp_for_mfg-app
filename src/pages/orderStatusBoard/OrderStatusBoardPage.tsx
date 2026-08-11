@@ -3080,7 +3080,9 @@ type CncPrintCard =
   | { kind: 'bazis-cut'; bazisCutSet: CncTelegramBazisCutSetCard }
   | { kind: 'order'; order: OrderStatusBoardCard };
 
-function formatCncBathCardCutNumber(bath: Pick<CncTelegramBathCard, 'cutJobId'>): string {
+function formatCncBathCardCutNumber(bath: Pick<CncTelegramBathCard, 'cutJobId' | 'displayCutNumber'>): string {
+  const displayCutNumber = bath.displayCutNumber?.trim();
+  if (displayCutNumber) return displayCutNumber;
   return `В-${bath.cutJobId}`;
 }
 

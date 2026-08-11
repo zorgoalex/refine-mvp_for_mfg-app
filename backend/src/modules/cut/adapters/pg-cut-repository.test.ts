@@ -47,7 +47,7 @@ describe('cut PDF sheet context fields', () => {
     expect(repositorySource).toContain('cutJobId: pdfIdentity.cutJobId');
     expect(repositorySource).toContain('cutNumber: pdfIdentity.cutNumber');
     expect(repositorySource).toContain('currentCutNumber: pdfIdentity.currentCutNumber');
-    expect(repositorySource).toContain('currentCutNumber: currentResultNo === null ? null : `${cutJobId}-${currentResultNo}`');
+    expect(repositorySource).toContain('currentCutNumber: currentResultNo === null ? null : formatCutNumber(cutJobId, currentResultNo, currentIsVacuum)');
     expect(repositorySource).toContain('filmRequirementLinearMeters: showBathMeterGuides');
     expect(repositorySource).toContain('calculateBathSheetFilmUsage(s.placements)?.linearMeters');
     expect(repositorySource).toContain('bathDetailInfoFor:');
@@ -58,6 +58,15 @@ describe('cut PDF sheet context fields', () => {
     expect(repositorySource.match(
       /edgeTypeName: detail\?\.edgeTypeName \?\? null,[\s\S]{0,120}millingTypeName: detail\?\.millingTypeName \?\? null,[\s\S]{0,120}doweling: detail\?\.doweling \?\? false/g,
     )).toHaveLength(2);
+  });
+});
+
+describe('cut job display numbering', () => {
+  it('loads backend-authoritative display numbers for list and card views', () => {
+    expect(repositorySource).toContain('formatCutJobNumber(jobId, isVacuum)');
+    expect(repositorySource).toContain('displayNumber: formatCutJobNumber(jobId, isVacuum)');
+    expect(repositorySource).toContain('cpp.params AS profile_params');
+    expect(repositorySource).toContain("layout_mode === 'vacuum_table'");
   });
 });
 
@@ -301,6 +310,11 @@ function createDatabase(options: FakeDbOptions = {}) {
       return { rows: [{ cut_job_id: 42 }], rowCount: 1 };
     }
 
+    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params,')) {
+      const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
+      return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null, sheet_material_type_id: options.cutJob?.sheet_material_type_id ?? null, combine_films: options.cutJob?.combine_films ?? false, split_by_material: options.cutJob?.split_by_material ?? true, rotation_allowed: options.cutJob?.rotation_allowed ?? true, texture_direction: options.cutJob?.texture_direction ?? 'none' }], rowCount: 1 };
+    }
+
     if (sql.startsWith('INSERT INTO cut_result_command') && sql.includes("'calculate'")) {
       storedCalculateCommand = {
         command_type: 'calculate',
@@ -326,9 +340,27 @@ function createDatabase(options: FakeDbOptions = {}) {
       return { rows: [], rowCount: 1 };
     }
 
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params,')) {
+    if (sql.startsWith('SELECT j.cut_job_id, j.name, j.status, j.source, j.version, j.pdf_prewarm_state, j.failure_code, j.failure_reason,')) {
       const base = options.cutJob ?? { cut_job_id: 42, name: 'J', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null };
-      return { rows: [{ ...base, version: jobVersion, param_profile_id: options.cutJob?.param_profile_id ?? null, sheet_material_type_id: options.cutJob?.sheet_material_type_id ?? null, combine_films: options.cutJob?.combine_films ?? false, split_by_material: options.cutJob?.split_by_material ?? true, rotation_allowed: options.cutJob?.rotation_allowed ?? true, texture_direction: options.cutJob?.texture_direction ?? 'none' }], rowCount: 1 };
+      return {
+        rows: [{
+          ...base,
+          version: jobVersion,
+          failure_code: options.cutJob?.failure_code ?? null,
+          failure_reason: options.cutJob?.failure_reason ?? null,
+          param_profile_id: options.cutJob?.param_profile_id ?? null,
+          sheet_material_type_id: options.cutJob?.sheet_material_type_id ?? null,
+          pdf_template_code: options.cutJob?.pdf_template_code ?? 'default',
+          combine_films: options.cutJob?.combine_films ?? false,
+          split_by_material: options.cutJob?.split_by_material ?? true,
+          rotation_allowed: options.cutJob?.rotation_allowed ?? true,
+          texture_direction: options.cutJob?.texture_direction ?? 'none',
+          created_at: options.cutJob?.created_at ?? new Date('2026-08-07T00:00:00Z'),
+          last_calc_params: lastCalcParams,
+          profile_params: options.cutJob?.profile_params ?? null,
+        }],
+        rowCount: 1,
+      };
     }
 
     if (sql.startsWith('SELECT cut_job_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
@@ -481,8 +513,8 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('INSERT INTO audit_log_related_entity')) return { rows: [], rowCount: 1 };
 
     // loadJob reads
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason,')) {
-      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: jobVersion, created_at: new Date('2026-08-07T00:00:00Z'), pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true, rotation_allowed: true, texture_direction: 'none', last_calc_params: lastCalcParams }], rowCount: 1 };
+    if (sql.startsWith('SELECT j.cut_job_id, j.name, j.status, j.source, j.version, j.pdf_prewarm_state, j.failure_code, j.failure_reason,')) {
+      return { rows: [{ cut_job_id: 42, name: 'J', status: 'ready', source: 'manual', version: jobVersion, created_at: new Date('2026-08-07T00:00:00Z'), pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: 'default', combine_films: false, split_by_material: true, rotation_allowed: true, texture_direction: 'none', last_calc_params: lastCalcParams, profile_params: null }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) {
       return { rows: [{ cut_job_id: 42, positions: 0, details: 0, area: 0 }], rowCount: 1 };

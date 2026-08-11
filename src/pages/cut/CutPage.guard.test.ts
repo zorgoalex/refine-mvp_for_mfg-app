@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // backend-owned, no-Hasura-write surface (CLAUDE.md principle 2/3) and keeps the
 // no_sheet_spec onboarding signal (plan §5).
 const source = readFileSync(fileURLToPath(new URL('./CutPage.tsx', import.meta.url)), 'utf8');
+const helperSource = readFileSync(fileURLToPath(new URL('./cutPageHelpers.ts', import.meta.url)), 'utf8');
 const pdfPreviewSource = readFileSync(fileURLToPath(new URL('./CutPdfPreview.tsx', import.meta.url)), 'utf8');
 const sheetLabelSource = readFileSync(fileURLToPath(new URL('./CutSheetLabelGenerateAction.tsx', import.meta.url)), 'utf8');
 const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
@@ -66,6 +67,7 @@ describe('CutPage source guards', () => {
     expect(source).toContain('formatCutJobDisplayNumber');
     expect(source).toContain('const jobDisplayNumber = job ? formatCutJobDisplayNumber(job, profiles) : null;');
     expect(source).toContain('render: (_: unknown, row: CutJobDto) => formatCutJobDisplayNumber(row, profiles)');
+    expect(helperSource).toContain('const displayNumber = job.displayNumber?.trim();');
     expect(source).toContain('Задание на раскрой {jobDisplayNumber}');
     expect(source).toContain('Производство › Раскрой › Задание ${jobDisplayNumber}');
     expect(source).toContain('`${formatCutJobDisplayNumber(candidate, profiles)} · ${candidate.name}`');

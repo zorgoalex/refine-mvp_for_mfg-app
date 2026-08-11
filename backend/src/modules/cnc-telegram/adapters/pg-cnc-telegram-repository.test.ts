@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import {
@@ -7,7 +8,13 @@ import {
   PgCncTelegramRepository,
 } from './pg-cnc-telegram-repository';
 
+const repositorySource = readFileSync(new URL('./pg-cnc-telegram-repository.ts', import.meta.url), 'utf8');
+
 describe('PgCncTelegramRepository', () => {
+  it('returns bath display cut numbers without result version', () => {
+    expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
+  });
+
   it('uses database current date for today when caller omits date', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const database = {

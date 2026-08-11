@@ -603,11 +603,16 @@ describe('OrderStatusBoardPage UX guards', () => {
     const actionsEnd = page.indexOf('</div>', actionsStart);
     const actions = page.slice(actionsStart, actionsEnd);
     expect(page).toContain('function formatCncBathCardCutNumber(');
+    expect(page).toContain('const displayCutNumber = bath.displayCutNumber?.trim();');
+    expect(page).toContain('if (displayCutNumber) return displayCutNumber;');
     expect(page).toContain('return `В-${bath.cutJobId}`;');
     expect(page).toContain('const bathCutNumber = formatCncBathCardCutNumber(bath);');
     expect(actions).toContain('className="cnc-bath-card__cut-result-badge"');
     expect(actions).toMatch(/>\s*\{bathCutNumber\}\s*<\/Tag>/);
     expect(actions).not.toContain('№{bath.cutNumber}');
+    expect(page).toContain('aria-label={`Номер карты раскроя ${bathCutNumber}`}');
+    expect(page).toMatch(/className="cnc-compact-card__number"[\s\S]*\{bathCutNumber\}/);
+    expect(page).not.toContain('aria-label={`Номер ванны ${bath.cutNumber}`}');
     expect(actions).not.toContain('cnc-bath-card__ready-icon');
     expect(css).toMatch(
       /\.cnc-bath-card__actions\s*\{[^}]*align-items: center;/s,

@@ -143,6 +143,9 @@ describe('cutPageHelpers', () => {
     ];
     expect(formatCutJobDisplayNumber({ cutJobId: 42, paramProfileId: 7 }, profiles)).toBe('В-42');
     expect(formatCutJobDisplayNumber({ cutJobId: 43, paramProfileId: 8 }, profiles)).toBe('#43');
+    expect(formatCutJobDisplayNumber({ cutJobId: 45, paramProfileId: 8, displayNumber: 'В-45' }, profiles)).toBe('В-45');
+    expect(formatCutJobDisplayNumber({ cutJobId: 46, paramProfileId: 8, isVacuum: true }, profiles)).toBe('В-46');
+    expect(formatCutJobDisplayNumber({ cutJobId: 47, paramProfileId: 8, displayNumber: '47' }, profiles)).toBe('#47');
     expect(isVacuumCutJobDisplayNumber({
       cutJobId: 44,
       paramProfileId: 99,

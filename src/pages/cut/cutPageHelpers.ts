@@ -210,6 +210,8 @@ type CutJobDisplayProfile = {
 type CutJobDisplayNumberSource = {
   cutJobId: number;
   paramProfileId: number | null;
+  displayNumber?: string | null;
+  isVacuum?: boolean | null;
   currentCutResult?: { cutNumber?: string | null } | null;
 };
 
@@ -217,6 +219,9 @@ export function isVacuumCutJobDisplayNumber(
   job: CutJobDisplayNumberSource,
   profiles: ReadonlyArray<CutJobDisplayProfile>,
 ): boolean {
+  const displayNumber = job.displayNumber?.trim();
+  if (displayNumber?.startsWith('В-')) return true;
+  if (job.isVacuum === true) return true;
   const currentCutNumber = job.currentCutResult?.cutNumber;
   if (typeof currentCutNumber === 'string' && currentCutNumber.trimStart().startsWith('В-')) {
     return true;
@@ -231,6 +236,12 @@ export function formatCutJobDisplayNumber(
   job: CutJobDisplayNumberSource,
   profiles: ReadonlyArray<CutJobDisplayProfile>,
 ): string {
+  const displayNumber = job.displayNumber?.trim();
+  if (displayNumber) {
+    return displayNumber.startsWith('В-') || displayNumber.startsWith('#')
+      ? displayNumber
+      : `#${displayNumber}`;
+  }
   return isVacuumCutJobDisplayNumber(job, profiles) ? `В-${job.cutJobId}` : `#${job.cutJobId}`;
 }
 
