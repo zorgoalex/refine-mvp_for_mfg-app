@@ -5114,6 +5114,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           ? 'Нет доступных активных статусов для перемещения.'
           : null;
   const orderNumber = formatStatusBoardOrderNumber(card);
+  const orderNumberOpensOrder = openOrderOnNumber || cncOrderCard;
   const updateDragSuppression = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
     dragSuppressedRef.current = isCncManualDragIgnored(event.target);
   }, []);
@@ -5282,13 +5283,11 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           <Button
             type="link"
             className="status-board-card__number"
+            data-cnc-manual-drag-ignore="true"
+            aria-label={`Открыть заказ ${orderNumber}`}
             onClick={(event) => {
-              if (relationClickEnabled) {
-                event.stopPropagation();
-                onSelectRelation?.();
-                return;
-              }
-              if (!openOrderOnNumber) return;
+              event.stopPropagation();
+              if (!orderNumberOpensOrder) return;
               onOpenOrder(card.orderId);
             }}
           >

@@ -642,7 +642,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('getCncOrderRelationState');
     expect(page).toContain("onSelectRelation({ kind: 'order', id: card.orderId })");
     expect(page).toContain('openOrderOnNumber={!relationsEnabled}');
-    expect(page).toContain('if (!openOrderOnNumber) return;');
+    expect(page).toContain('const orderNumberOpensOrder = openOrderOnNumber || cncOrderCard');
+    expect(page).toContain('if (!orderNumberOpensOrder) return;');
     expect(page).toContain('const bathCards = relationContext');
     expect(page).toContain('const machineFileCards = buildCncMachineColumnCards(');
     expect(page).toContain('machineFileCards.map((entry) =>');
@@ -709,6 +710,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('border-color: #722ed1');
     expect(css).toContain('0 0 0 2px #722ed1');
     expect(css).not.toContain('transition: all');
+  });
+
+  it('opens MDF order cards from the order number without stealing the whole-card relation click', () => {
+    expect(page).toContain('data-cnc-manual-drag-ignore="true"');
+    expect(page).toContain('aria-label={`Открыть заказ ${orderNumber}`}');
+    expect(page).toContain('event.stopPropagation();');
+    expect(page).toContain('onOpenOrder(card.orderId)');
+    expect(page).toContain('onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}');
+    expect(page).toContain("onSelectRelation({ kind: 'order', id: card.orderId })");
   });
 
   it('frames non-MDF machine-file cards in brown based on file metadata and comments', () => {
