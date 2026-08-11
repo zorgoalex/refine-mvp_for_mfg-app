@@ -552,6 +552,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     const actionsEnd = page.indexOf('</div>', actionsStart);
     const actions = page.slice(actionsStart, actionsEnd);
     expect(page).toContain('function formatCncBathCardCutNumber(');
+    expect(page).toContain('const displayCutNumber = bath.displayCutNumber?.trim();');
+    expect(page).toContain('if (displayCutNumber) return displayCutNumber;');
     expect(page).toContain('return `В-${bath.cutJobId}`;');
     expect(page).toContain('const bathCutNumber = formatCncBathCardCutNumber(bath);');
     expect(actions).toContain('className="cnc-bath-card__cut-result-badge"');

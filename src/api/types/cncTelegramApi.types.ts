@@ -137,6 +137,7 @@ export interface CncTelegramBathCard {
   resultNo: number;
   revisionNo: number;
   cutNumber: string;
+  displayCutNumber?: string | null;
   cutJobName: string;
   createdAt: string;
   ready: boolean;

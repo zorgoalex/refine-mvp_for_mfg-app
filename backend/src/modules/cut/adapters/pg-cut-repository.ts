@@ -21,6 +21,7 @@ import {
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
 import {
   cutJobSnapshotUsesVacuumTable,
+  formatCutJobNumber,
   formatCutNumber,
 } from '../application/cut-numbering';
 import {
@@ -4964,6 +4965,14 @@ interface JobRow extends QueryResultRow {
   rotation_allowed: boolean | null;
   texture_direction: string | null;
   last_calc_params: FreecutParams | null;
+  profile_params: unknown;
+}
+
+function cutParamsUseVacuumTable(params: unknown): boolean {
+  return typeof params === 'object'
+    && params !== null
+    && !Array.isArray(params)
+    && (params as { layout_mode?: unknown }).layout_mode === 'vacuum_table';
 }
 
 function buildPdfSheetMeta(
@@ -5572,10 +5581,13 @@ async function loadJob(
   frozenItems = false,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason,
-            param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material,
-            rotation_allowed, texture_direction, created_at, last_calc_params
-       FROM cut_job WHERE cut_job_id = $1`,
+    `SELECT j.cut_job_id, j.name, j.status, j.source, j.version, j.pdf_prewarm_state, j.failure_code, j.failure_reason,
+            j.param_profile_id, j.sheet_material_type_id, j.pdf_template_code, j.combine_films, j.split_by_material,
+            j.rotation_allowed, j.texture_direction, j.created_at, j.last_calc_params,
+            cpp.params AS profile_params
+       FROM cut_job j
+       LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = j.param_profile_id
+       WHERE j.cut_job_id = $1`,
     [cutJobId],
   );
   const jobRow = jobResult.rows[0];
@@ -5674,8 +5686,13 @@ async function loadJob(
     }),
   };
 
+  const jobId = toNum(jobRow.cut_job_id);
+  const isVacuum = cutParamsUseVacuumTable(jobRow.profile_params) || cutParamsUseVacuumTable(jobRow.last_calc_params);
+
   return {
-    cutJobId: toNum(jobRow.cut_job_id),
+    cutJobId: jobId,
+    displayNumber: formatCutJobNumber(jobId, isVacuum),
+    isVacuum,
     name: jobRow.name,
     status: jobRow.status,
     source: jobRow.source,

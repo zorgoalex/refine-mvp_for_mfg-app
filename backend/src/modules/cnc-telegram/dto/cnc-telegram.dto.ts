@@ -140,6 +140,8 @@ export interface CncTelegramBathCardDto {
   resultNo: number;
   revisionNo: number;
   cutNumber: string;
+  /** Operator-facing bath card number without result version, e.g. "В-42". */
+  displayCutNumber?: string;
   cutJobName: string;
   createdAt: string;
   ready: boolean;

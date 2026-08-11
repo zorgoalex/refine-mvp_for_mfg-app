@@ -220,6 +220,9 @@ export type CutTextureDirection = 'vertical' | 'horizontal' | 'none';
 
 export interface CutJobDto {
   cutJobId: number;
+  /** Operator-facing job number without result version. Vacuum-table jobs use "В-<cutJobId>". */
+  displayNumber?: string | null;
+  isVacuum?: boolean | null;
   name: string;
   status: string;
   source: string;
