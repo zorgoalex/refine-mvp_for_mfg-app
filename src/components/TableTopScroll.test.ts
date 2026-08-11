@@ -61,4 +61,12 @@ describe('TableTopScroll performance guards', () => {
     expect(verticalReturn).toBeGreaterThan(stopPropagation);
     expect(horizontalSync).toBeGreaterThan(verticalReturn);
   });
+
+  it('supports the floating horizontal edge scroll button only for real overflow', () => {
+    expect(source).toContain('horizontalEdgeScrollButton?: boolean');
+    expect(source).toContain('horizontalEdgeScrollButton && scrollState.visible');
+    expect(source).toContain('className="app-table-horizontal-edge-button"');
+    expect(source).toContain("scrollTo({ left: nextLeft, behavior: 'smooth' })");
+    expect(source).toContain('edgeButtonScrollsBack ? <LeftOutlined aria-hidden /> : <RightOutlined aria-hidden />');
+  });
 });

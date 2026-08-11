@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "Заказы: навигация по деталям",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В просмотре заказа колонки деталей получили сортировку, колонка «№» закреплена слева, а в просмотре и редактировании у широкого списка деталей появилась полупрозрачная боковая кнопка горизонтальной прокрутки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "Заказы: источник базис-проекта в сводке",
     services: ["ERP"],
     repositories: ["repo_erp"],

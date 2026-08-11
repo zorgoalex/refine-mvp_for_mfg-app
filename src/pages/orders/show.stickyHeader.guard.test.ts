@@ -6,6 +6,7 @@ const showSource = readFileSync(fileURLToPath(new URL('./show.tsx', import.meta.
 const orderFormSource = readFileSync(fileURLToPath(new URL('./components/OrderForm.tsx', import.meta.url)), 'utf8');
 const headerSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderShowHeader.tsx', import.meta.url)), 'utf8');
 const editHeaderSource = readFileSync(fileURLToPath(new URL('./components/sections/OrderHeaderSummary.tsx', import.meta.url)), 'utf8');
+const editDetailTableSource = readFileSync(fileURLToPath(new URL('./components/tables/OrderDetailTable.tsx', import.meta.url)), 'utf8');
 const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import.meta.url)), 'utf8');
 const operationalCss = readFileSync(fileURLToPath(new URL('../../ui-operational/operational.css', import.meta.url)), 'utf8');
 const operationalHeaderSource = headerSource.match(/if \(isOperational\) \{[\s\S]*?\n  \}\n\n  if \(compactSticky\)/)?.[0] ?? '';
@@ -146,5 +147,17 @@ describe('OrderShow sticky detail header guards', () => {
     expect(showSource).toContain('onMouseEnter: _onMouseEnter');
     expect(showSource).toContain('onMouseLeave: _onMouseLeave');
     expect(showSource).toContain('body: { cell: OrderShowDetailBodyCell }');
+  });
+
+  it('keeps show details sortable with a fixed position column and horizontal edge button', () => {
+    expect(showSource).toContain("const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(null);");
+    expect(showSource).toContain("lockVisible: true, lockPosition: 'start'");
+    expect(showSource).toContain("key: 'detail_number',");
+    expect(showSource).toContain("fixed: 'left',");
+    expect(showSource).toContain('sorter: true');
+    expect(showSource).toContain('sortOrder: column.key === orderShowActiveSorter?.key ? orderShowActiveSorter.order : null');
+    expect(showSource).toContain('setOrderShowActiveSorter({ key: String(next.columnKey), order: next.order });');
+    expect(showSource).toContain('<TableTopScroll className="order-show-details-table-wrap" horizontalEdgeScrollButton>');
+    expect(editDetailTableSource).toContain('horizontalEdgeScrollButton');
   });
 });

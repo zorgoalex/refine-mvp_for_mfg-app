@@ -3181,6 +3181,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       </OrderDetailsToolbar>
       <TableTopScroll
         manageAntTableScroll
+        horizontalEdgeScrollButton
         className={tableRowsReady ? undefined : 'order-details-table-scroll-shell--initializing'}
       >
       <OrderDetailCellRuntimeContext.Provider value={cellRuntime}>
