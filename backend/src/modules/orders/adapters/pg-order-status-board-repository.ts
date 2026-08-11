@@ -108,7 +108,6 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
     const needsAssignment =
       command.query.onlyMyOrders ||
       readScope === 'assigned' ||
-      policy.orders.update === 'assigned' ||
       policy.productionTasks.update === 'assigned';
     const needsActor = needsAssignment || readScope === 'own';
     const actorIndex = needsActor
