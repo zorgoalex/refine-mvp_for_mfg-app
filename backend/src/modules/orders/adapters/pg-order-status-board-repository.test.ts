@@ -324,11 +324,11 @@ describe('PgOrderStatusBoardRepository', () => {
     expect(database.queries[0]?.params).toEqual([25]);
   });
 
-  it('filters the board by explicit order ids before ranking cards', async () => {
+  it('filters the production board by explicit order ids without manager own-order scope', async () => {
     const database = fakeDatabase([]);
 
     await new PgOrderStatusBoardRepository(database.client).getBoard({
-      currentUser: user('admin'),
+      currentUser: user('manager'),
       query: {
         board: 'production',
         limit: 24,
@@ -342,6 +342,9 @@ describe('PgOrderStatusBoardRepository', () => {
     const sql = database.queries[0]?.text ?? '';
     expect(sql).toContain('o.order_id = ANY($1::bigint[])');
     expect(sql).toContain('ranked.row_number <= $2');
+    expect(sql).toContain('FALSE AS current_user_assigned');
+    expect(sql).not.toContain('(o.created_by = $1 OR o.manager_id = $1)');
+    expect(sql).not.toContain('assigned_ow');
     expect(database.queries[0]?.params).toEqual([[2700, 2706], 25]);
   });
 

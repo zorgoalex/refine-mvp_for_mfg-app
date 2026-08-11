@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "МДФ-работы: видимость заказов для менеджера",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Менеджер видит на МДФ-доске те же карточки заказов, что и администратор: production-доска больше не применяет ограничение «только свои заказы» к MDF-lookup по найденным заказам.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "Раскрой: номера заданий вакуумного стола",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

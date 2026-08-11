@@ -102,11 +102,15 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
         requiredPermissions: ['productionTasks.view'],
       });
     }
+    const readScope = command.query.board === 'production'
+      ? policy.productionTasks.view
+      : policy.orders.view;
     const needsAssignment =
       command.query.onlyMyOrders ||
-      policy.orders.view === 'assigned' ||
+      readScope === 'assigned' ||
+      policy.orders.update === 'assigned' ||
       policy.productionTasks.update === 'assigned';
-    const needsActor = needsAssignment || policy.orders.view === 'own';
+    const needsActor = needsAssignment || readScope === 'own';
     const actorIndex = needsActor
       ? params.push(normalizeActorUserId(command.currentUser.id))
       : null;
@@ -123,7 +127,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
     const filters = [
       'o.delete_flag = false',
       buildReadScopePredicate(
-        policy.orders.view,
+        readScope,
         actorIndex,
         assignedSql,
       ),
