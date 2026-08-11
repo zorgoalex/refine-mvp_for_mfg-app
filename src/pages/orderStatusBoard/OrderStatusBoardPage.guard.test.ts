@@ -392,6 +392,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("getCncPacketDisplayState(packet, relationContext, detailedContext) !== 'dimmed'");
     expect(page).toContain('cnc-today-column__header-main');
     expect(page).toContain('cnc-today-column__totals');
+    expect(page).toContain('cnc-today-column__totals-placeholder');
+    expect(page).toContain('CncColumnCardPlaceholders');
+    expect(page).toContain('<Skeleton.Input');
+    expect(page).toContain('loading={cncColumnsLoading}');
+    expect(page).toContain('loading && !isCncToday && !board');
+    expect(page).toContain('columns={cncRenderColumns}');
     expect(page).toContain("{totals.details} дет. · {formatArea(totals.areaM2)}");
     expect(page).toContain('По выбранному заказу МДФ-работ нет');
     expect(page).toContain('В чате {formatDateTime');
@@ -829,6 +835,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(css).toContain('.cnc-today-column__header-main');
     expect(css).toContain('.cnc-today-column__totals');
+    expect(css).toContain('.cnc-today-column__badge-placeholder');
+    expect(css).toContain('.cnc-column-placeholder-card');
     expect(css).toContain('font-variant-numeric: tabular-nums');
     expect(css).toContain('border-color: #722ed1');
     expect(css).toContain('0 0 0 2px #722ed1');
@@ -903,7 +911,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('STATUS_BOARD_COLUMN_PREFERENCE_KEYS.cnc_today');
     expect(page).toContain('filterVisibleStatusBoardColumns(');
     expect(page).toContain('showOrdersColumn={cncDetailedWorkspaceActive || cncOrdersColumnVisible}');
-    expect(page).toContain('columns={cncDetailedWorkspaceActive ? cncShownDataColumns : cncVisibleColumns}');
+    expect(page).toContain('columns={cncRenderColumns}');
+    expect(page).toContain('const cncPlaceholderColumns = useMemo(');
+    expect(page).toContain('const cncRenderColumns = cncColumnsLoading');
+    expect(page).toContain('const cncHasRenderableColumns = cncColumnsLoading');
     expect(page).toContain('const cncHasVisibleColumns = cncDetailedWorkspaceActive');
     expect(columnVisibility).toContain("order: 'statusBoardOrder'");
     expect(columnVisibility).toContain("production: 'statusBoardProduction'");
