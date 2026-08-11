@@ -95,7 +95,18 @@ describe('buildAuditQuery', () => {
   });
 });
 
-describe('HistoryJournalTable source guards', () => {
+describe('Journals source guards', () => {
+  it('keeps a single journals page with business history and technical audit tabs', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'list.tsx'), 'utf8');
+
+    expect(source).toContain("className=\"journals-top-tabs\"");
+    expect(source).toContain("label: 'История бизнеса'");
+    expect(source).toContain("label: 'Технический аудит'");
+    expect(source).toContain("className=\"technical-audit-tabs\"");
+    expect(source).toContain("label: 'Действия ERP'");
+    expect(source).toContain("label: 'Telegram-бот'");
+  });
+
   it('keeps business history filters visible, scoped and multi-select based', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'list.tsx'), 'utf8');
 
@@ -113,7 +124,7 @@ describe('HistoryJournalTable source guards', () => {
 
     expect(source).toContain('!businessHistoryMode && (');
     expect(source).toContain("businessHistoryMode || viewMode === 'readable'");
-    expect(source).toContain("businessHistoryMode ? 'Нет записей истории' : 'Нет записей аудита'");
+    expect(source).toContain("businessHistoryMode ? 'Нет записей истории бизнеса' : 'Нет записей аудита'");
   });
 });
 

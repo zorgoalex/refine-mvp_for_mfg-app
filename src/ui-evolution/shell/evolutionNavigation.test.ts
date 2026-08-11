@@ -46,6 +46,7 @@ describe('evolution navigation permission parity', () => {
   it('places MDF work in production and trash in data', () => {
     expect(EVOLUTION_CATEGORY_MAP['mdf-work-board']).toBe('Производство');
     expect(EVOLUTION_CATEGORY_MAP['orders-trash']).toBe('Данные');
+    expect(EVOLUTION_CATEGORY_MAP.audit).toBe('Журналы');
   });
 
   it('keeps settings resources hidden from a legacy non-admin', () => {
@@ -56,7 +57,8 @@ describe('evolution navigation permission parity', () => {
 
   it('keeps settings resources visible to a legacy admin', () => {
     const categories = visibleCategories({ user: { role: 'admin' }, backendPermissions: false });
-    expect(categories['Настройки'].map((item) => item.name)).toEqual(['audit', 'configuration', 'users']);
+    expect(categories['Журналы'].map((item) => item.name)).toEqual(['audit']);
+    expect(categories['Настройки'].map((item) => item.name)).toEqual(['configuration', 'users']);
   });
 
   it('uses backend permissions for settings and individual resources', () => {
@@ -73,7 +75,8 @@ describe('evolution navigation permission parity', () => {
       },
       backendPermissions: true,
     });
-    expect(allowed['Настройки'].map((item) => item.name)).toEqual(['audit', 'configuration', 'users']);
+    expect(allowed['Журналы'].map((item) => item.name)).toEqual(['audit']);
+    expect(allowed['Настройки'].map((item) => item.name)).toEqual(['configuration', 'users']);
   });
 
   it('applies the role visibility matrix after permission checks', () => {

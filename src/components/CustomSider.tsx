@@ -9,6 +9,7 @@ import {
   SettingOutlined,
   ContactsOutlined,
   DatabaseOutlined,
+  AuditOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
@@ -57,6 +58,7 @@ const CATEGORY_ORDER = [
   "Материалы",
   "Данные",
   "Справочники",
+  "Журналы",
   "Настройки",
 ] as const;
 
@@ -67,6 +69,7 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Материалы": <InboxOutlined />,
   "Данные": <DatabaseOutlined />,
   "Справочники": <SettingOutlined />,
+  "Журналы": <AuditOutlined />,
   "Настройки": <SettingOutlined />,
 };
 
@@ -96,7 +99,7 @@ const CATEGORY_MAP: Record<string, string> = {
   employees: "Настройки",
   users: "Настройки",
   configuration: "Настройки",
-  audit: "Настройки",
+  audit: "Журналы",
 };
 
 export const CustomSider: React.FC = () => {

@@ -24,7 +24,7 @@ describe('navigation permissions', () => {
     ).toBe(true);
     expect(
       canViewSettingsCategory({ permissions: ['audit.view'] }, true, false),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('uses explicit resource permissions for known resources', () => {
@@ -65,6 +65,9 @@ describe('navigation permissions', () => {
         { permissions: ['audit.view'] },
         true,
       ),
+    ).toBe(false);
+    expect(
+      canViewNavigationResource('audit', { permissions: ['audit.view'] }, true),
     ).toBe(true);
     expect(
       canViewNavigationResource('users', { permissions: ['audit.view'] }, true),

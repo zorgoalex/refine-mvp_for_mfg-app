@@ -9,7 +9,6 @@ export const SETTINGS_CATEGORY_PERMISSIONS: PermissionName[] = [
   'settings.manage',
   'users.view',
   'deadlines.view',
-  'audit.view',
 ];
 
 export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
@@ -51,7 +50,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   projects: ['projects.view'],
   users: ['users.view'],
   employees: ['employees.view'],
-  configuration: ['settings.view', 'settings.manage', 'deadlines.view', 'audit.view'],
+  configuration: ['settings.view', 'settings.manage', 'deadlines.view'],
   audit: ['audit.view'],
   'cut-jobs': ['cut.view'],
   'bazis-cut-sets': ['cut.view'],

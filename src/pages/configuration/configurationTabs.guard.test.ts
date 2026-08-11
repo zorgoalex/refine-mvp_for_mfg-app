@@ -30,12 +30,11 @@ describe('configuration tabs layout', () => {
     expect(source).toContain('<ExportTemplatesConfigTab />');
   });
 
-  it('registers the history journal tab in the configuration screen', () => {
+  it('does not register journals inside the configuration screen', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
-    expect(source).toContain("key: 'history-journal'");
-    expect(source).toContain('Журнал истории');
-    expect(source).toContain('mode="business-history"');
-    expect(source).toContain('defaultFiltersVisible');
+    expect(source).not.toContain("key: 'history-journal'");
+    expect(source).not.toContain('HistoryJournalTable');
+    expect(source).not.toContain('mode="business-history"');
   });
 
   it('embeds the financial layer matrix in finance settings', () => {
@@ -97,23 +96,19 @@ describe('configuration tabs layout', () => {
     expect(filterConfigurationTabItems(items, false, false)).toEqual([]);
   });
 
-  it('shows only history journal to audit viewers without settings access', () => {
+  it('does not show configuration tabs to audit-only viewers', () => {
     const items = [
       { key: 'orders' },
       { key: 'production' },
       { key: 'finance' },
-      { key: 'history-journal' },
     ];
 
-    expect(filterConfigurationTabItems(items, false, false, true)).toEqual([
-      { key: 'history-journal' },
-    ]);
-    expect(filterConfigurationTabItems(items, true, true, false)).toEqual([
+    expect(filterConfigurationTabItems(items, false, false)).toEqual([]);
+    expect(filterConfigurationTabItems(items, true, true)).toEqual([
       { key: 'orders' },
       { key: 'production' },
       { key: 'finance' },
     ]);
-    expect(filterConfigurationTabItems(items, true, true, true)).toEqual(items);
   });
 
   it('restores the last active configuration tab when it is still available', () => {

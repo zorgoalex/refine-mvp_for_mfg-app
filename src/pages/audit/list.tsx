@@ -425,7 +425,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
   defaultFiltersVisible = false,
 }) => {
   const businessHistoryMode = mode === 'business-history';
-  const resolvedTitle = title ?? (businessHistoryMode ? 'Журнал истории' : 'Журнал аудита');
+  const resolvedTitle = title ?? (businessHistoryMode ? 'История бизнеса' : 'Технический аудит');
   const [form] = Form.useForm<FilterValues>();
   const [filtersVisible, setFiltersVisible] = useState(defaultFiltersVisible);
   const [viewMode, setViewMode] = useState<AuditViewMode>('readable');
@@ -486,7 +486,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
         });
       } catch (err) {
         if (err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 401)) {
-          setPermissionError('Недостаточно прав для просмотра журнала аудита (audit.view).');
+          setPermissionError('Недостаточно прав для просмотра журналов (audit.view).');
           setData([]);
         } else if (err instanceof Error && err.name !== 'AbortError') {
           setPermissionError(`Ошибка загрузки: ${err.message}`);
@@ -514,7 +514,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
       if (err instanceof Error && err.name === 'AbortError') return;
       setFilterOptionsLoaded(true);
       if (err instanceof ApiError && (err.statusCode === 403 || err.statusCode === 401)) {
-        setPermissionError('Недостаточно прав для просмотра журнала аудита (audit.view).');
+        setPermissionError('Недостаточно прав для просмотра журналов (audit.view).');
       } else if (err instanceof Error) {
         setPermissionError(`Ошибка загрузки фильтров: ${err.message}`);
       }
@@ -1020,7 +1020,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
             showTotal: (total) => `Всего: ${total}`,
           }}
           onChange={(pag) => handleTableChange(pag)}
-          locale={{ emptyText: <Empty description={businessHistoryMode ? 'Нет записей истории' : 'Нет записей аудита'} /> }}
+          locale={{ emptyText: <Empty description={businessHistoryMode ? 'Нет записей истории бизнеса' : 'Нет записей аудита'} /> }}
         >
           <Table.Column<AuditLogEventDto>
             dataIndex="createdAt"
@@ -1137,13 +1137,40 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
 
 export const AuditList: React.FC = () => (
   <div style={{ padding: '8px 16px 0' }}>
-    <style>{`.audit-top-tabs .ant-tabs-tab { min-height: 40px; font-weight: 600; }`}</style>
+    <style>{`
+      .journals-top-tabs .ant-tabs-tab,
+      .technical-audit-tabs .ant-tabs-tab { min-height: 40px; font-weight: 600; }
+    `}</style>
     <Tabs
-      className="audit-top-tabs"
-      defaultActiveKey="erp"
+      className="journals-top-tabs"
+      defaultActiveKey="business-history"
       items={[
-        { key: 'erp', label: 'Действия ERP', children: <HistoryJournalTable /> },
-        { key: 'telegram', label: 'Telegram-бот', children: <TelegramWorkerAudit /> },
+        {
+          key: 'business-history',
+          label: 'История бизнеса',
+          children: (
+            <HistoryJournalTable
+              mode="business-history"
+              embedded
+              title="История бизнеса"
+              defaultFiltersVisible
+            />
+          ),
+        },
+        {
+          key: 'technical-audit',
+          label: 'Технический аудит',
+          children: (
+            <Tabs
+              className="technical-audit-tabs"
+              defaultActiveKey="erp"
+              items={[
+                { key: 'erp', label: 'Действия ERP', children: <HistoryJournalTable embedded title="Действия ERP" /> },
+                { key: 'telegram', label: 'Telegram-бот', children: <TelegramWorkerAudit /> },
+              ]}
+            />
+          ),
+        },
       ]}
     />
   </div>

@@ -2,6 +2,7 @@ import React from 'react';
 import { Button, Layout, Menu, Tooltip, Typography } from 'antd';
 import {
   AppstoreOutlined,
+  AuditOutlined,
   CalendarOutlined,
   CreditCardOutlined,
   DownOutlined,
@@ -45,7 +46,8 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
   const materialKeys = ['materials', 'sheet_material_types', 'films', 'film_types', 'edge_types'];
   const financeKeys = ['payments', 'payments_view', 'payment_types', 'payment_statuses'];
   const analyticsKeys = ['clients_analytics_view', 'payments_analytics'];
-  const adminKeys = ['configuration', 'users', 'employees', 'audit'];
+  const journalKeys = ['audit'];
+  const adminKeys = ['configuration', 'users', 'employees'];
   const orderDomainKeys = ['orders_view', 'bazis'];
   const operationalItems = [
     {
@@ -90,6 +92,13 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
       route: findRoute(analyticsKeys),
       icon: <LineChartOutlined />,
       active: isActive(analyticsKeys),
+    },
+    {
+      key: 'journals',
+      label: 'Журналы',
+      route: findRoute(journalKeys),
+      icon: <AuditOutlined />,
+      active: isActive(journalKeys),
     },
     {
       key: 'admin',
