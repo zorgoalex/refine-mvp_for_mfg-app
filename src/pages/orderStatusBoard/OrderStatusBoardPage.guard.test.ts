@@ -644,7 +644,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('openOrderOnNumber={!relationsEnabled}');
     expect(page).toContain('if (!openOrderOnNumber) return;');
     expect(page).toContain('const bathCards = relationContext');
-    expect(page).toContain('const packetCards = relationContext');
+    expect(page).toContain('const machineFileCards = buildCncMachineColumnCards(');
+    expect(page).toContain('machineFileCards.map((entry) =>');
+    expect(page).toContain("kind: 'bazisCutSet',");
+    expect(page).toContain('id: bazisCutSet.bazisCutSetId');
+    expect(page).toContain("active.kind === 'bazisCutSet'");
+    expect(page).toContain('export function cncRelationStatePriority');
     expect(page).toContain('sortCncRelationCards');
     expect(page).toContain('getCncPacketRelationState');
     expect(page).toContain('getCncBathRelationState');
@@ -923,8 +928,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain(
       'grid-template-columns: repeat(var(--status-board-cnc-column-count, 5), minmax(0, 1fr));',
     );
+    expect(page).toContain('const packetState = entry.state;');
     expect(page).toMatch(
-      /const packetState = packetStateFor\(packet\);\s+const summaryOnly = isCncCardSummaryOnly\([\s\S]*?cardKey,\s+detailedPacketHighlightEnabled && packetState === 'related',\s+\);/,
+      /const summaryOnly = isCncCardSummaryOnly\([\s\S]*?cardKey,\s+detailedPacketHighlightEnabled && packetState === 'related',\s+\);/,
     );
     expect(page).toContain('relationState={packetState}');
     expect(css).toContain('.cnc-bath-card--detailed');

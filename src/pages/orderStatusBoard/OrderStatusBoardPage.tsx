@@ -252,10 +252,16 @@ interface StatusBoardCardStatusBadgeOverride {
 export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
 type CncRelationTarget =
   | { kind: 'packet'; id: string }
+  | { kind: 'bazisCutSet'; id: number }
   | { kind: 'bath'; id: string }
   | { kind: 'order'; id: number };
 type CncDetailedDetailTarget = { bathId: string; detailId: number };
-type CncRelationCardState = 'normal' | 'active' | 'related' | 'order-mentioned' | 'dimmed';
+export type CncRelationCardState =
+  | 'normal'
+  | 'active'
+  | 'related'
+  | 'order-mentioned'
+  | 'dimmed';
 type CncDetailedBathPlacement = 'left' | 'right';
 type CncPdfjsModule = typeof import('pdfjs-dist');
 
@@ -2257,12 +2263,13 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
             (bath) => getCncBathRelationState(bath, relationContext),
           )
           : bathSourceCards;
-        const packetCards = relationContext || detailedPacketHighlightEnabled
-          ? sortCncRelationCards(packetSourceCards, packetStateFor)
-          : packetSourceCards;
-        const bazisCutSetCards = relationContext || detailedPacketHighlightEnabled
-          ? sortCncRelationCards(bazisCutSetSourceCards, bazisCutSetStateFor)
-          : bazisCutSetSourceCards;
+        const machineFileCards = buildCncMachineColumnCards(
+          bazisCutSetSourceCards,
+          packetSourceCards,
+          bazisCutSetStateFor,
+          packetStateFor,
+          relationContext || detailedPacketHighlightEnabled,
+        );
         const sortedOrderCards = relationContext
           ? sortCncRelationCards(orderSourceCards, orderStateFor)
           : orderSourceCards;
@@ -2459,7 +2466,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     );
                   })
                 )
-              ) : packetCards.length === 0 && bazisCutSetCards.length === 0 ? (
+              ) : machineFileCards.length === 0 ? (
                 <div className="status-board-column__empty">
                   <span className="status-board-column__empty-icon"><FileTextOutlined /></span>
                   <strong>Пакетов пока нет</strong>
@@ -2467,41 +2474,50 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 </div>
               ) : (
                 <>
-                {bazisCutSetCards.map((bazisCutSet) => {
-                  const cardKey = `bazis-cut:${bazisCutSet.bazisCutSetId}`;
-                  const state = bazisCutSetStateFor(bazisCutSet);
-                  const summaryOnly = isCncCardSummaryOnly(
-                    cardDisplayMode,
-                    standardCardOverrides,
-                    cardKey,
-                    detailedPacketHighlightEnabled && state === 'related',
-                  );
-                  return (
-                    <CncManualCardFrame
-                      key={bazisCutSet.bazisCutSetId}
-                      kind="bazisCutSet"
-                      cardId={String(bazisCutSet.bazisCutSetId)}
-                      sourceColumn={column.key}
-                      onMove={onMove}
-                    >
-                      {() => (
-                        <CncBazisCutSetCardView
-                          card={bazisCutSet}
-                          relationState={state}
-                          highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
-                          summaryOnly={summaryOnly}
-                          displayToggleVisible={cardDisplayMode === 'compact'}
-                          onToggleDisplay={() => toggleCardDisplay(cardKey)}
-                          onOpenOrder={onOpenOrder}
-                          onOpenBazisCut={onOpenBazisCut}
-                        />
-                      )}
-                    </CncManualCardFrame>
-                  );
-                })}
-                {packetCards.map((packet) => {
+                {machineFileCards.map((entry) => {
+                  if (entry.kind === 'bazisCutSet') {
+                    const bazisCutSet = entry.card;
+                    const cardKey = `bazis-cut:${bazisCutSet.bazisCutSetId}`;
+                    const state = entry.state;
+                    const summaryOnly = isCncCardSummaryOnly(
+                      cardDisplayMode,
+                      standardCardOverrides,
+                      cardKey,
+                      detailedPacketHighlightEnabled && state === 'related',
+                    );
+                    return (
+                      <CncManualCardFrame
+                        key={`bazis:${bazisCutSet.bazisCutSetId}`}
+                        kind="bazisCutSet"
+                        cardId={String(bazisCutSet.bazisCutSetId)}
+                        sourceColumn={column.key}
+                        onMove={onMove}
+                      >
+                        {() => (
+                          <CncBazisCutSetCardView
+                            card={bazisCutSet}
+                            relationState={state}
+                            relationsEnabled={relationsEnabled}
+                            highlightEnabled={relationsEnabled || detailedPacketHighlightEnabled}
+                            summaryOnly={summaryOnly}
+                            displayToggleVisible={cardDisplayMode === 'compact'}
+                            onToggleDisplay={() => toggleCardDisplay(cardKey)}
+                            onSelectRelation={() =>
+                              onSelectRelation({
+                                kind: 'bazisCutSet',
+                                id: bazisCutSet.bazisCutSetId,
+                              })
+                            }
+                            onOpenOrder={onOpenOrder}
+                            onOpenBazisCut={onOpenBazisCut}
+                          />
+                        )}
+                      </CncManualCardFrame>
+                    );
+                  }
+                  const packet = entry.card;
                   const cardKey = `packet:${packet.packetId}`;
-                  const packetState = packetStateFor(packet);
+                  const packetState = entry.state;
                   const summaryOnly = isCncCardSummaryOnly(
                     cardDisplayMode,
                     standardCardOverrides,
@@ -2510,7 +2526,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                   );
                   return (
                     <CncManualCardFrame
-                      key={packet.packetId}
+                      key={`packet:${packet.packetId}`}
                       kind="packet"
                       cardId={packet.packetId}
                       sourceColumn={column.key}
@@ -3258,10 +3274,12 @@ const CncCardDisplayToggle: React.FC<CncCardDisplayToggleProps> = ({
 interface CncBazisCutSetCardViewProps {
   card: CncTelegramBazisCutSetCard;
   relationState: CncRelationCardState;
+  relationsEnabled: boolean;
   highlightEnabled: boolean;
   summaryOnly: boolean;
   displayToggleVisible: boolean;
   onToggleDisplay: () => void;
+  onSelectRelation: () => void;
   onOpenOrder: (orderId: number) => void;
   onOpenBazisCut: (setId: number) => void;
 }
@@ -3269,10 +3287,12 @@ interface CncBazisCutSetCardViewProps {
 const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
   card,
   relationState,
+  relationsEnabled,
   highlightEnabled,
   summaryOnly,
   displayToggleVisible,
   onToggleDisplay,
+  onSelectRelation,
   onOpenOrder,
   onOpenBazisCut,
 }) => {
@@ -3296,6 +3316,16 @@ const CncBazisCutSetCardView = memo<CncBazisCutSetCardViewProps>(({
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
       data-bazis-cut-set-id={card.bazisCutSetId}
+      data-cnc-clickable={relationsEnabled ? 'true' : undefined}
+      role={relationsEnabled ? 'button' : undefined}
+      tabIndex={relationsEnabled ? 0 : -1}
+      onClick={relationsEnabled ? onSelectRelation : undefined}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (!relationsEnabled || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        onSelectRelation();
+      }}
     >
       <div className="status-board-card__top">
         <div className="cnc-packet-card__title">
@@ -6335,6 +6365,13 @@ function buildCncRelationContext(
       if (packet) {
         return { active, fingerprint: buildCncPacketFingerprint(packet) };
       }
+    } else if (active.kind === 'bazisCutSet') {
+      const bazisCutSet = column.bazisCutSets?.find(
+        (item) => item.bazisCutSetId === active.id,
+      );
+      if (bazisCutSet) {
+        return { active, fingerprint: buildCncBazisCutSetFingerprint(bazisCutSet) };
+      }
     } else {
       const bath = column.baths.find((item) => item.bathCardId === active.id);
       if (bath) {
@@ -6388,7 +6425,7 @@ function cncDetailedContextHasActiveDetail(
   return context !== null && context.activeDetail !== null && context.fingerprint !== null;
 }
 
-function sortCncRelationCards<T>(
+export function sortCncRelationCards<T>(
   cards: T[],
   getState: (card: T) => CncRelationCardState,
 ): T[] {
@@ -6402,8 +6439,48 @@ function sortCncRelationCards<T>(
     .map(({ card }) => card);
 }
 
-function cncRelationStatePriority(state: CncRelationCardState): number {
-  return state === 'dimmed' ? 1 : 0;
+export function cncRelationStatePriority(state: CncRelationCardState): number {
+  if (state === 'active') return 0;
+  if (state === 'related' || state === 'order-mentioned') return 1;
+  if (state === 'normal') return 2;
+  return 3;
+}
+
+export type CncMachineColumnCard =
+  | {
+    kind: 'bazisCutSet';
+    card: CncTelegramBazisCutSetCard;
+    state: CncRelationCardState;
+  }
+  | {
+    kind: 'packet';
+    card: CncTelegramPacket;
+    state: CncRelationCardState;
+  };
+
+export function buildCncMachineColumnCards(
+  bazisCutSets: CncTelegramBazisCutSetCard[],
+  packets: CncTelegramPacket[],
+  getBazisCutSetState: (card: CncTelegramBazisCutSetCard) => CncRelationCardState,
+  getPacketState: (packet: CncTelegramPacket) => CncRelationCardState,
+  prioritizeRelations: boolean,
+): CncMachineColumnCard[] {
+  const cards: CncMachineColumnCard[] = [
+    ...bazisCutSets.map((card) => ({
+      kind: 'bazisCutSet' as const,
+      card,
+      state: getBazisCutSetState(card),
+    })),
+    ...packets.map((card) => ({
+      kind: 'packet' as const,
+      card,
+      state: getPacketState(card),
+    })),
+  ];
+
+  return prioritizeRelations
+    ? sortCncRelationCards(cards, (card) => card.state)
+    : cards;
 }
 
 function getCncPacketRelationState(
@@ -6450,6 +6527,9 @@ function getCncBazisCutSetDisplayState(
       : 'dimmed';
   }
   if (!relationContext) return 'normal';
+  if (relationContext.active.kind === 'bazisCutSet') {
+    return card.bazisCutSetId === relationContext.active.id ? 'active' : 'dimmed';
+  }
   return cncFingerprintsIntersect(fingerprint, relationContext.fingerprint) ||
     cncMentionedOrderKeysIntersect(fingerprint, relationContext.fingerprint)
     ? 'related'

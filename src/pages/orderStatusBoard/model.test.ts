@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { CncTelegramTodayColumn } from '../../api/types/cncTelegramApi.types';
+import type {
+  CncTelegramBazisCutSetCard,
+  CncTelegramPacket,
+  CncTelegramTodayColumn,
+} from '../../api/types/cncTelegramApi.types';
 import type {
   OrderStatusBoardCard,
   OrderStatusBoardColumn,
@@ -7,13 +11,17 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 import {
   applyCncManualMovesToColumns,
+  buildCncMachineColumnCards,
   buildCncOrderReadiness,
+  cncRelationStatePriority,
   cncManualMoveDestinations,
   cncManualMoveStorageKey,
   formatStatusBoardOrderNumber,
   isCncManualMoveAllowed,
   splitCncOrderCardsByManualColumn,
+  sortCncRelationCards,
   type CncBoardManualMoveState,
+  type CncRelationCardState,
 } from './OrderStatusBoardPage';
 import {
   buildCncOrderSearchDateRange,
@@ -38,6 +46,45 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it('sorts CNC relation cards by active and related state before dimmed cards', () => {
+    const cards: Array<{ id: string; state: CncRelationCardState }> = [
+      { id: 'dimmed', state: 'dimmed' },
+      { id: 'normal', state: 'normal' },
+      { id: 'related', state: 'related' },
+      { id: 'active', state: 'active' },
+      { id: 'order-mentioned', state: 'order-mentioned' },
+    ];
+
+    expect(cards.map((card) => cncRelationStatePriority(card.state))).toEqual([3, 2, 1, 0, 1]);
+    expect(sortCncRelationCards(cards, (card) => card.state).map((card) => card.id)).toEqual([
+      'active',
+      'related',
+      'order-mentioned',
+      'normal',
+      'dimmed',
+    ]);
+  });
+
+  it('sorts mixed machine-file column cards in one relation-prioritized stream', () => {
+    const dimmedBazis = { bazisCutSetId: 100 } as CncTelegramBazisCutSetCard;
+    const normalBazis = { bazisCutSetId: 101 } as CncTelegramBazisCutSetCard;
+    const relatedPacket = { packetId: 'packet-related' } as CncTelegramPacket;
+
+    const cards = buildCncMachineColumnCards(
+      [dimmedBazis, normalBazis],
+      [relatedPacket],
+      (card) => (card.bazisCutSetId === 100 ? 'dimmed' : 'normal'),
+      () => 'related',
+      true,
+    );
+
+    expect(cards.map((card) => (
+      card.kind === 'packet'
+        ? `packet:${card.card.packetId}`
+        : `bazis:${card.card.bazisCutSetId}`
+    ))).toEqual(['packet:packet-related', 'bazis:101', 'bazis:100']);
+  });
+
   it('formats MDF order card numbers safely when compact cards receive incomplete live data', () => {
     expect(formatStatusBoardOrderNumber({ orderId: 2707, orderName: ' 2707 ' })).toBe('2707');
     expect(formatStatusBoardOrderNumber({ orderId: 2708 })).toBe('2708');

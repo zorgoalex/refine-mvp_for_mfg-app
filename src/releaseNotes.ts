@@ -40,6 +40,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   },
   {
     version: APP_VERSION,
+    date: "2026-08-11",
+    title: "МДФ-работы: связанные карточки поднимаются вверх",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В колонке «Файлы на станке» связанные карточки файлов станка и Базис-раскроя теперь сортируются единым списком и поднимаются вверх при выборе связанной карточки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-10",
     title: "МДФ-работы: Базис-раскрои как файлы станка",
     services: ["ERP", "Cutting"],
