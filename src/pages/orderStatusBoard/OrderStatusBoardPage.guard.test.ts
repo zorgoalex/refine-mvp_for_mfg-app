@@ -352,6 +352,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('data-cnc-manual-drag-ignore="true"');
     expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');
+    expect(css).toContain('grid-column: 1 / -1');
+    expect(css).toContain('width: 100%');
     expect(css).toContain('.cnc-order-card__missing-summary::after');
     expect(css).toContain('.cnc-order-card__missing[open] .cnc-order-card__missing-summary::after');
     expect(page).toContain('cncColumnDisplayTitle(column)');
