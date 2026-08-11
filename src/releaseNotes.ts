@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "МДФ-работы: общие ручные перемещения",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Ручные перемещения карточек на МДФ-доске теперь сохраняются в backend с audit-записью и одинаково видны всем ролям вместо локального состояния браузера.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "Автостатусы: файлы заказа на станке",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

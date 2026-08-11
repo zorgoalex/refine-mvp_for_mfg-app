@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -264,7 +264,31 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "source_bath_cut_number ~ '^[0-9]+-[0-9]+$'",
     ]) expect(migration115Probe).toContain(marker);
 
-    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\)/);
+    const migration116Probe = probeFn.slice(
+      probeFn.indexOf('116_telegram_svg_cut_job_display_number*'),
+      probeFn.indexOf('117_mdf_board_manual_moves*'),
+    );
+    for (const marker of [
+      'q_col cut_job source_display_number',
+      "LIKE 'Operator-facing cut job number from the source system;%'",
+      "packet.svg_cut_import_status = 'imported'",
+      "job.selection_criteria->>'source' = 'cnc_telegram_svg'",
+      'job.source_display_number IS DISTINCT FROM packet.cutting_sequence_no::text',
+    ]) expect(migration116Probe).toContain(marker);
+
+    const migration117Probe = probeFn.slice(
+      probeFn.indexOf('117_mdf_board_manual_moves*'),
+      probeFn.indexOf('*) return 2'),
+    );
+    for (const marker of [
+      'q_tbl mdf_board_manual_moves',
+      'uq_mdf_board_manual_moves_card',
+      'chk_mdf_board_manual_moves_kind_target',
+      'idx_mdf_board_manual_moves_lookup',
+      "LIKE 'mdf-board-manual-moves-v1:%'",
+    ]) expect(migration117Probe).toContain(marker);
+
+    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\)/);
   });
 });
 

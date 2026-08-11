@@ -985,6 +985,137 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/status-board/mdf-manual-moves:
+    get:
+      tags:
+        - Orders
+      operationId: listMdfBoardManualMoves
+      summary: Получить ручные перемещения карточек МДФ-доски
+      description: |
+        Возвращает общий backend-source список ручных placement overrides для
+        карточек МДФ-доски. Клиенты не хранят это состояние локально.
+      security:
+        - bearerAuth: []
+      x-permission: production.tasks.view
+      responses:
+        '200':
+          description: Ручные перемещения МДФ-доски
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MdfBoardManualMovesResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/orders/status-board/mdf-manual-moves/{cardKind}/{cardId}:
+    put:
+      tags:
+        - Orders
+      operationId: upsertMdfBoardManualMove
+      summary: Сохранить ручное перемещение карточки МДФ-доски
+      security:
+        - bearerAuth: []
+      x-permission: production.tasks.update
+      parameters:
+        - name: cardKind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [packet, bazisCutSet, bath, order]
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 240
+            pattern: '^[A-Za-z0-9._:-]+$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - targetColumn
+              properties:
+                targetColumn:
+                  $ref: '#/components/schemas/MdfBoardManualMoveTargetColumn'
+      responses:
+        '200':
+          description: Ручное перемещение сохранено
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MdfBoardManualMoveUpsertResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Orders
+      operationId: deleteMdfBoardManualMove
+      summary: Очистить ручное перемещение карточки МДФ-доски
+      security:
+        - bearerAuth: []
+      x-permission: production.tasks.update
+      parameters:
+        - name: cardKind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [packet, bazisCutSet, bath, order]
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 240
+            pattern: '^[A-Za-z0-9._:-]+$'
+      responses:
+        '200':
+          description: Ручное перемещение очищено или уже отсутствовало
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MdfBoardManualMoveDeleteResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/resource-demands:
     get:
       tags:
@@ -15315,6 +15446,116 @@ components:
             createdTo:
               type: string
               format: date-time
+
+    MdfBoardManualMoveTargetColumn:
+      type: string
+      enum:
+        - parsed
+        - completed
+        - completed_laminated
+        - baths
+        - baths_ready
+        - baths_laminated
+        - orders
+        - orders_ready
+        - orders_issued
+
+    MdfBoardManualMove:
+      type: object
+      additionalProperties: false
+      required:
+        - cardKind
+        - cardId
+        - targetColumn
+        - version
+        - createdAt
+        - createdByUserId
+        - updatedAt
+        - updatedByUserId
+      properties:
+        cardKind:
+          type: string
+          enum: [packet, bazisCutSet, bath, order]
+        cardId:
+          type: string
+          minLength: 1
+          maxLength: 240
+        targetColumn:
+          $ref: '#/components/schemas/MdfBoardManualMoveTargetColumn'
+        version:
+          type: integer
+          minimum: 1
+        createdAt:
+          type: string
+          format: date-time
+        createdByUserId:
+          type: integer
+          format: int64
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        updatedByUserId:
+          type: integer
+          format: int64
+          nullable: true
+
+    MdfBoardManualMovesResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - generatedAt
+        - moves
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        moves:
+          type: array
+          items:
+            $ref: '#/components/schemas/MdfBoardManualMove'
+
+    MdfBoardManualMoveUpsertResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - generatedAt
+        - changed
+        - move
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        changed:
+          type: boolean
+        move:
+          $ref: '#/components/schemas/MdfBoardManualMove'
+        auditId:
+          type: string
+
+    MdfBoardManualMoveDeleteResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - generatedAt
+        - cardKind
+        - cardId
+        - deleted
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        cardKind:
+          type: string
+          enum: [packet, bazisCutSet, bath, order]
+        cardId:
+          type: string
+          minLength: 1
+          maxLength: 240
+        deleted:
+          type: boolean
+        auditId:
+          type: string
 
     OrderStatusBoardResponse:
       type: object

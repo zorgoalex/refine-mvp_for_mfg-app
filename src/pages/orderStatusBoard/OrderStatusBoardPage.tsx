@@ -69,6 +69,9 @@ import {
 } from '../../api/productionActionsApi';
 import { authSession } from '../../api/authSession';
 import type {
+  MdfBoardManualMove,
+  MdfBoardManualMoveCardKind,
+  MdfBoardManualMoveTargetColumn,
   OrderStatusBoardCard,
   OrderStatusBoardColumn,
   OrderStatusBoardResponse,
@@ -218,7 +221,6 @@ const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
   '#d5e5f2',
   '#f2ddd5',
 ] as const;
-const CNC_MANUAL_MOVE_STORAGE_KEY = 'erp.statusBoard.cncManualMoves.v1';
 const DND_BACKEND_OPTIONS = {
   enableMouseEvents: true,
   delayTouchStart: 160,
@@ -436,8 +438,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
-  const [cncManualMoves, setCncManualMoves] =
-    useState<CncBoardManualMoveState>(() => loadCncManualMoves());
+  const [cncManualMoves, setCncManualMoves] = useState<CncBoardManualMoveState>({});
+  const cncManualMovesRef = useRef<CncBoardManualMoveState>({});
+  const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
     useState(true);
@@ -447,6 +450,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const [activeCncDetailedDetail, setActiveCncDetailedDetail] =
     useState<CncDetailedDetailTarget | null>(null);
   const isPacker = isPackerUser(currentUser);
+
+  useEffect(() => {
+    cncManualMovesRef.current = cncManualMoves;
+  }, [cncManualMoves]);
 
   useEffect(() => {
     if (viewState.view === 'cnc_today') return;
@@ -1180,6 +1187,50 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     };
   }, [cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
 
+  const fetchCncManualMoves = useCallback(async (): Promise<CncBoardManualMoveState> => {
+    const response = await orderStatusBoardApi.listMdfManualMoves();
+    return mapMdfBoardManualMovesResponse(response.moves);
+  }, []);
+
+  useEffect(() => {
+    if (!isCncToday) {
+      cncManualMovesRef.current = {};
+      setCncManualMoves({});
+      return undefined;
+    }
+
+    let cancelled = false;
+    let warned = false;
+    let inFlight = false;
+    const loadManualMoves = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const moves = await fetchCncManualMoves();
+        if (!cancelled) {
+          cncManualMovesRef.current = moves;
+          setCncManualMoves(moves);
+        }
+      } catch (error) {
+        if (!cancelled && !warned) {
+          warned = true;
+          message.warning(errorMessage(error, 'Не удалось загрузить ручные перемещения МДФ-доски.'));
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void loadManualMoves();
+    const timer = window.setInterval(() => {
+      void loadManualMoves();
+    }, CNC_ORDER_STATUS_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [fetchCncManualMoves, isCncToday]);
+
   const toggleCncRelation = useCallback((target: CncRelationTarget) => {
     setActiveCncRelation((current) =>
       cncRelationTargetEquals(current, target) ? null : target,
@@ -1252,17 +1303,55 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       message.warning('Эту карточку нельзя переместить в выбранную колонку.');
       return;
     }
-    setCncManualMoves((current) => {
-      const next = {
-        ...current,
-        [cncManualMoveStorageKey(kind, cardId)]: targetColumn,
-      };
-      saveCncManualMoves(next);
-      return next;
-    });
+    const key = cncManualMoveStorageKey(kind, cardId);
+    const previousTarget = cncManualMovesRef.current[key];
+    const requestSeq = (cncManualMoveRequestSeqRef.current[key] ?? 0) + 1;
+    cncManualMoveRequestSeqRef.current[key] = requestSeq;
+    const optimisticMoves = {
+      ...cncManualMovesRef.current,
+      [key]: targetColumn,
+    };
+    cncManualMovesRef.current = optimisticMoves;
+    setCncManualMoves(optimisticMoves);
     window.requestAnimationFrame(() => trigger?.focus());
-    message.success(`Карточка перемещена в «${targetTitle}».`);
-  }, []);
+    void orderStatusBoardApi.upsertMdfManualMove(
+      kind as MdfBoardManualMoveCardKind,
+      cardId,
+      targetColumn as MdfBoardManualMoveTargetColumn,
+    )
+      .then((response) => {
+        if (cncManualMoveRequestSeqRef.current[key] !== requestSeq) return;
+        setCncManualMoves((current) => {
+          const next = {
+            ...current,
+            [key]: response.move.targetColumn,
+          };
+          cncManualMovesRef.current = next;
+          return next;
+        });
+        message.success(`Карточка перемещена в «${targetTitle}».`);
+      })
+      .catch((error) => {
+        if (cncManualMoveRequestSeqRef.current[key] !== requestSeq) return;
+        setCncManualMoves((current) => {
+          const next = { ...current };
+          if (previousTarget) {
+            next[key] = previousTarget;
+          } else {
+            delete next[key];
+          }
+          cncManualMovesRef.current = next;
+          return next;
+        });
+        void fetchCncManualMoves()
+          .then((moves) => {
+            cncManualMovesRef.current = moves;
+            setCncManualMoves(moves);
+          })
+          .catch(() => undefined);
+        message.error(errorMessage(error, 'Не удалось сохранить ручное перемещение МДФ-доски.'));
+      });
+  }, [fetchCncManualMoves]);
 
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
@@ -5791,35 +5880,24 @@ function buildCncOrderStatusCards(
     .filter((card): card is OrderStatusBoardCard => Boolean(card));
 }
 
-function loadCncManualMoves(): CncBoardManualMoveState {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = window.localStorage.getItem(CNC_MANUAL_MOVE_STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const moves: CncBoardManualMoveState = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === 'string' && isCncManualColumnKey(value)) {
-        moves[key] = value;
-      }
-    }
-    return moves;
-  } catch {
-    return {};
-  }
-}
-
-function saveCncManualMoves(moves: CncBoardManualMoveState): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(CNC_MANUAL_MOVE_STORAGE_KEY, JSON.stringify(moves));
-  } catch {
-    // Board moves remain usable for this render even when storage is unavailable.
-  }
-}
-
 export function cncManualMoveStorageKey(kind: CncManualCardKind, cardId: string): string {
   return `${kind}:${cardId}`;
+}
+
+function mapMdfBoardManualMovesResponse(
+  moves: readonly MdfBoardManualMove[],
+): CncBoardManualMoveState {
+  const state: CncBoardManualMoveState = {};
+  for (const move of moves) {
+    if (
+      isCncManualCardKind(move.cardKind)
+      && isCncManualColumnKey(move.targetColumn)
+      && isCncManualMoveAllowed(move.cardKind, move.targetColumn)
+    ) {
+      state[cncManualMoveStorageKey(move.cardKind, move.cardId)] = move.targetColumn;
+    }
+  }
+  return state;
 }
 
 function resolveCncManualTarget(
@@ -5880,6 +5958,13 @@ function isCncManualColumnKey(value: string): value is CncTelegramTodayDisplayCo
     'orders_ready',
     'orders_issued',
   ].includes(value);
+}
+
+function isCncManualCardKind(value: string): value is CncManualCardKind {
+  return value === 'packet'
+    || value === 'bazisCutSet'
+    || value === 'bath'
+    || value === 'order';
 }
 
 export function applyCncManualMovesToColumns(

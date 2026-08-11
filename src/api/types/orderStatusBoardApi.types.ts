@@ -6,6 +6,49 @@ export type OrderStatusBoardSortBy =
   | 'updatedAt';
 export type OrderStatusBoardSortOrder = 'asc' | 'desc';
 
+export type MdfBoardManualMoveCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
+export type MdfBoardManualMoveTargetColumn =
+  | 'parsed'
+  | 'completed'
+  | 'completed_laminated'
+  | 'baths'
+  | 'baths_ready'
+  | 'baths_laminated'
+  | 'orders'
+  | 'orders_ready'
+  | 'orders_issued';
+
+export interface MdfBoardManualMove {
+  cardKind: MdfBoardManualMoveCardKind;
+  cardId: string;
+  targetColumn: MdfBoardManualMoveTargetColumn;
+  version: number;
+  createdAt: string;
+  createdByUserId: number | null;
+  updatedAt: string;
+  updatedByUserId: number | null;
+}
+
+export interface MdfBoardManualMovesResponse {
+  generatedAt: string;
+  moves: MdfBoardManualMove[];
+}
+
+export interface MdfBoardManualMoveUpsertResponse {
+  generatedAt: string;
+  changed: boolean;
+  move: MdfBoardManualMove;
+  auditId?: string;
+}
+
+export interface MdfBoardManualMoveDeleteResponse {
+  generatedAt: string;
+  cardKind: MdfBoardManualMoveCardKind;
+  cardId: string;
+  deleted: boolean;
+  auditId?: string;
+}
+
 export interface OrderStatusBoardQuery {
   board: OrderStatusBoardType;
   column?: string;

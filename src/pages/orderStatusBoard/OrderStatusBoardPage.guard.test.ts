@@ -74,6 +74,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('isCncManualMoveAllowed(item.kind, columnKey)');
     expect(page).toContain('includeTerminalManualMoves: terminalColumnsVisible');
     expect(page).toContain('applyCncManualMovesToColumns(readinessColumns, manualMoves)');
+    expect(page).toContain('orderStatusBoardApi.listMdfManualMoves');
+    expect(page).toContain('orderStatusBoardApi.upsertMdfManualMove');
+    expect(page).toContain('fetchCncManualMoves');
+    expect(page).not.toContain('erp.statusBoard.cncManualMoves');
+    expect(page).not.toContain('loadCncManualMoves');
+    expect(page).not.toContain('saveCncManualMoves');
     expect(page).toContain('kind="bazisCutSet"');
     expect(page).toContain('completed_laminated');
     expect(page).toContain('cncOrderStatusBadgeOverride(column.key)');

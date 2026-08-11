@@ -48,6 +48,9 @@ export const apiRoutes = {
     formData: backendApiPath('/orders/form-data'),
     resourceDemands: backendApiPath('/orders/resource-demands'),
     statusBoard: backendApiPath('/orders/status-board'),
+    statusBoardMdfManualMoves: backendApiPath('/orders/status-board/mdf-manual-moves'),
+    statusBoardMdfManualMove: (cardKind: string, cardId: string) =>
+      backendApiPath(`/orders/status-board/mdf-manual-moves/${encodeURIComponent(cardKind)}/${encodeURIComponent(cardId)}`),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
     refresh: (orderId: number) => backendApiPath(`/orders/${orderId}/refresh`),
     detailLiveState: (orderId: number) =>

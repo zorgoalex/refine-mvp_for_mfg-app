@@ -1165,6 +1165,49 @@ probe_file() {
                        FROM bazis_cut_set_details
                        WHERE source_bath_cut_number ~ '^[0-9]+-[0-9]+$'
                      );" ;;
+    116_telegram_svg_cut_job_display_number*) probe_all \
+                     "$(q_col cut_job source_display_number)" \
+                     "SELECT col_description(
+                       'cut_job'::regclass,
+                       (SELECT attnum FROM pg_attribute
+                        WHERE attrelid='cut_job'::regclass
+                          AND attname='source_display_number')
+                     ) LIKE 'Operator-facing cut job number from the source system;%';" \
+                     "SELECT NOT EXISTS (
+                       SELECT 1
+                       FROM cnc_telegram_packets packet
+                       JOIN cut_job job
+                         ON job.cut_job_id = packet.svg_cut_job_id
+                       WHERE packet.svg_cut_job_id IS NOT NULL
+                         AND packet.svg_cut_result_id IS NOT NULL
+                         AND packet.svg_cut_import_status = 'imported'
+                         AND packet.cutting_sequence_no IS NOT NULL
+                         AND packet.cut_layout_json->>'status' = 'valid'
+                         AND job.source = 'api'
+                         AND job.selection_criteria->>'source' = 'cnc_telegram_svg'
+                         AND job.source_display_number IS DISTINCT FROM packet.cutting_sequence_no::text
+                     );" ;;
+    117_mdf_board_manual_moves*) probe_all \
+                     "$(q_tbl mdf_board_manual_moves)" \
+                     "$(q_col mdf_board_manual_moves move_id)" \
+                     "$(q_col mdf_board_manual_moves card_kind)" \
+                     "$(q_col mdf_board_manual_moves card_id)" \
+                     "$(q_col mdf_board_manual_moves target_column)" \
+                     "$(q_col mdf_board_manual_moves version)" \
+                     "$(q_col mdf_board_manual_moves created_by_user_id)" \
+                     "$(q_col mdf_board_manual_moves updated_by_user_id)" \
+                     "$(q_col mdf_board_manual_moves created_at)" \
+                     "$(q_col mdf_board_manual_moves updated_at)" \
+                     "$(q_con_on mdf_board_manual_moves mdf_board_manual_moves_pkey)" \
+                     "$(q_con_on mdf_board_manual_moves uq_mdf_board_manual_moves_card)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_card_kind)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_card_id)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_target_column)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_kind_target)" \
+                     "$(q_con_on mdf_board_manual_moves chk_mdf_board_manual_moves_version)" \
+                     "$(q_idx idx_mdf_board_manual_moves_lookup)" \
+                     "$(q_idx idx_mdf_board_manual_moves_updated)" \
+                     "SELECT obj_description('mdf_board_manual_moves'::regclass) LIKE 'mdf-board-manual-moves-v1:%';" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1176,7 +1219,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
