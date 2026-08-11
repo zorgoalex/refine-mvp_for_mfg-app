@@ -550,7 +550,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(packetMinimal).not.toContain('<span className="cnc-compact-card__ref-label">Раскрой</span>');
     expect(packetMinimal).not.toContain('<span className="cnc-compact-card__ref-label">Базис</span>');
     expect(packetMinimal).not.toContain('Базис');
-    expect(bathMinimal).toContain('{bath.cutNumber}');
+    expect(bathMinimal).toContain('{bathCutNumber}');
     expect(bathMinimal).not.toContain('№');
     expect(page).toContain("minimal ? 'cnc-bath-card--minimal cnc-compact-card' : ''");
     expect(page).toContain("minimal ? 'cnc-bazis-cut-card--minimal cnc-compact-card' : ''");

@@ -175,7 +175,7 @@ describe('CutPage source guards', () => {
     expect(source).toContain('<span>Номер заказа</span>');
     expect(source).toContain('<span>Материал</span>');
     expect(source).toContain('<span>Название задания</span>');
-    expect(source).toContain("candidate.name.toLocaleLowerCase('ru-RU').includes(query)");
+    expect(source).toContain('formatCutJobDisplayNumber(candidate, profiles)');
     expect(source).toContain('cutJobMatchesOrderFilter(candidate, appliedJobOrderSearch)');
     expect(source).toContain('cutJobMatchesSheetMaterial(candidate, operationalSheetFilter)');
     expect(source).toContain('resetCutJobListFilters');
