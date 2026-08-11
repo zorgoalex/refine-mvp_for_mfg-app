@@ -20,6 +20,10 @@ import {
 } from '../../../shared/cut-geometry';
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
 import {
+  cutJobSnapshotUsesVacuumTable,
+  formatCutNumber,
+} from '../application/cut-numbering';
+import {
   classifyDetailEligibility,
   type DetailEligibilityCandidate,
 } from '../application/cut-eligibility';
@@ -2873,7 +2877,7 @@ export class PgCutRepository implements CutRepositoryPort {
       const ref = {
         cutJobId,
         resultNo,
-        cutNumber: `${cutJobId}-${resultNo}`,
+        cutNumber: formatCutNumber(cutJobId, resultNo, row.is_vacuum === true),
         name: row.name,
         paramProfileId: row.param_profile_id === null ? null : toNum(row.param_profile_id),
         profileName: row.profile_name,
@@ -3138,19 +3142,40 @@ export class PgCutRepository implements CutRepositoryPort {
     requestedResultNo: number | undefined,
   ): Promise<PdfRenderIdentity> {
     if (cutJobId === undefined) return { cutJobId: null, cutNumber: null, currentCutNumber: null };
-    const result = await this.database.query<{ result_no: string | number | null }>(
-      `SELECT current_result.result_no
+    const result = await this.database.query<{
+      current_result_no: string | number | null;
+      job_is_vacuum: boolean | null;
+      current_snapshot_job: CutJobDto | null;
+      requested_snapshot_job: CutJobDto | null;
+    }>(
+      `SELECT current_result.result_no AS current_result_no,
+              COALESCE(
+                j.last_calc_params->>'layout_mode',
+                cpp.params->>'layout_mode',
+                j.params->>'layout_mode'
+              ) = 'vacuum_table' AS job_is_vacuum,
+              current_result.snapshot_job AS current_snapshot_job,
+              requested_result.snapshot_job AS requested_snapshot_job
        FROM cut_job j
        LEFT JOIN cut_result current_result ON current_result.cut_result_id = j.current_cut_result_id
+       LEFT JOIN cut_result requested_result
+         ON requested_result.cut_job_id = j.cut_job_id
+        AND requested_result.result_no = $2::integer
+       LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = j.param_profile_id
        WHERE j.cut_job_id = $1`,
-      [cutJobId],
+      [cutJobId, requestedResultNo ?? null],
     );
-    const currentResultNo = numOrNull(result.rows[0]?.result_no);
+    const row = result.rows[0];
+    const currentResultNo = numOrNull(row?.current_result_no);
     const resultNo = requestedResultNo ?? currentResultNo;
+    const currentIsVacuum = cutJobSnapshotUsesVacuumTable(row?.current_snapshot_job) || row?.job_is_vacuum === true;
+    const requestedIsVacuum = requestedResultNo === undefined
+      ? currentIsVacuum
+      : cutJobSnapshotUsesVacuumTable(row?.requested_snapshot_job) || row?.job_is_vacuum === true;
     return {
       cutJobId,
-      cutNumber: resultNo === null ? null : `${cutJobId}-${resultNo}`,
-      currentCutNumber: currentResultNo === null ? null : `${cutJobId}-${currentResultNo}`,
+      cutNumber: resultNo === null ? null : formatCutNumber(cutJobId, resultNo, requestedIsVacuum),
+      currentCutNumber: currentResultNo === null ? null : formatCutNumber(cutJobId, currentResultNo, currentIsVacuum),
     };
   }
 
@@ -5875,7 +5900,7 @@ function mapCutResultSummary(row: CutResultRow): CutResultSummaryDto {
     cutResultId: toNum(row.cut_result_id),
     cutJobId,
     resultNo,
-    cutNumber: `${cutJobId}-${resultNo}`,
+    cutNumber: formatCutNumber(cutJobId, resultNo, cutJobSnapshotUsesVacuumTable(row.snapshot_job)),
     resultKind: row.result_kind,
     sourceJobVersion: toNum(row.source_job_version),
     basedOnResultId: numOrNull(row.based_on_result_id),

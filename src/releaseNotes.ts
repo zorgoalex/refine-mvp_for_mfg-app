@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-11",
+    title: "Раскрой: номера заданий вакуумного стола",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Задания на раскрой с профилем «Вакуумный стол» получают номер с префиксом «В-»; на МДФ-доске карточки ванн показывают только «В-» и номер задания без версии расчёта.",
+      "Сохранённые номера ванн в Базис-раскрое переводятся на новый формат отдельной миграцией 115.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-10",
     title: "МДФ-работы: Базис-раскрои как файлы станка",
     services: ["ERP", "Cutting"],

@@ -42,6 +42,29 @@ describe('label cut-map resolution', () => {
     );
   });
 
+  it('binds a vacuum placement with the Cyrillic cut-number prefix', async () => {
+    const client = databaseReturning(placementRow({
+      is_vacuum: true,
+      regular_cut_number: null,
+      vacuum_cut_number: 'В-30-4',
+    }));
+    const resolved = await resolveLabelCutMaps(
+      client,
+      template(),
+      [labelRow()],
+      [{ detailId: 10, copyIndex: 1, cutResultPlacementId: 700 }],
+      20,
+      'bath',
+    );
+
+    expect(resolved.rows[0].cutMap).toMatchObject({
+      cutResultPlacementId: 700,
+      cutNumber: 'В-30-4',
+    });
+    expect(resolved.rows[0].values).toMatchObject({ 'cut.number': 'В-30-4' });
+    expect(resolved.assets.get('cut_result:600')).toMatchObject({ isVacuum: true });
+  });
+
   it('fails closed when a placement belongs to another physical instance', async () => {
     const client = databaseReturning(placementRow({ instance: 2 }));
     await expect(resolveLabelCutMaps(

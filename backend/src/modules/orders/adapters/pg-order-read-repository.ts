@@ -17,6 +17,7 @@ import type {
   OrderListSortBy,
   OrderReadRepositoryPort,
 } from '../application/order-query.types';
+import { formatCutNumber } from '../../cut/application/cut-numbering';
 
 const SORT_COLUMNS: Record<OrderListSortBy, string> = {
   orderId: 'o.order_id',
@@ -503,7 +504,15 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
           SELECT DISTINCT
             cj.cut_job_id,
             cr.result_no,
-            cj.cut_job_id::text || '-' || cr.result_no::text AS cut_number,
+            CASE
+              WHEN COALESCE(
+                cj.last_calc_params->>'layout_mode',
+                cpp.params->>'layout_mode',
+                cj.params->>'layout_mode'
+              ) = 'vacuum_table'
+                THEN 'В-' || cj.cut_job_id::text || '-' || cr.result_no::text
+              ELSE cj.cut_job_id::text || '-' || cr.result_no::text
+            END AS cut_number,
             COALESCE(
               cj.last_calc_params->>'layout_mode',
               cpp.params->>'layout_mode',
@@ -1554,7 +1563,7 @@ function mapDetailCutJob(row: OrderDetailRow, kind: 'cut' | 'bath') {
   return {
     cutJobId,
     resultNo,
-    cutNumber: `${cutJobId}-${resultNo}`,
+    cutNumber: formatCutNumber(cutJobId, resultNo, kind === 'bath'),
     name: name ?? `Раскрой ${cutJobId}`,
     paramProfileId: toNullableNumber(kind === 'cut' ? row.cut_job_param_profile_id : row.bath_cut_job_param_profile_id),
     profileName: kind === 'cut' ? row.cut_job_profile_name : row.bath_cut_job_profile_name,

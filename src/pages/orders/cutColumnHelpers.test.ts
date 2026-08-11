@@ -35,7 +35,7 @@ describe('cutColumnHelpers', () => {
       {
         orderDetailId: 1,
         cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
-        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: '10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
       },
     ]);
     expect(maps.cutJobByDetailId.get(1)?.name).toBe('Regular');
@@ -50,7 +50,7 @@ describe('cutColumnHelpers', () => {
         bath_cut_job: {
           cutJobId: 42,
           resultNo: 3,
-          cutNumber: '42-3',
+          cutNumber: 'В-42-3',
           name: 'Ванна заказа',
           paramProfileId: '7',
           profileName: 'Вакуум',
@@ -89,21 +89,21 @@ describe('cutColumnHelpers', () => {
       {
         orderDetailId: 1,
         cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
-        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: '10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
       },
     ]);
     const unchanged = buildCutJobLinkMaps([
       {
         orderDetailId: 1,
         cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
-        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: '10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
       },
     ]);
     const changed = buildCutJobLinkMaps([
       {
         orderDetailId: 1,
         cutJob: { cutJobId: 9, resultNo: 4, cutNumber: '9-4', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
-        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: '10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
       },
     ]);
 
@@ -121,7 +121,7 @@ describe('cutColumnHelpers', () => {
       profileName: null,
       profileIsActive: null,
     };
-    const bathRef = { ...cutRef, cutJobId: 10, cutNumber: '10-2', name: 'Bath' };
+    const bathRef = { ...cutRef, cutJobId: 10, cutNumber: 'В-10-2', name: 'Bath' };
     const input = {
       currentDetailProductionStatusById: new Map([[1, 4]]),
       productionStatusesById: new Map([[4, { name: 'В работе', color: '#1677ff' }]]),
@@ -156,7 +156,7 @@ describe('cutColumnHelpers', () => {
     })).not.toBe(version);
     expect(buildOrderDetailLiveCellRenderVersion({
       ...input,
-      bathCutJobByDetailId: new Map([[1, { ...bathRef, resultNo: 3, cutNumber: '10-3' }]]),
+      bathCutJobByDetailId: new Map([[1, { ...bathRef, resultNo: 3, cutNumber: 'В-10-3' }]]),
     })).not.toBe(version);
   });
 
@@ -168,6 +168,7 @@ describe('cutColumnHelpers', () => {
 
   it('cutJobVersionLabel prefers the current result cut number', () => {
     expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '45-3' })).toBe('45-3');
+    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: 'В-45-3' })).toBe('В-45-3');
     expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '   ' })).toBe('45-3');
   });
 
