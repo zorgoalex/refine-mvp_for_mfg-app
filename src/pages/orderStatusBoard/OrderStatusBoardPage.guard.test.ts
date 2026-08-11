@@ -331,6 +331,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('dateFrom: displayRange.dateFrom');
     expect(page).toContain('dateTo: displayRange.dateTo');
     expect(page).toContain('datasetKey');
+    expect(page).toContain('const standardGridMinWidth = displayColumns.length * 220');
+    expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(220px, 1fr))`');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
     expect(page).toContain('CncBazisCutSetCardView');
     expect(page).toContain('Итоги по ERP-заказам набора');

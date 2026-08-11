@@ -2210,6 +2210,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       : [],
     [canViewCut, detailedContext?.activeBath, manualDisplayColumns, selectedDetailedDetailId],
   );
+  const standardGridMinWidth = displayColumns.length * 220 + Math.max(0, displayColumns.length - 1) * 12;
 
   return (
     <>
@@ -2223,6 +2224,12 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           {
             '--status-board-cnc-column-count': displayColumns.length,
             '--status-board-cnc-side-column-count': Math.max(0, displayColumns.length - 4),
+            ...(!detailedBathActive
+              ? {
+                gridTemplateColumns: `repeat(${displayColumns.length}, minmax(220px, 1fr))`,
+                minWidth: `${standardGridMinWidth}px`,
+              }
+              : {}),
           } as React.CSSProperties
         }
       >
