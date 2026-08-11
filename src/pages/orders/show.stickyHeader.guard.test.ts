@@ -73,6 +73,21 @@ describe('OrderShow sticky detail header guards', () => {
     expect(compactLineCss).not.toContain('overflow-x: auto;');
   });
 
+  it('shows the doweling order number as Basis project in the order summary without a duplicate material suffix', () => {
+    expect(headerSource).toContain('const compactBasisProjectName =');
+    expect(editHeaderSource).toContain('const compactBasisProjectName =');
+    expect(headerSource).toContain('record?.doweling_order_name');
+    expect(editHeaderSource).toContain('header.doweling_order_name');
+    expect(headerSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{compactBasisProjectName}</Text>');
+    expect(editHeaderSource).toContain('Базис-проект: <Text strong className="order-show-header__compact-text">{compactBasisProjectName}</Text>');
+    expect(headerSource).not.toContain('Присадка: <Text strong');
+    expect(editHeaderSource).not.toContain('Присадка: <Text strong');
+    expect(headerSource).not.toContain('basisProjects.length > 0 ? `Базис:');
+    expect(editHeaderSource).not.toContain('basisProjects.length > 0 ? `Базис:');
+    expect(headerSource).not.toContain('collectOrderBasisProjects');
+    expect(editHeaderSource).not.toContain('collectOrderBasisProjects');
+  });
+
   it('pins the stack below workspace tabs and keeps table headers below the sticky toolbar', () => {
     const stickyStackStart = showSource.indexOf('ref={orderShowSummaryTabsRef}');
     const toolbarRender = showSource.indexOf('{orderShowDetailsToolbar}', stickyStackStart);

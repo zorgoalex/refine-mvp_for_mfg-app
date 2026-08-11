@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-11",
+    title: "Заказы: базис-проект в сводке",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В верхней сводке заказа поле с номером присадки теперь называется «Базис-проект», а отдельный дубль «Базис-проект» рядом с материалами убран.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-11",
     title: "МДФ-работы: общие ручные перемещения",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
