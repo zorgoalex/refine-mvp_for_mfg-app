@@ -47,6 +47,7 @@ import {
   ProfileOutlined,
   ReloadOutlined,
   RightOutlined,
+  ScheduleOutlined,
   SearchOutlined,
   ToolOutlined,
   TagsOutlined,
@@ -1372,14 +1373,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       <label className="status-board-toolbar__switch">
         <Switch
           size="small"
-          checked={viewState.cncPlannedTodayOnly}
-          onChange={(checked) => updateViewState({ cncPlannedTodayOnly: checked })}
-        />
-        Плановая дата сегодня
-      </label>
-      <label className="status-board-toolbar__switch">
-        <Switch
-          size="small"
           checked={cncBathsRequireMachineFiles}
           onChange={setCncBathsRequireMachineFiles}
         />
@@ -1785,6 +1778,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
               value={cncOrderFilters}
               onChange={(values) => updateViewState({ cncOrderFilters: values })}
               aria-label="Фильтр МДФ-работ по номеру заказа"
+            />
+            <StatusBoardToolbarIconToggle
+              active={viewState.cncPlannedTodayOnly}
+              label="Плановая дата сегодня"
+              icon={<ScheduleOutlined />}
+              onToggle={() =>
+                updateViewState({ cncPlannedTodayOnly: !viewState.cncPlannedTodayOnly })
+              }
             />
             <div
               className="status-board-toolbar__cnc-period"

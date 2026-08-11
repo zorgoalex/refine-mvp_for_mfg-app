@@ -901,9 +901,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-terminal-card--muted');
     expect(settings).toContain('checked={viewState.hideEmpty}');
     expect(settings).toContain('Скрыть пустые');
-    expect(settings).toContain('checked={viewState.cncPlannedTodayOnly}');
-    expect(settings).toContain('Плановая дата сегодня');
-    expect(settings).toContain('updateViewState({ cncPlannedTodayOnly: checked })');
+    expect(settings).not.toContain('checked={viewState.cncPlannedTodayOnly}');
+    expect(settings).not.toContain('Плановая дата сегодня');
+    expect(cncToolbar).toContain('active={viewState.cncPlannedTodayOnly}');
+    expect(cncToolbar).toContain('label="Плановая дата сегодня"');
+    expect(cncToolbar).toContain('icon={<ScheduleOutlined />}');
+    expect(cncToolbar).toContain('updateViewState({ cncPlannedTodayOnly: !viewState.cncPlannedTodayOnly })');
     expect(cncToolbar).not.toContain('Вчера');
     expect(cncToolbar).not.toContain('checked={viewState.hideEmpty}');
     expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
@@ -924,6 +927,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(/\.status-board-toolbar--cnc\s*\{[^}]*padding: 2px 6px;/);
     expect(css).toMatch(
       /\.status-board-toolbar--cnc \.status-board-toolbar__settings-button\.ant-btn\s*\{[^}]*width: 24px;[^}]*height: 24px;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-toolbar--cnc \.status-board-toolbar__icon-toggle\.ant-btn\s*\{[^}]*width: 24px;[^}]*height: 24px;/s,
     );
     expect(css).toMatch(
       /\.status-board-toolbar__cnc-detail-toggle\.ant-btn\s*\{[^}]*margin-left: auto;[^}]*color: var\(--app-text-muted\);/s,
