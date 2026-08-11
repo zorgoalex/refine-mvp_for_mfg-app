@@ -1,4 +1,7 @@
 import type {
+  CncTelegramBathCard,
+  CncTelegramBazisCutSetCard,
+  CncTelegramPacket,
   CncTelegramTodayColumn,
 } from '../../api/types/cncTelegramApi.types';
 import type {
@@ -13,9 +16,30 @@ import type {
 
 const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
 export interface MdfBoardHiddenStatusesSetting {
-  productionStatusIds: number[];
+  productionStatusIds?: number[];
   orderStatusIds?: number[];
+  cardRules?: MdfBoardHiddenCardRule[];
 }
+
+export type MdfBoardHiddenCardKind = 'packet' | 'bazisCutSet' | 'bath';
+
+export interface MdfBoardHiddenCardRule {
+  cardKind: MdfBoardHiddenCardKind;
+  orderStatusIds: number[];
+}
+
+export const MDF_BOARD_HIDDEN_CARD_KINDS: readonly MdfBoardHiddenCardKind[] = [
+  'packet',
+  'bazisCutSet',
+  'bath',
+] as const;
+
+const MDF_BOARD_HIDDEN_COLUMN_TITLES: Partial<
+  Record<CncTelegramTodayColumn['key'], string>
+> = {
+  completed_laminated: 'Распиленные файлы',
+  baths_laminated: 'Завершённые ванны',
+};
 
 export const DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES = [
   'закатан',
@@ -579,6 +603,152 @@ export function filterCncBathColumnsByOrderStatuses(
     });
     return { ...column, baths, total: baths.length };
   });
+}
+
+export function normalizeMdfBoardHiddenCardRules(
+  setting: MdfBoardHiddenStatusesSetting | null | undefined,
+  fallbackOrderStatusIds: readonly unknown[] = [],
+): MdfBoardHiddenCardRule[] {
+  const rules = Array.isArray(setting?.cardRules) ? setting.cardRules : [];
+  const fallback = normalizePositiveIntegerArray(fallbackOrderStatusIds);
+  return MDF_BOARD_HIDDEN_CARD_KINDS.map((cardKind) => {
+    const rule = rules.find((candidate) => candidate?.cardKind === cardKind);
+    return {
+      cardKind,
+      orderStatusIds: normalizePositiveIntegerArray(rule?.orderStatusIds ?? fallback),
+    };
+  });
+}
+
+export function applyMdfBoardHiddenCardRulesToColumns(
+  columns: CncTelegramTodayColumn[],
+  orderCards: readonly OrderStatusBoardCard[],
+  setting: MdfBoardHiddenStatusesSetting | null | undefined,
+  legacyHiddenProductionStatusIds?: ReadonlySet<number>,
+  legacyHiddenOrderStatusIds?: ReadonlySet<number>,
+): CncTelegramTodayColumn[] {
+  if (!Array.isArray(setting?.cardRules)) {
+    return filterCncBathColumnsByOrderStatuses(
+      columns,
+      orderCards,
+      legacyHiddenProductionStatusIds,
+      legacyHiddenOrderStatusIds,
+    );
+  }
+
+  const rulesByKind = new Map(
+    normalizeMdfBoardHiddenCardRules(setting).map((rule) => [
+      rule.cardKind,
+      new Set(rule.orderStatusIds),
+    ]),
+  );
+  const orderStatusIdByOrderId = new Map(
+    orderCards
+      .filter((card) => isPositiveInteger(card.orderId) && isPositiveInteger(card.orderStatusId))
+      .map((card) => [card.orderId, card.orderStatusId] as const),
+  );
+
+  const byKey = new Map<CncTelegramTodayColumn['key'], CncTelegramTodayColumn>();
+  const ensureColumn = (key: CncTelegramTodayColumn['key']): CncTelegramTodayColumn => {
+    const existing = byKey.get(key);
+    if (existing) return existing;
+    const source = columns.find((column) => column.key === key);
+    const next: CncTelegramTodayColumn = {
+      key,
+      title: source?.title ?? MDF_BOARD_HIDDEN_COLUMN_TITLES[key] ?? key,
+      total: 0,
+      packets: [],
+      baths: [],
+      bazisCutSets: [],
+    };
+    byKey.set(key, next);
+    return next;
+  };
+
+  for (const column of columns) {
+    ensureColumn(column.key);
+  }
+
+  for (const column of columns) {
+    for (const packet of column.packets) {
+      const target = mdfBoardHiddenCardRuleMatches(
+        'packet',
+        collectPacketOrderIds(packet),
+        rulesByKind,
+        orderStatusIdByOrderId,
+      )
+        ? 'completed_laminated'
+        : column.key;
+      ensureColumn(target).packets.push(packet);
+    }
+
+    for (const bazisCutSet of column.bazisCutSets ?? []) {
+      const target = mdfBoardHiddenCardRuleMatches(
+        'bazisCutSet',
+        collectBazisCutSetOrderIds(bazisCutSet),
+        rulesByKind,
+        orderStatusIdByOrderId,
+      )
+        ? 'completed_laminated'
+        : column.key;
+      ensureColumn(target).bazisCutSets?.push(bazisCutSet);
+    }
+
+    for (const bath of column.baths) {
+      const target = mdfBoardHiddenCardRuleMatches(
+        'bath',
+        collectBathOrderIds(bath),
+        rulesByKind,
+        orderStatusIdByOrderId,
+      )
+        ? 'baths_laminated'
+        : column.key;
+      ensureColumn(target).baths.push(bath);
+    }
+  }
+
+  return Array.from(byKey.values()).map((column) => {
+    const baths = column.baths ?? [];
+    const packets = column.packets ?? [];
+    const bazisCutSets = column.bazisCutSets ?? [];
+    return {
+      ...column,
+      packets,
+      baths,
+      bazisCutSets,
+      total: isCncBathColumnKey(column.key)
+        ? baths.length
+        : packets.length + bazisCutSets.length,
+    };
+  });
+}
+
+function mdfBoardHiddenCardRuleMatches(
+  cardKind: MdfBoardHiddenCardKind,
+  orderIds: readonly number[],
+  rulesByKind: ReadonlyMap<MdfBoardHiddenCardKind, ReadonlySet<number>>,
+  orderStatusIdByOrderId: ReadonlyMap<number, number>,
+): boolean {
+  const allowedStatusIds = rulesByKind.get(cardKind);
+  if (!allowedStatusIds || allowedStatusIds.size === 0 || orderIds.length === 0) return false;
+  return orderIds.every((orderId) => {
+    const orderStatusId = orderStatusIdByOrderId.get(orderId);
+    return isPositiveInteger(orderStatusId) && allowedStatusIds.has(orderStatusId);
+  });
+}
+
+function collectPacketOrderIds(packet: CncTelegramPacket): number[] {
+  return normalizePositiveIntegerArray(
+    packet.items.map((item) => item.matchOrderId ?? item.orderId),
+  );
+}
+
+function collectBazisCutSetOrderIds(bazisCutSet: CncTelegramBazisCutSetCard): number[] {
+  return normalizePositiveIntegerArray(bazisCutSet.items.map((item) => item.orderId));
+}
+
+function collectBathOrderIds(bath: CncTelegramBathCard): number[] {
+  return normalizePositiveIntegerArray(bath.items.map((item) => item.orderId));
 }
 
 function isCncBathColumnKey(key: CncTelegramTodayColumn['key']): boolean {

@@ -689,7 +689,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /\.cnc-bath-card__cut-result-badge\.ant-tag\s*\{[^}]*padding-inline: 6px;[^}]*border-radius: 4px;[^}]*font-size: 0\.84em;[^}]*font-variant-numeric: tabular-nums;/s,
     );
-    expect(page).toContain('filterCncBathColumnsByOrderStatuses(');
+    expect(page).toContain('applyMdfBoardHiddenCardRulesToColumns(');
     expect(page).toContain('SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES');
     expect(page).toContain('resolveMdfBoardHiddenOrderStatusIds(');
     expect(page).toContain('resolveMdfBoardHiddenProductionStatusIds(');
