@@ -12,12 +12,21 @@ export const KeepAliveOutlet: React.FC = () => {
   const cacheRef = useRef<Map<string, React.ReactNode>>(new Map());
 
   const activeTab = tabs.find((t) => t.key === activeKey);
-  const eligible = activeTab ? isKeepAliveEligible(activeKey, { dirty: activeTab.dirty }) : false;
+  const activeDirty = activeTab?.dirty ?? false;
+  const eligible = isKeepAliveEligible(activeKey, { dirty: activeDirty });
 
-  if (eligible && outlet) cacheRef.current.set(activeKey, outlet);
+  if (eligible && outlet && !cacheRef.current.has(activeKey)) {
+    cacheRef.current.set(activeKey, outlet);
+  }
 
   // Evict per policy.
-  const keep = nextKeepAliveCache(new Set(cacheRef.current.keys()), { activeKey, tabs });
+  const tabsWithActive = activeTab || !eligible
+    ? tabs
+    : [...tabs, { key: activeKey, dirty: activeDirty }];
+  const keep = nextKeepAliveCache(new Set(cacheRef.current.keys()), {
+    activeKey,
+    tabs: tabsWithActive,
+  });
   for (const key of Array.from(cacheRef.current.keys())) {
     if (!keep.has(key)) cacheRef.current.delete(key);
   }
