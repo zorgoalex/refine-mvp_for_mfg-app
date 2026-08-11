@@ -229,9 +229,18 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('keeps desktop MDF auto-height but gives tablet a full-height pannable viewport', () => {
     expect(page).toContain("isCncToday ? ' status-board-page--cnc' : ''");
+    expect(page).toContain('function useWorkspaceTabsHeight(): number');
+    expect(page).toContain("document.querySelector('.workspace-tabs')");
+    expect(page).toContain("style={statusBoardPageStyle}");
+    expect(page).toContain("'--status-board-toolbar-sticky-top': `${workspaceTabsHeight}px`");
+    expect(page).toContain('className="status-board-toolbar-disclosure--cnc"');
     expect(css).toMatch(
       /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
     );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\s*\{[^}]*position: sticky;[^}]*top: var\(--status-board-toolbar-sticky-top, 0px\);[^}]*z-index: 24;/s,
+    );
+    expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar--cnc');
     expect(css).toMatch(
       /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*flex: 0 0 auto;[^}]*overflow-y: visible;/s,
     );

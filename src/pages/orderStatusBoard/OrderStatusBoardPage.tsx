@@ -330,6 +330,7 @@ interface OrderStatusBoardPageProps {
 
 interface StatusBoardToolbarDisclosureProps {
   children: React.ReactNode;
+  className?: string;
   contentId: string;
   expanded: boolean;
   label: string;
@@ -339,6 +340,7 @@ interface StatusBoardToolbarDisclosureProps {
 
 const StatusBoardToolbarDisclosure: React.FC<StatusBoardToolbarDisclosureProps> = ({
   children,
+  className,
   contentId,
   expanded,
   label,
@@ -348,6 +350,7 @@ const StatusBoardToolbarDisclosure: React.FC<StatusBoardToolbarDisclosureProps> 
   <section
     className={[
       'status-board-toolbar-disclosure',
+      className,
       expanded ? 'status-board-toolbar-disclosure--expanded' : '',
     ].filter(Boolean).join(' ')}
   >
@@ -376,6 +379,40 @@ const StatusBoardToolbarDisclosure: React.FC<StatusBoardToolbarDisclosureProps> 
   </section>
 );
 
+type StatusBoardPageStyle = React.CSSProperties & {
+  '--status-board-toolbar-sticky-top'?: string;
+};
+
+function useWorkspaceTabsHeight(): number {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    let ro: ResizeObserver | null = null;
+    const attach = (): boolean => {
+      const tabs = document.querySelector('.workspace-tabs');
+      if (!tabs) return false;
+      const measure = () => setHeight(tabs.getBoundingClientRect().height);
+      measure();
+      if (typeof ResizeObserver !== 'undefined') {
+        ro = new ResizeObserver(measure);
+        ro.observe(tabs);
+      }
+      return true;
+    };
+    if (attach()) return () => ro?.disconnect();
+    const mo = new MutationObserver(() => {
+      if (attach()) mo.disconnect();
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      ro?.disconnect();
+    };
+  }, []);
+
+  return height;
+}
+
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
   const isOperational = useOperationalUi();
   const touchBoardDragEnabled = useCoarsePointer();
@@ -383,6 +420,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const workspaceTabsHeight = useWorkspaceTabsHeight();
   const currentUser = authSession.getUser();
   const sortPreferenceBoard: OrderStatusBoardType =
     fixedView === 'production' || (!fixedView && searchParams.get('board') === 'production')
@@ -1632,11 +1670,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       </div>
     </section>
   );
+  const statusBoardPageStyle = useMemo<StatusBoardPageStyle | undefined>(() => (
+    isCncToday
+      ? { '--status-board-toolbar-sticky-top': `${workspaceTabsHeight}px` }
+      : undefined
+  ), [isCncToday, workspaceTabsHeight]);
 
   return (
     <DndProvider backend={TouchBackend} options={DND_BACKEND_OPTIONS}>
       <main
         className={`status-board-page${isCncToday ? ' status-board-page--cnc' : ''}`}
+        style={statusBoardPageStyle}
         aria-labelledby={isOperational ? undefined : 'status-board-title'}
         aria-label={isOperational ? (isCncToday ? 'Доска МДФ-работ' : 'Доски статусов') : undefined}
       >
@@ -1878,6 +1922,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         )}
         {isCncToday && (
           <StatusBoardToolbarDisclosure
+            className="status-board-toolbar-disclosure--cnc"
             contentId="status-board-toolbar-controls"
             expanded={mobileToolbarExpanded}
             label="Настройки МДФ"

@@ -62,6 +62,32 @@
   display: none;
 }
 
+@media (min-width: 769px) {
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc {
+    position: sticky;
+    top: var(--status-board-toolbar-sticky-top, 0px);
+    z-index: 24;
+    min-width: 0;
+    display: block;
+    flex: 0 0 auto;
+    padding-block: 2px 4px;
+    margin-block: -2px -4px;
+    border-radius: 12px;
+    background: var(--app-bg);
+    box-shadow: 0 12px 18px rgba(15, 23, 42, 0.08);
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content,
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content-inner {
+    display: contents;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar--cnc {
+    position: relative;
+    z-index: 1;
+  }
+}
+
 .status-board-toolbar__search {
   width: min(160px, 100%);
   flex: 0 0 160px;
