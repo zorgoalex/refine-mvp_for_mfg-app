@@ -1155,6 +1155,31 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             ))
             spool.close()
 
+    async def test_processing_recovery_defers_transient_backend_failure_with_saved_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temp_path = Path(temp)
+            worker = make_worker(temp_path)
+            accepting_erp = CrashAfterAcceptErpClient()
+            worker.erp = accepting_erp
+            vector = FakeMessage(337, filename="layout.svg", mime_type="image/svg+xml", media_content=VALID_SVG)
+            group = SvgGroup(vector, None, [], None, None)
+            spool = AuditSpool(temp_path / "audit.sqlite3", allow_unsafe_path=True)
+            audit = ScanAudit.start(spool, "-100123", date(2026, 7, 24), "77", "v1", False)
+
+            with self.assertRaises(KeyboardInterrupt):
+                await worker.process_group(
+                    FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
+                )
+
+            with self.assertRaisesRegex(RuntimeError, "ERP unavailable"):
+                await reconcile_pending_processing_attempts(spool, FailingErpClient(), worker.state)
+
+            operation = latest_processing_attempt(spool)
+            self.assertEqual(operation["status"], "planned")
+            self.assertEqual(operation["errorCode"], "backend_ingest_failed")
+            self.assertEqual(len(spool.pending_processing_attempts()), 1)
+            spool.close()
+
     async def test_recovery_terminalizes_definite_backend_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             temp_path = Path(temp)

@@ -455,6 +455,9 @@ class ScanAudit:
 
     def defer_processing_reconciliation(self, key: str, message: Any, error_message: str) -> None:
         record = self.record_for(message)
+        self.defer_saved_processing_reconciliation(key, record, error_message)
+
+    def defer_saved_processing_reconciliation(self, key: str, record: dict[str, Any], error_message: str) -> None:
         operation = self.operations[key]
         operation.update({
             "errorCode": "backend_ingest_failed",
@@ -672,7 +675,7 @@ async def reconcile_pending_processing_attempts(
                 )
                 reconciled.append(audit.operations[operation["operationKey"]])
                 continue
-            audit.defer_processing_reconciliation(operation["operationKey"], message, error_message)
+            audit.defer_saved_processing_reconciliation(operation["operationKey"], message, error_message)
             raise
         response_packet = response.get("packet") if isinstance(response, dict) else None
         audit.finish_saved_operation(
