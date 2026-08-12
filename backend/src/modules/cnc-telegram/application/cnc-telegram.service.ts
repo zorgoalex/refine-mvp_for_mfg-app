@@ -4,13 +4,18 @@ import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
   ConfigureCncAutoCutStatusCommand,
+  CreateManualSvgCommentPresetCommand,
   IngestCncTelegramPacketCommand,
+  ListManualSvgCommentPresetsCommand,
   ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
+  ManualSvgUploadCommand,
 } from './cnc-telegram.types';
 import type {
   CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
+  CncTelegramManualSvgCommentPresetDto,
+  CncTelegramManualSvgUploadResponseDto,
   CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramTodayResponseDto,
 } from '../dto/cnc-telegram.dto';
@@ -66,6 +71,39 @@ export class CncTelegramService {
     return this.ports.packets.ingest(command);
   }
 
+  async manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
+    if (!this.permissions.canUser(command.currentUser, 'cut.manage')) {
+      await this.recordManualSvgUploadDenied(command);
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для загрузки SVG-раскроя', {
+        requiredPermissions: ['cut.manage'],
+      });
+    }
+    return this.ports.packets.manualSvgUpload(command);
+  }
+
+  async listManualSvgCommentPresets(
+    command: ListManualSvgCommentPresetsCommand,
+  ): Promise<CncTelegramManualSvgCommentPresetDto[]> {
+    if (!this.permissions.canUser(command.currentUser, 'cut.view')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра пресетов SVG-раскроя', {
+        requiredPermissions: ['cut.view'],
+      });
+    }
+    return this.ports.packets.listManualSvgCommentPresets(command);
+  }
+
+  async createManualSvgCommentPreset(
+    command: CreateManualSvgCommentPresetCommand,
+  ): Promise<CncTelegramManualSvgCommentPresetDto> {
+    if (!this.permissions.canUser(command.currentUser, 'cut.manage')) {
+      await this.recordManualSvgCommentPresetDenied(command);
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для создания пресета SVG-раскроя', {
+        requiredPermissions: ['cut.manage'],
+      });
+    }
+    return this.ports.packets.createManualSvgCommentPreset(command);
+  }
+
   async configureAutoCutStatus(
     command: ConfigureCncAutoCutStatusCommand,
   ): Promise<CncAutoCutStatusConfigureResponseDto> {
@@ -88,6 +126,37 @@ export class CncTelegramService {
         event: 'cnc.telegram_packet.ingest_denied',
         requestId: command.requestId,
         externalPacketKey: command.dto.externalPacketKey,
+        reason: 'PERMISSION_DENIED',
+        requiredPermissions: ['cut.manage'],
+      });
+    } catch {
+      // Deny response must not depend on the audit sink.
+    }
+  }
+
+  private async recordManualSvgUploadDenied(command: ManualSvgUploadCommand): Promise<void> {
+    try {
+      await this.ports.deniedAudit?.recordIngestDenied({
+        currentUser: command.currentUser,
+        event: 'cnc.manual_svg_upload.denied',
+        requestId: command.requestId,
+        externalPacketKey: command.dto.svgContentHash,
+        reason: 'PERMISSION_DENIED',
+        requiredPermissions: ['cut.manage'],
+      });
+    } catch {
+      // Deny response must not depend on the audit sink.
+    }
+  }
+
+  private async recordManualSvgCommentPresetDenied(
+    command: CreateManualSvgCommentPresetCommand,
+  ): Promise<void> {
+    try {
+      await this.ports.deniedAudit?.recordIngestDenied({
+        currentUser: command.currentUser,
+        event: 'cnc.manual_svg_comment_preset.create_denied',
+        requestId: command.requestId,
         reason: 'PERMISSION_DENIED',
         requiredPermissions: ['cut.manage'],
       });

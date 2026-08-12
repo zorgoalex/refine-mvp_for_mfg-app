@@ -83,6 +83,7 @@ import {
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
+import { CutSvgUploadModal } from "../cut/CutSvgUploadModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
 import {
   isTabletTier,
@@ -232,6 +233,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   } | null>(null);
   const [snapshotReferenceMappingValues, setSnapshotReferenceMappingValues] = useState<Record<string, number | null>>({});
   const [snapshotReferenceMappingSubmitting, setSnapshotReferenceMappingSubmitting] = useState(false);
+  const [svgUploadOpen, setSvgUploadOpen] = useState(false);
 
   // Получаем текущего пользователя для фильтра "Мои заказы"
   const currentUser = authStorage.getUser();
@@ -247,6 +249,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const canViewProductionReferences = !featureFlags.useBackendPermissions || can('production.view');
   const canCreateOrders = canManageOrderContent('orders.create', currentUser, canViewFinancials);
   const canUpdateOrders = canManageOrderContent('orders.update', currentUser, canViewFinancials);
+  const canUploadSvgCut = useBackendCut && can('cut.manage');
   const orderListColumnDefinitions = useMemo(
     () => filterOrderFinancialItems(ORDER_LIST_COLUMN_DEFINITIONS, canViewFinancials),
     [canViewFinancials],
@@ -1611,6 +1614,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
                 Создать заказ
               </Button>
             )}
+            {canUploadSvgCut && (
+              <Tooltip title="Загрузить SVG-раскрой">
+                <Button
+                  icon={<UploadOutlined />}
+                  onClick={() => setSvgUploadOpen(true)}
+                  aria-label="Загрузить SVG-раскрой"
+                >
+                  SVG раскрой
+                </Button>
+              </Tooltip>
+            )}
             {canViewFinancials && <Dropdown
               trigger={["click"]}
               menu={{
@@ -1899,6 +1913,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           orderIds={selectedCutOrderIds}
           onClose={() => setAddToCutOpen(false)}
           onDone={() => setSelectedCutOrderIds([])}
+        />
+      )}
+
+      {canUploadSvgCut && (
+        <CutSvgUploadModal
+          open={svgUploadOpen}
+          onClose={() => setSvgUploadOpen(false)}
         />
       )}
     </>

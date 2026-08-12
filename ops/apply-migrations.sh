@@ -1281,6 +1281,28 @@ probe_file() {
                         WHERE conname = 'chk_mdf_board_manual_moves_target_column'
                           AND conrelid = 'public.mdf_board_manual_moves'::regclass
                      ), false);" ;;
+    119_cnc_manual_svg_comment_presets*) probe_all \
+                     "$(q_tbl cnc_manual_svg_comment_presets)" \
+                     "$(q_con_on cnc_manual_svg_comment_presets cnc_manual_svg_comment_presets_pkey)" \
+                     "$(q_con_on cnc_manual_svg_comment_presets chk_cnc_manual_svg_comment_presets_label)" \
+                     "$(q_con_on cnc_manual_svg_comment_presets chk_cnc_manual_svg_comment_presets_comment)" \
+                     "$(q_con_on cnc_manual_svg_comment_presets chk_cnc_manual_svg_comment_presets_category)" \
+                     "$(q_idx uq_cnc_manual_svg_comment_presets_active_text)" \
+                     "$(q_idx idx_cnc_manual_svg_comment_presets_active_order)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM cnc_manual_svg_comment_presets
+                        WHERE label = 'Весь заказ'
+                          AND comment_text = 'весь заказ'
+                          AND category = 'order'
+                     );" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM cnc_manual_svg_comment_presets
+                        WHERE label = 'Переделка'
+                          AND comment_text = 'переделка'
+                          AND category = 'rework'
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1292,7 +1314,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

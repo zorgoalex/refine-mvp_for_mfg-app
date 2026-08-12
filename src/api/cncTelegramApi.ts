@@ -3,10 +3,14 @@ import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
   CncAutoCutStatusConfigureResponse,
+  CncTelegramManualSvgCommentPreset,
+  CncTelegramManualSvgUploadRequest,
+  CncTelegramManualSvgUploadResponse,
   CncTelegramMediaRestoreResponse,
   CncTelegramOrderCuttingSequencesResponse,
   CncTelegramOrderScreenshotsResponse,
   CncTelegramTodayResponse,
+  CreateCncTelegramManualSvgCommentPresetRequest,
 } from './types/cncTelegramApi.types';
 import type {
   TelegramWorkerAuditExportQuery,
@@ -76,6 +80,31 @@ export const cncTelegramApi = {
     return httpClient.post<CncAutoCutStatusConfigureResponse>(
       apiRoutes.cncTelegram.autoCutStatus,
       { enabled },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
+  manualSvgUpload(
+    body: CncTelegramManualSvgUploadRequest,
+    idempotencyKey: string,
+  ): Promise<CncTelegramManualSvgUploadResponse> {
+    return httpClient.post<CncTelegramManualSvgUploadResponse>(
+      apiRoutes.cncTelegram.manualSvgUpload,
+      body,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
+  listManualSvgCommentPresets(): Promise<CncTelegramManualSvgCommentPreset[]> {
+    return httpClient.get<CncTelegramManualSvgCommentPreset[]>(
+      apiRoutes.cncTelegram.manualSvgCommentPresets,
+    );
+  },
+  createManualSvgCommentPreset(
+    body: CreateCncTelegramManualSvgCommentPresetRequest,
+    idempotencyKey: string,
+  ): Promise<CncTelegramManualSvgCommentPreset> {
+    return httpClient.post<CncTelegramManualSvgCommentPreset>(
+      apiRoutes.cncTelegram.manualSvgCommentPresets,
+      body,
       { headers: { 'Idempotency-Key': idempotencyKey } },
     );
   },

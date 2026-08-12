@@ -39,6 +39,7 @@ import {
   SearchOutlined,
   UndoOutlined,
   UpOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -78,6 +79,7 @@ import { CutPdfPreview } from './CutPdfPreview';
 import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from './CutSheetLabelGenerateAction';
+import { CutSvgUploadModal } from './CutSvgUploadModal';
 import { authSession } from '../../api/authSession';
 import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
 import { CutJobVersionLines } from '../orders/CutJobVersionLines';
@@ -1034,6 +1036,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [operationalSheetFilter, setOperationalSheetFilter] = useState<number | undefined>();
   const [operationalFilmFilter, setOperationalFilmFilter] = useState<number | undefined>();
   const [cutListDateRange, setCutListDateRange] = useState<CutOrderDateRangeValue>(undefined);
+  const [svgUploadOpen, setSvgUploadOpen] = useState(false);
   const listFiltersRef = useRef<CutJobListFilters>({});
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
@@ -3212,6 +3215,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                     История
                   </Button>
                   <Button
+                    icon={<UploadOutlined />}
+                    onClick={() => setSvgUploadOpen(true)}
+                    disabled={!canManage}
+                  >
+                    Загрузить SVG
+                  </Button>
+                  <Button
                     icon={<PrinterOutlined />}
                     onClick={() => void openJobPdfPreview()}
                     disabled={job.groups.length === 0 || jobPdfPreviewBlockReason !== null}
@@ -3232,6 +3242,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 <>
                   <Button icon={<DownloadOutlined />} onClick={exportJobs}>
                     Экспорт
+                  </Button>
+                  <Button
+                    icon={<UploadOutlined />}
+                    onClick={() => setSvgUploadOpen(true)}
+                    disabled={!canManage}
+                  >
+                    SVG раскрой
                   </Button>
                   <Button
                     type="primary"
@@ -4656,6 +4673,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           <CutPdfPreview blob={pdfPreview.blob} loading={pdfPreview.loading} />
         </div>
       </Modal>
+      <CutSvgUploadModal
+        open={svgUploadOpen}
+        onClose={() => setSvgUploadOpen(false)}
+        onDone={(cutJobId) => {
+          void loadJobs(listFiltersRef.current);
+          if (cutJobId) void openJob(cutJobId);
+        }}
+      />
     </>
   );
 };
