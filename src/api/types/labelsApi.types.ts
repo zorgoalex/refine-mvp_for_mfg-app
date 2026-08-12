@@ -119,6 +119,7 @@ export interface LabelRendererCapabilities {
 export interface LabelTemplateInput {
   name: string;
   description?: string | null;
+  isActive?: boolean;
   canvasWidthMm: number;
   canvasHeightMm: number;
   dpi: number;

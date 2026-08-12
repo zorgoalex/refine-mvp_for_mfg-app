@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
 import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
+import { authSession } from '../../../../api/authSession';
 import { labelsApi } from '../../../../api/labelsApi';
 import type { LabelCutMapOption, LabelTemplate, OrderLabelCutMapOptions, OrderLabelsPreview } from '../../../../api/types/labelsApi.types';
 import { can } from '../../../../utils/permissions';
@@ -13,6 +14,10 @@ import {
   missingOrderCutMapRows,
   type OrderCutMapSelectionState,
 } from './orderCutMapSelection';
+import {
+  resolvePreferredLabelTemplateId,
+  saveLabelTemplatePreference,
+} from './labelTemplatePreference';
 
 const { Text } = Typography;
 
@@ -54,6 +59,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
 }) => {
   const canGenerate = can('labels.generate');
   const canViewCut = can('cut.view');
+  const labelTemplatePreferenceUserId = authSession.getUser()?.id ?? 'anon';
   const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -123,14 +129,15 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     setGeneratedPreview(null);
     setGeneratedGenerationId(null);
     setLoading(true);
-    labelsApi.listTemplates(true)
+    labelsApi.listTemplates()
       .then((next) => {
-        setTemplates(next);
-        setTemplateId((current) => current ?? next.find((template) => template.isActive)?.labelTemplateId ?? null);
+        const activeTemplates = next.filter((template) => template.isActive);
+        setTemplates(activeTemplates);
+        setTemplateId(resolvePreferredLabelTemplateId(labelTemplatePreferenceUserId, activeTemplates));
       })
       .catch(() => message.error('Не удалось загрузить шаблоны бирок'))
       .finally(() => setLoading(false));
-  }, [initialDetailId, open]);
+  }, [initialDetailId, labelTemplatePreferenceUserId, open]);
 
   useEffect(() => {
     if (!open || !hasCutMap || !canViewCut) {
@@ -260,7 +267,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         onCancel={() => !generating && setOpen(false)}
         footer={[
           <Button key="preview" onClick={runPreview} loading={loading || cutMapOptionsLoading} disabled={!selectedTemplate || isOrderDirty || generating || missingPreviewCutMaps.length > 0}>
-            Предпросмотр
+            Обновить предпросмотр
           </Button>,
           <Button key="generate" type="primary" icon={<DownloadOutlined />} onClick={runGenerate} loading={generating} disabled={!preview || isOrderDirty || cutMapOptionsLoading || missingGenerationCutMaps.length > 0}>
             Сформировать и скачать ZIP
@@ -325,10 +332,11 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
                 loading={loading}
                 onChange={(value) => {
                   setTemplateId(value);
+                  saveLabelTemplatePreference(labelTemplatePreferenceUserId, value);
                 }}
                 options={templates.map((template) => ({
                   value: template.labelTemplateId,
-                  label: template.isActive ? template.name : `${template.name} (архив)`,
+                  label: template.name,
                 }))}
                 placeholder="Шаблон"
               />

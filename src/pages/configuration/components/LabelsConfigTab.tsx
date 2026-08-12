@@ -155,6 +155,7 @@ const LABEL_CONDITION_BRANCH_OPTIONS: Array<{ value: LabelConditionBranch['type'
 interface TemplateFormValues {
   name: string;
   description?: string;
+  isActive: boolean;
   canvasWidthMm: number;
   canvasHeightMm: number;
   dpi: number;
@@ -329,6 +330,7 @@ export const LabelsConfigTab: React.FC = () => {
       form.setFieldsValue({
         name: selectedTemplate.name,
         description: selectedTemplate.description ?? '',
+        isActive: selectedTemplate.isActive,
         canvasWidthMm: selectedTemplate.canvasWidthMm,
         canvasHeightMm: selectedTemplate.canvasHeightMm,
         dpi: selectedTemplate.dpi,
@@ -559,6 +561,7 @@ export const LabelsConfigTab: React.FC = () => {
     form.setFieldsValue({
       name: '',
       description: '',
+      isActive: true,
       canvasWidthMm: 85,
       canvasHeightMm: 88,
       dpi: 203,
@@ -599,6 +602,7 @@ export const LabelsConfigTab: React.FC = () => {
     return {
       name: name.trim(),
       description: values.description?.trim() || null,
+      isActive: values.isActive ?? true,
       canvasWidthMm: values.canvasWidthMm,
       canvasHeightMm: values.canvasHeightMm,
       dpi: values.dpi,
@@ -1212,6 +1216,7 @@ export const LabelsConfigTab: React.FC = () => {
     form.setFieldsValue({
       name: variant.name,
       description: variant.description,
+      isActive: true,
       canvasWidthMm: 85,
       canvasHeightMm: 88,
       dpi: 203,
@@ -1461,7 +1466,7 @@ export const LabelsConfigTab: React.FC = () => {
               title: 'Статус',
               dataIndex: 'isActive',
               width: 120,
-              render: (active: boolean) => <Tag color={active ? 'green' : 'default'}>{active ? 'Активен' : 'Отключен'}</Tag>,
+              render: (active: boolean) => <Tag color={active ? 'green' : 'default'}>{active ? 'Активен' : 'Отключён'}</Tag>,
             },
             {
               title: '',
@@ -1892,6 +1897,14 @@ export const LabelsConfigTab: React.FC = () => {
             <Card size="small" title="Параметры шаблона" style={{ marginBottom: 16 }}>
               <Form.Item name="description" label="Описание">
                 <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} />
+              </Form.Item>
+              <Form.Item
+                name="isActive"
+                label="Доступен для формирования"
+                valuePropName="checked"
+                tooltip="Отключённые шаблоны остаются в редакторе, но не показываются в модалках формирования бирок."
+              >
+                <Switch checkedChildren="Активен" unCheckedChildren="Отключён" />
               </Form.Item>
               <Row gutter={8} align="top" wrap={false}>
                 <Col flex="47px">

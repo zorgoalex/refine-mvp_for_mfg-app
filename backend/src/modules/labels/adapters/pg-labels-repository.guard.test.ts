@@ -23,6 +23,16 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).not.toMatch(/deleted_at=COALESCE\(deleted_at, now\(\)\)/);
   });
 
+  it('persists the template active flag on create and preserves it on legacy updates', () => {
+    const createSource = source.slice(source.indexOf('async createTemplate'), source.indexOf('async updateTemplate'));
+    const updateSource = source.slice(source.indexOf('async updateTemplate'), source.indexOf('async deleteTemplate'));
+
+    expect(createSource).toMatch(/\(name, description, is_active, canvas_width_mm/);
+    expect(createSource).toMatch(/input\.isActive \?\? true/);
+    expect(updateSource).toMatch(/name=\$2, description=\$3, is_active=\$4/);
+    expect(updateSource).toMatch(/input\.isActive \?\? before\.isActive/);
+  });
+
   it('discovers detail fields from the live order details view schema', () => {
     expect(source).toMatch(/information_schema\.columns/);
     expect(source).toMatch(/table_name = 'order_details_view'/);

@@ -29,6 +29,15 @@ describe('LabelsConfigTab wiring', () => {
     expect(tabSrc).toMatch(/Сохранить шаблон/);
   });
 
+  it('lets operators activate or deactivate label templates without hiding them from configuration', () => {
+    expect(tabSrc).toMatch(/labelsApi\.listTemplates\(true\)/);
+    expect(tabSrc).toMatch(/name="isActive"/);
+    expect(tabSrc).toContain('Доступен для формирования');
+    expect(tabSrc).toMatch(/<Switch checkedChildren="Активен" unCheckedChildren="Отключён" \/>/);
+    expect(tabSrc).toMatch(/isActive:\s*values\.isActive \?\? true/);
+    expect(tabSrc).toContain("render: (active: boolean) => <Tag color={active ? 'green' : 'default'}>{active ? 'Активен' : 'Отключён'}</Tag>");
+  });
+
   it('exposes editable template elements and a user-facing custom-field editor without JSON', () => {
     expect(tabSrc).toMatch(/Элементы/);
     expect(tabSrc).toMatch(/addElement\('text'\)/);

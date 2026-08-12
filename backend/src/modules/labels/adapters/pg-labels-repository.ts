@@ -339,13 +339,14 @@ export class PgLabelsRepository implements LabelsPort {
       }
       const inserted = await tx.query<TemplateRow>(
         `INSERT INTO label_templates
-          (name, description, canvas_width_mm, canvas_height_mm, dpi, default_export_formats,
+          (name, description, is_active, canvas_width_mm, canvas_height_mm, dpi, default_export_formats,
            custom_field_schema, field_catalog_snapshot, created_by, updated_by)
-         VALUES ($1,$2,$3,$4,$5,$6::text[],$7::jsonb,$8::jsonb,$9,$9)
+         VALUES ($1,$2,$3,$4,$5,$6,$7::text[],$8::jsonb,$9::jsonb,$10,$10)
          RETURNING ${TEMPLATE_COLUMNS}`,
         [
           input.name,
           input.description ?? null,
+          input.isActive ?? true,
           input.canvasWidthMm,
           input.canvasHeightMm,
           input.dpi,
@@ -405,15 +406,16 @@ export class PgLabelsRepository implements LabelsPort {
       const input = command.input;
       const updated = await tx.query<TemplateRow>(
         `UPDATE label_templates SET
-           name=$2, description=$3, canvas_width_mm=$4, canvas_height_mm=$5, dpi=$6,
-           default_export_formats=$7::text[], custom_field_schema=$8::jsonb,
-           field_catalog_snapshot=$9::jsonb, version=version+1, updated_by=$10, updated_at=now()
+           name=$2, description=$3, is_active=$4, canvas_width_mm=$5, canvas_height_mm=$6, dpi=$7,
+           default_export_formats=$8::text[], custom_field_schema=$9::jsonb,
+           field_catalog_snapshot=$10::jsonb, version=version+1, updated_by=$11, updated_at=now()
          WHERE label_template_id=$1 AND deleted_at IS NULL
          RETURNING ${TEMPLATE_COLUMNS}`,
         [
           command.id,
           input.name,
           input.description ?? null,
+          input.isActive ?? before.isActive,
           input.canvasWidthMm,
           input.canvasHeightMm,
           input.dpi,

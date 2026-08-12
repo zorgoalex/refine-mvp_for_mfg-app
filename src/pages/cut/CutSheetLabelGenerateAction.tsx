@@ -1,11 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Modal, Select, Space, Tooltip, Typography, message } from 'antd';
 import { DownloadOutlined, PrinterOutlined, TagsOutlined } from '@ant-design/icons';
+import { authSession } from '../../api/authSession';
 import { labelsApi } from '../../api/labelsApi';
 import type { DetailLabelsPreview, LabelExportFormat, LabelTemplate } from '../../api/types/labelsApi.types';
 import { can } from '../../utils/permissions';
 import { saveLabelBlob } from '../orders/components/labels/labelDownloads';
 import { printLabelSvgPages } from '../orders/components/labels/labelPrint';
+import {
+  resolvePreferredLabelTemplateId,
+  saveLabelTemplatePreference,
+} from '../orders/components/labels/labelTemplatePreference';
 
 const { Text } = Typography;
 
@@ -21,6 +26,22 @@ interface CutSheetLabelGenerateActionProps {
   cutJobId: number;
   cutGroupId: number;
   sheetIndex: number;
+  labelCoverage?: CutSheetLabelCoverage | null;
+}
+
+export interface CutSheetLabelCoverageIssue {
+  key: string;
+  label: string;
+  expectedQuantity: number;
+  includedQuantity: number;
+  missingQuantity: number;
+  reason: string;
+}
+
+export interface CutSheetLabelCoverage {
+  expectedCount: number;
+  includedCount: number;
+  issues: CutSheetLabelCoverageIssue[];
 }
 
 export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionProps> = ({
@@ -28,8 +49,10 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   cutJobId,
   cutGroupId,
   sheetIndex,
+  labelCoverage,
 }) => {
   const canGenerate = can('labels.generate');
+  const labelTemplatePreferenceUserId = authSession.getUser()?.id ?? 'anon';
   const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -45,6 +68,23 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     [templateId, templates],
   );
   const disabled = !canGenerate || detailIds.length === 0;
+  const incompleteCoverage = Boolean(labelCoverage && labelCoverage.issues.length > 0);
+  const buttonLabel = incompleteCoverage && labelCoverage
+    ? `Бирки ${labelCoverage.includedCount}/${labelCoverage.expectedCount}`
+    : 'Бирки';
+  const omittedPreview = labelCoverage?.issues.slice(0, 8) ?? [];
+  const omittedRestCount = Math.max(0, (labelCoverage?.issues.length ?? 0) - omittedPreview.length);
+  const button = (
+    <Button
+      className="app-hit-area-sm"
+      size="small"
+      icon={<TagsOutlined />}
+      disabled={disabled}
+      onClick={() => setOpen(true)}
+    >
+      {buttonLabel}
+    </Button>
+  );
 
   // Seed the export-format checkboxes from the selected template's defaults
   // whenever the chosen template changes; the operator can then toggle them.
@@ -55,23 +95,21 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   useEffect(() => {
     if (!open) return;
     setLoading(true);
-    labelsApi.listTemplates(true)
+    labelsApi.listTemplates()
       .then((next) => {
         // A cut-map label is intentionally configured from the order card,
         // where every physical copy can be bound to an exact immutable
         // placement. The sheet shortcut scopes labels by detail IDs from the
         // visible sheet, without a persisted per-copy placement binding.
-        const supported = next.filter((template) => !template.elements.some((element) => element.kind === 'cut_map'));
+        const supported = next.filter(
+          (template) => template.isActive && !template.elements.some((element) => element.kind === 'cut_map'),
+        );
         setTemplates(supported);
-        setTemplateId((current) => (
-          current && supported.some((template) => template.labelTemplateId === current)
-            ? current
-            : supported.find((template) => template.isActive)?.labelTemplateId ?? null
-        ));
+        setTemplateId(resolvePreferredLabelTemplateId(labelTemplatePreferenceUserId, supported));
       })
       .catch(() => message.error('Не удалось загрузить шаблоны бирок'))
       .finally(() => setLoading(false));
-  }, [open]);
+  }, [labelTemplatePreferenceUserId, open]);
 
   const runPreview = useCallback(async () => {
     if (!selectedTemplate || detailIds.length === 0) return;
@@ -153,22 +191,18 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
 
   return (
     <>
-      <Button
-        className="app-hit-area-sm"
-        size="small"
-        icon={<TagsOutlined />}
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-      >
-        Бирки
-      </Button>
+      {incompleteCoverage && labelCoverage ? (
+        <Tooltip title={`Неполный комплект: будет ${labelCoverage.includedCount} из ${labelCoverage.expectedCount} бирок`}>
+          {button}
+        </Tooltip>
+      ) : button}
       <Modal
         title={`Бирки листа ${sheetIndex + 1}`}
         open={open}
         onCancel={() => !generating && setOpen(false)}
         footer={[
           <Button key="preview" onClick={runPreview} loading={loading} disabled={!selectedTemplate || generating}>
-            Предпросмотр
+            Обновить предпросмотр
           </Button>,
           <Button
             key="print"
@@ -204,6 +238,33 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
         `}</style>
         <Space direction="vertical" style={{ width: '100%' }} size={12}>
           {detailIds.length === 0 && <Alert type="warning" showIcon message="На листе нет деталей для бирок" />}
+          {incompleteCoverage && labelCoverage && (
+            <Alert
+              type="warning"
+              showIcon
+              message={`Неполный комплект: будет сформировано ${labelCoverage.includedCount} из ${labelCoverage.expectedCount} бирок`}
+              description={(
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  <Text type="secondary">
+                    Генерация доступна. Ниже детали, для которых бирки не попадут в этот комплект.
+                  </Text>
+                  <ul style={{ margin: 0, paddingInlineStart: 20 }}>
+                    {omittedPreview.map((issue) => (
+                      <li key={issue.key}>
+                        <Text strong>{issue.label}</Text>
+                        <Text type="secondary">
+                          {` — нет ${issue.missingQuantity} из ${issue.expectedQuantity}. ${issue.reason}`}
+                        </Text>
+                      </li>
+                    ))}
+                  </ul>
+                  {omittedRestCount > 0 && (
+                    <Text type="secondary">Ещё {omittedRestCount} строк без бирок.</Text>
+                  )}
+                </Space>
+              )}
+            />
+          )}
           <Alert
             type="info"
             showIcon
@@ -214,10 +275,13 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
             style={{ width: '100%' }}
             value={templateId}
             loading={loading}
-            onChange={setTemplateId}
+            onChange={(value) => {
+              setTemplateId(value);
+              saveLabelTemplatePreference(labelTemplatePreferenceUserId, value);
+            }}
             options={templates.map((template) => ({
               value: template.labelTemplateId,
-              label: template.isActive ? template.name : `${template.name} (архив)`,
+              label: template.name,
             }))}
             placeholder="Шаблон"
           />

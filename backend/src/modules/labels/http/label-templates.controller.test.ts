@@ -60,12 +60,12 @@ describe('LabelTemplatesController', () => {
     const service = fakeService();
     const controller = new LabelTemplatesController(service, runtime(true));
 
-    await controller.create({ user, requestId: 'req-1' }, validBody());
+    await controller.create({ user, requestId: 'req-1' }, validBody({ isActive: false }));
     expect(service.createTemplate).toHaveBeenCalledWith(
       expect.objectContaining({
         currentUser: user,
         requestId: 'req-1',
-        input: expect.objectContaining({ name: 'Default', idempotencyKey: 'template-create-1' }),
+        input: expect.objectContaining({ name: 'Default', isActive: false, idempotencyKey: 'template-create-1' }),
       }),
     );
   });

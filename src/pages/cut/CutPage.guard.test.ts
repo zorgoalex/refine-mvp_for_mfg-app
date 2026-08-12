@@ -149,11 +149,36 @@ describe('CutPage source guards', () => {
     // Use Refine navigation push (keep-alive tab) for the order number; not a
     // react-router Link with target="_blank".
     expect(source).toContain("show('orders_view', r.orderId, 'push')");
+    expect(source).toContain("show('orders_view', orderId, 'push')");
     expect(source).toContain('OrderDeletedTag');
     expect(source).toContain('orderDeleted={r.orderDeleted}');
     expect(source).toContain('orderDeletedReferenceClassName');
     expect(appCss).toContain('.ant-table-tbody > tr.order-deleted-reference-row > td');
     expect(source).not.toContain('react-router-dom');
+  });
+
+  it('shows cut job creation date and clickable unique orders in list and stats row', () => {
+    expect(source).toContain("title: 'Дата'");
+    expect(source).toContain('formatCutJobCreatedDate');
+    expect(source).toContain('cutJobOrderRefs');
+    expect(source).toContain('<CutJobOrderLinks items={row.items}');
+    expect(source).toContain('cut-job-operational-stats__orders');
+    expect(source).not.toContain('data-testid="cut-job-orders-card"');
+    expect(source).not.toContain('Заказы в задании');
+  });
+
+  it('keeps list filters and sortable cut-job production columns', () => {
+    expect(source).toContain('aria-label="Фильтры заданий на раскрой"');
+    expect(source).toContain('<span>Номер заказа</span>');
+    expect(source).toContain('<span>Материал</span>');
+    expect(source).toContain('<span>Название задания</span>');
+    expect(source).toContain("candidate.name.toLocaleLowerCase('ru-RU').includes(query)");
+    expect(source).toContain('cutJobMatchesOrderFilter(candidate, jobOrderSearch)');
+    expect(source).toContain('cutJobMatchesSheetMaterial(candidate, operationalSheetFilter)');
+    expect(source).toContain('cutJobCreatedAtSortValue(a.createdAt) - cutJobCreatedAtSortValue(b.createdAt)');
+    expect(source).toContain('a.totals.details - b.totals.details');
+    expect(source).toContain('a.totals.area - b.totals.area');
+    expect(source).toContain('totalFilmUsageMeters(a.totals.filmUsage) - totalFilmUsageMeters(b.totals.filmUsage)');
   });
 
   it('fail-closes detail file links against javascript:/data: stored-link XSS', () => {
@@ -358,6 +383,8 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toContain('Бирки');
     expect(sheetLabelSource).toContain('labelsApi.previewDetailLabels');
     expect(sheetLabelSource).toContain('labelsApi.generateDetailLabels');
+    expect(sheetLabelSource).toContain('labelsApi.listTemplates()');
+    expect(sheetLabelSource).toMatch(/template\)\s*=>\s*template\.isActive && !template\.elements\.some/);
     expect(sheetLabelSource).toContain('printLabelSvgPages');
     expect(sheetLabelSource).toContain('const runPrint = async () =>');
     expect(sheetLabelSource).toContain('Скачать ZIP');
@@ -365,6 +392,9 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toContain('Форматы файлов бирок');
     expect(sheetLabelSource).toContain('Checkbox.Group');
     expect(sheetLabelSource).toContain('EXPORT_FORMAT_OPTIONS');
+    expect(sheetLabelSource).toContain('resolvePreferredLabelTemplateId');
+    expect(sheetLabelSource).toContain('saveLabelTemplatePreference');
+    expect(sheetLabelSource).toContain("authSession.getUser()?.id ?? 'anon'");
   });
 
   it('stacks portrait sheet preview title and actions into full-width blocks', () => {
@@ -470,8 +500,8 @@ describe('CutPage profile + totals columns (source guard)', () => {
   it('renames the positions column and adds totals/profile/sheets columns', () => {
     expect(source).toContain("title: 'Позиции'");
     expect(source).toContain("title: 'Заказы'");
-    expect(source).toContain('distinctOrderIdsFromItems(row.items).length');
-    expect(source).toContain('<span>Заказы: <b>{distinctOrderIdsFromItems(job.items).length}</b></span>');
+    expect(source).toContain('<CutJobOrderLinks items={row.items}');
+    expect(source).toContain('Заказы: <CutJobOrderLinks items={job.items}');
     expect(source).toContain("title: 'Деталей'");
     expect(source).toContain("title: isOperational ? 'Площадь, м²' : 'Площадь, итого'");
     expect(source).toContain("title: isOperational ? 'Листы' : 'Кол-во листов раскроя'");
