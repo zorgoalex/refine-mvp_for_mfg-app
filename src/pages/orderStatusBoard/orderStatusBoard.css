@@ -2761,14 +2761,10 @@
   backdrop-filter: blur(8px);
 }
 
+.cnc-board-scroll-edge--left.ant-btn,
 .cnc-board-scroll-edge--right.ant-btn {
   inset-inline-start: auto;
   inset-inline-end: 10px;
-}
-
-.cnc-board-scroll-edge--left.ant-btn {
-  inset-inline-start: 10px;
-  inset-inline-end: auto;
 }
 
 .cnc-board-scroll-edge.ant-btn:hover,
