@@ -4031,13 +4031,8 @@ async function loadPeriodBazisCutSetCards(
       FROM production_statuses ps
     ),
     issued_status_threshold AS (
-      SELECT COALESCE(
-        MIN(os.sort_order) FILTER (
-          WHERE lower(trim(COALESCE(os.order_status_code, ''))) = 'issued'
-        ),
-        MIN(os.sort_order) FILTER (
-          WHERE lower(trim(os.order_status_name)) = 'выдан'
-        )
+      SELECT MIN(os.sort_order) FILTER (
+        WHERE lower(trim(os.order_status_name)) = 'выдан'
       ) AS sort_order
       FROM order_statuses os
     ),

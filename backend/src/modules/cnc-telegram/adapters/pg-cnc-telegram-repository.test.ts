@@ -656,6 +656,7 @@ describe('PgCncTelegramRepository', () => {
     expect(basisQuery?.text).toContain('cut_set.created_at,');
     expect(basisQuery?.text).toContain('packed_status_threshold');
     expect(basisQuery?.text).toContain('issued_status_threshold');
+    expect(basisQuery?.text).not.toContain('order_status_code');
     expect(basisQuery?.text).toContain('LEFT JOIN order_statuses source_order_status');
     expect(basisQuery?.text).toContain('LEFT JOIN mdf_board_manual_moves issued_order_move');
     expect(basisQuery?.text).toContain("issued_order_move.target_column = 'orders_issued'");
