@@ -31,6 +31,7 @@ import { isApiError } from '../../api/apiError';
 import type { CncTelegramManualSvgCommentPreset } from '../../api/types/cncTelegramApi.types';
 import type { EligibleDetailDto } from '../../api/types/cutApi.types';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
+import { parseSvgCutUploadFileNameHints } from './svgCutUploadFilename';
 import { parseSvgCutUploadFile, type ParsedSvgUpload } from './svgCutUploadParser';
 
 interface CutSvgUploadModalProps {
@@ -155,6 +156,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     onRemove: () => {
       setParsed(null);
       setEligibleDetails([]);
+      setSelectedOrderIds(defaultOrderIds);
+      setOrderOptions(defaultOrderOptions);
       return true;
     },
   };
@@ -320,14 +323,43 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     try {
       const result = await parseSvgCutUploadFile(file);
       setParsed(result);
+      const fileNameHints = parseSvgCutUploadFileNameHints(result.fileName);
+      if (fileNameHints.machineName) {
+        setMachineName(fileNameHints.machineName);
+      }
+      if (fileNameHints.materialName) {
+        setMaterialName(fileNameHints.materialName);
+      }
+      if (fileNameHints.orderNames.length > 0) {
+        void applyFileNameOrderHints(fileNameHints.orderNames);
+      }
       if (result.cutLayout.status === 'valid') {
         const inferredMaterial = inferMaterialName(result.cutLayout.items, result.fileName);
-        if (inferredMaterial && !materialName) setMaterialName(inferredMaterial);
+        if (inferredMaterial && !fileNameHints.materialName) setMaterialName(inferredMaterial);
       }
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Не удалось прочитать SVG');
     } finally {
       setParsing(false);
+    }
+  }
+
+  async function applyFileNameOrderHints(orderNames: string[]) {
+    setOrderSearchLoading(true);
+    try {
+      const lookup = await findOrdersByFileNameHints(orderNames);
+      setOrderOptions((current) => mergeOrderOptions(current, lookup.orders));
+      if (lookup.matchedOrderIds.length > 0) {
+        setSelectedOrderIds(uniqueNumbers([...defaultOrderIds, ...lookup.matchedOrderIds]));
+        message.success(`Заказы из имени файла найдены: ${lookup.matchedOrderNames.join(', ')}`);
+      }
+      if (lookup.missingOrderNames.length > 0) {
+        message.warning(`Не найдены заказы из имени файла: ${lookup.missingOrderNames.join(', ')}`);
+      }
+    } catch {
+      message.warning('Не удалось найти заказы из имени SVG-файла');
+    } finally {
+      setOrderSearchLoading(false);
     }
   }
 
@@ -489,6 +521,64 @@ function mergeOrderOptions(current: OrderOption[], orders: OrderListItemDto[]): 
     });
   }
   return Array.from(map.values());
+}
+
+async function findOrdersByFileNameHints(orderNames: string[]): Promise<{
+  orders: OrderListItemDto[];
+  matchedOrderIds: number[];
+  matchedOrderNames: string[];
+  missingOrderNames: string[];
+}> {
+  const uniqueOrderNames = uniqueStrings(orderNames);
+  const responses = await Promise.all(uniqueOrderNames.map(async (orderName) => {
+    try {
+      const response = await ordersApi.list({ search: orderName, pageSize: 20 });
+      return { orderName, orders: response.data };
+    } catch {
+      return { orderName, orders: [] };
+    }
+  }));
+
+  const ordersById = new Map<number, OrderListItemDto>();
+  const matchedOrderIds: number[] = [];
+  const matchedOrderNames: string[] = [];
+  const missingOrderNames: string[] = [];
+  for (const response of responses) {
+    for (const order of response.orders) {
+      ordersById.set(order.orderId, order);
+    }
+    const exactOrder = response.orders.find((order) => orderMatchesFileNameHint(order, response.orderName));
+    if (!exactOrder) {
+      missingOrderNames.push(response.orderName);
+      continue;
+    }
+    if (!matchedOrderIds.includes(exactOrder.orderId)) {
+      matchedOrderIds.push(exactOrder.orderId);
+      matchedOrderNames.push(exactOrder.orderName);
+    }
+  }
+  return {
+    orders: Array.from(ordersById.values()),
+    matchedOrderIds,
+    matchedOrderNames,
+    missingOrderNames,
+  };
+}
+
+function orderMatchesFileNameHint(order: OrderListItemDto, orderName: string): boolean {
+  const normalized = orderName.trim();
+  if (!normalized) return false;
+  if (String(order.orderName ?? '').trim() === normalized) return true;
+  if (String(order.fullNumber ?? '').trim() === normalized) return true;
+  return (String(order.fullNumber ?? '').match(/\d{3,8}/g) ?? []).includes(normalized);
+}
+
+function uniqueNumbers(values: number[]): number[] {
+  return Array.from(new Set(values));
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function detailMatchesSvgItem(

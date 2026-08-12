@@ -12,6 +12,8 @@ describe('manual SVG cut upload UI guard', () => {
     expect(cncApi).toContain('manualSvgUpload');
     expect(cncApi).toContain('Idempotency-Key');
     expect(modal).toContain('parseSvgCutUploadFile');
+    expect(modal).toContain('parseSvgCutUploadFileNameHints');
+    expect(modal).toContain('applyFileNameOrderHints');
     expect(modal).toContain('создать карточку файла станка для Доски МДФ из раскроя?');
     expect(modal).toContain('createMdfMachineFileCard');
     expect(modal).toContain('manual-svg-preset:${asciiHash(commentText)}');
