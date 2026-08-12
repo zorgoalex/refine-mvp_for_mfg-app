@@ -349,6 +349,7 @@ function packetItem(overrides: Partial<CncTelegramPacketItem> = {}): CncTelegram
     confidence: 1,
     matchOrderId: 2701,
     matchDetailId: 7001,
+    matchDetailQuantity: 1,
     matchStatus: 'matched',
     reviewNote: null,
     laminatedOrLater: false,

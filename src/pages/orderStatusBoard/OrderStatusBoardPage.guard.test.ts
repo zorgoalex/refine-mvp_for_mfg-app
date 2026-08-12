@@ -572,8 +572,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cutApi.fetchSheetSvg');
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain('CutSheetLabelGenerateAction');
-    expect(page).toContain('detailInstancesFromRepeatedDetailIds(svgCutSheet.detailIds)');
-    expect(page).toContain('detailInstancesFromPacketItems(packet.items)');
+    expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
+    expect(page).toContain('buildLabelDetailsFromPacketItems(packet.items)');
+    expect(page).toContain('labelCoverage={labelCoverage}');
+    expect(page).toContain('item.matchDetailQuantity');
+    expect(page).toContain('instance <= availableQuantity');
+    expect(page).toContain('В ERP у детали количество');
     expect(page).toContain('cutMapFallbackImageFromPacket(packet)');
     expect(page).toContain('ImagePrintPreviewModal');
     expect(page).toContain('aria-label={`Печать скрина листа ${title}`}');

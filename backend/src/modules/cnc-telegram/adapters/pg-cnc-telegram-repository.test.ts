@@ -147,6 +147,7 @@ describe('PgCncTelegramRepository', () => {
         cuttingSequenceNo: 12,
         itemCount: 1,
         itemQuantityTotal: 4,
+        items: [{ matchDetailId: 3101, matchDetailQuantity: 4 }],
         svgCutSheets: [{ cutGroupId: 100, sheetIndex: 0, sheetNumber: 1, detailIds: [3101, 3101] }],
         sourceCreatedAt: '2026-07-24T07:59:00.000Z',
       },
@@ -158,6 +159,7 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('FROM unnest($1::bigint[], $2::bigint[])');
     expect(sql).toContain('svg_cut_sheets_json');
     expect(sql).toContain('cut_result_placement placement');
+    expect(sql).toContain('matched_detail.quantity AS match_detail_quantity');
     expect(sql).not.toMatch(/\b(raw_gcode|screenshot_path|file_path)\b/i);
     const idempotencyInsert = queries.find((query) =>
       /INSERT INTO command_idempotency_keys/i.test(query.text),
@@ -2583,6 +2585,7 @@ function packetRowBase() {
     confidence: 0.94,
     match_order_id: 2689,
     match_detail_id: 3101,
+    match_detail_quantity: 4,
     match_status: 'matched',
     review_note: null,
     laminated_or_later: false,

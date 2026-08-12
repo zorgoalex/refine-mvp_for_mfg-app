@@ -96,7 +96,11 @@ import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
-import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from '../cut/CutSheetLabelGenerateAction';
+import {
+  CutSheetLabelGenerateAction,
+  type CutSheetLabelCoverage,
+  type CutSheetLabelDetailInstance,
+} from '../cut/CutSheetLabelGenerateAction';
 import type { LabelCutMapFallbackImage } from '../../api/types/labelsApi.types';
 import {
   classifyOrderStatusBoardMoveFailure,
@@ -4105,20 +4109,148 @@ function detailInstancesFromRepeatedDetailIds(detailIds: number[]): CutSheetLabe
   return instances;
 }
 
-function detailInstancesFromPacketItems(items: CncTelegramPacket['items']): CutSheetLabelDetailInstance[] {
+interface PacketLabelDetailBuild {
+  detailInstances: CutSheetLabelDetailInstance[];
+  labelCoverage: CutSheetLabelCoverage | null;
+}
+
+function packetItemLabel(item: CncTelegramPacket['items'][number], fallbackDetailId?: number): string {
+  const orderName = item.orderName.trim() || (item.matchOrderId ? String(item.matchOrderId) : 'заказ');
+  const detailText = item.detailNumber !== null && item.detailNumber !== undefined
+    ? `поз. ${item.detailNumber}`
+    : `деталь ${fallbackDetailId ?? item.matchDetailId ?? 'без номера'}`;
+  return `${orderName}, ${detailText}`;
+}
+
+function normalizedMatchedQuantity(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.trunc(value));
+}
+
+function coverageOrNull(
+  expectedCount: number,
+  includedCount: number,
+  issues: CutSheetLabelCoverage['issues'],
+): CutSheetLabelCoverage | null {
+  return issues.length > 0 ? { expectedCount, includedCount, issues } : null;
+}
+
+function buildLabelDetailsFromPacketItems(items: CncTelegramPacket['items']): PacketLabelDetailBuild {
   const nextInstanceByDetailId = new Map<number, number>();
   const instances: CutSheetLabelDetailInstance[] = [];
+  const issues: CutSheetLabelCoverage['issues'] = [];
+  let expectedCount = 0;
   for (const item of items) {
-    const detailId = item.matchDetailId;
-    if (!Number.isInteger(detailId) || detailId <= 0) continue;
     const quantity = Math.max(0, Math.trunc(item.quantity || 0));
+    if (quantity === 0) continue;
+    expectedCount += quantity;
+    const detailId = item.matchDetailId;
+    if (!Number.isInteger(detailId) || detailId <= 0) {
+      issues.push({
+        key: `item:${item.packetItemId}`,
+        label: packetItemLabel(item),
+        expectedQuantity: quantity,
+        includedQuantity: 0,
+        missingQuantity: quantity,
+        reason: 'Строка файла не сопоставлена с деталью заказа.',
+      });
+      continue;
+    }
+    const availableQuantity = normalizedMatchedQuantity(item.matchDetailQuantity);
+    if (availableQuantity === null) {
+      issues.push({
+        key: `item:${item.packetItemId}`,
+        label: packetItemLabel(item, detailId),
+        expectedQuantity: quantity,
+        includedQuantity: 0,
+        missingQuantity: quantity,
+        reason: 'Сопоставленная деталь не найдена в ERP или удалена.',
+      });
+      continue;
+    }
     const firstInstance = nextInstanceByDetailId.get(detailId) ?? 1;
+    let includedQuantity = 0;
     for (let offset = 0; offset < quantity; offset += 1) {
-      instances.push({ detailId, instance: firstInstance + offset });
+      const instance = firstInstance + offset;
+      if (instance <= availableQuantity) {
+        instances.push({ detailId, instance });
+        includedQuantity += 1;
+      }
     }
     nextInstanceByDetailId.set(detailId, firstInstance + quantity);
+    if (includedQuantity < quantity) {
+      issues.push({
+        key: `item:${item.packetItemId}`,
+        label: packetItemLabel(item, detailId),
+        expectedQuantity: quantity,
+        includedQuantity,
+        missingQuantity: quantity - includedQuantity,
+        reason: `В ERP у детали количество ${availableQuantity}, а в файле раскроя экземпляров больше.`,
+      });
+    }
   }
-  return instances;
+  return {
+    detailInstances: instances,
+    labelCoverage: coverageOrNull(expectedCount, instances.length, issues),
+  };
+}
+
+function buildLabelDetailsFromRepeatedDetailIds(
+  detailIds: number[],
+  items: CncTelegramPacket['items'],
+): PacketLabelDetailBuild {
+  const itemByDetailId = new Map<number, CncTelegramPacket['items'][number]>();
+  for (const item of items) {
+    const detailId = item.matchDetailId;
+    if (Number.isInteger(detailId) && detailId > 0 && !itemByDetailId.has(detailId)) {
+      itemByDetailId.set(detailId, item);
+    }
+  }
+  const expectedByDetailId = new Map<number, number>();
+  const includedByDetailId = new Map<number, number>();
+  const nextInstanceByDetailId = new Map<number, number>();
+  const instances: CutSheetLabelDetailInstance[] = [];
+  let expectedCount = 0;
+
+  for (const detailId of detailIds) {
+    if (!Number.isInteger(detailId) || detailId <= 0) continue;
+    expectedCount += 1;
+    expectedByDetailId.set(detailId, (expectedByDetailId.get(detailId) ?? 0) + 1);
+    const instance = nextInstanceByDetailId.get(detailId) ?? 1;
+    nextInstanceByDetailId.set(detailId, instance + 1);
+    const item = itemByDetailId.get(detailId);
+    const availableQuantity = item ? normalizedMatchedQuantity(item.matchDetailQuantity) : undefined;
+    if (availableQuantity === null || (availableQuantity !== undefined && instance > availableQuantity)) continue;
+    instances.push({ detailId, instance });
+    includedByDetailId.set(detailId, (includedByDetailId.get(detailId) ?? 0) + 1);
+  }
+
+  const issues: CutSheetLabelCoverage['issues'] = [];
+  for (const [detailId, expectedQuantity] of expectedByDetailId.entries()) {
+    const includedQuantity = includedByDetailId.get(detailId) ?? 0;
+    if (includedQuantity >= expectedQuantity) continue;
+    const item = itemByDetailId.get(detailId);
+    const availableQuantity = item ? normalizedMatchedQuantity(item.matchDetailQuantity) : null;
+    issues.push({
+      key: `detail:${detailId}`,
+      label: item ? packetItemLabel(item, detailId) : `Деталь ${detailId}`,
+      expectedQuantity,
+      includedQuantity,
+      missingQuantity: expectedQuantity - includedQuantity,
+      reason: availableQuantity === null
+        ? 'Сопоставленная деталь не найдена в ERP или удалена.'
+        : `В ERP у детали количество ${availableQuantity}, а в раскрое экземпляров больше.`,
+    });
+  }
+
+  return {
+    detailInstances: instances,
+    labelCoverage: coverageOrNull(expectedCount, instances.length, issues),
+  };
+}
+
+function detailInstancesFromPacketItems(items: CncTelegramPacket['items']): CutSheetLabelDetailInstance[] {
+  return buildLabelDetailsFromPacketItems(items).detailInstances;
 }
 
 function cutMapFallbackImageFromPacket(packet: CncTelegramPacket): LabelCutMapFallbackImage | null {
@@ -4173,12 +4305,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const hasSvgSheetPreview = Boolean(packet.svgCutJobId && svgCutSheet);
   const hasSheetPreview = hasSheetImage || hasSvgSheetPreview;
   const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);
-  const labelDetailInstances = useMemo(
+  const labelDetailBuild = useMemo(
     () => svgCutSheet
-      ? detailInstancesFromRepeatedDetailIds(svgCutSheet.detailIds)
-      : detailInstancesFromPacketItems(packet.items),
+      ? buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)
+      : buildLabelDetailsFromPacketItems(packet.items),
     [packet.items, svgCutSheet],
   );
+  const labelDetailInstances = labelDetailBuild.detailInstances;
+  const labelCoverage = labelDetailBuild.labelCoverage;
   const cutMapFallbackImage = useMemo(() => cutMapFallbackImageFromPacket(packet), [packet]);
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
   const minimal = displayMode === 'minimal';
@@ -4583,6 +4717,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
               sheetIndex={labelSheet?.sheetIndex ?? 0}
               sheetLabel={labelSheet ? `листа ${labelSheet.sheetNumber}` : 'скрина'}
               cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}
+              labelCoverage={labelCoverage}
             />
           ) : (
             <Tooltip title={disabledLabelReason}>

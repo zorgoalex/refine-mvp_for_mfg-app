@@ -1567,6 +1567,7 @@ function packetSelectSql(whereSql: string): string {
       i.confidence,
       i.match_order_id,
       i.match_detail_id,
+      matched_detail.quantity AS match_detail_quantity,
       i.match_status,
       i.review_note,
       CASE
@@ -5381,6 +5382,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         confidence: toNumber(row.confidence),
         matchOrderId: toNullableNumber(row.match_order_id),
         matchDetailId: toNullableNumber(row.match_detail_id),
+        matchDetailQuantity: toNullableNumber(row.match_detail_quantity),
         matchStatus: row.match_status ?? 'unmatched',
         reviewNote: row.review_note,
         laminatedOrLater:

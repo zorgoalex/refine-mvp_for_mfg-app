@@ -27,6 +27,7 @@ export interface CncTelegramPacketItemDto {
   confidence: number;
   matchOrderId: number | null;
   matchDetailId: number | null;
+  matchDetailQuantity: number | null;
   matchStatus: CncTelegramMatchStatus;
   reviewNote: string | null;
   laminatedOrLater: boolean;
