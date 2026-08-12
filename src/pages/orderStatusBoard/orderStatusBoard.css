@@ -440,6 +440,8 @@
 
 .status-board-columns--cnc {
   --status-board-cnc-column-gap: clamp(4px, 0.8vw, 12px);
+  --status-board-cnc-order-column-offset-y: 0px;
+  --status-board-cnc-order-column-visual-height: 100%;
   width: 100%;
   min-width: 0;
   display: grid;
@@ -466,7 +468,9 @@
 .status-board-page--cnc .cnc-today-column--orders_ready .status-board-column__cards,
 .status-board-page--cnc .cnc-today-column--orders_issued .status-board-column__cards {
   box-sizing: border-box;
-  max-height: var(--status-board-cnc-order-cards-max-height);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
@@ -476,6 +480,12 @@
 .status-board-page--cnc .cnc-today-column--orders_ready,
 .status-board-page--cnc .cnc-today-column--orders_issued {
   position: relative;
+  height: var(--status-board-cnc-order-column-visual-height);
+  max-height: var(--status-board-cnc-order-column-visual-height);
+  align-self: start;
+  z-index: 16;
+  transform: translateY(var(--status-board-cnc-order-column-offset-y));
+  will-change: transform;
 }
 
 .status-board-page--cnc .cnc-detailed-workspace {

@@ -710,6 +710,13 @@
   height: 100% !important;
 }
 
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders_ready,
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders_issued {
+  height: var(--status-board-cnc-order-column-visual-height) !important;
+  max-height: var(--status-board-cnc-order-column-visual-height);
+}
+
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-column__cards {
   max-height: none;
   min-height: 0;
@@ -722,7 +729,8 @@
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders .status-board-column__cards,
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders_ready .status-board-column__cards,
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .cnc-today-column--orders_issued .status-board-column__cards {
-  max-height: var(--status-board-cnc-order-cards-max-height);
+  flex: 1 1 auto;
+  max-height: none;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
