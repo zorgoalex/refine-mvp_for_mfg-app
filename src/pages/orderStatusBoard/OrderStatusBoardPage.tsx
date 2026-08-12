@@ -3614,8 +3614,11 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
   printDate,
 }) => {
   const printColumns: CncPrintColumn[] = columns.map((column) => {
-    const cards: CncPrintCard[] = column.key === 'orders'
-      ? (column.orderCards ?? []).map((order) => ({ kind: 'order', order }))
+    const cards: CncPrintCard[] = isCncOrderColumnKey(column.key)
+      ? (column.orderCards ?? []).map((entry) => ({
+          kind: 'order' as const,
+          order: entry.card,
+        }))
       : isCncBathColumnKey(column.key)
         ? column.baths.map((bath) => ({ kind: 'bath', bath }))
         : [
