@@ -17,10 +17,6 @@ export interface ExecuteBoardMoveInput {
 }
 
 export interface ExecuteBoardMoveDependencies {
-  confirmManualProductionMove: (
-    card: OrderStatusBoardCard,
-    targetName: string,
-  ) => Promise<boolean>;
   changeOrderStatus: (
     orderId: number,
     request: { orderStatusId: number; version: number; idempotencyKey: string },
@@ -34,7 +30,6 @@ export interface ExecuteBoardMoveDependencies {
 }
 
 export type ExecuteBoardMoveResult =
-  | { kind: 'cancelled' }
   | { kind: 'refreshed' }
   | { kind: 'stale' };
 
@@ -42,17 +37,6 @@ export async function executeOrderStatusBoardMove(
   input: ExecuteBoardMoveInput,
   dependencies: ExecuteBoardMoveDependencies,
 ): Promise<ExecuteBoardMoveResult> {
-  if (
-    input.board === 'production' &&
-    input.card.productionStatusFromDetailsEnabled
-  ) {
-    const confirmed = await dependencies.confirmManualProductionMove(
-      input.card,
-      input.targetName,
-    );
-    if (!confirmed) return { kind: 'cancelled' };
-  }
-
   if (input.board === 'order') {
     await dependencies.changeOrderStatus(input.card.orderId, {
       orderStatusId: input.targetStatusId,

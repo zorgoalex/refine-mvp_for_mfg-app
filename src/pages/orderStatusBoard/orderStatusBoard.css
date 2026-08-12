@@ -104,7 +104,7 @@
 }
 
 .status-board-toolbar__settings-panel {
-  min-width: 190px;
+  min-width: 240px;
   display: grid;
   gap: 10px;
 }
@@ -113,6 +113,31 @@
   width: 100%;
   min-height: 28px;
   justify-content: space-between;
+}
+
+.status-board-toolbar__settings-section {
+  display: grid;
+  gap: 8px;
+}
+
+.status-board-toolbar__settings-label {
+  line-height: 1.25;
+}
+
+.status-board-toolbar__order-sort-select {
+  width: 100%;
+}
+
+.status-board-toolbar__order-sort-direction .ant-segmented-group {
+  display: flex;
+}
+
+.status-board-toolbar__order-sort-direction .ant-segmented-item {
+  flex: 1 1 0;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .status-board-toolbar__display-mode {
@@ -172,6 +197,8 @@
   --cnc-bath-detail-width: 70vw;
   --cnc-bath-column-width: 304px;
   --cnc-bath-column-gap: 12px;
+  --status-board-cnc-order-column-offset-y: 0px;
+  --status-board-cnc-order-column-visual-height: 100%;
   align-items: flex-start;
 }
 
@@ -305,6 +332,25 @@
   background: #fbfff5;
 }
 
+.status-board-columns--cnc > .cnc-today-column--orders,
+.status-board-columns--cnc > .cnc-today-column--orders_ready,
+.status-board-columns--cnc > .cnc-today-column--orders_issued {
+  height: var(--status-board-cnc-order-column-visual-height);
+  max-height: var(--status-board-cnc-order-column-visual-height);
+  align-self: start;
+  z-index: 16;
+  transform: translateY(var(--status-board-cnc-order-column-offset-y));
+  will-change: transform;
+}
+
+.status-board-columns--cnc > .cnc-today-column--orders .status-board-column__cards,
+.status-board-columns--cnc > .cnc-today-column--orders_ready .status-board-column__cards,
+.status-board-columns--cnc > .cnc-today-column--orders_issued .status-board-column__cards {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .cnc-today-column .status-board-column__header {
   min-height: 64px;
   align-items: stretch;
@@ -402,6 +448,17 @@
 .status-board-card:focus-visible {
   outline: 2px solid #1677ff;
   outline-offset: 2px;
+}
+
+.status-board-card[aria-disabled="false"],
+.cnc-board-card-shell[aria-disabled="false"] > .status-board-card {
+  cursor: grab;
+  touch-action: pan-y;
+}
+
+.status-board-card[aria-disabled="false"]:active,
+.cnc-board-card-shell[aria-disabled="false"] > .status-board-card:active {
+  cursor: grabbing;
 }
 
 .cnc-relation-card {
@@ -527,31 +584,6 @@
   display: block;
   overflow-wrap: anywhere;
   white-space: normal;
-}
-
-.status-board-card__actions {
-  display: flex;
-  flex: 0 0 auto;
-}
-
-.status-board-card__actions .ant-btn {
-  width: 36px;
-  height: 36px;
-}
-
-.status-board-card--compact .status-board-card__actions .ant-btn,
-.status-board-card--minimal .status-board-card__actions .ant-btn {
-  width: 32px;
-  height: 32px;
-}
-
-.status-board-card__drag {
-  cursor: grab;
-  touch-action: none;
-}
-
-.status-board-card__drag:active {
-  cursor: grabbing;
 }
 
 .status-board-card__client {
@@ -717,28 +749,6 @@
   transform: rotate(1deg);
 }
 
-.cnc-card-move-actions {
-  min-height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 2px;
-}
-
-.cnc-card-move-actions .ant-btn {
-  width: 36px;
-  height: 36px;
-}
-
-.cnc-card-move-actions__drag {
-  cursor: grab;
-  touch-action: none;
-}
-
-.cnc-card-move-actions__drag:active {
-  cursor: grabbing;
-}
-
 .cnc-card-context-menu .ant-dropdown-menu-submenu-title,
 .status-board-card-context-menu .ant-dropdown-menu-submenu-title {
   min-width: 150px;
@@ -751,6 +761,71 @@
   flex-wrap: wrap;
   gap: 4px;
   font-variant-numeric: tabular-nums;
+}
+
+.status-board-columns--cnc-minimal .status-board-column__cards {
+  padding: 6px;
+  gap: 5px;
+}
+
+.cnc-compact-card {
+  min-height: 34px;
+  padding: 5px 7px;
+  border-radius: 7px;
+}
+
+.cnc-compact-card__number,
+.cnc-compact-card__number.ant-btn {
+  width: 100%;
+  height: auto;
+  min-height: 24px;
+  padding: 0;
+  color: var(--app-text);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+}
+
+.cnc-order-card--minimal .cnc-order-card__order-link.ant-btn {
+  min-height: 24px;
+  color: #1677ff;
+}
+
+.cnc-compact-card__refs {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.cnc-compact-card__refs > span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.cnc-compact-card__ref-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--app-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cnc-compact-card__refs strong {
+  flex: 0 0 auto;
+  color: var(--app-text);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .cnc-order-card__order-link.ant-btn {
@@ -1496,10 +1571,6 @@
     overflow-y: auto;
   }
 
-  .status-board-card__actions .ant-btn {
-    width: 44px;
-    height: 44px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
