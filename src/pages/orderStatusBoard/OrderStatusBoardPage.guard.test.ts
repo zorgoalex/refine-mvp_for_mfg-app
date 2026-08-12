@@ -675,6 +675,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 
   it('offers compact MDF cards with per-card temporary standard view', () => {
+    const mobileCncContainerStart = css.indexOf('@container status-board-viewport (max-width: 960px)');
+    const mobileCncContainerEnd = css.indexOf('@media (max-width: 768px)', mobileCncContainerStart);
+    const mobileCncContainer = css.slice(mobileCncContainerStart, mobileCncContainerEnd);
+
     expect(page).toContain('type CncCardDisplayMode,');
     expect(page).toContain('const [cncCardDisplayMode, setCncCardDisplayMode]');
     expect(page).toContain('aria-label="Формат карточек МДФ-доски"');
@@ -702,6 +706,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('blur(4px)');
     expect(css).toContain('cubic-bezier(0.2, 0, 0, 1)');
     expect(css).not.toContain('transition: all');
+    expect(mobileCncContainer).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__standard-grid',
+    );
+    expect(mobileCncContainer).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__sheet',
+    );
+    expect(mobileCncContainer).not.toContain(
+      '.status-board-columns--cnc .status-board-card__standard-grid',
+    );
+    expect(mobileCncContainer).not.toContain(
+      '.status-board-columns--cnc .cnc-packet-card__sheet',
+    );
+    expect(mobileCncContainer).not.toContain(
+      '.status-board-columns--cnc .status-board-card__top',
+    );
   });
 
   it('adds a number-only compact MDF card mode', () => {
@@ -822,9 +841,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-columns--cnc > .status-board-column');
     expect(css).toContain('container-name: status-board-viewport');
     expect(css).toContain('@container status-board-viewport (max-width: 960px)');
-    expect(css).toContain('.status-board-columns--cnc .cnc-packet-card__summary-meta');
-    expect(css).toContain('.status-board-columns--cnc .status-board-card__standard-grid');
-    expect(css).toContain('.status-board-columns--cnc .cnc-order-card__compact-client');
+    expect(css).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-meta',
+    );
+    expect(css).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__standard-grid',
+    );
+    expect(css).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-order-card__compact-client',
+    );
   });
 
   it('prints the compact MDF board in landscape with repeated column headers', () => {

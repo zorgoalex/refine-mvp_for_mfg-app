@@ -2830,28 +2830,28 @@
 }
 
 @container status-board-viewport (max-width: 960px) {
-  .status-board-columns--cnc .status-board-column__marker,
-  .status-board-columns--cnc .cnc-today-column__totals,
-  .status-board-columns--cnc .cnc-today-column__totals-placeholder,
-  .status-board-columns--cnc .cnc-today-column__load,
-  .status-board-columns--cnc .cnc-card-display-toggle.ant-btn,
-  .status-board-columns--cnc .cnc-packet-card__summary-meta,
-  .status-board-columns--cnc .cnc-packet-card__summary-order-wrap .ant-tag,
-  .status-board-columns--cnc .cnc-packet-card__material,
-  .status-board-columns--cnc .cnc-packet-card__program,
-  .status-board-columns--cnc .cnc-packet-card__status-icons,
-  .status-board-columns--cnc .cnc-packet-card__notes,
-  .status-board-columns--cnc .cnc-packet-card__metrics,
-  .status-board-columns--cnc .cnc-packet-card__tabs,
-  .status-board-columns--cnc .cnc-packet-card__items-panel,
-  .status-board-columns--cnc .cnc-packet-card__sheet-panel,
-  .status-board-columns--cnc .cnc-packet-card__collapse,
-  .status-board-columns--cnc .cnc-packet-card__sheet,
-  .status-board-columns--cnc .status-board-card__footer,
-  .status-board-columns--cnc .cnc-bath-card__actions,
-  .status-board-columns--cnc .status-board-card__standard-grid,
-  .status-board-columns--cnc .status-board-card__compact-text,
-  .status-board-columns--cnc .cnc-order-card__compact-client {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-column__marker,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column__totals,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column__totals-placeholder,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column__load,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-card-display-toggle.ant-btn,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-meta,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-order-wrap .ant-tag,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__material,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__program,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__status-icons,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__notes,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__metrics,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__tabs,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__items-panel,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__sheet-panel,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__collapse,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__sheet,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__footer,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-bath-card__actions,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__standard-grid,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__compact-text,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-order-card__compact-client {
     display: none;
   }
 
@@ -2877,21 +2877,21 @@
     display: inline-flex;
   }
 
-  .status-board-columns--cnc .cnc-today-column .status-board-column__header {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column .status-board-column__header {
     min-height: 42px;
     padding: 4px;
   }
 
-  .status-board-columns--cnc .cnc-today-column__header-main {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column__header-main {
     justify-content: center;
     gap: 3px;
   }
 
-  .status-board-columns--cnc .status-board-column__title .ant-typography {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-column__title .ant-typography {
     font-size: clamp(8px, 1.2vw, 11px);
   }
 
-  .status-board-columns--cnc .ant-badge-count {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .ant-badge-count {
     min-width: 16px;
     height: 16px;
     padding-inline: 4px;
@@ -2899,30 +2899,30 @@
     line-height: 16px;
   }
 
-  .status-board-columns--cnc .status-board-card,
-  .status-board-columns--cnc .cnc-card--summary-only,
-  .status-board-columns--cnc .cnc-order-card--summary-only {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-card--summary-only,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-order-card--summary-only {
     padding: 4px;
   }
 
-  .status-board-columns--cnc .status-board-card__top {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__top {
     min-height: 0;
   }
 
-  .status-board-columns--cnc .cnc-packet-card__summaries {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summaries {
     margin: 0;
     padding: 0;
   }
 
-  .status-board-columns--cnc .cnc-packet-card__summary-order,
-  .status-board-columns--cnc .cnc-packet-card__summary-order.ant-btn {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-order,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-order.ant-btn {
     font-size: clamp(10px, 1.5vw, 15px);
     color: var(--app-text);
     font-weight: 700;
     line-height: 1.15;
   }
 
-  .status-board-columns--cnc .cnc-order-card .status-board-card__number {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-order-card .status-board-card__number {
     font-size: clamp(14px, 4.8cqw, 16px);
     color: var(--app-text);
     font-weight: 700;
