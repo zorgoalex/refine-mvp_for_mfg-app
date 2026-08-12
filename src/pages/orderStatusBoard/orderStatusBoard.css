@@ -3242,6 +3242,24 @@
     line-height: 1.25;
   }
 
+  .cnc-print-board--minimal .cnc-print-card {
+    min-height: 6.5mm;
+    padding: 1mm 1.4mm;
+  }
+
+  .cnc-print-card--minimal {
+    display: flex;
+    align-items: center;
+  }
+
+  .cnc-print-card__minimal-number {
+    color: #111;
+    font-size: 9.8pt;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+  }
+
   .cnc-print-card__sequence-row {
     margin-bottom: 1.1mm;
   }

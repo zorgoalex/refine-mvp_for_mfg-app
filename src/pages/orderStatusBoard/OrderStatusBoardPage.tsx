@@ -3063,6 +3063,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
         <CncTelegramPrintBoard
           columns={displayColumns}
           orderStatusColumns={orderStatusColumns}
+          displayMode={cardDisplayMode}
           printDate={printDate}
         />,
         document.body,
@@ -3577,6 +3578,7 @@ const CncOrderSummaryLine: React.FC<CncOrderSummaryLineProps> = ({
 interface CncTelegramPrintBoardProps {
   columns: CncTelegramTodayDisplayColumn[];
   orderStatusColumns: OrderStatusBoardColumn[];
+  displayMode: CncCardDisplayMode;
   printDate: string;
 }
 
@@ -3603,6 +3605,7 @@ interface CncPrintColumn {
 const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
   columns,
   orderStatusColumns,
+  displayMode,
   printDate,
 }) => {
   const printColumns: CncPrintColumn[] = columns.map((column) => {
@@ -3631,7 +3634,10 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
   );
 
   return (
-    <section className="cnc-print-board" aria-label="Печатная версия МДФ-доски">
+    <section
+      className={`cnc-print-board cnc-print-board--${displayMode}`}
+      aria-label="Печатная версия МДФ-доски"
+    >
       <header className="cnc-print-board__title">
         <strong>МДФ-работы</strong>
         <span>{printDate}</span>
@@ -3661,6 +3667,7 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
                     <CncTelegramPrintCard
                       card={column.cards[rowIndex]}
                       orderStatusColumns={orderStatusColumns}
+                      displayMode={displayMode}
                     />
                   ) : null}
                 </td>
@@ -3676,7 +3683,23 @@ const CncTelegramPrintBoard: React.FC<CncTelegramPrintBoardProps> = ({
 const CncTelegramPrintCard: React.FC<{
   card: CncPrintCard;
   orderStatusColumns: OrderStatusBoardColumn[];
-}> = ({ card, orderStatusColumns }) => {
+  displayMode: CncCardDisplayMode;
+}> = ({ card, orderStatusColumns, displayMode }) => {
+  if (displayMode === 'minimal') {
+    const numberOnly = card.kind === 'order'
+      ? formatStatusBoardOrderNumber(card.order)
+      : card.kind === 'bath'
+        ? formatCncBathCardCutNumber(card.bath)
+        : card.kind === 'bazis-cut'
+          ? `БР-${card.bazisCutSet.bazisCutSetId}`
+          : formatCncPacketCompactNumber(card.packet);
+    return (
+      <div className="cnc-print-card cnc-print-card--minimal">
+        <strong className="cnc-print-card__minimal-number">{numberOnly}</strong>
+      </div>
+    );
+  }
+
   if (card.kind === 'order') {
     const status = card.order.productionStatusName || 'Без статуса';
     const statusColor =
