@@ -2978,6 +2978,26 @@
     cursor: pointer;
   }
 
+  .status-board-page--cnc .status-board-toolbar-disclosure {
+    border-radius: 8px;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure__toggle {
+    min-height: 34px;
+    height: 34px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure__label {
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure__summary {
+    font-size: 11px;
+  }
+
   .status-board-toolbar-disclosure__toggle:focus-visible {
     outline: 2px solid #1677ff;
     outline-offset: -2px;
@@ -3053,6 +3073,11 @@
     border-radius: 0;
     background: transparent;
     box-shadow: none;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure .status-board-toolbar-disclosure__content-inner > .status-board-toolbar {
+    padding: 8px;
+    gap: 6px;
   }
 
   .status-board-toolbar {
@@ -3145,6 +3170,21 @@
   .status-board-column__cards {
     overscroll-behavior-x: auto;
     overscroll-behavior-y: contain;
+    touch-action: pan-x pan-y;
+  }
+
+  .status-board-page--cnc :where(
+    .status-board-viewport,
+    .status-board-columns--cnc,
+    .status-board-column,
+    .status-board-column__header,
+    .status-board-column__cards,
+    .status-board-card,
+    .cnc-card--summary-only,
+    .cnc-order-card--summary-only,
+    .cnc-packet-card,
+    .cnc-bath-card
+  ) {
     touch-action: pan-x pan-y;
   }
 

@@ -226,8 +226,8 @@ const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
 ] as const;
 const DND_BACKEND_OPTIONS = {
   enableMouseEvents: true,
-  delayTouchStart: 160,
-  touchSlop: 6,
+  delayTouchStart: 320,
+  touchSlop: 12,
 };
 
 function isKeyboardMoveMenuTrigger(event: React.KeyboardEvent<HTMLElement>): boolean {

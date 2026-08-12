@@ -674,6 +674,7 @@
 /* CNC is a horizontal tablet board too. Keep tracks wide, but never let a
    generic column width escape its grid track and overlap the next column. */
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page.status-board-page--cnc {
+  --status-board-cnc-mobile-spoiler-row: 34px;
   height: 100% !important;
   min-height: 0 !important;
   gap: 0;
@@ -681,11 +682,11 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-viewport {
-  height: calc(100% - var(--tablet-sticky-row));
+  height: auto;
   min-height: 0;
   flex: 1 1 0;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   touch-action: pan-x pan-y;
 }
 
@@ -757,13 +758,97 @@
   top: 0;
   z-index: 32;
   width: 100%;
-  flex: 0 0 var(--tablet-sticky-row);
+  min-height: var(--status-board-cnc-mobile-spoiler-row);
+  flex: 0 0 auto;
+  overflow: clip;
+  border: 1px solid var(--app-border-soft);
+  border-radius: 0 0 10px 10px;
+  background: var(--app-surface);
+  box-shadow: 0 5px 14px rgba(23, 52, 61, 0.08);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__toggle {
+  width: 100%;
+  min-height: var(--status-board-cnc-mobile-spoiler-row);
+  height: var(--status-board-cnc-mobile-spoiler-row);
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--app-text);
+  font: inherit;
+  text-align: left;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__label {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__summary {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--app-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__chevron {
+  flex: 0 0 auto;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  opacity: 0;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content-inner {
+  min-width: 0;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc.status-board-toolbar-disclosure--expanded .status-board-toolbar-disclosure__content {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  opacity: 1;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc .status-board-toolbar {
-  position: relative;
+  position: static;
   top: auto;
   z-index: 1;
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  flex-basis: auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  overflow-x: visible;
+  overflow-y: visible;
+  border: 0;
+  border-top: 1px solid var(--app-border-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar::-webkit-scrollbar {

@@ -127,16 +127,34 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('color: #cf1322');
   });
 
-  it('keeps every tablet board action in the forced one-row toolbar', () => {
+  it('keeps tablet board actions compact and MDF controls under the thin disclosure', () => {
     expect(page).toContain('className="status-board-toolbar__tablet-board-switch"');
     expect(page).toContain('aria-label="Переключатель досок"');
     expect(page).toContain('className="status-board-toolbar__tablet-refresh"');
     expect(page).toContain('className="status-board-toolbar__cnc-card-mode-text"');
     expect(tabletCss).toMatch(/data-modern-route="status-board"[^}]+\.status-board-toolbar \{[\s\S]*height: var\(--tablet-sticky-row\);/);
+    expect(tabletCss).toContain('--status-board-cnc-mobile-spoiler-row: 34px;');
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc\s*\{[^}]*min-height: var\(--status-board-cnc-mobile-spoiler-row\);[^}]*flex: 0 0 auto;[^}]*overflow: clip;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__toggle\s*\{[^}]*height: var\(--status-board-cnc-mobile-spoiler-row\);[^}]*padding: 0 10px;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content\s*\{[^}]*grid-template-rows: 0fr;[^}]*visibility: hidden;[^}]*opacity: 0;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc\.status-board-toolbar-disclosure--expanded \.status-board-toolbar-disclosure__content\s*\{[^}]*grid-template-rows: 1fr;[^}]*visibility: visible;[^}]*opacity: 1;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc \.status-board-toolbar\s*\{[^}]*position: static;[^}]*height: auto;[^}]*flex-wrap: wrap;/s,
+    );
     expect(tabletCss).toContain('.status-board-toolbar__tablet-board-switch .ant-segmented-item');
     expect(tabletCss).toContain('.status-board-toolbar__cnc-card-mode-text');
     expect(tabletCss).toContain('scrollbar-width: none');
-    expect(tabletCss).toContain('height: calc(100% - var(--tablet-sticky-row))');
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: auto;[^}]*overflow-x: auto;[^}]*overflow-y: auto;/s,
+    );
     expect(tabletCss).toMatch(/\.evolution-shell--tablet \.status-board-scrollbar \{\s*display: none;/);
     expect(tabletCss).toContain('overscroll-behavior-x: auto');
     expect(tabletCss).toContain('touch-action: pan-x pan-y');
@@ -151,6 +169,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : ''");
     expect(css).toContain('.status-board-toolbar-disclosure__toggle');
     expect(css).toContain('min-height: 44px');
+    expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure__toggle');
+    expect(css).toContain('height: 34px');
+    expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure__summary');
     expect(css).toContain('grid-template-rows: 0fr');
     expect(css).toContain('visibility: hidden');
     expect(css).toContain('transition-property: grid-template-rows, opacity, visibility');
@@ -164,6 +185,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-column__cards \{[^}]*overscroll-behavior-x: auto;[^}]*overscroll-behavior-y: contain;[^}]*touch-action: pan-x pan-y;/,
     );
+    expect(css).toMatch(
+      /\.status-board-page--cnc :where\([\s\S]*?\.status-board-viewport,[\s\S]*?\.status-board-card,[\s\S]*?\.cnc-bath-card[\s\S]*?\)\s*\{[^}]*touch-action: pan-x pan-y;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*overflow-x: auto;[^}]*overflow-y: auto;[^}]*touch-action: pan-x pan-y;/s,
+    );
+    expect(page).toContain('delayTouchStart: 320');
+    expect(page).toContain('touchSlop: 12');
     expect(page).toContain('{...touchDragHandleProps}');
     expect(css).not.toContain('.status-board-card__drag--touch');
   });
@@ -251,7 +280,12 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content,[\s\S]*?\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content-inner\s*\{[^}]*display: block;/s,
     );
     expect(tabletCss).toContain('.status-board-toolbar-disclosure--cnc');
-    expect(tabletCss).toContain('flex: 0 0 var(--tablet-sticky-row)');
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc\s*\{[^}]*min-height: var\(--status-board-cnc-mobile-spoiler-row\);[^}]*flex: 0 0 auto;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content\s*\{[^}]*grid-template-rows: 0fr;[^}]*visibility: hidden;[^}]*opacity: 0;/s,
+    );
     expect(css).toMatch(
       /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*flex: 1 1 auto;[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/s,
     );
@@ -329,7 +363,7 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: 100% !important;[^}]*overflow: hidden !important;/s,
     );
     expect(tabletCss).toMatch(
-      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: calc\(100% - var\(--tablet-sticky-row\)\);[^}]*overflow-x: auto;/s,
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: auto;[^}]*overflow-x: auto;[^}]*overflow-y: auto;/s,
     );
     expect(tabletCss).toMatch(
       /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: auto;/s,
