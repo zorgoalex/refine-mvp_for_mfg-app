@@ -754,6 +754,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(toolbarPrintButton).not.toContain('>Печать');
     expect(page).toContain("cardDisplayMode !== 'standard' && createPortal(");
     expect(page).toContain('<CncTelegramPrintBoard');
+    expect(page).toContain('displayMode={cardDisplayMode}');
+    expect(page).toContain('displayMode: CncCardDisplayMode;');
+    expect(page).toContain("className={`cnc-print-board cnc-print-board--${displayMode}`}");
+    expect(printCard).toContain("if (displayMode === 'minimal') {");
+    expect(printCard).toContain('cnc-print-card--minimal');
+    expect(printCard).toContain('cnc-print-card__minimal-number');
+    expect(printCard).toContain('formatCncPacketCompactNumber(card.packet)');
+    expect(printCard).toContain('formatStatusBoardOrderNumber(card.order)');
     expect(page).toContain('card.packet.cuttingSequenceNo');
     expect(page).toContain('cnc-print-card__sequence');
     expect(page).toContain('cnc-print-card__sequence-sign');
@@ -765,6 +773,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-print-board thead');
     expect(css).toContain('.cnc-print-card__sequence');
     expect(css).toContain('.cnc-print-card__sequence-sign');
+    expect(css).toContain('.cnc-print-board--minimal .cnc-print-card');
+    expect(css).toContain('.cnc-print-card__minimal-number');
     expect(css).toMatch(/\.cnc-print-card__sequence\s*\{[^}]*color: #000;/);
     expect(css).toMatch(/\.cnc-print-card__sequence-sign\s*\{[^}]*font-size: 0\.5em;/);
     expect(css).toContain('display: table-header-group');
