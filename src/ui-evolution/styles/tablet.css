@@ -752,6 +752,20 @@
   box-shadow: 0 5px 14px rgba(23, 52, 61, 0.08);
 }
 
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc {
+  position: sticky;
+  top: 0;
+  z-index: 32;
+  width: 100%;
+  flex: 0 0 var(--tablet-sticky-row);
+}
+
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure--cnc .status-board-toolbar {
+  position: relative;
+  top: auto;
+  z-index: 1;
+}
+
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar::-webkit-scrollbar {
   display: none;
 }
@@ -888,7 +902,7 @@
     display: block;
   }
 
-  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure__content-inner > .status-board-toolbar {
+  :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content[data-tablet-header-compact="true"][data-modern-route="status-board"] .status-board-toolbar-disclosure:not(.status-board-toolbar-disclosure--cnc) .status-board-toolbar-disclosure__content-inner > .status-board-toolbar {
     position: static;
     width: 100%;
     min-height: 0;

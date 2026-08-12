@@ -1330,7 +1330,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   }, []);
 
   useEffect(() => {
-    if (!isCncToday || !cncRelationsEnabled || !activeCncRelation) return undefined;
+    if (
+      !isCncToday ||
+      !cncRelationsEnabled ||
+      !activeCncRelation ||
+      activeCncRelation.kind === 'order'
+    ) {
+      return undefined;
+    }
     const animationFrame = window.requestAnimationFrame(() => {
       scrollStatusBoardColumnCardsToTop(boardViewportRef.current);
     });
@@ -2679,9 +2686,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           packetStateFor,
           relationContext || detailedPacketHighlightEnabled,
         );
-        const sortedOrderCards = relationContext
-          ? sortCncRelationCards(orderSourceCards, orderStateFor)
-          : orderSourceCards;
+        const sortedOrderCards = orderSourceCards;
         const columnDetailed = !detailedBathActive && detailedEnabled && bathColumn && bathSourceCards.some(
           (bath) => bath.bathCardId === detailedContext?.activeBathId,
         );

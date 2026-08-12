@@ -202,7 +202,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
-  it('scrolls MDF board and column card lists to top after relation selection', () => {
+  it('keeps order-card relation selection in place and scrolls other relation selections to top', () => {
     expect(page).toContain('function scrollStatusBoardColumnCardsToTop');
     expect(page).toContain("viewport.closest<HTMLElement>('.status-board-page')");
     expect(page).toContain("block: 'start'");
@@ -210,6 +210,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("viewport.scrollTo({ top: 0, behavior: 'smooth' })");
     expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
     expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
+    expect(page).toContain("activeCncRelation.kind === 'order'");
+    expect(page).toContain('const sortedOrderCards = orderSourceCards;');
     expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
     expect(page).toContain('[activeCncRelation, cncRelationsEnabled, isCncToday]');
   });
@@ -238,9 +240,11 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
     );
     expect(css).toMatch(
-      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\s*\{[^}]*position: sticky;[^}]*top: var\(--status-board-toolbar-sticky-top, 0px\);[^}]*z-index: 24;/s,
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\s*\{[^}]*position: sticky;[^}]*top: var\(--status-board-toolbar-sticky-top, 0px\);[^}]*z-index: 32;/s,
     );
     expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar--cnc');
+    expect(tabletCss).toContain('.status-board-toolbar-disclosure--cnc');
+    expect(tabletCss).toContain('flex: 0 0 var(--tablet-sticky-row)');
     expect(css).toMatch(
       /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*flex: 0 0 auto;[^}]*overflow-y: visible;/s,
     );
