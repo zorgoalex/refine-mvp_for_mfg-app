@@ -230,7 +230,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('font-variant-numeric: tabular-nums');
   });
 
-  it('keeps desktop MDF auto-height but gives tablet a full-height pannable viewport', () => {
+  it('keeps desktop MDF order columns sticky inside the pannable board viewport', () => {
     expect(page).toContain("isCncToday ? ' status-board-page--cnc' : ''");
     expect(page).toContain('function useWorkspaceTabsHeight(): number');
     expect(page).toContain("document.querySelector('.workspace-tabs')");
@@ -238,10 +238,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("'--status-board-toolbar-sticky-top': `${workspaceTabsHeight}px`");
     expect(page).toContain('className="status-board-toolbar-disclosure--cnc"');
     expect(css).toMatch(
-      /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+      /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: calc\(100dvh - 132px\);[^}]*overflow: hidden;/s,
     );
     expect(operationalCss).toMatch(
-      /\.evolution-shell__content\[data-modern-route="status-board"\] \.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+      /\.evolution-shell__content\[data-modern-route="status-board"\] \.status-board-page\.status-board-page--cnc\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/s,
     );
     expect(css).toMatch(
       /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\s*\{[^}]*position: sticky;[^}]*top: var\(--status-board-toolbar-sticky-top, 0px\);[^}]*z-index: 48;/s,
@@ -253,7 +253,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toContain('.status-board-toolbar-disclosure--cnc');
     expect(tabletCss).toContain('flex: 0 0 var(--tablet-sticky-row)');
     expect(css).toMatch(
-      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*flex: 0 0 auto;[^}]*overflow-y: visible;/s,
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*flex: 1 1 auto;[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/s,
     );
     expect(css).toMatch(
       /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*overflow-y: visible;/s,
@@ -268,7 +268,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).not.toContain('--status-board-cnc-order-column-offset-y');
     expect(css).not.toContain('--status-board-cnc-order-column-visual-height');
     expect(css).toMatch(
-      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*position: relative;[^}]*\}/s,
+      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*position: sticky;[^}]*top: 4px;[^}]*align-self: start;[^}]*\}/s,
     );
     expect(css).not.toContain('translateY(var(--status-board-cnc-order-column-offset-y))');
     expect(css).not.toContain('will-change: transform');

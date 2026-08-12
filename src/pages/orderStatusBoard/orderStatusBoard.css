@@ -11,9 +11,9 @@
 
 .status-board-page.status-board-page--cnc {
   --status-board-cnc-order-cards-max-height: max(320px, calc(100vh - 330px));
-  height: auto;
-  min-height: calc(100vh - 132px);
-  overflow: visible;
+  height: calc(100dvh - 132px);
+  min-height: 620px;
+  overflow: hidden;
 }
 
 .status-board-page__header {
@@ -426,8 +426,9 @@
 
 .status-board-page--cnc .status-board-viewport {
   min-height: 0;
-  flex: 0 0 auto;
-  overflow-y: visible;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .status-board-columns {
@@ -451,7 +452,7 @@
 
 .status-board-page--cnc .status-board-columns--cnc {
   height: auto;
-  min-height: 0;
+  min-height: 100%;
 }
 
 .status-board-page--cnc .status-board-column {
@@ -476,7 +477,10 @@
 .status-board-page--cnc .cnc-today-column--orders,
 .status-board-page--cnc .cnc-today-column--orders_ready,
 .status-board-page--cnc .cnc-today-column--orders_issued {
-  position: relative;
+  position: sticky;
+  top: 4px;
+  z-index: 16;
+  align-self: start;
 }
 
 .status-board-page--cnc .cnc-detailed-workspace {
@@ -2897,6 +2901,7 @@
   .status-board-page.status-board-page--cnc {
     height: auto;
     min-height: calc(100vh - 116px);
+    overflow: visible;
   }
 
   .status-board-page > .operational-page-head,
