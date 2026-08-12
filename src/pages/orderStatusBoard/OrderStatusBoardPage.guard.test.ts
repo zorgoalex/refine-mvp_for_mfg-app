@@ -268,8 +268,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('transform: translateX(-50%) scale(0.96)');
     expect(page).toContain('function statusBoardHorizontalScrollDirection');
     expect(page).toContain("type CncBoardHorizontalScrollDirection = 'left' | 'right';");
+    expect(page).toContain('targetLeft?: number');
+    expect(page).toContain('const effectiveLeft = targetLeft ?? viewport.scrollLeft');
+    expect(page).toContain('const cncBoardScrollTargetLeftRef = useRef<number | null>(null)');
     expect(page).toContain('const [cncBoardScrollDirection, setCncBoardScrollDirection] =');
     expect(page).toContain('setCncBoardScrollDirection(');
+    expect(page).toContain('cncBoardScrollTargetLeftRef.current = nextLeft');
+    expect(page).toContain('statusBoardHorizontalScrollDirection(viewport, nextLeft)');
     expect(page).toContain("viewport.scrollTo({ left: nextLeft, behavior: 'smooth' })");
     expect(page).toContain('className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}');
     expect(page).toContain("cncBoardScrollDirection === 'left'");
@@ -278,6 +283,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-board-scroll-edge.ant-btn');
     expect(css).toContain('inset-block-start: 50dvh');
     expect(css).toContain('inset-inline-end: 10px');
+    expect(css).toContain('.cnc-board-scroll-edge--left.ant-btn');
+    expect(css).toContain('inset-inline-start: 10px');
+    expect(css).toContain('inset-inline-end: auto');
     expect(css).toContain('background: rgba(17, 24, 39, 0.58)');
     expect(css).toContain('transform: translateY(-50%) scale(0.96)');
     expect(css).toMatch(

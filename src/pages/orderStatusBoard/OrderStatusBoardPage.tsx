@@ -257,11 +257,13 @@ type CncBoardHorizontalScrollDirection = 'left' | 'right';
 
 function statusBoardHorizontalScrollDirection(
   viewport: HTMLElement | null,
+  targetLeft?: number,
 ): CncBoardHorizontalScrollDirection | null {
   if (!viewport) return null;
   const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
   if (maxLeft <= 2) return null;
-  return viewport.scrollLeft >= maxLeft - 2 ? 'left' : 'right';
+  const effectiveLeft = targetLeft ?? viewport.scrollLeft;
+  return effectiveLeft >= maxLeft - 2 ? 'left' : 'right';
 }
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
@@ -485,6 +487,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const topScrollbarRef = useRef<HTMLDivElement | null>(null);
   const topScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const boardViewportRef = useRef<HTMLElement | null>(null);
+  const cncBoardScrollTargetLeftRef = useRef<number | null>(null);
   const [cncBoardScrollDirection, setCncBoardScrollDirection] =
     useState<CncBoardHorizontalScrollDirection | null>(null);
   const [announcement, setAnnouncement] = useState('');
@@ -1455,7 +1458,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       topScrollbarTrack.style.width = `${viewport.scrollWidth}px`;
       topScrollbar.scrollLeft = viewport.scrollLeft;
       setCncBoardScrollDirection(
-        isCncToday ? statusBoardHorizontalScrollDirection(viewport) : null,
+        isCncToday
+          ? statusBoardHorizontalScrollDirection(
+              viewport,
+              cncBoardScrollTargetLeftRef.current ?? undefined,
+            )
+          : null,
       );
     };
     updateTrackWidth();
@@ -1479,6 +1487,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     (event: React.UIEvent<HTMLDivElement>) => {
       const viewport = boardViewportRef.current;
       if (viewport && viewport.scrollLeft !== event.currentTarget.scrollLeft) {
+        cncBoardScrollTargetLeftRef.current = null;
         viewport.scrollLeft = event.currentTarget.scrollLeft;
         setCncBoardScrollDirection(
           isCncToday ? statusBoardHorizontalScrollDirection(viewport) : null,
@@ -1494,9 +1503,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       if (topScrollbar && topScrollbar.scrollLeft !== event.currentTarget.scrollLeft) {
         topScrollbar.scrollLeft = event.currentTarget.scrollLeft;
       }
+      const targetLeft = cncBoardScrollTargetLeftRef.current;
       setCncBoardScrollDirection(
-        isCncToday ? statusBoardHorizontalScrollDirection(event.currentTarget) : null,
+        isCncToday
+          ? statusBoardHorizontalScrollDirection(event.currentTarget, targetLeft ?? undefined)
+          : null,
       );
+      if (targetLeft !== null && Math.abs(event.currentTarget.scrollLeft - targetLeft) <= 2) {
+        cncBoardScrollTargetLeftRef.current = null;
+      }
     },
     [isCncToday],
   );
@@ -1511,11 +1526,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     const nextLeft = currentDirection === 'left'
       ? 0
       : Math.min(maxLeft, viewport.scrollLeft + step);
+    cncBoardScrollTargetLeftRef.current = nextLeft;
     viewport.scrollTo({ left: nextLeft, behavior: 'smooth' });
     const topScrollbar = topScrollbarRef.current;
     if (topScrollbar) topScrollbar.scrollLeft = nextLeft;
     setCncBoardScrollDirection(
-      nextLeft >= maxLeft - 2 ? 'left' : 'right',
+      statusBoardHorizontalScrollDirection(viewport, nextLeft),
     );
   }, []);
 
