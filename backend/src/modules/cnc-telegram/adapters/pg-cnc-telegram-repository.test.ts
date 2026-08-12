@@ -46,6 +46,26 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).not.toContain('manual-svg-upload-mdf-card-created');
   });
 
+  it('supports forced manual SVG cut-job number without breaking the identity sequence', () => {
+    expect(repositorySource).toContain('requestedCutJobId: command.dto.requestedCutJobId ?? null');
+    expect(repositorySource).toContain('CUT_JOB_NUMBER_CONFLICT');
+    expect(repositorySource).toContain('suggestedCutJobIds');
+    expect(repositorySource).toContain('suggestCutJobIds');
+    expect(repositorySource).toContain('ON CONFLICT (cut_job_id) DO NOTHING');
+    expect(repositorySource).toContain('syncCutJobIdentitySequence');
+    expect(repositorySource).toContain("pg_get_serial_sequence('cut_job', 'cut_job_id')");
+    expect(repositorySource).toContain('cut_job_id, name, status, source');
+  });
+
+  it('explains manual SVG order/detail match failures with per-detail reasons', () => {
+    expect(repositorySource).toContain('buildManualSvgOrderScopeProblems');
+    expect(repositorySource).toContain('Не все детали SVG найдены в выбранных заказах');
+    expect(repositorySource).toContain('Размер в SVG');
+    expect(repositorySource).toContain('Есть детали');
+    expect(repositorySource).toContain('Количество в SVG');
+    expect(repositorySource).toContain('problems: unmatched.slice(0, 50)');
+  });
+
   it('emits only one MDF-card event for repeated same-source manual SVG follow-up', async () => {
     const { queries, first, second } = await runManualSvgMdfFollowupSequence();
     const auditEvents = queries
@@ -2654,6 +2674,19 @@ async function runManualSvgMdfFollowupSequence() {
           }],
         };
       }
+      if (/SELECT\s+o\.order_id,\s+o\.order_name,\s+od\.detail_id/i.test(text)) {
+        return {
+          rows: [{
+            order_id: 2689,
+            order_name: '2689',
+            detail_id: 3101,
+            detail_number: 31,
+            width: 497,
+            height: 477,
+            quantity: 4,
+          }],
+        };
+      }
       if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
         return { rows: [] };
       }
@@ -2753,11 +2786,16 @@ function manualSvgPacketRow(packetId: string, completed: boolean) {
   });
 }
 
-function manualSvgUploadDto(createMdfMachineFileCard: boolean, idempotencyKey: string) {
+function manualSvgUploadDto(
+  createMdfMachineFileCard: boolean,
+  idempotencyKey: string,
+  requestedCutJobId: number | null = null,
+) {
   return {
     idempotencyKey,
     selectedOrderIds: [2689],
     createMdfMachineFileCard,
+    requestedCutJobId,
     svgContentHash: 'a'.repeat(64),
     workday: '2026-08-12',
     machine: 'CNC#1',
@@ -2848,6 +2886,7 @@ function manualSvgExternalPacketKeyForTest(dto: ReturnType<typeof manualSvgUploa
   const identityHash = sha256JsonForTest({
     kind: 'erp-manual-svg-upload-v1',
     selectedOrderIds: [...dto.selectedOrderIds].sort((a, b) => a - b),
+    requestedCutJobId: dto.requestedCutJobId ?? null,
     svgContentHash: dto.svgContentHash.toLowerCase(),
     workday: dto.workday ?? null,
     machine: dto.machine?.trim() || null,

@@ -4598,6 +4598,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               labelSheet={svgCutSheet}
               printHeader={sheetPrintHeader ?? undefined}
               labelDetailInstances={labelDetailInstances}
+              labelCoverage={labelCoverage}
               cutMapFallbackImage={cutMapFallbackImage}
             />
           )}
@@ -4621,6 +4622,7 @@ interface CncTelegramSheetImagePreviewProps {
   labelSheet: CncTelegramPacketCutSheet | null;
   printHeader?: string;
   labelDetailInstances: CutSheetLabelDetailInstance[];
+  labelCoverage: CutSheetLabelCoverage | null;
   cutMapFallbackImage: LabelCutMapFallbackImage | null;
 }
 
@@ -4633,6 +4635,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   labelSheet,
   printHeader,
   labelDetailInstances,
+  labelCoverage,
   cutMapFallbackImage,
 }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);

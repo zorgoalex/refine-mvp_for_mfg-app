@@ -581,6 +581,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
     expect(page).toContain('buildLabelDetailsFromPacketItems(packet.items)');
     expect(page).toContain('labelCoverage={labelCoverage}');
+    expect(page).toContain('labelCoverage: CutSheetLabelCoverage | null;');
     expect(page).toContain('item.matchDetailQuantity');
     expect(page).toContain('instance <= availableQuantity');
     expect(page).toContain('В ERP у детали количество');

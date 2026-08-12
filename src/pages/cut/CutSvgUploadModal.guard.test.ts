@@ -16,6 +16,18 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('applyFileNameOrderHints');
     expect(modal).toContain('создать карточку файла станка для Доски МДФ из раскроя?');
     expect(modal).toContain('createMdfMachineFileCard');
+    expect(modal).toContain('requestedCutJobId');
+    expect(modal).toContain('№ задания');
+    expect(modal).toContain('Оставьте пустым для авто-номера');
+    expect(modal).toContain('checkRequestedCutJobNumber');
+    expect(modal).toContain('suggestAvailableCutJobNumbers');
+    expect(modal).toContain('buildSvgMatchProblems');
+    expect(modal).toContain('Детали SVG не сопоставлены с выбранными заказами');
+    expect(modal).toContain('Размер в SVG');
+    expect(modal).toContain('showManualSvgApiMatchError');
+    expect(modal).toContain('MANUAL_SVG_UNMATCHED_DETAILS');
+    expect(modal).toContain('MANUAL_SVG_ORDER_SCOPE_MISMATCH');
+    expect(modal).toContain('Деталь уже есть в активных раскроях');
     expect(modal).toContain('manual-svg-preset:${asciiHash(commentText)}');
     expect(modal).toContain("okText: cutJobPath ? 'Открыть задание' : 'OK'");
     expect(modal).toContain('onOk: openCutJob');

@@ -247,6 +247,7 @@ export interface CncTelegramManualSvgUploadDto {
   idempotencyKey: string;
   selectedOrderIds: number[];
   createMdfMachineFileCard: boolean;
+  requestedCutJobId?: number | null;
   svgContentHash: string;
   workday?: string;
   machine?: string | null;

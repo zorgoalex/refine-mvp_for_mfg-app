@@ -3,14 +3,13 @@ import {
   Alert,
   Button,
   Checkbox,
-  Divider,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Space,
   Tag,
-  Tooltip,
   Typography,
   Upload,
   message,
@@ -19,7 +18,6 @@ import type { UploadProps } from 'antd';
 import {
   FileAddOutlined,
   LinkOutlined,
-  PlusOutlined,
   SaveOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
@@ -27,7 +25,7 @@ import { useNavigate } from 'react-router-dom';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
 import { ordersApi } from '../../api/ordersApi';
-import { isApiError } from '../../api/apiError';
+import { isApiError, type ApiError } from '../../api/apiError';
 import type { CncTelegramManualSvgCommentPreset } from '../../api/types/cncTelegramApi.types';
 import type { EligibleDetailDto } from '../../api/types/cutApi.types';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
@@ -47,8 +45,31 @@ interface OrderOption {
   label: string;
 }
 
+interface CutJobNumberCheck {
+  status: 'idle' | 'checking' | 'available' | 'duplicate' | 'error';
+  suggestions: number[];
+  message?: string;
+}
+
+interface SvgMatchProblem {
+  severity: 'error' | 'warning';
+  key: string;
+  title: string;
+  reason: string;
+  quantity: number;
+}
+
+interface SvgItemGroup {
+  orderName: string;
+  detailNumber: number;
+  widthMm: number;
+  heightMm: number;
+  quantity: number;
+}
+
 const EMPTY_DEFAULT_ORDER_IDS: number[] = [];
 const EMPTY_DEFAULT_ORDER_NAMES: string[] = [];
+const EMPTY_CUT_JOB_NUMBER_CHECK: CutJobNumberCheck = { status: 'idle', suggestions: [] };
 
 const DEFAULT_COMMENT_PRESETS: Array<Pick<CncTelegramManualSvgCommentPreset, 'label' | 'commentText' | 'category'>> = [
   { label: 'Фрезы', commentText: 'фрезы:', category: 'tool' },
@@ -81,6 +102,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const [commentText, setCommentText] = useState('');
   const [materialName, setMaterialName] = useState('');
   const [machineName, setMachineName] = useState('');
+  const [requestedCutJobId, setRequestedCutJobId] = useState<number | null>(null);
+  const [cutJobNumberCheck, setCutJobNumberCheck] = useState<CutJobNumberCheck>(EMPTY_CUT_JOB_NUMBER_CHECK);
   const [rework, setRework] = useState(false);
   const [presets, setPresets] = useState<CncTelegramManualSvgCommentPreset[]>([]);
   const [presetSaving, setPresetSaving] = useState(false);
@@ -133,17 +156,26 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     ...presets,
   ], [orderPresetText, presets]);
 
+  const matchProblems = useMemo(() => {
+    if (!parsed?.cutLayout.items.length || eligibleLoading) return [];
+    return buildSvgMatchProblems(parsed.cutLayout.items, eligibleDetails);
+  }, [eligibleDetails, eligibleLoading, parsed]);
+
+  const blockingMatchProblems = useMemo(
+    () => matchProblems.filter((problem) => problem.severity === 'error'),
+    [matchProblems],
+  );
+
   const matchSummary = useMemo(() => {
     if (!parsed?.cutLayout.items.length) return null;
-    const matched = parsed.cutLayout.items.filter((item) =>
-      eligibleDetails.some((detail) => detailMatchesSvgItem(detail, item.orderName, item.detailNumber, item.widthMm, item.heightMm)),
-    );
+    const unmatched = blockingMatchProblems.reduce((sum, problem) => sum + Math.max(1, problem.quantity), 0);
+    const matched = parsed.cutLayout.items.length - unmatched;
     return {
-      matched: matched.length,
+      matched,
       total: parsed.cutLayout.items.length,
-      unmatched: parsed.cutLayout.items.length - matched.length,
+      unmatched,
     };
-  }, [eligibleDetails, parsed]);
+  }, [blockingMatchProblems, parsed]);
 
   const uploadProps: UploadProps = {
     accept: '.svg,image/svg+xml',
@@ -158,6 +190,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       setEligibleDetails([]);
       setSelectedOrderIds(defaultOrderIds);
       setOrderOptions(defaultOrderOptions);
+      setRequestedCutJobId(null);
+      setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
       return true;
     },
   };
@@ -215,9 +249,39 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setCommentText('');
     setMaterialName('');
     setMachineName('');
+    setRequestedCutJobId(null);
+    setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
     setRework(false);
     setEligibleDetails([]);
   }, []);
+
+  useEffect(() => {
+    if (!open || requestedCutJobId === null) {
+      setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setCutJobNumberCheck({ status: 'checking', suggestions: [] });
+      void checkRequestedCutJobNumber(requestedCutJobId)
+        .then((check) => {
+          if (!cancelled) setCutJobNumberCheck(check);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setCutJobNumberCheck({
+              status: 'error',
+              suggestions: [],
+              message: 'Не удалось проверить номер задания',
+            });
+          }
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, requestedCutJobId]);
 
   const submit = useCallback(async () => {
     if (!parsed) {
@@ -225,15 +289,25 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       return;
     }
     if (parsed.cutLayout.status !== 'valid') {
-      message.error('SVG не прошел валидацию');
+      message.error(`SVG не прошел валидацию: ${parsed.cutLayout.reasons.join('; ') || 'нет деталей для раскроя'}`);
       return;
     }
     if (selectedOrderIds.length === 0) {
       message.warning('Укажите заказы для раскроя');
       return;
     }
-    if (matchSummary && matchSummary.unmatched > 0) {
-      message.warning('Не все детали SVG найдены в выбранных заказах');
+    if (eligibleLoading) {
+      message.warning('Дождитесь проверки деталей выбранных заказов');
+      return;
+    }
+    if (blockingMatchProblems.length > 0) {
+      showSvgMatchProblems(blockingMatchProblems);
+      return;
+    }
+    if (requestedCutJobId !== null && cutJobNumberCheck.status !== 'available') {
+      message.warning(cutJobNumberCheck.status === 'duplicate'
+        ? 'Выберите свободный номер задания'
+        : 'Дождитесь проверки номера задания');
       return;
     }
 
@@ -243,6 +317,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       const uploadBody = {
         selectedOrderIds,
         createMdfMachineFileCard: false,
+        requestedCutJobId,
         svgContentHash: parsed.svgContentHash,
         machine: machineName.trim() || null,
         programName: parsed.fileName,
@@ -300,6 +375,22 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       resetFormState();
       onClose();
     } catch (error) {
+      if (isApiError(error, 'CUT_JOB_NUMBER_CONFLICT')) {
+        setCutJobNumberCheck({
+          status: 'duplicate',
+          suggestions: suggestedCutJobIdsFromErrorDetails(error.details),
+          message: error.message,
+        });
+        message.error(error.message);
+        return;
+      }
+      if (
+        isApiError(error, 'MANUAL_SVG_UNMATCHED_DETAILS') ||
+        isApiError(error, 'MANUAL_SVG_ORDER_SCOPE_MISMATCH')
+      ) {
+        showManualSvgApiMatchError(error);
+        return;
+      }
       message.error(isApiError(error) ? error.message : 'Не удалось загрузить SVG-раскрой');
     } finally {
       setSubmitting(false);
@@ -309,10 +400,14 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     machineName,
     materialName,
     matchSummary,
+    blockingMatchProblems,
+    eligibleLoading,
     navigate,
     onClose,
     onDone,
     parsed,
+    cutJobNumberCheck.status,
+    requestedCutJobId,
     resetFormState,
     rework,
     selectedOrderIds,
@@ -368,6 +463,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     }
   }
 
+  const cutJobNumberSubmitBlocked = requestedCutJobId !== null && cutJobNumberCheck.status !== 'available';
+
   return (
     <Modal
       open={open}
@@ -378,7 +475,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       onOk={() => void submit()}
       confirmLoading={submitting}
       okButtonProps={{
-        disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0,
+        disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0 || eligibleLoading || cutJobNumberSubmitBlocked,
         icon: <FileAddOutlined />,
       }}
     >
@@ -390,7 +487,12 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         </Upload.Dragger>
 
         {parsed && (
-          <SvgValidationSummary parsed={parsed} eligibleLoading={eligibleLoading} matchSummary={matchSummary} />
+          <SvgValidationSummary
+            parsed={parsed}
+            eligibleLoading={eligibleLoading}
+            matchSummary={matchSummary}
+            matchProblems={matchProblems}
+          />
         )}
 
         <Form layout="vertical">
@@ -421,6 +523,24 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
                 value={machineName}
                 onChange={(event) => setMachineName(event.target.value)}
                 placeholder="manual-svg-upload"
+              />
+            </Form.Item>
+            <Form.Item
+              label="№ задания"
+              tooltip="Оставьте пустым для авто-номера"
+              validateStatus={cutJobNumberValidateStatus(cutJobNumberCheck)}
+              help={renderCutJobNumberHelp(cutJobNumberCheck, setRequestedCutJobId)}
+              style={{ width: 190 }}
+            >
+              <InputNumber
+                value={requestedCutJobId}
+                onChange={(value) => setRequestedCutJobId(normalizeRequestedCutJobId(value))}
+                min={1}
+                max={Number.MAX_SAFE_INTEGER}
+                precision={0}
+                controls={false}
+                placeholder="авто"
+                style={{ width: '100%' }}
               />
             </Form.Item>
             <Form.Item label="Тип">
@@ -469,16 +589,20 @@ function SvgValidationSummary({
   parsed,
   eligibleLoading,
   matchSummary,
+  matchProblems,
 }: {
   parsed: ParsedSvgUpload;
   eligibleLoading: boolean;
   matchSummary: { matched: number; total: number; unmatched: number } | null;
+  matchProblems: SvgMatchProblem[];
 }) {
   const layout = parsed.cutLayout;
   const valid = layout.status === 'valid';
+  const errorCount = matchProblems.filter((problem) => problem.severity === 'error').length;
+  const warningCount = matchProblems.length - errorCount;
   return (
     <Alert
-      type={valid ? 'success' : 'error'}
+      type={!valid || errorCount > 0 ? 'error' : warningCount > 0 ? 'warning' : 'success'}
       showIcon
       message={valid ? 'SVG прошел базовую проверку' : 'SVG не прошел проверку'}
       description={(
@@ -499,6 +623,28 @@ function SvgValidationSummary({
               {layout.reasons.join('; ')}
             </Typography.Text>
           )}
+          {matchProblems.length > 0 && (
+            <Space direction="vertical" size={4}>
+              <Typography.Text type={errorCount > 0 ? 'danger' : 'warning'}>
+                {errorCount > 0
+                  ? `Проблемные детали: ${errorCount}`
+                  : `Предупреждения по деталям: ${warningCount}`}
+              </Typography.Text>
+              {matchProblems.slice(0, 6).map((problem) => (
+                <Typography.Text
+                  key={problem.key}
+                  type={problem.severity === 'error' ? 'danger' : 'warning'}
+                >
+                  {problem.title}: {problem.reason}
+                </Typography.Text>
+              ))}
+              {matchProblems.length > 6 && (
+                <Typography.Text type="secondary">
+                  Еще {matchProblems.length - 6}; полный список будет показан при формировании
+                </Typography.Text>
+              )}
+            </Space>
+          )}
         </Space>
       )}
     />
@@ -515,6 +661,205 @@ function askCreateMdfMachineFileCard(): Promise<boolean> {
       onCancel: () => resolve(false),
     });
   });
+}
+
+function showSvgMatchProblems(problems: SvgMatchProblem[]): void {
+  Modal.warning({
+    title: 'Детали SVG не сопоставлены с выбранными заказами',
+    width: 720,
+    content: (
+      <Space direction="vertical" size={8}>
+        {problems.map((problem) => (
+          <Alert
+            key={problem.key}
+            type={problem.severity === 'error' ? 'error' : 'warning'}
+            showIcon
+            message={problem.title}
+            description={problem.reason}
+          />
+        ))}
+      </Space>
+    ),
+  });
+}
+
+function buildSvgMatchProblems(
+  items: ParsedSvgUpload['cutLayout']['items'],
+  details: EligibleDetailDto[],
+): SvgMatchProblem[] {
+  const problems: SvgMatchProblem[] = [];
+  for (const item of groupSvgItems(items)) {
+    const title = svgItemTitle(item);
+    const itemKey = `${item.orderName}:${item.detailNumber}:${item.widthMm}:${item.heightMm}`;
+    const sameOrder = details.filter((detail) => String(detail.orderName ?? '') === item.orderName);
+    if (sameOrder.length === 0) {
+      problems.push({
+        severity: 'error',
+        key: `${itemKey}:order`,
+        title,
+        reason: `Заказ ${item.orderName} не найден среди выбранных заказов или удален`,
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    const sameDetailNumber = sameOrder.filter((detail) => detail.detailNumber === item.detailNumber);
+    if (sameDetailNumber.length === 0) {
+      problems.push({
+        severity: 'error',
+        key: `${itemKey}:detail`,
+        title,
+        reason: `В заказе ${item.orderName} нет детали #${item.detailNumber}. Есть детали: ${detailNumbersPreview(sameOrder)}`,
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    const sameSize = sameDetailNumber.filter((detail) =>
+      detailMatchesSvgItem(detail, item.orderName, item.detailNumber, item.widthMm, item.heightMm),
+    );
+    if (sameSize.length === 0) {
+      problems.push({
+        severity: 'error',
+        key: `${itemKey}:size`,
+        title,
+        reason: `Размер в SVG ${formatMmPair(item.widthMm, item.heightMm)} не совпал с ERP. В ERP: ${detailSizesPreview(sameDetailNumber)}`,
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    const totalQuantity = sameSize.reduce((sum, detail) => sum + Math.max(0, detail.quantity), 0);
+    if (item.quantity > totalQuantity) {
+      problems.push({
+        severity: 'error',
+        key: `${itemKey}:qty`,
+        title,
+        reason: `Количество в SVG ${item.quantity}, в заказе доступно ${totalQuantity}`,
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    const placedJobs = sameSize.flatMap((detail) => detail.activeJobs ?? []);
+    if (placedJobs.length > 0) {
+      problems.push({
+        severity: 'warning',
+        key: `${itemKey}:jobs`,
+        title,
+        reason: `Деталь уже есть в активных раскроях: ${cutJobsPreview(placedJobs)}`,
+        quantity: item.quantity,
+      });
+    }
+  }
+  return problems;
+}
+
+function groupSvgItems(items: ParsedSvgUpload['cutLayout']['items']): SvgItemGroup[] {
+  const groups = new Map<string, SvgItemGroup>();
+  for (const item of items) {
+    const key = `${item.orderName}:${item.detailNumber}:${item.widthMm}:${item.heightMm}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+      continue;
+    }
+    groups.set(key, {
+      orderName: item.orderName,
+      detailNumber: item.detailNumber,
+      widthMm: item.widthMm,
+      heightMm: item.heightMm,
+      quantity: item.quantity,
+    });
+  }
+  return Array.from(groups.values());
+}
+
+function svgItemTitle(item: SvgItemGroup): string {
+  const quantity = item.quantity > 1 ? `, ${item.quantity} шт.` : '';
+  return `${item.orderName} деталь #${item.detailNumber} ${formatMmPair(item.widthMm, item.heightMm)}${quantity}`;
+}
+
+function detailNumbersPreview(details: EligibleDetailDto[]): string {
+  const values = uniqueNumbers(details
+    .map((detail) => detail.detailNumber)
+    .filter((value): value is number => value !== null));
+  return values.length > 0 ? values.slice(0, 12).map((value) => `#${value}`).join(', ') : 'нет номеров деталей';
+}
+
+function detailSizesPreview(details: EligibleDetailDto[]): string {
+  const values = uniqueStrings(details
+    .map((detail) => detail.width != null && detail.height != null
+      ? `${formatMmPair(detail.width, detail.height)}${detail.productionStatusName ? ` (${detail.productionStatusName})` : ''}`
+      : 'размер не заполнен'));
+  return values.slice(0, 8).join(', ');
+}
+
+function cutJobsPreview(jobs: EligibleDetailDto['activeJobs']): string {
+  return jobs
+    .slice(0, 6)
+    .map((job) => job.name ? `#${job.cutJobId} ${job.name}` : `#${job.cutJobId}`)
+    .join(', ');
+}
+
+function showManualSvgApiMatchError(error: ApiError): void {
+  const problems = svgMatchProblemsFromApiError(error.details);
+  if (problems.length === 0) {
+    message.error(error.message);
+    return;
+  }
+  showSvgMatchProblems(problems);
+}
+
+function svgMatchProblemsFromApiError(details: unknown): SvgMatchProblem[] {
+  if (!details || typeof details !== 'object') return [];
+  const raw = (details as { problems?: unknown; items?: unknown }).problems
+    ?? (details as { problems?: unknown; items?: unknown }).items;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry, index): SvgMatchProblem[] => {
+    if (!entry || typeof entry !== 'object') return [];
+    const record = entry as Record<string, unknown>;
+    const orderName = stringFromUnknown(record.orderName) ?? 'без заказа';
+    const detailNumber = numberFromUnknown(record.detailNumber);
+    const widthMm = numberFromUnknown(record.widthMm);
+    const heightMm = numberFromUnknown(record.heightMm);
+    const quantity = numberFromUnknown(record.quantity) ?? 1;
+    const title = stringFromUnknown(record.title)
+      ?? [
+        orderName,
+        detailNumber !== null ? `деталь #${detailNumber}` : 'деталь без номера',
+        widthMm !== null && heightMm !== null ? formatMmPair(widthMm, heightMm) : null,
+        quantity > 1 ? `${quantity} шт.` : null,
+      ].filter(Boolean).join(' ');
+    return [{
+      severity: record.severity === 'warning' ? 'warning' : 'error',
+      key: stringFromUnknown(record.key) ?? `api:${index}`,
+      title,
+      reason: stringFromUnknown(record.reason) ?? 'Backend не смог сопоставить позицию SVG с выбранными заказами',
+      quantity,
+    }];
+  });
+}
+
+function stringFromUnknown(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatMmPair(width: number, height: number): string {
+  return `${formatMm(width)}x${formatMm(height)} мм`;
+}
+
+function formatMm(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function mergeOrderOptions(current: OrderOption[], orders: OrderListItemDto[]): OrderOption[] {
@@ -599,6 +944,95 @@ function detailMatchesSvgItem(
   const expected = [widthMm, heightMm].sort((a, b) => a - b);
   const actual = [detail.width, detail.height].sort((a, b) => a - b);
   return Math.max(Math.abs(expected[0] - actual[0]), Math.abs(expected[1] - actual[1])) <= 8;
+}
+
+function normalizeRequestedCutJobId(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return null;
+  return value;
+}
+
+function cutJobNumberValidateStatus(
+  check: CutJobNumberCheck,
+): 'success' | 'warning' | 'error' | 'validating' | undefined {
+  if (check.status === 'checking') return 'validating';
+  if (check.status === 'available') return 'success';
+  if (check.status === 'duplicate') return 'error';
+  if (check.status === 'error') return 'warning';
+  return undefined;
+}
+
+function renderCutJobNumberHelp(
+  check: CutJobNumberCheck,
+  onPick: (cutJobId: number) => void,
+): React.ReactNode {
+  if (check.status === 'idle') return null;
+  if (check.status === 'checking') return 'Проверка номера...';
+  if (check.status === 'available') return 'Номер свободен';
+  if (check.status === 'error') return check.message ?? 'Не удалось проверить номер';
+  if (check.status === 'duplicate') {
+    return (
+      <Space direction="vertical" size={4}>
+        <Typography.Text type="danger">
+          {check.message ?? 'Номер уже занят'}
+        </Typography.Text>
+        {check.suggestions.length > 0 && (
+          <Space size={4} wrap>
+            {check.suggestions.map((cutJobId) => (
+              <Button
+                key={cutJobId}
+                size="small"
+                type="link"
+                onClick={() => onPick(cutJobId)}
+              >
+                #{cutJobId}
+              </Button>
+            ))}
+          </Space>
+        )}
+      </Space>
+    );
+  }
+  return null;
+}
+
+async function checkRequestedCutJobNumber(cutJobId: number): Promise<CutJobNumberCheck> {
+  const exists = await cutJobExists(cutJobId);
+  if (!exists) {
+    return { status: 'available', suggestions: [] };
+  }
+  return {
+    status: 'duplicate',
+    suggestions: await suggestAvailableCutJobNumbers(cutJobId),
+    message: `Задание #${cutJobId} уже существует`,
+  };
+}
+
+async function suggestAvailableCutJobNumbers(cutJobId: number): Promise<number[]> {
+  const candidates = Array.from({ length: 30 }, (_item, index) => cutJobId + index + 1);
+  const checked = await Promise.all(candidates.map(async (candidate) => (
+    await cutJobExists(candidate) ? null : candidate
+  )));
+  return checked.filter((candidate): candidate is number => candidate !== null).slice(0, 5);
+}
+
+async function cutJobExists(cutJobId: number): Promise<boolean> {
+  try {
+    await cutApi.get(cutJobId);
+    return true;
+  } catch (error) {
+    if (isApiError(error) && (error.status === 404 || error.code === 'CUT_JOB_NOT_FOUND')) return false;
+    throw error;
+  }
+}
+
+function suggestedCutJobIdsFromErrorDetails(details: unknown): number[] {
+  if (!details || typeof details !== 'object') return [];
+  const raw = (details as { suggestedCutJobIds?: unknown }).suggestedCutJobIds;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((value) => Number(value))
+    .filter((value) => Number.isSafeInteger(value) && value > 0)
+    .slice(0, 5);
 }
 
 function createIdempotencyKey(svgContentHash: string): string {
