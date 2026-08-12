@@ -125,6 +125,7 @@ export const createLabelTemplateSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
     description: z.string().max(2000).nullable().optional(),
+    isActive: z.boolean().optional(),
     canvasWidthMm: z.number().positive(),
     canvasHeightMm: z.number().positive(),
     dpi: z.number().int().positive(),

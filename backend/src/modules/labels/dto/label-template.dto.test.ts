@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createLabelTemplateSchema } from './label-template.dto';
+import { createLabelTemplateSchema, updateLabelTemplateSchema } from './label-template.dto';
 
 const base = {
   name: 'Тест шаблон',
@@ -12,6 +12,11 @@ const base = {
 };
 
 describe('label template DTO advanced element contract', () => {
+  it('accepts activation/deactivation flags on create and update payloads', () => {
+    expect(createLabelTemplateSchema.parse({ ...base, isActive: false }).isActive).toBe(false);
+    expect(updateLabelTemplateSchema.parse({ ...base, version: 2, isActive: true }).isActive).toBe(true);
+  });
+
   it('accepts strict typography/editor metadata and if/else v1', () => {
     const parsed = createLabelTemplateSchema.parse({
       ...base,
