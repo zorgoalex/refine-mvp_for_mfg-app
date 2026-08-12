@@ -283,9 +283,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-board-scroll-edge.ant-btn');
     expect(css).toContain('inset-block-start: 50dvh');
     expect(css).toContain('inset-inline-end: 10px');
-    expect(css).toContain('.cnc-board-scroll-edge--left.ant-btn');
-    expect(css).toContain('inset-inline-start: 10px');
-    expect(css).toContain('inset-inline-end: auto');
+    expect(css).toMatch(
+      /\.cnc-board-scroll-edge--left\.ant-btn,\s*\.cnc-board-scroll-edge--right\.ant-btn\s*\{[^}]*inset-inline-start: auto;[^}]*inset-inline-end: 10px;/,
+    );
+    expect(css).not.toMatch(
+      /\.cnc-board-scroll-edge--left\.ant-btn\s*\{[^}]*inset-inline-start: 10px;[^}]*inset-inline-end: auto;/,
+    );
     expect(css).toContain('background: rgba(17, 24, 39, 0.58)');
     expect(css).toContain('transform: translateY(-50%) scale(0.96)');
     expect(css).toMatch(
