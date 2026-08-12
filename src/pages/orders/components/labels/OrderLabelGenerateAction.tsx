@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Modal, Radio, Select, Space, Typography, message } from 'antd';
 import { DownloadOutlined, TagsOutlined } from '@ant-design/icons';
+import { authSession } from '../../../../api/authSession';
 import { labelsApi } from '../../../../api/labelsApi';
 import { subscribeLabelTemplateChanged } from '../../../../api/labelTemplateEvents';
 import type { LabelCutMapOption, LabelTemplate, OrderLabelCutMapOptions, OrderLabelsPreview } from '../../../../api/types/labelsApi.types';
@@ -19,6 +20,10 @@ import {
   type OrderCutMapSelectionState,
   type OrderCutMapSelectionSource,
 } from './orderCutMapSelection';
+import {
+  resolvePreferredLabelTemplateId,
+  saveLabelTemplatePreference,
+} from './labelTemplatePreference';
 
 const { Text } = Typography;
 
@@ -60,6 +65,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
 }) => {
   const canGenerate = can('labels.generate');
   const canViewCut = can('cut.view');
+  const labelTemplatePreferenceUserId = authSession.getUser()?.id ?? 'anon';
   const [open, setOpen] = useState(false);
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
@@ -155,16 +161,21 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     templateRequestRef.current = requestId;
     setLoading(true);
     try {
-      const next = await labelsApi.listTemplates(true);
+      const next = await labelsApi.listTemplates();
       if (templateRequestRef.current !== requestId) return;
+      const activeTemplates = next.filter((template) => template.isActive);
       setTemplates((current) => {
         const currentById = new Map(current.map((template) => [template.labelTemplateId, template]));
-        return next.map((template) => {
+        return activeTemplates.map((template) => {
           const previous = currentById.get(template.labelTemplateId);
           return previous?.version === template.version ? previous : template;
         });
       });
-      setTemplateId((current) => current ?? next.find((template) => template.isActive)?.labelTemplateId ?? null);
+      setTemplateId((current) => (
+        current && activeTemplates.some((template) => template.labelTemplateId === current)
+          ? current
+          : resolvePreferredLabelTemplateId(labelTemplatePreferenceUserId, activeTemplates)
+      ));
     } catch {
       if (templateRequestRef.current === requestId) {
         message.error('Не удалось загрузить шаблоны бирок');
@@ -174,7 +185,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         setLoading(false);
       }
     }
-  }, []);
+  }, [labelTemplatePreferenceUserId]);
 
   useEffect(() => {
     if (!open) return;
@@ -349,7 +360,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         onCancel={() => !generating && setOpen(false)}
         footer={[
           <Button key="preview" onClick={runPreview} loading={loading || cutMapOptionsLoading} disabled={!selectedTemplate || isOrderDirty || generating || missingPreviewCutMaps.length > 0}>
-            Предпросмотр
+            Обновить предпросмотр
           </Button>,
           <Button key="generate" type="primary" icon={<DownloadOutlined />} onClick={runGenerate} loading={generating} disabled={!preview || isOrderDirty || cutMapOptionsLoading || missingGenerationCutMaps.length > 0}>
             Сформировать и скачать ZIP
@@ -414,10 +425,11 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
                 loading={loading}
                 onChange={(value) => {
                   setTemplateId(value);
+                  saveLabelTemplatePreference(labelTemplatePreferenceUserId, value);
                 }}
                 options={templates.map((template) => ({
                   value: template.labelTemplateId,
-                  label: template.isActive ? template.name : `${template.name} (архив)`,
+                  label: template.name,
                 }))}
                 placeholder="Шаблон"
               />

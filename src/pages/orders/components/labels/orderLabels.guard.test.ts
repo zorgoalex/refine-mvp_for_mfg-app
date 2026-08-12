@@ -60,13 +60,25 @@ describe('order labels UI wiring', () => {
     expect(latestSrc).toMatch(/onGenerated=\{loadLatest\}/);
   });
 
-  it('order-side template selectors include inactive templates so saved label data remains reachable', () => {
+  it('keeps inactive templates reachable for saved label data but hidden from generation modals', () => {
+    const generateTemplateOptions = generateSrc.slice(
+      generateSrc.indexOf('options={templates.map((template) => ({'),
+      generateSrc.indexOf('placeholder="Шаблон"', generateSrc.indexOf('options={templates.map((template) => ({')),
+    );
+
     expect(dataEditorSrc).toMatch(/labelsApi\.listTemplates\(true\)/);
-    expect(generateSrc).toMatch(/labelsApi\.listTemplates\(true\)/);
+    expect(generateSrc).toMatch(/labelsApi\.listTemplates\(\)/);
+    expect(generateSrc).toMatch(/next\.filter\(\(template\) => template\.isActive\)/);
     expect(dataEditorSrc).toMatch(/next\.find\(\(template\) => template\.isActive\)\?\.labelTemplateId/);
-    expect(generateSrc).toMatch(/next\.find\(\(template\) => template\.isActive\)\?\.labelTemplateId/);
+    expect(generateSrc).toMatch(/resolvePreferredLabelTemplateId/);
     expect(dataEditorSrc).toMatch(/\(архив\)/);
-    expect(generateSrc).toMatch(/\(архив\)/);
+    expect(generateTemplateOptions).not.toMatch(/\(архив\)/);
+  });
+
+  it('remembers the last generated-label template per user', () => {
+    expect(generateSrc).toMatch(/authSession\.getUser\(\)\?\.id \?\? 'anon'/);
+    expect(generateSrc).toMatch(/resolvePreferredLabelTemplateId\(labelTemplatePreferenceUserId, activeTemplates\)/);
+    expect(generateSrc).toMatch(/saveLabelTemplatePreference\(labelTemplatePreferenceUserId, value\)/);
   });
 
   it('shows the effective generated comment fallback before writing explicit overrides', () => {

@@ -162,6 +162,7 @@ describe('CutPage source guards', () => {
     // Use Refine navigation push (keep-alive tab) for the order number; not a
     // react-router Link with target="_blank".
     expect(source).toContain("show('orders_view', r.orderId, 'push')");
+    expect(source).toContain("show('orders_view', orderId, 'push')");
     expect(source).toContain('OrderDeletedTag');
     expect(source).toContain('orderDeleted={r.orderDeleted}');
     expect(source).toContain('orderDeletedReferenceClassName');
@@ -387,6 +388,8 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toContain('Бирки');
     expect(sheetLabelSource).toContain('labelsApi.previewDetailLabels');
     expect(sheetLabelSource).toContain('labelsApi.generateDetailLabels');
+    expect(sheetLabelSource).toContain('labelsApi.listTemplates()');
+    expect(sheetLabelSource).toMatch(/next\.filter\(\(template\) => template\.isActive\)/);
     expect(sheetLabelSource).toContain('printLabelSvgPages');
     expect(sheetLabelSource).toContain('const runPrint = async () =>');
     expect(sheetLabelSource).toContain('Скачать ZIP');
@@ -397,6 +400,9 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toContain('Форматы файлов бирок');
     expect(sheetLabelSource).toContain('Checkbox.Group');
     expect(sheetLabelSource).toContain('EXPORT_FORMAT_OPTIONS');
+    expect(sheetLabelSource).toContain('resolvePreferredLabelTemplateId');
+    expect(sheetLabelSource).toContain('saveLabelTemplatePreference');
+    expect(sheetLabelSource).toContain("authSession.getUser()?.id ?? 'anon'");
   });
 
   it('stacks portrait sheet preview title and actions into full-width blocks', () => {
