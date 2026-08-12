@@ -87,6 +87,7 @@ describe('PgCncTelegramRepository', () => {
       packet: {
         itemCount: 1,
         itemQuantityTotal: 4,
+        svgCutResultNo: 12,
         svgCutSheets: [{ cutGroupId: 100, sheetIndex: 0, sheetNumber: 1, detailIds: [3101, 3101] }],
         sourceCreatedAt: '2026-07-24T07:59:00.000Z',
       },
@@ -97,6 +98,8 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('UPDATE command_idempotency_keys');
     expect(sql).toContain('FROM unnest($1::bigint[], $2::bigint[])');
     expect(sql).toContain('svg_cut_sheets_json');
+    expect(sql).toContain('svg_result.result_no AS svg_cut_result_no');
+    expect(sql).toContain('LEFT JOIN cut_results svg_result');
     expect(sql).toContain('cut_result_placement placement');
     expect(sql).not.toMatch(/\b(raw_gcode|screenshot_path|file_path)\b/i);
     const idempotencyInsert = queries.find((query) =>
@@ -109,6 +112,150 @@ describe('PgCncTelegramRepository', () => {
     expect(packetInsert?.params[5]).toBe('2026-07-24T08:00:00.000Z');
     expect(packetInsert?.params[6]).toBe('2026-07-24T07:59:00.000Z');
     expect(packetInsert?.params[18]).toBe('2026-07-24T08:00:00.000Z');
+  });
+
+  it('ingests manual SVG uploads with explicit command history, scope check, audit and outbox', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return {
+            rows: [{
+              order_key: '2689',
+              order_id: 2689,
+              detail_id: 3101,
+              detail_number: 31,
+              width: 501,
+              height: 480,
+            }],
+          };
+        }
+        if (/SELECT order_id\s+FROM orders/i.test(text)) {
+          return { rows: [{ order_id: 2689 }] };
+        }
+        if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              external_packet_key: 'erp-svg-upload:manual',
+              source_chat_id: 'erp-manual-svg-upload',
+              source_message_id: null,
+              source_created_at: null,
+              source_updated_at: null,
+              completion_status: 'completed',
+              thumbs_up: true,
+              parser_version: 'erp-manual-svg-upload-v1',
+            })],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-manual-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.manualSvgUpload({
+      currentUser: user(),
+      dto: manualSvgDto(),
+      requestId: 'request-manual-svg-1',
+    });
+
+    const sql = queries.map((query) => query.text).join('\n');
+    expect(result).toMatchObject({
+      applied: true,
+      auditId: 'audit-manual-1',
+      createdMdfMachineFileCard: true,
+      packet: {
+        sourceChatId: 'erp-manual-svg-upload',
+        completionStatus: 'completed',
+      },
+    });
+    const idempotencyInsert = queries.find((query) =>
+      /INSERT INTO command_idempotency_keys/i.test(query.text),
+    );
+    expect(idempotencyInsert?.params[1]).toBe('cnc.manual_svg_upload');
+    expect(idempotencyInsert?.params[3]).toBe('cnc_manual_svg_upload');
+    const matchQuery = queries.find((query) => /FROM orders o\s+JOIN order_details od/i.test(query.text));
+    expect(matchQuery?.text).toContain('o.order_id = ANY($2::bigint[])');
+    expect(matchQuery?.params[1]).toEqual([2689]);
+    expect(sql).toContain('SELECT order_id');
+    expect(sql).toContain('cnc_telegram_packets');
+    expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.manual_svg_upload.created'))).toBe(true);
+    expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.manual_svg_upload.mdf_card_created'))).toBe(true);
+  });
+
+  it('creates manual SVG comment presets with command idempotency, audit and outbox', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/INSERT INTO cnc_manual_svg_comment_presets/i.test(text)) {
+          return {
+            rows: [{
+              preset_id: 7,
+              label: 'Переделка',
+              comment_text: 'переделка',
+              category: 'rework',
+              is_active: true,
+              sort_order: 500,
+              version: 1,
+              created_at: '2026-08-12T00:00:00.000Z',
+              updated_at: '2026-08-12T00:00:00.000Z',
+            }],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-preset-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.createManualSvgCommentPreset({
+      currentUser: user(),
+      idempotencyKey: 'manual-svg-preset:test',
+      dto: {
+        label: 'Переделка',
+        commentText: 'переделка',
+        category: 'rework',
+      },
+      requestId: 'request-preset-1',
+    });
+
+    expect(result).toMatchObject({ presetId: 7, commentText: 'переделка' });
+    const idempotencyInsert = queries.find((query) =>
+      /INSERT INTO command_idempotency_keys/i.test(query.text),
+    );
+    expect(idempotencyInsert?.params[1]).toBe('cnc.manual_svg_comment_preset.create');
+    expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.manual_svg_comment_preset.created'))).toBe(true);
+    expect(queries.some((query) => /UPDATE command_idempotency_keys/i.test(query.text))).toBe(true);
   });
 
   it('uses source creation time when Telegram update time is absent', async () => {
@@ -1170,6 +1317,39 @@ function ingestDto() {
   };
 }
 
+function manualSvgDto() {
+  return {
+    idempotencyKey: 'manual-svg:test:repo',
+    selectedOrderIds: [2689],
+    createMdfMachineFileCard: true,
+    svgContentHash: 'a'.repeat(64),
+    programName: 'manual.svg',
+    materialName: 'МДФ 16мм',
+    comments: ['весь заказ: 2689'],
+    cutLayout: {
+      status: 'invalid' as const,
+      reasons: ['test skips reverse import'],
+      sheet: { widthMm: 2070, heightMm: 2800 },
+      rawCommentCount: 1,
+      partContourCount: 1,
+      acceptedItemCount: 0,
+      items: [],
+    },
+    items: [
+      {
+        sourceItemKey: '2689:31:497x477:part-1',
+        orderName: '2689',
+        detailNumber: 31,
+        widthMm: 497,
+        heightMm: 477,
+        quantity: 1,
+        source: 'vector' as const,
+        confidence: 0.99,
+      },
+    ],
+  };
+}
+
 function packetRow(overrides: Partial<ReturnType<typeof packetRowBase>> = {}) {
   return { ...packetRowBase(), ...overrides };
 }
@@ -1204,6 +1384,7 @@ function packetRowBase() {
     parser_version: 'cnc-telegram-structured-v1',
     svg_cut_job_id: 30,
     svg_cut_result_id: 500,
+    svg_cut_result_no: 12,
     svg_cut_import_status: 'imported',
     svg_cut_import_note: null,
     svg_cut_sheets_json: [

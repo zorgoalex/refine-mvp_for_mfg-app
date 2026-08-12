@@ -64,6 +64,7 @@ import { HasuraReportError } from "../../api/hasuraReportClient";
 import { canQueryUsersResource } from "../../utils/resourcePermissions";
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
+import { CutSvgUploadModal } from "../cut/CutSvgUploadModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
 import { useIsMobile } from "../../hooks/useDeviceTier";
 import { OrderCardList } from "./mobile/OrderCardList";
@@ -153,6 +154,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const useBackendCut = featureFlags.useBackendCut;
   const [selectedCutOrderIds, setSelectedCutOrderIds] = useState<number[]>([]);
   const [addToCutOpen, setAddToCutOpen] = useState(false);
+  const [cutSvgUploadOpen, setCutSvgUploadOpen] = useState(false);
   const canViewUsers = canQueryUsersResource(currentUser);
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
   // hook is disabled so the cached list stops reacting to invalidateQueries.
@@ -1306,6 +1308,16 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             >
               Создать заказ
             </Button>
+            {useBackendCut && (
+              <Tooltip title="Загрузить SVG-раскрой">
+                <Button
+                  icon={<UploadOutlined />}
+                  onClick={() => setCutSvgUploadOpen(true)}
+                >
+                  SVG
+                </Button>
+              </Tooltip>
+            )}
             <Dropdown
               trigger={["click"]}
               menu={{
@@ -1612,6 +1624,13 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
           orderIds={selectedCutOrderIds}
           onClose={() => setAddToCutOpen(false)}
           onDone={() => setSelectedCutOrderIds([])}
+        />
+      )}
+      {useBackendCut && (
+        <CutSvgUploadModal
+          open={cutSvgUploadOpen}
+          onClose={() => setCutSvgUploadOpen(false)}
+          onDone={() => setCutSvgUploadOpen(false)}
         />
       )}
     </>

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
-import { parseDateQuery, parseIdempotencyKey, parseStructuredIngest, parseTodayQuery } from './cnc-telegram.controller';
+import {
+  parseDateQuery,
+  parseIdempotencyKey,
+  parseManualSvgCommentPreset,
+  parseManualSvgUpload,
+  parseStructuredIngest,
+  parseTodayQuery,
+} from './cnc-telegram.controller';
 
 describe('CncTelegramController parsing', () => {
   it('accepts structured packet ingest and rejects raw fields', () => {
@@ -86,6 +93,68 @@ describe('CncTelegramController parsing', () => {
       sheet: { widthMm: 2070, heightMm: 2800 },
       items: [{ quantity: 1, rotated: true }],
     });
+  });
+
+  it('accepts manual SVG upload payload and normalizes selected order allowlist', () => {
+    const parsed = parseManualSvgUpload({
+      selectedOrderIds: [42, 7, 42],
+      createMdfMachineFileCard: true,
+      svgContentHash: 'a'.repeat(64),
+      programName: 'manual.svg',
+      cutLayout: {
+        status: 'valid',
+        reasons: [],
+        sheet: { widthMm: 2070, heightMm: 2800 },
+        acceptedItemCount: 1,
+        items: [{
+          orderName: '2689',
+          detailNumber: 31,
+          widthMm: 497,
+          heightMm: 477,
+          quantity: 1,
+          xMm: 10,
+          yMm: 20,
+          placedWidthMm: 497,
+          placedHeightMm: 477,
+          rotated: false,
+        }],
+      },
+      items: [structuredPayload().items[0]],
+    }, 'manual-svg:test:1');
+
+    expect(parsed).toMatchObject({
+      idempotencyKey: 'manual-svg:test:1',
+      selectedOrderIds: [7, 42],
+      createMdfMachineFileCard: true,
+      svgContentHash: 'a'.repeat(64),
+    });
+  });
+
+  it('rejects manual SVG upload without selected orders or with raw SVG body idempotency', () => {
+    expect(() =>
+      parseManualSvgUpload({
+        selectedOrderIds: [],
+        createMdfMachineFileCard: false,
+        svgContentHash: 'a'.repeat(64),
+        rawSvg: '<svg />',
+        cutLayout: { status: 'invalid', reasons: ['bad'], sheet: null, items: [] },
+        items: [],
+      }, 'manual-svg:test:1'),
+    ).toThrow(ApiError);
+  });
+
+  it('accepts manual SVG comment presets and rejects extra fields', () => {
+    expect(parseManualSvgCommentPreset({
+      label: 'Переделка',
+      commentText: 'переделка',
+      category: 'rework',
+    })).toMatchObject({ label: 'Переделка', commentText: 'переделка' });
+
+    expect(() => parseManualSvgCommentPreset({
+      label: 'X',
+      commentText: 'Y',
+      rawSql: 'DROP',
+    })).toThrow(ApiError);
   });
 
   it('validates date-only query values', () => {

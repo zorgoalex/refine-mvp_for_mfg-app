@@ -78,7 +78,10 @@ import type {
 import { featureFlags } from '../../config/featureFlags';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
-import { CutSheetLabelGenerateAction } from '../cut/CutSheetLabelGenerateAction';
+import {
+  CutSheetLabelGenerateAction,
+  type CutSheetLabelCoverage,
+} from '../cut/CutSheetLabelGenerateAction';
 import {
   classifyOrderStatusBoardMoveFailure,
   executeOrderStatusBoardMove,
@@ -1995,6 +1998,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   );
   const orderSummaries = buildCncOrderSummaries(packet.items);
   const svgCutSheet = packet.svgCutSheets?.[0] ?? null;
+  const labelCoverage = svgCutSheet ? buildCncPacketLabelCoverage(packet, svgCutSheet) : null;
   const minimal = displayMode === 'minimal';
   const packetClassName = cncRelationCardClassName(
     [
@@ -2178,12 +2182,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         </Collapse.Panel>
       </Collapse>
 
-      {packet.sheetImageUrl && (
+      {(packet.sheetImageUrl || (packet.svgCutJobId && svgCutSheet)) && (
         <CncTelegramSheetImagePreview
           imageUrl={packet.sheetImageUrl}
           title={packet.programName ?? packet.externalPacketKey}
           cutJobId={packet.svgCutJobId ?? null}
+          resultNo={packet.svgCutResultNo ?? null}
           labelSheet={svgCutSheet}
+          labelCoverage={labelCoverage}
         />
       )}
 
@@ -2196,17 +2202,21 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
 CncTelegramPacketCard.displayName = 'CncTelegramPacketCard';
 
 interface CncTelegramSheetImagePreviewProps {
-  imageUrl: string;
+  imageUrl: string | null;
   title: string;
   cutJobId: number | null;
+  resultNo: number | null;
   labelSheet: CncTelegramPacketCutSheet | null;
+  labelCoverage: CutSheetLabelCoverage | null;
 }
 
 const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> = ({
   imageUrl,
   title,
   cutJobId,
+  resultNo,
   labelSheet,
+  labelCoverage,
 }) => {
   const [open, setOpen] = useState(false);
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -2218,7 +2228,23 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     let cancelled = false;
     setLoading(true);
     setError(null);
-    cncTelegramApi.downloadSheetImage(imageUrl)
+    const loader = imageUrl
+      ? cncTelegramApi.downloadSheetImage(imageUrl)
+      : cutJobId && labelSheet
+        ? cutApi.fetchSheetPng(
+          cutJobId,
+          labelSheet.cutGroupId,
+          labelSheet.sheetIndex,
+          'screen',
+          false,
+          labelSheet.variant,
+          undefined,
+          true,
+          'bottom-left',
+          resultNo ?? undefined,
+        ).then((blob) => ({ blob, fileName: null, status: 200 }))
+        : Promise.reject(new Error('Нет связанного листа раскроя'));
+    loader
       .then(({ blob }) => {
         if (cancelled) return;
         setObjectUrl(URL.createObjectURL(blob));
@@ -2236,7 +2262,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, objectUrl, open]);
+  }, [cutJobId, imageUrl, labelSheet, objectUrl, open, resultNo]);
 
   useEffect(() => () => {
     if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -2289,6 +2315,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
                 cutJobId={cutJobId}
                 cutGroupId={labelSheet.cutGroupId}
                 sheetIndex={labelSheet.sheetIndex}
+                labelCoverage={labelCoverage}
               />
             ) : (
               <Tooltip title="Нет связанного листа раскроя для бирок">
@@ -3628,6 +3655,73 @@ function formatCncNumberRefs(numbers: number[]): string {
   return numbers.length > 0
     ? numbers.map((number) => `№${number}`).join(', ')
     : '—';
+}
+
+export function buildCncPacketLabelCoverage(
+  packet: CncTelegramPacket,
+  labelSheet: CncTelegramPacketCutSheet,
+): CutSheetLabelCoverage {
+  const expectedCount = packet.items.reduce((sum, item) => sum + cncPositiveQuantity(item.quantity), 0);
+  const includedCount = labelSheet.detailIds.length;
+  const remainingByDetailId = new Map<number, number>();
+  for (const detailId of labelSheet.detailIds) {
+    remainingByDetailId.set(detailId, (remainingByDetailId.get(detailId) ?? 0) + 1);
+  }
+
+  const issues: CutSheetLabelCoverage['issues'] = [];
+  for (const item of packet.items) {
+    const expectedQuantity = cncPositiveQuantity(item.quantity);
+    if (expectedQuantity === 0) continue;
+
+    if (item.matchStatus !== 'matched' || item.matchDetailId == null) {
+      issues.push({
+        key: item.packetItemId,
+        label: formatCncPacketLabelCoverageItem(item),
+        expectedQuantity,
+        includedQuantity: 0,
+        missingQuantity: expectedQuantity,
+        reason: cncPacketLabelCoverageUnmatchedReason(item),
+      });
+      continue;
+    }
+
+    const availableQuantity = remainingByDetailId.get(item.matchDetailId) ?? 0;
+    const includedQuantity = Math.min(expectedQuantity, availableQuantity);
+    remainingByDetailId.set(item.matchDetailId, Math.max(0, availableQuantity - includedQuantity));
+    const missingQuantity = expectedQuantity - includedQuantity;
+    if (missingQuantity > 0) {
+      issues.push({
+        key: item.packetItemId,
+        label: formatCncPacketLabelCoverageItem(item),
+        expectedQuantity,
+        includedQuantity,
+        missingQuantity,
+        reason: includedQuantity > 0
+          ? `в импортированном SVG-листе найдено только ${includedQuantity} размещ.`
+          : 'в импортированном SVG-листе нет размещения этой детали',
+      });
+    }
+  }
+
+  return { expectedCount, includedCount, issues };
+}
+
+function cncPositiveQuantity(value: number): number {
+  return Math.max(0, Math.trunc(Number.isFinite(value) ? value : 0));
+}
+
+function formatCncPacketLabelCoverageItem(item: CncTelegramPacket['items'][number]): string {
+  const orderName = item.orderName.trim() || 'Без заказа';
+  const detailRef = item.detailNumber == null ? 'деталь без номера' : `#${item.detailNumber}`;
+  const size = formatCncSize(item.widthMm, item.heightMm);
+  return size === '—' ? `${orderName} ${detailRef}` : `${orderName} ${detailRef} ${size}`;
+}
+
+function cncPacketLabelCoverageUnmatchedReason(item: CncTelegramPacket['items'][number]): string {
+  if (item.matchStatus === 'conflict') return 'конфликт сопоставления с ERP';
+  if (item.matchStatus === 'needs_review') return 'строка требует ручной проверки';
+  if (item.matchStatus === 'unmatched') return 'деталь не сопоставлена с ERP';
+  return 'нет надёжной связи с ERP-деталью';
 }
 
 function loadCncManualMoves(): CncBoardManualMoveState {

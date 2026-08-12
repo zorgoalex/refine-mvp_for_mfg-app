@@ -1,7 +1,12 @@
 import { apiRoutes } from './apiRoutes';
 import { httpClient } from './httpClient';
 import { withQuery } from './ordersApi';
-import type { CncTelegramTodayResponse } from './types/cncTelegramApi.types';
+import type {
+  CncTelegramManualSvgCommentPreset,
+  CncTelegramManualSvgUploadRequest,
+  CncTelegramManualSvgUploadResponse,
+  CncTelegramTodayResponse,
+} from './types/cncTelegramApi.types';
 
 export interface CncTelegramTodayQuery {
   date?: string;
@@ -17,5 +22,31 @@ export const cncTelegramApi = {
   },
   downloadSheetImage(path: string): Promise<{ blob: Blob; fileName: string | null; status: number }> {
     return httpClient.download(path);
+  },
+  manualSvgUpload(
+    body: CncTelegramManualSvgUploadRequest,
+    idempotencyKey: string,
+  ): Promise<CncTelegramManualSvgUploadResponse> {
+    return httpClient.post<CncTelegramManualSvgUploadResponse>(
+      apiRoutes.cncTelegram.manualSvgUpload,
+      body,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
+  listManualSvgCommentPresets(): Promise<CncTelegramManualSvgCommentPreset[]> {
+    return httpClient.get<CncTelegramManualSvgCommentPreset[]>(
+      apiRoutes.cncTelegram.manualSvgCommentPresets,
+    );
+  },
+  createManualSvgCommentPreset(
+    body: Pick<CncTelegramManualSvgCommentPreset, 'label' | 'commentText'> &
+      Partial<Pick<CncTelegramManualSvgCommentPreset, 'category' | 'sortOrder'>>,
+    idempotencyKey: string,
+  ): Promise<CncTelegramManualSvgCommentPreset> {
+    return httpClient.post<CncTelegramManualSvgCommentPreset>(
+      apiRoutes.cncTelegram.manualSvgCommentPresets,
+      body,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
   },
 };

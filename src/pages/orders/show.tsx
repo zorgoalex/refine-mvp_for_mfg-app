@@ -1,7 +1,7 @@
 import { useShow, useList, useUpdate, useOne, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined, UploadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -34,12 +34,14 @@ import { cutApi } from "../../api/cutApi";
 import type { CutJobDto } from "../../api/types/cutApi.types";
 import { projectsApi } from "../../api/projectsApi";
 import type { ProjectDto } from "../../api/projectsApi";
+import { CutJobVersionLines } from "./CutJobVersionLines";
 import { cutJobDeepLink, cutJobProfileLabel } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
 import { useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
+import { CutSvgUploadModal } from "../cut/CutSvgUploadModal";
 import { buildGroupedRows, GROUP_TINT_COUNT, selectedGroupLabelForCut } from './detailGrouping';
 import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
@@ -624,6 +626,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
   const [cutModalOpen, setCutModalOpen] = useState(false);
+  const [cutSvgUploadOpen, setCutSvgUploadOpen] = useState(false);
   const [bazisCutModalOpen, setBazisCutModalOpen] = useState(false);
 
   useEffect(() => {
@@ -1148,7 +1151,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = cutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
             },
           },
           {
@@ -1158,7 +1161,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             render: (_: unknown, detail: any) => {
               const ref = bathCutJobByDetailId.get(detail.detail_id);
               if (!ref) return '—';
-              return <Link to={cutJobDeepLink(ref)}>{ref.name || ref.cutNumber}</Link>;
+              return <Link to={cutJobDeepLink(ref)} title={ref.name} style={{ display: 'inline-block', maxWidth: '100%' }}><CutJobVersionLines job={ref} /></Link>;
             },
           },
         ]
@@ -1603,6 +1606,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     <Button icon={<EditOutlined />} onClick={() => navigate(`/orders/edit/${record.order_id}`)}>
                       Редактировать
                     </Button>
+                    {cutEnabled && (
+                      <Tooltip title="Загрузить SVG-раскрой">
+                        <Button icon={<UploadOutlined />} onClick={() => setCutSvgUploadOpen(true)}>
+                          SVG
+                        </Button>
+                      </Tooltip>
+                    )}
                     <Button
                       icon={<FileExcelOutlined />}
                       onClick={() => void handleExportExcel('without-prices')}
@@ -1911,12 +1921,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                                   <Link
                                     key={j.cutJobId}
                                     to={cutJobDeepLink(j)}
-                                    style={{ fontSize: 12, lineHeight: 1.35 }}
+                                    title={j.name}
+                                    style={{ display: 'inline-block', maxWidth: '100%', fontSize: 12, lineHeight: 1.35 }}
                                   >
-                                    {j.name || j.cutNumber}
-                                    <span style={{ color: 'var(--app-text-muted)' }}>
-                                      {' '}· Профиль: {cutJobProfileLabel(j)}
-                                    </span>
+                                    <CutJobVersionLines job={j} nameSuffix={<> · Профиль: {cutJobProfileLabel(j)}</>} />
                                   </Link>
                                 ))}
                               </div>
@@ -2196,6 +2204,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 setCutSelectMode(false);
                 setCutSelectedDetailIds([]);
               }}
+            />
+          )}
+          {cutEnabled && record?.order_id && (
+            <CutSvgUploadModal
+              open={cutSvgUploadOpen}
+              defaultOrderIds={[record.order_id]}
+              defaultOrderNames={[record.order_name]}
+              onClose={() => setCutSvgUploadOpen(false)}
+              onDone={() => setCutSvgUploadOpen(false)}
             />
           )}
           {bazisCutVisible && record?.order_id && (

@@ -97,6 +97,7 @@ export interface CncTelegramPacketDto {
   cutLayout: CncTelegramCutLayoutDto | null;
   svgCutJobId?: number | null;
   svgCutResultId?: number | null;
+  svgCutResultNo?: number | null;
   svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
   svgCutImportNote?: string | null;
   svgCutSheets?: CncTelegramPacketCutSheetDto[];
@@ -165,6 +166,49 @@ export interface CncTelegramIngestResponseDto {
   auditId?: string;
   applied: boolean;
   ignoredStaleSourceVersion: boolean;
+}
+
+export interface CncTelegramManualSvgUploadResponseDto extends CncTelegramIngestResponseDto {
+  cutJobId: number | null;
+  cutResultId: number | null;
+  cutJobPath: string | null;
+  createdMdfMachineFileCard: boolean;
+}
+
+export interface CncTelegramManualSvgUploadDto {
+  idempotencyKey: string;
+  selectedOrderIds: number[];
+  createMdfMachineFileCard: boolean;
+  svgContentHash: string;
+  workday?: string;
+  machine?: string | null;
+  programName?: string | null;
+  materialName?: string | null;
+  rework?: boolean;
+  comments?: string[];
+  tools?: CncTelegramToolDto[];
+  parserVersion?: string | null;
+  cutLayout: CncTelegramCutLayoutDto;
+  items: CncTelegramStructuredIngestDto['items'];
+}
+
+export interface CncTelegramManualSvgCommentPresetDto {
+  presetId: number;
+  label: string;
+  commentText: string;
+  category: 'general' | 'order' | 'tool' | 'material' | 'rework' | 'custom';
+  isActive: boolean;
+  sortOrder: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCncTelegramManualSvgCommentPresetDto {
+  label: string;
+  commentText: string;
+  category?: CncTelegramManualSvgCommentPresetDto['category'];
+  sortOrder?: number;
 }
 
 export interface CncTelegramStructuredIngestDto {
