@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { Button, Result } from 'antd';
 import { logError } from '../utils/notificationLogger';
+import { reloadPageOnceForStaleChunk } from '../utils/staleChunkReload';
 
 interface Props {
   children: ReactNode;
@@ -27,6 +28,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught error:', error, errorInfo);
+
+    if (reloadPageOnceForStaleChunk(error)) {
+      return;
+    }
 
     // Логируем ошибку в систему уведомлений
     const errorMessage = `${error.name}: ${error.message}`;

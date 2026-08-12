@@ -6,6 +6,7 @@ import {
   resolveInitialUiVariant,
   seedLegacyAuthSession,
 } from "./ui-variant/uiVariantBootstrap";
+import { reloadPageOnceForStaleChunk } from "./utils/staleChunkReload";
 
 async function bootstrap() {
   try {
@@ -21,7 +22,16 @@ async function bootstrap() {
   const uiVariant = await resolveInitialUiVariant(getLoadedRuntimeConfig()?.ui);
   setDocumentUiVariant(uiVariant);
 
-  const { default: App } = await import("./App");
+  let App: typeof import("./App").default;
+  try {
+    ({ default: App } = await import("./App"));
+  } catch (error) {
+    if (reloadPageOnceForStaleChunk(error)) {
+      return;
+    }
+    throw error;
+  }
+
   const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
   root.render(
     <React.StrictMode>
