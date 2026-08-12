@@ -2784,6 +2784,39 @@
   transform: translateY(-50%) scale(0.96);
 }
 
+.cnc-board-scroll-top.ant-btn {
+  position: fixed;
+  inset-block-end: calc(64px + env(safe-area-inset-bottom, 0px));
+  z-index: 39;
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+  border-color: rgba(17, 24, 39, 0.28);
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.6);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.22);
+  opacity: 0.78;
+  transform: translateX(-50%);
+  transition-property: opacity, transform, background-color, box-shadow;
+  transition-duration: 140ms;
+  transition-timing-function: ease;
+  backdrop-filter: blur(8px);
+}
+
+.cnc-board-scroll-top.ant-btn:hover,
+.cnc-board-scroll-top.ant-btn:focus-visible {
+  border-color: rgba(17, 24, 39, 0.36);
+  background: rgba(17, 24, 39, 0.76);
+  color: #fff;
+  box-shadow: 0 14px 30px rgba(17, 24, 39, 0.26);
+  opacity: 0.94;
+}
+
+.cnc-board-scroll-top.ant-btn:active {
+  transform: translateX(-50%) scale(0.96);
+}
+
 .status-board-columns--cnc .status-board-card {
   min-width: 0;
   padding-inline: clamp(4px, 0.7vw, 11px);

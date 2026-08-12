@@ -490,6 +490,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const cncBoardScrollTargetLeftRef = useRef<number | null>(null);
   const [cncBoardScrollDirection, setCncBoardScrollDirection] =
     useState<CncBoardHorizontalScrollDirection | null>(null);
+  const [cncBoardScrollTopState, setCncBoardScrollTopState] = useState({
+    visible: false,
+    left: 0,
+  });
   const [announcement, setAnnouncement] = useState('');
   const finePointer = useFinePointer();
   const viewStateRef = useRef(viewState);
@@ -1455,6 +1459,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       });
   }, [fetchCncManualMoves]);
 
+  const syncCncBoardScrollTopButton = useCallback((viewportOverride?: HTMLElement | null) => {
+    const viewport = viewportOverride ?? boardViewportRef.current;
+    const rect = viewport?.getBoundingClientRect();
+    const hasVerticalOverflow = viewport
+      ? viewport.scrollHeight - viewport.clientHeight > 2
+      : false;
+    const visible = Boolean(isCncToday && viewport && hasVerticalOverflow && viewport.scrollTop > 1);
+    const left = rect
+      ? Math.round(Math.min(Math.max(rect.left + rect.width / 2, 58), window.innerWidth - 58))
+      : 0;
+    setCncBoardScrollTopState((current) => {
+      if (current.visible === visible && (!visible || current.left === left)) return current;
+      return { visible, left };
+    });
+  }, [isCncToday]);
+
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
     const topScrollbarTrack = topScrollbarTrackRef.current;
@@ -1472,6 +1492,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             )
           : null,
       );
+      syncCncBoardScrollTopButton(viewport);
     };
     updateTrackWidth();
 
@@ -1488,6 +1509,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     datasetKey,
     isCncToday,
     loading,
+    syncCncBoardScrollTopButton,
   ]);
 
   const scrollBoardFromTop = useCallback(
@@ -1519,9 +1541,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       if (targetLeft !== null && Math.abs(event.currentTarget.scrollLeft - targetLeft) <= 2) {
         cncBoardScrollTargetLeftRef.current = null;
       }
+      syncCncBoardScrollTopButton(event.currentTarget);
     },
-    [isCncToday],
+    [isCncToday, syncCncBoardScrollTopButton],
   );
+
+  const scrollCncBoardToTop = useCallback(() => {
+    const viewport = boardViewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTo({ top: 0, behavior: 'smooth' });
+    setCncBoardScrollTopState((current) => ({
+      ...current,
+      visible: false,
+    }));
+  }, []);
 
   const scrollCncBoardHorizontally = useCallback(() => {
     const viewport = boardViewportRef.current;
@@ -2274,6 +2307,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             </div>
           )}
         </section>
+        {isCncToday && cncHasRenderableColumns && cncBoardScrollTopState.visible && (
+          <Button
+            className="cnc-board-scroll-top"
+            type="default"
+            shape="circle"
+            icon={<UpOutlined />}
+            aria-label="Прокрутить МДФ-доску наверх"
+            style={{ left: cncBoardScrollTopState.left }}
+            onClick={scrollCncBoardToTop}
+          />
+        )}
         {isCncToday && cncBoardScrollDirection && (
           <Button
             className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}
