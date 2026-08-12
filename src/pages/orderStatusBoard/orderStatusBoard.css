@@ -2998,6 +2998,19 @@
     font-size: 11px;
   }
 
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content {
+    display: grid;
+    grid-template-rows: 0fr;
+    visibility: hidden;
+    opacity: 0;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content-inner {
+    min-height: 0;
+    display: block;
+    overflow: hidden;
+  }
+
   .status-board-toolbar-disclosure__toggle:focus-visible {
     outline: 2px solid #1677ff;
     outline-offset: -2px;
@@ -3060,6 +3073,12 @@
     visibility: visible;
     opacity: 1;
     transition-delay: 0s;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc.status-board-toolbar-disclosure--expanded .status-board-toolbar-disclosure__content {
+    grid-template-rows: 1fr;
+    visibility: visible;
+    opacity: 1;
   }
 
   .status-board-toolbar-disclosure .status-board-toolbar-disclosure__content-inner > .status-board-toolbar {

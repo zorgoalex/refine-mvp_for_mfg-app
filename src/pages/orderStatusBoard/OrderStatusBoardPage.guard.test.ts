@@ -172,6 +172,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure__toggle');
     expect(css).toContain('height: 34px');
     expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure__summary');
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content\s*\{[^}]*display: grid;[^}]*grid-template-rows: 0fr;[^}]*visibility: hidden;[^}]*opacity: 0;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content-inner\s*\{[^}]*min-height: 0;[^}]*display: block;[^}]*overflow: hidden;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\.status-board-toolbar-disclosure--expanded \.status-board-toolbar-disclosure__content\s*\{[^}]*grid-template-rows: 1fr;[^}]*visibility: visible;[^}]*opacity: 1;/s,
+    );
     expect(css).toContain('grid-template-rows: 0fr');
     expect(css).toContain('visibility: hidden');
     expect(css).toContain('transition-property: grid-template-rows, opacity, visibility');
