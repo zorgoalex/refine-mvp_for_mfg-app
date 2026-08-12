@@ -3186,10 +3186,19 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  .status-board-page--cnc .status-board-viewport {
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+  }
+
   .status-board-column__cards {
     overscroll-behavior-x: auto;
     overscroll-behavior-y: contain;
     touch-action: pan-x pan-y;
+  }
+
+  .status-board-page--cnc .status-board-column__cards {
+    overscroll-behavior-y: auto;
   }
 
   .status-board-page--cnc :where(

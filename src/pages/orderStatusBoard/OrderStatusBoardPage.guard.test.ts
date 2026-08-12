@@ -196,6 +196,12 @@ describe('OrderStatusBoardPage UX guards', () => {
       /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-column__cards \{[^}]*overscroll-behavior-x: auto;[^}]*overscroll-behavior-y: contain;[^}]*touch-action: pan-x pan-y;/,
     );
     expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*overscroll-behavior-x: contain;[^}]*overscroll-behavior-y: auto;/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*overscroll-behavior-y: auto;/,
+    );
+    expect(css).toMatch(
       /\.status-board-page--cnc :where\([\s\S]*?\.status-board-viewport,[\s\S]*?\.cnc-board-card-shell,[\s\S]*?\.cnc-board-card-shell--draggable,[\s\S]*?\.status-board-card,[\s\S]*?\.cnc-bath-card[\s\S]*?\)\s*\{[^}]*touch-action: pan-x pan-y;/s,
     );
     expect(tabletCss).toMatch(
