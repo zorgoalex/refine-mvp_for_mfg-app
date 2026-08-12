@@ -4112,8 +4112,10 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   );
   const orderSummaries = buildCncOrderSummaries(packet.items);
   const otherMaterial = cncPacketHasOtherMaterialMarker(packet);
-  const hasSheetImage = Boolean(packet.sheetImageUrl);
   const svgCutSheet = packet.svgCutSheets?.[0] ?? null;
+  const hasSheetImage = Boolean(packet.sheetImageUrl);
+  const hasSvgSheetPreview = Boolean(packet.svgCutJobId && svgCutSheet);
+  const hasSheetPreview = hasSheetImage || hasSvgSheetPreview;
   const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);
   const labelDetailInstances = useMemo(
     () => svgCutSheet
@@ -4145,10 +4147,10 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   }, [cutJobPath, navigate]);
 
   useEffect(() => {
-    if (activeAuxView === 'sheet' && !hasSheetImage) {
+    if (activeAuxView === 'sheet' && !hasSheetPreview) {
       setActiveAuxView(null);
     }
-  }, [activeAuxView, hasSheetImage]);
+  }, [activeAuxView, hasSheetPreview]);
 
   if (minimal) {
     return (
@@ -4319,13 +4321,13 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               type="text"
               className="cnc-packet-card__tab"
               icon={<PictureOutlined />}
-              disabled={!hasSheetImage}
-              aria-disabled={!hasSheetImage}
+              disabled={!hasSheetPreview}
+              aria-disabled={!hasSheetPreview}
               aria-expanded={activeAuxView === 'sheet'}
               aria-pressed={activeAuxView === 'sheet'}
               onClick={() => setActiveAuxView((current) => current === 'sheet' ? null : 'sheet')}
             >
-              Скрин
+              {hasSheetImage ? 'Скрин' : 'SVG'}
             </Button>
           </div>
 
@@ -4396,12 +4398,13 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
             </div>
           )}
 
-          {packet.sheetImageUrl && (
+          {hasSheetPreview && (
             <CncTelegramSheetImagePreview
               imageUrl={packet.sheetImageUrl}
               title={packet.programName ?? packet.externalPacketKey}
               open={activeAuxView === 'sheet'}
               cutJobId={packet.svgCutJobId ?? null}
+              cutResultNo={packet.svgCutResultNo ?? null}
               labelSheet={svgCutSheet}
               printHeader={sheetPrintHeader ?? undefined}
               labelDetailInstances={labelDetailInstances}
@@ -4420,10 +4423,11 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
 CncTelegramPacketCard.displayName = 'CncTelegramPacketCard';
 
 interface CncTelegramSheetImagePreviewProps {
-  imageUrl: string;
+  imageUrl: string | null;
   title: string;
   open: boolean;
   cutJobId: number | null;
+  cutResultNo: number | null;
   labelSheet: CncTelegramPacketCutSheet | null;
   printHeader?: string;
   labelDetailInstances: CutSheetLabelDetailInstance[];
@@ -4435,6 +4439,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   title,
   open,
   cutJobId,
+  cutResultNo,
   labelSheet,
   printHeader,
   labelDetailInstances,
@@ -4449,7 +4454,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     setObjectUrl(null);
     setError(null);
     setPrintPreviewOpen(false);
-  }, [imageUrl]);
+  }, [imageUrl, cutJobId, cutResultNo, labelSheet?.cutGroupId, labelSheet?.sheetIndex, labelSheet?.variant]);
 
   useEffect(() => {
     if (!open) setPrintPreviewOpen(false);
@@ -4460,8 +4465,24 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     let cancelled = false;
     setLoading(true);
     setError(null);
-    cncTelegramApi.downloadSheetImage(imageUrl)
-      .then(({ blob }) => {
+    const loadPreview = imageUrl
+      ? cncTelegramApi.downloadSheetImage(imageUrl).then(({ blob }) => blob)
+      : cutJobId && labelSheet
+        ? cutApi.fetchSheetPng(
+            cutJobId,
+            labelSheet.cutGroupId,
+            labelSheet.sheetIndex,
+            'thumb',
+            false,
+            labelSheet.variant,
+            undefined,
+            true,
+            'top-left',
+            cutResultNo ?? undefined,
+          )
+        : Promise.reject(new Error('Нет связанного превью раскроя'));
+    loadPreview
+      .then((blob) => {
         if (cancelled) return;
         setObjectUrl(URL.createObjectURL(blob));
       })
@@ -4478,7 +4499,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, objectUrl, open]);
+  }, [imageUrl, objectUrl, open, cutJobId, cutResultNo, labelSheet]);
 
   useEffect(() => () => {
     if (objectUrl) URL.revokeObjectURL(objectUrl);

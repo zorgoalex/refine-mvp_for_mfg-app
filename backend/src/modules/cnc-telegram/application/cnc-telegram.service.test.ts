@@ -15,6 +15,15 @@ describe('CncTelegramService', () => {
         async ingest() {
           throw new Error('unused');
         },
+        async manualSvgUpload() {
+          throw new Error('unused');
+        },
+        async listManualSvgCommentPresets() {
+          throw new Error('unused');
+        },
+        async createManualSvgCommentPreset() {
+          throw new Error('unused');
+        },
         async configureAutoCutStatus() {
           throw new Error('unused');
         },
@@ -47,6 +56,15 @@ describe('CncTelegramService', () => {
         },
         async ingest() {
           throw new Error('repository must not be called');
+        },
+        async manualSvgUpload() {
+          throw new Error('unused');
+        },
+        async listManualSvgCommentPresets() {
+          throw new Error('unused');
+        },
+        async createManualSvgCommentPreset() {
+          throw new Error('unused');
         },
         async configureAutoCutStatus() {
           throw new Error('unused');
@@ -86,6 +104,15 @@ describe('CncTelegramService', () => {
         async ingest() {
           throw new Error('unused');
         },
+        async manualSvgUpload() {
+          throw new Error('unused');
+        },
+        async listManualSvgCommentPresets() {
+          throw new Error('unused');
+        },
+        async createManualSvgCommentPreset() {
+          throw new Error('unused');
+        },
         async configureAutoCutStatus() {
           throw new Error('unused');
         },
@@ -109,6 +136,9 @@ describe('CncTelegramService', () => {
         listToday: vi.fn(),
         listOrderCuttingSequences: vi.fn(),
         ingest: vi.fn(),
+        manualSvgUpload: vi.fn(),
+        listManualSvgCommentPresets: vi.fn(),
+        createManualSvgCommentPreset: vi.fn(),
         configureAutoCutStatus: vi.fn(),
       },
     });
@@ -131,6 +161,9 @@ describe('CncTelegramService', () => {
         listToday: vi.fn(),
         listOrderCuttingSequences: vi.fn(),
         ingest: vi.fn(),
+        manualSvgUpload: vi.fn(),
+        listManualSvgCommentPresets: vi.fn(),
+        createManualSvgCommentPreset: vi.fn(),
         configureAutoCutStatus,
       },
       deniedAudit,
@@ -169,6 +202,9 @@ describe('CncTelegramService', () => {
         listToday: vi.fn(),
         listOrderCuttingSequences: vi.fn(),
         ingest: vi.fn(),
+        manualSvgUpload: vi.fn(),
+        listManualSvgCommentPresets: vi.fn(),
+        createManualSvgCommentPreset: vi.fn(),
         configureAutoCutStatus,
       },
     });
@@ -181,6 +217,45 @@ describe('CncTelegramService', () => {
 
     await expect(service.configureAutoCutStatus(command)).resolves.toEqual(response);
     expect(configureAutoCutStatus).toHaveBeenCalledWith(command);
+  });
+
+  it('requires cut.manage for manual SVG upload and records denied audit', async () => {
+    const deniedAudit = {
+      recordIngestDenied: vi.fn().mockResolvedValue(undefined),
+      recordAutoCutStatusConfigureDenied: vi.fn().mockResolvedValue(undefined),
+    };
+    const manualSvgUpload = vi.fn();
+    const service = new CncTelegramService({
+      packets: {
+        listToday: vi.fn(),
+        listOrderCuttingSequences: vi.fn(),
+        ingest: vi.fn(),
+        manualSvgUpload,
+        listManualSvgCommentPresets: vi.fn(),
+        createManualSvgCommentPreset: vi.fn(),
+        configureAutoCutStatus: vi.fn(),
+      },
+      deniedAudit,
+    });
+
+    await expect(
+      service.manualSvgUpload({
+        currentUser: user(['orders.view']),
+        dto: manualSvgDto(),
+        requestId: 'request-1',
+      }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      statusCode: 403,
+    });
+    expect(manualSvgUpload).not.toHaveBeenCalled();
+    expect(deniedAudit.recordIngestDenied).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'cnc.manual_svg_upload.denied',
+        externalPacketKey: 'a'.repeat(64),
+        requiredPermissions: ['cut.manage'],
+      }),
+    );
   });
 });
 
@@ -211,5 +286,41 @@ function ingestDto() {
         confidence: 0.9,
       },
     ],
+  };
+}
+
+function manualSvgDto() {
+  return {
+    idempotencyKey: 'manual-svg:test:1',
+    selectedOrderIds: [42],
+    createMdfMachineFileCard: true,
+    svgContentHash: 'a'.repeat(64),
+    cutLayout: {
+      status: 'valid' as const,
+      reasons: [],
+      sheet: { widthMm: 2070, heightMm: 2800 },
+      items: [{
+        orderName: '2689',
+        detailNumber: 31,
+        widthMm: 497,
+        heightMm: 477,
+        quantity: 1,
+        xMm: 0,
+        yMm: 0,
+        placedWidthMm: 497,
+        placedHeightMm: 477,
+        rotated: false,
+      }],
+    },
+    items: [{
+      sourceItemKey: 'item-1',
+      orderName: '2689',
+      detailNumber: 31,
+      widthMm: 497,
+      heightMm: 477,
+      quantity: 1,
+      source: 'vector' as const,
+      confidence: 0.99,
+    }],
   };
 }

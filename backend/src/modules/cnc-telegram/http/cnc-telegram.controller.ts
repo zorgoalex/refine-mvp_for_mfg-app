@@ -17,9 +17,13 @@ import { CncTelegramService } from '../application/cnc-telegram.service';
 import type {
   CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
+  CncTelegramManualSvgCommentPresetDto,
+  CncTelegramManualSvgUploadDto,
+  CncTelegramManualSvgUploadResponseDto,
   CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayResponseDto,
+  CreateCncTelegramManualSvgCommentPresetDto,
 } from '../dto/cnc-telegram.dto';
 import { CncTelegramRuntimeConfigService } from './cnc-telegram-runtime-config.service';
 import { openTelegramMedia } from '../application/telegram-media-reader';
@@ -139,6 +143,31 @@ const ingestSchema = z.object({
   parserVersion: z.string().trim().min(1).max(120).nullable().optional(),
   cutLayout: cutLayoutSchema.nullable().optional(),
   items: z.array(itemSchema).min(1).max(2000),
+}).strict();
+
+const SHA256_RE = /^[a-f0-9]{64}$/i;
+
+const manualSvgUploadSchema = z.object({
+  selectedOrderIds: z.array(z.number().int().positive()).min(1).max(100),
+  createMdfMachineFileCard: z.boolean(),
+  svgContentHash: z.string().trim().regex(SHA256_RE),
+  workday: z.string().regex(DATE_ONLY).refine(isValidDateOnly).optional(),
+  machine: z.string().trim().min(1).max(64).nullable().optional(),
+  programName: z.string().trim().min(1).max(200).nullable().optional(),
+  materialName: z.string().trim().min(1).max(120).nullable().optional(),
+  rework: z.boolean().optional(),
+  comments: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
+  tools: z.array(toolSchema).max(50).optional(),
+  parserVersion: z.string().trim().min(1).max(120).nullable().optional(),
+  cutLayout: cutLayoutSchema,
+  items: z.array(itemSchema).min(1).max(2000),
+}).strict();
+
+const commentPresetSchema = z.object({
+  label: z.string().trim().min(1).max(120),
+  commentText: z.string().trim().min(1).max(500),
+  category: z.enum(['general', 'order', 'tool', 'material', 'rework', 'custom']).optional(),
+  sortOrder: z.number().int().min(0).max(100000).optional(),
 }).strict();
 
 const autoCutStatusConfigureSchema = z.object({
@@ -264,6 +293,79 @@ export class CncTelegramController {
   }
 
   @ApiOperation({
+    operationId: 'manualSvgUpload',
+    summary: 'Create a cut job from a user-uploaded parsed SVG layout',
+  })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  @ApiResponse({ status: 201, description: 'Manual SVG upload accepted' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Idempotency or source conflict' })
+  @ApiResponse({ status: 422, description: 'Invalid SVG upload payload' })
+  @ApiResponse({ status: 503, description: 'CNC Telegram API is disabled' })
+  @Post('manual-svg-upload')
+  manualSvgUpload(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('idempotency-key') idempotencyKey: string | string[] | undefined,
+    @Body() body: unknown,
+  ): Promise<CncTelegramManualSvgUploadResponseDto> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.cncTelegram.manualSvgUpload({
+      currentUser,
+      dto: parseManualSvgUpload(body, parseIdempotencyKey(idempotencyKey)),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
+    operationId: 'listManualSvgCommentPresets',
+    summary: 'List comment presets for manual SVG uploads',
+  })
+  @ApiResponse({ status: 200, description: 'Manual SVG comment presets' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 503, description: 'CNC Telegram API is disabled' })
+  @Get('manual-svg-comment-presets')
+  listManualSvgCommentPresets(
+    @Req() request: RequestWithCurrentUser,
+  ): Promise<CncTelegramManualSvgCommentPresetDto[]> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.cncTelegram.listManualSvgCommentPresets({
+      currentUser,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
+    operationId: 'createManualSvgCommentPreset',
+    summary: 'Create a reusable comment preset for manual SVG uploads',
+  })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  @ApiResponse({ status: 201, description: 'Manual SVG comment preset created' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Duplicate comment preset' })
+  @ApiResponse({ status: 422, description: 'Invalid preset payload' })
+  @ApiResponse({ status: 503, description: 'CNC Telegram API is disabled' })
+  @Post('manual-svg-comment-presets')
+  createManualSvgCommentPreset(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('idempotency-key') idempotencyKey: string | string[] | undefined,
+    @Body() body: unknown,
+  ): Promise<CncTelegramManualSvgCommentPresetDto> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.cncTelegram.createManualSvgCommentPreset({
+      currentUser,
+      dto: parseManualSvgCommentPreset(body),
+      idempotencyKey: parseIdempotencyKey(idempotencyKey),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
     operationId: 'getCncTelegramSheetImage',
     summary: 'Get stored Telegram cutting sheet image',
   })
@@ -324,6 +426,43 @@ export function parseStructuredIngest(
     });
   }
   return { ...parsed.data, idempotencyKey };
+}
+
+export function parseManualSvgUpload(
+  body: unknown,
+  idempotencyKey: string,
+): CncTelegramManualSvgUploadDto {
+  const parsed = manualSvgUploadSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid manual SVG upload payload', {
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    });
+  }
+  if (parsed.data.cutLayout.status !== 'valid') {
+    throw new ApiError(422, 'MANUAL_SVG_INVALID_LAYOUT', 'Manual SVG upload requires a valid parsed layout', {
+      reasons: parsed.data.cutLayout.reasons,
+    });
+  }
+  const selectedOrderIds = Array.from(new Set(parsed.data.selectedOrderIds)).sort((a, b) => a - b);
+  return { ...parsed.data, selectedOrderIds, idempotencyKey };
+}
+
+export function parseManualSvgCommentPreset(
+  body: unknown,
+): CreateCncTelegramManualSvgCommentPresetDto {
+  const parsed = commentPresetSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Invalid manual SVG comment preset payload', {
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    });
+  }
+  return parsed.data;
 }
 
 export function parseAutoCutStatusConfigure(body: unknown): boolean {

@@ -2,9 +2,13 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type {
   CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
+  CncTelegramManualSvgCommentPresetDto,
+  CncTelegramManualSvgUploadDto,
+  CncTelegramManualSvgUploadResponseDto,
   CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayResponseDto,
+  CreateCncTelegramManualSvgCommentPresetDto,
 } from '../dto/cnc-telegram.dto';
 
 export interface ListCncTelegramTodayCommand {
@@ -34,12 +38,37 @@ export interface ConfigureCncAutoCutStatusCommand {
   requestId?: string;
 }
 
+export interface ManualSvgUploadCommand {
+  currentUser: CurrentUser;
+  dto: CncTelegramManualSvgUploadDto;
+  requestId?: string;
+}
+
+export interface CreateManualSvgCommentPresetCommand {
+  currentUser: CurrentUser;
+  dto: CreateCncTelegramManualSvgCommentPresetDto;
+  idempotencyKey: string;
+  requestId?: string;
+}
+
+export interface ListManualSvgCommentPresetsCommand {
+  currentUser: CurrentUser;
+  requestId?: string;
+}
+
 export interface CncTelegramRepositoryPort {
   listToday(command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto>;
   listOrderCuttingSequences(
     command: ListCncTelegramOrderCuttingSequencesCommand,
   ): Promise<CncTelegramOrderCuttingSequencesResponseDto>;
   ingest(command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto>;
+  manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto>;
+  listManualSvgCommentPresets(
+    command: ListManualSvgCommentPresetsCommand,
+  ): Promise<CncTelegramManualSvgCommentPresetDto[]>;
+  createManualSvgCommentPreset(
+    command: CreateManualSvgCommentPresetCommand,
+  ): Promise<CncTelegramManualSvgCommentPresetDto>;
   configureAutoCutStatus(
     command: ConfigureCncAutoCutStatusCommand,
   ): Promise<CncAutoCutStatusConfigureResponseDto>;
@@ -49,6 +78,8 @@ export interface RecordCncTelegramDeniedAuditCommand {
   currentUser: CurrentUser;
   event:
     | 'cnc.telegram_packet.ingest_denied'
+    | 'cnc.manual_svg_upload.denied'
+    | 'cnc.manual_svg_comment_preset.create_denied'
     | 'cnc.telegram_packet.auto_cut_status_configure_denied'
     | 'cnc.telegram_worker.audit_write_denied';
   requestId?: string;

@@ -260,3 +260,63 @@ export interface CncAutoCutStatusConfigureResponse {
   changedOrderCount: number;
   changedDetailCount: number;
 }
+
+export interface CncTelegramManualSvgUploadRequest {
+  selectedOrderIds: number[];
+  createMdfMachineFileCard: boolean;
+  svgContentHash: string;
+  workday?: string;
+  machine?: string | null;
+  programName?: string | null;
+  materialName?: string | null;
+  rework?: boolean;
+  comments?: string[];
+  tools?: CncTelegramTool[];
+  parserVersion?: string | null;
+  cutLayout: CncTelegramCutLayout;
+  items: Array<{
+    sourceItemKey: string;
+    orderName: string;
+    detailNumber?: number | null;
+    widthMm?: number | null;
+    heightMm?: number | null;
+    quantity: number;
+    source: CncTelegramItemSource;
+    confidence: number;
+    matchOrderId?: number | null;
+    matchDetailId?: number | null;
+    matchStatus?: CncTelegramMatchStatus;
+    reviewNote?: string | null;
+  }>;
+}
+
+export interface CncTelegramManualSvgUploadResponse {
+  packet: CncTelegramPacket;
+  requestId: string;
+  auditId?: string;
+  applied: boolean;
+  ignoredStaleSourceVersion: boolean;
+  cutJobId: number | null;
+  cutResultId: number | null;
+  cutJobPath: string | null;
+  createdMdfMachineFileCard: boolean;
+}
+
+export interface CncTelegramManualSvgCommentPreset {
+  presetId: number;
+  label: string;
+  commentText: string;
+  category: 'general' | 'order' | 'tool' | 'material' | 'rework' | 'custom';
+  isActive: boolean;
+  sortOrder: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCncTelegramManualSvgCommentPresetRequest {
+  label: string;
+  commentText: string;
+  category?: CncTelegramManualSvgCommentPreset['category'];
+  sortOrder?: number;
+}

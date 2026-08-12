@@ -73,6 +73,87 @@ describe('cncTelegramApi', () => {
     );
   });
 
+  it('submits manual SVG uploads with idempotency header', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          packet: { packetId: 'p1' },
+          requestId: 'r1',
+          applied: true,
+          ignoredStaleSourceVersion: false,
+          cutJobId: 42,
+          cutResultId: 100,
+          cutJobPath: '/cut?job=42',
+          createdMdfMachineFileCard: true,
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.manualSvgUpload({
+      selectedOrderIds: [1],
+      createMdfMachineFileCard: true,
+      svgContentHash: 'a'.repeat(64),
+      cutLayout: {
+        status: 'valid',
+        reasons: [],
+        sheet: { widthMm: 2070, heightMm: 2800 },
+        items: [],
+      },
+      items: [{
+        sourceItemKey: 'i1',
+        orderName: '2689',
+        detailNumber: 31,
+        widthMm: 497,
+        heightMm: 477,
+        quantity: 1,
+        source: 'vector',
+        confidence: 0.99,
+      }],
+    }, 'manual-svg:key-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cnc-telegram/manual-svg-upload');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('manual-svg:key-1');
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      selectedOrderIds: [1],
+      createMdfMachineFileCard: true,
+    });
+  });
+
+  it('creates manual SVG comment presets with idempotency header', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          presetId: 1,
+          label: 'Переделка',
+          commentText: 'переделка',
+          category: 'rework',
+          isActive: true,
+          sortOrder: 500,
+          version: 1,
+          createdAt: '2026-08-12T00:00:00.000Z',
+          updatedAt: '2026-08-12T00:00:00.000Z',
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.createManualSvgCommentPreset({
+      label: 'Переделка',
+      commentText: 'переделка',
+      category: 'rework',
+    }, 'manual-svg-preset:key-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cnc-telegram/manual-svg-comment-presets');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('manual-svg-preset:key-1');
+  });
+
   it('downloads the detailed worker audit JSON with bounded filters', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"format":"erp.cnc-telegram-worker-audit"}', {
