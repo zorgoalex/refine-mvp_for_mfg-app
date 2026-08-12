@@ -108,7 +108,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('touchDragEnabled={false}');
     expect(css).toContain('.cnc-board-card-shell--draggable');
     expect(css).not.toContain('.cnc-card-move-actions');
-    expect(css).toContain('touch-action: none');
+    expect(css).toMatch(/\.cnc-board-card-shell--draggable\s*\{[^}]*touch-action: pan-x pan-y;/s);
+    expect(css).not.toContain('touch-action: none');
     expect(css).toContain('.status-board-viewport--touch-dragging');
     expect(css).toContain('scroll-snap-type: none');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
@@ -195,10 +196,19 @@ describe('OrderStatusBoardPage UX guards', () => {
       /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-column__cards \{[^}]*overscroll-behavior-x: auto;[^}]*overscroll-behavior-y: contain;[^}]*touch-action: pan-x pan-y;/,
     );
     expect(css).toMatch(
-      /\.status-board-page--cnc :where\([\s\S]*?\.status-board-viewport,[\s\S]*?\.status-board-card,[\s\S]*?\.cnc-bath-card[\s\S]*?\)\s*\{[^}]*touch-action: pan-x pan-y;/s,
+      /\.status-board-page--cnc :where\([\s\S]*?\.status-board-viewport,[\s\S]*?\.cnc-board-card-shell,[\s\S]*?\.cnc-board-card-shell--draggable,[\s\S]*?\.status-board-card,[\s\S]*?\.cnc-bath-card[\s\S]*?\)\s*\{[^}]*touch-action: pan-x pan-y;/s,
     );
     expect(tabletCss).toMatch(
       /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*overflow-x: auto;[^}]*overflow-y: auto;[^}]*touch-action: pan-x pan-y;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-columns--cnc\s*\{[^}]*height: auto;[^}]*min-height: 100%;[^}]*align-items: start;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-columns--cnc > \.status-board-column\s*\{[^}]*height: auto !important;[^}]*min-height: 100%;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: visible;/s,
     );
     expect(page).toContain('delayTouchStart: 320');
     expect(page).toContain('touchSlop: 12');
@@ -382,7 +392,7 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: auto;[^}]*overflow-x: auto;[^}]*overflow-y: auto;/s,
     );
     expect(tabletCss).toMatch(
-      /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: auto;/s,
+      /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: visible;/s,
     );
     expect(tabletCss).toMatch(
       /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*max-height: var\(--status-board-cnc-order-cards-max-height\);[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
@@ -390,7 +400,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toContain('.status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
     expect(tabletCss).toContain('clamp(240px, 24vw, 276px)');
     expect(tabletCss).toMatch(
-      /\.status-board-columns--cnc > \.status-board-column\s*\{[^}]*width: auto !important;[^}]*min-width: 0 !important;/s,
+      /\.status-board-columns--cnc > \.status-board-column\s*\{[^}]*width: auto !important;[^}]*min-width: 0 !important;[^}]*height: auto !important;[^}]*min-height: 100%;/s,
     );
   });
 

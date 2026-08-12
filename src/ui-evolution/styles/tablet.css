@@ -691,8 +691,9 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-columns--cnc {
-  height: 100%;
+  height: auto;
   min-height: 100%;
+  align-items: start;
   padding: 4px 2px 8px;
 }
 
@@ -708,13 +709,14 @@
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-columns--cnc > .status-board-column {
   width: auto !important;
   min-width: 0 !important;
-  height: 100% !important;
+  height: auto !important;
+  min-height: 100%;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .status-board-page--cnc .status-board-column__cards {
   max-height: none;
   min-height: 0;
-  overflow-y: auto;
+  overflow-y: visible;
   overscroll-behavior-x: auto;
   overscroll-behavior-y: contain;
   touch-action: pan-x pan-y;

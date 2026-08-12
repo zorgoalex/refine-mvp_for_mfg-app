@@ -1500,7 +1500,7 @@
 
 .cnc-board-card-shell--draggable {
   cursor: grab;
-  touch-action: none;
+  touch-action: pan-x pan-y;
   user-select: none;
   -webkit-touch-callout: none;
 }
@@ -3198,6 +3198,8 @@
     .status-board-column,
     .status-board-column__header,
     .status-board-column__cards,
+    .cnc-board-card-shell,
+    .cnc-board-card-shell--draggable,
     .status-board-card,
     .cnc-card--summary-only,
     .cnc-order-card--summary-only,
