@@ -17,6 +17,8 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('создать карточку файла станка для Доски МДФ из раскроя?');
     expect(modal).toContain('createMdfMachineFileCard');
     expect(modal).toContain('manual-svg-preset:${asciiHash(commentText)}');
+    expect(modal).toContain("okText: cutJobPath ? 'Открыть задание' : 'OK'");
+    expect(modal).toContain('onOk: openCutJob');
   });
 
   it('wires upload button into cut and orders headers', () => {

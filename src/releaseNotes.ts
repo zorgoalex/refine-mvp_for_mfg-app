@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-12",
+    title: "Раскрой: загрузка SVG",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "После загрузки SVG кнопка подтверждения в окне результата открывает созданное задание на раскрой.",
+      "Карточка файла станка из ручного SVG-загрузчика создаётся в колонке «Файлы на станке» и больше не помечает раскрой как распиленный.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-12",
     title: "Заказы: высота таблицы деталей",
     services: ["ERP"],
     repositories: ["repo_erp"],

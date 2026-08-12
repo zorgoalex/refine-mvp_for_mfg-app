@@ -265,19 +265,24 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         }, createIdempotencyKey(`${parsed.svgContentHash}:mdf-card`));
         mdfCardCreated = mdfResponse.createdMdfMachineFileCard;
       }
+      const openCutJob = cutJobPath
+        ? () => {
+            Modal.destroyAll();
+            navigate(cutJobPath);
+          }
+        : undefined;
       Modal.success({
         title: cutJobId
           ? `Задание на раскрой #${cutJobId} сформировано`
           : 'SVG загружен, требуется проверка раскроя',
+        okText: cutJobPath ? 'Открыть задание' : 'OK',
+        onOk: openCutJob,
         content: cutJobPath ? (
           <Space direction="vertical" size={8}>
             <Button
               type="link"
               icon={<LinkOutlined />}
-              onClick={() => {
-                Modal.destroyAll();
-                navigate(cutJobPath);
-              }}
+              onClick={openCutJob}
             >
               Открыть задание #{cutJobId}
             </Button>

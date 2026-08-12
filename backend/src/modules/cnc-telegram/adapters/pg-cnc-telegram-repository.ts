@@ -326,8 +326,19 @@ export class PgCncTelegramRepository
     const workdayFrom = command.workdayFrom ?? workday;
     const workdayTo = command.workdayTo ?? workday;
     const rows = await this.database.query<PacketJoinedRow>(
-      packetSelectSql('p.workday BETWEEN $1::date AND $2::date'),
-      [workdayFrom, workdayTo],
+      packetSelectSql(`
+        p.workday BETWEEN $1::date AND $2::date
+        AND (
+          p.source_chat_id IS DISTINCT FROM $3
+          OR EXISTS (
+            SELECT 1
+            FROM outbox_events manual_svg_mdf_card
+            WHERE manual_svg_mdf_card.idempotency_key =
+              'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+          )
+        )
+      `),
+      [workdayFrom, workdayTo, MANUAL_SVG_CHAT_ID],
     );
     const packets = mapPacketRows(rows.rows);
     const baths = await loadBathCards(this.database, workdayFrom, workdayTo);
@@ -664,46 +675,28 @@ export class PgCncTelegramRepository
             requestId,
           },
         });
-        let packet = await loadPacket(tx, existing.packet_id);
-        const beforeMdfPacket = packet;
+        const packet = await loadPacket(tx, existing.packet_id);
         let mdfCardCreatedAuditId: string | undefined;
         let mdfCardCreatedNow = false;
         if (command.dto.createMdfMachineFileCard) {
           assertManualSvgMachineFileCardReady(packet);
-          if (!packetIsCompleted(packet)) {
-            await completeManualSvgMachineFileCard(tx, existing.packet_id, command.currentUser.id);
-            packet = await loadPacket(tx, existing.packet_id);
+          if (!await manualSvgMdfCardEventExists(tx, packet)) {
+            mdfCardCreatedAuditId = await writeManualSvgMdfCardAudit(tx, {
+              command,
+              beforePacket: null,
+              packet,
+              requestId,
+              externalPacketKey: dto.externalPacketKey,
+            });
+            await enqueueManualSvgMdfCardEvent(tx, {
+              command,
+              packet,
+              requestId,
+              auditId: mdfCardCreatedAuditId,
+              externalPacketKey: dto.externalPacketKey,
+            });
             mdfCardCreatedNow = true;
           }
-        }
-        if (mdfCardCreatedNow) {
-          mdfCardCreatedAuditId = await writeManualSvgMdfCardAudit(tx, {
-            command,
-            beforePacket: beforeMdfPacket,
-            packet,
-            requestId,
-            externalPacketKey: dto.externalPacketKey,
-          });
-          await applyCompletedPacketAutoCutStatus(tx, {
-            command: resolvedDtoCommand(command, resolvedDto, requestId),
-            packet,
-            requestId,
-            packetAuditId: mdfCardCreatedAuditId,
-          });
-          await evaluateMdfBoardColumnAutomation(tx, {
-            eventType: 'mdf.board.completed',
-            orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
-            actor: command.currentUser,
-            requestId,
-            sourceIdempotencyKey: `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
-          });
-          await enqueueManualSvgMdfCardEvent(tx, {
-            command,
-            packet,
-            requestId,
-            auditId: mdfCardCreatedAuditId,
-            externalPacketKey: dto.externalPacketKey,
-          });
         }
         await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
           packet,
@@ -757,6 +750,8 @@ export class PgCncTelegramRepository
         },
       });
 
+      let mdfCardAuditId: string | undefined;
+      let mdfCardCreatedNow = false;
       const packet = await loadPacket(tx, packetId);
       if (command.dto.createMdfMachineFileCard) {
         assertManualSvgMachineFileCardReady(packet);
@@ -767,8 +762,7 @@ export class PgCncTelegramRepository
         requestId,
         externalPacketKey: dto.externalPacketKey,
       });
-      let mdfCardAuditId: string | undefined;
-      if (packetIsCompleted(packet)) {
+      if (command.dto.createMdfMachineFileCard) {
         mdfCardAuditId = await writeManualSvgMdfCardAudit(tx, {
           command,
           beforePacket: null,
@@ -776,26 +770,14 @@ export class PgCncTelegramRepository
           requestId,
           externalPacketKey: dto.externalPacketKey,
         });
-        await applyCompletedPacketAutoCutStatus(tx, {
-          command: resolvedCommand,
-          packet,
-          requestId,
-          packetAuditId: mdfCardAuditId,
-        });
-        await evaluateMdfBoardColumnAutomation(tx, {
-          eventType: 'mdf.board.completed',
-          orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
-          actor: command.currentUser,
-          requestId,
-          sourceIdempotencyKey: `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
-        });
+        mdfCardCreatedNow = true;
       }
       await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
         packet,
         actor: command.currentUser,
         requestId,
       });
-      if (packetColumnKey(packet) === 'parsed') {
+      if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
           orderIds: packet.items.map((item) => item.orderId),
           actor: command.currentUser,
@@ -810,7 +792,7 @@ export class PgCncTelegramRepository
         auditId,
         externalPacketKey: dto.externalPacketKey,
       });
-      if (packetIsCompleted(packet)) {
+      if (mdfCardCreatedNow) {
         await enqueueManualSvgMdfCardEvent(tx, {
           command,
           packet,
@@ -826,7 +808,7 @@ export class PgCncTelegramRepository
         auditId,
         applied: true,
         ignoredStaleSourceVersion: false,
-      }, command.dto.createMdfMachineFileCard && packetIsCompleted(packet));
+      }, mdfCardCreatedNow);
       await completeIdempotency(tx, dto.idempotencyKey, response);
       return response;
     });
@@ -1085,7 +1067,6 @@ export class PgCncTelegramRepository
 function buildManualSvgStructuredDto(
   dto: ManualSvgUploadCommand['dto'],
 ): CncTelegramStructuredIngestDto {
-  const completionStatus = dto.createMdfMachineFileCard ? 'completed' : 'pending';
   return {
     idempotencyKey: dto.idempotencyKey,
     externalPacketKey: manualSvgExternalPacketKey(dto),
@@ -1098,8 +1079,8 @@ function buildManualSvgStructuredDto(
     programName: normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`,
     materialName: normalizeOptional(dto.materialName) ?? 'МДФ 16мм',
     parseStatus: 'parsed',
-    completionStatus,
-    thumbsUp: dto.createMdfMachineFileCard,
+    completionStatus: 'pending',
+    thumbsUp: false,
     rework: dto.rework === true,
     comments: dto.comments ?? [],
     tools: dto.tools ?? [],
@@ -1140,18 +1121,6 @@ function manualSvgSourcePayloadDto(dto: CncTelegramStructuredIngestDto): CncTele
     ...dto,
     completionStatus: 'pending',
     thumbsUp: false,
-  };
-}
-
-function resolvedDtoCommand(
-  command: ManualSvgUploadCommand,
-  dto: CncTelegramStructuredIngestDto,
-  requestId: string,
-): IngestCncTelegramPacketCommand {
-  return {
-    currentUser: command.currentUser,
-    dto,
-    requestId,
   };
 }
 
@@ -1258,24 +1227,25 @@ function assertManualSvgMachineFileCardReady(packet: CncTelegramPacketDto): void
   );
 }
 
-async function completeManualSvgMachineFileCard(
+async function manualSvgMdfCardEventExists(
   tx: TransactionClient,
-  packetId: string,
-  actorUserId: string,
-): Promise<void> {
-  await tx.query(
+  packet: CncTelegramPacketDto,
+): Promise<boolean> {
+  const result = await tx.query<{ exists: boolean }>(
     `
-    UPDATE cnc_telegram_packets
-    SET completion_status = 'completed',
-        thumbs_up = true,
-        completed_at = COALESCE(completed_at, now()),
-        updated_by = $2,
-        updated_at = now()
-    WHERE packet_id = $1::uuid
-      AND (completion_status <> 'completed' OR thumbs_up IS DISTINCT FROM true)
+    SELECT EXISTS (
+      SELECT 1
+      FROM outbox_events
+      WHERE idempotency_key = $1
+    ) AS "exists"
     `,
-    [packetId, Number(actorUserId)],
+    [manualSvgMdfCardEventKey(packet)],
   );
+  return result.rows[0]?.exists === true;
+}
+
+function manualSvgMdfCardEventKey(packet: CncTelegramPacketDto): string {
+  return `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-card-created`;
 }
 
 async function writeManualSvgCreatedAudit(
@@ -1374,7 +1344,7 @@ async function enqueueManualSvgMdfCardEvent(
     eventType: MANUAL_SVG_COMPLETED_EVENT,
     aggregateType: 'cnc_telegram_packet',
     aggregateId: input.packet.packetId,
-    idempotencyKey: `cnc-manual-svg:${input.packet.packetId}:source-${input.packet.sourceVersion}:mdf-card-created`,
+    idempotencyKey: manualSvgMdfCardEventKey(input.packet),
     payload: manualSvgOutboxPayload(input, MANUAL_SVG_COMPLETED_EVENT),
   });
 }
