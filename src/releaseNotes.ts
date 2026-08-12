@@ -30,6 +30,17 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-12",
+    title: "Навигация: обновление после деплоя",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Открытая вкладка со старой версией ERP при переходе в новый раздел теперь один раз автоматически обновляет страницу вместо экрана «Произошла ошибка».",
+      "Отсутствующие устаревшие файлы `/assets/*.js` больше не подменяются HTML-страницей приложения.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-11",
     title: "Заказы: навигация по деталям",
     services: ["ERP"],
