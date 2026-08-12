@@ -740,6 +740,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('displayMode={cardDisplayMode}');
     expect(page).toContain('displayMode: CncCardDisplayMode;');
     expect(page).toContain("className={`cnc-print-board cnc-print-board--${displayMode}`}");
+    expect(page).toContain('const cards: CncPrintCard[] = isCncOrderColumnKey(column.key)');
+    expect(page).toContain("kind: 'order' as const");
+    expect(page).toContain('order: entry.card');
     expect(printCard).toContain("if (displayMode === 'minimal') {");
     expect(printCard).toContain('cnc-print-card--minimal');
     expect(printCard).toContain('cnc-print-card__minimal-number');
