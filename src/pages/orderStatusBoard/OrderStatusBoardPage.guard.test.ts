@@ -271,11 +271,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('targetLeft?: number');
     expect(page).toContain('const effectiveLeft = targetLeft ?? viewport.scrollLeft');
     expect(page).toContain('const cncBoardScrollTargetLeftRef = useRef<number | null>(null)');
+    expect(page).toContain('const cncBoardScrollButtonScrollActiveRef = useRef(false)');
+    expect(page).toContain('if (cncBoardScrollButtonScrollActiveRef.current) {');
+    expect(page).toContain('const reachedTarget =');
+    expect(page).toContain('const scrollDirectionTargetLeft = reachedTarget ? undefined : targetLeft ?? undefined');
     expect(page).toContain('const [cncBoardScrollDirection, setCncBoardScrollDirection] =');
     expect(page).toContain('setCncBoardScrollDirection(');
+    expect(page).toContain('cncBoardScrollButtonScrollActiveRef.current = true');
+    expect(page).toContain('cncBoardScrollButtonScrollActiveRef.current = false');
     expect(page).toContain('cncBoardScrollTargetLeftRef.current = nextLeft');
     expect(page).toContain('statusBoardHorizontalScrollDirection(viewport, nextLeft)');
     expect(page).toContain("viewport.scrollTo({ left: nextLeft, behavior: 'smooth' })");
+    expect(page).not.toContain('if (topScrollbar) topScrollbar.scrollLeft = nextLeft');
     expect(page).toContain('className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}');
     expect(page).toContain("cncBoardScrollDirection === 'left'");
     expect(page).toContain('Прокрутить МДФ-доску влево');
