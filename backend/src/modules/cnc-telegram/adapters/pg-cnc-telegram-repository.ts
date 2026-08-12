@@ -24,9 +24,12 @@ import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
   ConfigureCncAutoCutStatusCommand,
+  CreateManualSvgCommentPresetCommand,
   IngestCncTelegramPacketCommand,
+  ListManualSvgCommentPresetsCommand,
   ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
+  ManualSvgUploadCommand,
   RecordCncTelegramDeniedAuditCommand,
 } from '../application/cnc-telegram.types';
 import type {
@@ -41,6 +44,8 @@ import type {
   CncTelegramDowelingLinkDto,
   CncTelegramIngestResponseDto,
   CncTelegramItemSource,
+  CncTelegramManualSvgCommentPresetDto,
+  CncTelegramManualSvgUploadResponseDto,
   CncTelegramMatchStatus,
   CncTelegramOrderCuttingSequenceDto,
   CncTelegramOrderCuttingSequencesResponseDto,
@@ -64,6 +69,13 @@ import {
 
 const SOURCE = 'backend-cnc-telegram-command';
 const COMMAND_NAME = 'cnc.telegram_packet.ingest';
+const MANUAL_SVG_SOURCE = 'backend-manual-svg-upload-command';
+const MANUAL_SVG_COMMAND_NAME = 'cnc.manual_svg_upload';
+const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
+const MANUAL_SVG_EVENT = 'cnc.manual_svg_upload.created';
+const MANUAL_SVG_COMPLETED_EVENT = 'cnc.manual_svg_upload.mdf_card_created';
+const MANUAL_SVG_PRESET_COMMAND_NAME = 'cnc.manual_svg_comment_preset.create';
+const MANUAL_SVG_PRESET_CREATE_EVENT = 'cnc.manual_svg_comment_preset.created';
 const CNC_AUTO_CUT_STATUS_CONFIGURE_COMMAND = 'cnc.telegram_packet.auto_cut_status.configure';
 const CNC_AUTO_CUT_STATUS_SETTING_KEY = 'status_automation.cnc_mark_cut_details';
 const CNC_AUTO_CUT_STATUS_EVENT = 'cnc.telegram_packet.auto_cut_status_applied';
@@ -195,6 +207,8 @@ interface IdempotencyRow extends QueryResultRow {
   request_hash: string;
   response_json:
     | CncTelegramIngestResponseDto
+    | CncTelegramManualSvgUploadResponseDto
+    | CncTelegramManualSvgCommentPresetDto
     | CncAutoCutStatusConfigureResponseDto
     | string
     | null;
@@ -265,6 +279,18 @@ interface OrderCuttingSequenceRow extends QueryResultRow {
   completion_status: CncTelegramPacketDto['completionStatus'];
   source_created_at: string | Date | null;
   item_quantity_total: string | number | null;
+}
+
+interface ManualSvgCommentPresetRow extends QueryResultRow {
+  preset_id: string | number;
+  label: string;
+  comment_text: string;
+  category: CncTelegramManualSvgCommentPresetDto['category'];
+  is_active: boolean;
+  sort_order: string | number;
+  version: string | number;
+  created_at: string | Date;
+  updated_at: string | Date;
 }
 
 interface DetailMatchRow extends QueryResultRow {
@@ -563,6 +589,361 @@ export class PgCncTelegramRepository
     });
   }
 
+  async manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const requestId = command.requestId || 'cnc-manual-svg-upload';
+      const dto = buildManualSvgStructuredDto(command.dto);
+      const payloadHash = hashPayload(manualSvgSourcePayloadDto(dto));
+      const replayResponse = await reconcileManualSvgUploadIdempotency(tx, {
+        command,
+        dto,
+        payloadHash,
+      });
+      if (replayResponse) return replayResponse;
+
+      const replay = await tx.query<PacketReplayRow>(
+        `
+        SELECT packet_id, source_version, payload_hash, cutting_sequence_no, completion_status, thumbs_up
+        FROM cnc_telegram_packets
+        WHERE external_packet_key = $1
+        FOR UPDATE
+        `,
+        [dto.externalPacketKey],
+      );
+      const existing = replay.rows[0] ?? null;
+
+      if (existing && dto.source.version < Number(existing.source_version)) {
+        const packet = await loadPacket(tx, existing.packet_id);
+        const response = manualSvgResponse({
+          packet,
+          requestId,
+          applied: false,
+          ignoredStaleSourceVersion: true,
+        }, false);
+        await completeIdempotency(tx, dto.idempotencyKey, response);
+        return response;
+      }
+
+      if (
+        existing &&
+        dto.source.version === Number(existing.source_version) &&
+        existing.payload_hash !== payloadHash
+      ) {
+        await failIdempotency(tx, dto.idempotencyKey);
+        throw new ApiError(
+          409,
+          'MANUAL_SVG_SOURCE_CONFLICT',
+          'Manual SVG upload key already exists with different parsed payload',
+          { externalPacketKey: dto.externalPacketKey },
+        );
+      }
+
+      if (
+        existing &&
+        dto.source.version === Number(existing.source_version) &&
+        existing.payload_hash === payloadHash
+      ) {
+        const matchedDto = await resolveItemMatches(tx, dto, {
+          orderIds: command.dto.selectedOrderIds,
+          tolerantSizeMm: 8,
+        });
+        await assertManualSvgOrderScope(tx, command.dto.selectedOrderIds, matchedDto);
+        const resolvedDto = aggregateMatchedItems(matchedDto);
+        await assertMatchedDetailsBelongToOrders(tx, resolvedDto);
+        await ensureStoredCutLayout(tx, existing.packet_id, dto.cutLayout ?? null);
+        await ensureCuttingSequenceNo(tx, existing.packet_id, resolvedDto, Number(command.currentUser.id));
+        await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchedDto, command.currentUser.id);
+        await projectTelegramLabelMap(tx, {
+          packetId: existing.packet_id,
+          source: 'ingest',
+          context: {
+            actorUserId: command.currentUser.id,
+            actorUsername: command.currentUser.username,
+            actorRole: command.currentUser.role,
+            requestId,
+          },
+        });
+        let packet = await loadPacket(tx, existing.packet_id);
+        const beforeMdfPacket = packet;
+        let mdfCardCreatedAuditId: string | undefined;
+        let mdfCardCreatedNow = false;
+        if (command.dto.createMdfMachineFileCard) {
+          assertManualSvgMachineFileCardReady(packet);
+          if (!packetIsCompleted(packet)) {
+            await completeManualSvgMachineFileCard(tx, existing.packet_id, command.currentUser.id);
+            packet = await loadPacket(tx, existing.packet_id);
+            mdfCardCreatedNow = true;
+          }
+        }
+        if (mdfCardCreatedNow) {
+          mdfCardCreatedAuditId = await writeManualSvgMdfCardAudit(tx, {
+            command,
+            beforePacket: beforeMdfPacket,
+            packet,
+            requestId,
+            externalPacketKey: dto.externalPacketKey,
+          });
+          await applyCompletedPacketAutoCutStatus(tx, {
+            command: resolvedDtoCommand(command, resolvedDto, requestId),
+            packet,
+            requestId,
+            packetAuditId: mdfCardCreatedAuditId,
+          });
+          await evaluateMdfBoardColumnAutomation(tx, {
+            eventType: 'mdf.board.completed',
+            orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
+            actor: command.currentUser,
+            requestId,
+            sourceIdempotencyKey: `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
+          });
+          await enqueueManualSvgMdfCardEvent(tx, {
+            command,
+            packet,
+            requestId,
+            auditId: mdfCardCreatedAuditId,
+            externalPacketKey: dto.externalPacketKey,
+          });
+        }
+        await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
+          packet,
+          actor: command.currentUser,
+          requestId,
+        });
+        if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
+          await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+            orderIds: packet.items.map((item) => item.orderId),
+            actor: command.currentUser,
+            requestId,
+            sourceIdempotencyKey: `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:machine-files`,
+          });
+        }
+        const response = manualSvgResponse({
+          packet,
+          requestId,
+          auditId: mdfCardCreatedAuditId,
+          applied: false,
+          ignoredStaleSourceVersion: false,
+        }, mdfCardCreatedNow);
+        await completeIdempotency(tx, dto.idempotencyKey, response);
+        return response;
+      }
+
+      const matchedDto = await resolveItemMatches(tx, dto, {
+        orderIds: command.dto.selectedOrderIds,
+        tolerantSizeMm: 8,
+      });
+      await assertManualSvgOrderScope(tx, command.dto.selectedOrderIds, matchedDto);
+      const resolvedDto = aggregateMatchedItems(matchedDto);
+      await assertMatchedDetailsBelongToOrders(tx, resolvedDto);
+      const resolvedCommand: IngestCncTelegramPacketCommand = {
+        currentUser: command.currentUser,
+        dto: resolvedDto,
+        requestId,
+      };
+
+      const packetId = await insertPacket(tx, resolvedCommand, payloadHash);
+      await replaceItems(tx, packetId, resolvedDto);
+      await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));
+      await syncSvgCutImport(tx, packetId, resolvedDto, matchedDto, command.currentUser.id);
+      await projectTelegramLabelMap(tx, {
+        packetId,
+        source: 'ingest',
+        context: {
+          actorUserId: command.currentUser.id,
+          actorUsername: command.currentUser.username,
+          actorRole: command.currentUser.role,
+          requestId,
+        },
+      });
+
+      const packet = await loadPacket(tx, packetId);
+      if (command.dto.createMdfMachineFileCard) {
+        assertManualSvgMachineFileCardReady(packet);
+      }
+      const auditId = await writeManualSvgCreatedAudit(tx, {
+        command,
+        packet,
+        requestId,
+        externalPacketKey: dto.externalPacketKey,
+      });
+      let mdfCardAuditId: string | undefined;
+      if (packetIsCompleted(packet)) {
+        mdfCardAuditId = await writeManualSvgMdfCardAudit(tx, {
+          command,
+          beforePacket: null,
+          packet,
+          requestId,
+          externalPacketKey: dto.externalPacketKey,
+        });
+        await applyCompletedPacketAutoCutStatus(tx, {
+          command: resolvedCommand,
+          packet,
+          requestId,
+          packetAuditId: mdfCardAuditId,
+        });
+        await evaluateMdfBoardColumnAutomation(tx, {
+          eventType: 'mdf.board.completed',
+          orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
+          actor: command.currentUser,
+          requestId,
+          sourceIdempotencyKey: `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
+        });
+      }
+      await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
+        packet,
+        actor: command.currentUser,
+        requestId,
+      });
+      if (packetColumnKey(packet) === 'parsed') {
+        await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+          orderIds: packet.items.map((item) => item.orderId),
+          actor: command.currentUser,
+          requestId,
+          sourceIdempotencyKey: `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:machine-files`,
+        });
+      }
+      await enqueueManualSvgCreatedEvent(tx, {
+        command,
+        packet,
+        requestId,
+        auditId,
+        externalPacketKey: dto.externalPacketKey,
+      });
+      if (packetIsCompleted(packet)) {
+        await enqueueManualSvgMdfCardEvent(tx, {
+          command,
+          packet,
+          requestId,
+          auditId: mdfCardAuditId ?? auditId,
+          externalPacketKey: dto.externalPacketKey,
+        });
+      }
+
+      const response = manualSvgResponse({
+        packet,
+        requestId,
+        auditId,
+        applied: true,
+        ignoredStaleSourceVersion: false,
+      }, command.dto.createMdfMachineFileCard && packetIsCompleted(packet));
+      await completeIdempotency(tx, dto.idempotencyKey, response);
+      return response;
+    });
+  }
+
+  async listManualSvgCommentPresets(
+    _command: ListManualSvgCommentPresetsCommand,
+  ): Promise<CncTelegramManualSvgCommentPresetDto[]> {
+    const result = await this.database.query<ManualSvgCommentPresetRow>(
+      `
+      SELECT preset_id, label, comment_text, category, is_active, sort_order,
+             version, created_at, updated_at
+      FROM cnc_manual_svg_comment_presets
+      WHERE is_active = true
+      ORDER BY category, sort_order, label, preset_id
+      `,
+    );
+    return result.rows.map(mapManualSvgCommentPreset);
+  }
+
+  async createManualSvgCommentPreset(
+    command: CreateManualSvgCommentPresetCommand,
+  ): Promise<CncTelegramManualSvgCommentPresetDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const requestId = command.requestId || 'cnc-manual-svg-comment-preset-create';
+      const input = {
+        label: normalizeRequired(command.dto.label),
+        commentText: normalizeRequired(command.dto.commentText),
+        category: command.dto.category ?? 'custom',
+        sortOrder: command.dto.sortOrder ?? 500,
+      };
+      const requestHash = hashRequest({
+        actorUserId: command.currentUser.id,
+        commandName: MANUAL_SVG_PRESET_COMMAND_NAME,
+        label: input.label,
+        commentText: input.commentText,
+        category: input.category,
+        sortOrder: input.sortOrder,
+      });
+      const replay = await reconcileManualSvgPresetIdempotency(tx, {
+        idempotencyKey: command.idempotencyKey,
+        currentUserId: command.currentUser.id,
+        entityId: input.commentText.toLowerCase(),
+        requestHash,
+      });
+      if (replay) return replay;
+
+      const inserted = await tx.query<ManualSvgCommentPresetRow>(
+        `
+        INSERT INTO cnc_manual_svg_comment_presets (
+          label, comment_text, category, sort_order, created_by, updated_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $5)
+        ON CONFLICT DO NOTHING
+        RETURNING preset_id, label, comment_text, category, is_active, sort_order,
+                  version, created_at, updated_at
+        `,
+        [
+          input.label,
+          input.commentText,
+          input.category,
+          input.sortOrder,
+          toNullableNumber(command.currentUser.id),
+        ],
+      );
+      const row = inserted.rows[0];
+      if (!row) {
+        await failIdempotency(tx, command.idempotencyKey);
+        throw new ApiError(
+          409,
+          'MANUAL_SVG_COMMENT_PRESET_DUPLICATE',
+          'Manual SVG comment preset already exists',
+          { commentText: input.commentText },
+        );
+      }
+
+      const preset = mapManualSvgCommentPreset(row);
+      const presetSnapshot = manualSvgPresetSnapshot(preset);
+      const auditId = await auditService.record(tx, {
+        event: MANUAL_SVG_PRESET_CREATE_EVENT,
+        entityType: 'cnc_manual_svg_comment_preset',
+        entityId: preset.presetId,
+        actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username ?? null,
+        actorRole: command.currentUser.role ?? null,
+        requestId,
+        source: MANUAL_SVG_SOURCE,
+        before: null,
+        after: presetSnapshot,
+        diff: { created: true },
+        metadata: {
+          source: MANUAL_SVG_SOURCE,
+          action: 'manual_svg_comment_preset_create',
+          category: preset.category,
+          requestId,
+        },
+      });
+      await enqueueOutbox(tx, {
+        eventType: MANUAL_SVG_PRESET_CREATE_EVENT,
+        aggregateType: 'cnc_manual_svg_comment_preset',
+        aggregateId: String(preset.presetId),
+        idempotencyKey: `${MANUAL_SVG_PRESET_CREATE_EVENT}:${preset.presetId}:v${preset.version}`,
+        payload: {
+          eventType: MANUAL_SVG_PRESET_CREATE_EVENT,
+          actorUserId: command.currentUser.id,
+          requestId,
+          auditId,
+          presetId: preset.presetId,
+          category: preset.category,
+        },
+      });
+      await completeIdempotency(tx, command.idempotencyKey, preset);
+      return preset;
+    });
+  }
+
   async configureAutoCutStatus(
     command: ConfigureCncAutoCutStatusCommand,
   ): Promise<CncAutoCutStatusConfigureResponseDto> {
@@ -644,15 +1025,20 @@ export class PgCncTelegramRepository
   }
 
   async recordIngestDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void> {
+    const entityType = command.event === 'cnc.manual_svg_comment_preset.create_denied'
+      ? 'cnc_manual_svg_comment_preset'
+      : command.event === 'cnc.manual_svg_upload.denied'
+        ? 'cnc_manual_svg_upload'
+        : 'cnc_telegram_packet';
     await auditService.recordDenied(this.database, {
       event: command.event,
-      entityType: 'cnc_telegram_packet',
+      entityType,
       entityId: command.externalPacketKey ?? 'unknown',
       actorUserId: command.currentUser.id,
       actorUsername: command.currentUser.username ?? null,
       actorRole: command.currentUser.role ?? null,
       requestId: command.requestId ?? 'cnc-telegram-ingest-denied',
-      source: SOURCE,
+      source: command.event.startsWith('cnc.manual_svg') ? MANUAL_SVG_SOURCE : SOURCE,
       reason: command.reason,
       requiredPermissions: command.requiredPermissions,
       metadata: {
@@ -694,6 +1080,411 @@ export class PgCncTelegramRepository
       metadata: {},
     });
   }
+}
+
+function buildManualSvgStructuredDto(
+  dto: ManualSvgUploadCommand['dto'],
+): CncTelegramStructuredIngestDto {
+  const completionStatus = dto.createMdfMachineFileCard ? 'completed' : 'pending';
+  return {
+    idempotencyKey: dto.idempotencyKey,
+    externalPacketKey: manualSvgExternalPacketKey(dto),
+    source: {
+      chatId: MANUAL_SVG_CHAT_ID,
+      version: 1,
+    },
+    workday: dto.workday,
+    machine: normalizeOptional(dto.machine) ?? 'manual-svg-upload',
+    programName: normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`,
+    materialName: normalizeOptional(dto.materialName) ?? 'МДФ 16мм',
+    parseStatus: 'parsed',
+    completionStatus,
+    thumbsUp: dto.createMdfMachineFileCard,
+    rework: dto.rework === true,
+    comments: dto.comments ?? [],
+    tools: dto.tools ?? [],
+    ocrEngine: null,
+    parserVersion: normalizeOptional(dto.parserVersion) ?? 'erp-manual-svg-upload-v1',
+    cutLayout: dto.cutLayout,
+    items: dto.items.map((item) => ({
+      ...item,
+      matchOrderId: null,
+      matchDetailId: null,
+      matchStatus: 'unmatched' as const,
+      reviewNote: null,
+    })),
+  };
+}
+
+function manualSvgExternalPacketKey(dto: ManualSvgUploadCommand['dto']): string {
+  const identityHash = sha256Json({
+    kind: 'erp-manual-svg-upload-v1',
+    selectedOrderIds: [...dto.selectedOrderIds].sort((a, b) => a - b),
+    svgContentHash: dto.svgContentHash.toLowerCase(),
+    workday: dto.workday ?? null,
+    machine: normalizeOptional(dto.machine),
+    programName: normalizeOptional(dto.programName),
+    materialName: normalizeOptional(dto.materialName),
+    rework: dto.rework === true,
+    comments: dto.comments ?? [],
+    tools: dto.tools ?? [],
+    parserVersion: normalizeOptional(dto.parserVersion),
+    cutLayout: dto.cutLayout,
+    items: dto.items,
+  });
+  return `erp-svg-upload:${identityHash}`;
+}
+
+function manualSvgSourcePayloadDto(dto: CncTelegramStructuredIngestDto): CncTelegramStructuredIngestDto {
+  return {
+    ...dto,
+    completionStatus: 'pending',
+    thumbsUp: false,
+  };
+}
+
+function resolvedDtoCommand(
+  command: ManualSvgUploadCommand,
+  dto: CncTelegramStructuredIngestDto,
+  requestId: string,
+): IngestCncTelegramPacketCommand {
+  return {
+    currentUser: command.currentUser,
+    dto,
+    requestId,
+  };
+}
+
+async function assertManualSvgOrderScope(
+  tx: TransactionClient,
+  selectedOrderIds: number[],
+  dto: CncTelegramStructuredIngestDto,
+): Promise<void> {
+  const allowed = new Set(selectedOrderIds);
+  const orderRows = await tx.query<{ order_id: string | number }>(
+    `
+    SELECT order_id
+    FROM orders
+    WHERE order_id = ANY($1::bigint[])
+      AND delete_flag = false
+    `,
+    [selectedOrderIds],
+  );
+  const existing = new Set(orderRows.rows.map((row) => toNumber(row.order_id)));
+  const missing = selectedOrderIds.filter((orderId) => !existing.has(orderId));
+  if (missing.length > 0) {
+    throw new ApiError(
+      422,
+      'MANUAL_SVG_SELECTED_ORDER_NOT_FOUND',
+      'Selected SVG upload orders do not exist or are deleted',
+      { orderIds: missing },
+    );
+  }
+
+  const unmatched = dto.items.filter((item) =>
+    item.matchStatus !== 'matched' ||
+    item.matchOrderId == null ||
+    item.matchDetailId == null,
+  );
+  if (unmatched.length > 0) {
+    throw new ApiError(
+      422,
+      'MANUAL_SVG_UNMATCHED_DETAILS',
+      'All manual SVG details must match selected active order details',
+      {
+        items: unmatched.slice(0, 20).map((item) => ({
+          orderName: item.orderName,
+          detailNumber: item.detailNumber ?? null,
+          widthMm: item.widthMm ?? null,
+          heightMm: item.heightMm ?? null,
+        })),
+      },
+    );
+  }
+
+  const outsideScope = dto.items.filter((item) =>
+    item.matchOrderId != null && !allowed.has(item.matchOrderId),
+  );
+  if (outsideScope.length > 0) {
+    throw new ApiError(
+      422,
+      'MANUAL_SVG_ORDER_SCOPE_MISMATCH',
+      'SVG contains details outside the selected orders',
+      {
+        selectedOrderIds,
+        items: outsideScope.slice(0, 20).map((item) => ({
+          orderName: item.orderName,
+          detailNumber: item.detailNumber ?? null,
+          matchOrderId: item.matchOrderId ?? null,
+          matchDetailId: item.matchDetailId ?? null,
+        })),
+      },
+    );
+  }
+}
+
+function manualSvgResponse(
+  response: CncTelegramIngestResponseDto,
+  createdMdfMachineFileCard: boolean,
+): CncTelegramManualSvgUploadResponseDto {
+  const cutJobId = response.packet.svgCutJobId ?? null;
+  const cutResultId = response.packet.svgCutResultId ?? null;
+  return {
+    ...response,
+    cutJobId,
+    cutResultId,
+    cutJobPath: cutJobId ? `/cut?job=${cutJobId}` : null,
+    createdMdfMachineFileCard,
+  };
+}
+
+function manualSvgHasImportedCut(packet: CncTelegramPacketDto): boolean {
+  return packet.svgCutImportStatus === 'imported' &&
+    packet.svgCutJobId != null &&
+    packet.svgCutResultId != null;
+}
+
+function assertManualSvgMachineFileCardReady(packet: CncTelegramPacketDto): void {
+  if (manualSvgHasImportedCut(packet)) return;
+  throw new ApiError(
+    422,
+    'MANUAL_SVG_CUT_IMPORT_NOT_READY',
+    'Manual SVG upload must import into a cut job before creating an MDF machine-file card',
+    {
+      packetId: packet.packetId,
+      svgCutImportStatus: packet.svgCutImportStatus,
+      svgCutImportNote: packet.svgCutImportNote,
+    },
+  );
+}
+
+async function completeManualSvgMachineFileCard(
+  tx: TransactionClient,
+  packetId: string,
+  actorUserId: string,
+): Promise<void> {
+  await tx.query(
+    `
+    UPDATE cnc_telegram_packets
+    SET completion_status = 'completed',
+        thumbs_up = true,
+        completed_at = COALESCE(completed_at, now()),
+        updated_by = $2,
+        updated_at = now()
+    WHERE packet_id = $1::uuid
+      AND (completion_status <> 'completed' OR thumbs_up IS DISTINCT FROM true)
+    `,
+    [packetId, Number(actorUserId)],
+  );
+}
+
+async function writeManualSvgCreatedAudit(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    externalPacketKey: string;
+  },
+): Promise<string> {
+  return auditService.record(tx, {
+    event: MANUAL_SVG_EVENT,
+    entityType: 'cnc_telegram_packet',
+    entityId: input.packet.packetId,
+    actorUserId: input.command.currentUser.id,
+    actorUsername: input.command.currentUser.username ?? null,
+    actorRole: input.command.currentUser.role ?? null,
+    requestId: input.requestId,
+    source: MANUAL_SVG_SOURCE,
+    before: null,
+    after: packetAuditSnapshot(input.packet),
+    diff: {
+      created: true,
+      itemCount: input.packet.itemCount,
+      itemQuantityTotal: input.packet.itemQuantityTotal,
+      svgCutImportStatus: input.packet.svgCutImportStatus ?? 'none',
+    },
+    metadata: manualSvgEventMetadata(input, 'manual_svg_upload'),
+    relatedEntities: manualSvgRelatedEntities(input.packet),
+  });
+}
+
+async function writeManualSvgMdfCardAudit(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    beforePacket: CncTelegramPacketDto | null;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    externalPacketKey: string;
+  },
+): Promise<string> {
+  return auditService.record(tx, {
+    event: MANUAL_SVG_COMPLETED_EVENT,
+    entityType: 'cnc_telegram_packet',
+    entityId: input.packet.packetId,
+    actorUserId: input.command.currentUser.id,
+    actorUsername: input.command.currentUser.username ?? null,
+    actorRole: input.command.currentUser.role ?? null,
+    requestId: input.requestId,
+    source: MANUAL_SVG_SOURCE,
+    before: input.beforePacket ? packetAuditSnapshot(input.beforePacket) : null,
+    after: packetAuditSnapshot(input.packet),
+    diff: {
+      mdfMachineFileCardCreated: true,
+      completionStatus: input.packet.completionStatus,
+      thumbsUp: input.packet.thumbsUp,
+      svgCutImportStatus: input.packet.svgCutImportStatus ?? 'none',
+    },
+    metadata: manualSvgEventMetadata(input, 'manual_svg_mdf_card_create'),
+    relatedEntities: manualSvgRelatedEntities(input.packet),
+  });
+}
+
+async function enqueueManualSvgCreatedEvent(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    auditId: string;
+    externalPacketKey: string;
+  },
+): Promise<void> {
+  await enqueueOutbox(tx, {
+    eventType: MANUAL_SVG_EVENT,
+    aggregateType: 'cnc_telegram_packet',
+    aggregateId: input.packet.packetId,
+    idempotencyKey: `cnc-manual-svg:${input.packet.packetId}:source-${input.packet.sourceVersion}:created`,
+    payload: manualSvgOutboxPayload(input, MANUAL_SVG_EVENT),
+  });
+}
+
+async function enqueueManualSvgMdfCardEvent(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    auditId: string;
+    externalPacketKey: string;
+  },
+): Promise<void> {
+  await enqueueOutbox(tx, {
+    eventType: MANUAL_SVG_COMPLETED_EVENT,
+    aggregateType: 'cnc_telegram_packet',
+    aggregateId: input.packet.packetId,
+    idempotencyKey: `cnc-manual-svg:${input.packet.packetId}:source-${input.packet.sourceVersion}:mdf-card-created`,
+    payload: manualSvgOutboxPayload(input, MANUAL_SVG_COMPLETED_EVENT),
+  });
+}
+
+function manualSvgOutboxPayload(
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    auditId: string;
+    externalPacketKey: string;
+  },
+  eventType: string,
+): Record<string, unknown> {
+  return {
+    eventType,
+    actorUserId: input.command.currentUser.id,
+    requestId: input.requestId,
+    auditId: input.auditId,
+    packetId: input.packet.packetId,
+    externalPacketKey: input.externalPacketKey,
+    svgContentHash: input.command.dto.svgContentHash.toLowerCase(),
+    selectedOrderIds: input.command.dto.selectedOrderIds,
+    createMdfMachineFileCard: input.command.dto.createMdfMachineFileCard,
+    cutJobId: input.packet.svgCutJobId ?? null,
+    cutResultId: input.packet.svgCutResultId ?? null,
+    sourceChatId: input.packet.sourceChatId,
+    sourceVersion: input.packet.sourceVersion,
+    workday: input.packet.workday,
+    machine: input.packet.machine,
+    programName: input.packet.programName,
+    materialName: input.packet.materialName,
+    parseStatus: input.packet.parseStatus,
+    completionStatus: input.packet.completionStatus,
+    rework: input.packet.rework,
+    itemCount: input.packet.itemCount,
+    itemQuantityTotal: input.packet.itemQuantityTotal,
+    commentsCount: input.packet.comments.length,
+    idempotencyKey: input.command.dto.idempotencyKey,
+  };
+}
+
+function manualSvgRelatedEntities(packet: CncTelegramPacketDto): Array<{ entityType: string; entityId: number }> {
+  const matchedOrderIds = Array.from(
+    new Set(packet.items.map((item) => item.matchOrderId).filter(isPositiveNumber)),
+  );
+  return [
+    ...matchedOrderIds.map((orderId) => ({ entityType: 'order', entityId: orderId })),
+    ...(packet.svgCutJobId ? [{ entityType: 'cut_job', entityId: packet.svgCutJobId }] : []),
+    ...(packet.svgCutResultId ? [{ entityType: 'cut_result', entityId: packet.svgCutResultId }] : []),
+  ];
+}
+
+function manualSvgEventMetadata(
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    externalPacketKey: string;
+  },
+  action: 'manual_svg_upload' | 'manual_svg_mdf_card_create',
+): Record<string, unknown> {
+  return {
+    source: MANUAL_SVG_SOURCE,
+    action,
+    externalPacketKey: input.externalPacketKey,
+    svgContentHash: input.command.dto.svgContentHash.toLowerCase(),
+    selectedOrderIds: input.command.dto.selectedOrderIds,
+    createMdfMachineFileCard: input.command.dto.createMdfMachineFileCard,
+    machine: input.packet.machine,
+    programName: input.packet.programName,
+    materialName: input.packet.materialName,
+    rework: input.packet.rework,
+    itemCount: input.packet.itemCount,
+    itemQuantityTotal: input.packet.itemQuantityTotal,
+    commentsCount: input.packet.comments.length,
+    parserVersion: input.packet.parserVersion,
+    svgCutJobId: input.packet.svgCutJobId ?? null,
+    svgCutResultId: input.packet.svgCutResultId ?? null,
+    svgCutImportStatus: input.packet.svgCutImportStatus ?? 'none',
+    requestId: input.requestId,
+  };
+}
+
+function mapManualSvgCommentPreset(row: ManualSvgCommentPresetRow): CncTelegramManualSvgCommentPresetDto {
+  return {
+    presetId: toNumber(row.preset_id),
+    label: row.label,
+    commentText: row.comment_text,
+    category: row.category,
+    isActive: row.is_active === true,
+    sortOrder: toNumber(row.sort_order),
+    version: toNumber(row.version),
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
+function manualSvgPresetSnapshot(preset: CncTelegramManualSvgCommentPresetDto): Record<string, unknown> {
+  return {
+    presetId: preset.presetId,
+    label: preset.label,
+    commentText: preset.commentText,
+    category: preset.category,
+    isActive: preset.isActive,
+    sortOrder: preset.sortOrder,
+    version: preset.version,
+    createdAt: preset.createdAt,
+    updatedAt: preset.updatedAt,
+  };
 }
 
 function packetSelectSql(whereSql: string): string {
@@ -1538,7 +2329,15 @@ async function buildSvgCutImportPlan(
   for (const item of matchSourceDto.items) {
     const key = svgLayoutMatchKey(item.orderName, item.detailNumber ?? null, item.widthMm ?? null, item.heightMm ?? null);
     if (!key) continue;
-    matchedItems.set(key, item);
+    const existing = matchedItems.get(key);
+    if (existing) {
+      matchedItems.set(key, {
+        ...existing,
+        quantity: existing.quantity + item.quantity,
+      });
+    } else {
+      matchedItems.set(key, item);
+    }
   }
 
   const placements: Array<CncTelegramCutLayoutItemDto & { orderId: number; orderDetailId: number }> = [];
@@ -1684,8 +2483,10 @@ async function createSvgCutJob(
 ): Promise<{ cutJobId: number; cutResultId: number }> {
   const params = SVG_REVERSE_IMPORT_PARAMS;
   const sourceDisplayNumber = String(cuttingSequenceNo);
+  const isManualSvgUpload = dto.source.chatId === MANUAL_SVG_CHAT_ID;
+  const selectionSource = isManualSvgUpload ? 'manual_svg_upload' : 'cnc_telegram_svg';
   const selectionCriteria = {
-    source: 'cnc_telegram_svg',
+    source: selectionSource,
     externalPacketKey: dto.externalPacketKey,
     packetId,
     cuttingSequenceNo,
@@ -1703,7 +2504,7 @@ async function createSvgCutJob(
   const commandId = randomUUID();
   const commandPayloadHash = sha256Json({
     type: 'manual_save',
-    source: 'cnc_telegram_svg_reverse_import',
+    source: isManualSvgUpload ? 'manual_svg_upload_reverse_import' : 'cnc_telegram_svg_reverse_import',
     packetId,
     externalPacketKey: dto.externalPacketKey,
     sourceVersion: dto.source.version,
@@ -1744,7 +2545,7 @@ async function createSvgCutJob(
     [cutJobId, commandId, commandPayloadHash, toNullableNumber(actorUserId)],
   );
   const groupKey = `svg:m:${plan.sheetMaterialTypeId}:f:${plan.filmId ?? 'none'}`;
-  const summary = buildSvgCutSummary(plan);
+  const summary = buildSvgCutSummary(plan, selectionSource);
   const group = await tx.query<{ cut_group_id: string | number }>(
     `
     INSERT INTO cut_group (
@@ -1887,7 +2688,10 @@ const SVG_REVERSE_IMPORT_PARAMS = {
   retry_strategy: 'disabled',
 } as const;
 
-function buildSvgCutSummary(plan: Extract<SvgCutImportPlan, { ok: true }>): Record<string, unknown> {
+function buildSvgCutSummary(
+  plan: Extract<SvgCutImportPlan, { ok: true }>,
+  source: 'cnc_telegram_svg' | 'manual_svg_upload',
+): Record<string, unknown> {
   const sheetArea = plan.sheetWidthMm * plan.sheetHeightMm;
   const placedArea = plan.placements.reduce((sum, item) => sum + item.placedWidthMm * item.placedHeightMm, 0);
   const wastePercent = sheetArea > 0 ? Math.max(0, ((sheetArea - placedArea) / sheetArea) * 100) : 0;
@@ -1895,7 +2699,7 @@ function buildSvgCutSummary(plan: Extract<SvgCutImportPlan, { ok: true }>): Reco
     used_stock_count: 1,
     waste_percent: round2(wastePercent),
     engine_used: 'svg_reverse_import',
-    source: 'cnc_telegram_svg',
+    source,
   };
 }
 
@@ -2204,6 +3008,7 @@ function stableJson(v: unknown): string {
 async function resolveItemMatches(
   tx: TransactionClient,
   dto: CncTelegramStructuredIngestDto,
+  options: { orderIds?: number[]; tolerantSizeMm?: number } = {},
 ): Promise<CncTelegramStructuredIngestDto> {
   const orderKeys = Array.from(
     new Set(
@@ -2227,11 +3032,12 @@ async function resolveItemMatches(
     FROM orders o
     JOIN order_details od ON od.order_id = o.order_id
     WHERE lower(trim(o.order_name)) = ANY($1::text[])
+      AND ($2::bigint[] IS NULL OR o.order_id = ANY($2::bigint[]))
       AND o.delete_flag = false
       AND od.delete_flag = false
     ORDER BY o.order_id, od.detail_number NULLS LAST, od.detail_id
     `,
-    [orderKeys],
+    [orderKeys, options.orderIds && options.orderIds.length > 0 ? options.orderIds : null],
   );
   if (result.rows.length === 0) return dto;
 
@@ -2249,7 +3055,7 @@ async function resolveItemMatches(
   const items = dto.items.map((item) => {
     const orderKey = normalizeOrderKey(item.orderName);
     const details = orderKey ? detailsByOrder.get(orderKey) : undefined;
-    const match = details ? resolveItemMatch(item, details) : null;
+    const match = details ? resolveItemMatch(item, details, options) : null;
     if (!match) return item;
     changed = true;
     return {
@@ -2344,24 +3150,34 @@ function toDetailMatch(row: DetailMatchRow): DetailMatch | null {
   };
 }
 
-function resolveItemMatch(item: IngestItemInput, details: DetailMatch[]): DetailMatch | null {
+function resolveItemMatch(
+  item: IngestItemInput,
+  details: DetailMatch[],
+  options: { tolerantSizeMm?: number } = {},
+): DetailMatch | null {
   if (details.length === 0 || uniqueOrderId(details) === null) return null;
 
   if (item.detailNumber != null) {
     let candidates = details.filter((detail) => detail.detailNumber === item.detailNumber);
-    candidates = preferSizeMatches(item, candidates);
+    candidates = preferSizeMatches(item, candidates, options);
     return uniqueDetail(candidates);
   }
 
   if (item.widthMm == null || item.heightMm == null) return null;
-  return uniqueDetail(details.filter((detail) => sameItemSize(item, detail)));
+  return uniqueDetail(details.filter((detail) => sameItemSize(item, detail, options.tolerantSizeMm)));
 }
 
-function preferSizeMatches(item: IngestItemInput, details: DetailMatch[]): DetailMatch[] {
+function preferSizeMatches(
+  item: IngestItemInput,
+  details: DetailMatch[],
+  options: { tolerantSizeMm?: number } = {},
+): DetailMatch[] {
   if (item.widthMm == null || item.heightMm == null) return details;
   const detailsWithSize = details.filter((detail) => detail.width != null && detail.height != null);
   if (detailsWithSize.length === 0) return details;
-  return detailsWithSize.filter((detail) => sameItemSize(item, detail));
+  const sizeMatches = detailsWithSize.filter((detail) => sameItemSize(item, detail, options.tolerantSizeMm));
+  if (sizeMatches.length > 0) return sizeMatches;
+  return options.tolerantSizeMm !== undefined ? [] : detailsWithSize;
 }
 
 function uniqueOrderId(details: DetailMatch[]): number | null {
@@ -2397,13 +3213,22 @@ function roundDimensionForKey(value: number): string {
   return String(Math.round(value * 1000) / 1000);
 }
 
-function sameItemSize(item: IngestItemInput, detail: DetailMatch): boolean {
+function sameItemSize(
+  item: IngestItemInput,
+  detail: DetailMatch,
+  tolerantSizeMm?: number,
+): boolean {
   const itemWidth = toNullableFiniteNumber(item.widthMm);
   const itemHeight = toNullableFiniteNumber(item.heightMm);
   if (itemWidth === null || itemHeight === null || detail.width === null || detail.height === null) {
     return false;
   }
-  const matchesSize = item.source === 'ocr' ? closeEnoughSize : exactSize;
+  const matchesSize = tolerantSizeMm !== undefined
+    ? (leftWidth: number, leftHeight: number, rightWidth: number, rightHeight: number) =>
+      closeEnoughSize(leftWidth, leftHeight, rightWidth, rightHeight, tolerantSizeMm)
+    : item.source === 'ocr'
+      ? closeEnoughSize
+      : exactSize;
   return (
     matchesSize(itemWidth, itemHeight, detail.width, detail.height)
     || matchesSize(itemWidth, itemHeight, detail.height, detail.width)
@@ -2424,12 +3249,13 @@ function closeEnoughSize(
   itemHeight: number,
   detailWidth: number,
   detailHeight: number,
+  toleranceMm = 3,
 ): boolean {
-  return closeEnough(itemWidth, detailWidth) && closeEnough(itemHeight, detailHeight);
+  return closeEnough(itemWidth, detailWidth, toleranceMm) && closeEnough(itemHeight, detailHeight, toleranceMm);
 }
 
-function closeEnough(left: number, right: number): boolean {
-  return Math.abs(left - right) <= 3;
+function closeEnough(left: number, right: number, toleranceMm = 3): boolean {
+  return Math.abs(left - right) <= toleranceMm;
 }
 
 function normalizeOrderKey(value: string | null | undefined): string | null {
@@ -3496,6 +4322,167 @@ async function reconcileIdempotency(
   throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.dto.idempotencyKey);
 }
 
+async function reconcileManualSvgUploadIdempotency(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    dto: CncTelegramStructuredIngestDto;
+    payloadHash: string;
+  },
+): Promise<CncTelegramManualSvgUploadResponseDto | null> {
+  const requestHash = hashRequest({
+    actorUserId: input.command.currentUser.id,
+    commandName: MANUAL_SVG_COMMAND_NAME,
+    externalPacketKey: input.dto.externalPacketKey,
+    sourceVersion: input.dto.source.version,
+    selectedOrderIds: input.command.dto.selectedOrderIds,
+    createMdfMachineFileCard: input.command.dto.createMdfMachineFileCard,
+    payloadHash: input.payloadHash,
+  });
+  const inserted = await tx.query<IdempotencyRow>(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, $2, $3, 'cnc_manual_svg_upload', $4, $5, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING request_hash, response_json, status
+    `,
+    [
+      input.dto.idempotencyKey,
+      MANUAL_SVG_COMMAND_NAME,
+      Number(input.command.currentUser.id),
+      input.dto.externalPacketKey,
+      requestHash,
+    ],
+  );
+  if (inserted.rows[0]) return null;
+
+  const existing = await tx.query<IdempotencyRow>(
+    `
+    SELECT request_hash, response_json, status
+    FROM command_idempotency_keys
+    WHERE idempotency_key = $1
+    FOR UPDATE
+    `,
+    [input.dto.idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.dto.idempotencyKey);
+  if (row.request_hash !== requestHash) {
+    throw idempotencyError('IDEMPOTENCY_KEY_REUSED', input.dto.idempotencyKey);
+  }
+  if (row.status === 'completed' && row.response_json) {
+    const response = manualSvgUploadResponseFromJson(row.response_json);
+    if (response) return response;
+    throw new ApiError(
+      500,
+      'IDEMPOTENCY_RESPONSE_INVALID',
+      'Stored manual SVG upload response is invalid',
+      { idempotencyKey: input.dto.idempotencyKey },
+    );
+  }
+  if (row.status === 'failed') {
+    throw idempotencyError('IDEMPOTENCY_FAILED', input.dto.idempotencyKey);
+  }
+  throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.dto.idempotencyKey);
+}
+
+async function reconcileManualSvgPresetIdempotency(
+  tx: TransactionClient,
+  input: {
+    idempotencyKey: string;
+    currentUserId: string;
+    entityId: string;
+    requestHash: string;
+  },
+): Promise<CncTelegramManualSvgCommentPresetDto | null> {
+  const inserted = await tx.query<IdempotencyRow>(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, $2, $3, 'cnc_manual_svg_comment_preset', $4, $5, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING request_hash, response_json, status
+    `,
+    [
+      input.idempotencyKey,
+      MANUAL_SVG_PRESET_COMMAND_NAME,
+      Number(input.currentUserId),
+      input.entityId,
+      input.requestHash,
+    ],
+  );
+  if (inserted.rows[0]) return null;
+
+  const existing = await tx.query<IdempotencyRow>(
+    `
+    SELECT request_hash, response_json, status
+    FROM command_idempotency_keys
+    WHERE idempotency_key = $1
+    FOR UPDATE
+    `,
+    [input.idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.idempotencyKey);
+  if (row.request_hash !== input.requestHash) {
+    throw idempotencyError('IDEMPOTENCY_KEY_REUSED', input.idempotencyKey);
+  }
+  if (row.status === 'completed' && row.response_json) {
+    const response = manualSvgPresetResponseFromJson(row.response_json);
+    if (response) return response;
+    throw new ApiError(
+      500,
+      'IDEMPOTENCY_RESPONSE_INVALID',
+      'Stored manual SVG preset response is invalid',
+      { idempotencyKey: input.idempotencyKey },
+    );
+  }
+  if (row.status === 'failed') {
+    throw idempotencyError('IDEMPOTENCY_FAILED', input.idempotencyKey);
+  }
+  throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.idempotencyKey);
+}
+
+function manualSvgUploadResponseFromJson(
+  value: IdempotencyRow['response_json'],
+): CncTelegramManualSvgUploadResponseDto | null {
+  const parsed = parseStoredJsonObject(value);
+  if (!parsed || typeof parsed.requestId !== 'string' || typeof parsed.packet !== 'object' || parsed.packet === null) return null;
+  if (!('createdMdfMachineFileCard' in parsed) || typeof parsed.createdMdfMachineFileCard !== 'boolean') return null;
+  return parsed as unknown as CncTelegramManualSvgUploadResponseDto;
+}
+
+function manualSvgPresetResponseFromJson(
+  value: IdempotencyRow['response_json'],
+): CncTelegramManualSvgCommentPresetDto | null {
+  const parsed = parseStoredJsonObject(value);
+  if (
+    !parsed ||
+    typeof parsed.presetId !== 'number' ||
+    !Number.isSafeInteger(parsed.presetId) ||
+    typeof parsed.label !== 'string' ||
+    typeof parsed.commentText !== 'string' ||
+    typeof parsed.category !== 'string'
+  ) return null;
+  return parsed as unknown as CncTelegramManualSvgCommentPresetDto;
+}
+
+function parseStoredJsonObject(value: IdempotencyRow['response_json']): Record<string, unknown> | null {
+  let parsed: unknown = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return parsed as Record<string, unknown>;
+}
+
 async function reconcileCncAutoCutStatusConfigureIdempotency(
   tx: TransactionClient,
   command: ConfigureCncAutoCutStatusCommand,
@@ -3583,7 +4570,11 @@ function cncAutoCutStatusConfigureResponse(
 async function completeIdempotency(
   tx: TransactionClient,
   idempotencyKey: string,
-  response: CncTelegramIngestResponseDto | CncAutoCutStatusConfigureResponseDto,
+  response:
+    | CncTelegramIngestResponseDto
+    | CncTelegramManualSvgUploadResponseDto
+    | CncTelegramManualSvgCommentPresetDto
+    | CncAutoCutStatusConfigureResponseDto,
 ): Promise<void> {
   await tx.query(
     `
@@ -4489,6 +5480,10 @@ function dateOnlyDaysBefore(value: string, days: number): string {
 function normalizeOptional(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function normalizeRequired(value: string): string {
+  return normalizeOptional(value) ?? '';
 }
 
 function stringArray(value: unknown): string[] {

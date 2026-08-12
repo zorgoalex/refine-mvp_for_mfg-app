@@ -155,6 +155,8 @@ export const apiRoutes = {
   cncTelegram: {
     today: backendApiPath('/cnc-telegram/today'),
     ingest: backendApiPath('/cnc-telegram/ingest'),
+    manualSvgUpload: backendApiPath('/cnc-telegram/manual-svg-upload'),
+    manualSvgCommentPresets: backendApiPath('/cnc-telegram/manual-svg-comment-presets'),
     autoCutStatus: backendApiPath('/cnc-telegram/auto-cut-status'),
     orderCuttingSequences: (orderId: number) => backendApiPath(`/cnc-telegram/orders/${orderId}/cutting-sequences`),
     orderScreenshots: (orderId: number) => backendApiPath(`/cnc-telegram/orders/${orderId}/screenshots`),

@@ -22,6 +22,46 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:machine-files');
   });
 
+  it('aggregates repeated SVG layout matches before placement-count comparison', () => {
+    expect(repositorySource).toContain('existing.quantity + item.quantity');
+    expect(repositorySource).toContain('countByLayoutKey.set(key, (countByLayoutKey.get(key) ?? 0) + 1)');
+    expect(repositorySource).toContain('match.quantity !== count');
+  });
+
+  it('separates manual SVG packet-created and MDF-card-created audit/outbox events', () => {
+    expect(repositorySource).toContain('writeManualSvgCreatedAudit');
+    expect(repositorySource).toContain('writeManualSvgMdfCardAudit');
+    expect(repositorySource).toContain('enqueueManualSvgCreatedEvent');
+    expect(repositorySource).toContain('enqueueManualSvgMdfCardEvent');
+    expect(repositorySource).toContain('event: MANUAL_SVG_COMPLETED_EVENT');
+    expect(repositorySource).toContain('mdfMachineFileCardCreated: true');
+    expect(repositorySource).toContain(':mdf-card-created`');
+    expect(repositorySource).not.toContain('enqueueManualSvgEvents');
+    expect(repositorySource).not.toContain('manual-svg-upload-mdf-card-created');
+  });
+
+  it('emits only one MDF-card event for repeated same-source manual SVG follow-up', async () => {
+    const { queries, first, second } = await runManualSvgMdfFollowupSequence();
+    const auditEvents = queries
+      .filter((query) => /INSERT INTO audit_log/i.test(query.text))
+      .map((query) => query.params[0]);
+    const outboxEvents = queries
+      .filter((query) => /INSERT INTO outbox_events/i.test(query.text))
+      .map((query) => query.params[0]);
+    const outboxKeys = queries
+      .filter((query) => /INSERT INTO outbox_events/i.test(query.text))
+      .map((query) => query.params[4]);
+
+    expect(first.createdMdfMachineFileCard).toBe(true);
+    expect(second.createdMdfMachineFileCard).toBe(false);
+    expect(auditEvents.filter((event) => event === 'cnc.manual_svg_upload.created')).toHaveLength(0);
+    expect(auditEvents.filter((event) => event === 'cnc.manual_svg_upload.mdf_card_created')).toHaveLength(1);
+    expect(outboxEvents.filter((event) => event === 'cnc.manual_svg_upload.created')).toHaveLength(0);
+    expect(outboxEvents.filter((event) => event === 'cnc.manual_svg_upload.mdf_card_created')).toHaveLength(1);
+    expect(outboxKeys.filter((key) => key === 'cnc-manual-svg:00000000-0000-0000-0000-000000000091:source-1:mdf-card-created'))
+      .toHaveLength(1);
+  });
+
   it('uses database current date for today when caller omits date', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const database = {
@@ -2548,6 +2588,265 @@ function packetRowBase() {
     laminated_or_later: false,
     all_linked_order_details_packed_or_later: false,
   };
+}
+
+async function runManualSvgMdfFollowupSequence() {
+  const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+  const packetId = '00000000-0000-0000-0000-000000000091';
+  const dto = manualSvgUploadDto(true, 'cnc:test:manual-svg:mdf-followup-1');
+  const payloadHash = manualSvgPayloadHashForTest(dto);
+  let completed = false;
+  let auditIndex = 0;
+  const tx = {
+    query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+      queries.push({ text, params });
+      if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+        return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+      }
+      if (/p\.workday/i.test(text) && /p\.packet_id = \$1::uuid/i.test(text)) {
+        return {
+          rows: [manualSvgPacketRow(packetId, completed)],
+        };
+      }
+      if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+        return {
+          rows: [{
+            ...manualSvgPacketRow(packetId, completed),
+            packet_id: packetId,
+            source_version: 1,
+            payload_hash: payloadHash,
+            cutting_sequence_no: 91,
+            completion_status: completed ? 'completed' : 'pending',
+            thumbs_up: completed,
+          }],
+        };
+      }
+      if (/SELECT\s+order_id\s+FROM orders\s+WHERE order_id = ANY/i.test(text)) {
+        return { rows: [{ order_id: 2689 }] };
+      }
+      if (/SELECT\s+lower\(trim\(o\.order_name\)\) AS order_key/i.test(text)) {
+        return {
+          rows: [{
+            order_key: '2689',
+            order_id: 2689,
+            detail_id: 3101,
+            detail_number: 31,
+            width: 497,
+            height: 477,
+          }],
+        };
+      }
+      if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
+        return { rows: [] };
+      }
+      if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+        return {
+          rows: [{
+            ...manualSvgPacketRow(packetId, completed),
+            svg_cut_job_id: 30,
+            svg_cut_result_id: 500,
+            svg_cut_import_status: 'imported',
+            cutting_sequence_no: 91,
+          }],
+        };
+      }
+      if (/SELECT packet_id, source_version, payload_hash, source_chat_id, source_message_id/i.test(text)) {
+        return { rows: [] };
+      }
+      if (/UPDATE cnc_telegram_packets/i.test(text) && /completion_status = 'completed'/i.test(text)) {
+        completed = true;
+        return { rows: [] };
+      }
+      if (/FROM cnc_telegram_packets p/i.test(text)) {
+        return {
+          rows: [manualSvgPacketRow(packetId, completed)],
+        };
+      }
+      if (/FROM app_settings/i.test(text)) {
+        return { rows: [] };
+      }
+      if (/INSERT INTO audit_log/i.test(text)) {
+        auditIndex += 1;
+        return { rows: [{ audit_id: `manual-svg-audit-${auditIndex}` }] };
+      }
+      return { rows: [] };
+    }),
+  };
+  const repo = new PgCncTelegramRepository({
+    transaction: vi.fn((handler) => handler(tx)),
+  } as never);
+
+  const first = await repo.manualSvgUpload({
+    currentUser: user(),
+    dto,
+    requestId: 'request-manual-svg-mdf-followup-1',
+  });
+  const second = await repo.manualSvgUpload({
+    currentUser: user(),
+    dto: manualSvgUploadDto(true, 'cnc:test:manual-svg:mdf-followup-2'),
+    requestId: 'request-manual-svg-mdf-followup-2',
+  });
+  return { queries, first, second };
+}
+
+function manualSvgPacketRow(packetId: string, completed: boolean) {
+  return packetRow({
+    packet_id: packetId,
+    external_packet_key: manualSvgExternalPacketKeyForTest(manualSvgUploadDto(true, 'cnc:test:manual-svg:mdf-followup-row')),
+    source_chat_id: 'erp-manual-svg-upload',
+    source_message_id: null,
+    source_version: 1,
+    cutting_sequence_no: 91,
+    machine: 'CNC#1',
+    program_name: 'manual.svg',
+    material_name: 'МДФ 16мм',
+    completion_status: completed ? 'completed' : 'pending',
+    thumbs_up: completed,
+    completed_at: completed ? '2026-08-12T10:00:00.000Z' : null,
+    comments_json: ['2689 — весь заказ'],
+    tools_json: [],
+    ocr_engine: null,
+    parser_version: 'erp-manual-svg-upload-v1',
+    cut_layout_json: manualSvgValidCutLayout(),
+    svg_cut_job_id: 30,
+    svg_cut_result_id: 500,
+    svg_cut_import_status: 'imported',
+    svg_cut_import_note: 'SVG layout imported into cut job',
+    svg_cut_sheets_json: [{ cutGroupId: 100, sheetIndex: 0, sheetNumber: 1, detailIds: [3101] }],
+    source_item_key: '2689:31:497x477',
+    order_name: '2689',
+    item_order_id: 2689,
+    detail_number: 31,
+    width_mm: 497,
+    height_mm: 477,
+    quantity: 1,
+    item_source: 'vector',
+    confidence: 0.99,
+    match_order_id: 2689,
+    match_detail_id: 3101,
+    match_status: 'matched',
+  });
+}
+
+function manualSvgUploadDto(createMdfMachineFileCard: boolean, idempotencyKey: string) {
+  return {
+    idempotencyKey,
+    selectedOrderIds: [2689],
+    createMdfMachineFileCard,
+    svgContentHash: 'a'.repeat(64),
+    workday: '2026-08-12',
+    machine: 'CNC#1',
+    programName: 'manual.svg',
+    materialName: 'МДФ 16мм',
+    rework: false,
+    comments: ['2689 — весь заказ'],
+    tools: [],
+    parserVersion: 'erp-manual-svg-upload-v1',
+    cutLayout: manualSvgValidCutLayout(),
+    items: [{
+      sourceItemKey: '2689:31:497x477',
+      orderName: '2689',
+      detailNumber: 31,
+      widthMm: 497,
+      heightMm: 477,
+      quantity: 1,
+      source: 'vector' as const,
+      confidence: 0.99,
+    }],
+  };
+}
+
+function manualSvgValidCutLayout() {
+  return {
+    status: 'valid' as const,
+    reasons: [],
+    sheet: { widthMm: 2800, heightMm: 2070 },
+    rawCommentCount: 1,
+    partContourCount: 1,
+    acceptedItemCount: 1,
+    items: [{
+      orderName: '2689',
+      detailNumber: 31,
+      widthMm: 497,
+      heightMm: 477,
+      quantity: 1,
+      confidence: 0.99,
+      sourceElementId: 'PartContour-2689-31',
+      xMm: 10,
+      yMm: 20,
+      placedWidthMm: 497,
+      placedHeightMm: 477,
+      rotated: false,
+    }],
+  };
+}
+
+function manualSvgPayloadHashForTest(dto: ReturnType<typeof manualSvgUploadDto>) {
+  const structured = manualSvgStructuredDtoForTest(dto);
+  const sourcePayload = { ...structured, completionStatus: 'pending', thumbsUp: false };
+  const { idempotencyKey: _idempotencyKey, cuttingSequenceNo: _cuttingSequenceNo, ...payload } = sourcePayload;
+  return `sha256:${createHash('sha256').update(stableStringifyForTest(payload)).digest('hex')}`;
+}
+
+function manualSvgStructuredDtoForTest(dto: ReturnType<typeof manualSvgUploadDto>) {
+  return {
+    idempotencyKey: dto.idempotencyKey,
+    externalPacketKey: manualSvgExternalPacketKeyForTest(dto),
+    source: {
+      chatId: 'erp-manual-svg-upload',
+      version: 1,
+    },
+    workday: dto.workday,
+    machine: dto.machine,
+    programName: dto.programName,
+    materialName: dto.materialName,
+    parseStatus: 'parsed',
+    completionStatus: dto.createMdfMachineFileCard ? 'completed' : 'pending',
+    thumbsUp: dto.createMdfMachineFileCard,
+    rework: dto.rework,
+    comments: dto.comments,
+    tools: dto.tools,
+    ocrEngine: null,
+    parserVersion: dto.parserVersion,
+    cutLayout: dto.cutLayout,
+    items: dto.items.map((item) => ({
+      ...item,
+      matchOrderId: null,
+      matchDetailId: null,
+      matchStatus: 'unmatched' as const,
+      reviewNote: null,
+    })),
+  };
+}
+
+function manualSvgExternalPacketKeyForTest(dto: ReturnType<typeof manualSvgUploadDto>) {
+  const identityHash = sha256JsonForTest({
+    kind: 'erp-manual-svg-upload-v1',
+    selectedOrderIds: [...dto.selectedOrderIds].sort((a, b) => a - b),
+    svgContentHash: dto.svgContentHash.toLowerCase(),
+    workday: dto.workday ?? null,
+    machine: dto.machine?.trim() || null,
+    programName: dto.programName?.trim() || null,
+    materialName: dto.materialName?.trim() || null,
+    rework: dto.rework === true,
+    comments: dto.comments ?? [],
+    tools: dto.tools ?? [],
+    parserVersion: dto.parserVersion?.trim() || null,
+    cutLayout: dto.cutLayout,
+    items: dto.items,
+  });
+  return `erp-svg-upload:${identityHash}`;
+}
+
+function sha256JsonForTest(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value, (_key, entry: unknown) => {
+    if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+      return Object.fromEntries(
+        Object.entries(entry as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)),
+      );
+    }
+    return entry;
+  })).digest('hex');
 }
 
 interface AutoCutIngestOptions {

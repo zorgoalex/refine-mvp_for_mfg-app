@@ -3,14 +3,19 @@ import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
   ConfigureCncAutoCutStatusCommand,
+  CreateManualSvgCommentPresetCommand,
   IngestCncTelegramPacketCommand,
+  ListManualSvgCommentPresetsCommand,
   ListCncTelegramOrderCuttingSequencesCommand,
   ListCncTelegramTodayCommand,
+  ManualSvgUploadCommand,
   RecordCncTelegramDeniedAuditCommand,
 } from '../application/cnc-telegram.types';
 import type {
   CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
+  CncTelegramManualSvgCommentPresetDto,
+  CncTelegramManualSvgUploadResponseDto,
   CncTelegramOrderCuttingSequencesResponseDto,
   CncTelegramTodayResponseDto,
 } from '../dto/cnc-telegram.dto';
@@ -29,6 +34,22 @@ export class UnavailableCncTelegramRepository
   }
 
   async ingest(_command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto> {
+    throw unavailable();
+  }
+
+  async manualSvgUpload(_command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
+    throw unavailable();
+  }
+
+  async listManualSvgCommentPresets(
+    _command: ListManualSvgCommentPresetsCommand,
+  ): Promise<CncTelegramManualSvgCommentPresetDto[]> {
+    throw unavailable();
+  }
+
+  async createManualSvgCommentPreset(
+    _command: CreateManualSvgCommentPresetCommand,
+  ): Promise<CncTelegramManualSvgCommentPresetDto> {
     throw unavailable();
   }
 
