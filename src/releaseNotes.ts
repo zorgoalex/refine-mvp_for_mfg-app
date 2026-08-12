@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-12",
+    title: "Календарь: перенос карточек",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "На экране календаря убрана отдельная зона DnD на карточках; теперь вся карточка является зоной переноса и больше не перекрывает данные заказа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-12",
     title: "Автостатусы: импорт и экспорт правил",
     services: ["ERP"],
     repositories: ["repo_erp"],
