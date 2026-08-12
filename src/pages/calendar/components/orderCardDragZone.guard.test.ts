@@ -5,12 +5,14 @@ import { describe, expect, it } from 'vitest';
 const orderCard = readFileSync(resolve(__dirname, 'OrderCard.tsx'), 'utf8');
 const compactOrderCard = readFileSync(resolve(__dirname, 'OrderCardCompact.tsx'), 'utf8');
 const calendarCss = readFileSync(resolve(__dirname, '../styles/calendar.css'), 'utf8');
+const tabletCss = readFileSync(resolve(__dirname, '../../../ui-evolution/styles/tablet.css'), 'utf8');
 
 describe('calendar order card drag zone', () => {
   it('does not render or style a separate drag handle', () => {
     expect(orderCard).not.toContain('calendar-order-card__drag-handle');
     expect(compactOrderCard).not.toContain('calendar-order-card__drag-handle');
     expect(calendarCss).not.toContain('calendar-order-card__drag-handle');
+    expect(tabletCss).not.toContain('calendar-order-card__drag-handle');
   });
 
   it('uses the card root as the drag source in both display modes', () => {
@@ -22,5 +24,6 @@ describe('calendar order card drag zone', () => {
 
   it('does not reserve card width for the removed handle', () => {
     expect(calendarCss).not.toContain('padding-right: 48px');
+    expect(tabletCss).not.toContain('padding-right: 52px');
   });
 });

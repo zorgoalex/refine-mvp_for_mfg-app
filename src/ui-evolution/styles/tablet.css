@@ -1077,15 +1077,7 @@
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .order-card {
-  padding-right: 52px;
   touch-action: pan-x pan-y;
-}
-
-:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .calendar-order-card__drag-handle {
-  width: 44px;
-  min-width: 44px;
-  height: 44px;
-  min-height: 44px;
 }
 
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content:where(
