@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-12",
+    title: "Заказы: высота таблицы деталей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В форме редактирования заказа контейнер таблицы деталей получил запас по высоте, чтобы нижняя заполненная строка не обрезалась.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-12",
     title: "Навигация: обновление после деплоя",
     services: ["ERP"],
     repositories: ["repo_erp"],

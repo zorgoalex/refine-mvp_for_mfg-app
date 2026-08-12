@@ -211,8 +211,9 @@ const ORDER_DETAIL_COLUMN_WIDTHS = {
   detailCost: 105,
 } as const;
 
-const ORDER_DETAIL_TABLE_MAX_SCROLL_Y = 500;
+const ORDER_DETAIL_TABLE_MAX_SCROLL_Y = 560;
 const ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT = 39;
+const ORDER_DETAIL_TABLE_SCROLL_SAFETY_ROWS = 1;
 
 const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
   'height',
@@ -237,6 +238,21 @@ const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
 
 const orderDetailRowKey = (detail: OrderDetail): number | undefined =>
   detail.temp_id ?? detail.detail_id;
+
+export function calculateOrderDetailTableBodyScrollY(
+  filledDetailRowsCount: number,
+  detailRowsCount: number,
+): number {
+  const minimumRows = detailRowsCount > 0 ? 1 : 0;
+  const visibleDetailRows = Math.max(minimumRows, filledDetailRowsCount);
+  const safetyRows = visibleDetailRows > 0 ? ORDER_DETAIL_TABLE_SCROLL_SAFETY_ROWS : 0;
+  const bodyRows = Math.max(1, visibleDetailRows + safetyRows);
+
+  return Math.min(
+    ORDER_DETAIL_TABLE_MAX_SCROLL_Y,
+    bodyRows * ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT,
+  );
+}
 
 export function isLastOrderDetailRow(
   details: readonly OrderDetail[],
@@ -3150,13 +3166,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }, []);
   const mountedTableRows = tableRowsReady ? tableRows : EMPTY_ORDER_DETAIL_TABLE_ROWS;
   const tableBodyScrollY = useMemo(() => {
-    const minimumRows = details.length > 0 ? 1 : 0;
-    const visibleDetailRows = Math.max(minimumRows, filledDetailRowsCount);
-    const bodyRows = Math.max(1, visibleDetailRows);
-    return Math.min(
-      ORDER_DETAIL_TABLE_MAX_SCROLL_Y,
-      bodyRows * ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT,
-    );
+    return calculateOrderDetailTableBodyScrollY(filledDetailRowsCount, details.length);
   }, [details.length, filledDetailRowsCount]);
 
   return (
