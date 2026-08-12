@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-12",
+    title: "Автостатусы: импорт и экспорт правил",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Во вкладке «Автостатусы» правила можно выгрузить в JSON и загрузить обратно; импорт пропускает дубликаты и показывает список правил, которые не удалось загрузить из-за отсутствующих событий или статусов.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-11",
     title: "Заказы: навигация по деталям",
     services: ["ERP"],

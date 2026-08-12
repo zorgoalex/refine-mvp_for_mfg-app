@@ -7,8 +7,11 @@ import {
   allowedConditionKeysForEvent,
   buildCreatePayload,
   buildEventTypeSelectOptions,
+  buildStatusAutomationRulesExportFile,
   buildUpdatePayload,
   describeConditions,
+  planStatusAutomationRulesImport,
+  readStatusAutomationRulesImportSource,
   type StatusAutomationFormValues,
 } from './statusAutomationView';
 
@@ -67,6 +70,14 @@ const rule: StatusAutomationRuleDto = {
   priority: 50,
   isEnabled: true,
   version: 7,
+};
+
+const importStatusCatalog = {
+  orderStatusIds: new Set([1, 2]),
+  activeOrderStatusIds: new Set([1, 2]),
+  paymentStatusIds: new Set([3]),
+  productionStatusIds: new Set([4, 5]),
+  activeProductionStatusIds: new Set([4]),
 };
 
 describe('statusAutomationView', () => {
@@ -277,5 +288,120 @@ describe('statusAutomationView', () => {
       orderSourceIn: ['manual', 'bazis', 'import'],
       firstPaymentOnly: true,
     });
+  });
+
+  it('exports status automation rules without database ids and versions', () => {
+    expect(buildStatusAutomationRulesExportFile([rule], '2026-08-12T00:00:00.000Z')).toEqual({
+      schema: 'erp.statusAutomationRules.v1',
+      exportedAt: '2026-08-12T00:00:00.000Z',
+      rules: [
+        {
+          name: 'Существующее правило',
+          eventType: 'order.created',
+          actionType: 'change_production_status',
+          targetStatusId: 4,
+          conditions: {},
+          priority: 50,
+          isEnabled: true,
+        },
+      ],
+    });
+  });
+
+  it('reads import rules from either a plain array or an export wrapper', () => {
+    const imported = [{ name: 'Правило' }];
+
+    expect(readStatusAutomationRulesImportSource(imported)).toBe(imported);
+    expect(readStatusAutomationRulesImportSource({ rules: imported })).toBe(imported);
+    expect(() => readStatusAutomationRulesImportSource({ items: imported })).toThrow(
+      'JSON должен содержать массив правил или объект с полем rules',
+    );
+  });
+
+  it('plans import and skips existing and in-file duplicate rules', () => {
+    const validRule = {
+      name: 'Новая копия',
+      eventType: 'payment.created',
+      actionType: 'change_order_status',
+      targetStatusId: 2,
+      conditions: { currentOrderStatusIn: [1], paidShareGte: 50 },
+      priority: 100,
+      isEnabled: true,
+    };
+
+    const plan = planStatusAutomationRulesImport(
+      [
+        validRule,
+        { ...validRule, name: 'Дубль в файле' },
+        { ...rule, name: 'Дубль существующего' },
+      ],
+      {
+        existingRules: [rule],
+        eventTypes: [eventDescriptor(), eventDescriptor({ eventType: 'order.created' })],
+        statusCatalog: importStatusCatalog,
+      },
+    );
+
+    expect(plan.rulesToCreate).toEqual([{ index: 1, name: 'Новая копия', rule: validRule }]);
+    expect(plan.skippedDuplicates).toEqual([
+      { index: 2, name: 'Дубль в файле', reasons: ['Такое правило уже есть в этом JSON-файле'] },
+      {
+        index: 3,
+        name: 'Дубль существующего',
+        reasons: ['Такое правило уже есть в текущем приложении'],
+      },
+    ]);
+    expect(plan.failedRules).toEqual([]);
+  });
+
+  it('reports rules that cannot be imported because matching events or statuses are absent', () => {
+    const plan = planStatusAutomationRulesImport(
+      [
+        {
+          name: 'Нет события',
+          eventType: 'unknown.event',
+          actionType: 'change_order_status',
+          targetStatusId: 2,
+          conditions: {},
+        },
+        {
+          name: 'Нет статусов',
+          eventType: 'payment.created',
+          actionType: 'change_production_status',
+          targetStatusId: 5,
+          conditions: {
+            currentOrderStatusIn: [999],
+            currentPaymentStatusIn: [888],
+            currentProductionStatusIn: [777],
+          },
+          priority: 20,
+          isEnabled: true,
+        },
+      ],
+      {
+        existingRules: [],
+        eventTypes: [eventDescriptor()],
+        statusCatalog: importStatusCatalog,
+      },
+    );
+
+    expect(plan.rulesToCreate).toEqual([]);
+    expect(plan.failedRules).toEqual([
+      {
+        index: 1,
+        name: 'Нет события',
+        reasons: ['Событие «unknown.event» отсутствует в текущем приложении'],
+      },
+      {
+        index: 2,
+        name: 'Нет статусов',
+        reasons: [
+          'Целевой производственный статус #5 неактивен',
+          'Отсутствуют статусы заказа: #999',
+          'Отсутствуют статусы оплаты: #888',
+          'Отсутствуют статусы производства: #777',
+        ],
+      },
+    ]);
   });
 });
