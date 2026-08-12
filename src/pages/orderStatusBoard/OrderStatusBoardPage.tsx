@@ -2384,11 +2384,6 @@ export interface CncTelegramTodayDisplayColumn {
   orderCards?: CncOrderBoardCard[];
 }
 
-interface CncOrderColumnViewportFrame {
-  offsetY: number;
-  visualHeight: number;
-}
-
 function createCncPlaceholderColumn(
   key: CncTelegramTodayColumn['key'],
   title: string,
@@ -2434,9 +2429,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   const isOperational = useOperationalUi();
   const [standardCardOverrides, setStandardCardOverrides] =
     useState<Set<string>>(() => new Set());
-  const columnsRootRef = useRef<HTMLDivElement | null>(null);
-  const orderColumnViewportFrameRef =
-    useRef<CncOrderColumnViewportFrame | null>(null);
   const orderColumnRefs = useRef<Partial<Record<CncOrderDisplayColumnKey, HTMLElement | null>>>({});
   const orderColumnCardListRefs =
     useRef<Partial<Record<CncOrderDisplayColumnKey, HTMLElement | null>>>({});
@@ -2491,78 +2483,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       syncOrderColumnScrollTopButton(columnKey);
     }
   }, [syncOrderColumnScrollTopButton]);
-  const syncOrderColumnViewportFrame = useCallback(() => {
-    const columnsRoot = columnsRootRef.current;
-    if (!columnsRoot) return;
-
-    const resetFrame = () => {
-      if (!orderColumnViewportFrameRef.current) return;
-      orderColumnViewportFrameRef.current = null;
-      columnsRoot.style.removeProperty('--status-board-cnc-order-column-offset-y');
-      columnsRoot.style.removeProperty('--status-board-cnc-order-column-visual-height');
-    };
-
-    const hasOrderColumn = CNC_ORDER_DISPLAY_COLUMN_KEYS.some(
-      (columnKey) => orderColumnRefs.current[columnKey],
-    );
-    const rootRect = columnsRoot.getBoundingClientRect();
-    const viewport = window.visualViewport;
-    const viewportTop = viewport?.offsetTop ?? 0;
-    const viewportHeight = viewport?.height ?? window.innerHeight;
-    const viewportBottom = viewportTop + viewportHeight;
-
-    if (
-      !hasOrderColumn ||
-      rootRect.width <= 0 ||
-      rootRect.height <= 0 ||
-      rootRect.bottom <= viewportTop ||
-      rootRect.top >= viewportBottom
-    ) {
-      resetFrame();
-      return;
-    }
-
-    const page = columnsRoot.closest('.status-board-page') as HTMLElement | null;
-    const toolbar =
-      page?.querySelector<HTMLElement>('.status-board-toolbar-disclosure--cnc') ??
-      page?.querySelector<HTMLElement>('.status-board-toolbar--cnc') ??
-      null;
-    const toolbarRect = toolbar?.getBoundingClientRect();
-    const toolbarBottom =
-      toolbarRect && toolbarRect.bottom > viewportTop && toolbarRect.top < viewportBottom
-        ? toolbarRect.bottom + 8
-        : viewportTop;
-    const visibleTop = Math.max(rootRect.top, toolbarBottom);
-    const visibleBottom = Math.min(rootRect.bottom, viewportBottom);
-    const visualHeight = Math.max(0, Math.round(visibleBottom - visibleTop));
-
-    if (visualHeight <= 0) {
-      resetFrame();
-      return;
-    }
-
-    const nextFrame: CncOrderColumnViewportFrame = {
-      offsetY: Math.max(0, Math.round(visibleTop - rootRect.top)),
-      visualHeight,
-    };
-    const currentFrame = orderColumnViewportFrameRef.current;
-    if (
-      currentFrame?.offsetY === nextFrame.offsetY &&
-      currentFrame.visualHeight === nextFrame.visualHeight
-    ) {
-      return;
-    }
-
-    orderColumnViewportFrameRef.current = nextFrame;
-    columnsRoot.style.setProperty(
-      '--status-board-cnc-order-column-offset-y',
-      `${nextFrame.offsetY}px`,
-    );
-    columnsRoot.style.setProperty(
-      '--status-board-cnc-order-column-visual-height',
-      `${nextFrame.visualHeight}px`,
-    );
-  }, []);
   const scrollOrderColumnToTop = useCallback((
     columnKey: CncOrderDisplayColumnKey,
     trigger: HTMLElement | null,
@@ -2668,35 +2588,14 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       .map((columnKey) => orderColumnRefs.current[columnKey])
       .find(Boolean)
       ?.closest<HTMLElement>('.status-board-viewport') ?? null;
-    let animationFrame: number | null = null;
-    const scheduleSync = () => {
-      if (animationFrame !== null) return;
-      animationFrame = window.requestAnimationFrame(() => {
-        animationFrame = null;
-        syncOrderColumnViewportFrame();
-        syncAllOrderColumnScrollTopButtons();
-      });
-    };
-    scheduleSync();
-    viewport?.addEventListener('scroll', scheduleSync, { passive: true });
-    window.addEventListener('resize', scheduleSync);
-    window.addEventListener('scroll', scheduleSync, true);
-    window.visualViewport?.addEventListener('resize', scheduleSync);
-    window.visualViewport?.addEventListener('scroll', scheduleSync);
+    const sync = () => syncAllOrderColumnScrollTopButtons();
+    sync();
+    viewport?.addEventListener('scroll', sync, { passive: true });
+    window.addEventListener('resize', sync);
+    window.addEventListener('scroll', sync, true);
     const resizeObserver = typeof ResizeObserver === 'undefined'
       ? null
-      : new ResizeObserver(scheduleSync);
-    const columnsRoot = columnsRootRef.current;
-    const toolbar =
-      columnsRoot
-        ?.closest('.status-board-page')
-        ?.querySelector<HTMLElement>('.status-board-toolbar-disclosure--cnc') ??
-      columnsRoot
-        ?.closest('.status-board-page')
-        ?.querySelector<HTMLElement>('.status-board-toolbar--cnc') ??
-      null;
-    if (columnsRoot) resizeObserver?.observe(columnsRoot);
-    if (toolbar) resizeObserver?.observe(toolbar);
+      : new ResizeObserver(sync);
     for (const columnKey of CNC_ORDER_DISPLAY_COLUMN_KEYS) {
       const column = orderColumnRefs.current[columnKey];
       const cardList = orderColumnCardListRefs.current[columnKey];
@@ -2704,14 +2603,9 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       if (cardList) resizeObserver?.observe(cardList);
     }
     return () => {
-      if (animationFrame !== null) {
-        window.cancelAnimationFrame(animationFrame);
-      }
-      viewport?.removeEventListener('scroll', scheduleSync);
-      window.removeEventListener('resize', scheduleSync);
-      window.removeEventListener('scroll', scheduleSync, true);
-      window.visualViewport?.removeEventListener('resize', scheduleSync);
-      window.visualViewport?.removeEventListener('scroll', scheduleSync);
+      viewport?.removeEventListener('scroll', sync);
+      window.removeEventListener('resize', sync);
+      window.removeEventListener('scroll', sync, true);
       resizeObserver?.disconnect();
     };
   }, [
@@ -2720,7 +2614,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     loading,
     orderCardsLoading,
     syncAllOrderColumnScrollTopButtons,
-    syncOrderColumnViewportFrame,
   ]);
   const detailedPacketHighlightEnabled = cncDetailedContextHasActiveDetail(detailedContext);
   const selectedDetailedDetailId = detailedContext?.activeDetail?.detailId ?? null;
@@ -2742,7 +2635,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   return (
     <>
       <div
-        ref={columnsRootRef}
         className={[
           'status-board-columns status-board-columns--cnc',
           cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : '',

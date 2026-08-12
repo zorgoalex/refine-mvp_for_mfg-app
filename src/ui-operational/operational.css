@@ -1998,6 +1998,12 @@
   gap: 9px;
 }
 
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell__content[data-modern-route="status-board"] .status-board-page.status-board-page--cnc {
+  height: auto;
+  min-height: calc(100vh - 166px);
+  overflow: visible;
+}
+
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .status-board-tabs {
   flex: 0 0 auto;
 }

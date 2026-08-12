@@ -11,6 +11,7 @@ const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
 );
+const operationalCss = readFileSync('src/ui-operational/operational.css', 'utf8');
 const tabletCss = readFileSync('src/ui-evolution/styles/tablet.css', 'utf8');
 const columnSettings = readFileSync(
   'src/pages/orderStatusBoard/StatusBoardColumnSettings.tsx',
@@ -239,10 +240,16 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
     );
+    expect(operationalCss).toMatch(
+      /\.evolution-shell__content\[data-modern-route="status-board"\] \.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+    );
     expect(css).toMatch(
-      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\s*\{[^}]*position: sticky;[^}]*top: var\(--status-board-toolbar-sticky-top, 0px\);[^}]*z-index: 32;/s,
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\s*\{[^}]*position: sticky;[^}]*top: var\(--status-board-toolbar-sticky-top, 0px\);[^}]*z-index: 48;/s,
     );
     expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar--cnc');
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content,[\s\S]*?\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content-inner\s*\{[^}]*display: block;/s,
+    );
     expect(tabletCss).toContain('.status-board-toolbar-disclosure--cnc');
     expect(tabletCss).toContain('flex: 0 0 var(--tablet-sticky-row)');
     expect(css).toMatch(
@@ -253,21 +260,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(css).toContain('--status-board-cnc-order-cards-max-height');
     expect(css).toMatch(
-      /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*flex: 1 1 auto;[^}]*max-height: none;[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
+      /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*max-height: var\(--status-board-cnc-order-cards-max-height\);[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
     );
-    expect(page).toContain('interface CncOrderColumnViewportFrame');
-    expect(page).toContain('const columnsRootRef = useRef<HTMLDivElement | null>(null)');
-    expect(page).toContain('syncOrderColumnViewportFrame');
-    expect(page).toContain('window.addEventListener(\'scroll\', scheduleSync, true)');
-    expect(page).toContain('window.visualViewport?.addEventListener(\'resize\', scheduleSync)');
-    expect(page).toContain('ref={columnsRootRef}');
-    expect(css).toContain('--status-board-cnc-order-column-offset-y: 0px;');
-    expect(css).toContain('--status-board-cnc-order-column-visual-height: 100%;');
+    expect(page).not.toContain('interface CncOrderColumnViewportFrame');
+    expect(page).not.toContain('syncOrderColumnViewportFrame');
+    expect(page).not.toContain('window.visualViewport?.addEventListener');
+    expect(css).not.toContain('--status-board-cnc-order-column-offset-y');
+    expect(css).not.toContain('--status-board-cnc-order-column-visual-height');
     expect(css).toMatch(
-      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*height: var\(--status-board-cnc-order-column-visual-height\);[^}]*transform: translateY\(var\(--status-board-cnc-order-column-offset-y\)\);[^}]*will-change: transform;/s,
+      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*position: relative;[^}]*\}/s,
     );
-    expect(tabletCss).toContain('height: var(--status-board-cnc-order-column-visual-height) !important;');
-    expect(tabletCss).toContain('max-height: none;');
+    expect(css).not.toContain('translateY(var(--status-board-cnc-order-column-offset-y))');
+    expect(css).not.toContain('will-change: transform');
     expect(page).toContain('type CncOrderDisplayColumnKey = Extract<');
     expect(page).toContain('orderColumnScrollTopState');
     expect(page).toContain('syncOrderColumnScrollTopButton(orderColumnKey, event.currentTarget)');
@@ -310,7 +314,7 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: auto;/s,
     );
     expect(tabletCss).toMatch(
-      /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*flex: 1 1 auto;[^}]*max-height: none;[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
+      /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*max-height: var\(--status-board-cnc-order-cards-max-height\);[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
     );
     expect(tabletCss).toContain('.status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
     expect(tabletCss).toContain('clamp(240px, 24vw, 276px)');
