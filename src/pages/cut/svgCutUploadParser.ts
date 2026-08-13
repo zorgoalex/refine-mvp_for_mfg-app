@@ -3,8 +3,6 @@ import type {
   CncTelegramManualSvgUploadRequest,
 } from '../../api/types/cncTelegramApi.types';
 
-const DETAIL_HEADER_RE = /(?<order>\d{4,})#(?<detail>\d{1,5})#/;
-const DETAIL_SIZE_RE = /@(?<width>\d+(?:[.,]\d+)?)\*(?<height>\d+(?:[.,]\d+)?)@/;
 const VISUAL_SIZE_RE = /(?<width>\d+(?:[.,]\d+)?)\s*[xхХX*×]\s*(?<height>\d+(?:[.,]\d+)?)/;
 const VISUAL_ORDER_RE = /\b(?<order>\d{4,})\b/;
 const VISUAL_DETAIL_RE = /(?:поз\.?|позиция|дет\.?|деталь|#)?\s*(?<detail>\d{1,5})/i;
@@ -23,7 +21,6 @@ type Bbox = [number, number, number, number];
 
 interface PartContourGeometry {
   elementId: string;
-  comments: string[];
   xMm: number;
   yMm: number;
   placedWidthMm: number;
@@ -36,8 +33,12 @@ interface VisualTextLine {
   yMm: number;
 }
 
-interface VisualDetailLabel extends ParsedDetailComment {
+interface VisualDetailLabel {
   key: string;
+  orderName: string;
+  detailNumber: number;
+  widthMm: number;
+  heightMm: number;
   cxMm: number;
   cyMm: number;
   rawLines: string[];
@@ -111,14 +112,12 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
   const seenGeometry = new Set<string>();
   const rejected = new Set<string>();
   const visualLabels = extractVisualDetailLabels(root, vbMinX, vbMinY, scaleX, scaleY);
-  let rawCommentCount = 0;
+  const rawCommentCount = visualLabels.length;
   let partContourCount = 0;
 
   for (const { element, matrix, transformError } of traverse(root)) {
     if (!GEOMETRY_TAGS.has(localName(element))) continue;
     const elementId = element.getAttribute('id') ?? '';
-    const comments = detailComments(element);
-    rawCommentCount += comments.length;
     if (!elementId.includes('PartContour')) continue;
 
     partContourCount += 1;
@@ -130,7 +129,7 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
     const points = elementPoints(element).map((point) => applyMatrix(point, matrix));
     const bbox = pointsBbox(points);
     if (!bbox) {
-      if (visualLabels.length > 0 || comments.some((comment) => parseDetailComment(comment, null))) {
+      if (visualLabels.length > 0) {
         rejected.add('PartContour detail outlines have no geometry');
       }
       continue;
@@ -153,7 +152,6 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
 
     partContours.push({
       elementId,
-      comments,
       xMm,
       yMm,
       placedWidthMm,
@@ -194,54 +192,12 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
           Math.round(contour.placedHeightMm) === Math.round(parsed.widthMm),
       });
     }
-  } else {
-    for (const contour of partContours) {
-      if (contour.comments.length === 0) continue;
-      const parsedComments = contour.comments
-        .map((comment) => parseDetailComment(comment, [contour.placedWidthMm, contour.placedHeightMm]))
-        .filter((comment): comment is ParsedDetailComment => comment !== null);
-      if (parsedComments.length === 0) {
-        rejected.add('PartContour detail outlines have unreadable detail comments');
-        continue;
-      }
-
-      let matchedComment = false;
-      for (const parsed of parsedComments) {
-        if (!sizeMatches(parsed.widthMm, parsed.heightMm, contour.placedWidthMm, contour.placedHeightMm)) continue;
-        matchedComment = true;
-        const key = [
-          parsed.orderName,
-          parsed.detailNumber,
-          parsed.widthMm,
-          parsed.heightMm,
-          contour.elementId,
-        ].join('|');
-        if (seenGeometry.has(key)) continue;
-        seenGeometry.add(key);
-        layoutItems.push({
-          orderName: parsed.orderName,
-          detailNumber: parsed.detailNumber,
-          widthMm: parsed.widthMm,
-          heightMm: parsed.heightMm,
-          quantity: 1,
-          confidence: 0.99,
-          sourceElementId: contour.elementId,
-          xMm: round2(contour.xMm),
-          yMm: round2(contour.yMm),
-          placedWidthMm: round2(contour.placedWidthMm),
-          placedHeightMm: round2(contour.placedHeightMm),
-          rotated: Math.round(contour.placedWidthMm) === Math.round(parsed.heightMm) &&
-            Math.round(contour.placedHeightMm) === Math.round(parsed.widthMm),
-        });
-      }
-      if (!matchedComment) {
-        rejected.add('PartContour detail outline size does not match detail comment');
-      }
-    }
   }
 
   const reasons: string[] = [];
-  if (visualLabels.length === 0 && rawCommentCount === 0) reasons.push('no detail comments');
+  if (visualLabels.length === 0) {
+    reasons.push('no readable top-layer detail labels');
+  }
   if (visualLabels.length > 0 && layoutItems.length === 0) {
     reasons.push('visual detail labels exist but no label matched a PartContour outline');
   }
@@ -285,43 +241,6 @@ function layoutItemsToRequestItems(layout: CncTelegramCutLayout): CncTelegramMan
     source: 'vector',
     confidence: item.confidence ?? 0.99,
   }));
-}
-
-function detailComments(element: Element): string[] {
-  const values: string[] = [];
-  for (const child of Array.from(element.querySelectorAll('*'))) {
-    if (localName(child) !== 'odm') continue;
-    if (child.getAttribute('name') !== 'Comments') continue;
-    const value = child.getAttribute('value')?.trim();
-    if (value) values.push(value);
-  }
-  return values;
-}
-
-interface ParsedDetailComment {
-  orderName: string;
-  detailNumber: number;
-  widthMm: number;
-  heightMm: number;
-}
-
-function parseDetailComment(comment: string, bboxSize: [number, number] | null): ParsedDetailComment | null {
-  const header = DETAIL_HEADER_RE.exec(comment);
-  if (!header?.groups) return null;
-  const size = DETAIL_SIZE_RE.exec(comment);
-  let width = positiveFloat(size?.groups?.width);
-  let height = positiveFloat(size?.groups?.height);
-  if ((!width || !height) && bboxSize) {
-    width = round2(Math.max(...bboxSize));
-    height = round2(Math.min(...bboxSize));
-  }
-  if (!width || !height) return null;
-  return {
-    orderName: header.groups.order,
-    detailNumber: Number(header.groups.detail),
-    widthMm: width,
-    heightMm: height,
-  };
 }
 
 function extractVisualDetailLabels(

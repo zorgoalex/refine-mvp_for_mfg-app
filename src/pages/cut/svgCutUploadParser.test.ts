@@ -44,7 +44,9 @@ describe('svgCutUploadParser visual labels', () => {
     expect(parserSource).toContain('matchVisualLabelsToPartContours');
     expect(parserSource).toContain('visualLabels.length > 0');
     expect(parserSource).toContain('PartContour detail outline has no matching visual label');
-    expect(parserSource.indexOf('if (visualLabels.length > 0)'))
-      .toBeLessThan(parserSource.indexOf('} else {\n    for (const contour of partContours)'));
+    expect(parserSource).toContain('no readable top-layer detail labels');
+    expect(parserSource).not.toContain('parseDetailComment');
+    expect(parserSource).not.toContain('DETAIL_HEADER_RE');
+    expect(parserSource).not.toContain('odm');
   });
 });
