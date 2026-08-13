@@ -19,6 +19,7 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertEqual(config.ocr_command_timeout_seconds, 180)
         self.assertEqual(config.glm_ocr_client_timeout_seconds, 660)
         self.assertFalse(config.enabled)
+        self.assertFalse(config.can_send_manual_svg_uploads)
 
     def test_glm_ocr_fallback_requires_explicit_enable(self) -> None:
         with patch.dict(os.environ, {
@@ -72,6 +73,20 @@ class WorkerConfigTest(unittest.TestCase):
 
         self.assertTrue(config.enabled)
         self.assertFalse(config.can_write_chat)
+        self.assertFalse(config.can_send_manual_svg_uploads)
+        config.require_worker_enabled()
+
+    def test_reader_can_send_only_manual_svg_uploads_when_enabled(self) -> None:
+        with patch.dict(os.environ, {
+            "ERP_STACK_ENV": "test",
+            "CNC_TELEGRAM_WORKER_ROLE": "reader",
+            "CNC_TELEGRAM_ENABLE_MANUAL_UPLOAD_SENDS": "true",
+        }, clear=True):
+            config = WorkerConfig.from_env()
+
+        self.assertTrue(config.enabled)
+        self.assertFalse(config.can_write_chat)
+        self.assertTrue(config.can_send_manual_svg_uploads)
         config.require_worker_enabled()
 
     def test_writer_runs_on_prod_stack(self) -> None:
@@ -83,6 +98,7 @@ class WorkerConfigTest(unittest.TestCase):
 
         self.assertTrue(config.enabled)
         self.assertTrue(config.can_write_chat)
+        self.assertTrue(config.can_send_manual_svg_uploads)
         config.require_worker_enabled()
 
     def test_invalid_worker_role_is_rejected(self) -> None:

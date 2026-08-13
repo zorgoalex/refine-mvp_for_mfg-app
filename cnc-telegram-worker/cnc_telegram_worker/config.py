@@ -14,6 +14,7 @@ class WorkerConfig:
     stack_env: str
     worker_role: str
     allow_non_prod_writer: bool
+    manual_svg_send_enabled: bool
     telegram_api_id: int | None
     telegram_api_hash: str
     telegram_session_path: Path
@@ -61,6 +62,7 @@ class WorkerConfig:
             stack_env=normalized_env("ERP_STACK_ENV", "test"),
             worker_role=worker_role,
             allow_non_prod_writer=bool_env("CNC_TELEGRAM_ALLOW_NON_PROD_WRITER", False),
+            manual_svg_send_enabled=bool_env("CNC_TELEGRAM_ENABLE_MANUAL_UPLOAD_SENDS", False),
             telegram_api_id=int(api_id_raw) if api_id_raw else None,
             telegram_api_hash=env("TELEGRAM_API_HASH"),
             telegram_session_path=Path(env("TELEGRAM_SESSION_PATH", "/data/session/cnc_telegram")),
@@ -100,6 +102,10 @@ class WorkerConfig:
     @property
     def can_write_chat(self) -> bool:
         return self.worker_role == "writer"
+
+    @property
+    def can_send_manual_svg_uploads(self) -> bool:
+        return self.can_write_chat or self.manual_svg_send_enabled
 
     def require_worker_enabled(self) -> None:
         if not self.enabled:

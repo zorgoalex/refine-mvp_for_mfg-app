@@ -134,7 +134,7 @@ class CncTelegramWorker:
             chat_id = peer_id(entity)
             assert_allowed_chat(chat_id, self.config.telegram_allowed_chat_ids)
             await self.process_media_restore_requests(client, entity, chat_id)
-            if self.config.can_write_chat:
+            if self.config.can_send_manual_svg_uploads:
                 await self.process_manual_svg_telegram_send_requests(client, entity, chat_id)
             me = await client.get_me()
             session_user_id = str(me.id) if getattr(me, "id", None) is not None else None
