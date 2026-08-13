@@ -68,6 +68,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("import { TouchBackend } from 'react-dnd-touch-backend'");
     expect(page).toContain('enableMouseEvents: true');
     expect(page).toContain('delayTouchStart');
+    expect(page).toContain('delayTouchStart: 420');
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('CNC_BOARD_DRAG_TYPE');
@@ -101,12 +102,17 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('touchDragEnabled = false');
     expect(touchDrag).toContain("event.pointerType !== 'touch'");
     expect(touchDrag).toContain('handle.setPointerCapture');
+    expect(touchDrag).toContain('setReady(true)');
+    expect(touchDrag).toContain('ready,');
     expect(touchDrag).toContain('navigator.vibrate?.(18)');
     expect(touchDrag).toContain('document.elementFromPoint');
     expect(page).toContain('data-status-board-column-key={column.key}');
     expect(page).toContain('status-board-touch-drag-instructions');
     expect(page).not.toContain('touchDragEnabled={false}');
     expect(css).toContain('.cnc-board-card-shell--draggable');
+    expect(css).toContain('.status-board-card--touch-ready');
+    expect(css).toContain('.cnc-board-card-shell--touch-ready > .status-board-card');
+    expect(css).toContain('@keyframes statusBoardTouchReadyWiggle');
     expect(css).not.toContain('.cnc-card-move-actions');
     expect(css).toMatch(/\.cnc-board-card-shell--draggable\s*\{[^}]*touch-action: pan-x pan-y;/s);
     expect(css).not.toContain('touch-action: none');
@@ -216,7 +222,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toMatch(
       /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: visible;/s,
     );
-    expect(page).toContain('delayTouchStart: 320');
+    expect(page).toContain('delayTouchStart: 420');
     expect(page).toContain('touchSlop: 12');
     expect(page).toContain('{...touchDragHandleProps}');
     expect(css).not.toContain('.status-board-card__drag--touch');

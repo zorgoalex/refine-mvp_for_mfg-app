@@ -1,4 +1,4 @@
-export const TOUCH_BOARD_LONG_PRESS_MS = 260;
+export const TOUCH_BOARD_LONG_PRESS_MS = 420;
 export const TOUCH_BOARD_SLOP_PX = 8;
 export const TOUCH_BOARD_EDGE_PX = 56;
 export const TOUCH_BOARD_MAX_SCROLL_PX = 18;

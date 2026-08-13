@@ -230,7 +230,7 @@ const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
 ] as const;
 const DND_BACKEND_OPTIONS = {
   enableMouseEvents: true,
-  delayTouchStart: 320,
+  delayTouchStart: 420,
   touchSlop: 12,
 };
 
@@ -3251,6 +3251,9 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const dragSuppressedRef = useRef(false);
+  const touchReadyTimerRef = useRef<number | null>(null);
+  const touchReadyStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [touchReady, setTouchReady] = useState(false);
   const destinations = useMemo(
     () => cncManualMoveDestinations(kind, sourceColumn),
     [kind, sourceColumn],
@@ -3274,9 +3277,47 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
   const updateDragSuppression = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
     dragSuppressedRef.current = isCncManualDragIgnored(event.target);
   }, []);
+  const clearTouchReadySignal = useCallback(() => {
+    if (touchReadyTimerRef.current !== null) {
+      window.clearTimeout(touchReadyTimerRef.current);
+      touchReadyTimerRef.current = null;
+    }
+    touchReadyStartRef.current = null;
+    setTouchReady(false);
+  }, []);
+  const queueTouchReadySignal = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    const ignored = isCncManualDragIgnored(event.target);
+    dragSuppressedRef.current = ignored;
+    clearTouchReadySignal();
+    if (!moveAvailable || ignored) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    touchReadyStartRef.current = { x: touch.clientX, y: touch.clientY };
+    touchReadyTimerRef.current = window.setTimeout(() => {
+      touchReadyTimerRef.current = null;
+      setTouchReady(true);
+    }, DND_BACKEND_OPTIONS.delayTouchStart);
+  }, [clearTouchReadySignal, moveAvailable]);
+  const cancelTouchReadyOnMove = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    const start = touchReadyStartRef.current;
+    const touch = event.touches[0];
+    if (!start || !touch) return;
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (deltaX * deltaX + deltaY * deltaY > DND_BACKEND_OPTIONS.touchSlop ** 2) {
+      clearTouchReadySignal();
+    }
+  }, [clearTouchReadySignal]);
   const clearDragSuppression = useCallback(() => {
     dragSuppressedRef.current = false;
-  }, []);
+    clearTouchReadySignal();
+  }, [clearTouchReadySignal]);
+
+  useEffect(() => () => clearTouchReadySignal(), [clearTouchReadySignal]);
+
+  useEffect(() => {
+    if (!moveAvailable) clearTouchReadySignal();
+  }, [clearTouchReadySignal, moveAvailable]);
   const moveMenu = useMemo<MenuProps>(() => ({
     items: [
       {
@@ -3313,10 +3354,12 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
           'cnc-board-card-shell',
           moveAvailable ? 'cnc-board-card-shell--draggable' : '',
           isDragging ? 'cnc-board-card-shell--dragging' : '',
+          touchReady ? 'cnc-board-card-shell--touch-ready' : '',
         ].filter(Boolean).join(' ')}
         onMouseDownCapture={updateDragSuppression}
         onMouseUpCapture={clearDragSuppression}
-        onTouchStartCapture={updateDragSuppression}
+        onTouchStartCapture={queueTouchReadySignal}
+        onTouchMoveCapture={cancelTouchReadyOnMove}
         onTouchEndCapture={clearDragSuppression}
         onTouchCancelCapture={clearDragSuppression}
       >
@@ -6045,6 +6088,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     active: isTouchDragging,
     ghost: touchDragGhost,
     handleProps: touchDragHandleProps,
+    ready: touchDragReady,
   } = useTouchBoardCardDrag({
     enabled: actionsVisible && touchDragEnabled && moveAvailable,
     orderNumber,
@@ -6143,6 +6187,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           cncNumberOnly ? 'cnc-order-card--minimal cnc-compact-card' : '',
           cncMuted ? 'cnc-terminal-card--muted' : '',
           cncSummaryOnly ? 'cnc-order-card--summary-only' : '',
+          touchDragReady ? 'status-board-card--touch-ready' : '',
           isDragging || isTouchDragging ? 'status-board-card--dragging' : '',
           pending ? 'status-board-card--pending' : '',
         ].filter(Boolean).join(' '),

@@ -1115,6 +1115,38 @@
   box-shadow: 0 4px 12px var(--app-shadow);
 }
 
+.status-board-card--touch-ready,
+.cnc-board-card-shell--touch-ready > .status-board-card {
+  border-color: color-mix(in srgb, var(--status-color, #1677ff) 58%, var(--app-border-soft));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--status-color, #1677ff) 28%, transparent),
+    0 8px 18px var(--app-shadow);
+  transform-origin: center;
+  animation: statusBoardTouchReadyWiggle 360ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes statusBoardTouchReadyWiggle {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+
+  28% {
+    transform: translate3d(0, -1px, 0) rotate(-1.2deg) scale(1.015);
+  }
+
+  56% {
+    transform: translate3d(0, -1px, 0) rotate(1.2deg) scale(1.015);
+  }
+
+  78% {
+    transform: translate3d(0, 0, 0) rotate(-0.6deg) scale(1.008);
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+}
+
 .status-board-card:focus-visible {
   outline: 2px solid #1677ff;
   outline-offset: 2px;
@@ -3461,6 +3493,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .status-board-card--touch-ready,
+  .cnc-board-card-shell--touch-ready > .status-board-card {
+    animation: none;
+  }
+
   .status-board-toolbar-disclosure__content,
   .status-board-toolbar-disclosure__chevron,
   .status-board-column,
