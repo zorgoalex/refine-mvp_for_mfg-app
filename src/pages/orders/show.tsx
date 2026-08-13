@@ -1529,6 +1529,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     resource: 'order_doweling_links',
     filters: [
       { field: 'order_id', operator: 'eq', value: record?.order_id },
+      { field: 'delete_flag', operator: 'eq', value: false },
     ],
     pagination: { pageSize: 100 },
     queryOptions: {

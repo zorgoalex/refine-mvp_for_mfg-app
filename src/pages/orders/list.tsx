@@ -953,6 +953,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         operator: "in",
         value: orderIds,
       },
+      {
+        field: "delete_flag",
+        operator: "eq",
+        value: false,
+      },
     ],
     pagination: {
       pageSize: 10000,
@@ -1010,6 +1015,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         field: "order_id",
         operator: "in",
         value: orderIds,
+      },
+      {
+        field: "delete_flag",
+        operator: "eq",
+        value: false,
       },
     ],
     pagination: { pageSize: 10000 },
