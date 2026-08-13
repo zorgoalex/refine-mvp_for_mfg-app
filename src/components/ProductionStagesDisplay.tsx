@@ -1,9 +1,10 @@
+import { Tooltip } from '../ui/tooltipDelay';
 // Production Stages Display Component
 // Displays passed production stages as letters separated by slash
 // Format: Н/О/П/Р/С/Ш/К/З/У/В
 
 import React from 'react';
-import { Tooltip } from 'antd';
+
 import { PRODUCTION_STATUS_CODE_LETTERS, PRODUCTION_STATUS_DISPLAY_ORDER } from '../types/orders';
 
 // Full mapping with names for tooltips

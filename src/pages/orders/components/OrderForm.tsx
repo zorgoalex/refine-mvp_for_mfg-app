@@ -1,9 +1,10 @@
+import { Tooltip } from '../../../ui/tooltipDelay';
 // Main Order Form Component
 // Master-Detail form with Tabs for child entities
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Tooltip, Popconfirm, message } from 'antd';
+import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';

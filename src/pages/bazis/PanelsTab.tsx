@@ -1,3 +1,4 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 // Главный экран Базис-проекта: панели ревизии (с любой глубины дерева).
 // По умолчанию сгруппированы по материалу и размерам (уникальные позиции);
 // чекбокс «Группировать» переключает на плоский список. Группа
@@ -10,15 +11,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
-  ApartmentOutlined,
-  DownloadOutlined,
-  FilterOutlined,
-  InfoCircleOutlined,
-  ScissorOutlined,
-  SearchOutlined,
-  SettingOutlined,
-} from '@ant-design/icons';
-import { Button, Checkbox, Collapse, Empty, Input, Modal, Space, Table, Tooltip, Typography, notification } from 'antd';
+  ApartmentOutlined, DownloadOutlined, FilterOutlined, InfoCircleOutlined, ScissorOutlined, SearchOutlined, SettingOutlined, } from '@ant-design/icons';
+import { Button, Checkbox, Collapse, Empty, Input, Modal, Space, Typography, notification } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { FilterDropdownProps, FilterValue } from 'antd/es/table/interface';
 import { isApiError } from '../../api/apiError';

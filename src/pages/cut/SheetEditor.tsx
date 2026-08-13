@@ -1,3 +1,4 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 /**
  * SheetEditor — interactive SVG editor for a cut group's sheets.
  *
@@ -15,7 +16,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Menu, Space, Tooltip, message } from 'antd';
+import { Button, Menu, Space, message } from 'antd';
 import {
   ColumnHeightOutlined,
   DeleteOutlined,

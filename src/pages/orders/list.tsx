@@ -1,3 +1,4 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useMemo, useState, useCallback, useEffect } from "react";
 import type { Dayjs } from "dayjs";
 import {
@@ -15,7 +16,7 @@ import {
   useSelect,
 } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Button, Input, message, Tooltip, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge, Segmented } from "antd";
+import { Space, Button, Input, message, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge, Segmented } from "antd";
 import {
   AppstoreOutlined,
   EyeOutlined,

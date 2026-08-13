@@ -1,5 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Form, Input, Modal, Select, Space, Table, Typography, message, notification } from 'antd';
+import { Alert, Button, Card, Form, Input, Modal, Select, Space, Typography, message, notification } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link, useParams } from 'react-router-dom';
 import { ApiError } from '../../api/apiError';

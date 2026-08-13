@@ -1,5 +1,6 @@
-﻿import React from "react";
-import { Button, Drawer, Layout, List, Space, Tag, Tooltip, Typography } from "antd";
+import { Tooltip } from '../ui/tooltipDelay';
+import React from "react";
+import { Button, Drawer, Layout, List, Space, Tag, Typography } from "antd";
 import { NotificationOutlined } from "@ant-design/icons";
 import { authStorage } from "../utils/auth";
 import { releaseNotes, REPOSITORY_LABELS, SERVICE_LABELS } from "../releaseNotes";

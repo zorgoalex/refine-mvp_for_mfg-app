@@ -1,23 +1,10 @@
+import { Table, Tooltip } from '../../../ui/tooltipDelay';
 /**
  * VlmProvidersSection - CRUD для провайдеров VLM
  */
 
 import React, { useState, useMemo } from 'react';
-import {
-  Card,
-  Table,
-  Button,
-  Space,
-  Modal,
-  Form,
-  Input,
-  InputNumber,
-  Switch,
-  Tag,
-  Tooltip,
-  message,
-  Popconfirm,
-} from 'antd';
+import { Card, Button, Space, Modal, Form, Input, InputNumber, Switch, Tag, message, Popconfirm } from 'antd';
 import {
   PlusOutlined,
   EditOutlined,

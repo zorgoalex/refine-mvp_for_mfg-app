@@ -1,3 +1,4 @@
+import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Table
 // Displays list of order details with inline editing capabilities
 //
@@ -6,7 +7,7 @@
 // Решение: используем useRef для синхронного хранения значений полей
 
 import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext, useSyncExternalStore } from 'react';
-import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox, notification } from 'antd';
+import { Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Divider, Checkbox, notification } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';

@@ -1,5 +1,6 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Drawer, Empty, Popconfirm, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Card, Drawer, Empty, Popconfirm, Space, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';

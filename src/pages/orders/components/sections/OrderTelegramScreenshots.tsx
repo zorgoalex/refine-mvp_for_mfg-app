@@ -1,12 +1,6 @@
-import {
-  CloseOutlined,
-  PictureOutlined,
-  PrinterOutlined,
-  ReloadOutlined,
-  ZoomInOutlined,
-  ZoomOutOutlined,
-} from '@ant-design/icons';
-import { Alert, Button, Modal, Spin, Tag, Tooltip, Typography } from 'antd';
+import { Tooltip } from '../../../../ui/tooltipDelay';
+import { CloseOutlined, PictureOutlined, PrinterOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined, } from '@ant-design/icons';
+import { Alert, Button, Modal, Spin, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cncTelegramApi } from '../../../../api/cncTelegramApi';
 import { cutApi } from '../../../../api/cutApi';

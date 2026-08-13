@@ -1,3 +1,4 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React, {
   memo,
   useCallback,
@@ -6,28 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import {
-  Alert,
-  Badge,
-  Button,
-  Checkbox,
-  Collapse,
-  DatePicker,
-  Dropdown,
-  Empty,
-  Input,
-  Modal,
-  Segmented,
-  Select,
-  Skeleton,
-  Spin,
-  Switch,
-  Tabs,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-} from 'antd';
+import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   CalendarOutlined,

@@ -1,9 +1,10 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 // Вкладка «Операции»: все сдельные операции ревизии (из raw_json панелей),
 // с кодом, ценой и стоимостью; переходы к панели-владельцу и в дерево.
 
 import React, { useMemo } from 'react';
 import { ApartmentOutlined, TableOutlined } from '@ant-design/icons';
-import { Button, Empty, Space, Table, Tooltip } from 'antd';
+import { Button, Empty, Space } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type { BazisEstimateOperation } from '../../api/types/bazisApi.types';
 import { nodePathTitle, type RevisionData } from './useRevisionData';

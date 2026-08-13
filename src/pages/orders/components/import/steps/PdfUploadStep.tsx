@@ -1,7 +1,8 @@
+import { Table } from '../../../../../ui/tooltipDelay';
 // Step 1: PDF File Upload with parsing results preview
 
 import React, { useCallback } from 'react';
-import { Upload, Table, Typography, Space, Alert, Spin, Descriptions, Tag } from 'antd';
+import { Upload, Typography, Space, Alert, Spin, Descriptions, Tag } from 'antd';
 import { InboxOutlined, FilePdfOutlined, CheckCircleOutlined, WarningOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import type { PdfParsedResult } from '../types/pdfTypes';

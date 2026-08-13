@@ -1,5 +1,6 @@
+import { Tooltip } from '../../../ui/tooltipDelay';
 import React from 'react';
-import { Button, Space, Tooltip } from 'antd';
+import { Button, Space } from 'antd';
 import type { LabelCutMapStyle } from './labelCutMapStyle';
 
 export function LabelCutMapFlipControls({

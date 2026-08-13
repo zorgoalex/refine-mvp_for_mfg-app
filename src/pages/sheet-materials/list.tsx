@@ -1,8 +1,9 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useMemo } from 'react';
 import { IResourceComponentsProps, useMany, useNavigation } from '@refinedev/core';
 import { ShowButton, EditButton, CreateButton } from '@refinedev/antd';
 import { usePersistentTable as useTable } from '../../hooks/usePersistentTable';
-import { Space, Table, Badge, Tag, Button } from 'antd';
+import { Space, Badge, Tag, Button } from 'antd';
 import { useHighlightRow } from '../../hooks/useHighlightRow';
 import { LocalizedList } from '../../components/LocalizedList';
 import { can } from '../../utils/permissions';

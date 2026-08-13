@@ -1,5 +1,6 @@
+import { Table } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Input, InputNumber, Modal, Select, Space, Spin, Switch, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Input, InputNumber, Modal, Select, Space, Spin, Switch, Tag, Typography, message } from 'antd';
 import { SaveOutlined, ArrowUpOutlined, ArrowDownOutlined, HolderOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useGetIdentity, useInvalidate, useList, useUpdate } from '@refinedev/core';
 import { useLocation } from 'react-router-dom';

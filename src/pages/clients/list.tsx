@@ -1,8 +1,9 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useState, useCallback, useEffect } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, ShowButton, EditButton, CreateButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Badge, Input, Button, message } from "antd";
+import { Space, Badge, Input, Button, message } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { HasuraReportError } from "../../api/hasuraReportClient";

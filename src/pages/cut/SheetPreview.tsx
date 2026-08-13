@@ -1,5 +1,6 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useState } from 'react';
-import { Space, Tooltip } from 'antd';
+import { Space } from 'antd';
 import { CheckCircleFilled } from '@ant-design/icons';
 import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { displayedSheetExtents, formatSheetSide, type CutPieceOverlay } from './cutPreviewHelpers';

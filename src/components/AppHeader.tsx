@@ -1,5 +1,6 @@
+import { Tooltip } from '../ui/tooltipDelay';
 import React from "react";
-import { Layout, Space, Avatar, Typography, Dropdown, Button, Switch, Tooltip } from "antd";
+import { Layout, Space, Avatar, Typography, Dropdown, Button, Switch } from "antd";
 import {
   UserOutlined,
   LogoutOutlined,

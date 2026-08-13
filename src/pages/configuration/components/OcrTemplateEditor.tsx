@@ -1,5 +1,6 @@
+import { Table } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Divider, Drawer, Input, Select, Space, Switch, Table, Tag, Typography, Upload, message } from 'antd';
+import { Alert, Button, Checkbox, Divider, Drawer, Input, Select, Space, Switch, Tag, Typography, Upload, message } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import { ApiError } from '../../../api/apiError';
 import { labelsApi } from '../../../api/labelsApi';

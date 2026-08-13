@@ -1,6 +1,7 @@
+import { Table } from '../../ui/tooltipDelay';
 import { useShow, useList, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
-import { Typography, Badge, Row, Col, Divider, Table, Tag, Space } from "antd";
+import { Typography, Badge, Row, Col, Divider, Tag, Space } from "antd";
 import { PhoneOutlined, StarFilled } from "@ant-design/icons";
 import { ClientPhone, PhoneType, PHONE_TYPE_LABELS } from "../../types/clients";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";

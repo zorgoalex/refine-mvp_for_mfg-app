@@ -1,6 +1,7 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { useShow, useList, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
+import { Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";

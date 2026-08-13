@@ -1,20 +1,10 @@
+import { Table } from '../../../../../ui/tooltipDelay';
 // Step 1: Photo Upload with VLM analysis progress and results preview
 // Supports optional image crop before analysis
 
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { Upload, Table, Typography, Space, Alert, Progress, Descriptions, Tag, Button, Image, Checkbox } from 'antd';
-import {
-  InboxOutlined,
-  CameraOutlined,
-  CloudUploadOutlined,
-  ScanOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ReloadOutlined,
-  ScissorOutlined,
-  ZoomInOutlined,
-  ZoomOutOutlined,
-} from '@ant-design/icons';
+import { Upload, Typography, Space, Alert, Progress, Descriptions, Tag, Button, Image, Checkbox } from 'antd';
+import { InboxOutlined, CameraOutlined, CloudUploadOutlined, ScanOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, ScissorOutlined, ZoomInOutlined, ZoomOutOutlined, } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import type { Crop, PixelCrop } from 'react-image-crop';
 import type { ImportStatus, VlmImportResult } from '../../../../../hooks/useVlmImport';

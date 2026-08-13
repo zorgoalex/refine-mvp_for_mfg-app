@@ -1,9 +1,10 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 // Вкладка «Смета»: все стоимости ревизии (материалы узлов + сдельные
 // операции) одним списком с итогами и переходами к панели / в дерево.
 
 import React, { useMemo } from 'react';
 import { ApartmentOutlined, TableOutlined } from '@ant-design/icons';
-import { Button, Empty, Space, Statistic, Table, Tag, Tooltip } from 'antd';
+import { Button, Empty, Space, Statistic, Tag } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { nodePathTitle, type RevisionData } from './useRevisionData';
 

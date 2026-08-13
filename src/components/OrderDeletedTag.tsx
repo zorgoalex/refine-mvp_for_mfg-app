@@ -1,5 +1,6 @@
+import { Tooltip } from '../ui/tooltipDelay';
 import React from 'react';
-import { Tag, Tooltip } from 'antd';
+import { Tag } from 'antd';
 
 export const ORDER_DELETED_TAG_TEXT = 'удалён';
 export const ORDER_DELETED_TOOLTIP = 'Заказ удалён; ссылка ведёт в карточку удалённого заказа';

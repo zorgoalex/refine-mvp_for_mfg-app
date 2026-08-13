@@ -1,5 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React from 'react';
-import { Button, Form, Input, Select, Space, Table, Typography } from 'antd';
+import { Button, Form, Input, Select, Space, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type {
   GroupParticipantDto,

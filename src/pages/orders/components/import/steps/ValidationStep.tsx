@@ -1,7 +1,8 @@
+import { Table, Tooltip } from '../../../../../ui/tooltipDelay';
 // Step 4: Validation with inline editing and statistics
 
 import React, { useMemo } from 'react';
-import { Table, InputNumber, Input, Select, Typography, Card, Row, Col, Statistic, Tag, Tooltip, Button, Popconfirm, Alert, Space } from 'antd';
+import { InputNumber, Input, Select, Typography, Card, Row, Col, Statistic, Tag, Button, Popconfirm, Alert, Space } from 'antd';
 import { DeleteOutlined, CheckCircleOutlined, ExclamationCircleOutlined, WarningOutlined, SwapOutlined } from '@ant-design/icons';
 import type { ValidatedRow, ReferenceData } from '../types/importTypes';
 import type { ImportStats, UnresolvedReferences } from '../hooks/useImportValidation';

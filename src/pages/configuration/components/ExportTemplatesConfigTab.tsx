@@ -1,8 +1,6 @@
+import { Table, Tooltip } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert, Button, Card, Checkbox, Col, Empty, Form, Input, List, Popconfirm, Row, Select,
-  Space, Spin, Table, Tag, Tooltip, Typography, message,
-} from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Empty, Form, Input, List, Popconfirm, Row, Select, Space, Spin, Tag, Typography, message } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, CopyOutlined, DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
 import {
   exportTemplateCommandKey, exportTemplatesApi,

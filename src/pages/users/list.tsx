@@ -1,7 +1,8 @@
-﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { Table } from '../../ui/tooltipDelay';
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton, DateField } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Badge } from "antd";
+import { Space, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 import { DISPLAY_DATE_TIME_FORMAT } from "../../utils/dateFormat";
 

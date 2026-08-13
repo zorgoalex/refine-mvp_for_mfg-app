@@ -1,5 +1,6 @@
+import { Tooltip, Table } from '../../ui/tooltipDelay';
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, Tabs, Typography, Space, InputNumber, Input, Button, Tooltip, message, Spin, Table, Checkbox } from 'antd';
+import { Card, Tabs, Typography, Space, InputNumber, Input, Button, message, Spin, Checkbox } from 'antd';
 import { useList, useResource } from '@refinedev/core';
 import {
   SettingOutlined,

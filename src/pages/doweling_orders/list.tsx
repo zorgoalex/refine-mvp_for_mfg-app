@@ -1,8 +1,9 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useState } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton, List } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Badge, Button, Space, Switch, Table, Tooltip } from "antd";
+import { Badge, Button, Space, Switch } from "antd";
 import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";

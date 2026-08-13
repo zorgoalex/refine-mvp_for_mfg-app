@@ -1,7 +1,8 @@
-﻿import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
+import { Table } from '../../ui/tooltipDelay';
+import { IResourceComponentsProps, useMany, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton, List, useSelect } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Button, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Input } from "antd";
+import { Space, Button, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Input } from "antd";
 import { useMemo, useState } from "react";
 import { FilterOutlined, ClearOutlined, CheckCircleOutlined } from "@ant-design/icons";
 import { useHighlightRow } from "../../hooks/useHighlightRow";

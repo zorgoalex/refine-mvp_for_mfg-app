@@ -1,14 +1,7 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ArrowLeftOutlined,
-  CheckOutlined,
-  CloseOutlined,
-  DownloadOutlined,
-  EditOutlined,
-  HistoryOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
-import { Alert, Button, Card, Col, Descriptions, Empty, Input, Row, Select, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd';
+import { ArrowLeftOutlined, CheckOutlined, CloseOutlined, DownloadOutlined, EditOutlined, HistoryOutlined, PlusOutlined, } from '@ant-design/icons';
+import { Alert, Button, Card, Col, Descriptions, Empty, Input, Row, Select, Space, Spin, Tabs, Typography, message } from 'antd';
 import { useSelect } from '@refinedev/antd';
 import type { BazisProjectCard } from '../../api/types/bazisApi.types';
 import { Link, useParams, useSearchParams } from 'react-router-dom';

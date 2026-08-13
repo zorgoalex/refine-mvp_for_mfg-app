@@ -1,20 +1,6 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Checkbox,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Select,
-  Space,
-  Tag,
-  Tooltip,
-  Typography,
-  Upload,
-  message,
-} from 'antd';
+import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Tag, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import {
   CloseOutlined,

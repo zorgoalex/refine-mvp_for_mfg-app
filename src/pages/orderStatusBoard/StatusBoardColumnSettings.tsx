@@ -1,5 +1,6 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useMemo, useState } from 'react';
-import { Button, Checkbox, Modal, Tooltip, message } from 'antd';
+import { Button, Checkbox, Modal, message } from 'antd';
 import { SettingOutlined } from '@ant-design/icons';
 import type { OrderDetailColumnPreference } from '../../api/types/profileApi.types';
 import type { OrderDetailColumnDefinition } from '../orders/components/tables/OrderDetailColumnSettings';

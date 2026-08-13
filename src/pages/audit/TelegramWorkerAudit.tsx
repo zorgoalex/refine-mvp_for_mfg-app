@@ -1,5 +1,6 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, message, Row, Select, Space, Statistic, Table, Tag, Timeline, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, message, Row, Select, Space, Statistic, Tag, Timeline, Typography } from 'antd';
 import { DownloadOutlined, ReloadOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { cncTelegramApi } from '../../api/cncTelegramApi';

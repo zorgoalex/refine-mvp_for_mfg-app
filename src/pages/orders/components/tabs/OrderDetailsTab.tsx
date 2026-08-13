@@ -1,8 +1,9 @@
+import { Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
 import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
-import { Card, Button, Space, Modal, message, Tooltip, Alert } from 'antd';
+import { Card, Button, Space, Modal, message, Alert } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,

@@ -1,18 +1,6 @@
+import { Table } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Button,
-  Drawer,
-  Empty,
-  Input,
-  Modal,
-  Select,
-  Space,
-  Switch,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
+import { Button, Drawer, Empty, Input, Modal, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import { ApartmentOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { useGetIdentity } from '@refinedev/core';
 import { ApiError } from '../../../api/apiError';

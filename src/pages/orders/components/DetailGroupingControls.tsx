@@ -1,6 +1,7 @@
+import { Tooltip } from '../../../ui/tooltipDelay';
 // src/pages/orders/components/DetailGroupingControls.tsx
 import React, { useMemo } from 'react';
-import { Dropdown, Button, Checkbox, Space, Tooltip } from 'antd';
+import { Dropdown, Button, Checkbox, Space } from 'antd';
 import { ApartmentOutlined, DownOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { GroupField } from '../detailGrouping';

@@ -1,3 +1,4 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 // Ячейка «Примечания» панели: текст + инлайн-редактор (✎ → Input; Enter или
 // blur = сохранить, Esc = отмена — blur после Esc НЕ сохраняет). Сохранение —
 // backend-команда PATCH nodes/:id/notes; успех отдаётся родителю вместе с
@@ -5,7 +6,7 @@
 
 import React, { useRef, useState } from 'react';
 import { EditOutlined } from '@ant-design/icons';
-import { Button, Input, Space, Tooltip, Typography, notification } from 'antd';
+import { Button, Input, Space, Typography, notification } from 'antd';
 import { bazisApi } from '../../api/bazisApi';
 import {
   NODE_NOTES_MAX_LENGTH,

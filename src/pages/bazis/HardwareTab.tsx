@@ -1,10 +1,11 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 // Вкладка «Фурнитура»: все узлы-фурнитура ревизии одним списком, с кодом
 // позиции и ID материала из Базиса, расположением по блокам и переходами
 // в дерево / к родительской панели (если есть).
 
 import React, { useMemo } from 'react';
 import { ApartmentOutlined, TableOutlined } from '@ant-design/icons';
-import { Button, Empty, Space, Table, Tooltip } from 'antd';
+import { Button, Empty, Space } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { NodeCard } from './NodeCard';
 import { nodePathTitle, type RevisionData } from './useRevisionData';

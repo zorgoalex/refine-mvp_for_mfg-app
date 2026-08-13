@@ -1,5 +1,6 @@
+import { Table } from '../../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Badge, Input, Segmented, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Badge, Input, Segmented, Space, Tag, Typography, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 

@@ -1,5 +1,6 @@
+import { Tooltip } from '../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Modal, Space, Tooltip, Typography, message } from 'antd';
+import { Button, Modal, Space, Typography, message } from 'antd';
 import type { ButtonProps } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, HolderOutlined, SettingOutlined } from '@ant-design/icons';
 import type { SidebarMenuOrderPreference } from '../api/types/profileApi.types';

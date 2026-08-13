@@ -1,6 +1,7 @@
+import { Table } from '../../ui/tooltipDelay';
 import React from "react";
 import { DateField } from "@refinedev/antd";
-import { Alert, Button, Card, Input, Modal, Space, Table, Typography } from "antd";
+import { Alert, Button, Card, Input, Modal, Space, Typography } from "antd";
 import { DisconnectOutlined } from "@ant-design/icons";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { authApi, type WorkosLinkItem } from "../../api/authApi";

@@ -1,5 +1,6 @@
+import { Tooltip } from '../ui/tooltipDelay';
 import React, { Suspense, lazy, useState } from 'react';
-import { Button, Dropdown, Tooltip, type DropdownProps, type TooltipProps } from 'antd';
+import { Button, Dropdown, type DropdownProps, type TooltipProps } from 'antd';
 import { EllipsisOutlined, FileAddOutlined } from '@ant-design/icons';
 import { featureFlags } from '../config/featureFlags';
 import { can } from '../utils/permissions';

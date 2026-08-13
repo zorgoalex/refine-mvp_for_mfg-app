@@ -1,8 +1,9 @@
+import { Table } from '../../../../ui/tooltipDelay';
 // Order Materials Tab
 // Displays aggregated data for materials and films
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Row, Col, Table, Typography } from 'antd';
+import { Row, Col, Typography } from 'antd';
 import { useList } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';

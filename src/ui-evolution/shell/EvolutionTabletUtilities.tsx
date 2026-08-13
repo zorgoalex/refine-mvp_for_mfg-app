@@ -1,5 +1,6 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React from 'react';
-import { Avatar, Button, Dropdown, Tooltip } from 'antd';
+import { Avatar, Button, Dropdown } from 'antd';
 import {
   LogoutOutlined,
   MoonOutlined,

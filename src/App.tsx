@@ -262,8 +262,6 @@ const ThemedApp = () => {
                     },
                   }),
             }}
-            tooltip={{ mouseEnterDelay: 1 }}
-            table={{ showSorterTooltip: { mouseEnterDelay: 1 } }}
           >
             <WarningNotificationBridge />
             <AuthSessionExpiryBridge />

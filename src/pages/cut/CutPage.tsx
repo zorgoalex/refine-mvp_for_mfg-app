@@ -1,26 +1,6 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  Collapse,
-  DatePicker,
-  Empty,
-  Form,
-  Input,
-  Modal,
-  Radio,
-  Select,
-  Space,
-  Spin,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-  theme,
-} from 'antd';
+import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tag, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,

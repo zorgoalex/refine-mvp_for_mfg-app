@@ -1,5 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React from 'react';
-import { Descriptions, Space, Statistic, Table, Tag, Typography } from 'antd';
+import { Descriptions, Space, Statistic, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import type {
   OrderGroupRelationType,

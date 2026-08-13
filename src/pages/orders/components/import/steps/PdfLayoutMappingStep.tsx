@@ -1,5 +1,6 @@
+import { Table } from '../../../../../ui/tooltipDelay';
 import React from 'react';
-import { Alert, Card, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Card, Select, Space, Tag, Typography } from 'antd';
 import type { SheetMaterialReferenceItem } from '../types/importTypes';
 import type { PdfGenericTable, PdfUnresolvedLineAction } from '../utils/pdfGenericTable';
 import type { PdfLayoutMapping, PdfLayoutTarget } from '../utils/pdfLayoutPattern';
