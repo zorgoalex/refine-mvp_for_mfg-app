@@ -170,6 +170,8 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as root:
             worker = object.__new__(CncTelegramWorker)
             worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            svg_payload = manual_svg_send_file("svg", "CNC#1_2777+2723-HDF.svg", b"<svg></svg>")
+            svg_payload["base64Content"] = with_base64_line_breaks(str(svg_payload["base64Content"]))
             worker.erp = SimpleNamespace(
                 claim_manual_svg_telegram_sends=AsyncMock(return_value={
                     "capability": "cnc_manual_svg_telegram_send_v1",
@@ -178,7 +180,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                         "packetId": "00000000-0000-4000-8000-000000000011",
                         "messageText": "Фрезы для ХДФ: 8",
                         "files": [
-                            manual_svg_send_file("svg", "CNC#1_2777+2723-HDF.svg", b"<svg></svg>"),
+                            svg_payload,
                             manual_svg_send_file("gcode", "CNC#1_2777+2723-HDF.nc", b"G01 X1"),
                         ],
                     }],
@@ -246,6 +248,10 @@ def manual_svg_send_file(kind: str, file_name: str, body: bytes) -> dict[str, ob
         "sha256": hashlib.sha256(body).hexdigest(),
         "base64Content": base64.b64encode(body).decode("ascii"),
     }
+
+
+def with_base64_line_breaks(value: str) -> str:
+    return "\n".join(value[index:index + 4] for index in range(0, len(value), 4))
 
 
 if __name__ == "__main__":

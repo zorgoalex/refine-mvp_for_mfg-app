@@ -1158,8 +1158,9 @@ def write_manual_svg_send_file(send_dir: Path, file_item: Any, index: int) -> Pa
     file_name = safe_manual_svg_send_file_name(str(file_item.get("fileName") or f"file-{index}"))
     target = unique_child_path(send_dir, file_name)
     content = str(file_item.get("base64Content") or "")
+    normalized_content = re.sub(r"\s+", "", content)
     try:
-        raw = base64.b64decode(content.encode("ascii"), validate=True)
+        raw = base64.b64decode(normalized_content.encode("ascii"), validate=True)
     except Exception as exc:
         raise RuntimeError(f"{file_name}: invalid base64 content") from exc
     size_bytes = int(file_item.get("sizeBytes") or -1)
