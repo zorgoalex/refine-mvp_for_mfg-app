@@ -6,6 +6,7 @@ import {
   firstBathSheetMaterialId,
   isVacuumTableProfile,
   isVacuumTableJob,
+  profileDrivenCutJobName,
   resolveCutJobLayoutKind,
   resolveSheetAxisOriginForJob,
   textureDirectionForCutProfile,
@@ -77,6 +78,15 @@ describe('vacuum profile defaults', () => {
     expect(textureDirectionForCutProfile(5, profiles)).toBeNull();
     expect(textureDirectionForCutProfile(null, profiles)).toBeNull();
     expect(textureDirectionForCutProfile(999, profiles)).toBeNull();
+  });
+
+  it('switches only auto-managed cut job name prefixes for vacuum/non-vacuum profiles', () => {
+    const profiles = [profile(4, 'vacuum_table'), profile(5, 'guillotine')];
+
+    expect(profileDrivenCutJobName('Раскрой 2709', 4, profiles)).toBe('Ванна 2709');
+    expect(profileDrivenCutJobName('Ванна 2709', 5, profiles)).toBe('Раскрой 2709');
+    expect(profileDrivenCutJobName('  Раскрой 2709', 4, profiles)).toBe('  Ванна 2709');
+    expect(profileDrivenCutJobName('Срочный 2709', 4, profiles)).toBe('Срочный 2709');
   });
 
   it('opens every non-vacuum profile top-left and preserves the saved vacuum origin', () => {
@@ -214,6 +224,84 @@ describe('vacuum profile defaults', () => {
       ['sheet', 17, 2, 14],
     ]);
     expect(result.job).toMatchObject({ version: 15, textureDirection: 'vertical', sheetMaterialTypeId: 2 });
+  });
+
+  it('renames an auto-created cut job to Ванна when selecting a vacuum profile', async () => {
+    const calls: Array<[string, number, number | string | null, number]> = [];
+    const mutations = {
+      setProfile: vi.fn(async (jobId: number, value: number | null, version: number) => {
+        calls.push(['profile', jobId, value, version]);
+        return job({
+          name: 'Раскрой 2709',
+          version: 11,
+          paramProfileId: value,
+          splitByMaterial: false,
+          combineFilms: false,
+          sheetMaterialTypeId: 2,
+        });
+      }),
+      setName: vi.fn(async (jobId: number, value: string, version: number) => {
+        calls.push(['name', jobId, value, version]);
+        return job({
+          name: value,
+          version: 12,
+          paramProfileId: 4,
+          splitByMaterial: false,
+          combineFilms: false,
+          sheetMaterialTypeId: 2,
+        });
+      }),
+      setTextureDirection: vi.fn(),
+      setSplitByMaterial: vi.fn(),
+      setCombineFilms: vi.fn(),
+      setSheetMaterial: vi.fn(),
+    };
+
+    const result = await applyCutProfileSelection({
+      currentJob: job({ name: 'Раскрой 2709', splitByMaterial: false, combineFilms: false, sheetMaterialTypeId: 2 }),
+      paramProfileId: 4,
+      profiles: [profile(4, 'vacuum_table')],
+      sheetOptions: [sheet(2, 'Ванна 2800x1050')],
+      mutations,
+    });
+
+    expect(calls).toEqual([
+      ['profile', 17, 4, 10],
+      ['name', 17, 'Ванна 2709', 11],
+    ]);
+    expect(result.job.name).toBe('Ванна 2709');
+  });
+
+  it('renames an auto-created bath job back to Раскрой when selecting a non-vacuum profile', async () => {
+    const calls: Array<[string, number, number | string | null, number]> = [];
+    const mutations = {
+      setProfile: vi.fn(async (jobId: number, value: number | null, version: number) => {
+        calls.push(['profile', jobId, value, version]);
+        return job({ name: 'Ванна 2709', version: 11, paramProfileId: value });
+      }),
+      setName: vi.fn(async (jobId: number, value: string, version: number) => {
+        calls.push(['name', jobId, value, version]);
+        return job({ name: value, version: 12, paramProfileId: 5 });
+      }),
+      setTextureDirection: vi.fn(),
+      setSplitByMaterial: vi.fn(),
+      setCombineFilms: vi.fn(),
+      setSheetMaterial: vi.fn(),
+    };
+
+    const result = await applyCutProfileSelection({
+      currentJob: job({ name: 'Ванна 2709' }),
+      paramProfileId: 5,
+      profiles: [profile(4, 'vacuum_table'), profile(5, 'guillotine')],
+      sheetOptions: [sheet(2, 'Ванна 2800x1050')],
+      mutations,
+    });
+
+    expect(calls).toEqual([
+      ['profile', 17, 5, 10],
+      ['name', 17, 'Раскрой 2709', 11],
+    ]);
+    expect(result.job.name).toBe('Раскрой 2709');
   });
 
   it('reports a missing bath sheet after disabling both flags', async () => {

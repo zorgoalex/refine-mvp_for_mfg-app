@@ -582,6 +582,9 @@ describe('CutPage profile + totals columns (source guard)', () => {
   });
   it('wires the profile selector to setProfile', () => {
     expect(source).toContain('cutApi.setProfile');
+    expect(source).toContain('setName: cutApi.setName');
+    expect(source).toContain('manualNamePrefixJobIdsRef');
+    expect(source).toContain('cutJobNameFirstWord(job.name)');
   });
 });
 
