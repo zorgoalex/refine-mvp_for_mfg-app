@@ -11,7 +11,8 @@ export interface OrderContextMenuProps {
   visible: boolean;
   x: number;
   y: number;
-  mobile?: boolean;
+  compact?: boolean;
+  submenuDirection?: 'right' | 'left';
   onClose: () => void;
   onStatusChange: (fieldName: string, statusId: number, statusName: string) => void;
   onProductionStatusToggle: (statusId: number, statusName: string) => void;
@@ -69,7 +70,8 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   visible,
   x,
   y,
-  mobile = false,
+  compact = false,
+  submenuDirection = 'right',
   onClose,
   onStatusChange,
   onProductionStatusToggle,
@@ -180,6 +182,20 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
     };
   });
 
+  const submenuPopupClassName = [
+    CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS,
+    compact ? `${CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS}--compact` : '',
+    `${CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS}--${submenuDirection}`,
+  ].filter(Boolean).join(' ');
+  const submenuPopupOffset: [number, number] = submenuDirection === 'left' ? [-10, 0] : [10, 0];
+  const submenuPlacements: MenuProps['builtinPlacements'] = {
+    rightTop: {
+      points: submenuDirection === 'left' ? ['tr', 'tl'] : ['tl', 'tr'],
+      offset: submenuDirection === 'left' ? [-4, 0] : [4, 0],
+      overflow: { adjustX: 0, adjustY: 1 },
+    },
+  };
+
   // Главное меню с подменю
   const menuItems: MenuProps['items'] = [
     {
@@ -193,14 +209,16 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
       key: 'order_status',
       label: 'Статус заказа',
       children: orderStatusItems,
-      popupClassName: CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS,
+      popupClassName: submenuPopupClassName,
+      popupOffset: submenuPopupOffset,
     },
     ...(paymentStatusItems.length > 0
       ? [{
           key: 'payment_status',
           label: 'Статус оплаты',
           children: paymentStatusItems,
-          popupClassName: CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS,
+          popupClassName: submenuPopupClassName,
+          popupOffset: submenuPopupOffset,
         }]
       : []),
     ...(productionStatusItems.length > 0
@@ -208,7 +226,8 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
           key: 'production_status',
           label: 'Статус производства',
           children: productionStatusItems,
-          popupClassName: CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS,
+          popupClassName: submenuPopupClassName,
+          popupOffset: submenuPopupOffset,
         }]
       : []),
     ...(onMoveToDate
@@ -228,7 +247,11 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
     <>
       {visible && (
         <div
-          className={`calendar-context-menu${mobile ? ' calendar-context-menu--mobile' : ''}`}
+          className={[
+            'calendar-context-menu',
+            compact ? 'calendar-context-menu--compact' : '',
+            `calendar-context-menu--submenu-${submenuDirection}`,
+          ].filter(Boolean).join(' ')}
           style={{
             position: 'fixed',
             top: y,
@@ -238,13 +261,14 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
           onClick={(e) => e.stopPropagation()}
         >
           <Menu
-            mode={mobile ? 'vertical' : 'inline'}
+            mode="vertical"
             inlineIndent={12}
-            triggerSubMenuAction={mobile ? 'click' : 'hover'}
+            triggerSubMenuAction={compact ? 'click' : 'hover'}
+            builtinPlacements={submenuPlacements}
             items={menuItems}
             style={{
-              minWidth: mobile ? 0 : 220,
-              width: mobile ? '100%' : undefined,
+              minWidth: compact ? 0 : 220,
+              width: compact ? '100%' : undefined,
               border: 'none',
               boxShadow: '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,0.08)',
             }}
