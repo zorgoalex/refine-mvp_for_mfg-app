@@ -16,6 +16,7 @@ import {
 import { formatDateKey } from '../utils/dateUtils';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
+import { buildCalendarOrderDragPreview } from './calendarDragPreview';
 
 /**
  * Компонент карточки заказа (стандартный вид)
@@ -224,7 +225,11 @@ const OrderCard: React.FC<OrderCardProps> = ({
   const cardNodeRef = useRef<HTMLDivElement | null>(null);
   const [collected, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean; handlerId: string | symbol | null }>({
     type: DRAG_TYPE,
-    item: { order, sourceDate },
+    item: () => ({
+      order,
+      preview: buildCalendarOrderDragPreview(order, sourceDate, cardNodeRef.current),
+      sourceDate,
+    }),
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
       handlerId: monitor.getHandlerId(),
@@ -310,7 +315,6 @@ const OrderCard: React.FC<OrderCardProps> = ({
       className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${borderClass}`}
       style={{
         backgroundColor,
-        opacity: isDragging ? 0.5 : 1,
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
         marginBottom: marginCompensation,

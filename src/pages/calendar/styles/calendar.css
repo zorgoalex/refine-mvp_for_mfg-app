@@ -309,8 +309,58 @@
 
 /* Перетаскиваемая карточка */
 .order-card--dragging {
-  opacity: 0.5;
+  opacity: 0.46;
   cursor: grabbing;
+  outline: 2px dashed rgba(24, 144, 255, 0.72);
+  outline-offset: -5px;
+  box-shadow:
+    0 0 0 1px rgba(24, 144, 255, 0.5),
+    0 8px 18px rgba(24, 144, 255, 0.18);
+}
+
+.calendar-order-drag-outline {
+  position: fixed;
+  z-index: 5200;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 10px;
+  pointer-events: none;
+  color: var(--app-text);
+  background: var(--calendar-drag-bg, rgba(255, 255, 255, 0.94));
+  border-left: 4px solid var(--calendar-drag-border, #1677ff);
+  border-radius: 8px;
+  outline: 2px dashed rgba(24, 144, 255, 0.78);
+  outline-offset: -6px;
+  box-shadow:
+    0 0 0 1px rgba(24, 144, 255, 0.34),
+    0 14px 30px rgba(15, 23, 42, 0.24),
+    0 4px 10px rgba(15, 23, 42, 0.16);
+  opacity: 0.96;
+  overflow: hidden;
+  transform: translateZ(0);
+  transition-property: opacity, box-shadow;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+}
+
+.calendar-order-drag-outline__title {
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-order-drag-outline__subtitle,
+.calendar-order-drag-outline__meta {
+  font-size: 12px;
+  line-height: 1.25;
+  color: var(--app-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Карточка со статусом "Готов к выдаче" - зелёный контур */

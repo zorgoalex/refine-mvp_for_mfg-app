@@ -1168,6 +1168,10 @@
   touch-action: pan-x pan-y;
 }
 
+:root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .order-card--dragging {
+  opacity: 0.58;
+}
+
 :root:where([data-ui-variant="evolution"], [data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell--tablet .evolution-shell__content:where(
   [data-modern-route="order-detail"],
   [data-modern-route="client-detail"],

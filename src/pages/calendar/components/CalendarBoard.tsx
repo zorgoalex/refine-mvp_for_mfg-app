@@ -22,6 +22,7 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { useInvalidate } from '@refinedev/core';
 import DayColumn from './DayColumn';
+import CalendarOrderDragLayer from './CalendarOrderDragLayer';
 import OrderContextMenu from './OrderContextMenu';
 import { useCalendarDays } from '../hooks/useCalendarDays';
 import { useCalendarData } from '../hooks/useCalendarData';
@@ -192,8 +193,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const isMobile = responsive.isMobile;
   const isNarrow = responsive.isNarrow;
   const deviceTier = useDeviceTier();
-  const isTabletContextMenu = isTabletTier(deviceTier);
-  const compactContextMenu = isMobile || isTabletContextMenu;
+  const isTabletLayout = isTabletTier(deviceTier);
+  const compactContextMenu = isMobile || isTabletLayout;
 
   // AD-2: pick DnD backend based on pointer precision.
   // TouchBackend only on touch-primary devices; touch-capable desktops
@@ -674,6 +675,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
       }
     >
       <div className="calendar-board" ref={containerRef}>
+        <CalendarOrderDragLayer enabled={isTabletLayout} />
         <MobileCalendarDisclosure
           mobile={isMobile}
           expanded={mobileControlsExpanded}

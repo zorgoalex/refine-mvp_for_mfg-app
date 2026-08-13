@@ -4,6 +4,7 @@ import { useDrag, useDragDropManager } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
 import { getCardBorderColor, getMillingDisplayValue } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
+import { buildCalendarOrderDragPreview } from './calendarDragPreview';
 
 /**
  * Компактный вид карточки заказа
@@ -154,7 +155,11 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   // Настройка useDrag для перетаскивания карточки
   const [collected, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean; handlerId: string | symbol | null }>({
     type: DRAG_TYPE,
-    item: { order, sourceDate },
+    item: () => ({
+      order,
+      preview: buildCalendarOrderDragPreview(order, sourceDate, cardNodeRef.current),
+      sourceDate,
+    }),
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
       handlerId: monitor.getHandlerId(),
@@ -205,7 +210,6 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
       className={`order-card order-card--compact ${isDragging || isDraggingProp ? 'order-card--dragging' : ''}`}
       style={{
         borderColor,
-        opacity: isDragging ? 0.5 : 1,
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
         marginBottom: marginCompensation,
