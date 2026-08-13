@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applySvgMatrixToPoint, parseSvgTransformList } from './svgCutUploadParser';
+
+const parserSource = readFileSync('src/pages/cut/svgCutUploadParser.ts', 'utf8');
 
 function roundedPoint(value: [number, number]): [number, number] {
   return [
@@ -32,5 +35,16 @@ describe('svgCutUploadParser transforms', () => {
       .toBe('unsupported SVG transform: matrix');
     expect(parseSvgTransformList('translate(10 20px)').error)
       .toBe('unsupported SVG transform: translate');
+  });
+});
+
+describe('svgCutUploadParser visual labels', () => {
+  it('treats top-layer visual labels as the primary detail identity source', () => {
+    expect(parserSource).toContain('extractVisualDetailLabels');
+    expect(parserSource).toContain('matchVisualLabelsToPartContours');
+    expect(parserSource).toContain('visualLabels.length > 0');
+    expect(parserSource).toContain('PartContour detail outline has no matching visual label');
+    expect(parserSource.indexOf('if (visualLabels.length > 0)'))
+      .toBeLessThan(parserSource.indexOf('} else {\n    for (const contour of partContours)'));
   });
 });

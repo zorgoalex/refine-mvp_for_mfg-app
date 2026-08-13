@@ -5,6 +5,9 @@ import type {
 
 const DETAIL_HEADER_RE = /(?<order>\d{4,})#(?<detail>\d{1,5})#/;
 const DETAIL_SIZE_RE = /@(?<width>\d+(?:[.,]\d+)?)\*(?<height>\d+(?:[.,]\d+)?)@/;
+const VISUAL_SIZE_RE = /(?<width>\d+(?:[.,]\d+)?)\s*[xхХX*×]\s*(?<height>\d+(?:[.,]\d+)?)/;
+const VISUAL_ORDER_RE = /\b(?<order>\d{4,})\b/;
+const VISUAL_DETAIL_RE = /(?:поз\.?|позиция|дет\.?|деталь|#)?\s*(?<detail>\d{1,5})/i;
 const NUMBER_RE = /-?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?/g;
 const TRANSFORM_NUMBER_TOKEN_RE = /^\s*,?\s*(-?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?)/;
 const PATH_TOKEN_RE = /[MmLlHhVvCcSsQqTtAaZz]|-?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?/g;
@@ -17,6 +20,28 @@ export type SvgMatrix = [number, number, number, number, number, number];
 export type SvgPoint = [number, number];
 type Point = SvgPoint;
 type Bbox = [number, number, number, number];
+
+interface PartContourGeometry {
+  elementId: string;
+  comments: string[];
+  xMm: number;
+  yMm: number;
+  placedWidthMm: number;
+  placedHeightMm: number;
+}
+
+interface VisualTextLine {
+  text: string;
+  xMm: number;
+  yMm: number;
+}
+
+interface VisualDetailLabel extends ParsedDetailComment {
+  key: string;
+  cxMm: number;
+  cyMm: number;
+  rawLines: string[];
+}
 
 export interface ParsedSvgUpload {
   fileName: string;
@@ -82,8 +107,10 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
   const scaleY = vbHeight / sheetHeight;
 
   const layoutItems: CncTelegramCutLayout['items'] = [];
+  const partContours: PartContourGeometry[] = [];
   const seenGeometry = new Set<string>();
   const rejected = new Set<string>();
+  const visualLabels = extractVisualDetailLabels(root, vbMinX, vbMinY, scaleX, scaleY);
   let rawCommentCount = 0;
   let partContourCount = 0;
 
@@ -99,12 +126,11 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
       rejected.add(transformError);
       continue;
     }
-    if (comments.length === 0) continue;
 
     const points = elementPoints(element).map((point) => applyMatrix(point, matrix));
     const bbox = pointsBbox(points);
     if (!bbox) {
-      if (comments.some((comment) => parseDetailComment(comment, null))) {
+      if (visualLabels.length > 0 || comments.some((comment) => parseDetailComment(comment, null))) {
         rejected.add('PartContour detail outlines have no geometry');
       }
       continue;
@@ -114,13 +140,6 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
     const yMm = (bbox[1] - vbMinY) / scaleY;
     const placedWidthMm = Math.abs(bbox[2] - bbox[0]) / scaleX;
     const placedHeightMm = Math.abs(bbox[3] - bbox[1]) / scaleY;
-    const parsedComments = comments
-      .map((comment) => parseDetailComment(comment, [placedWidthMm, placedHeightMm]))
-      .filter((comment): comment is ParsedDetailComment => comment !== null);
-    if (parsedComments.length === 0) {
-      rejected.add('PartContour detail outlines have unreadable detail comments');
-      continue;
-    }
 
     const insideSheet =
       xMm >= -LAYOUT_BOUNDS_TOLERANCE_MM &&
@@ -132,16 +151,30 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
       continue;
     }
 
-    let matchedComment = false;
-    for (const parsed of parsedComments) {
-      if (!sizeMatches(parsed.widthMm, parsed.heightMm, placedWidthMm, placedHeightMm)) continue;
-      matchedComment = true;
+    partContours.push({
+      elementId,
+      comments,
+      xMm,
+      yMm,
+      placedWidthMm,
+      placedHeightMm,
+    });
+  }
+
+  if (visualLabels.length > 0) {
+    const visualMatches = matchVisualLabelsToPartContours(partContours, visualLabels);
+    for (const contour of partContours) {
+      const parsed = visualMatches.get(contour);
+      if (!parsed) {
+        rejected.add('PartContour detail outline has no matching visual label');
+        continue;
+      }
       const key = [
         parsed.orderName,
         parsed.detailNumber,
         parsed.widthMm,
         parsed.heightMm,
-        elementId,
+        contour.elementId,
       ].join('|');
       if (seenGeometry.has(key)) continue;
       seenGeometry.add(key);
@@ -152,22 +185,66 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
         heightMm: parsed.heightMm,
         quantity: 1,
         confidence: 0.99,
-        sourceElementId: elementId,
-        xMm: round2(xMm),
-        yMm: round2(yMm),
-        placedWidthMm: round2(placedWidthMm),
-        placedHeightMm: round2(placedHeightMm),
-        rotated: Math.round(placedWidthMm) === Math.round(parsed.heightMm) &&
-          Math.round(placedHeightMm) === Math.round(parsed.widthMm),
+        sourceElementId: contour.elementId,
+        xMm: round2(contour.xMm),
+        yMm: round2(contour.yMm),
+        placedWidthMm: round2(contour.placedWidthMm),
+        placedHeightMm: round2(contour.placedHeightMm),
+        rotated: Math.round(contour.placedWidthMm) === Math.round(parsed.heightMm) &&
+          Math.round(contour.placedHeightMm) === Math.round(parsed.widthMm),
       });
     }
-    if (!matchedComment) {
-      rejected.add('PartContour detail outline size does not match detail comment');
+  } else {
+    for (const contour of partContours) {
+      if (contour.comments.length === 0) continue;
+      const parsedComments = contour.comments
+        .map((comment) => parseDetailComment(comment, [contour.placedWidthMm, contour.placedHeightMm]))
+        .filter((comment): comment is ParsedDetailComment => comment !== null);
+      if (parsedComments.length === 0) {
+        rejected.add('PartContour detail outlines have unreadable detail comments');
+        continue;
+      }
+
+      let matchedComment = false;
+      for (const parsed of parsedComments) {
+        if (!sizeMatches(parsed.widthMm, parsed.heightMm, contour.placedWidthMm, contour.placedHeightMm)) continue;
+        matchedComment = true;
+        const key = [
+          parsed.orderName,
+          parsed.detailNumber,
+          parsed.widthMm,
+          parsed.heightMm,
+          contour.elementId,
+        ].join('|');
+        if (seenGeometry.has(key)) continue;
+        seenGeometry.add(key);
+        layoutItems.push({
+          orderName: parsed.orderName,
+          detailNumber: parsed.detailNumber,
+          widthMm: parsed.widthMm,
+          heightMm: parsed.heightMm,
+          quantity: 1,
+          confidence: 0.99,
+          sourceElementId: contour.elementId,
+          xMm: round2(contour.xMm),
+          yMm: round2(contour.yMm),
+          placedWidthMm: round2(contour.placedWidthMm),
+          placedHeightMm: round2(contour.placedHeightMm),
+          rotated: Math.round(contour.placedWidthMm) === Math.round(parsed.heightMm) &&
+            Math.round(contour.placedHeightMm) === Math.round(parsed.widthMm),
+        });
+      }
+      if (!matchedComment) {
+        rejected.add('PartContour detail outline size does not match detail comment');
+      }
     }
   }
 
   const reasons: string[] = [];
-  if (rawCommentCount === 0) reasons.push('no detail comments');
+  if (visualLabels.length === 0 && rawCommentCount === 0) reasons.push('no detail comments');
+  if (visualLabels.length > 0 && layoutItems.length === 0) {
+    reasons.push('visual detail labels exist but no label matched a PartContour outline');
+  }
   if (partContourCount === 0) reasons.push('no PartContour detail outlines');
   reasons.push(...Array.from(rejected).sort());
   if (partContourCount > 0 && layoutItems.length === 0) {
@@ -245,6 +322,222 @@ function parseDetailComment(comment: string, bboxSize: [number, number] | null):
     widthMm: width,
     heightMm: height,
   };
+}
+
+function extractVisualDetailLabels(
+  root: Element,
+  vbMinX: number,
+  vbMinY: number,
+  scaleX: number,
+  scaleY: number,
+): VisualDetailLabel[] {
+  return groupVisualDetailLabels(collectVisualTextLines(root, vbMinX, vbMinY, scaleX, scaleY));
+}
+
+function collectVisualTextLines(
+  root: Element,
+  vbMinX: number,
+  vbMinY: number,
+  scaleX: number,
+  scaleY: number,
+): VisualTextLine[] {
+  const lines: VisualTextLine[] = [];
+  for (const { element, matrix, transformError } of traverse(root)) {
+    if (transformError || localName(element) !== 'text') continue;
+    lines.push(...textElementLines(element, matrix, vbMinX, vbMinY, scaleX, scaleY));
+  }
+  return lines;
+}
+
+function textElementLines(
+  element: Element,
+  matrix: SvgMatrix,
+  vbMinX: number,
+  vbMinY: number,
+  scaleX: number,
+  scaleY: number,
+): VisualTextLine[] {
+  const rawLines = splitTextElementLines(element);
+  return rawLines.flatMap((line) => {
+    const normalized = normalizeVisualText(line.text);
+    if (!normalized) return [];
+    const point = applyMatrix([line.x, line.y], matrix);
+    return [{
+      text: normalized,
+      xMm: round2((point[0] - vbMinX) / scaleX),
+      yMm: round2((point[1] - vbMinY) / scaleY),
+    }];
+  });
+}
+
+function splitTextElementLines(element: Element): Array<{ text: string; x: number; y: number }> {
+  const tspans = Array.from(element.children).filter((child) => localName(child) === 'tspan');
+  const parentX = coordinateAttr(element, 'x') ?? 0;
+  const parentY = coordinateAttr(element, 'y') ?? 0;
+  if (tspans.length === 0) {
+    return [{ text: element.textContent ?? '', x: parentX, y: parentY }];
+  }
+
+  const lines: Array<{ text: string; x: number; y: number }> = [];
+  let x = parentX;
+  let y = parentY;
+  let current: { text: string; x: number; y: number } | null = null;
+
+  for (const tspan of tspans) {
+    const text = tspan.textContent ?? '';
+    const explicitX = coordinateAttr(tspan, 'x');
+    const explicitY = coordinateAttr(tspan, 'y');
+    const dx = coordinateAttr(tspan, 'dx');
+    const dy = coordinateAttr(tspan, 'dy');
+    const startsNewLine = current === null ||
+      explicitX !== null ||
+      explicitY !== null ||
+      (dy !== null && Math.abs(dy) > 0.001);
+
+    if (explicitX !== null) x = explicitX;
+    else if (dx !== null) x += dx;
+    if (explicitY !== null) y = explicitY;
+    else if (dy !== null) y += dy;
+
+    if (startsNewLine) {
+      if (current) lines.push(current);
+      current = { text, x, y };
+    } else if (current) {
+      current.text += text;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function groupVisualDetailLabels(lines: VisualTextLine[]): VisualDetailLabel[] {
+  const sorted = [...lines].sort((left, right) => left.yMm - right.yMm || left.xMm - right.xMm);
+  const labels: VisualDetailLabel[] = [];
+
+  for (const sizeLine of sorted) {
+    const size = parseVisualSizeLine(sizeLine.text);
+    if (!size) continue;
+    const maxXDelta = Math.max(35, Math.min(180, Math.max(size.widthMm, size.heightMm) * 0.35));
+    const maxYDelta = Math.max(20, Math.min(220, Math.max(size.widthMm, size.heightMm) * 0.35));
+    const upper = sorted
+      .filter((line) =>
+        line.yMm < sizeLine.yMm &&
+        sizeLine.yMm - line.yMm <= maxYDelta &&
+        Math.abs(line.xMm - sizeLine.xMm) <= maxXDelta,
+      )
+      .sort((left, right) => right.yMm - left.yMm);
+    const detailLine = upper.find((line) => parseVisualDetailLine(line.text) !== null);
+    if (!detailLine) continue;
+    const orderLine = upper
+      .filter((line) => line.yMm < detailLine.yMm)
+      .find((line) => parseVisualOrderLine(line.text) !== null);
+    if (!orderLine) continue;
+    const orderName = parseVisualOrderLine(orderLine.text);
+    const detailNumber = parseVisualDetailLine(detailLine.text);
+    if (!orderName || detailNumber === null) continue;
+
+    labels.push({
+      key: `${orderName}:${detailNumber}:${size.widthMm}:${size.heightMm}:${round2(sizeLine.xMm)}:${round2(sizeLine.yMm)}`,
+      orderName,
+      detailNumber,
+      widthMm: size.widthMm,
+      heightMm: size.heightMm,
+      cxMm: round2((orderLine.xMm + detailLine.xMm + sizeLine.xMm) / 3),
+      cyMm: round2((orderLine.yMm + detailLine.yMm + sizeLine.yMm) / 3),
+      rawLines: [orderLine.text, detailLine.text, sizeLine.text],
+    });
+  }
+
+  return dedupeVisualLabels(labels);
+}
+
+function parseVisualOrderLine(text: string): string | null {
+  const match = VISUAL_ORDER_RE.exec(text);
+  return match?.groups?.order ?? null;
+}
+
+function parseVisualDetailLine(text: string): number | null {
+  if (parseVisualSizeLine(text) || parseVisualOrderLine(text)) return null;
+  const match = VISUAL_DETAIL_RE.exec(text);
+  const parsed = positiveFloat(match?.groups?.detail);
+  return parsed !== null && Number.isInteger(parsed) ? parsed : null;
+}
+
+function parseVisualSizeLine(text: string): { widthMm: number; heightMm: number } | null {
+  const match = VISUAL_SIZE_RE.exec(text.replace(/\s+/g, ''));
+  const widthMm = positiveFloat(match?.groups?.width);
+  const heightMm = positiveFloat(match?.groups?.height);
+  return widthMm && heightMm ? { widthMm, heightMm } : null;
+}
+
+function dedupeVisualLabels(labels: VisualDetailLabel[]): VisualDetailLabel[] {
+  const seen = new Set<string>();
+  const out: VisualDetailLabel[] = [];
+  for (const label of labels) {
+    if (seen.has(label.key)) continue;
+    seen.add(label.key);
+    out.push(label);
+  }
+  return out;
+}
+
+function matchVisualLabelsToPartContours(
+  contours: PartContourGeometry[],
+  labels: VisualDetailLabel[],
+): Map<PartContourGeometry, VisualDetailLabel> {
+  const matches = new Map<PartContourGeometry, VisualDetailLabel>();
+  const usedLabels = new Set<VisualDetailLabel>();
+  const orderedContours = [...contours].sort((left, right) =>
+    (left.placedWidthMm * left.placedHeightMm) - (right.placedWidthMm * right.placedHeightMm),
+  );
+
+  for (const contour of orderedContours) {
+    const match = labels
+      .filter((label) => !usedLabels.has(label) && sizeMatches(label.widthMm, label.heightMm, contour.placedWidthMm, contour.placedHeightMm))
+      .map((label) => ({ label, score: visualLabelContourScore(label, contour) }))
+      .filter((candidate) => candidate.score !== null)
+      .sort((left, right) => Number(left.score) - Number(right.score))[0];
+    if (!match) continue;
+    matches.set(contour, match.label);
+    usedLabels.add(match.label);
+  }
+
+  return matches;
+}
+
+function visualLabelContourScore(label: VisualDetailLabel, contour: PartContourGeometry): number | null {
+  const center = contourCenter(contour);
+  const distance = Math.hypot(label.cxMm - center[0], label.cyMm - center[1]);
+  const inside = pointInsideContour(label.cxMm, label.cyMm, contour, Math.max(8, Math.min(contour.placedWidthMm, contour.placedHeightMm) * 0.2));
+  const maxDistance = Math.max(30, Math.hypot(contour.placedWidthMm, contour.placedHeightMm) * 0.6);
+  if (!inside && distance > maxDistance) return null;
+  return distance + (inside ? 0 : maxDistance);
+}
+
+function contourCenter(contour: PartContourGeometry): Point {
+  return [
+    contour.xMm + contour.placedWidthMm / 2,
+    contour.yMm + contour.placedHeightMm / 2,
+  ];
+}
+
+function pointInsideContour(x: number, y: number, contour: PartContourGeometry, toleranceMm: number): boolean {
+  return x >= contour.xMm - toleranceMm &&
+    y >= contour.yMm - toleranceMm &&
+    x <= contour.xMm + contour.placedWidthMm + toleranceMm &&
+    y <= contour.yMm + contour.placedHeightMm + toleranceMm;
+}
+
+function coordinateAttr(element: Element, name: string): number | null {
+  const values = numbersFrom(element.getAttribute(name) ?? '');
+  return values[0] ?? null;
+}
+
+function normalizeVisualText(value: string): string {
+  return value
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function elementPoints(element: Element): Point[] {
