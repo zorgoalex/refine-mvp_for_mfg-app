@@ -66,12 +66,17 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('keeps regular status DnD guarded and MDF manual drag touch-capable', () => {
     expect(page).toContain("import { TouchBackend } from 'react-dnd-touch-backend'");
+    expect(page).toContain('useDragLayer');
     expect(page).toContain('enableMouseEvents: true');
     expect(page).toContain('delayTouchStart');
     expect(page).toContain('delayTouchStart: 420');
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('CNC_BOARD_DRAG_TYPE');
+    expect(page).toContain('CncBoardDragLayer');
+    expect(page).toContain('buildCncDragPreview');
+    expect(page).toContain('monitor.getSourceClientOffset()');
+    expect(page).toContain('className="cnc-board-drag-outline"');
     expect(page).toContain('CncManualCardFrame');
     expect(page).toContain('isCncManualMoveAllowed(item.kind, columnKey)');
     expect(page).toContain('includeTerminalManualMoves: terminalColumnsVisible');
@@ -113,6 +118,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-card--touch-ready');
     expect(css).toContain('.cnc-board-card-shell--touch-ready > .status-board-card');
     expect(css).toContain('@keyframes statusBoardTouchReadyWiggle');
+    expect(css).toContain('.cnc-board-drag-outline');
+    expect(css).toMatch(/\.cnc-board-drag-outline\s*\{[^}]*position: fixed;[^}]*pointer-events: none;[^}]*border: 2px dashed var\(--status-color, #1677ff\);/s);
     expect(css).not.toContain('.cnc-card-move-actions');
     expect(css).toMatch(/\.cnc-board-card-shell--draggable\s*\{[^}]*touch-action: pan-x pan-y;/s);
     expect(css).not.toContain('touch-action: none');

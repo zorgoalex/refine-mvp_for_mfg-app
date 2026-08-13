@@ -1378,6 +1378,49 @@
   white-space: nowrap;
 }
 
+.cnc-board-drag-outline {
+  position: fixed;
+  z-index: 3100;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  border: 2px dashed var(--status-color, #1677ff);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--status-color, #1677ff) 18%, transparent),
+    0 18px 36px rgba(0, 0, 0, 0.2);
+  color: var(--app-text);
+  opacity: 0.94;
+  transform: rotate(0.8deg) scale(1.01);
+  transition-property: opacity, transform;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+  backdrop-filter: blur(6px);
+}
+
+.cnc-board-drag-outline strong,
+.cnc-board-drag-outline span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cnc-board-drag-outline strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cnc-board-drag-outline span {
+  color: var(--app-text-muted);
+  font-size: 11px;
+}
+
 .status-board-card__client {
   display: block;
   margin-bottom: 7px;
@@ -3496,6 +3539,11 @@
   .status-board-card--touch-ready,
   .cnc-board-card-shell--touch-ready > .status-board-card {
     animation: none;
+  }
+
+  .cnc-board-drag-outline {
+    transform: none;
+    transition: none;
   }
 
   .status-board-toolbar-disclosure__content,

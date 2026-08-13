@@ -57,7 +57,7 @@ import {
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { createPortal } from 'react-dom';
-import { DndProvider, useDrag, useDrop } from 'react-dnd';
+import { DndProvider, useDrag, useDragLayer, useDrop } from 'react-dnd';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { isApiError } from '../../api/apiError';
@@ -277,6 +277,12 @@ interface StatusBoardCardStatusBadgeOverride {
 }
 
 export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
+const CNC_DRAG_PREVIEW_KIND_LABELS: Record<CncManualCardKind, string> = {
+  packet: 'Файл станка',
+  bazisCutSet: 'Раскрой',
+  bath: 'Ванна',
+  order: 'Заказ',
+};
 type CncRelationTarget =
   | { kind: 'packet'; id: string }
   | { kind: 'bazisCutSet'; id: number }
@@ -328,6 +334,15 @@ interface CncBoardDragItem {
   cardId: string;
   sourceColumn: CncTelegramTodayDisplayColumnKey;
   trigger: HTMLElement | null;
+  preview: CncBoardDragPreview;
+}
+
+interface CncBoardDragPreview {
+  height: number;
+  kindLabel: string;
+  label: string;
+  statusColor: string;
+  width: number;
 }
 
 interface OrderStatusBoardPageProps {
@@ -1751,6 +1766,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         aria-labelledby={isOperational ? undefined : 'status-board-title'}
         aria-label={isOperational ? (isCncToday ? 'Доска МДФ-работ' : 'Доски статусов') : undefined}
       >
+        <CncBoardDragLayer />
         {isOperational ? (
           <OperationalPageHeader
             compact
@@ -3187,6 +3203,79 @@ const CncColumnCardPlaceholders: React.FC<{ displayMode: CncCardDisplayMode }> =
   );
 };
 
+function buildCncDragPreview(kind: CncManualCardKind, handle: HTMLElement | null): CncBoardDragPreview {
+  const rect = handle?.getBoundingClientRect();
+  const card = handle?.querySelector<HTMLElement>('.status-board-card') ?? handle;
+  const label = card
+    ?.querySelector<HTMLElement>(
+      [
+        '.status-board-card__number',
+        '.cnc-packet-card__summary-order',
+        '.cnc-bath-card__block-job',
+        '.cnc-bazis-cut-card__badge',
+      ].join(', '),
+    )
+    ?.textContent
+    ?.replace(/\s+/g, ' ')
+    .trim()
+    || CNC_DRAG_PREVIEW_KIND_LABELS[kind];
+  const column = handle?.closest<HTMLElement>('.status-board-column');
+  const statusColor = column
+    ? getComputedStyle(column).getPropertyValue('--status-color').trim()
+    : '';
+
+  return {
+    height: Math.max(44, Math.round(rect?.height ?? 72)),
+    kindLabel: CNC_DRAG_PREVIEW_KIND_LABELS[kind],
+    label,
+    statusColor: statusColor || '#1677ff',
+    width: Math.max(120, Math.round(rect?.width ?? 220)),
+  };
+}
+
+const CncBoardDragLayer: React.FC = () => {
+  const { isDragging, itemType, item, sourceOffset } = useDragLayer((monitor) => ({
+    isDragging: monitor.isDragging(),
+    itemType: monitor.getItemType(),
+    item: monitor.getItem() as CncBoardDragItem | null,
+    sourceOffset: monitor.getSourceClientOffset(),
+  }));
+  if (
+    !isDragging ||
+    itemType !== CNC_BOARD_DRAG_TYPE ||
+    !item?.preview ||
+    !sourceOffset ||
+    typeof document === 'undefined' ||
+    typeof window === 'undefined'
+  ) {
+    return null;
+  }
+
+  const width = Math.min(item.preview.width, Math.max(120, window.innerWidth - 28));
+  const height = Math.min(item.preview.height, Math.max(44, Math.round(window.innerHeight * 0.38)));
+  const style = {
+    '--status-color': item.preview.statusColor,
+    height,
+    left: Math.round(sourceOffset.x),
+    top: Math.round(sourceOffset.y),
+    width,
+  } as React.CSSProperties;
+
+  return createPortal(
+    <div
+      className="cnc-board-drag-outline"
+      data-kind={item.kind}
+      data-testid="cnc-board-drag-outline"
+      style={style}
+      aria-hidden="true"
+    >
+      <strong>{item.preview.label}</strong>
+      <span>{item.preview.kindLabel}</span>
+    </div>,
+    document.body,
+  );
+};
+
 interface CncColumnDropZoneProps {
   columnKey: CncTelegramTodayDisplayColumnKey;
   columnTitle: string;
@@ -3270,6 +3359,7 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       cardId,
       sourceColumn,
       trigger: shellRef.current,
+      preview: buildCncDragPreview(kind, shellRef.current),
     }),
     canDrag: () => moveAvailable && !dragSuppressedRef.current,
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
