@@ -117,10 +117,59 @@ test('keeps MDF phone columns 15 percent denser than desktop runtime grid', asyn
   });
 
   expect(geometry.columnCount).toBe(5);
-  expect(geometry.cssColumnWidth).toBe('187px');
+  expect(geometry.cssColumnWidth).toContain('187px');
   expect(geometry.columnWidth).toBe(187);
   expect(geometry.gridTemplateColumns).not.toContain('220px');
   expect(geometry.viewportScrollWidth).toBeGreaterThan(408);
+});
+
+test('scales MDF phone columns and sheet previews from mobile settings variables', async ({ page }) => {
+  await page.setViewportSize({ width: 408, height: 816 });
+  await page.setContent(`
+    <style>${boardCss}</style>
+    <section class="status-board-page status-board-page--cnc" style="--status-board-cnc-mobile-column-scale: 1;">
+      <section class="status-board-viewport" style="width: 408px; height: 640px;">
+        <div
+          class="status-board-columns status-board-columns--cnc status-board-columns--cnc-standard"
+          style="--status-board-cnc-column-count: 2; grid-template-columns: repeat(2, minmax(var(--status-board-cnc-column-width, 220px), 1fr));"
+        >
+          <article class="status-board-column" data-testid="mdf-column">
+            <header class="status-board-column__header"></header>
+            <div class="status-board-column__cards">
+              <article class="status-board-card cnc-packet-card" data-testid="packet-card">
+                <div class="cnc-packet-card__sheet-body">
+                  <img class="cnc-packet-card__sheet-image" data-testid="sheet" src="${screenshotUrl}" alt="sheet" />
+                </div>
+              </article>
+            </div>
+          </article>
+          <article class="status-board-column"><header class="status-board-column__header"></header></article>
+        </div>
+      </section>
+    </section>
+  `);
+  await page.getByTestId('sheet').evaluate((image: HTMLImageElement) => image.decode());
+
+  const readGeometry = () => page.evaluate(() => {
+    const column = document.querySelector<HTMLElement>('[data-testid="mdf-column"]')!;
+    const sheet = document.querySelector<HTMLElement>('[data-testid="sheet"]')!;
+    const columnRect = column.getBoundingClientRect();
+    const sheetRect = sheet.getBoundingClientRect();
+    return {
+      columnWidth: Math.round(columnRect.width),
+      sheetWidth: Math.round(sheetRect.width),
+    };
+  });
+
+  const regular = await readGeometry();
+  await page.locator('.status-board-page--cnc').evaluate((pageNode) => {
+    pageNode.setAttribute('style', '--status-board-cnc-mobile-column-scale: 1.5;');
+  });
+  const enlarged = await readGeometry();
+
+  expect(regular.columnWidth).toBe(187);
+  expect(enlarged.columnWidth).toBeGreaterThanOrEqual(280);
+  expect(enlarged.sheetWidth).toBeGreaterThan(regular.sheetWidth * 1.4);
 });
 
 test('keeps MDF phone column headers sticky during vertical board scroll', async ({ page }) => {

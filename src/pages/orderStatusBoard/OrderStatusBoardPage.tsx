@@ -315,6 +315,36 @@ const STATUS_BOARD_CARD_DISPLAY_ICONS: Record<StatusBoardCardDisplayMode, React.
   minimal: <FileTextOutlined />,
 };
 const CNC_CARD_DISPLAY_STORAGE_PREFIX = 'erp.status-board.cnc-card-display';
+type CncMobileFontSize = 'normal' | 'large' | 'xlarge';
+const CNC_MOBILE_FONT_SIZE_OPTIONS: Array<{
+  label: string;
+  value: CncMobileFontSize;
+}> = [
+  { label: 'Обычный', value: 'normal' },
+  { label: 'Крупный', value: 'large' },
+  { label: 'Очень крупный', value: 'xlarge' },
+];
+const CNC_MOBILE_FONT_SIZE_SCALE: Record<CncMobileFontSize, number> = {
+  normal: 1,
+  large: 1.25,
+  xlarge: 1.45,
+};
+type CncMobileColumnScale = 'normal' | 'wide' | 'xwide';
+const CNC_MOBILE_COLUMN_SCALE_OPTIONS: Array<{
+  label: string;
+  value: CncMobileColumnScale;
+}> = [
+  { label: '1x', value: 'normal' },
+  { label: '1.5x', value: 'wide' },
+  { label: '1.75x', value: 'xwide' },
+];
+const CNC_MOBILE_COLUMN_SCALE: Record<CncMobileColumnScale, number> = {
+  normal: 1,
+  wide: 1.5,
+  xwide: 1.75,
+};
+const CNC_MOBILE_FONT_SIZE_STORAGE_PREFIX = 'erp.status-board.cnc-mobile-font-size';
+const CNC_MOBILE_COLUMN_SCALE_STORAGE_PREFIX = 'erp.status-board.cnc-mobile-column-scale';
 const STATUS_BOARD_SORT_STORAGE_PREFIX = 'erp.status-board.card-sort';
 const STATUS_BOARD_SORT_FIELD_OPTIONS: Array<{
   label: string;
@@ -406,6 +436,8 @@ const StatusBoardToolbarDisclosure: React.FC<StatusBoardToolbarDisclosureProps> 
 
 type StatusBoardPageStyle = React.CSSProperties & {
   '--status-board-toolbar-sticky-top'?: string;
+  '--status-board-cnc-mobile-font-scale'?: string;
+  '--status-board-cnc-mobile-column-scale'?: string;
 };
 
 function useWorkspaceTabsHeight(): number {
@@ -526,6 +558,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     useState<StatusBoardCardDisplayMode>('compact');
   const [cncCardDisplayMode, setCncCardDisplayMode] =
     useState<CncCardDisplayMode>(() => readCncCardDisplayPreference(currentUser?.id));
+  const [cncMobileFontSize, setCncMobileFontSize] =
+    useState<CncMobileFontSize>(() => readCncMobileFontSizePreference(currentUser?.id));
+  const [cncMobileColumnScale, setCncMobileColumnScale] =
+    useState<CncMobileColumnScale>(() => readCncMobileColumnScalePreference(currentUser?.id));
   const [mobileToolbarExpanded, setMobileToolbarExpanded] = useState(false);
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
@@ -730,6 +766,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
 
   useEffect(() => {
     setCncCardDisplayMode(readCncCardDisplayPreference(currentUser?.id));
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    setCncMobileFontSize(readCncMobileFontSizePreference(currentUser?.id));
+    setCncMobileColumnScale(readCncMobileColumnScalePreference(currentUser?.id));
   }, [currentUser?.id]);
 
   useEffect(() => {
@@ -954,6 +995,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     (mode: CncCardDisplayMode) => {
       setCncCardDisplayMode(mode);
       writeCncCardDisplayPreference(currentUser?.id, mode);
+    },
+    [currentUser?.id],
+  );
+  const updateCncMobileFontSize = useCallback(
+    (size: CncMobileFontSize) => {
+      setCncMobileFontSize(size);
+      writeCncMobileFontSizePreference(currentUser?.id, size);
+    },
+    [currentUser?.id],
+  );
+  const updateCncMobileColumnScale = useCallback(
+    (scale: CncMobileColumnScale) => {
+      setCncMobileColumnScale(scale);
+      writeCncMobileColumnScalePreference(currentUser?.id, scale);
     },
     [currentUser?.id],
   );
@@ -1656,7 +1711,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const cncCardDisplayModeLabel = CNC_CARD_DISPLAY_OPTIONS.find(
     (option) => option.value === cncCardDisplayMode,
   )?.label ?? 'Стандартный';
+  const cncMobileFontSizeLabel = CNC_MOBILE_FONT_SIZE_OPTIONS.find(
+    (option) => option.value === cncMobileFontSize,
+  )?.label ?? 'Обычный';
+  const cncMobileColumnScaleLabel = CNC_MOBILE_COLUMN_SCALE_OPTIONS.find(
+    (option) => option.value === cncMobileColumnScale,
+  )?.label ?? '1x';
   const cncPlannedTodaySummary = viewState.cncPlannedTodayOnly ? ' · План сегодня' : '';
+  const cncMobileSizeSummary = [
+    cncMobileFontSize !== 'normal' ? `Текст ${cncMobileFontSizeLabel.toLocaleLowerCase('ru-RU')}` : null,
+    cncMobileColumnScale !== 'normal' ? `Скрин ${cncMobileColumnScaleLabel}` : null,
+  ].filter(Boolean).join(' · ');
   const focusCncOrderSearch = () => {
     setMobileToolbarExpanded(true);
     window.requestAnimationFrame(() => {
@@ -1707,6 +1772,34 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         >
           Завершенные файлы и ванны
         </Checkbox>
+      </div>
+      <div
+        className="status-board-toolbar__mobile-scale-settings"
+        aria-label="Мобильные размеры МДФ-доски"
+      >
+        <strong>Мобильные размеры</strong>
+        <div className="status-board-toolbar__scale-row">
+          <Typography.Text>Размер текста</Typography.Text>
+          <Segmented
+            value={cncMobileFontSize}
+            options={CNC_MOBILE_FONT_SIZE_OPTIONS}
+            onChange={(value) =>
+              updateCncMobileFontSize(value as CncMobileFontSize)
+            }
+            aria-label="Размер текста карточек МДФ-доски на мобильном экране"
+          />
+        </div>
+        <div className="status-board-toolbar__scale-row">
+          <Typography.Text>Ширина скринов</Typography.Text>
+          <Segmented
+            value={cncMobileColumnScale}
+            options={CNC_MOBILE_COLUMN_SCALE_OPTIONS}
+            onChange={(value) =>
+              updateCncMobileColumnScale(value as CncMobileColumnScale)
+            }
+            aria-label="Масштаб ширины колонок и скринов МДФ-доски на мобильном экране"
+          />
+        </div>
       </div>
       <div
         className="status-board-toolbar__sort-settings"
@@ -1769,9 +1862,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   );
   const statusBoardPageStyle = useMemo<StatusBoardPageStyle | undefined>(() => (
     isCncToday
-      ? { '--status-board-toolbar-sticky-top': `${workspaceTabsHeight}px` }
+      ? {
+        '--status-board-toolbar-sticky-top': `${workspaceTabsHeight}px`,
+        '--status-board-cnc-mobile-font-scale': String(
+          CNC_MOBILE_FONT_SIZE_SCALE[cncMobileFontSize],
+        ),
+        '--status-board-cnc-mobile-column-scale': String(
+          CNC_MOBILE_COLUMN_SCALE[cncMobileColumnScale],
+        ),
+      }
       : undefined
-  ), [isCncToday, workspaceTabsHeight]);
+  ), [cncMobileColumnScale, cncMobileFontSize, isCncToday, workspaceTabsHeight]);
 
   return (
     <DndProvider backend={TouchBackend} options={DND_BACKEND_OPTIONS}>
@@ -2024,7 +2125,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             contentId="status-board-toolbar-controls"
             expanded={mobileToolbarExpanded}
             label="Настройки МДФ"
-            summary={`${cncSelectedDate?.format(DATE_FORMAT) ?? 'Сегодня'} · ${cncCardDisplayModeLabel}${cncPlannedTodaySummary}`}
+            summary={`${cncSelectedDate?.format(DATE_FORMAT) ?? 'Сегодня'} · ${cncCardDisplayModeLabel}${cncPlannedTodaySummary}${cncMobileSizeSummary ? ` · ${cncMobileSizeSummary}` : ''}`}
             onToggle={() => setMobileToolbarExpanded((current) => !current)}
           >
           <div className="status-board-toolbar status-board-toolbar--cnc" aria-label="Фильтры CNC-работ">
@@ -8209,6 +8310,66 @@ function writeCncCardDisplayPreference(
 
 function cncCardDisplayPreferenceKey(userId: string | undefined): string {
   return `${CNC_CARD_DISPLAY_STORAGE_PREFIX}.${userId ?? 'anonymous'}`;
+}
+
+function isCncMobileFontSize(value: unknown): value is CncMobileFontSize {
+  return value === 'normal' || value === 'large' || value === 'xlarge';
+}
+
+function readCncMobileFontSizePreference(userId: string | undefined): CncMobileFontSize {
+  if (typeof window === 'undefined') return 'normal';
+  try {
+    const raw = window.localStorage.getItem(cncMobileFontSizePreferenceKey(userId));
+    return isCncMobileFontSize(raw) ? raw : 'normal';
+  } catch {
+    return 'normal';
+  }
+}
+
+function writeCncMobileFontSizePreference(
+  userId: string | undefined,
+  value: CncMobileFontSize,
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(cncMobileFontSizePreferenceKey(userId), value);
+  } catch {
+    // Browser storage can be blocked; the in-memory choice still applies.
+  }
+}
+
+function cncMobileFontSizePreferenceKey(userId: string | undefined): string {
+  return `${CNC_MOBILE_FONT_SIZE_STORAGE_PREFIX}.${userId ?? 'anonymous'}`;
+}
+
+function isCncMobileColumnScale(value: unknown): value is CncMobileColumnScale {
+  return value === 'normal' || value === 'wide' || value === 'xwide';
+}
+
+function readCncMobileColumnScalePreference(userId: string | undefined): CncMobileColumnScale {
+  if (typeof window === 'undefined') return 'normal';
+  try {
+    const raw = window.localStorage.getItem(cncMobileColumnScalePreferenceKey(userId));
+    return isCncMobileColumnScale(raw) ? raw : 'normal';
+  } catch {
+    return 'normal';
+  }
+}
+
+function writeCncMobileColumnScalePreference(
+  userId: string | undefined,
+  value: CncMobileColumnScale,
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(cncMobileColumnScalePreferenceKey(userId), value);
+  } catch {
+    // Browser storage can be blocked; the in-memory choice still applies.
+  }
+}
+
+function cncMobileColumnScalePreferenceKey(userId: string | undefined): string {
+  return `${CNC_MOBILE_COLUMN_SCALE_STORAGE_PREFIX}.${userId ?? 'anonymous'}`;
 }
 
 function readStatusBoardSortPreference(

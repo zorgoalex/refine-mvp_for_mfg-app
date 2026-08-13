@@ -222,8 +222,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('visibility: hidden');
     expect(css).toContain('transition-property: grid-template-rows, opacity, visibility');
     expect(css).toContain('.status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
-    expect(css).toContain('--status-board-cnc-column-width: 187px');
-    expect(css).toContain('--status-board-cnc-column-width: 112px');
+    expect(css).toContain('--status-board-cnc-column-width: calc(187px * var(--status-board-cnc-mobile-column-scale, 1))');
+    expect(css).toContain('--status-board-cnc-column-width: calc(112px * var(--status-board-cnc-mobile-column-scale, 1))');
     expect(css).toContain('min-width: 100% !important');
     expect(page).toContain("'var(--status-board-cnc-column-width, 220px)'");
     expect(css).not.toContain('min-width: 200%');
@@ -1195,6 +1195,23 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');
     expect(settings).toContain('checked={cncTerminalColumnsVisible}');
     expect(settings).toContain('Завершенные файлы и ванны');
+    expect(page).toContain("const CNC_MOBILE_FONT_SIZE_STORAGE_PREFIX = 'erp.status-board.cnc-mobile-font-size'");
+    expect(page).toContain("const CNC_MOBILE_COLUMN_SCALE_STORAGE_PREFIX = 'erp.status-board.cnc-mobile-column-scale'");
+    expect(page).toContain('readCncMobileFontSizePreference(currentUser?.id)');
+    expect(page).toContain('readCncMobileColumnScalePreference(currentUser?.id)');
+    expect(page).toContain('writeCncMobileFontSizePreference(currentUser?.id, size)');
+    expect(page).toContain('writeCncMobileColumnScalePreference(currentUser?.id, scale)');
+    expect(page).toContain("return `${CNC_MOBILE_FONT_SIZE_STORAGE_PREFIX}.${userId ?? 'anonymous'}`;");
+    expect(page).toContain("return `${CNC_MOBILE_COLUMN_SCALE_STORAGE_PREFIX}.${userId ?? 'anonymous'}`;");
+    expect(settings).toContain('Мобильные размеры');
+    expect(settings).toContain('Размер текста');
+    expect(settings).toContain('Ширина скринов');
+    expect(settings).toContain('options={CNC_MOBILE_FONT_SIZE_OPTIONS}');
+    expect(settings).toContain('options={CNC_MOBILE_COLUMN_SCALE_OPTIONS}');
+    expect(settings).toContain('updateCncMobileFontSize(value as CncMobileFontSize)');
+    expect(settings).toContain('updateCncMobileColumnScale(value as CncMobileColumnScale)');
+    expect(page).toContain("'--status-board-cnc-mobile-font-scale'");
+    expect(page).toContain("'--status-board-cnc-mobile-column-scale'");
     expect(page).toContain("completed_laminated: 'Распиленные файлы'");
     expect(page).toContain("completed_baths: 'Завершенные ванны'");
     expect(page).toContain("baths_laminated: 'Закатаны'");
@@ -1231,6 +1248,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-toolbar__settings-button.ant-btn');
     expect(css).toContain('margin-left: auto');
     expect(css).toContain('.status-board-settings__modes');
+    expect(css).toContain('.status-board-toolbar__mobile-scale-settings');
+    expect(css).toContain('.status-board-toolbar__scale-row');
+    expect(css).toContain('--status-board-cnc-mobile-font-scale: 1;');
+    expect(css).toContain('--status-board-cnc-mobile-column-scale: 1;');
+    expect(css).toContain('font-size: calc(14px * var(--status-board-cnc-mobile-font-scale, 1))');
+    expect(css).toContain('overflow-wrap: anywhere;');
+    expect(css).toContain('text-wrap: pretty;');
+    expect(css).toContain('max-height: calc(420px * var(--status-board-cnc-mobile-column-scale, 1));');
+    expect(css).toContain('--status-board-cnc-column-width: calc(187px * var(--status-board-cnc-mobile-column-scale, 1))');
     expect(css).toMatch(/\.status-board-toolbar--cnc\s*\{[^}]*padding: 2px 6px;/);
     expect(css).toMatch(
       /\.status-board-toolbar--cnc \.status-board-toolbar__settings-button\.ant-btn\s*\{[^}]*width: 24px;[^}]*height: 24px;/s,

@@ -11,6 +11,8 @@
 
 .status-board-page.status-board-page--cnc {
   --status-board-cnc-order-cards-max-height: max(320px, calc(100vh - 330px));
+  --status-board-cnc-mobile-font-scale: 1;
+  --status-board-cnc-mobile-column-scale: 1;
   height: calc(100dvh - 132px);
   min-height: 620px;
   overflow: hidden;
@@ -287,7 +289,14 @@
   gap: 12px;
 }
 
-.status-board-toolbar__sort-row {
+.status-board-toolbar__mobile-scale-settings {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.status-board-toolbar__sort-row,
+.status-board-toolbar__scale-row {
   min-height: 40px;
   display: grid;
   grid-template-columns: minmax(132px, 0.8fr) minmax(180px, 1.2fr);
@@ -296,12 +305,29 @@
 }
 
 .status-board-toolbar__sort-row .ant-select,
-.status-board-toolbar__sort-row .ant-segmented {
+.status-board-toolbar__sort-row .ant-segmented,
+.status-board-toolbar__scale-row .ant-segmented {
   width: 100%;
 }
 
+.status-board-toolbar__scale-row .ant-segmented-group {
+  display: flex;
+}
+
+.status-board-toolbar__scale-row .ant-segmented-item {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.status-board-toolbar__scale-row .ant-segmented-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (max-width: 480px) {
-  .status-board-toolbar__sort-row {
+  .status-board-toolbar__sort-row,
+  .status-board-toolbar__scale-row {
     grid-template-columns: 1fr;
     gap: 6px;
   }
@@ -3332,8 +3358,103 @@
     min-width: calc((100vw - 48px) * 0.6);
   }
 
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) .status-board-card {
+    font-size: calc(12px * var(--status-board-cnc-mobile-font-scale, 1));
+    line-height: 1.28;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) :where(
+    .status-board-card__number,
+    .status-board-card__number.ant-btn,
+    .status-board-card__number.ant-btn > span,
+    .status-board-card__client,
+    .status-board-card__compact-text,
+    .status-board-card__standard-cell,
+    .status-board-card__standard-client,
+    .status-board-card__meta > span,
+    .status-board-card__footer span,
+    .cnc-packet-card__summary,
+    .cnc-packet-card__summary-order,
+    .cnc-packet-card__summary-order.ant-btn,
+    .cnc-packet-card__summary-meta,
+    .cnc-packet-card__material,
+    .cnc-packet-card__program,
+    .cnc-packet-card__notes,
+    .cnc-packet-card__note-file,
+    .cnc-packet-card__item > span,
+    .cnc-packet-card__order-link,
+    .cnc-packet-card__size,
+    .cnc-compact-card__number,
+    .cnc-order-card__client,
+    .cnc-order-card__compact-client,
+    .cnc-order-card__readiness,
+    .cnc-order-card__missing-label,
+    .cnc-order-card__missing-list,
+    .cnc-bath-card__block-label,
+    .cnc-bath-card__block-job,
+    .cnc-bath-card__cut-result-badge.ant-tag
+  ) {
+    min-width: 0;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    text-wrap: pretty;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) .status-board-card__top,
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) .status-board-card__identity {
+    align-items: flex-start;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) .status-board-card__identity {
+    flex-wrap: wrap;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) :where(
+    .cnc-packet-card__summary-order,
+    .cnc-packet-card__summary-order.ant-btn,
+    .status-board-card__number,
+    .status-board-card__number.ant-btn,
+    .cnc-compact-card__number,
+    .cnc-compact-card__number.ant-btn
+  ) {
+    font-size: calc(14px * var(--status-board-cnc-mobile-font-scale, 1));
+    line-height: 1.18;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) :where(
+    .status-board-card__meta,
+    .status-board-card__standard-grid,
+    .status-board-card__footer,
+    .cnc-order-card__readiness,
+    .cnc-order-card__missing,
+    .cnc-order-card__missing-list,
+    .cnc-packet-card__items,
+    .cnc-packet-card__order-link
+  ) {
+    font-size: calc(12px * var(--status-board-cnc-mobile-font-scale, 1));
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) :where(
+    .cnc-packet-card__summary-meta,
+    .cnc-packet-card__size,
+    .cnc-bath-card__sheet-figure figcaption
+  ) {
+    font-size: calc(11px * var(--status-board-cnc-mobile-font-scale, 1));
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) .cnc-packet-card__sheet-image {
+    max-height: calc(420px * var(--status-board-cnc-mobile-column-scale, 1));
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) .cnc-bath-card__sheet-svg {
+    max-height: calc(720px * var(--status-board-cnc-mobile-column-scale, 1));
+  }
+
   .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) {
-    --status-board-cnc-column-width: 187px;
+    --status-board-cnc-column-width: calc(187px * var(--status-board-cnc-mobile-column-scale, 1));
     width: max-content;
     min-width: 100% !important;
     grid-template-columns: repeat(
@@ -3343,7 +3464,7 @@
   }
 
   .status-board-page--cnc .status-board-columns--cnc-minimal:not(.status-board-columns--cnc-detailed) {
-    --status-board-cnc-column-width: 112px;
+    --status-board-cnc-column-width: calc(112px * var(--status-board-cnc-mobile-column-scale, 1));
   }
 
   .status-board-card__actions .ant-btn {
