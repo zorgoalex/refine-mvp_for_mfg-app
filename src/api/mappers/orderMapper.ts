@@ -147,7 +147,32 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
   return dto;
 }
 
+function resolveOrderDtoTotals(order: OrderDto): OrderDto['totals'] {
+  const runtimeOrder = order as OrderDto & { totals?: Partial<OrderDto['totals']> | null };
+  const runtimeHeader = order.header as OrderDto['header'] & Partial<OrderDto['totals']>;
+  const totalAmount = normalizeNumber(runtimeOrder.totals?.totalAmount ?? runtimeHeader.totalAmount, 0);
+  const discount = normalizeNumber(runtimeOrder.totals?.discount ?? runtimeHeader.discount, 0);
+  const surcharge = normalizeNumber(runtimeOrder.totals?.surcharge ?? runtimeHeader.surcharge, 0);
+  const finalAmount = normalizeNumber(
+    runtimeOrder.totals?.finalAmount ?? runtimeHeader.finalAmount,
+    totalAmount - discount + surcharge,
+  );
+  const paidAmount = normalizeNumber(runtimeOrder.totals?.paidAmount ?? runtimeHeader.paidAmount, 0);
+
+  return {
+    totalAmount,
+    discount,
+    surcharge,
+    finalAmount,
+    paidAmount,
+    debtAmount: normalizeNumber(runtimeOrder.totals?.debtAmount, finalAmount - paidAmount),
+    partsCount: normalizeNumber(runtimeOrder.totals?.partsCount ?? runtimeHeader.partsCount, 0),
+    totalArea: normalizeNumber(runtimeOrder.totals?.totalArea ?? runtimeHeader.totalArea, 0),
+  };
+}
+
 export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
+  const totals = resolveOrderDtoTotals(order);
   const header: Order = {
     order_id: order.header.orderId,
     order_name: order.header.orderName,
@@ -177,11 +202,11 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     issue_date: order.header.issueDate ?? null,
     payment_date: order.header.paymentDate ?? null,
 
-    total_amount: order.totals.totalAmount,
-    final_amount: order.totals.finalAmount,
-    paid_amount: order.totals.paidAmount,
-    parts_count: order.totals.partsCount,
-    total_area: order.totals.totalArea,
+    total_amount: totals.totalAmount,
+    final_amount: totals.finalAmount,
+    paid_amount: totals.paidAmount,
+    parts_count: totals.partsCount,
+    total_area: totals.totalArea,
 
     discount: normalizeNumber(order.header.discount, 0),
     surcharge: normalizeNumber(order.header.surcharge, 0),
