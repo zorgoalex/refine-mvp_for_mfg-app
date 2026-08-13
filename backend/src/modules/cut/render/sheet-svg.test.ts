@@ -88,6 +88,23 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
     ).toEqual(['weird']);
   });
 
+  it('renders order-level informative SVG labels without a real order detail id', () => {
+    expect(
+      composePieceLabelLines({
+        orderId: 2701,
+        orderName: '2701',
+        detailId: null,
+        detailNumber: 3,
+        widthMm: 600,
+        heightMm: 400,
+        itemId: 'svg-1',
+        instance: 1,
+        qty: 1,
+        materialName: 'ХДФ',
+      }),
+    ).toEqual(['2701', 'поз. 3', '600X400', 'ХДФ']);
+  });
+
   it('appends a 4th material line when materialName is a non-blank string', () => {
     expect(
       composePieceLabelLines({

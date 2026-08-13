@@ -507,14 +507,15 @@ function frozenPieceLabelLines(
   const detailId = parseFreecutItemId(piece.item_id);
   return composePieceLabelLines({
     orderId: label?.orderId ?? item?.orderId ?? null,
-    orderName: item?.orderName ?? null,
-    detailId,
+    orderName: label?.orderName ?? item?.orderName ?? null,
+    detailId: label?.detailId ?? detailId,
     detailNumber: label?.detailNumber ?? item?.detail?.detailNumber ?? null,
     widthMm: label?.widthMm ?? item?.detail?.width ?? null,
     heightMm: label?.heightMm ?? item?.detail?.height ?? null,
     itemId: piece.item_id,
     instance: piece.instance,
     qty: quantities.get(piece.item_id) ?? item?.qty ?? 1,
+    materialName: label?.materialName ?? null,
   });
 }
 
@@ -3578,15 +3579,15 @@ export class PgCutRepository implements CutRepositoryPort {
       if (frozenLabel) {
         return composePieceLabelLines({
           orderId: frozenLabel.orderId,
-          orderName: orderNameForOrderId(frozenLabel.orderId),
-          detailId: parseFreecutItemId(piece.item_id),
+          orderName: frozenLabel.orderName ?? orderNameForOrderId(frozenLabel.orderId),
+          detailId: frozenLabel.detailId ?? parseFreecutItemId(piece.item_id),
           detailNumber: frozenLabel.detailNumber,
           widthMm: frozenLabel.widthMm,
           heightMm: frozenLabel.heightMm,
           itemId: piece.item_id,
           instance: piece.instance,
           qty: quantities.get(piece.item_id) ?? 1,
-          materialName,
+          materialName: frozenLabel.materialName ?? materialName,
         });
       }
       // Legacy fallback: live join.

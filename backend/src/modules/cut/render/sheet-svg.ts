@@ -76,13 +76,15 @@ export interface BathPieceDetailInfo {
  */
 export function composePieceLabelLines(input: PieceLabelInput): string[] {
   const { orderId, orderName, detailId, detailNumber, widthMm, heightMm, itemId, instance, qty } = input;
-  if (orderId === null || detailId === null) {
+  if (orderId === null) {
     return [formatPieceLabel(itemId, instance, qty)];
   }
+  const position = detailNumber ?? detailId;
+  if (position === null) return [formatPieceLabel(itemId, instance, qty)];
   const orderLabel = orderName?.trim() || String(orderId);
   const lines = [
     orderLabel,
-    formatPositionLine(detailNumber ?? detailId, instance, qty),
+    formatPositionLine(position, instance, qty),
     formatPieceSize(widthMm, heightMm),
   ];
   const material = input.materialName?.trim();

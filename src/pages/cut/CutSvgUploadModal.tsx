@@ -10,14 +10,18 @@ import {
   Select,
   Space,
   Tag,
+  Tooltip,
   Typography,
   Upload,
   message,
 } from 'antd';
 import type { UploadProps } from 'antd';
 import {
+  CloseOutlined,
   FileAddOutlined,
+  FullscreenOutlined,
   LinkOutlined,
+  PrinterOutlined,
   SaveOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
@@ -26,7 +30,10 @@ import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
 import { ordersApi } from '../../api/ordersApi';
 import { isApiError, type ApiError } from '../../api/apiError';
-import type { CncTelegramManualSvgCommentPreset } from '../../api/types/cncTelegramApi.types';
+import type {
+  CncTelegramManualSvgCommentPreset,
+  CncTelegramManualSvgUploadRequest,
+} from '../../api/types/cncTelegramApi.types';
 import type { EligibleDetailDto } from '../../api/types/cutApi.types';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { parseSvgCutUploadFileNameHints } from './svgCutUploadFilename';
@@ -72,13 +79,25 @@ interface SvgPreviewState {
   fileName: string;
 }
 
+type SvgUploadMatchMode = 'order_details' | 'informational';
+type SvgCommentPresetOption = Pick<CncTelegramManualSvgCommentPreset, 'label' | 'commentText' | 'category'>;
+
 const EMPTY_DEFAULT_ORDER_IDS: number[] = [];
 const EMPTY_DEFAULT_ORDER_NAMES: string[] = [];
 const EMPTY_CUT_JOB_NUMBER_CHECK: CutJobNumberCheck = { status: 'idle', suggestions: [] };
 
-const DEFAULT_COMMENT_PRESETS: Array<Pick<CncTelegramManualSvgCommentPreset, 'label' | 'commentText' | 'category'>> = [
+const DEFAULT_COMMENT_PRESETS: SvgCommentPresetOption[] = [
   { label: 'Фрезы', commentText: 'фрезы:', category: 'tool' },
+  { label: 'Фрезы ХДФ', commentText: 'Фрезы для ХДФ: 8', category: 'tool' },
+  { label: 'Фрезы ЛДСП', commentText: 'Фрезы для ЛДСП: 8', category: 'tool' },
+  { label: 'Фрезы 18мм', commentText: 'Фрезы для 18мм:', category: 'tool' },
+  { label: 'Фрезы 10мм', commentText: 'Фрезы для 10мм:', category: 'tool' },
+  { label: 'Фреза лам. стороны', commentText: 'Фреза для ламинированной стороны:', category: 'tool' },
   { label: 'Материал', commentText: 'материал:', category: 'material' },
+  { label: 'Ламинированная сторона МДФ', commentText: 'Ламинированная сторона МДФ !!!', category: 'material' },
+  { label: 'Черновой', commentText: 'Черновой', category: 'general' },
+  { label: 'Черновой 2 стороны', commentText: 'Черновой с двух сторон!!!', category: 'general' },
+  { label: 'Присадка №', commentText: 'Присадка №', category: 'general' },
   { label: 'Переделка', commentText: 'переделка', category: 'rework' },
 ];
 
@@ -98,6 +117,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   })), [defaultOrderIdsKey, defaultOrderNamesKey]);
   const [parsed, setParsed] = useState<ParsedSvgUpload | null>(null);
   const [svgPreview, setSvgPreview] = useState<SvgPreviewState | null>(null);
+  const [svgPreviewExpanded, setSvgPreviewExpanded] = useState(false);
   const svgPreviewUrlRef = useRef<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -114,6 +134,13 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const [rework, setRework] = useState(false);
   const [presets, setPresets] = useState<CncTelegramManualSvgCommentPreset[]>([]);
   const [presetSaving, setPresetSaving] = useState(false);
+  const uploadMatchMode: SvgUploadMatchMode = useMemo(
+    () => svgUploadMaterialIsInformational(materialName, parsed?.fileName ?? null)
+      ? 'informational'
+      : 'order_details',
+    [materialName, parsed?.fileName],
+  );
+  const informationalUpload = uploadMatchMode === 'informational';
 
   useEffect(() => {
     if (!open) return;
@@ -129,7 +156,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, [open]);
 
   useEffect(() => {
-    if (!open || selectedOrderIds.length === 0 || !parsed?.cutLayout.items.length) {
+    if (!open || informationalUpload || selectedOrderIds.length === 0 || !parsed?.cutLayout.items.length) {
       setEligibleDetails([]);
       return;
     }
@@ -148,7 +175,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open, parsed, selectedOrderIds]);
+  }, [informationalUpload, open, parsed, selectedOrderIds]);
 
   const orderPresetText = useMemo(() => {
     const labels = selectedOrderIds
@@ -157,16 +184,17 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     return labels.length > 0 ? `весь заказ: ${labels.join(', ')}` : 'весь заказ';
   }, [orderOptions, selectedOrderIds]);
 
-  const allPresets = useMemo(() => [
+  const allPresets = useMemo(() => dedupeCommentPresets([
     { label: 'Весь заказ', commentText: orderPresetText, category: 'order' },
     ...DEFAULT_COMMENT_PRESETS,
     ...presets,
-  ], [orderPresetText, presets]);
+  ]), [orderPresetText, presets]);
 
   const matchProblems = useMemo(() => {
+    if (informationalUpload) return [];
     if (!parsed?.cutLayout.items.length || eligibleLoading) return [];
     return buildSvgMatchProblems(parsed.cutLayout.items, eligibleDetails);
-  }, [eligibleDetails, eligibleLoading, parsed]);
+  }, [eligibleDetails, eligibleLoading, informationalUpload, parsed]);
 
   const blockingMatchProblems = useMemo(
     () => matchProblems.filter((problem) => problem.severity === 'error'),
@@ -181,6 +209,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     revokeObjectUrl(svgPreviewUrlRef.current);
     svgPreviewUrlRef.current = next?.url ?? null;
     setSvgPreview(next);
+    if (!next) setSvgPreviewExpanded(false);
   }, []);
 
   useEffect(() => () => {
@@ -189,6 +218,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, []);
 
   const matchSummary = useMemo(() => {
+    if (informationalUpload) return null;
     if (!parsed?.cutLayout.items.length) return null;
     const unmatched = blockingMatchProblems.reduce((sum, problem) => sum + Math.max(1, problem.quantity), 0);
     const matched = parsed.cutLayout.items.length - unmatched;
@@ -197,7 +227,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       total: parsed.cutLayout.items.length,
       unmatched,
     };
-  }, [blockingMatchProblems, parsed]);
+  }, [blockingMatchProblems, informationalUpload, parsed]);
 
   const uploadProps: UploadProps = {
     accept: '.svg,image/svg+xml',
@@ -232,32 +262,28 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, []);
 
   const addPreset = useCallback((value: string) => {
-    const comment = value.trim();
-    if (!comment) return;
-    setCommentText((current) => {
-      const lines = current.split('\n').map((line) => line.trim()).filter(Boolean);
-      if (!lines.includes(comment)) lines.push(comment);
-      return lines.join('\n');
-    });
-    if (comment.toLowerCase().includes('переделка')) setRework(true);
-    if (comment.toLowerCase().startsWith('материал:')) {
+    const comment = normalizeCommentPresetSegment(value);
+    if (!comment.trim()) return;
+    setCommentText((current) => appendCommentPreset(current, comment));
+    if (comment.toLocaleLowerCase('ru-RU').includes('переделка')) setRework(true);
+    if (comment.toLocaleLowerCase('ru-RU').startsWith('материал:')) {
       setMaterialName(comment.split(':').slice(1).join(':').trim());
     }
   }, []);
 
   const savePreset = useCallback(async () => {
-    const firstLine = commentText.split('\n').map((line) => line.trim()).find(Boolean);
-    if (!firstLine) {
+    const comment = normalizeManualSvgCommentForSubmit(commentText);
+    if (!comment) {
       message.warning('Нет комментария для пресета');
       return;
     }
     setPresetSaving(true);
     try {
       const preset = await cncTelegramApi.createManualSvgCommentPreset({
-        label: firstLine.slice(0, 80),
-        commentText: firstLine,
+        label: comment.slice(0, 80),
+        commentText: comment,
         category: rework ? 'rework' : 'custom',
-      }, createPresetIdempotencyKey(firstLine));
+      }, createPresetIdempotencyKey(comment));
       setPresets((current) => [...current, preset]);
       message.success('Пресет сохранен');
     } catch (error) {
@@ -320,11 +346,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       message.warning('Укажите заказы для раскроя');
       return;
     }
-    if (eligibleLoading) {
+    if (!informationalUpload && eligibleLoading) {
       message.warning('Дождитесь проверки деталей выбранных заказов');
       return;
     }
-    if (blockingMatchProblems.length > 0) {
+    if (!informationalUpload && blockingMatchProblems.length > 0) {
       showSvgMatchProblems(blockingMatchProblems);
       return;
     }
@@ -334,23 +360,25 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         : 'Дождитесь проверки номера задания');
       return;
     }
-    if (warningMatchProblems.length > 0 && !await confirmSvgMatchWarnings(warningMatchProblems)) {
+    if (!informationalUpload && warningMatchProblems.length > 0 && !await confirmSvgMatchWarnings(warningMatchProblems)) {
       return;
     }
 
     const idempotencyKey = createIdempotencyKey(parsed.svgContentHash);
+    const uploadComment = normalizeManualSvgCommentForSubmit(commentText);
     setSubmitting(true);
     try {
-      const uploadBody = {
+      const uploadBody: CncTelegramManualSvgUploadRequest = {
         selectedOrderIds,
         createMdfMachineFileCard: false,
+        matchMode: uploadMatchMode,
         requestedCutJobId,
         svgContentHash: parsed.svgContentHash,
         machine: machineName.trim() || null,
         programName: parsed.fileName,
         materialName: materialName.trim() || null,
         rework,
-        comments: commentText.split('\n').map((line) => line.trim()).filter(Boolean),
+        comments: uploadComment ? [uploadComment] : [],
         parserVersion: 'erp-manual-svg-upload-v1',
         cutLayout: parsed.cutLayout,
         items: parsed.items,
@@ -430,6 +458,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     blockingMatchProblems,
     warningMatchProblems,
     eligibleLoading,
+    informationalUpload,
     navigate,
     onClose,
     onDone,
@@ -439,6 +468,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     resetFormState,
     rework,
     selectedOrderIds,
+    uploadMatchMode,
   ]);
 
   const resetAndClose = useCallback(() => {
@@ -450,9 +480,16 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setParsing(true);
     replaceSvgPreview(createSvgPreview(file));
     try {
-      const result = await parseSvgCutUploadFile(file);
+      const fileNameHints = parseSvgCutUploadFileNameHints(file.name);
+      const parseAsInformational = svgUploadMaterialIsInformational(
+        fileNameHints.materialName ?? materialName,
+        file.name,
+      );
+      const result = await parseSvgCutUploadFile(file, {
+        allowGeometryFallbackItems: parseAsInformational,
+        fallbackOrderName: fileNameHints.orderNames.join('+') || defaultOrderNames[0] || null,
+      });
       setParsed(result);
-      const fileNameHints = parseSvgCutUploadFileNameHints(result.fileName);
       if (fileNameHints.machineName) {
         setMachineName(fileNameHints.machineName);
       }
@@ -493,6 +530,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }
 
   const cutJobNumberSubmitBlocked = requestedCutJobId !== null && cutJobNumberCheck.status !== 'available';
+  const orderDetailMatchLoading = !informationalUpload && eligibleLoading;
 
   return (
     <Modal
@@ -504,7 +542,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       onOk={() => void submit()}
       confirmLoading={submitting}
       okButtonProps={{
-        disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0 || eligibleLoading || cutJobNumberSubmitBlocked,
+        disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0 || orderDetailMatchLoading || cutJobNumberSubmitBlocked,
         icon: <FileAddOutlined />,
       }}
     >
@@ -533,7 +571,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
           {parsed && (
             <SvgValidationSummary
               parsed={parsed}
-              eligibleLoading={eligibleLoading}
+              eligibleLoading={orderDetailMatchLoading}
+              matchMode={uploadMatchMode}
               matchSummary={matchSummary}
               matchProblems={matchProblems}
             />
@@ -608,11 +647,10 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
               </Space>
             </Form.Item>
 
-            <Form.Item label="Комментарии">
-              <Input.TextArea
+            <Form.Item label="Комментарий">
+              <Input
                 value={commentText}
-                onChange={(event) => setCommentText(event.target.value)}
-                autoSize={{ minRows: 3, maxRows: 6 }}
+                onChange={(event) => setCommentText(normalizeManualSvgCommentInput(event.target.value))}
                 placeholder="весь заказ, фрезы, материал, переделка"
               />
             </Form.Item>
@@ -621,13 +659,24 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
               loading={presetSaving}
               onClick={() => void savePreset()}
             >
-              Сохранить первый комментарий как пресет
+              Сохранить комментарий как пресет
             </Button>
           </Form>
         </Space>
 
-        <SvgUploadPreview preview={svgPreview} parsed={parsed} />
+        <SvgUploadPreview
+          preview={svgPreview}
+          parsed={parsed}
+          onOpenExpanded={() => setSvgPreviewExpanded(true)}
+        />
       </div>
+      {svgPreview && svgPreviewExpanded && (
+        <FloatingSvgPreview
+          preview={svgPreview}
+          parsed={parsed}
+          onClose={() => setSvgPreviewExpanded(false)}
+        />
+      )}
     </Modal>
   );
 };
@@ -635,9 +684,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 function SvgUploadPreview({
   preview,
   parsed,
+  onOpenExpanded,
 }: {
   preview: SvgPreviewState | null;
   parsed: ParsedSvgUpload | null;
+  onOpenExpanded: () => void;
 }) {
   const sheetSize = parsed?.cutLayout.sheet
     ? `${parsed.cutLayout.sheet.widthMm} x ${parsed.cutLayout.sheet.heightMm} мм`
@@ -660,22 +711,48 @@ function SvgUploadPreview({
         style={{
           padding: '10px 12px',
           borderBottom: '1px solid #f0f0f0',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 8,
         }}
       >
-        <Typography.Text strong>Превью SVG</Typography.Text>
-        <Typography.Text
-          type="secondary"
-          ellipsis={preview ? { tooltip: preview.fileName } : true}
-          style={{
-            display: 'block',
-            maxWidth: '100%',
-            fontSize: 12,
-          }}
-        >
-          {preview?.fileName ?? 'Файл не выбран'}
-        </Typography.Text>
+        <div style={{ minWidth: 0 }}>
+          <Typography.Text strong>Превью SVG</Typography.Text>
+          <Typography.Text
+            type="secondary"
+            ellipsis={preview ? { tooltip: preview.fileName } : true}
+            style={{
+              display: 'block',
+              maxWidth: '100%',
+              fontSize: 12,
+            }}
+          >
+            {preview?.fileName ?? 'Файл не выбран'}
+          </Typography.Text>
+        </div>
+        <Tooltip title={preview ? 'Открыть крупное превью' : 'Сначала выберите SVG'}>
+          <Button
+            type="text"
+            size="small"
+            icon={<FullscreenOutlined />}
+            disabled={!preview}
+            aria-label="Открыть крупное превью SVG"
+            onClick={onOpenExpanded}
+            style={{ minWidth: 32 }}
+          />
+        </Tooltip>
       </div>
       <div
+        role={preview ? 'button' : undefined}
+        tabIndex={preview ? 0 : undefined}
+        onClick={preview ? onOpenExpanded : undefined}
+        onKeyDown={preview ? (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpenExpanded();
+          }
+        } : undefined}
         style={{
           flex: 1,
           minHeight: 0,
@@ -684,6 +761,8 @@ function SvgUploadPreview({
           justifyContent: 'center',
           background: '#fafafa',
           padding: 8,
+          cursor: preview ? 'zoom-in' : 'default',
+          outline: 'none',
         }}
       >
         {preview ? (
@@ -719,6 +798,217 @@ function SvgUploadPreview({
   );
 }
 
+function FloatingSvgPreview({
+  preview,
+  parsed,
+  onClose,
+}: {
+  preview: SvgPreviewState;
+  parsed: ParsedSvgUpload | null;
+  onClose: () => void;
+}) {
+  const sheetSize = parsed?.cutLayout.sheet
+    ? `${parsed.cutLayout.sheet.widthMm} x ${parsed.cutLayout.sheet.heightMm} мм`
+    : 'размер листа не определен';
+  const [position, setPosition] = useState(defaultFloatingSvgPreviewPosition);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    left: number;
+    top: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleResize = () => setPosition((current) => clampFloatingSvgPreviewPosition(current));
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      left: position.left,
+      top: position.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [position.left, position.top]);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setPosition(clampFloatingSvgPreviewPosition({
+      left: drag.left + event.clientX - drag.startX,
+      top: drag.top + event.clientY - drag.startY,
+    }));
+  }, []);
+
+  const finishDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: position.left,
+        top: position.top,
+        zIndex: 1100,
+        width: 'min(760px, calc(100vw - 32px))',
+        height: 'min(620px, calc(100vh - 32px))',
+        borderRadius: 8,
+        background: '#ffffff',
+        boxShadow: '0 18px 45px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.1)',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+      aria-label="Крупное превью SVG-раскроя"
+    >
+      <div
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        style={{
+          minHeight: 48,
+          padding: '8px 10px 8px 14px',
+          cursor: 'move',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          borderBottom: '1px solid #f0f0f0',
+          userSelect: 'none',
+          touchAction: 'none',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <Typography.Text strong ellipsis={{ tooltip: preview.fileName }} style={{ display: 'block' }}>
+            {preview.fileName}
+          </Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {sheetSize}
+          </Typography.Text>
+        </div>
+        <Space size={4}>
+          <Tooltip title="Распечатать SVG">
+            <Button
+              type="text"
+              icon={<PrinterOutlined />}
+              aria-label="Распечатать SVG-превью"
+              onClick={(event) => {
+                event.stopPropagation();
+                printSvgPreview(preview.url, preview.fileName);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title="Закрыть">
+            <Button
+              type="text"
+              icon={<CloseOutlined />}
+              aria-label="Закрыть крупное превью SVG"
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose();
+              }}
+            />
+          </Tooltip>
+        </Space>
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          background: '#fafafa',
+          padding: 12,
+        }}
+      >
+        <img
+          src={preview.url}
+          alt="Крупное превью SVG-раскроя"
+          draggable={false}
+          decoding="async"
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            outline: '1px solid rgba(0, 0, 0, 0.1)',
+            background: '#ffffff',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function defaultFloatingSvgPreviewPosition(): { left: number; top: number } {
+  if (typeof window === 'undefined') return { left: 24, top: 72 };
+  const width = Math.min(760, Math.max(320, window.innerWidth - 32));
+  const height = Math.min(620, Math.max(320, window.innerHeight - 32));
+  return clampFloatingSvgPreviewPosition({
+    left: window.innerWidth - width - 24,
+    top: Math.min(88, window.innerHeight - height - 16),
+  });
+}
+
+function clampFloatingSvgPreviewPosition(position: { left: number; top: number }): { left: number; top: number } {
+  if (typeof window === 'undefined') return position;
+  const width = Math.min(760, Math.max(320, window.innerWidth - 32));
+  const height = Math.min(620, Math.max(320, window.innerHeight - 32));
+  const margin = 16;
+  return {
+    left: Math.min(Math.max(margin, position.left), Math.max(margin, window.innerWidth - width - margin)),
+    top: Math.min(Math.max(margin, position.top), Math.max(margin, window.innerHeight - height - margin)),
+  };
+}
+
+function printSvgPreview(url: string, title: string): void {
+  const frame = document.createElement('iframe');
+  frame.style.position = 'fixed';
+  frame.style.width = '1px';
+  frame.style.height = '1px';
+  frame.style.opacity = '0';
+  frame.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(frame);
+  const documentRef = frame.contentDocument;
+  if (!documentRef) {
+    frame.remove();
+    return;
+  }
+  documentRef.open();
+  documentRef.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><style>@page{margin:8mm}html,body{margin:0;width:100%;height:100%}body{display:flex;align-items:center;justify-content:center}img{display:block;max-width:100%;max-height:calc(100vh - 16mm);object-fit:contain}</style></head><body><img src="${escapeHtml(url)}" alt=""></body></html>`);
+  documentRef.close();
+  const image = documentRef.querySelector('img');
+  const finish = () => {
+    frame.contentWindow?.focus();
+    frame.contentWindow?.print();
+    window.setTimeout(() => frame.remove(), 60_000);
+  };
+  if (image?.complete) finish();
+  else if (image) image.onload = finish;
+  else frame.remove();
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character] ?? character);
+}
+
 function createSvgPreview(file: File): SvgPreviewState | null {
   if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
   return {
@@ -735,11 +1025,13 @@ function revokeObjectUrl(url: string | null): void {
 function SvgValidationSummary({
   parsed,
   eligibleLoading,
+  matchMode,
   matchSummary,
   matchProblems,
 }: {
   parsed: ParsedSvgUpload;
   eligibleLoading: boolean;
+  matchMode: SvgUploadMatchMode;
   matchSummary: { matched: number; total: number; unmatched: number } | null;
   matchProblems: SvgMatchProblem[];
 }) {
@@ -747,11 +1039,16 @@ function SvgValidationSummary({
   const valid = layout.status === 'valid';
   const errorCount = matchProblems.filter((problem) => problem.severity === 'error').length;
   const warningCount = matchProblems.length - errorCount;
+  const informational = matchMode === 'informational';
   return (
     <Alert
-      type={!valid || errorCount > 0 ? 'error' : warningCount > 0 ? 'warning' : 'success'}
+      type={!valid || errorCount > 0 ? 'error' : warningCount > 0 ? 'warning' : informational ? 'info' : 'success'}
       showIcon
-      message={valid ? 'SVG прошел базовую проверку' : 'SVG не прошел проверку'}
+      message={valid
+        ? informational
+          ? 'SVG прошел проверку для информативного раскроя'
+          : 'SVG прошел базовую проверку'
+        : 'SVG не прошел проверку'}
       description={(
         <Space direction="vertical" size={6}>
           <Space wrap>
@@ -759,12 +1056,18 @@ function SvgValidationSummary({
             {layout.sheet && <Tag>{layout.sheet.widthMm} x {layout.sheet.heightMm} мм</Tag>}
             <Tag>{layout.acceptedItemCount ?? layout.items.length} деталей</Tag>
             <Tag>{layout.partContourCount ?? 0} контуров</Tag>
+            {informational && <Tag color="blue">без сверки ERP-деталей</Tag>}
             {matchSummary && (
               <Tag color={matchSummary.unmatched ? 'orange' : 'green'}>
                 {eligibleLoading ? 'проверка заказов...' : `${matchSummary.matched}/${matchSummary.total} найдены в заказах`}
               </Tag>
             )}
           </Space>
+          {informational && valid && (
+            <Typography.Text type="secondary">
+              Размеры и список деталей берутся из SVG. Задание будет связано с выбранными заказами без привязки к деталям заказа.
+            </Typography.Text>
+          )}
           {layout.reasons.length > 0 && (
             <Typography.Text type="danger">
               {layout.reasons.join('; ')}
@@ -1211,6 +1514,39 @@ function suggestedCutJobIdsFromErrorDetails(details: unknown): number[] {
     .slice(0, 5);
 }
 
+function dedupeCommentPresets(presets: SvgCommentPresetOption[]): SvgCommentPresetOption[] {
+  const seen = new Set<string>();
+  const result: SvgCommentPresetOption[] = [];
+  for (const preset of presets) {
+    const key = normalizeManualSvgCommentForSubmit(preset.commentText).toLocaleLowerCase('ru-RU');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(preset);
+  }
+  return result;
+}
+
+function appendCommentPreset(current: string, preset: string): string {
+  const base = normalizeManualSvgCommentInput(current).trimEnd();
+  const segment = preset.trimStart();
+  return base ? `${base} ${segment}` : segment;
+}
+
+function normalizeCommentPresetSegment(value: string): string {
+  const collapsed = normalizeManualSvgCommentForSubmit(value);
+  if (!collapsed) return '';
+  if (/[:№]$/u.test(collapsed)) return `${collapsed} `;
+  return collapsed;
+}
+
+function normalizeManualSvgCommentInput(value: string): string {
+  return value.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trimStart();
+}
+
+function normalizeManualSvgCommentForSubmit(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 function createIdempotencyKey(svgContentHash: string): string {
   const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -1225,9 +1561,25 @@ function createPresetIdempotencyKey(commentText: string): string {
   return `manual-svg-preset:${asciiHash(commentText)}:${suffix}`;
 }
 
+const SVG_UPLOAD_OTHER_MATERIAL_RE = /(?:^|[^a-zа-яё])(?:hdf|хдф|лдсп|ldsp|lдсп|дсп|dsp|двп|dvp|osb|осп|fanera|фанера|plywood|акрил|acrylic|пластик|plastic)(?=$|[^a-zа-яё])/i;
+const SVG_UPLOAD_MDF_MATERIAL_RE = /(?:^|[^a-zа-яё])(?:mdf|мдф)(?=$|[^a-zа-яё])/i;
+const SVG_UPLOAD_UNKNOWN_MATERIAL_RE = /^(?:не\s*(?:определ[её]н(?:о)?|распознан(?:о)?)|неизвестн(?:ый|о)?|unknown|[-—])$/i;
+
+function svgUploadMaterialIsInformational(materialName: string | null | undefined, fileName: string | null | undefined): boolean {
+  const metadata = [materialName ?? '', fileName ?? ''].filter((value) => value.trim());
+  if (metadata.some((value) => SVG_UPLOAD_OTHER_MATERIAL_RE.test(value))) return true;
+  const material = materialName?.trim() ?? '';
+  if (!material || SVG_UPLOAD_UNKNOWN_MATERIAL_RE.test(material)) return false;
+  return !SVG_UPLOAD_MDF_MATERIAL_RE.test(material);
+}
+
 function inferMaterialName(items: ParsedSvgUpload['cutLayout']['items'], fileName: string): string | null {
   const fileLower = fileName.toLowerCase();
   if (fileLower.includes('hdf') || fileLower.includes('хдф')) return 'ХДФ';
+  if (fileLower.includes('ldsp') || fileLower.includes('лдсп')) return 'ЛДСП';
+  if (fileLower.includes('fanera') || fileLower.includes('фанера') || fileLower.includes('plywood')) return 'Фанера';
+  if (fileLower.includes('osb') || fileLower.includes('осп')) return 'OSB';
+  if (fileLower.includes('dvp') || fileLower.includes('двп')) return 'ДВП';
   if (fileLower.includes('mdf') || fileLower.includes('мдф')) return 'МДФ 16мм';
   return items.length > 0 ? 'МДФ 16мм' : null;
 }

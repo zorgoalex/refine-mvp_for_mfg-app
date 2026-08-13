@@ -33,4 +33,15 @@ describe('parseSvgCutUploadFileNameHints', () => {
       materialName: null,
     });
   });
+
+  it('extracts common non-MDF material suffixes', () => {
+    expect(parseSvgCutUploadFileNameHints('CNC#1_2777-LDSP.svg')).toMatchObject({
+      orderNames: ['2777'],
+      materialName: 'ЛДСП',
+    });
+    expect(parseSvgCutUploadFileNameHints('CNC#1_2777+2723-FANERA12MM.svg')).toMatchObject({
+      orderNames: ['2777', '2723'],
+      materialName: 'Фанера 12мм',
+    });
+  });
 });

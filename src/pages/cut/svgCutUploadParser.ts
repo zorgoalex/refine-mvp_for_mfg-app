@@ -53,16 +53,28 @@ export interface ParsedSvgUpload {
   items: CncTelegramManualSvgUploadRequest['items'];
 }
 
-export async function parseSvgCutUploadFile(file: File): Promise<ParsedSvgUpload> {
+export interface SvgCutUploadParseOptions {
+  allowGeometryFallbackItems?: boolean;
+  fallbackOrderName?: string | null;
+}
+
+export async function parseSvgCutUploadFile(
+  file: File,
+  options: SvgCutUploadParseOptions = {},
+): Promise<ParsedSvgUpload> {
   const text = await file.text();
-  const parsed = parseSvgCutUploadText(text, file.name);
+  const parsed = parseSvgCutUploadText(text, file.name, options);
   return {
     ...parsed,
     svgContentHash: await sha256Hex(text),
   };
 }
 
-export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Omit<ParsedSvgUpload, 'svgContentHash'> {
+export function parseSvgCutUploadText(
+  text: string,
+  fileName = 'upload.svg',
+  options: SvgCutUploadParseOptions = {},
+): Omit<ParsedSvgUpload, 'svgContentHash'> {
   const invalid = (reasons: string[], sheet: CncTelegramCutLayout['sheet'] = null): Omit<ParsedSvgUpload, 'svgContentHash'> => ({
     fileName,
     cutLayout: {
@@ -131,7 +143,7 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
     const points = elementPoints(element).map((point) => applyMatrix(point, matrix));
     const bbox = pointsBbox(points);
     if (!bbox) {
-      if (visualLabels.length > 0) {
+      if (visualLabels.length > 0 || options.allowGeometryFallbackItems === true) {
         rejected.add('Контуры деталей PartContour без геометрии');
       }
       continue;
@@ -161,44 +173,58 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
     });
   }
 
-  if (visualLabels.length > 0) {
-    const visualMatches = matchVisualLabelsToPartContours(partContours, visualLabels);
-    for (const contour of partContours) {
-      const parsed = visualMatches.get(contour);
-      if (!parsed) {
+  const visualMatches = visualLabels.length > 0
+    ? matchVisualLabelsToPartContours(partContours, visualLabels)
+    : new Map<PartContourGeometry, VisualDetailLabel>();
+  for (const [index, contour] of partContours.entries()) {
+    const parsed = visualMatches.get(contour);
+    if (!parsed) {
+      if (options.allowGeometryFallbackItems === true) {
+        const fallback = fallbackLayoutItemFromContour(contour, index, options.fallbackOrderName);
+        const key = [
+          fallback.orderName,
+          fallback.detailNumber,
+          fallback.widthMm,
+          fallback.heightMm,
+          fallback.sourceElementId ?? index,
+        ].join('|');
+        if (seenGeometry.has(key)) continue;
+        seenGeometry.add(key);
+        layoutItems.push(fallback);
+      } else if (visualLabels.length > 0) {
         rejected.add('Для контура детали PartContour не найдена верхняя подпись с заказом/позицией');
-        continue;
       }
-      const resolvedSize = resolveVisualLabelSize(parsed, contour);
-      const key = [
-        parsed.orderName,
-        parsed.detailNumber,
-        resolvedSize.widthMm,
-        resolvedSize.heightMm,
-        contour.elementId,
-      ].join('|');
-      if (seenGeometry.has(key)) continue;
-      seenGeometry.add(key);
-      layoutItems.push({
-        orderName: parsed.orderName,
-        detailNumber: parsed.detailNumber,
-        widthMm: resolvedSize.widthMm,
-        heightMm: resolvedSize.heightMm,
-        quantity: 1,
-        confidence: parsed.hasExplicitSize ? 0.99 : 0.82,
-        sourceElementId: contour.elementId,
-        xMm: round2(contour.xMm),
-        yMm: round2(contour.yMm),
-        placedWidthMm: round2(contour.placedWidthMm),
-        placedHeightMm: round2(contour.placedHeightMm),
-        rotated: Math.round(contour.placedWidthMm) === Math.round(resolvedSize.heightMm) &&
-          Math.round(contour.placedHeightMm) === Math.round(resolvedSize.widthMm),
-      });
+      continue;
     }
+    const resolvedSize = resolveVisualLabelSize(parsed, contour);
+    const key = [
+      parsed.orderName,
+      parsed.detailNumber,
+      resolvedSize.widthMm,
+      resolvedSize.heightMm,
+      contour.elementId,
+    ].join('|');
+    if (seenGeometry.has(key)) continue;
+    seenGeometry.add(key);
+    layoutItems.push({
+      orderName: parsed.orderName,
+      detailNumber: parsed.detailNumber,
+      widthMm: resolvedSize.widthMm,
+      heightMm: resolvedSize.heightMm,
+      quantity: 1,
+      confidence: parsed.hasExplicitSize ? 0.99 : 0.82,
+      sourceElementId: contour.elementId,
+      xMm: round2(contour.xMm),
+      yMm: round2(contour.yMm),
+      placedWidthMm: round2(contour.placedWidthMm),
+      placedHeightMm: round2(contour.placedHeightMm),
+      rotated: Math.round(contour.placedWidthMm) === Math.round(resolvedSize.heightMm) &&
+        Math.round(contour.placedHeightMm) === Math.round(resolvedSize.widthMm),
+    });
   }
 
   const reasons: string[] = [];
-  if (visualLabels.length === 0) {
+  if (visualLabels.length === 0 && options.allowGeometryFallbackItems !== true) {
     reasons.push('Не найдены читаемые верхние подписи деталей: заказ / позиция / размер');
   }
   if (visualLabels.length > 0 && layoutItems.length === 0) {
@@ -225,6 +251,33 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
     cutLayout,
     items: layoutItemsToRequestItems(cutLayout),
   };
+}
+
+function fallbackLayoutItemFromContour(
+  contour: PartContourGeometry,
+  index: number,
+  fallbackOrderName: string | null | undefined,
+): CncTelegramCutLayout['items'][number] {
+  const orderName = normalizeFallbackOrderName(fallbackOrderName);
+  return {
+    orderName,
+    detailNumber: index + 1,
+    widthMm: round2(contour.placedWidthMm),
+    heightMm: round2(contour.placedHeightMm),
+    quantity: 1,
+    confidence: 0.72,
+    sourceElementId: contour.elementId || `PartContour-${index + 1}`,
+    xMm: round2(contour.xMm),
+    yMm: round2(contour.yMm),
+    placedWidthMm: round2(contour.placedWidthMm),
+    placedHeightMm: round2(contour.placedHeightMm),
+    rotated: false,
+  };
+}
+
+function normalizeFallbackOrderName(value: string | null | undefined): string {
+  const normalized = value?.trim();
+  return normalized ? normalized.slice(0, 64) : 'SVG';
 }
 
 function layoutItemsToRequestItems(layout: CncTelegramCutLayout): CncTelegramManualSvgUploadRequest['items'] {

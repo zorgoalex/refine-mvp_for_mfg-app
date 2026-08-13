@@ -136,8 +136,16 @@ describe('CncTelegramController parsing', () => {
       idempotencyKey: 'manual-svg:test:1',
       selectedOrderIds: [7, 42],
       createMdfMachineFileCard: true,
+      matchMode: 'order_details',
       requestedCutJobId: 777,
       svgContentHash: 'a'.repeat(64),
+    });
+
+    expect(parseManualSvgUpload({
+      ...manualSvgUploadPayload(),
+      matchMode: 'informational',
+    }, 'manual-svg:test:2')).toMatchObject({
+      matchMode: 'informational',
     });
   });
 

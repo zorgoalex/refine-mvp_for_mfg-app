@@ -66,6 +66,17 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('problems: unmatched.slice(0, 50)');
   });
 
+  it('supports informative non-MDF SVG imports without order-detail links', () => {
+    expect(repositorySource).toContain("manualDto.matchMode === 'informational'");
+    expect(repositorySource).toContain('buildInformationalSvgCutImportPlan');
+    expect(repositorySource).toContain('Информативный SVG: связь с деталями ERP не требуется');
+    expect(repositorySource).toContain('orderDetailId: null');
+    expect(repositorySource).toContain("itemKey: informationalSvgItemKey(item, index)");
+    expect(repositorySource).toContain("sheetMaterialTypeId: null");
+    expect(repositorySource).toContain('buildInformationalSvgPdfDetailRows');
+    expect(repositorySource).toContain('snapshotPieces.length');
+  });
+
   it('emits only one MDF-card event for repeated same-source manual SVG follow-up', async () => {
     const { queries, first, second } = await runManualSvgMdfFollowupSequence();
     const auditEvents = queries
@@ -2659,8 +2670,8 @@ async function runManualSvgMdfFollowupSequence() {
           }],
         };
       }
-      if (/SELECT\s+order_id\s+FROM orders\s+WHERE order_id = ANY/i.test(text)) {
-        return { rows: [{ order_id: 2689 }] };
+      if (/SELECT\s+order_id,\s+order_name\s+FROM orders\s+WHERE order_id = ANY/i.test(text)) {
+        return { rows: [{ order_id: 2689, order_name: '2689' }] };
       }
       if (/SELECT\s+lower\(trim\(o\.order_name\)\) AS order_key/i.test(text)) {
         return {
@@ -2795,6 +2806,7 @@ function manualSvgUploadDto(
     idempotencyKey,
     selectedOrderIds: [2689],
     createMdfMachineFileCard,
+    matchMode: 'order_details' as const,
     requestedCutJobId,
     svgContentHash: 'a'.repeat(64),
     workday: '2026-08-12',
@@ -2869,6 +2881,7 @@ function manualSvgStructuredDtoForTest(dto: ReturnType<typeof manualSvgUploadDto
     rework: dto.rework,
     comments: dto.comments,
     tools: dto.tools,
+    analysisWarnings: [],
     ocrEngine: null,
     parserVersion: dto.parserVersion,
     cutLayout: dto.cutLayout,
@@ -2885,6 +2898,7 @@ function manualSvgStructuredDtoForTest(dto: ReturnType<typeof manualSvgUploadDto
 function manualSvgExternalPacketKeyForTest(dto: ReturnType<typeof manualSvgUploadDto>) {
   const identityHash = sha256JsonForTest({
     kind: 'erp-manual-svg-upload-v1',
+    matchMode: dto.matchMode,
     selectedOrderIds: [...dto.selectedOrderIds].sort((a, b) => a - b),
     requestedCutJobId: dto.requestedCutJobId ?? null,
     svgContentHash: dto.svgContentHash.toLowerCase(),

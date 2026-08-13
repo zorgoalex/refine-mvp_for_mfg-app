@@ -91,11 +91,17 @@ export function selectCncMachineResultSheets(
   selectedDetailId: number | null,
 ): CncMachineResultSheet[] {
   const targetItemId = selectedDetailId === null ? null : `det-${selectedDetailId}`;
+  const hasOrderDetailPieces = result.job.groups.some((group) =>
+    group.sheets.some((sheet) =>
+      sheet.placements.pieces.some((piece) => /^det-\d+$/.test(piece.item_id)),
+    ),
+  );
   const sheets: CncMachineResultSheet[] = [];
 
   for (const group of result.job.groups) {
     for (const sheet of group.sheets) {
       const containsDetail = targetItemId === null
+        || !hasOrderDetailPieces
         || sheet.placements.pieces.some((piece) => piece.item_id === targetItemId);
       if (!containsDetail) continue;
 

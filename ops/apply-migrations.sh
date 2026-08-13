@@ -1303,6 +1303,26 @@ probe_file() {
                           AND comment_text = 'переделка'
                           AND category = 'rework'
                      );" ;;
+    120_cnc_manual_svg_comment_preset_seed*) probe_all \
+                     "$(q_tbl cnc_manual_svg_comment_presets)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM cnc_manual_svg_comment_presets
+                        WHERE lower(trim(comment_text)) = lower('Фрезы для ХДФ: 8')
+                          AND category = 'tool'
+                     );" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM cnc_manual_svg_comment_presets
+                        WHERE lower(trim(comment_text)) = lower('Черновой с двух сторон!!!')
+                          AND category = 'general'
+                     );" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM cnc_manual_svg_comment_presets
+                        WHERE lower(trim(comment_text)) = lower('Фреза для ламинированной стороны:')
+                          AND category = 'tool'
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1314,7 +1334,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

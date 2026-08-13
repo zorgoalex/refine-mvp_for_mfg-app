@@ -49,6 +49,11 @@ function normalizeMaterialSuffix(value: string): string | null {
   if (/(MDF|МДФ)/i.test(normalized)) return `МДФ${thicknessSuffix || ' 16мм'}`;
   if (/(LDSP|ЛДСП)/i.test(normalized)) return `ЛДСП${thicknessSuffix}`;
   if (/(DSP|ДСП)/i.test(normalized)) return `ДСП${thicknessSuffix}`;
+  if (/(DVP|ДВП)/i.test(normalized)) return `ДВП${thicknessSuffix}`;
+  if (/(OSB|ОСП)/i.test(normalized)) return `OSB${thicknessSuffix}`;
+  if (/(FANERA|ФАНЕРА|PLYWOOD)/i.test(normalized)) return `Фанера${thicknessSuffix}`;
+  if (/(ACRYLIC|АКРИЛ)/i.test(normalized)) return `Акрил${thicknessSuffix}`;
+  if (/(PLASTIC|ПЛАСТИК)/i.test(normalized)) return `Пластик${thicknessSuffix}`;
   if (thickness) return `МДФ ${Number(thickness)}мм`;
   return null;
 }

@@ -150,6 +150,7 @@ const SHA256_RE = /^[a-f0-9]{64}$/i;
 const manualSvgUploadSchema = z.object({
   selectedOrderIds: z.array(z.number().int().positive()).min(1).max(100),
   createMdfMachineFileCard: z.boolean(),
+  matchMode: z.enum(['order_details', 'informational']).optional().default('order_details'),
   requestedCutJobId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   svgContentHash: z.string().trim().regex(SHA256_RE),
   workday: z.string().regex(DATE_ONLY).refine(isValidDateOnly).optional(),

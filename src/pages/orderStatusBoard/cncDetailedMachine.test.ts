@@ -329,6 +329,36 @@ describe('CNC detailed machine result sheets', () => {
     ]);
     expect(selectCncMachineResultSheets(cutResult(), 7999)).toEqual([]);
   });
+
+  it('shows all sheets for imported informative SVG results without order-detail pieces', () => {
+    const result = cutResult();
+    const informative: CutResultDto = {
+      ...result,
+      job: {
+        ...result.job,
+        items: [],
+        groups: result.job.groups.map((group) => ({
+          ...group,
+          sheets: group.sheets.map((sheet) => ({
+            ...sheet,
+            placements: {
+              ...sheet.placements,
+              pieces: sheet.placements.pieces.map((piece, index) => ({
+                ...piece,
+                item_id: `svg-${group.cutGroupId}-${sheet.sheetIndex}-${index + 1}`,
+              })),
+            },
+          })),
+        })),
+      },
+    };
+
+    expect(selectCncMachineResultSheets(informative, 7001).map((sheet) => sheet.key)).toEqual([
+      '35:3:101:0',
+      '35:3:101:1',
+      '35:3:102:2',
+    ]);
+  });
 });
 
 function machineColumns(packets: CncTelegramPacket[]): CncTelegramTodayColumn[] {

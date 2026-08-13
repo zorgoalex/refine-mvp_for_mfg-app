@@ -85,6 +85,14 @@ describe('svgCutUploadParser visual labels', () => {
     expect(parserSource).not.toContain('odm');
   });
 
+  it('keeps a geometry fallback path for informative non-MDF uploads only', () => {
+    expect(parserSource).toContain('allowGeometryFallbackItems');
+    expect(parserSource).toContain('fallbackLayoutItemFromContour');
+    expect(parserSource).toContain('fallbackOrderName');
+    expect(parserSource).toContain('confidence: 0.72');
+    expect(parserSource).toContain('options.allowGeometryFallbackItems !== true');
+  });
+
   it('matches visual labels by position when contour bbox size is slightly noisy', () => {
     const target = contour({
       elementId: '_2756_PartContour',

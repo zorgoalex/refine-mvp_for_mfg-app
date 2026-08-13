@@ -265,6 +265,7 @@ export interface CncAutoCutStatusConfigureResponse {
 export interface CncTelegramManualSvgUploadRequest {
   selectedOrderIds: number[];
   createMdfMachineFileCard: boolean;
+  matchMode?: 'order_details' | 'informational';
   requestedCutJobId?: number | null;
   svgContentHash: string;
   workday?: string;

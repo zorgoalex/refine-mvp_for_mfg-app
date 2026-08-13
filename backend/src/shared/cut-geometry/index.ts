@@ -16,9 +16,12 @@
  */
 export interface PieceLabelSnapshot {
   orderId: number | null;
+  orderName?: string | null;
+  detailId?: number | null;
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
+  materialName?: string | null;
 }
 
 /** Per-piece geometry as stored in the sheet placements JSONB. */
