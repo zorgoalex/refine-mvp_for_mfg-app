@@ -37,6 +37,28 @@ Tracked env shape:
 
 Полный runbook: [VPS Bootstrap And Deploy](../ops/README.md).
 
+## Production backup
+
+Перед миграциями, restore rehearsal или prod-to-stage refresh используйте
+`ops/backup-prod-packet.sh`, а не legacy DB-only dump. Скрипт сам определяет
+Compose project name: `--compose-project-name`, caller `COMPOSE_PROJECT_NAME`,
+`.env`, running Docker labels, затем Compose config name. Secrets и raw `.env`
+в packet не пишутся.
+
+```bash
+cd ~/projects/erp_dev/repo_erp
+ops/backup-prod-packet.sh \
+  --project-dir ~/projects/erp_dev \
+  --env-file ~/projects/erp_dev/.env \
+  --compose-file ~/projects/erp_dev/docker-compose.yml \
+  --backup-root ~/projects/erp_dev/backups/prod-packets \
+  --include-cnc-media
+
+PACKET_DIR="$(ls -td ~/projects/erp_dev/backups/prod-packets/erp-backup-packet-* | head -n1)"
+(cd "$PACKET_DIR" && sha256sum -c SHA256SUMS)
+sha256sum -c "$PACKET_DIR.tar.gz.sha256"
+```
+
 ## Запуск tracked template
 
 Если runtime root и checkout различаются, всегда задавайте
