@@ -242,6 +242,12 @@ describe('OrderStatusBoardPage UX guards', () => {
       /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*overscroll-behavior-y: auto;/,
     );
     expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-columns--cnc:not\(\.status-board-columns--cnc-detailed\) > \.status-board-column\s*\{[^}]*overflow: visible;/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-columns--cnc:not\(\.status-board-columns--cnc-detailed\) \.status-board-column__header\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*z-index: 18;[^}]*border-radius: 7px 7px 0 0;/,
+    );
+    expect(css).toMatch(
       /\.status-board-page--cnc :where\([\s\S]*?\.status-board-viewport,[\s\S]*?\.cnc-board-card-shell,[\s\S]*?\.cnc-board-card-shell--draggable,[\s\S]*?\.status-board-card,[\s\S]*?\.cnc-bath-card[\s\S]*?\)\s*\{[^}]*touch-action: pan-x pan-y;/s,
     );
     expect(tabletCss).toMatch(

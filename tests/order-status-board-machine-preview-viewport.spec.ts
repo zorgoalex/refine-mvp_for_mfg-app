@@ -122,3 +122,71 @@ test('keeps MDF phone columns 15 percent denser than desktop runtime grid', asyn
   expect(geometry.gridTemplateColumns).not.toContain('220px');
   expect(geometry.viewportScrollWidth).toBeGreaterThan(408);
 });
+
+test('keeps MDF phone column headers sticky during vertical board scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 408, height: 816 });
+  await page.setContent(`
+    <style>${boardCss}</style>
+    <style>html, body { margin: 0; }</style>
+    <section class="status-board-page status-board-page--cnc" style="height: 360px; min-height: 0; padding: 0;">
+      <section class="status-board-viewport" style="width: 408px; height: 260px;">
+        <div
+          class="status-board-columns status-board-columns--cnc status-board-columns--cnc-standard"
+          style="--status-board-cnc-column-count: 3; grid-template-columns: repeat(3, minmax(var(--status-board-cnc-column-width, 220px), 1fr)); min-width: 690px;"
+        >
+          ${Array.from({ length: 3 }, (_, columnIndex) => `
+            <article class="status-board-column cnc-today-column cnc-today-column--parsed" data-testid="mdf-column-${columnIndex}">
+              <header class="status-board-column__header" data-testid="mdf-header-${columnIndex}">
+                <div class="cnc-today-column__header-main">
+                  <div class="status-board-column__title">
+                    <span class="status-board-column__marker"></span>
+                    <strong>Колонка ${columnIndex + 1}</strong>
+                  </div>
+                </div>
+              </header>
+              <div class="status-board-column__cards">
+                ${Array.from({ length: 18 }, (_, cardIndex) => `
+                  <article class="status-board-card" style="height: 64px; flex: 0 0 64px;">
+                    ${columnIndex + 1}.${cardIndex + 1}
+                  </article>
+                `).join('')}
+              </div>
+            </article>
+          `).join('')}
+        </div>
+      </section>
+    </section>
+  `);
+
+  const before = await page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>('.status-board-viewport')!;
+    const header = document.querySelector<HTMLElement>('[data-testid="mdf-header-0"]')!;
+    return {
+      headerTop: Math.round(header.getBoundingClientRect().top),
+      position: getComputedStyle(header).position,
+      scrollTop: viewport.scrollTop,
+      viewportTop: Math.round(viewport.getBoundingClientRect().top),
+    };
+  });
+
+  await page.locator('.status-board-viewport').evaluate((viewport) => {
+    viewport.scrollTop = 420;
+  });
+
+  const after = await page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>('.status-board-viewport')!;
+    const header = document.querySelector<HTMLElement>('[data-testid="mdf-header-0"]')!;
+    return {
+      headerTop: Math.round(header.getBoundingClientRect().top),
+      position: getComputedStyle(header).position,
+      scrollTop: viewport.scrollTop,
+      viewportTop: Math.round(viewport.getBoundingClientRect().top),
+    };
+  });
+
+  expect(before.position).toBe('sticky');
+  expect(before.headerTop).toBeGreaterThanOrEqual(before.viewportTop);
+  expect(after.position).toBe('sticky');
+  expect(after.scrollTop).toBeGreaterThan(0);
+  expect(after.headerTop).toBe(after.viewportTop);
+});

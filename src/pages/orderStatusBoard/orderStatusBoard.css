@@ -3290,6 +3290,20 @@
     overscroll-behavior-y: auto;
   }
 
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) > .status-board-column {
+    overflow: visible;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) .status-board-column__header {
+    position: sticky;
+    top: 0;
+    z-index: 18;
+    border-radius: 7px 7px 0 0;
+    box-shadow:
+      0 1px 0 var(--app-border-soft),
+      0 8px 14px rgba(15, 23, 42, 0.08);
+  }
+
   .status-board-page--cnc :where(
     .status-board-viewport,
     .status-board-columns--cnc,
