@@ -20,6 +20,7 @@ describe('CncTelegramMediaService', () => {
   it('binds order-scoped URLs and exposes the fixed 30-day contract', async () => {
     const repository = repositoryMock();
     repository.listOrderScreenshots.mockResolvedValue([{
+      kind: 'telegram',
       packetId: packetId(),
       sourceMessageId: 10847,
       sourceCreatedAt: '2026-08-01T08:00:00.000Z',

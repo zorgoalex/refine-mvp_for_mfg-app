@@ -102,8 +102,19 @@ export interface DayData {
 /**
  * Элемент перетаскивания (Drag Item)
  */
+export interface CalendarDragPreview {
+  backgroundColor: string;
+  borderColor: string;
+  height: number;
+  meta: string;
+  orderLabel: string;
+  subtitle: string;
+  width: number;
+}
+
 export interface DragItem {
   order: CalendarOrder;
+  preview?: CalendarDragPreview;
   sourceDate: string; // Исходная дата (DD.MM.YYYY)
 }
 

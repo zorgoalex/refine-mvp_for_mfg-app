@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Modal, Select, Space, Tooltip, Typography, message } from 'antd';
-import { DownloadOutlined, PrinterOutlined, TagsOutlined } from '@ant-design/icons';
+import { DownloadOutlined, LeftOutlined, PrinterOutlined, RightOutlined, TagsOutlined } from '@ant-design/icons';
 import { authSession } from '../../api/authSession';
 import { labelsApi } from '../../api/labelsApi';
 import type {
@@ -73,6 +73,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   const [useBasisFields, setUseBasisFields] = useState(true);
   const [exportFormats, setExportFormats] = useState<LabelExportFormat[]>([]);
   const [preview, setPreview] = useState<DetailLabelsPreview | null>(null);
+  const [previewPageIndex, setPreviewPageIndex] = useState(0);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [printing, setPrinting] = useState(false);
@@ -104,6 +105,8 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
     : 'Бирки';
   const omittedPreview = labelCoverage?.issues.slice(0, 8) ?? [];
   const omittedRestCount = Math.max(0, (labelCoverage?.issues.length ?? 0) - omittedPreview.length);
+  const previewPageCount = preview?.svgPages.length ?? 0;
+  const visiblePreviewSvg = previewPageCount > 0 ? preview.svgPages[previewPageIndex] : null;
   const button = (
     <Button
       className="app-hit-area-sm"
@@ -121,6 +124,11 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   useEffect(() => {
     if (selectedTemplate) setExportFormats(selectedTemplate.defaultExportFormats);
   }, [selectedTemplate?.labelTemplateId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!preview || previewPageIndex < preview.svgPages.length) return;
+    setPreviewPageIndex(Math.max(0, preview.svgPages.length - 1));
+  }, [preview, previewPageIndex]);
 
   useEffect(() => {
     if (!open) return;
@@ -144,7 +152,10 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
       const nextPreview = await labelsApi.previewDetailLabels({
         ...buildRequest(selectedTemplate),
       });
-      if (previewRequestRef.current === requestId) setPreview(nextPreview);
+      if (previewRequestRef.current === requestId) {
+        setPreview(nextPreview);
+        setPreviewPageIndex(0);
+      }
     } catch {
       if (previewRequestRef.current === requestId) message.error('Не удалось построить предпросмотр бирок');
     } finally {
@@ -192,6 +203,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
         ...buildRequest(selectedTemplate),
       });
       setPreview(printPreview);
+      setPreviewPageIndex(0);
       const printed = printLabelSvgPages(printPreview.svgPages, `Бирки ${resolvedSheetLabel}`);
       if (!printed) message.warning('Нет бирок для печати');
     } catch {
@@ -306,10 +318,42 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
           </div>
           {preview && (
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Text type="secondary">Бирок: {preview.labelCount}. Показана первая.</Text>
-              {preview.svgPages.slice(0, 1).map((svg, index) => (
+              <div
+                style={{
+                  alignItems: 'center',
+                  display: 'flex',
+                  gap: 8,
+                  justifyContent: 'space-between',
+                  width: '100%',
+                }}
+              >
+                <Text type="secondary" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  Бирка {previewPageCount > 0 ? previewPageIndex + 1 : 0} из {previewPageCount}. Всего: {preview.labelCount}.
+                </Text>
+                <Space size={6} wrap={false}>
+                  <Button
+                    className="app-hit-area-sm"
+                    size="small"
+                    icon={<LeftOutlined />}
+                    disabled={previewPageIndex <= 0}
+                    onClick={() => setPreviewPageIndex((current) => Math.max(0, current - 1))}
+                  >
+                    Предыдущее
+                  </Button>
+                  <Button
+                    className="app-hit-area-sm"
+                    size="small"
+                    icon={<RightOutlined />}
+                    disabled={previewPageIndex >= previewPageCount - 1}
+                    onClick={() => setPreviewPageIndex((current) => Math.min(previewPageCount - 1, current + 1))}
+                  >
+                    Следующее
+                  </Button>
+                </Space>
+              </div>
+              {visiblePreviewSvg && (
                 <div
-                  key={index}
+                  key={previewPageIndex}
                   className="cut-label-preview-fit"
                   style={{
                     alignItems: 'center',
@@ -320,9 +364,9 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
                     overflow: 'hidden',
                     padding: 12,
                   }}
-                  dangerouslySetInnerHTML={{ __html: svg }}
+                  dangerouslySetInnerHTML={{ __html: visiblePreviewSvg }}
                 />
-              ))}
+              )}
             </Space>
           )}
         </Space>

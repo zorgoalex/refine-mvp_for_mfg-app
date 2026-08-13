@@ -68,4 +68,18 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).not.toContain('label="Текущие статусы заказа"');
     expect(config).not.toContain('label="Исключающие статусы заказа"');
   });
+
+  it('offers JSON export and import for auto-status rules with a detailed import report', () => {
+    expect(config).toContain('DownloadOutlined');
+    expect(config).toContain('UploadOutlined');
+    expect(config).toContain('buildStatusAutomationRulesExportFile(rules)');
+    expect(config).toContain('readStatusAutomationRulesImportSource(parsedJson)');
+    expect(config).toContain('planStatusAutomationRulesImport(rawRules');
+    expect(config).toContain('statusAutomationApi.create(item.rule)');
+    expect(config).toContain('Выгрузить JSON');
+    expect(config).toContain('Загрузить JSON');
+    expect(config).toContain('Результат загрузки правил');
+    expect(config).toContain('Не удалось загрузить из-за отсутствия или несоответствия элементов');
+    expect(config).toContain('Пропущенные дубликаты');
+  });
 });

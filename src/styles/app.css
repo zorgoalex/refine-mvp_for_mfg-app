@@ -1366,8 +1366,30 @@ html {
   z-index: 2;
   padding: 0 2px !important;
   font-size: 62.5% !important;
-  line-height: 1.84 !important;
+  line-height: 1.12 !important;
+  vertical-align: middle;
+  white-space: normal !important;
+  word-break: normal;
+  overflow-wrap: normal;
   background: var(--app-surface) !important;
+}
+
+.cut-jobs-table .ant-table-thead > tr > th .ant-table-column-title,
+.cut-jobs-table .ant-table-thead > tr > th .ant-table-column-sorters {
+  min-height: 2.24em;
+  white-space: normal !important;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.cut-jobs-table .ant-table-thead > tr > th .ant-table-column-sorters {
+  align-items: center;
+}
+
+.cut-jobs-table .ant-table-thead > tr > th .ant-table-column-title {
+  display: block;
+  min-width: 0;
+  line-height: 1.12;
 }
 
 .cut-jobs-table .ant-table-tbody > tr > td {

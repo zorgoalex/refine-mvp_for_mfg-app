@@ -561,7 +561,7 @@ describe('buildSheetsPdf', () => {
         cutNumber: '42-3',
         currentCutNumber: '42-4',
         jobName: 'Задание ванна',
-        textureDirection: 'Вертикальное',
+        textureDirection: 'вдоль полотна',
         filmRequirementLinearMeters: 2.1,
         templateLayout: {
           version: 3,
@@ -582,7 +582,7 @@ describe('buildSheetsPdf', () => {
     expect(rendered).toContain('42-3');
     expect(rendered).toContain('42-4');
     expect(rendered).toContain('2,1 пог. м');
-    expect(rendered).toContain('Вертикальное');
+    expect(rendered).toContain('вдоль полотна');
   });
 
   it('renders v3 sheet thumbnail layouts on the configured PDF page size', async () => {

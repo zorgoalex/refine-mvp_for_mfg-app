@@ -81,3 +81,112 @@ test('fits detailed machine SVG maps and screenshot fallback to viewport height'
   expect(tallViewport.portrait.height).toBeLessThanOrEqual(720);
   expect(tallViewport.screenshot.height).toBeLessThanOrEqual(720);
 });
+
+test('keeps MDF phone columns 15 percent denser than desktop runtime grid', async ({ page }) => {
+  await page.setViewportSize({ width: 408, height: 816 });
+  await page.setContent(`
+    <style>${boardCss}</style>
+    <section class="status-board-page status-board-page--cnc">
+      <section class="status-board-viewport" style="width: 408px; height: 640px;">
+        <div
+          class="status-board-columns status-board-columns--cnc status-board-columns--cnc-standard"
+          style="--status-board-cnc-column-count: 5; grid-template-columns: repeat(5, minmax(var(--status-board-cnc-column-width, 220px), 1fr)); min-width: 1148px;"
+        >
+          ${Array.from({ length: 5 }, (_, index) => `
+            <article class="status-board-column" data-testid="mdf-column-${index}">
+              <header class="status-board-column__header"></header>
+              <div class="status-board-column__cards"></div>
+            </article>
+          `).join('')}
+        </div>
+      </section>
+    </section>
+  `);
+
+  const geometry = await page.evaluate(() => {
+    const columns = Array.from(document.querySelectorAll<HTMLElement>('.status-board-column'));
+    const grid = document.querySelector<HTMLElement>('.status-board-columns--cnc')!;
+    const firstColumn = columns[0]!;
+    return {
+      columnCount: columns.length,
+      columnWidth: Math.round(firstColumn.getBoundingClientRect().width),
+      cssColumnWidth: getComputedStyle(grid).getPropertyValue('--status-board-cnc-column-width').trim(),
+      gridTemplateColumns: getComputedStyle(grid).gridTemplateColumns,
+      viewportScrollWidth: grid.parentElement?.scrollWidth ?? 0,
+    };
+  });
+
+  expect(geometry.columnCount).toBe(5);
+  expect(geometry.cssColumnWidth).toBe('187px');
+  expect(geometry.columnWidth).toBe(187);
+  expect(geometry.gridTemplateColumns).not.toContain('220px');
+  expect(geometry.viewportScrollWidth).toBeGreaterThan(408);
+});
+
+test('keeps MDF phone column headers sticky during vertical board scroll', async ({ page }) => {
+  await page.setViewportSize({ width: 408, height: 816 });
+  await page.setContent(`
+    <style>${boardCss}</style>
+    <style>html, body { margin: 0; }</style>
+    <section class="status-board-page status-board-page--cnc" style="height: 360px; min-height: 0; padding: 0;">
+      <section class="status-board-viewport" style="width: 408px; height: 260px;">
+        <div
+          class="status-board-columns status-board-columns--cnc status-board-columns--cnc-standard"
+          style="--status-board-cnc-column-count: 3; grid-template-columns: repeat(3, minmax(var(--status-board-cnc-column-width, 220px), 1fr)); min-width: 690px;"
+        >
+          ${Array.from({ length: 3 }, (_, columnIndex) => `
+            <article class="status-board-column cnc-today-column cnc-today-column--parsed" data-testid="mdf-column-${columnIndex}">
+              <header class="status-board-column__header" data-testid="mdf-header-${columnIndex}">
+                <div class="cnc-today-column__header-main">
+                  <div class="status-board-column__title">
+                    <span class="status-board-column__marker"></span>
+                    <strong>Колонка ${columnIndex + 1}</strong>
+                  </div>
+                </div>
+              </header>
+              <div class="status-board-column__cards">
+                ${Array.from({ length: 18 }, (_, cardIndex) => `
+                  <article class="status-board-card" style="height: 64px; flex: 0 0 64px;">
+                    ${columnIndex + 1}.${cardIndex + 1}
+                  </article>
+                `).join('')}
+              </div>
+            </article>
+          `).join('')}
+        </div>
+      </section>
+    </section>
+  `);
+
+  const before = await page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>('.status-board-viewport')!;
+    const header = document.querySelector<HTMLElement>('[data-testid="mdf-header-0"]')!;
+    return {
+      headerTop: Math.round(header.getBoundingClientRect().top),
+      position: getComputedStyle(header).position,
+      scrollTop: viewport.scrollTop,
+      viewportTop: Math.round(viewport.getBoundingClientRect().top),
+    };
+  });
+
+  await page.locator('.status-board-viewport').evaluate((viewport) => {
+    viewport.scrollTop = 420;
+  });
+
+  const after = await page.evaluate(() => {
+    const viewport = document.querySelector<HTMLElement>('.status-board-viewport')!;
+    const header = document.querySelector<HTMLElement>('[data-testid="mdf-header-0"]')!;
+    return {
+      headerTop: Math.round(header.getBoundingClientRect().top),
+      position: getComputedStyle(header).position,
+      scrollTop: viewport.scrollTop,
+      viewportTop: Math.round(viewport.getBoundingClientRect().top),
+    };
+  });
+
+  expect(before.position).toBe('sticky');
+  expect(before.headerTop).toBeGreaterThanOrEqual(before.viewportTop);
+  expect(after.position).toBe('sticky');
+  expect(after.scrollTop).toBeGreaterThan(0);
+  expect(after.headerTop).toBe(after.viewportTop);
+});

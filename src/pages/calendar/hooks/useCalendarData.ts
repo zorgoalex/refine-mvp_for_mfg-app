@@ -174,6 +174,11 @@ export const useCalendarData = (
         operator: 'in',
         value: orderIds,
       },
+      {
+        field: 'delete_flag',
+        operator: 'eq',
+        value: false,
+      },
     ],
     pagination: { pageSize: 10000 },
     queryOptions: {

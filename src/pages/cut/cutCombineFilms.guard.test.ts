@@ -35,4 +35,9 @@ describe('CutPage rotation and texture controls wiring', () => {
     expect(src).toMatch(/setJobTextureDirection/);
     expect(src).toMatch(/cutApi\.setTextureDirection/);
   });
+
+  it('auto-applies profile-implied texture direction when profile changes', () => {
+    expect(src).toMatch(/applyCutProfileSelection/);
+    expect(src).toMatch(/setTextureDirection:\s*cutApi\.setTextureDirection/);
+  });
 });

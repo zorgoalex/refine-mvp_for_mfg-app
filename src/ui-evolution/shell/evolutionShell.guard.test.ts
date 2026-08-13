@@ -34,11 +34,12 @@ describe('evolution shell behavior preservation', () => {
     expect(layout).toContain('onScrollCapture={handleTabletScrollCapture}');
     expect(tabletNavigation).toContain('width={68}');
     expect(tabletNavigation).toContain('aria-label="Планшетная навигация"');
-    expect(tabletNavigation).toContain('sider.categorizedResources');
     expect(tabletNavigation).toContain('sider.topMenuItems');
-    expect(tabletNavigation).toContain("permittedTopKeys.has('orders_view')");
-    expect(tabletNavigation).toContain("permittedTopKeys.has('calendar')");
-    expect(tabletNavigation).toContain("permittedTopKeys.has('order-status-board')");
+    expect(tabletNavigation).toContain('sider.categoryOrder.flatMap');
+    expect(tabletNavigation).toContain('sider.categorizedResources[category]');
+    expect(tabletNavigation).toContain('buildTabletRailItems(sider)');
+    expect(tabletNavigation).not.toContain('permittedTopKeys');
+    expect(tabletNavigation).not.toContain('routeFor([');
     expect(tabletStyles).toContain('--tablet-sticky-row: 44px');
     expect(tabletStyles).toContain('.evolution-shell--tablet[data-tablet-header-compact="true"] .evolution-workspace-tabs.workspace-tabs');
     expect(tabletStyles).toMatch(/data-tablet-header-compact="true"[^}]+\.ant-page-header-heading,[\s\S]+position: sticky;/);
@@ -95,6 +96,13 @@ describe('evolution shell behavior preservation', () => {
     expect(sider).toContain('className="evolution-sider__settings-bottom"');
     expect(styles).toContain('.evolution-sider__settings-bottom');
     expect(styles).toContain('.evolution-sider.ant-layout-sider-collapsed .evolution-sider__nav');
+  });
+
+  it('persists collapsed state per user in the modern sider shell', () => {
+    expect(layout).toContain('loadSidebarCollapsed(currentUserId, false)');
+    expect(layout).toContain('saveSidebarCollapsed(currentUserId, next)');
+    expect(layout).not.toContain('SIDEBAR_STORAGE_KEY');
+    expect(layout).not.toContain('erp.ui.evolution.sidebar.collapsed');
   });
 
   it('renders AIR as a separate top-nav and utility-rail shell, not a recolored sider', () => {

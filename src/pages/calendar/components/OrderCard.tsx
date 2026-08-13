@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { Checkbox, Tag, Tooltip } from 'antd';
-import { EditOutlined, HolderOutlined } from '@ant-design/icons';
+import { EditOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDrag, useDragDropManager } from 'react-dnd';
 import { OrderCardProps, DragItem } from '../types/calendar';
@@ -16,6 +16,7 @@ import {
 import { formatDateKey } from '../utils/dateUtils';
 import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
+import { buildCalendarOrderDragPreview } from './calendarDragPreview';
 
 /**
  * Компонент карточки заказа (стандартный вид)
@@ -52,11 +53,6 @@ const OrderCard: React.FC<OrderCardProps> = ({
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
-  const dragFromHandleOnly =
-    typeof window !== 'undefined' &&
-    ('ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0) &&
-    typeof window.matchMedia === 'function' &&
-    window.matchMedia('(pointer: coarse)').matches;
 
   // AD-mobile: double-tap on the card opens the context menu. We use
   // touchstart/touchend (not `click`) so the gesture works even when
@@ -69,7 +65,6 @@ const OrderCard: React.FC<OrderCardProps> = ({
     y: number;
     t: number;
     onNumber: boolean;
-    onDragHandle: boolean;
   } | null>(null);
 
   // AD-mobile: custom long-press state. A longPressTimer ref is set on
@@ -95,21 +90,16 @@ const OrderCard: React.FC<OrderCardProps> = ({
     // press or a tap from such a touch.
     const target = e.target as HTMLElement;
     const onNumber = !!target.closest('.order-card__number');
-    const onDragHandle = !!target.closest('.calendar-order-card__drag-handle');
-    if (onDragHandle && (e.currentTarget as HTMLElement).classList.contains('order-card')) {
-      return;
-    }
     touchStartRef.current = {
       x: t.clientX,
       y: t.clientY,
       t: Date.now(),
       onNumber,
-      onDragHandle,
     };
     // Schedule the long-press drag start. beginDrag is only called if
     // the user has not lifted the finger and has not moved more than
     // LONG_PRESS_MAX_MOVE_PX by the time the timer fires.
-    if (!onDragHandle) return;
+    if (onNumber) return;
     longPressTimerRef.current = setTimeout(() => {
       longPressTimerRef.current = null;
       const start = touchStartRef.current;
@@ -165,7 +155,7 @@ const OrderCard: React.FC<OrderCardProps> = ({
     }
     const t = e.changedTouches[0];
     if (!t) return;
-    if (start.onNumber || start.onDragHandle) {
+    if (start.onNumber) {
       lastTapRef.current = null;
       return;
     }
@@ -235,7 +225,11 @@ const OrderCard: React.FC<OrderCardProps> = ({
   const cardNodeRef = useRef<HTMLDivElement | null>(null);
   const [collected, dragRef] = useDrag<DragItem, unknown, { isDragging: boolean; handlerId: string | symbol | null }>({
     type: DRAG_TYPE,
-    item: { order, sourceDate },
+    item: () => ({
+      order,
+      preview: buildCalendarOrderDragPreview(order, sourceDate, cardNodeRef.current),
+      sourceDate,
+    }),
     collect: (monitor) => ({
       isDragging: monitor.isDragging(),
       handlerId: monitor.getHandlerId(),
@@ -244,15 +238,11 @@ const OrderCard: React.FC<OrderCardProps> = ({
   const isDragging = collected.isDragging;
   const handlerId = collected.handlerId;
 
-  // A coarse touch pointer gets a dedicated DnD handle, leaving the card
-  // body as a native pan surface. Desktop keeps the established behavior:
-  // the entire card remains an HTML5 drag source.
+  // The whole card is the drag source; touch devices use the custom
+  // long-press path above, while desktop uses the HTML5 backend.
   const setCardRef = (node: HTMLDivElement | null) => {
     cardNodeRef.current = node;
-    if (!dragFromHandleOnly) dragRef(node);
-  };
-  const setDragHandleRef = (node: HTMLButtonElement | null) => {
-    if (dragFromHandleOnly) dragRef(node);
+    dragRef(node);
   };
 
   // Вычисляем фрезеровку из деталей заказа
@@ -325,7 +315,6 @@ const OrderCard: React.FC<OrderCardProps> = ({
       className={`order-card ${isDragging || isDraggingProp ? 'order-card--dragging' : ''} ${borderClass}`}
       style={{
         backgroundColor,
-        opacity: isDragging ? 0.5 : 1,
         transform: `scale(${cardScale})`,
         transformOrigin: 'top center',
         marginBottom: marginCompensation,
@@ -337,22 +326,6 @@ const OrderCard: React.FC<OrderCardProps> = ({
       onTouchCancel={handleTouchCancel}
       onClick={handleCardClick}
     >
-      <button
-        ref={setDragHandleRef}
-        type="button"
-        className="calendar-order-card__drag-handle"
-        aria-label={`Удерживайте и перетащите заказ ${order.order_name}`}
-        title="Удерживайте и перетащите"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchCancel}
-        onClick={(event) => event.stopPropagation()}
-        onContextMenu={(event) => event.stopPropagation()}
-      >
-        <HolderOutlined aria-hidden="true" />
-      </button>
-
       {/* Строка 1: Чекбокс | Номер | Материалы | Карандашик (если отрисован) */}
       <div className="order-card__header">
         <Checkbox

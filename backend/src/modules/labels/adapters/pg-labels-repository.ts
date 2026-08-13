@@ -2187,21 +2187,23 @@ function selectLabelRowsByInstances(
 ): LabelRow[] {
   const rowsByKey = new Map(rows.map((row) => [`${row.detailId}:${row.copyIndex}`, row]));
   const seen = new Set<string>();
-  const countByDetailId = new Map<number, number>();
   for (const instance of detailInstances) {
     const key = `${instance.detailId}:${instance.instance}`;
     if (seen.has(key)) {
       throw new ApiError(422, 'LABEL_DETAIL_INSTANCE_DUPLICATE', 'Один экземпляр детали нельзя добавить дважды', { key });
     }
     seen.add(key);
-    countByDetailId.set(instance.detailId, (countByDetailId.get(instance.detailId) ?? 0) + 1);
   }
-  const selected = detailInstances.map((instance, index): LabelRow => {
+  const matchedRows = detailInstances.flatMap((instance): LabelRow[] => {
     const key = `${instance.detailId}:${instance.instance}`;
     const row = rowsByKey.get(key);
-    if (!row) {
-      throw new ApiError(422, 'LABEL_DETAIL_INSTANCE_INVALID', 'Экземпляр детали не найден', { key });
-    }
+    return row ? [row] : [];
+  });
+  const countByDetailId = new Map<number, number>();
+  for (const row of matchedRows) {
+    countByDetailId.set(row.detailId, (countByDetailId.get(row.detailId) ?? 0) + 1);
+  }
+  const selected = matchedRows.map((row, index): LabelRow => {
     const rowIndex = index + 1;
     const copyCount = countByDetailId.get(row.detailId) ?? row.copyCount;
     return {
@@ -2212,8 +2214,8 @@ function selectLabelRowsByInstances(
         ...row.values,
         'bazis.quantity': copyCount,
         'label.counter': rowIndex,
-        'label.counter_total': detailInstances.length,
-        'label.counter_text': `Бир. № ${rowIndex} / ${detailInstances.length}`,
+        'label.counter_total': matchedRows.length,
+        'label.counter_text': `Бир. № ${rowIndex} / ${matchedRows.length}`,
       },
     };
   });

@@ -108,6 +108,7 @@ describe('CncTelegramController parsing', () => {
     const parsed = parseManualSvgUpload({
       selectedOrderIds: [42, 7, 42],
       createMdfMachineFileCard: true,
+      requestedCutJobId: 777,
       svgContentHash: 'a'.repeat(64),
       programName: 'manual.svg',
       cutLayout: {
@@ -135,7 +136,16 @@ describe('CncTelegramController parsing', () => {
       idempotencyKey: 'manual-svg:test:1',
       selectedOrderIds: [7, 42],
       createMdfMachineFileCard: true,
+      matchMode: 'order_details',
+      requestedCutJobId: 777,
       svgContentHash: 'a'.repeat(64),
+    });
+
+    expect(parseManualSvgUpload({
+      ...manualSvgUploadPayload(),
+      matchMode: 'informational',
+    }, 'manual-svg:test:2')).toMatchObject({
+      matchMode: 'informational',
     });
   });
 
@@ -148,6 +158,13 @@ describe('CncTelegramController parsing', () => {
         rawSvg: '<svg />',
         cutLayout: { status: 'invalid', reasons: ['bad'], sheet: null, items: [] },
         items: [],
+      }, 'manual-svg:test:1'),
+    ).toThrow(ApiError);
+
+    expect(() =>
+      parseManualSvgUpload({
+        ...manualSvgUploadPayload(),
+        requestedCutJobId: 0,
       }, 'manual-svg:test:1'),
     ).toThrow(ApiError);
 

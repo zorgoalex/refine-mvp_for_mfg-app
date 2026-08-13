@@ -69,6 +69,21 @@ export interface FreecutItem {
   pattern_direction: FreecutPatternDirection;
 }
 
+export type VacuumOrientationSide = 'width' | 'height';
+
+export interface VacuumOrientationWarning {
+  code: 'vacuum_profile_orientation_fallback';
+  profileDirection: 'width' | 'height';
+  requestedSide: VacuumOrientationSide;
+  actualSide: VacuumOrientationSide;
+  message: string;
+}
+
+export interface VacuumOrientationResult {
+  items: FreecutItem[];
+  warningsByItemId: Map<string, VacuumOrientationWarning>;
+}
+
 export interface TrimMm {
   left: number;
   right: number;
@@ -177,29 +192,101 @@ export function resolveVacuumDirection(
   return longIsWidth ? 'height' : 'width';
 }
 
+const VACUUM_ORIENTATION_EPSILON_MM = 1e-7;
+
+function sourceSideLabel(side: VacuumOrientationSide): string {
+  return side === 'height' ? 'высота' : 'ширина';
+}
+
+function vacuumProfileLabel(direction: 'width' | 'height'): string {
+  return direction === 'width' ? 'вдоль полотна' : 'поперёк полотна';
+}
+
+function requestedSourceSideForVacuumDirection(direction: 'width' | 'height'): VacuumOrientationSide {
+  // "вдоль полотна": source height side runs along sheet long side.
+  // "поперёк полотна": source width side runs along sheet long side.
+  return direction === 'width' ? 'height' : 'width';
+}
+
+function oppositeSourceSide(side: VacuumOrientationSide): VacuumOrientationSide {
+  return side === 'width' ? 'height' : 'width';
+}
+
+function warningForVacuumFallback(
+  direction: 'width' | 'height',
+  requestedSide: VacuumOrientationSide,
+  actualSide: VacuumOrientationSide,
+): VacuumOrientationWarning {
+  return {
+    code: 'vacuum_profile_orientation_fallback',
+    profileDirection: direction,
+    requestedSide,
+    actualSide,
+    message: `Для профиля «${vacuumProfileLabel(direction)}» сторона «${sourceSideLabel(requestedSide)}» должна идти вдоль длинной стороны листа, но противоположная сторона не помещается по ширине листа. Деталь развернута стороной «${sourceSideLabel(actualSide)}» вдоль листа.`,
+  };
+}
+
+function sideLengthMm(
+  item: FreecutItem,
+  side: VacuumOrientationSide,
+  sourceAxesTransposed: boolean,
+): number {
+  const widthAxisSide: VacuumOrientationSide = sourceAxesTransposed ? 'height' : 'width';
+  return side === widthAxisSide ? item.width_mm : item.height_mm;
+}
+
+function orientVacuumItemToSourceSide(
+  item: FreecutItem,
+  sideAlongLongAxis: VacuumOrientationSide,
+  longAxisIsX: boolean,
+  sourceAxesTransposed: boolean,
+): FreecutItem {
+  const widthAxisSide: VacuumOrientationSide = sourceAxesTransposed ? 'height' : 'width';
+  const widthAxisShouldBeSide = longAxisIsX ? sideAlongLongAxis : oppositeSourceSide(sideAlongLongAxis);
+  const shouldSwapAxes = widthAxisSide !== widthAxisShouldBeSide;
+  if (!shouldSwapAxes) {
+    return { ...item, rotation: 'forbid' };
+  }
+  return {
+    ...item,
+    width_mm: item.height_mm,
+    height_mm: item.width_mm,
+    rotation: 'forbid',
+    pattern_direction: transposePatternDirection(item.pattern_direction),
+  };
+}
+
 /**
  * Apply the global vacuum profile contract before dispatching to Freecut.
  * `optimal` (Auto) deliberately ignores film texture and permits 90° rotation.
- * `width` («по длине») and `height` («по ширине») always forbid rotation;
- * textured details preserve their grain-authoritative dimensions. Plain `height`
- * details put their long edge across the physical table only when it fits the
- * usable transverse span, otherwise they fall back along the table length.
+ * `width` («вдоль полотна») puts the source height side along the sheet long
+ * side. `height` («поперёк полотна») puts the source width side along it. If the
+ * opposite source side cannot fit the usable transverse span, the item is
+ * flipped back to the fitting orientation and marked with a warning.
  */
-export function orientItemsForVacuumDirection(
+export function orientItemsForVacuumDirectionWithWarnings(
   items: readonly FreecutItem[],
   stockWidthMm: number,
   stockHeightMm: number,
   direction: 'optimal' | 'width' | 'height' | undefined,
   trim?: TrimMm,
-): FreecutItem[] {
+  options?: { sourceAxesTransposed?: boolean },
+): VacuumOrientationResult {
+  const warningsByItemId = new Map<string, VacuumOrientationWarning>();
+  const sourceAxesTransposed = options?.sourceAxesTransposed === true;
   if (direction === 'optimal') {
-    return items.map((item) => ({
-      ...item,
-      rotation: 'allow_90',
-      pattern_direction: 'none',
-    }));
+    return {
+      items: items.map((item) => ({
+        ...item,
+        rotation: 'allow_90',
+        pattern_direction: 'none',
+      })),
+      warningsByItemId,
+    };
   }
-  if (direction !== 'width' && direction !== 'height') return [...items];
+  if (direction !== 'width' && direction !== 'height') {
+    return { items: [...items], warningsByItemId };
+  }
 
   const longAxisIsX = stockWidthMm >= stockHeightMm;
   const transverseAxisIsX = stockWidthMm <= stockHeightMm;
@@ -207,25 +294,48 @@ export function orientItemsForVacuumDirection(
     ? stockWidthMm - (trim?.left ?? 0) - (trim?.right ?? 0)
     : stockHeightMm - (trim?.top ?? 0) - (trim?.bottom ?? 0);
 
-  return items.map((item) => {
-    if (item.pattern_direction !== 'none') {
-      return { ...item, rotation: 'forbid' };
+  const requestedSide = requestedSourceSideForVacuumDirection(direction);
+  const fallbackSide = oppositeSourceSide(requestedSide);
+
+  const orientedItems = items.map((item) => {
+    const requestedTransverseSide = fallbackSide;
+    const requestedTransverseMm = sideLengthMm(item, requestedTransverseSide, sourceAxesTransposed);
+    const canUseRequestedOrientation = requestedTransverseMm <= usableTransverseSpan + VACUUM_ORIENTATION_EPSILON_MM;
+    const actualSide = canUseRequestedOrientation ? requestedSide : fallbackSide;
+    if (!canUseRequestedOrientation) {
+      warningsByItemId.set(item.id, warningForVacuumFallback(direction, requestedSide, actualSide));
     }
-    const longEdge = Math.max(item.width_mm, item.height_mm);
-    const shortEdge = Math.min(item.width_mm, item.height_mm);
-    const canPlaceAcross = longEdge <= usableTransverseSpan + 1e-7;
-    const longEdgeAlongLongSide = direction === 'width' || !canPlaceAcross;
-    const longEdgeAlongX = longEdgeAlongLongSide ? longAxisIsX : !longAxisIsX;
-    return {
-      ...item,
-      width_mm: longEdgeAlongX ? longEdge : shortEdge,
-      height_mm: longEdgeAlongX ? shortEdge : longEdge,
-      rotation: 'forbid',
-    };
+    return orientVacuumItemToSourceSide(item, actualSide, longAxisIsX, sourceAxesTransposed);
   });
+
+  return { items: orientedItems, warningsByItemId };
 }
 
-export function buildOptimizeRequest(input: BuildOptimizeRequestInput): OptimizeRequest {
+export function orientItemsForVacuumDirection(
+  items: readonly FreecutItem[],
+  stockWidthMm: number,
+  stockHeightMm: number,
+  direction: 'optimal' | 'width' | 'height' | undefined,
+  trim?: TrimMm,
+  options?: { sourceAxesTransposed?: boolean },
+): FreecutItem[] {
+  return orientItemsForVacuumDirectionWithWarnings(
+    items,
+    stockWidthMm,
+    stockHeightMm,
+    direction,
+    trim,
+    options,
+  ).items;
+}
+
+export interface BuildOptimizeRequestOutput {
+  request: OptimizeRequest;
+  vacuumWarningsByItemId: Map<string, VacuumOrientationWarning>;
+}
+
+export function buildOptimizeRequestWithWarnings(input: BuildOptimizeRequestInput): BuildOptimizeRequestOutput {
+  const sourceAxesTransposed = input.nativePortrait === true && input.stock.width_mm > input.stock.height_mm;
   const orientedInput = orientOptimizeInputPortrait(input);
   const isVacuum = orientedInput.params.layout_mode === 'vacuum_table';
   const effectiveVacuumDirection = isVacuum
@@ -246,31 +356,39 @@ export function buildOptimizeRequest(input: BuildOptimizeRequestInput): Optimize
         }
       : orientedInput.params;
 
-  const orientedItems =
+  const orientedVacuumResult =
     isVacuum
-      ? orientItemsForVacuumDirection(
+      ? orientItemsForVacuumDirectionWithWarnings(
           orientedInput.items,
           orientedInput.stock.width_mm,
           orientedInput.stock.height_mm,
           effectiveVacuumDirection,
           orientedInput.params.trim_mm,
+          { sourceAxesTransposed },
         )
-      : [...orientedInput.items];
+      : { items: [...orientedInput.items], warningsByItemId: new Map<string, VacuumOrientationWarning>() };
 
   return {
-    units: 'mm',
-    params: { ...resolvedParams, include_svg: input.includeSvg === true },
-    // qty:0 = unlimited stock unless a warehouse constraint is applied later.
-    stock: [
-      {
-        id: input.stock.id,
-        width_mm: orientedInput.stock.width_mm,
-        height_mm: orientedInput.stock.height_mm,
-        qty: orientedInput.stock.qty ?? 0,
-      },
-    ],
-    items: orientedItems,
+    request: {
+      units: 'mm',
+      params: { ...resolvedParams, include_svg: input.includeSvg === true },
+      // qty:0 = unlimited stock unless a warehouse constraint is applied later.
+      stock: [
+        {
+          id: input.stock.id,
+          width_mm: orientedInput.stock.width_mm,
+          height_mm: orientedInput.stock.height_mm,
+          qty: orientedInput.stock.qty ?? 0,
+        },
+      ],
+      items: orientedVacuumResult.items,
+    },
+    vacuumWarningsByItemId: orientedVacuumResult.warningsByItemId,
   };
+}
+
+export function buildOptimizeRequest(input: BuildOptimizeRequestInput): OptimizeRequest {
+  return buildOptimizeRequestWithWarnings(input).request;
 }
 
 export function assertWithinInstanceLimit(items: readonly FreecutItem[]): void {
@@ -417,6 +535,8 @@ export type SheetPlacementPieceJson = FreecutPlacement & {
   label?: PieceLabelSnapshot;
   /** Frozen request rule. Absent on legacy layouts. */
   rotation_forbidden?: boolean;
+  /** Directional vacuum profile fallback. Absent when requested orientation was used. */
+  vacuum_orientation_warning?: VacuumOrientationWarning;
 };
 
 /** Frozen per-sheet placements JSONB (plan §3). Render source of truth. */
@@ -441,7 +561,11 @@ export interface BackMappedSheet {
  */
 export function backMapSolutions(
   response: FreecutOptimizeResponse,
-  options?: { coordinateContract?: typeof NATIVE_PORTRAIT_COORDINATE_CONTRACT; requestItems?: readonly FreecutItem[] },
+  options?: {
+    coordinateContract?: typeof NATIVE_PORTRAIT_COORDINATE_CONTRACT;
+    requestItems?: readonly FreecutItem[];
+    vacuumWarningsByItemId?: ReadonlyMap<string, VacuumOrientationWarning>;
+  },
 ): BackMappedSheet[] {
   const requestItemById = new Map(options?.requestItems?.map((item) => [item.id, item]));
   return response.solutions.map((solution) => ({
@@ -461,6 +585,9 @@ export function backMapSolutions(
         rotated: placement.rotated,
         ...(requestItemById.has(placement.item_id)
           ? { rotation_forbidden: requestItemById.get(placement.item_id)?.rotation === 'forbid' }
+          : {}),
+        ...(options?.vacuumWarningsByItemId?.has(placement.item_id)
+          ? { vacuum_orientation_warning: options.vacuumWarningsByItemId.get(placement.item_id)! }
           : {}),
       })),
     },

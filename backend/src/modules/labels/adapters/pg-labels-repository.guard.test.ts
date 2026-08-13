@@ -202,6 +202,16 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).not.toContain('LABEL_CUT_MAP_ORDER_SCOPE_ONLY');
   });
 
+  it('keeps explicit detail previews available when requested instances exceed ERP quantity', () => {
+    const helperStart = source.indexOf('function selectLabelRowsByInstances');
+    expect(helperStart).toBeGreaterThan(-1);
+    const helperSource = source.slice(helperStart, source.indexOf('async function resolveCutSheetScopeSelections', helperStart));
+    expect(helperSource).toContain('const matchedRows = detailInstances.flatMap');
+    expect(helperSource).toContain('return row ? [row] : []');
+    expect(helperSource).toContain("'label.counter_total': matchedRows.length");
+    expect(helperSource).not.toContain('LABEL_DETAIL_INSTANCE_INVALID');
+  });
+
   it('binds explicit sheet screenshot cut-map fallback to matching Telegram evidence rows', () => {
     const helperStart = source.indexOf('async function assertExplicitTelegramImageRowsBelongToPacket');
     expect(helperStart).toBeGreaterThan(-1);

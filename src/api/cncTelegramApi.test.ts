@@ -94,6 +94,8 @@ describe('cncTelegramApi', () => {
     await cncTelegramApi.manualSvgUpload({
       selectedOrderIds: [1],
       createMdfMachineFileCard: true,
+      matchMode: 'informational',
+      requestedCutJobId: 777,
       svgContentHash: 'a'.repeat(64),
       cutLayout: {
         status: 'valid',
@@ -120,6 +122,8 @@ describe('cncTelegramApi', () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       selectedOrderIds: [1],
       createMdfMachineFileCard: true,
+      matchMode: 'informational',
+      requestedCutJobId: 777,
     });
   });
 

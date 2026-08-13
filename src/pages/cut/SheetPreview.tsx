@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Space, Tooltip } from 'antd';
+import { CheckCircleFilled } from '@ant-design/icons';
 import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { displayedSheetExtents, formatSheetSide, type CutPieceOverlay } from './cutPreviewHelpers';
 import { fitLabelScale, LINE1_SCALE, splitDimsLine } from './pieceLabel';
@@ -84,6 +85,7 @@ function OverlayLayer({
         });
         const font = BASE_FONT_PX * scale;
         const font0 = font * LINE1_SCALE;
+        const warningIconSize = Math.max(10, Math.min(16, Math.min(boxWpx || 12, boxHpx || 12) * 0.22));
 
         return (
           <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)} mouseEnterDelay={0.15}>
@@ -105,6 +107,29 @@ function OverlayLayer({
                 overflow: 'hidden',
               }}
             >
+              {overlay.vacuumOrientationWarning && (
+                <Tooltip title={overlay.vacuumOrientationWarning.message} mouseEnterDelay={0.1}>
+                  <span
+                    aria-label={overlay.vacuumOrientationWarning.message}
+                    style={{
+                      position: 'absolute',
+                      top: 2,
+                      right: 2,
+                      zIndex: 2,
+                      color: '#cf1322',
+                      background: 'rgba(255,255,255,0.88)',
+                      borderRadius: '50%',
+                      lineHeight: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: warningIconSize,
+                    }}
+                  >
+                    <CheckCircleFilled />
+                  </span>
+                </Tooltip>
+              )}
               {/* 3-line label overlay. The PNG image has no baked labels
                   (backend renders with showLabels=false for the on-screen
                   preview), so this overlay is the sole label source.

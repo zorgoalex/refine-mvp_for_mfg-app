@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CutParamProfile } from '../../api/cutConfigApi';
-import type { CutJobDto, CutSheetTypeOption } from '../../api/types/cutApi.types';
+import type { CutJobDto, CutSheetTypeOption, CutTextureDirection } from '../../api/types/cutApi.types';
 import {
   applyCutProfileSelection,
   firstBathSheetMaterialId,
@@ -8,12 +8,13 @@ import {
   isVacuumTableJob,
   resolveCutJobLayoutKind,
   resolveSheetAxisOriginForJob,
+  textureDirectionForCutProfile,
 } from './cutVacuumProfile';
 
-const profile = (id: number, layoutMode: string): CutParamProfile => ({
+const profile = (id: number, layoutMode: string, params: Record<string, unknown> = {}): CutParamProfile => ({
   cutParamProfileId: id,
   name: `P${id}`,
-  params: { layout_mode: layoutMode },
+  params: { layout_mode: layoutMode, ...params },
   isDefault: false,
   isActive: true,
   version: 1,
@@ -58,6 +59,24 @@ describe('vacuum profile defaults', () => {
     expect(isVacuumTableProfile(4, profiles)).toBe(true);
     expect(isVacuumTableProfile(5, profiles)).toBe(false);
     expect(isVacuumTableProfile(null, profiles)).toBe(false);
+  });
+
+  it('resolves profile-implied texture direction for vacuum-table profiles', () => {
+    const profiles = [
+      profile(1, 'vacuum_table', { vacuum: { direction: 'width' } }),
+      profile(2, 'vacuum_table', { vacuum: { direction: 'height' } }),
+      profile(3, 'vacuum_table', { vacuum: { direction: 'optimal' } }),
+      profile(4, 'vacuum_table'),
+      profile(5, 'guillotine'),
+    ];
+
+    expect(textureDirectionForCutProfile(1, profiles)).toBe('vertical');
+    expect(textureDirectionForCutProfile(2, profiles)).toBe('horizontal');
+    expect(textureDirectionForCutProfile(3, profiles)).toBe('none');
+    expect(textureDirectionForCutProfile(4, profiles)).toBe('none');
+    expect(textureDirectionForCutProfile(5, profiles)).toBeNull();
+    expect(textureDirectionForCutProfile(null, profiles)).toBeNull();
+    expect(textureDirectionForCutProfile(999, profiles)).toBeNull();
   });
 
   it('opens every non-vacuum profile top-left and preserves the saved vacuum origin', () => {
@@ -108,12 +127,16 @@ describe('vacuum profile defaults', () => {
   });
 
   it('turns both flags off and selects the first bath sheet using returned versions', async () => {
-    const calls: Array<[string, number, number | boolean | null, number]> = [];
+    const calls: Array<[string, number, number | boolean | string | null, number]> = [];
     const advance = (current: CutJobDto, patch: Partial<CutJobDto>) => job({ ...current, ...patch, version: current.version + 1 });
     const mutations = {
       setProfile: vi.fn(async (jobId: number, value: number | null, version: number) => {
         calls.push(['profile', jobId, value, version]);
         return advance(job({ version }), { paramProfileId: value });
+      }),
+      setTextureDirection: vi.fn(async (jobId: number, value: CutTextureDirection, version: number) => {
+        calls.push(['texture', jobId, value, version]);
+        return advance(job({ version, paramProfileId: 4 }), { textureDirection: value });
       }),
       setSplitByMaterial: vi.fn(async (jobId: number, value: boolean, version: number) => {
         calls.push(['split', jobId, value, version]);
@@ -150,9 +173,53 @@ describe('vacuum profile defaults', () => {
     expect(result.bathSheetMissing).toBe(false);
   });
 
+  it('sets the profile-implied texture direction before applying other vacuum defaults', async () => {
+    const calls: Array<[string, number, number | boolean | string | null, number]> = [];
+    const mutations = {
+      setProfile: vi.fn(async (jobId: number, value: number | null, version: number) => {
+        calls.push(['profile', jobId, value, version]);
+        return job({ version: 11, paramProfileId: value, textureDirection: 'none' });
+      }),
+      setTextureDirection: vi.fn(async (jobId: number, value: CutTextureDirection, version: number) => {
+        calls.push(['texture', jobId, value, version]);
+        return job({ version: 12, paramProfileId: 4, textureDirection: value });
+      }),
+      setSplitByMaterial: vi.fn(async (jobId: number, value: boolean, version: number) => {
+        calls.push(['split', jobId, value, version]);
+        return job({ version: 13, paramProfileId: 4, textureDirection: 'vertical', splitByMaterial: value });
+      }),
+      setCombineFilms: vi.fn(async (jobId: number, value: boolean, version: number) => {
+        calls.push(['combine', jobId, value, version]);
+        return job({ version: 14, paramProfileId: 4, textureDirection: 'vertical', splitByMaterial: false, combineFilms: value });
+      }),
+      setSheetMaterial: vi.fn(async (jobId: number, value: number | null, version: number) => {
+        calls.push(['sheet', jobId, value, version]);
+        return job({ version: 15, paramProfileId: 4, textureDirection: 'vertical', splitByMaterial: false, combineFilms: false, sheetMaterialTypeId: value });
+      }),
+    };
+
+    const result = await applyCutProfileSelection({
+      currentJob: job(),
+      paramProfileId: 4,
+      profiles: [profile(4, 'vacuum_table', { vacuum: { direction: 'width' } })],
+      sheetOptions: [sheet(2, 'Ванна 2800x1050')],
+      mutations,
+    });
+
+    expect(calls).toEqual([
+      ['profile', 17, 4, 10],
+      ['texture', 17, 'vertical', 11],
+      ['split', 17, false, 12],
+      ['combine', 17, false, 13],
+      ['sheet', 17, 2, 14],
+    ]);
+    expect(result.job).toMatchObject({ version: 15, textureDirection: 'vertical', sheetMaterialTypeId: 2 });
+  });
+
   it('reports a missing bath sheet after disabling both flags', async () => {
     const mutations = {
       setProfile: vi.fn(async () => job({ version: 11, paramProfileId: 4 })),
+      setTextureDirection: vi.fn(async () => job({ version: 12, paramProfileId: 4, textureDirection: 'none' })),
       setSplitByMaterial: vi.fn(async () => job({ version: 12, paramProfileId: 4, splitByMaterial: false })),
       setCombineFilms: vi.fn(async () => job({ version: 13, paramProfileId: 4, splitByMaterial: false, combineFilms: false })),
       setSheetMaterial: vi.fn(),

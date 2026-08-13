@@ -290,54 +290,12 @@
   border-radius: 6px;
   padding: 10px 12px;
   margin-bottom: 6px;
-  cursor: pointer;
+  cursor: grab;
   transition-property: box-shadow, transform, border-left-color, background-color;
   transition-duration: 200ms;
   transition-timing-function: ease;
   position: relative;
   touch-action: pan-x pan-y;
-  padding-right: 48px;
-}
-
-.calendar-order-card__drag-handle {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  min-height: 40px;
-  padding: 0;
-  border: 0;
-  border-radius: 8px;
-  color: var(--app-text-muted);
-  background: var(--app-surface-muted);
-  box-shadow: var(--app-shadow-border);
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-  transition-property: scale, color, background-color, box-shadow;
-  transition-duration: 150ms;
-  transition-timing-function: ease-out;
-}
-
-.calendar-order-card__drag-handle:hover {
-  color: var(--app-selection-border);
-  box-shadow: var(--app-shadow-border-hover);
-}
-
-.calendar-order-card__drag-handle:focus-visible {
-  outline: 2px solid var(--app-selection-border);
-  outline-offset: 2px;
-}
-
-.calendar-order-card__drag-handle:active {
-  scale: 0.96;
-  cursor: grabbing;
 }
 
 .order-card:last-child {
@@ -351,8 +309,58 @@
 
 /* Перетаскиваемая карточка */
 .order-card--dragging {
-  opacity: 0.5;
-  cursor: move;
+  opacity: 0.46;
+  cursor: grabbing;
+  outline: 2px dashed rgba(24, 144, 255, 0.72);
+  outline-offset: -5px;
+  box-shadow:
+    0 0 0 1px rgba(24, 144, 255, 0.5),
+    0 8px 18px rgba(24, 144, 255, 0.18);
+}
+
+.calendar-order-drag-outline {
+  position: fixed;
+  z-index: 5200;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 10px;
+  pointer-events: none;
+  color: var(--app-text);
+  background: var(--calendar-drag-bg, rgba(255, 255, 255, 0.94));
+  border-left: 4px solid var(--calendar-drag-border, #1677ff);
+  border-radius: 8px;
+  outline: 2px dashed rgba(24, 144, 255, 0.78);
+  outline-offset: -6px;
+  box-shadow:
+    0 0 0 1px rgba(24, 144, 255, 0.34),
+    0 14px 30px rgba(15, 23, 42, 0.24),
+    0 4px 10px rgba(15, 23, 42, 0.16);
+  opacity: 0.96;
+  overflow: hidden;
+  transform: translateZ(0);
+  transition-property: opacity, box-shadow;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+}
+
+.calendar-order-drag-outline__title {
+  font-size: 14px;
+  line-height: 1.2;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-order-drag-outline__subtitle,
+.calendar-order-drag-outline__meta {
+  font-size: 12px;
+  line-height: 1.25;
+  color: var(--app-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Карточка со статусом "Готов к выдаче" - зелёный контур */
@@ -534,7 +542,6 @@
    ============================================ */
 .order-card--compact {
   padding: 6px 8px;
-  padding-right: 48px;
   margin-bottom: 4px;
 }
 

@@ -1,11 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
   Checkbox,
-  Divider,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Space,
@@ -17,9 +17,11 @@ import {
 } from 'antd';
 import type { UploadProps } from 'antd';
 import {
+  CloseOutlined,
   FileAddOutlined,
+  FullscreenOutlined,
   LinkOutlined,
-  PlusOutlined,
+  PrinterOutlined,
   SaveOutlined,
   UploadOutlined,
 } from '@ant-design/icons';
@@ -27,10 +29,14 @@ import { useNavigate } from 'react-router-dom';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
 import { ordersApi } from '../../api/ordersApi';
-import { isApiError } from '../../api/apiError';
-import type { CncTelegramManualSvgCommentPreset } from '../../api/types/cncTelegramApi.types';
+import { isApiError, type ApiError } from '../../api/apiError';
+import type {
+  CncTelegramManualSvgCommentPreset,
+  CncTelegramManualSvgUploadRequest,
+} from '../../api/types/cncTelegramApi.types';
 import type { EligibleDetailDto } from '../../api/types/cutApi.types';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
+import { parseSvgCutUploadFileNameHints } from './svgCutUploadFilename';
 import { parseSvgCutUploadFile, type ParsedSvgUpload } from './svgCutUploadParser';
 
 interface CutSvgUploadModalProps {
@@ -46,12 +52,64 @@ interface OrderOption {
   label: string;
 }
 
+interface CutJobNumberCheck {
+  status: 'idle' | 'checking' | 'available' | 'duplicate' | 'error';
+  suggestions: number[];
+  message?: string;
+}
+
+interface SvgMatchProblem {
+  severity: 'error' | 'warning';
+  key: string;
+  title: string;
+  reason: string;
+  quantity: number;
+}
+
+interface SvgItemGroup {
+  orderName: string;
+  detailNumber: number;
+  widthMm: number;
+  heightMm: number;
+  quantity: number;
+}
+
+interface SvgPreviewState {
+  url: string;
+  fileName: string;
+}
+
+type SvgUploadMatchMode = 'order_details' | 'informational';
+type SvgCommentPresetOption = Pick<CncTelegramManualSvgCommentPreset, 'label' | 'commentText' | 'category'>;
+type FloatingSvgPreviewResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+interface FloatingSvgPreviewRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 const EMPTY_DEFAULT_ORDER_IDS: number[] = [];
 const EMPTY_DEFAULT_ORDER_NAMES: string[] = [];
+const EMPTY_CUT_JOB_NUMBER_CHECK: CutJobNumberCheck = { status: 'idle', suggestions: [] };
+const FLOATING_SVG_PREVIEW_MARGIN = 16;
+const FLOATING_SVG_PREVIEW_MIN_WIDTH = 360;
+const FLOATING_SVG_PREVIEW_MIN_HEIGHT = 320;
+const FLOATING_SVG_PREVIEW_DEFAULT_WIDTH = 760;
+const FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT = 620;
 
-const DEFAULT_COMMENT_PRESETS: Array<Pick<CncTelegramManualSvgCommentPreset, 'label' | 'commentText' | 'category'>> = [
+const DEFAULT_COMMENT_PRESETS: SvgCommentPresetOption[] = [
   { label: 'Фрезы', commentText: 'фрезы:', category: 'tool' },
+  { label: 'Фрезы ХДФ', commentText: 'Фрезы для ХДФ: 8', category: 'tool' },
+  { label: 'Фрезы ЛДСП', commentText: 'Фрезы для ЛДСП: 8', category: 'tool' },
+  { label: 'Фрезы 18мм', commentText: 'Фрезы для 18мм:', category: 'tool' },
+  { label: 'Фрезы 10мм', commentText: 'Фрезы для 10мм:', category: 'tool' },
+  { label: 'Фреза лам. стороны', commentText: 'Фреза для ламинированной стороны:', category: 'tool' },
   { label: 'Материал', commentText: 'материал:', category: 'material' },
+  { label: 'Ламинированная сторона МДФ', commentText: 'Ламинированная сторона МДФ !!!', category: 'material' },
+  { label: 'Черновой', commentText: 'Черновой', category: 'general' },
+  { label: 'Черновой 2 стороны', commentText: 'Черновой с двух сторон!!!', category: 'general' },
+  { label: 'Присадка №', commentText: 'Присадка №', category: 'general' },
   { label: 'Переделка', commentText: 'переделка', category: 'rework' },
 ];
 
@@ -70,6 +128,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     label: defaultOrderNames[index] ? `${defaultOrderNames[index]} · #${orderId}` : `#${orderId}`,
   })), [defaultOrderIdsKey, defaultOrderNamesKey]);
   const [parsed, setParsed] = useState<ParsedSvgUpload | null>(null);
+  const [svgPreview, setSvgPreview] = useState<SvgPreviewState | null>(null);
+  const [svgPreviewExpanded, setSvgPreviewExpanded] = useState(false);
+  const svgPreviewUrlRef = useRef<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>(defaultOrderIds);
@@ -80,9 +141,18 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const [commentText, setCommentText] = useState('');
   const [materialName, setMaterialName] = useState('');
   const [machineName, setMachineName] = useState('');
+  const [requestedCutJobId, setRequestedCutJobId] = useState<number | null>(null);
+  const [cutJobNumberCheck, setCutJobNumberCheck] = useState<CutJobNumberCheck>(EMPTY_CUT_JOB_NUMBER_CHECK);
   const [rework, setRework] = useState(false);
   const [presets, setPresets] = useState<CncTelegramManualSvgCommentPreset[]>([]);
   const [presetSaving, setPresetSaving] = useState(false);
+  const uploadMatchMode: SvgUploadMatchMode = useMemo(
+    () => svgUploadMaterialIsInformational(materialName, parsed?.fileName ?? null)
+      ? 'informational'
+      : 'order_details',
+    [materialName, parsed?.fileName],
+  );
+  const informationalUpload = uploadMatchMode === 'informational';
 
   useEffect(() => {
     if (!open) return;
@@ -98,7 +168,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, [open]);
 
   useEffect(() => {
-    if (!open || selectedOrderIds.length === 0 || !parsed?.cutLayout.items.length) {
+    if (!open || informationalUpload || selectedOrderIds.length === 0 || !parsed?.cutLayout.items.length) {
       setEligibleDetails([]);
       return;
     }
@@ -117,7 +187,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [open, parsed, selectedOrderIds]);
+  }, [informationalUpload, open, parsed, selectedOrderIds]);
 
   const orderPresetText = useMemo(() => {
     const labels = selectedOrderIds
@@ -126,23 +196,50 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     return labels.length > 0 ? `весь заказ: ${labels.join(', ')}` : 'весь заказ';
   }, [orderOptions, selectedOrderIds]);
 
-  const allPresets = useMemo(() => [
+  const allPresets = useMemo(() => dedupeCommentPresets([
     { label: 'Весь заказ', commentText: orderPresetText, category: 'order' },
     ...DEFAULT_COMMENT_PRESETS,
     ...presets,
-  ], [orderPresetText, presets]);
+  ]), [orderPresetText, presets]);
+
+  const matchProblems = useMemo(() => {
+    if (informationalUpload) return [];
+    if (!parsed?.cutLayout.items.length || eligibleLoading) return [];
+    return buildSvgMatchProblems(parsed.cutLayout.items, eligibleDetails);
+  }, [eligibleDetails, eligibleLoading, informationalUpload, parsed]);
+
+  const blockingMatchProblems = useMemo(
+    () => matchProblems.filter((problem) => problem.severity === 'error'),
+    [matchProblems],
+  );
+  const warningMatchProblems = useMemo(
+    () => matchProblems.filter((problem) => problem.severity === 'warning'),
+    [matchProblems],
+  );
+
+  const replaceSvgPreview = useCallback((next: SvgPreviewState | null) => {
+    revokeObjectUrl(svgPreviewUrlRef.current);
+    svgPreviewUrlRef.current = next?.url ?? null;
+    setSvgPreview(next);
+    if (!next) setSvgPreviewExpanded(false);
+  }, []);
+
+  useEffect(() => () => {
+    revokeObjectUrl(svgPreviewUrlRef.current);
+    svgPreviewUrlRef.current = null;
+  }, []);
 
   const matchSummary = useMemo(() => {
+    if (informationalUpload) return null;
     if (!parsed?.cutLayout.items.length) return null;
-    const matched = parsed.cutLayout.items.filter((item) =>
-      eligibleDetails.some((detail) => detailMatchesSvgItem(detail, item.orderName, item.detailNumber, item.widthMm, item.heightMm)),
-    );
+    const unmatched = blockingMatchProblems.reduce((sum, problem) => sum + Math.max(1, problem.quantity), 0);
+    const matched = parsed.cutLayout.items.length - unmatched;
     return {
-      matched: matched.length,
+      matched,
       total: parsed.cutLayout.items.length,
-      unmatched: parsed.cutLayout.items.length - matched.length,
+      unmatched,
     };
-  }, [eligibleDetails, parsed]);
+  }, [blockingMatchProblems, informationalUpload, parsed]);
 
   const uploadProps: UploadProps = {
     accept: '.svg,image/svg+xml',
@@ -154,7 +251,12 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     },
     onRemove: () => {
       setParsed(null);
+      replaceSvgPreview(null);
       setEligibleDetails([]);
+      setSelectedOrderIds(defaultOrderIds);
+      setOrderOptions(defaultOrderOptions);
+      setRequestedCutJobId(null);
+      setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
       return true;
     },
   };
@@ -172,32 +274,28 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   }, []);
 
   const addPreset = useCallback((value: string) => {
-    const comment = value.trim();
-    if (!comment) return;
-    setCommentText((current) => {
-      const lines = current.split('\n').map((line) => line.trim()).filter(Boolean);
-      if (!lines.includes(comment)) lines.push(comment);
-      return lines.join('\n');
-    });
-    if (comment.toLowerCase().includes('переделка')) setRework(true);
-    if (comment.toLowerCase().startsWith('материал:')) {
+    const comment = normalizeCommentPresetSegment(value);
+    if (!comment.trim()) return;
+    setCommentText((current) => appendCommentPreset(current, comment));
+    if (comment.toLocaleLowerCase('ru-RU').includes('переделка')) setRework(true);
+    if (comment.toLocaleLowerCase('ru-RU').startsWith('материал:')) {
       setMaterialName(comment.split(':').slice(1).join(':').trim());
     }
   }, []);
 
   const savePreset = useCallback(async () => {
-    const firstLine = commentText.split('\n').map((line) => line.trim()).find(Boolean);
-    if (!firstLine) {
+    const comment = normalizeManualSvgCommentForSubmit(commentText);
+    if (!comment) {
       message.warning('Нет комментария для пресета');
       return;
     }
     setPresetSaving(true);
     try {
       const preset = await cncTelegramApi.createManualSvgCommentPreset({
-        label: firstLine.slice(0, 80),
-        commentText: firstLine,
+        label: comment.slice(0, 80),
+        commentText: comment,
         category: rework ? 'rework' : 'custom',
-      }, createPresetIdempotencyKey(firstLine));
+      }, createPresetIdempotencyKey(comment));
       setPresets((current) => [...current, preset]);
       message.success('Пресет сохранен');
     } catch (error) {
@@ -212,9 +310,40 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setCommentText('');
     setMaterialName('');
     setMachineName('');
+    setRequestedCutJobId(null);
+    setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
     setRework(false);
     setEligibleDetails([]);
-  }, []);
+    replaceSvgPreview(null);
+  }, [replaceSvgPreview]);
+
+  useEffect(() => {
+    if (!open || requestedCutJobId === null) {
+      setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setCutJobNumberCheck({ status: 'checking', suggestions: [] });
+      void checkRequestedCutJobNumber(requestedCutJobId)
+        .then((check) => {
+          if (!cancelled) setCutJobNumberCheck(check);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setCutJobNumberCheck({
+              status: 'error',
+              suggestions: [],
+              message: 'Не удалось проверить номер задания',
+            });
+          }
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, requestedCutJobId]);
 
   const submit = useCallback(async () => {
     if (!parsed) {
@@ -222,30 +351,46 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       return;
     }
     if (parsed.cutLayout.status !== 'valid') {
-      message.error('SVG не прошел валидацию');
+      message.error(`SVG не прошел валидацию: ${parsed.cutLayout.reasons.join('; ') || 'нет деталей для раскроя'}`);
       return;
     }
     if (selectedOrderIds.length === 0) {
       message.warning('Укажите заказы для раскроя');
       return;
     }
-    if (matchSummary && matchSummary.unmatched > 0) {
-      message.warning('Не все детали SVG найдены в выбранных заказах');
+    if (!informationalUpload && eligibleLoading) {
+      message.warning('Дождитесь проверки деталей выбранных заказов');
+      return;
+    }
+    if (!informationalUpload && blockingMatchProblems.length > 0) {
+      showSvgMatchProblems(blockingMatchProblems);
+      return;
+    }
+    if (requestedCutJobId !== null && cutJobNumberCheck.status !== 'available') {
+      message.warning(cutJobNumberCheck.status === 'duplicate'
+        ? 'Выберите свободный номер задания'
+        : 'Дождитесь проверки номера задания');
+      return;
+    }
+    if (!informationalUpload && warningMatchProblems.length > 0 && !await confirmSvgMatchWarnings(warningMatchProblems)) {
       return;
     }
 
     const idempotencyKey = createIdempotencyKey(parsed.svgContentHash);
+    const uploadComment = normalizeManualSvgCommentForSubmit(commentText);
     setSubmitting(true);
     try {
-      const uploadBody = {
+      const uploadBody: CncTelegramManualSvgUploadRequest = {
         selectedOrderIds,
         createMdfMachineFileCard: false,
+        matchMode: uploadMatchMode,
+        requestedCutJobId,
         svgContentHash: parsed.svgContentHash,
         machine: machineName.trim() || null,
         programName: parsed.fileName,
         materialName: materialName.trim() || null,
         rework,
-        comments: commentText.split('\n').map((line) => line.trim()).filter(Boolean),
+        comments: uploadComment ? [uploadComment] : [],
         parserVersion: 'erp-manual-svg-upload-v1',
         cutLayout: parsed.cutLayout,
         items: parsed.items,
@@ -262,19 +407,24 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         }, createIdempotencyKey(`${parsed.svgContentHash}:mdf-card`));
         mdfCardCreated = mdfResponse.createdMdfMachineFileCard;
       }
+      const openCutJob = cutJobPath
+        ? () => {
+            Modal.destroyAll();
+            navigate(cutJobPath);
+          }
+        : undefined;
       Modal.success({
         title: cutJobId
           ? `Задание на раскрой #${cutJobId} сформировано`
           : 'SVG загружен, требуется проверка раскроя',
+        okText: cutJobPath ? 'Открыть задание' : 'OK',
+        onOk: openCutJob,
         content: cutJobPath ? (
           <Space direction="vertical" size={8}>
             <Button
               type="link"
               icon={<LinkOutlined />}
-              onClick={() => {
-                Modal.destroyAll();
-                navigate(cutJobPath);
-              }}
+              onClick={openCutJob}
             >
               Открыть задание #{cutJobId}
             </Button>
@@ -292,6 +442,22 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       resetFormState();
       onClose();
     } catch (error) {
+      if (isApiError(error, 'CUT_JOB_NUMBER_CONFLICT')) {
+        setCutJobNumberCheck({
+          status: 'duplicate',
+          suggestions: suggestedCutJobIdsFromErrorDetails(error.details),
+          message: error.message,
+        });
+        message.error(error.message);
+        return;
+      }
+      if (
+        isApiError(error, 'MANUAL_SVG_UNMATCHED_DETAILS') ||
+        isApiError(error, 'MANUAL_SVG_ORDER_SCOPE_MISMATCH')
+      ) {
+        showManualSvgApiMatchError(error);
+        return;
+      }
       message.error(isApiError(error) ? error.message : 'Не удалось загрузить SVG-раскрой');
     } finally {
       setSubmitting(false);
@@ -301,13 +467,20 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     machineName,
     materialName,
     matchSummary,
+    blockingMatchProblems,
+    warningMatchProblems,
+    eligibleLoading,
+    informationalUpload,
     navigate,
     onClose,
     onDone,
     parsed,
+    cutJobNumberCheck.status,
+    requestedCutJobId,
     resetFormState,
     rework,
     selectedOrderIds,
+    uploadMatchMode,
   ]);
 
   const resetAndClose = useCallback(() => {
@@ -317,12 +490,30 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   async function handleFile(file: File) {
     setParsing(true);
+    replaceSvgPreview(createSvgPreview(file));
     try {
-      const result = await parseSvgCutUploadFile(file);
+      const fileNameHints = parseSvgCutUploadFileNameHints(file.name);
+      const parseAsInformational = svgUploadMaterialIsInformational(
+        fileNameHints.materialName ?? materialName,
+        file.name,
+      );
+      const result = await parseSvgCutUploadFile(file, {
+        allowGeometryFallbackItems: parseAsInformational,
+        fallbackOrderName: fileNameHints.orderNames.join('+') || defaultOrderNames[0] || null,
+      });
       setParsed(result);
+      if (fileNameHints.machineName) {
+        setMachineName(fileNameHints.machineName);
+      }
+      if (fileNameHints.materialName) {
+        setMaterialName(fileNameHints.materialName);
+      }
+      if (fileNameHints.orderNames.length > 0) {
+        void applyFileNameOrderHints(fileNameHints.orderNames);
+      }
       if (result.cutLayout.status === 'valid') {
         const inferredMaterial = inferMaterialName(result.cutLayout.items, result.fileName);
-        if (inferredMaterial && !materialName) setMaterialName(inferredMaterial);
+        if (inferredMaterial && !fileNameHints.materialName) setMaterialName(inferredMaterial);
       }
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Не удалось прочитать SVG');
@@ -331,119 +522,677 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     }
   }
 
+  async function applyFileNameOrderHints(orderNames: string[]) {
+    setOrderSearchLoading(true);
+    try {
+      const lookup = await findOrdersByFileNameHints(orderNames);
+      setOrderOptions((current) => mergeOrderOptions(current, lookup.orders));
+      if (lookup.matchedOrderIds.length > 0) {
+        setSelectedOrderIds(uniqueNumbers([...defaultOrderIds, ...lookup.matchedOrderIds]));
+        message.success(`Заказы из имени файла найдены: ${lookup.matchedOrderNames.join(', ')}`);
+      }
+      if (lookup.missingOrderNames.length > 0) {
+        message.warning(`Не найдены заказы из имени файла: ${lookup.missingOrderNames.join(', ')}`);
+      }
+    } catch {
+      message.warning('Не удалось найти заказы из имени SVG-файла');
+    } finally {
+      setOrderSearchLoading(false);
+    }
+  }
+
+  const cutJobNumberSubmitBlocked = requestedCutJobId !== null && cutJobNumberCheck.status !== 'available';
+  const orderDetailMatchLoading = !informationalUpload && eligibleLoading;
+
   return (
     <Modal
       open={open}
       title="Загрузка SVG-раскроя"
-      width={760}
+      width={1040}
       onCancel={resetAndClose}
       okText="Сформировать раскрой"
       onOk={() => void submit()}
       confirmLoading={submitting}
       okButtonProps={{
-        disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0,
+        disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0 || orderDetailMatchLoading || cutJobNumberSubmitBlocked,
         icon: <FileAddOutlined />,
       }}
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Upload.Dragger {...uploadProps} disabled={parsing || submitting}>
-          <p className="ant-upload-drag-icon"><UploadOutlined /></p>
-          <p className="ant-upload-text">SVG-файл раскроя</p>
-          <p className="ant-upload-hint">Файл проверяется сразу после выбора</p>
-        </Upload.Dragger>
+      <div
+        style={{
+          display: 'flex',
+          gap: 16,
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+        }}
+      >
+        <Space
+          direction="vertical"
+          size="middle"
+          style={{
+            flex: '1 1 560px',
+            minWidth: 0,
+          }}
+        >
+          <Upload.Dragger {...uploadProps} disabled={parsing || submitting}>
+            <p className="ant-upload-drag-icon"><UploadOutlined /></p>
+            <p className="ant-upload-text">SVG-файл раскроя</p>
+            <p className="ant-upload-hint">Файл проверяется сразу после выбора</p>
+          </Upload.Dragger>
 
-        {parsed && (
-          <SvgValidationSummary parsed={parsed} eligibleLoading={eligibleLoading} matchSummary={matchSummary} />
-        )}
-
-        <Form layout="vertical">
-          <Form.Item label="Заказы в раскрое" required>
-            <Select
-              mode="multiple"
-              showSearch
-              filterOption={false}
-              value={selectedOrderIds}
-              options={orderOptions}
-              loading={orderSearchLoading}
-              onSearch={searchOrders}
-              onChange={(values) => setSelectedOrderIds(values)}
-              placeholder="Найдите заказ по номеру или названию"
+          {parsed && (
+            <SvgValidationSummary
+              parsed={parsed}
+              eligibleLoading={orderDetailMatchLoading}
+              matchMode={uploadMatchMode}
+              matchSummary={matchSummary}
+              matchProblems={matchProblems}
             />
-          </Form.Item>
+          )}
 
-          <Space size="middle" style={{ width: '100%' }} align="start">
-            <Form.Item label="Материал" style={{ flex: 1, minWidth: 220 }}>
-              <Input
-                value={materialName}
-                onChange={(event) => setMaterialName(event.target.value)}
-                placeholder="МДФ 16мм"
+          <Form layout="vertical">
+            <Form.Item label="Заказы в раскрое" required>
+              <Select
+                mode="multiple"
+                showSearch
+                filterOption={false}
+                value={selectedOrderIds}
+                options={orderOptions}
+                loading={orderSearchLoading}
+                onSearch={searchOrders}
+                onChange={(values) => setSelectedOrderIds(values)}
+                placeholder="Найдите заказ по номеру или названию"
               />
             </Form.Item>
-            <Form.Item label="Станок" style={{ flex: 1, minWidth: 180 }}>
-              <Input
-                value={machineName}
-                onChange={(event) => setMachineName(event.target.value)}
-                placeholder="manual-svg-upload"
-              />
-            </Form.Item>
-            <Form.Item label="Тип">
-              <Checkbox checked={rework} onChange={(event) => setRework(event.target.checked)}>
-                Переделка
-              </Checkbox>
-            </Form.Item>
-          </Space>
 
-          <Form.Item label="Пресеты комментариев">
-            <Space wrap>
-              {allPresets.map((preset, index) => (
-                <Button
-                  key={`${preset.category}:${preset.commentText}:${index}`}
-                  size="small"
-                  onClick={() => addPreset(preset.commentText)}
-                >
-                  {preset.label}
-                </Button>
-              ))}
+            <Space size="middle" style={{ width: '100%' }} align="start">
+              <Form.Item label="Материал" style={{ flex: 1, minWidth: 220 }}>
+                <Input
+                  value={materialName}
+                  onChange={(event) => setMaterialName(event.target.value)}
+                  placeholder="МДФ 16мм"
+                />
+              </Form.Item>
+              <Form.Item label="Станок" style={{ flex: 1, minWidth: 180 }}>
+                <Input
+                  value={machineName}
+                  onChange={(event) => setMachineName(event.target.value)}
+                  placeholder="manual-svg-upload"
+                />
+              </Form.Item>
+              <Form.Item
+                label="№ задания"
+                tooltip="Оставьте пустым для авто-номера"
+                validateStatus={cutJobNumberValidateStatus(cutJobNumberCheck)}
+                help={renderCutJobNumberHelp(cutJobNumberCheck, setRequestedCutJobId)}
+                style={{ width: 190 }}
+              >
+                <InputNumber
+                  value={requestedCutJobId}
+                  onChange={(value) => setRequestedCutJobId(normalizeRequestedCutJobId(value))}
+                  min={1}
+                  max={Number.MAX_SAFE_INTEGER}
+                  precision={0}
+                  controls={false}
+                  placeholder="авто"
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              <Form.Item label="Тип">
+                <Checkbox checked={rework} onChange={(event) => setRework(event.target.checked)}>
+                  Переделка
+                </Checkbox>
+              </Form.Item>
             </Space>
-          </Form.Item>
 
-          <Form.Item label="Комментарии">
-            <Input.TextArea
-              value={commentText}
-              onChange={(event) => setCommentText(event.target.value)}
-              autoSize={{ minRows: 3, maxRows: 6 }}
-              placeholder="весь заказ, фрезы, материал, переделка"
-            />
-          </Form.Item>
-          <Button
-            icon={<SaveOutlined />}
-            loading={presetSaving}
-            onClick={() => void savePreset()}
-          >
-            Сохранить первый комментарий как пресет
-          </Button>
-        </Form>
-      </Space>
+            <Form.Item label="Пресеты комментариев">
+              <Space wrap>
+                {allPresets.map((preset, index) => (
+                  <Button
+                    key={`${preset.category}:${preset.commentText}:${index}`}
+                    size="small"
+                    onClick={() => addPreset(preset.commentText)}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </Space>
+            </Form.Item>
+
+            <Form.Item label="Комментарий">
+              <Input
+                value={commentText}
+                onChange={(event) => setCommentText(normalizeManualSvgCommentInput(event.target.value))}
+                placeholder="весь заказ, фрезы, материал, переделка"
+              />
+            </Form.Item>
+            <Button
+              icon={<SaveOutlined />}
+              loading={presetSaving}
+              onClick={() => void savePreset()}
+            >
+              Сохранить комментарий как пресет
+            </Button>
+          </Form>
+        </Space>
+
+        <SvgUploadPreview
+          preview={svgPreview}
+          parsed={parsed}
+          onOpenExpanded={() => setSvgPreviewExpanded(true)}
+        />
+      </div>
+      {svgPreview && svgPreviewExpanded && (
+        <FloatingSvgPreview
+          preview={svgPreview}
+          parsed={parsed}
+          onClose={() => setSvgPreviewExpanded(false)}
+        />
+      )}
     </Modal>
   );
 };
 
+function SvgUploadPreview({
+  preview,
+  parsed,
+  onOpenExpanded,
+}: {
+  preview: SvgPreviewState | null;
+  parsed: ParsedSvgUpload | null;
+  onOpenExpanded: () => void;
+}) {
+  const sheetSize = parsed?.cutLayout.sheet
+    ? `${parsed.cutLayout.sheet.widthMm} x ${parsed.cutLayout.sheet.heightMm} мм`
+    : null;
+  return (
+    <div
+      style={{
+        flex: '0 0 320px',
+        maxWidth: '100%',
+        height: 360,
+        borderRadius: 8,
+        background: '#ffffff',
+        boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.12)',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <div
+        style={{
+          padding: '10px 12px',
+          borderBottom: '1px solid #f0f0f0',
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 8,
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <Typography.Text strong>Превью SVG</Typography.Text>
+          <Typography.Text
+            type="secondary"
+            ellipsis={preview ? { tooltip: preview.fileName } : true}
+            style={{
+              display: 'block',
+              maxWidth: '100%',
+              fontSize: 12,
+            }}
+          >
+            {preview?.fileName ?? 'Файл не выбран'}
+          </Typography.Text>
+        </div>
+        <Tooltip title={preview ? 'Открыть крупное превью' : 'Сначала выберите SVG'}>
+          <Button
+            type="text"
+            size="small"
+            icon={<FullscreenOutlined />}
+            disabled={!preview}
+            aria-label="Открыть крупное превью SVG"
+            onClick={onOpenExpanded}
+            style={{ minWidth: 32 }}
+          />
+        </Tooltip>
+      </div>
+      <div
+        role={preview ? 'button' : undefined}
+        tabIndex={preview ? 0 : undefined}
+        onClick={preview ? onOpenExpanded : undefined}
+        onKeyDown={preview ? (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onOpenExpanded();
+          }
+        } : undefined}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#fafafa',
+          padding: 8,
+          cursor: preview ? 'zoom-in' : 'default',
+          outline: 'none',
+        }}
+      >
+        {preview ? (
+          <img
+            src={preview.url}
+            alt="Превью SVG-раскроя"
+            draggable={false}
+            decoding="async"
+            style={{
+              display: 'block',
+              maxWidth: '100%',
+              maxHeight: '100%',
+              width: 'auto',
+              height: 'auto',
+              objectFit: 'contain',
+            }}
+          />
+        ) : (
+          <Typography.Text type="secondary">Выберите SVG-файл</Typography.Text>
+        )}
+      </div>
+      <div
+        style={{
+          padding: '8px 12px',
+          borderTop: '1px solid #f0f0f0',
+        }}
+      >
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {sheetSize ?? 'Пропорции сохраняются при показе'}
+        </Typography.Text>
+      </div>
+    </div>
+  );
+}
+
+function FloatingSvgPreview({
+  preview,
+  parsed,
+  onClose,
+}: {
+  preview: SvgPreviewState;
+  parsed: ParsedSvgUpload | null;
+  onClose: () => void;
+}) {
+  const sheetSize = parsed?.cutLayout.sheet
+    ? `${parsed.cutLayout.sheet.widthMm} x ${parsed.cutLayout.sheet.heightMm} мм`
+    : 'размер листа не определен';
+  const [rect, setRect] = useState(defaultFloatingSvgPreviewRect);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    rect: FloatingSvgPreviewRect;
+  } | null>(null);
+  const resizeRef = useRef<{
+    pointerId: number;
+    corner: FloatingSvgPreviewResizeCorner;
+    startX: number;
+    startY: number;
+    rect: FloatingSvgPreviewRect;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleResize = () => setRect((current) => clampFloatingSvgPreviewRect(current));
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      rect,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [rect]);
+
+  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setRect(clampFloatingSvgPreviewRect({
+      ...drag.rect,
+      left: drag.rect.left + event.clientX - drag.startX,
+      top: drag.rect.top + event.clientY - drag.startY,
+    }));
+  }, []);
+
+  const finishDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+  }, []);
+
+  const handleResizePointerDown = useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    corner: FloatingSvgPreviewResizeCorner,
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeRef.current = {
+      pointerId: event.pointerId,
+      corner,
+      startX: event.clientX,
+      startY: event.clientY,
+      rect,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [rect]);
+
+  const handleResizePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setRect(resizeFloatingSvgPreviewRect(
+      resize.rect,
+      event.clientX - resize.startX,
+      event.clientY - resize.startY,
+      resize.corner,
+    ));
+  }, []);
+
+  const finishResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (resizeRef.current?.pointerId === event.pointerId) resizeRef.current = null;
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        left: rect.left,
+        top: rect.top,
+        zIndex: 1100,
+        width: rect.width,
+        height: rect.height,
+        borderRadius: 8,
+        background: '#ffffff',
+        boxShadow: '0 18px 45px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.1)',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+      aria-label="Крупное превью SVG-раскроя"
+    >
+      <div
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        style={{
+          minHeight: 48,
+          padding: '8px 10px 8px 14px',
+          cursor: 'move',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          borderBottom: '1px solid #f0f0f0',
+          userSelect: 'none',
+          touchAction: 'none',
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <Typography.Text strong ellipsis={{ tooltip: preview.fileName }} style={{ display: 'block' }}>
+            {preview.fileName}
+          </Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {sheetSize}
+          </Typography.Text>
+        </div>
+        <Space size={4} onPointerDown={stopFloatingSvgPreviewActionPointerDown}>
+          <Tooltip title="Распечатать SVG">
+            <Button
+              type="text"
+              icon={<PrinterOutlined />}
+              aria-label="Распечатать SVG-превью"
+              onClick={(event) => {
+                event.stopPropagation();
+                printSvgPreview(preview.url, preview.fileName);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title="Закрыть">
+            <Button
+              type="text"
+              icon={<CloseOutlined />}
+              aria-label="Закрыть крупное превью SVG"
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose();
+              }}
+            />
+          </Tooltip>
+        </Space>
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: 'auto',
+          background: '#fafafa',
+          padding: 12,
+        }}
+      >
+        <img
+          src={preview.url}
+          alt="Крупное превью SVG-раскроя"
+          draggable={false}
+          decoding="async"
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            outline: '1px solid rgba(0, 0, 0, 0.1)',
+            background: '#ffffff',
+          }}
+        />
+      </div>
+      {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((corner) => (
+        <div
+          key={corner}
+          aria-label={`Изменить размер крупного превью SVG: ${corner}`}
+          onPointerDown={(event) => handleResizePointerDown(event, corner)}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={finishResize}
+          onPointerCancel={finishResize}
+          style={floatingSvgPreviewResizeHandleStyle(corner)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function stopFloatingSvgPreviewActionPointerDown(event: React.PointerEvent): void {
+  event.stopPropagation();
+}
+
+function defaultFloatingSvgPreviewRect(): FloatingSvgPreviewRect {
+  if (typeof window === 'undefined') {
+    return {
+      left: 24,
+      top: 72,
+      width: FLOATING_SVG_PREVIEW_DEFAULT_WIDTH,
+      height: FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT,
+    };
+  }
+  const width = Math.min(
+    FLOATING_SVG_PREVIEW_DEFAULT_WIDTH,
+    Math.max(FLOATING_SVG_PREVIEW_MIN_WIDTH, window.innerWidth - FLOATING_SVG_PREVIEW_MARGIN * 2),
+  );
+  const height = Math.min(
+    FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT,
+    Math.max(FLOATING_SVG_PREVIEW_MIN_HEIGHT, window.innerHeight - FLOATING_SVG_PREVIEW_MARGIN * 2),
+  );
+  return clampFloatingSvgPreviewRect({
+    left: window.innerWidth - width - 24,
+    top: Math.min(88, window.innerHeight - height - 16),
+    width,
+    height,
+  });
+}
+
+function clampFloatingSvgPreviewRect(rect: FloatingSvgPreviewRect): FloatingSvgPreviewRect {
+  if (typeof window === 'undefined') return rect;
+  const maxWidth = Math.max(FLOATING_SVG_PREVIEW_MIN_WIDTH, window.innerWidth - FLOATING_SVG_PREVIEW_MARGIN * 2);
+  const maxHeight = Math.max(FLOATING_SVG_PREVIEW_MIN_HEIGHT, window.innerHeight - FLOATING_SVG_PREVIEW_MARGIN * 2);
+  const width = clampNumber(rect.width, FLOATING_SVG_PREVIEW_MIN_WIDTH, maxWidth);
+  const height = clampNumber(rect.height, FLOATING_SVG_PREVIEW_MIN_HEIGHT, maxHeight);
+  return {
+    left: clampNumber(
+      rect.left,
+      FLOATING_SVG_PREVIEW_MARGIN,
+      Math.max(FLOATING_SVG_PREVIEW_MARGIN, window.innerWidth - width - FLOATING_SVG_PREVIEW_MARGIN),
+    ),
+    top: clampNumber(
+      rect.top,
+      FLOATING_SVG_PREVIEW_MARGIN,
+      Math.max(FLOATING_SVG_PREVIEW_MARGIN, window.innerHeight - height - FLOATING_SVG_PREVIEW_MARGIN),
+    ),
+    width,
+    height,
+  };
+}
+
+function resizeFloatingSvgPreviewRect(
+  rect: FloatingSvgPreviewRect,
+  deltaX: number,
+  deltaY: number,
+  corner: FloatingSvgPreviewResizeCorner,
+): FloatingSvgPreviewRect {
+  const next = { ...rect };
+  const maxWidth = typeof window === 'undefined'
+    ? FLOATING_SVG_PREVIEW_DEFAULT_WIDTH
+    : Math.max(FLOATING_SVG_PREVIEW_MIN_WIDTH, window.innerWidth - FLOATING_SVG_PREVIEW_MARGIN * 2);
+  const maxHeight = typeof window === 'undefined'
+    ? FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT
+    : Math.max(FLOATING_SVG_PREVIEW_MIN_HEIGHT, window.innerHeight - FLOATING_SVG_PREVIEW_MARGIN * 2);
+  if (corner.includes('right')) {
+    next.width = clampNumber(rect.width + deltaX, FLOATING_SVG_PREVIEW_MIN_WIDTH, maxWidth);
+  } else {
+    const right = rect.left + rect.width;
+    next.left = clampNumber(rect.left + deltaX, right - maxWidth, right - FLOATING_SVG_PREVIEW_MIN_WIDTH);
+    next.width = right - next.left;
+  }
+  if (corner.includes('bottom')) {
+    next.height = clampNumber(rect.height + deltaY, FLOATING_SVG_PREVIEW_MIN_HEIGHT, maxHeight);
+  } else {
+    const bottom = rect.top + rect.height;
+    next.top = clampNumber(rect.top + deltaY, bottom - maxHeight, bottom - FLOATING_SVG_PREVIEW_MIN_HEIGHT);
+    next.height = bottom - next.top;
+  }
+  return clampFloatingSvgPreviewRect(next);
+}
+
+function floatingSvgPreviewResizeHandleStyle(corner: FloatingSvgPreviewResizeCorner): React.CSSProperties {
+  const size = 18;
+  const inset = -2;
+  const style: React.CSSProperties = {
+    position: 'absolute',
+    width: size,
+    height: size,
+    zIndex: 1,
+    touchAction: 'none',
+    cursor: corner === 'top-left' || corner === 'bottom-right' ? 'nwse-resize' : 'nesw-resize',
+  };
+  if (corner.includes('top')) style.top = inset;
+  if (corner.includes('bottom')) style.bottom = inset;
+  if (corner.includes('left')) style.left = inset;
+  if (corner.includes('right')) style.right = inset;
+  return style;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function printSvgPreview(url: string, title: string): void {
+  const frame = document.createElement('iframe');
+  frame.style.position = 'fixed';
+  frame.style.width = '1px';
+  frame.style.height = '1px';
+  frame.style.opacity = '0';
+  frame.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(frame);
+  const documentRef = frame.contentDocument;
+  if (!documentRef) {
+    frame.remove();
+    return;
+  }
+  documentRef.open();
+  documentRef.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><style>@page{margin:8mm}html,body{margin:0;width:100%;height:100%}body{display:flex;align-items:center;justify-content:center}img{display:block;max-width:100%;max-height:calc(100vh - 16mm);object-fit:contain}</style></head><body><img src="${escapeHtml(url)}" alt=""></body></html>`);
+  documentRef.close();
+  const image = documentRef.querySelector('img');
+  const finish = () => {
+    frame.contentWindow?.focus();
+    frame.contentWindow?.print();
+    window.setTimeout(() => frame.remove(), 60_000);
+  };
+  if (image?.complete) finish();
+  else if (image) image.onload = finish;
+  else frame.remove();
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character] ?? character);
+}
+
+function createSvgPreview(file: File): SvgPreviewState | null {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
+  return {
+    url: URL.createObjectURL(file),
+    fileName: file.name,
+  };
+}
+
+function revokeObjectUrl(url: string | null): void {
+  if (!url || typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+  URL.revokeObjectURL(url);
+}
+
 function SvgValidationSummary({
   parsed,
   eligibleLoading,
+  matchMode,
   matchSummary,
+  matchProblems,
 }: {
   parsed: ParsedSvgUpload;
   eligibleLoading: boolean;
+  matchMode: SvgUploadMatchMode;
   matchSummary: { matched: number; total: number; unmatched: number } | null;
+  matchProblems: SvgMatchProblem[];
 }) {
   const layout = parsed.cutLayout;
   const valid = layout.status === 'valid';
+  const errorCount = matchProblems.filter((problem) => problem.severity === 'error').length;
+  const warningCount = matchProblems.length - errorCount;
+  const informational = matchMode === 'informational';
   return (
     <Alert
-      type={valid ? 'success' : 'error'}
+      type={!valid || errorCount > 0 ? 'error' : warningCount > 0 ? 'warning' : informational ? 'info' : 'success'}
       showIcon
-      message={valid ? 'SVG прошел базовую проверку' : 'SVG не прошел проверку'}
+      message={valid
+        ? informational
+          ? 'SVG прошел проверку для информативного раскроя'
+          : 'SVG прошел базовую проверку'
+        : 'SVG не прошел проверку'}
       description={(
         <Space direction="vertical" size={6}>
           <Space wrap>
@@ -451,16 +1200,44 @@ function SvgValidationSummary({
             {layout.sheet && <Tag>{layout.sheet.widthMm} x {layout.sheet.heightMm} мм</Tag>}
             <Tag>{layout.acceptedItemCount ?? layout.items.length} деталей</Tag>
             <Tag>{layout.partContourCount ?? 0} контуров</Tag>
+            {informational && <Tag color="blue">без сверки ERP-деталей</Tag>}
             {matchSummary && (
               <Tag color={matchSummary.unmatched ? 'orange' : 'green'}>
                 {eligibleLoading ? 'проверка заказов...' : `${matchSummary.matched}/${matchSummary.total} найдены в заказах`}
               </Tag>
             )}
           </Space>
+          {informational && valid && (
+            <Typography.Text type="secondary">
+              Размеры и список деталей берутся из SVG. Задание будет связано с выбранными заказами без привязки к деталям заказа.
+            </Typography.Text>
+          )}
           {layout.reasons.length > 0 && (
             <Typography.Text type="danger">
               {layout.reasons.join('; ')}
             </Typography.Text>
+          )}
+          {matchProblems.length > 0 && (
+            <Space direction="vertical" size={4}>
+              <Typography.Text type={errorCount > 0 ? 'danger' : 'warning'}>
+                {errorCount > 0
+                  ? `Проблемные детали: ${errorCount}`
+                  : `Предупреждения по деталям: ${warningCount}`}
+              </Typography.Text>
+              {matchProblems.slice(0, 6).map((problem) => (
+                <Typography.Text
+                  key={problem.key}
+                  type={problem.severity === 'error' ? 'danger' : 'warning'}
+                >
+                  {problem.title}: {problem.reason}
+                </Typography.Text>
+              ))}
+              {matchProblems.length > 6 && (
+                <Typography.Text type="secondary">
+                  Еще {matchProblems.length - 6}; полный список будет показан при формировании
+                </Typography.Text>
+              )}
+            </Space>
           )}
         </Space>
       )}
@@ -480,6 +1257,234 @@ function askCreateMdfMachineFileCard(): Promise<boolean> {
   });
 }
 
+function showSvgMatchProblems(problems: SvgMatchProblem[]): void {
+  Modal.warning({
+    title: 'Детали SVG не сопоставлены с выбранными заказами',
+    width: 720,
+    content: (
+      <Space direction="vertical" size={8}>
+        {problems.map((problem) => (
+          <Alert
+            key={problem.key}
+            type={problem.severity === 'error' ? 'error' : 'warning'}
+            showIcon
+            message={problem.title}
+            description={problem.reason}
+          />
+        ))}
+      </Space>
+    ),
+  });
+}
+
+function confirmSvgMatchWarnings(problems: SvgMatchProblem[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    Modal.confirm({
+      title: 'Детали уже есть в активных раскроях',
+      width: 720,
+      okText: 'Формировать всё равно',
+      cancelText: 'Вернуться',
+      content: (
+        <Space direction="vertical" size={8}>
+          <Typography.Text>
+            Это предупреждение не запрещает новый раскрой. Проверьте список и продолжите, если это ожидаемо.
+          </Typography.Text>
+          {problems.map((problem) => (
+            <Alert
+              key={problem.key}
+              type="warning"
+              showIcon
+              message={problem.title}
+              description={problem.reason}
+            />
+          ))}
+        </Space>
+      ),
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  });
+}
+
+function buildSvgMatchProblems(
+  items: ParsedSvgUpload['cutLayout']['items'],
+  details: EligibleDetailDto[],
+): SvgMatchProblem[] {
+  const problems: SvgMatchProblem[] = [];
+  for (const item of groupSvgItems(items)) {
+    const title = svgItemTitle(item);
+    const itemKey = `${item.orderName}:${item.detailNumber}:${item.widthMm}:${item.heightMm}`;
+    const sameOrder = details.filter((detail) => String(detail.orderName ?? '') === item.orderName);
+    if (sameOrder.length === 0) {
+      problems.push({
+        severity: 'error',
+        key: `${itemKey}:order`,
+        title,
+        reason: `Заказ ${item.orderName} не найден среди выбранных заказов или удален`,
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    const sameDetailNumber = sameOrder.filter((detail) => detail.detailNumber === item.detailNumber);
+    if (sameDetailNumber.length === 0) {
+      problems.push({
+        severity: 'error',
+        key: `${itemKey}:detail`,
+        title,
+        reason: `В заказе ${item.orderName} нет детали #${item.detailNumber}. Есть детали: ${detailNumbersPreview(sameOrder)}`,
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    const sameSize = sameDetailNumber.filter((detail) =>
+      detailMatchesSvgItem(detail, item.orderName, item.detailNumber, item.widthMm, item.heightMm),
+    );
+    if (sameSize.length === 0) {
+      problems.push({
+        severity: 'error',
+        key: `${itemKey}:size`,
+        title,
+        reason: `Размер в SVG ${formatMmPair(item.widthMm, item.heightMm)} не совпал с ERP. В ERP: ${detailSizesPreview(sameDetailNumber)}`,
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    const totalQuantity = sameSize.reduce((sum, detail) => sum + Math.max(0, detail.quantity), 0);
+    if (item.quantity > totalQuantity) {
+      problems.push({
+        severity: 'error',
+        key: `${itemKey}:qty`,
+        title,
+        reason: `Количество в SVG ${item.quantity}, в заказе доступно ${totalQuantity}`,
+        quantity: item.quantity,
+      });
+      continue;
+    }
+
+    const placedJobs = sameSize.flatMap((detail) => detail.activeJobs ?? []);
+    if (placedJobs.length > 0) {
+      problems.push({
+        severity: 'warning',
+        key: `${itemKey}:jobs`,
+        title,
+        reason: `Деталь уже есть в активных раскроях: ${cutJobsPreview(placedJobs)}`,
+        quantity: item.quantity,
+      });
+    }
+  }
+  return problems;
+}
+
+function groupSvgItems(items: ParsedSvgUpload['cutLayout']['items']): SvgItemGroup[] {
+  const groups = new Map<string, SvgItemGroup>();
+  for (const item of items) {
+    const key = `${item.orderName}:${item.detailNumber}:${item.widthMm}:${item.heightMm}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+      continue;
+    }
+    groups.set(key, {
+      orderName: item.orderName,
+      detailNumber: item.detailNumber,
+      widthMm: item.widthMm,
+      heightMm: item.heightMm,
+      quantity: item.quantity,
+    });
+  }
+  return Array.from(groups.values());
+}
+
+function svgItemTitle(item: SvgItemGroup): string {
+  const quantity = item.quantity > 1 ? `, ${item.quantity} шт.` : '';
+  return `${item.orderName} деталь #${item.detailNumber} ${formatMmPair(item.widthMm, item.heightMm)}${quantity}`;
+}
+
+function detailNumbersPreview(details: EligibleDetailDto[]): string {
+  const values = uniqueNumbers(details
+    .map((detail) => detail.detailNumber)
+    .filter((value): value is number => value !== null));
+  return values.length > 0 ? values.slice(0, 12).map((value) => `#${value}`).join(', ') : 'нет номеров деталей';
+}
+
+function detailSizesPreview(details: EligibleDetailDto[]): string {
+  const values = uniqueStrings(details
+    .map((detail) => detail.width != null && detail.height != null
+      ? `${formatMmPair(detail.width, detail.height)}${detail.productionStatusName ? ` (${detail.productionStatusName})` : ''}`
+      : 'размер не заполнен'));
+  return values.slice(0, 8).join(', ');
+}
+
+function cutJobsPreview(jobs: EligibleDetailDto['activeJobs']): string {
+  return jobs
+    .slice(0, 6)
+    .map((job) => job.name ? `#${job.cutJobId} ${job.name}` : `#${job.cutJobId}`)
+    .join(', ');
+}
+
+function showManualSvgApiMatchError(error: ApiError): void {
+  const problems = svgMatchProblemsFromApiError(error.details);
+  if (problems.length === 0) {
+    message.error(error.message);
+    return;
+  }
+  showSvgMatchProblems(problems);
+}
+
+function svgMatchProblemsFromApiError(details: unknown): SvgMatchProblem[] {
+  if (!details || typeof details !== 'object') return [];
+  const raw = (details as { problems?: unknown; items?: unknown }).problems
+    ?? (details as { problems?: unknown; items?: unknown }).items;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry, index): SvgMatchProblem[] => {
+    if (!entry || typeof entry !== 'object') return [];
+    const record = entry as Record<string, unknown>;
+    const orderName = stringFromUnknown(record.orderName) ?? 'без заказа';
+    const detailNumber = numberFromUnknown(record.detailNumber);
+    const widthMm = numberFromUnknown(record.widthMm);
+    const heightMm = numberFromUnknown(record.heightMm);
+    const quantity = numberFromUnknown(record.quantity) ?? 1;
+    const title = stringFromUnknown(record.title)
+      ?? [
+        orderName,
+        detailNumber !== null ? `деталь #${detailNumber}` : 'деталь без номера',
+        widthMm !== null && heightMm !== null ? formatMmPair(widthMm, heightMm) : null,
+        quantity > 1 ? `${quantity} шт.` : null,
+      ].filter(Boolean).join(' ');
+    return [{
+      severity: record.severity === 'warning' ? 'warning' : 'error',
+      key: stringFromUnknown(record.key) ?? `api:${index}`,
+      title,
+      reason: stringFromUnknown(record.reason) ?? 'Backend не смог сопоставить позицию SVG с выбранными заказами',
+      quantity,
+    }];
+  });
+}
+
+function stringFromUnknown(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function formatMmPair(width: number, height: number): string {
+  return `${formatMm(width)}x${formatMm(height)} мм`;
+}
+
+function formatMm(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 function mergeOrderOptions(current: OrderOption[], orders: OrderListItemDto[]): OrderOption[] {
   const map = new Map(current.map((option) => [option.value, option]));
   for (const order of orders) {
@@ -489,6 +1494,64 @@ function mergeOrderOptions(current: OrderOption[], orders: OrderListItemDto[]): 
     });
   }
   return Array.from(map.values());
+}
+
+async function findOrdersByFileNameHints(orderNames: string[]): Promise<{
+  orders: OrderListItemDto[];
+  matchedOrderIds: number[];
+  matchedOrderNames: string[];
+  missingOrderNames: string[];
+}> {
+  const uniqueOrderNames = uniqueStrings(orderNames);
+  const responses = await Promise.all(uniqueOrderNames.map(async (orderName) => {
+    try {
+      const response = await ordersApi.list({ search: orderName, pageSize: 20 });
+      return { orderName, orders: response.data };
+    } catch {
+      return { orderName, orders: [] };
+    }
+  }));
+
+  const ordersById = new Map<number, OrderListItemDto>();
+  const matchedOrderIds: number[] = [];
+  const matchedOrderNames: string[] = [];
+  const missingOrderNames: string[] = [];
+  for (const response of responses) {
+    for (const order of response.orders) {
+      ordersById.set(order.orderId, order);
+    }
+    const exactOrder = response.orders.find((order) => orderMatchesFileNameHint(order, response.orderName));
+    if (!exactOrder) {
+      missingOrderNames.push(response.orderName);
+      continue;
+    }
+    if (!matchedOrderIds.includes(exactOrder.orderId)) {
+      matchedOrderIds.push(exactOrder.orderId);
+      matchedOrderNames.push(exactOrder.orderName);
+    }
+  }
+  return {
+    orders: Array.from(ordersById.values()),
+    matchedOrderIds,
+    matchedOrderNames,
+    missingOrderNames,
+  };
+}
+
+function orderMatchesFileNameHint(order: OrderListItemDto, orderName: string): boolean {
+  const normalized = orderName.trim();
+  if (!normalized) return false;
+  if (String(order.orderName ?? '').trim() === normalized) return true;
+  if (String(order.fullNumber ?? '').trim() === normalized) return true;
+  return (String(order.fullNumber ?? '').match(/\d{3,8}/g) ?? []).includes(normalized);
+}
+
+function uniqueNumbers(values: number[]): number[] {
+  return Array.from(new Set(values));
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function detailMatchesSvgItem(
@@ -506,6 +1569,128 @@ function detailMatchesSvgItem(
   return Math.max(Math.abs(expected[0] - actual[0]), Math.abs(expected[1] - actual[1])) <= 8;
 }
 
+function normalizeRequestedCutJobId(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return null;
+  return value;
+}
+
+function cutJobNumberValidateStatus(
+  check: CutJobNumberCheck,
+): 'success' | 'warning' | 'error' | 'validating' | undefined {
+  if (check.status === 'checking') return 'validating';
+  if (check.status === 'available') return 'success';
+  if (check.status === 'duplicate') return 'error';
+  if (check.status === 'error') return 'warning';
+  return undefined;
+}
+
+function renderCutJobNumberHelp(
+  check: CutJobNumberCheck,
+  onPick: (cutJobId: number) => void,
+): React.ReactNode {
+  if (check.status === 'idle') return null;
+  if (check.status === 'checking') return 'Проверка номера...';
+  if (check.status === 'available') return 'Номер свободен';
+  if (check.status === 'error') return check.message ?? 'Не удалось проверить номер';
+  if (check.status === 'duplicate') {
+    return (
+      <Space direction="vertical" size={4}>
+        <Typography.Text type="danger">
+          {check.message ?? 'Номер уже занят'}
+        </Typography.Text>
+        {check.suggestions.length > 0 && (
+          <Space size={4} wrap>
+            {check.suggestions.map((cutJobId) => (
+              <Button
+                key={cutJobId}
+                size="small"
+                type="link"
+                onClick={() => onPick(cutJobId)}
+              >
+                #{cutJobId}
+              </Button>
+            ))}
+          </Space>
+        )}
+      </Space>
+    );
+  }
+  return null;
+}
+
+async function checkRequestedCutJobNumber(cutJobId: number): Promise<CutJobNumberCheck> {
+  const exists = await cutJobExists(cutJobId);
+  if (!exists) {
+    return { status: 'available', suggestions: [] };
+  }
+  return {
+    status: 'duplicate',
+    suggestions: await suggestAvailableCutJobNumbers(cutJobId),
+    message: `Задание #${cutJobId} уже существует`,
+  };
+}
+
+async function suggestAvailableCutJobNumbers(cutJobId: number): Promise<number[]> {
+  const candidates = Array.from({ length: 30 }, (_item, index) => cutJobId + index + 1);
+  const checked = await Promise.all(candidates.map(async (candidate) => (
+    await cutJobExists(candidate) ? null : candidate
+  )));
+  return checked.filter((candidate): candidate is number => candidate !== null).slice(0, 5);
+}
+
+async function cutJobExists(cutJobId: number): Promise<boolean> {
+  try {
+    await cutApi.get(cutJobId);
+    return true;
+  } catch (error) {
+    if (isApiError(error) && (error.status === 404 || error.code === 'CUT_JOB_NOT_FOUND')) return false;
+    throw error;
+  }
+}
+
+function suggestedCutJobIdsFromErrorDetails(details: unknown): number[] {
+  if (!details || typeof details !== 'object') return [];
+  const raw = (details as { suggestedCutJobIds?: unknown }).suggestedCutJobIds;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((value) => Number(value))
+    .filter((value) => Number.isSafeInteger(value) && value > 0)
+    .slice(0, 5);
+}
+
+function dedupeCommentPresets(presets: SvgCommentPresetOption[]): SvgCommentPresetOption[] {
+  const seen = new Set<string>();
+  const result: SvgCommentPresetOption[] = [];
+  for (const preset of presets) {
+    const key = normalizeManualSvgCommentForSubmit(preset.commentText).toLocaleLowerCase('ru-RU');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(preset);
+  }
+  return result;
+}
+
+function appendCommentPreset(current: string, preset: string): string {
+  const base = normalizeManualSvgCommentInput(current).trimEnd();
+  const segment = preset.trimStart();
+  return base ? `${base} ${segment}` : segment;
+}
+
+function normalizeCommentPresetSegment(value: string): string {
+  const collapsed = normalizeManualSvgCommentForSubmit(value);
+  if (!collapsed) return '';
+  if (/[:№]$/u.test(collapsed)) return `${collapsed} `;
+  return collapsed;
+}
+
+function normalizeManualSvgCommentInput(value: string): string {
+  return value.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trimStart();
+}
+
+function normalizeManualSvgCommentForSubmit(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 function createIdempotencyKey(svgContentHash: string): string {
   const suffix = typeof crypto !== 'undefined' && 'randomUUID' in crypto
     ? crypto.randomUUID()
@@ -520,9 +1705,25 @@ function createPresetIdempotencyKey(commentText: string): string {
   return `manual-svg-preset:${asciiHash(commentText)}:${suffix}`;
 }
 
+const SVG_UPLOAD_OTHER_MATERIAL_RE = /(?:^|[^a-zа-яё])(?:hdf|хдф|лдсп|ldsp|lдсп|дсп|dsp|двп|dvp|osb|осп|fanera|фанера|plywood|акрил|acrylic|пластик|plastic)(?=$|[^a-zа-яё])/i;
+const SVG_UPLOAD_MDF_MATERIAL_RE = /(?:^|[^a-zа-яё])(?:mdf|мдф)(?=$|[^a-zа-яё])/i;
+const SVG_UPLOAD_UNKNOWN_MATERIAL_RE = /^(?:не\s*(?:определ[её]н(?:о)?|распознан(?:о)?)|неизвестн(?:ый|о)?|unknown|[-—])$/i;
+
+function svgUploadMaterialIsInformational(materialName: string | null | undefined, fileName: string | null | undefined): boolean {
+  const metadata = [materialName ?? '', fileName ?? ''].filter((value) => value.trim());
+  if (metadata.some((value) => SVG_UPLOAD_OTHER_MATERIAL_RE.test(value))) return true;
+  const material = materialName?.trim() ?? '';
+  if (!material || SVG_UPLOAD_UNKNOWN_MATERIAL_RE.test(material)) return false;
+  return !SVG_UPLOAD_MDF_MATERIAL_RE.test(material);
+}
+
 function inferMaterialName(items: ParsedSvgUpload['cutLayout']['items'], fileName: string): string | null {
   const fileLower = fileName.toLowerCase();
   if (fileLower.includes('hdf') || fileLower.includes('хдф')) return 'ХДФ';
+  if (fileLower.includes('ldsp') || fileLower.includes('лдсп')) return 'ЛДСП';
+  if (fileLower.includes('fanera') || fileLower.includes('фанера') || fileLower.includes('plywood')) return 'Фанера';
+  if (fileLower.includes('osb') || fileLower.includes('осп')) return 'OSB';
+  if (fileLower.includes('dvp') || fileLower.includes('двп')) return 'ДВП';
   if (fileLower.includes('mdf') || fileLower.includes('мдф')) return 'МДФ 16мм';
   return items.length > 0 ? 'МДФ 16мм' : null;
 }

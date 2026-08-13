@@ -16,9 +16,20 @@
  */
 export interface PieceLabelSnapshot {
   orderId: number | null;
+  orderName?: string | null;
+  detailId?: number | null;
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
+  materialName?: string | null;
+}
+
+export interface VacuumOrientationWarningSnapshot {
+  code: 'vacuum_profile_orientation_fallback';
+  profileDirection: 'width' | 'height';
+  requestedSide: 'width' | 'height';
+  actualSide: 'width' | 'height';
+  message: string;
 }
 
 /** Per-piece geometry as stored in the sheet placements JSONB. */
@@ -31,6 +42,7 @@ export interface GeomPiece {
   height_mm: number;
   rotated: boolean;
   rotation_forbidden?: boolean;
+  vacuum_orientation_warning?: VacuumOrientationWarningSnapshot;
   label?: PieceLabelSnapshot;
 }
 
@@ -612,6 +624,7 @@ export type AutoPieceSpec = {
   baseH: number;
   label: PieceLabel;
   rotationForbidden?: boolean;
+  vacuumOrientationWarning?: VacuumOrientationWarningSnapshot;
 };
 
 /**
@@ -709,6 +722,7 @@ export function reconstructManualSheets(args: {
       height_mm: h,
       rotated: m.rotated,
       ...(spec.rotationForbidden !== undefined ? { rotation_forbidden: spec.rotationForbidden } : {}),
+      ...(spec.vacuumOrientationWarning ? { vacuum_orientation_warning: spec.vacuumOrientationWarning } : {}),
       label: spec.label,
     });
   }

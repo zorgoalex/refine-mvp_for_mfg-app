@@ -57,7 +57,7 @@ import {
 } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { createPortal } from 'react-dom';
-import { DndProvider, useDrag, useDrop } from 'react-dnd';
+import { DndProvider, useDrag, useDragLayer, useDrop } from 'react-dnd';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { isApiError } from '../../api/apiError';
@@ -96,7 +96,11 @@ import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
-import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from '../cut/CutSheetLabelGenerateAction';
+import {
+  CutSheetLabelGenerateAction,
+  type CutSheetLabelCoverage,
+  type CutSheetLabelDetailInstance,
+} from '../cut/CutSheetLabelGenerateAction';
 import type { LabelCutMapFallbackImage } from '../../api/types/labelsApi.types';
 import {
   classifyOrderStatusBoardMoveFailure,
@@ -166,6 +170,7 @@ import {
   cncPacketHasOtherMaterialMarker,
   type CncDetailedMachineSource,
 } from './cncDetailedMachine';
+import { touchBoardEdgeScrollDelta } from './touchBoardDrag';
 import { useTouchBoardCardDrag } from './useTouchBoardCardDrag';
 import {
   cncDetailedMachinePreviewsShareSheets,
@@ -203,11 +208,13 @@ const CNC_CARD_DISPLAY_OPTIONS: Array<{
   value: CncCardDisplayMode;
 }> = [
   { label: 'Стандартный', value: 'standard' },
+  { label: 'Скрин', value: 'screenshot' },
   { label: 'Средний', value: 'compact' },
   { label: 'Компактный', value: 'minimal' },
 ];
 const CNC_CARD_DISPLAY_ICONS: Record<CncCardDisplayMode, React.ReactNode> = {
   standard: <ProfileOutlined />,
+  screenshot: <PictureOutlined />,
   compact: <CompressOutlined />,
   minimal: <FileTextOutlined />,
 };
@@ -226,8 +233,8 @@ const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
 ] as const;
 const DND_BACKEND_OPTIONS = {
   enableMouseEvents: true,
-  delayTouchStart: 160,
-  touchSlop: 6,
+  delayTouchStart: 420,
+  touchSlop: 12,
 };
 
 function isKeyboardMoveMenuTrigger(event: React.KeyboardEvent<HTMLElement>): boolean {
@@ -273,6 +280,12 @@ interface StatusBoardCardStatusBadgeOverride {
 }
 
 export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
+const CNC_DRAG_PREVIEW_KIND_LABELS: Record<CncManualCardKind, string> = {
+  packet: 'Файл станка',
+  bazisCutSet: 'Раскрой',
+  bath: 'Ванна',
+  order: 'Заказ',
+};
 type CncRelationTarget =
   | { kind: 'packet'; id: string }
   | { kind: 'bazisCutSet'; id: number }
@@ -301,6 +314,7 @@ const STATUS_BOARD_CARD_DISPLAY_ICONS: Record<StatusBoardCardDisplayMode, React.
   compact: <CompressOutlined />,
   minimal: <FileTextOutlined />,
 };
+const CNC_CARD_DISPLAY_STORAGE_PREFIX = 'erp.status-board.cnc-card-display';
 const STATUS_BOARD_SORT_STORAGE_PREFIX = 'erp.status-board.card-sort';
 const STATUS_BOARD_SORT_FIELD_OPTIONS: Array<{
   label: string;
@@ -324,6 +338,15 @@ interface CncBoardDragItem {
   cardId: string;
   sourceColumn: CncTelegramTodayDisplayColumnKey;
   trigger: HTMLElement | null;
+  preview: CncBoardDragPreview;
+}
+
+interface CncBoardDragPreview {
+  height: number;
+  kindLabel: string;
+  label: string;
+  statusColor: string;
+  width: number;
 }
 
 interface OrderStatusBoardPageProps {
@@ -491,6 +514,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const cncBoardScrollButtonScrollActiveRef = useRef(false);
   const [cncBoardScrollDirection, setCncBoardScrollDirection] =
     useState<CncBoardHorizontalScrollDirection | null>(null);
+  const [cncBoardScrollTopState, setCncBoardScrollTopState] = useState({
+    visible: false,
+    left: 0,
+  });
   const [announcement, setAnnouncement] = useState('');
   const finePointer = useFinePointer();
   const viewStateRef = useRef(viewState);
@@ -498,7 +525,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const [cardDisplayMode, setCardDisplayMode] =
     useState<StatusBoardCardDisplayMode>('compact');
   const [cncCardDisplayMode, setCncCardDisplayMode] =
-    useState<CncCardDisplayMode>('standard');
+    useState<CncCardDisplayMode>(() => readCncCardDisplayPreference(currentUser?.id));
   const [mobileToolbarExpanded, setMobileToolbarExpanded] = useState(false);
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
@@ -700,6 +727,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     // datasetKey is the canonical backend data revision trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetKey]);
+
+  useEffect(() => {
+    setCncCardDisplayMode(readCncCardDisplayPreference(currentUser?.id));
+  }, [currentUser?.id]);
 
   useEffect(() => {
     const refreshWhenVisible = () => {
@@ -918,6 +949,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         ),
       })),
     [],
+  );
+  const updateCncCardDisplayMode = useCallback(
+    (mode: CncCardDisplayMode) => {
+      setCncCardDisplayMode(mode);
+      writeCncCardDisplayPreference(currentUser?.id, mode);
+    },
+    [currentUser?.id],
   );
   const tabletBoardSwitchOptions = useMemo(
     () => [
@@ -1334,7 +1372,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   }, []);
 
   useEffect(() => {
-    if (!isCncToday || !cncRelationsEnabled || !activeCncRelation) return undefined;
+    if (
+      !isCncToday ||
+      !cncRelationsEnabled ||
+      !activeCncRelation ||
+      activeCncRelation.kind === 'order'
+    ) {
+      return undefined;
+    }
     const animationFrame = window.requestAnimationFrame(() => {
       scrollStatusBoardColumnCardsToTop(boardViewportRef.current);
     });
@@ -1449,6 +1494,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       });
   }, [fetchCncManualMoves]);
 
+  const syncCncBoardScrollTopButton = useCallback((viewportOverride?: HTMLElement | null) => {
+    const viewport = viewportOverride ?? boardViewportRef.current;
+    const rect = viewport?.getBoundingClientRect();
+    const hasVerticalOverflow = viewport
+      ? viewport.scrollHeight - viewport.clientHeight > 2
+      : false;
+    const visible = Boolean(isCncToday && viewport && hasVerticalOverflow && viewport.scrollTop > 1);
+    const left = rect
+      ? Math.round(Math.min(Math.max(rect.left + rect.width / 2, 58), window.innerWidth - 58))
+      : 0;
+    setCncBoardScrollTopState((current) => {
+      if (current.visible === visible && (!visible || current.left === left)) return current;
+      return { visible, left };
+    });
+  }, [isCncToday]);
+
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
     const topScrollbarTrack = topScrollbarTrackRef.current;
@@ -1466,6 +1527,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             )
           : null,
       );
+      syncCncBoardScrollTopButton(viewport);
     };
     updateTrackWidth();
 
@@ -1482,6 +1544,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     datasetKey,
     isCncToday,
     loading,
+    syncCncBoardScrollTopButton,
   ]);
 
   const scrollBoardFromTop = useCallback(
@@ -1520,9 +1583,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
           ? statusBoardHorizontalScrollDirection(event.currentTarget, scrollDirectionTargetLeft)
           : null,
       );
+      syncCncBoardScrollTopButton(event.currentTarget);
     },
-    [isCncToday],
+    [isCncToday, syncCncBoardScrollTopButton],
   );
+
+  const scrollCncBoardToTop = useCallback(() => {
+    const viewport = boardViewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTo({ top: 0, behavior: 'smooth' });
+    setCncBoardScrollTopState((current) => ({
+      ...current,
+      visible: false,
+    }));
+  }, []);
 
   const scrollCncBoardHorizontally = useCallback(() => {
     const viewport = boardViewportRef.current;
@@ -1707,6 +1781,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         aria-labelledby={isOperational ? undefined : 'status-board-title'}
         aria-label={isOperational ? (isCncToday ? 'Доска МДФ-работ' : 'Доски статусов') : undefined}
       >
+        <CncBoardDragLayer />
         {isOperational ? (
           <OperationalPageHeader
             compact
@@ -2064,7 +2139,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
                 value={cncCardDisplayMode}
                 options={cncCardDisplayOptions}
                 onChange={(value) =>
-                  setCncCardDisplayMode(value as CncCardDisplayMode)
+                  updateCncCardDisplayMode(value as CncCardDisplayMode)
                 }
               />
             </div>
@@ -2274,6 +2349,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             </div>
           )}
         </section>
+        {isCncToday && cncHasRenderableColumns && cncBoardScrollTopState.visible && (
+          <Button
+            className="cnc-board-scroll-top"
+            type="default"
+            shape="circle"
+            icon={<UpOutlined />}
+            aria-label="Прокрутить МДФ-доску наверх"
+            style={{ left: cncBoardScrollTopState.left }}
+            onClick={scrollCncBoardToTop}
+          />
+        )}
         {isCncToday && cncBoardScrollDirection && (
           <Button
             className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}
@@ -2644,8 +2730,11 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       : [],
     [canViewCut, detailedContext?.activeBath, manualDisplayColumns, selectedDetailedDetailId],
   );
+  const cncStandardColumnLayout = cncUsesStandardColumnLayout(cardDisplayMode);
   const standardGridMinWidth = displayColumns.length * 220 + Math.max(0, displayColumns.length - 1) * 12;
-  const cncColumnMinWidth = cardDisplayMode === 'minimal' ? 132 : 220;
+  const cncColumnMinWidth = cardDisplayMode === 'minimal'
+    ? 'var(--status-board-cnc-column-width, 132px)'
+    : 'var(--status-board-cnc-column-width, 220px)';
   const highlightedOrderKeys = relationContext?.activeOrderKeys ?? null;
 
   return (
@@ -2653,7 +2742,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       <div
         className={[
           'status-board-columns status-board-columns--cnc',
-          cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : '',
+          cncStandardColumnLayout ? 'status-board-columns--cnc-standard' : '',
+          cardDisplayMode === 'screenshot' ? 'status-board-columns--cnc-screenshot' : '',
           cardDisplayMode === 'minimal' ? 'status-board-columns--cnc-minimal' : '',
           detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
         ].filter(Boolean).join(' ')}
@@ -2663,8 +2753,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
             '--status-board-cnc-side-column-count': Math.max(0, displayColumns.length - 4),
             ...(!detailedBathActive
               ? {
-                gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}px, 1fr))`,
-                minWidth: cardDisplayMode === 'standard' ? `${standardGridMinWidth}px` : undefined,
+                gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}, 1fr))`,
+                minWidth: cncStandardColumnLayout ? `${standardGridMinWidth}px` : undefined,
               }
               : {}),
           } as React.CSSProperties
@@ -2702,9 +2792,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           packetStateFor,
           relationContext || detailedPacketHighlightEnabled,
         );
-        const sortedOrderCards = relationContext
-          ? sortCncRelationCards(orderSourceCards, orderStateFor)
-          : orderSourceCards;
+        const sortedOrderCards = orderSourceCards;
         const columnDetailed = !detailedBathActive && detailedEnabled && bathColumn && bathSourceCards.some(
           (bath) => bath.bathCardId === detailedContext?.activeBathId,
         );
@@ -3134,6 +3222,79 @@ const CncColumnCardPlaceholders: React.FC<{ displayMode: CncCardDisplayMode }> =
   );
 };
 
+function buildCncDragPreview(kind: CncManualCardKind, handle: HTMLElement | null): CncBoardDragPreview {
+  const rect = handle?.getBoundingClientRect();
+  const card = handle?.querySelector<HTMLElement>('.status-board-card') ?? handle;
+  const label = card
+    ?.querySelector<HTMLElement>(
+      [
+        '.status-board-card__number',
+        '.cnc-packet-card__summary-order',
+        '.cnc-bath-card__block-job',
+        '.cnc-bazis-cut-card__badge',
+      ].join(', '),
+    )
+    ?.textContent
+    ?.replace(/\s+/g, ' ')
+    .trim()
+    || CNC_DRAG_PREVIEW_KIND_LABELS[kind];
+  const column = handle?.closest<HTMLElement>('.status-board-column');
+  const statusColor = column
+    ? getComputedStyle(column).getPropertyValue('--status-color').trim()
+    : '';
+
+  return {
+    height: Math.max(44, Math.round(rect?.height ?? 72)),
+    kindLabel: CNC_DRAG_PREVIEW_KIND_LABELS[kind],
+    label,
+    statusColor: statusColor || '#1677ff',
+    width: Math.max(120, Math.round(rect?.width ?? 220)),
+  };
+}
+
+const CncBoardDragLayer: React.FC = () => {
+  const { isDragging, itemType, item, sourceOffset } = useDragLayer((monitor) => ({
+    isDragging: monitor.isDragging(),
+    itemType: monitor.getItemType(),
+    item: monitor.getItem() as CncBoardDragItem | null,
+    sourceOffset: monitor.getSourceClientOffset(),
+  }));
+  if (
+    !isDragging ||
+    itemType !== CNC_BOARD_DRAG_TYPE ||
+    !item?.preview ||
+    !sourceOffset ||
+    typeof document === 'undefined' ||
+    typeof window === 'undefined'
+  ) {
+    return null;
+  }
+
+  const width = Math.min(item.preview.width, Math.max(120, window.innerWidth - 28));
+  const height = Math.min(item.preview.height, Math.max(44, Math.round(window.innerHeight * 0.38)));
+  const style = {
+    '--status-color': item.preview.statusColor,
+    height,
+    left: Math.round(sourceOffset.x),
+    top: Math.round(sourceOffset.y),
+    width,
+  } as React.CSSProperties;
+
+  return createPortal(
+    <div
+      className="cnc-board-drag-outline"
+      data-kind={item.kind}
+      data-testid="cnc-board-drag-outline"
+      style={style}
+      aria-hidden="true"
+    >
+      <strong>{item.preview.label}</strong>
+      <span>{item.preview.kindLabel}</span>
+    </div>,
+    document.body,
+  );
+};
+
 interface CncColumnDropZoneProps {
   columnKey: CncTelegramTodayDisplayColumnKey;
   columnTitle: string;
@@ -3198,6 +3359,12 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
   const dragSuppressedRef = useRef(false);
+  const touchReadyTimerRef = useRef<number | null>(null);
+  const touchReadyStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchDragLockedRef = useRef(false);
+  const touchDragPointRef = useRef<{ x: number; y: number } | null>(null);
+  const touchDragFrameRef = useRef<number | null>(null);
+  const [touchReady, setTouchReady] = useState(false);
   const destinations = useMemo(
     () => cncManualMoveDestinations(kind, sourceColumn),
     [kind, sourceColumn],
@@ -3214,6 +3381,7 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       cardId,
       sourceColumn,
       trigger: shellRef.current,
+      preview: buildCncDragPreview(kind, shellRef.current),
     }),
     canDrag: () => moveAvailable && !dragSuppressedRef.current,
     collect: (monitor) => ({ isDragging: monitor.isDragging() }),
@@ -3221,9 +3389,111 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
   const updateDragSuppression = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
     dragSuppressedRef.current = isCncManualDragIgnored(event.target);
   }, []);
+  const stopTouchDragAutoScroll = useCallback(() => {
+    if (touchDragFrameRef.current !== null) {
+      window.cancelAnimationFrame(touchDragFrameRef.current);
+      touchDragFrameRef.current = null;
+    }
+    touchDragPointRef.current = null;
+  }, []);
+  const startTouchDragAutoScroll = useCallback((handle: HTMLElement) => {
+    const viewport = handle.closest<HTMLElement>('.status-board-viewport');
+    if (!viewport || touchDragFrameRef.current !== null) return;
+    const tick = () => {
+      if (!touchDragLockedRef.current) {
+        touchDragFrameRef.current = null;
+        return;
+      }
+      const point = touchDragPointRef.current;
+      if (point) {
+        const viewportRect = viewport.getBoundingClientRect();
+        viewport.scrollLeft += touchBoardEdgeScrollDelta(
+          point.x,
+          viewportRect.left,
+          viewportRect.right,
+        );
+        const column = document
+          .elementFromPoint(point.x, point.y)
+          ?.closest<HTMLElement>('[data-status-board-column-key]');
+        const cards = column?.querySelector<HTMLElement>('.status-board-column__cards');
+        if (cards) {
+          const cardsRect = cards.getBoundingClientRect();
+          cards.scrollTop += touchBoardEdgeScrollDelta(
+            point.y,
+            cardsRect.top,
+            cardsRect.bottom,
+          );
+        }
+      }
+      touchDragFrameRef.current = window.requestAnimationFrame(tick);
+    };
+    touchDragFrameRef.current = window.requestAnimationFrame(tick);
+  }, []);
+  const clearTouchReadySignal = useCallback(() => {
+    if (touchReadyTimerRef.current !== null) {
+      window.clearTimeout(touchReadyTimerRef.current);
+      touchReadyTimerRef.current = null;
+    }
+    touchReadyStartRef.current = null;
+    touchDragLockedRef.current = false;
+    stopTouchDragAutoScroll();
+    setTouchReady(false);
+  }, [stopTouchDragAutoScroll]);
+  const queueTouchReadySignal = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    const ignored = isCncManualDragIgnored(event.target);
+    const handle = event.currentTarget;
+    dragSuppressedRef.current = ignored;
+    clearTouchReadySignal();
+    if (!moveAvailable || ignored) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    touchReadyStartRef.current = { x: touch.clientX, y: touch.clientY };
+    touchDragPointRef.current = { x: touch.clientX, y: touch.clientY };
+    touchReadyTimerRef.current = window.setTimeout(() => {
+      touchReadyTimerRef.current = null;
+      touchDragLockedRef.current = true;
+      setTouchReady(true);
+      startTouchDragAutoScroll(handle);
+    }, DND_BACKEND_OPTIONS.delayTouchStart);
+  }, [clearTouchReadySignal, moveAvailable, startTouchDragAutoScroll]);
+  const cancelTouchReadyOnMove = useCallback((event: React.TouchEvent<HTMLElement>) => {
+    const start = touchReadyStartRef.current;
+    const touch = event.touches[0];
+    if (!start || !touch) return;
+    touchDragPointRef.current = { x: touch.clientX, y: touch.clientY };
+    if (touchDragLockedRef.current) {
+      if (event.cancelable) event.preventDefault();
+      return;
+    }
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (deltaX * deltaX + deltaY * deltaY > DND_BACKEND_OPTIONS.touchSlop ** 2) {
+      clearTouchReadySignal();
+    }
+  }, [clearTouchReadySignal]);
   const clearDragSuppression = useCallback(() => {
     dragSuppressedRef.current = false;
-  }, []);
+    clearTouchReadySignal();
+  }, [clearTouchReadySignal]);
+
+  useEffect(() => () => clearTouchReadySignal(), [clearTouchReadySignal]);
+
+  useEffect(() => {
+    if (!touchReady) return undefined;
+    const preventTouchScroll = (event: TouchEvent) => {
+      if (!touchDragLockedRef.current) return;
+      if (event.cancelable) event.preventDefault();
+    };
+    document.addEventListener('touchmove', preventTouchScroll, {
+      capture: true,
+      passive: false,
+    });
+    return () => document.removeEventListener('touchmove', preventTouchScroll, true);
+  }, [touchReady]);
+
+  useEffect(() => {
+    if (!moveAvailable) clearTouchReadySignal();
+  }, [clearTouchReadySignal, moveAvailable]);
   const moveMenu = useMemo<MenuProps>(() => ({
     items: [
       {
@@ -3260,10 +3530,13 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
           'cnc-board-card-shell',
           moveAvailable ? 'cnc-board-card-shell--draggable' : '',
           isDragging ? 'cnc-board-card-shell--dragging' : '',
+          touchReady ? 'cnc-board-card-shell--touch-ready' : '',
+          touchReady ? 'cnc-board-card-shell--touch-locked' : '',
         ].filter(Boolean).join(' ')}
         onMouseDownCapture={updateDragSuppression}
         onMouseUpCapture={clearDragSuppression}
-        onTouchStartCapture={updateDragSuppression}
+        onTouchStartCapture={queueTouchReadySignal}
+        onTouchMoveCapture={cancelTouchReadyOnMove}
         onTouchEndCapture={clearDragSuppression}
         onTouchCancelCapture={clearDragSuppression}
       >
@@ -4056,20 +4329,148 @@ function detailInstancesFromRepeatedDetailIds(detailIds: number[]): CutSheetLabe
   return instances;
 }
 
-function detailInstancesFromPacketItems(items: CncTelegramPacket['items']): CutSheetLabelDetailInstance[] {
+interface PacketLabelDetailBuild {
+  detailInstances: CutSheetLabelDetailInstance[];
+  labelCoverage: CutSheetLabelCoverage | null;
+}
+
+function packetItemLabel(item: CncTelegramPacket['items'][number], fallbackDetailId?: number): string {
+  const orderName = item.orderName.trim() || (item.matchOrderId ? String(item.matchOrderId) : 'заказ');
+  const detailText = item.detailNumber !== null && item.detailNumber !== undefined
+    ? `поз. ${item.detailNumber}`
+    : `деталь ${fallbackDetailId ?? item.matchDetailId ?? 'без номера'}`;
+  return `${orderName}, ${detailText}`;
+}
+
+function normalizedMatchedQuantity(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.trunc(value));
+}
+
+function coverageOrNull(
+  expectedCount: number,
+  includedCount: number,
+  issues: CutSheetLabelCoverage['issues'],
+): CutSheetLabelCoverage | null {
+  return issues.length > 0 ? { expectedCount, includedCount, issues } : null;
+}
+
+function buildLabelDetailsFromPacketItems(items: CncTelegramPacket['items']): PacketLabelDetailBuild {
   const nextInstanceByDetailId = new Map<number, number>();
   const instances: CutSheetLabelDetailInstance[] = [];
+  const issues: CutSheetLabelCoverage['issues'] = [];
+  let expectedCount = 0;
   for (const item of items) {
-    const detailId = item.matchDetailId;
-    if (!Number.isInteger(detailId) || detailId <= 0) continue;
     const quantity = Math.max(0, Math.trunc(item.quantity || 0));
+    if (quantity === 0) continue;
+    expectedCount += quantity;
+    const detailId = item.matchDetailId;
+    if (!Number.isInteger(detailId) || detailId <= 0) {
+      issues.push({
+        key: `item:${item.packetItemId}`,
+        label: packetItemLabel(item),
+        expectedQuantity: quantity,
+        includedQuantity: 0,
+        missingQuantity: quantity,
+        reason: 'Строка файла не сопоставлена с деталью заказа.',
+      });
+      continue;
+    }
+    const availableQuantity = normalizedMatchedQuantity(item.matchDetailQuantity);
+    if (availableQuantity === null) {
+      issues.push({
+        key: `item:${item.packetItemId}`,
+        label: packetItemLabel(item, detailId),
+        expectedQuantity: quantity,
+        includedQuantity: 0,
+        missingQuantity: quantity,
+        reason: 'Сопоставленная деталь не найдена в ERP или удалена.',
+      });
+      continue;
+    }
     const firstInstance = nextInstanceByDetailId.get(detailId) ?? 1;
+    let includedQuantity = 0;
     for (let offset = 0; offset < quantity; offset += 1) {
-      instances.push({ detailId, instance: firstInstance + offset });
+      const instance = firstInstance + offset;
+      if (instance <= availableQuantity) {
+        instances.push({ detailId, instance });
+        includedQuantity += 1;
+      }
     }
     nextInstanceByDetailId.set(detailId, firstInstance + quantity);
+    if (includedQuantity < quantity) {
+      issues.push({
+        key: `item:${item.packetItemId}`,
+        label: packetItemLabel(item, detailId),
+        expectedQuantity: quantity,
+        includedQuantity,
+        missingQuantity: quantity - includedQuantity,
+        reason: `В ERP у детали количество ${availableQuantity}, а в файле раскроя экземпляров больше.`,
+      });
+    }
   }
-  return instances;
+  return {
+    detailInstances: instances,
+    labelCoverage: coverageOrNull(expectedCount, instances.length, issues),
+  };
+}
+
+function buildLabelDetailsFromRepeatedDetailIds(
+  detailIds: number[],
+  items: CncTelegramPacket['items'],
+): PacketLabelDetailBuild {
+  const itemByDetailId = new Map<number, CncTelegramPacket['items'][number]>();
+  for (const item of items) {
+    const detailId = item.matchDetailId;
+    if (Number.isInteger(detailId) && detailId > 0 && !itemByDetailId.has(detailId)) {
+      itemByDetailId.set(detailId, item);
+    }
+  }
+  const expectedByDetailId = new Map<number, number>();
+  const includedByDetailId = new Map<number, number>();
+  const nextInstanceByDetailId = new Map<number, number>();
+  const instances: CutSheetLabelDetailInstance[] = [];
+  let expectedCount = 0;
+
+  for (const detailId of detailIds) {
+    if (!Number.isInteger(detailId) || detailId <= 0) continue;
+    expectedCount += 1;
+    expectedByDetailId.set(detailId, (expectedByDetailId.get(detailId) ?? 0) + 1);
+    const instance = nextInstanceByDetailId.get(detailId) ?? 1;
+    nextInstanceByDetailId.set(detailId, instance + 1);
+    const item = itemByDetailId.get(detailId);
+    const availableQuantity = item ? normalizedMatchedQuantity(item.matchDetailQuantity) : undefined;
+    if (availableQuantity === null || (availableQuantity !== undefined && instance > availableQuantity)) continue;
+    instances.push({ detailId, instance });
+    includedByDetailId.set(detailId, (includedByDetailId.get(detailId) ?? 0) + 1);
+  }
+
+  const issues: CutSheetLabelCoverage['issues'] = [];
+  for (const [detailId, expectedQuantity] of expectedByDetailId.entries()) {
+    const includedQuantity = includedByDetailId.get(detailId) ?? 0;
+    if (includedQuantity >= expectedQuantity) continue;
+    const item = itemByDetailId.get(detailId);
+    const availableQuantity = item ? normalizedMatchedQuantity(item.matchDetailQuantity) : null;
+    issues.push({
+      key: `detail:${detailId}`,
+      label: item ? packetItemLabel(item, detailId) : `Деталь ${detailId}`,
+      expectedQuantity,
+      includedQuantity,
+      missingQuantity: expectedQuantity - includedQuantity,
+      reason: availableQuantity === null
+        ? 'Сопоставленная деталь не найдена в ERP или удалена.'
+        : `В ERP у детали количество ${availableQuantity}, а в раскрое экземпляров больше.`,
+    });
+  }
+
+  return {
+    detailInstances: instances,
+    labelCoverage: coverageOrNull(expectedCount, instances.length, issues),
+  };
+}
+
+function detailInstancesFromPacketItems(items: CncTelegramPacket['items']): CutSheetLabelDetailInstance[] {
+  return buildLabelDetailsFromPacketItems(items).detailInstances;
 }
 
 function cutMapFallbackImageFromPacket(packet: CncTelegramPacket): LabelCutMapFallbackImage | null {
@@ -4124,12 +4525,14 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const hasSvgSheetPreview = Boolean(packet.svgCutJobId && svgCutSheet);
   const hasSheetPreview = hasSheetImage || hasSvgSheetPreview;
   const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);
-  const labelDetailInstances = useMemo(
+  const labelDetailBuild = useMemo(
     () => svgCutSheet
-      ? detailInstancesFromRepeatedDetailIds(svgCutSheet.detailIds)
-      : detailInstancesFromPacketItems(packet.items),
+      ? buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)
+      : buildLabelDetailsFromPacketItems(packet.items),
     [packet.items, svgCutSheet],
   );
+  const labelDetailInstances = labelDetailBuild.detailInstances;
+  const labelCoverage = labelDetailBuild.labelCoverage;
   const cutMapFallbackImage = useMemo(() => cutMapFallbackImageFromPacket(packet), [packet]);
   const [activeAuxView, setActiveAuxView] = useState<'items' | 'sheet' | null>(null);
   const minimal = displayMode === 'minimal';
@@ -4158,6 +4561,12 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
       setActiveAuxView(null);
     }
   }, [activeAuxView, hasSheetPreview]);
+
+  useEffect(() => {
+    if (displayMode === 'screenshot' && hasSheetPreview) {
+      setActiveAuxView('sheet');
+    }
+  }, [displayMode, hasSheetPreview, packet.packetId]);
 
   if (minimal) {
     return (
@@ -4205,7 +4614,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
         relationState,
         highlightEnabled,
       )}
-      data-cnc-card-view={summaryOnly ? 'compact' : 'standard'}
+      data-cnc-card-view={displayMode === 'screenshot' ? 'screenshot' : summaryOnly ? 'compact' : 'standard'}
       data-cnc-material-kind={otherMaterial ? 'other' : undefined}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-clickable={relationsEnabled ? 'true' : undefined}
@@ -4415,6 +4824,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               labelSheet={svgCutSheet}
               printHeader={sheetPrintHeader ?? undefined}
               labelDetailInstances={labelDetailInstances}
+              labelCoverage={labelCoverage}
               cutMapFallbackImage={cutMapFallbackImage}
             />
           )}
@@ -4438,6 +4848,7 @@ interface CncTelegramSheetImagePreviewProps {
   labelSheet: CncTelegramPacketCutSheet | null;
   printHeader?: string;
   labelDetailInstances: CutSheetLabelDetailInstance[];
+  labelCoverage: CutSheetLabelCoverage | null;
   cutMapFallbackImage: LabelCutMapFallbackImage | null;
 }
 
@@ -4450,6 +4861,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   labelSheet,
   printHeader,
   labelDetailInstances,
+  labelCoverage,
   cutMapFallbackImage,
 }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
@@ -4486,6 +4898,8 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
             true,
             'top-left',
             cutResultNo ?? undefined,
+            false,
+            true,
           )
         : Promise.reject(new Error('Нет связанного превью раскроя'));
     loadPreview
@@ -4514,6 +4928,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
 
   if (!open) return null;
   const hasCutSheetScope = Boolean(cutJobId && labelSheet);
+  const generatedSvgPreview = !imageUrl && hasCutSheetScope;
   const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null);
   const disabledLabelReason = labelDetailInstances.length === 0
     ? 'Нет сопоставленных деталей для бирок'
@@ -4534,6 +4949,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
               sheetIndex={labelSheet?.sheetIndex ?? 0}
               sheetLabel={labelSheet ? `листа ${labelSheet.sheetNumber}` : 'скрина'}
               cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}
+              labelCoverage={labelCoverage}
             />
           ) : (
             <Tooltip title={disabledLabelReason}>
@@ -4576,9 +4992,9 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
         open={printPreviewOpen}
         imageUrl={objectUrl}
         title={`Скрин раскроя · ${title}`}
-        status="Скрин из Telegram-чата"
+        status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}
         alt={`Скрин листа ${title}`}
-        printTitle={`Раскрой Telegram ${title}`}
+        printTitle={generatedSvgPreview ? `Раскрой ${title}` : `Раскрой Telegram ${title}`}
         printHeader={printHeader}
         printMode="stretch-page-height"
         onClose={() => setPrintPreviewOpen(false)}
@@ -5858,6 +6274,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
     active: isTouchDragging,
     ghost: touchDragGhost,
     handleProps: touchDragHandleProps,
+    ready: touchDragReady,
   } = useTouchBoardCardDrag({
     enabled: actionsVisible && touchDragEnabled && moveAvailable,
     orderNumber,
@@ -5956,6 +6373,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           cncNumberOnly ? 'cnc-order-card--minimal cnc-compact-card' : '',
           cncMuted ? 'cnc-terminal-card--muted' : '',
           cncSummaryOnly ? 'cnc-order-card--summary-only' : '',
+          touchDragReady ? 'status-board-card--touch-ready' : '',
           isDragging || isTouchDragging ? 'status-board-card--dragging' : '',
           pending ? 'status-board-card--pending' : '',
         ].filter(Boolean).join(' '),
@@ -7747,6 +8165,43 @@ function statusBoardSortDirectionOptions(
         { label: 'Обычные', value: 'desc' },
       ];
   }
+}
+
+function cncUsesStandardColumnLayout(displayMode: CncCardDisplayMode): boolean {
+  return displayMode === 'standard' || displayMode === 'screenshot';
+}
+
+function isCncCardDisplayMode(value: unknown): value is CncCardDisplayMode {
+  return value === 'standard' ||
+    value === 'screenshot' ||
+    value === 'compact' ||
+    value === 'minimal';
+}
+
+function readCncCardDisplayPreference(userId: string | undefined): CncCardDisplayMode {
+  if (typeof window === 'undefined') return 'standard';
+  try {
+    const raw = window.localStorage.getItem(cncCardDisplayPreferenceKey(userId));
+    return isCncCardDisplayMode(raw) ? raw : 'standard';
+  } catch {
+    return 'standard';
+  }
+}
+
+function writeCncCardDisplayPreference(
+  userId: string | undefined,
+  value: CncCardDisplayMode,
+): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(cncCardDisplayPreferenceKey(userId), value);
+  } catch {
+    // Browser storage can be blocked; the in-memory choice still applies.
+  }
+}
+
+function cncCardDisplayPreferenceKey(userId: string | undefined): string {
+  return `${CNC_CARD_DISPLAY_STORAGE_PREFIX}.${userId ?? 'anonymous'}`;
 }
 
 function readStatusBoardSortPreference(

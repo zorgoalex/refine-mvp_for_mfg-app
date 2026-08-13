@@ -27,6 +27,7 @@ export interface CncTelegramPacketItemDto {
   confidence: number;
   matchOrderId: number | null;
   matchDetailId: number | null;
+  matchDetailQuantity: number | null;
   matchStatus: CncTelegramMatchStatus;
   reviewNote: string | null;
   laminatedOrLater: boolean;
@@ -246,6 +247,8 @@ export interface CncTelegramManualSvgUploadDto {
   idempotencyKey: string;
   selectedOrderIds: number[];
   createMdfMachineFileCard: boolean;
+  matchMode: 'order_details' | 'informational';
+  requestedCutJobId?: number | null;
   svgContentHash: string;
   workday?: string;
   machine?: string | null;

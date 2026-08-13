@@ -100,12 +100,14 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
   active: boolean;
   ghost: React.ReactPortal | null;
   handleProps: TouchBoardDragHandleProps;
+  ready: boolean;
 } {
   const optionsRef = useRef(options);
   optionsRef.current = options;
   const gestureRef = useRef<TouchBoardGesture | null>(null);
   const suppressClickUntilRef = useRef(0);
   const [visual, setVisual] = useState<TouchBoardDragVisual | null>(null);
+  const [ready, setReady] = useState(false);
 
   const cleanup = useCallback(() => {
     const gesture = gestureRef.current;
@@ -117,6 +119,7 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
     window.removeEventListener('orientationchange', gesture.orientationChange);
     window.removeEventListener('resize', gesture.orientationChange);
     clearTouchBoardMarks(gesture.viewport);
+    setReady(false);
     try {
       if (gesture.handle.hasPointerCapture(gesture.pointerId)) {
         gesture.handle.releasePointerCapture(gesture.pointerId);
@@ -239,6 +242,7 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
       document.addEventListener('keydown', gesture.keydown);
       window.addEventListener('orientationchange', gesture.orientationChange);
       window.addEventListener('resize', gesture.orientationChange);
+      setReady(true);
       setVisual({
         orderNumber: optionsRef.current.orderNumber,
         statusName: optionsRef.current.statusName,
@@ -342,6 +346,7 @@ export function useTouchBoardCardDrag(options: TouchBoardCardDragOptions): {
   return {
     active: visual !== null,
     ghost,
+    ready,
     handleProps: {
       onClickCapture,
       onLostPointerCapture,

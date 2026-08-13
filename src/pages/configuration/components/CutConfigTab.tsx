@@ -559,7 +559,7 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'job.name': 'Раскрой заказ 11380',
   'job.number': '19',
   'job.pdf_template': 'Профили ванны',
-  'job.texture_direction': 'Вертикальное',
+  'job.texture_direction': 'вдоль полотна',
   'cut.number': '19-3',
   'cut.current_version': '19-4',
   'group.number': '1',
@@ -3225,7 +3225,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ open, editing, onClose, onS
             {params.layout_mode === 'vacuum_table' && (
               <Form.Item
                 label="Направление подачи"
-                tooltip="Авто — оптимизатор выбирает направление. Вдоль — детали укладываются вдоль длинной стороны листа. Поперёк — поперёк длинной стороны."
+                tooltip="Авто — оптимизатор выбирает направление. Вдоль — высота детали параллельна длинной стороне листа. Поперёк — ширина детали параллельна длинной стороне."
                 extra={VACUUM_DIRECTION_META.short}
                 style={{ marginBottom: 12 }}
               >
@@ -3421,7 +3421,7 @@ const RETRY_META = {
 };
 const VACUUM_DIRECTION_META = {
   short: 'Ориентация деталей на вакуумном столе',
-  tooltip: 'Авто — оптимизатор выбирает направление. Вдоль — детали укладываются вдоль длинной стороны листа. Поперёк — поперёк длинной стороны.',
+  tooltip: 'Авто — оптимизатор выбирает направление. Вдоль — высота детали параллельна длинной стороне листа. Поперёк — ширина детали параллельна длинной стороне.',
 };
 const QUALITY_META = {
   short: 'Скорость против плотности',

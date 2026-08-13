@@ -11,6 +11,7 @@ const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
 );
+const operationalCss = readFileSync('src/ui-operational/operational.css', 'utf8');
 const tabletCss = readFileSync('src/ui-evolution/styles/tablet.css', 'utf8');
 const columnSettings = readFileSync(
   'src/pages/orderStatusBoard/StatusBoardColumnSettings.tsx',
@@ -65,11 +66,17 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('keeps regular status DnD guarded and MDF manual drag touch-capable', () => {
     expect(page).toContain("import { TouchBackend } from 'react-dnd-touch-backend'");
+    expect(page).toContain('useDragLayer');
     expect(page).toContain('enableMouseEvents: true');
     expect(page).toContain('delayTouchStart');
+    expect(page).toContain('delayTouchStart: 420');
     expect(page).toContain("window.matchMedia('(pointer: fine)')");
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('CNC_BOARD_DRAG_TYPE');
+    expect(page).toContain('CncBoardDragLayer');
+    expect(page).toContain('buildCncDragPreview');
+    expect(page).toContain('monitor.getSourceClientOffset()');
+    expect(page).toContain('className="cnc-board-drag-outline"');
     expect(page).toContain('CncManualCardFrame');
     expect(page).toContain('isCncManualMoveAllowed(item.kind, columnKey)');
     expect(page).toContain('includeTerminalManualMoves: terminalColumnsVisible');
@@ -100,16 +107,47 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('touchDragEnabled = false');
     expect(touchDrag).toContain("event.pointerType !== 'touch'");
     expect(touchDrag).toContain('handle.setPointerCapture');
+    expect(touchDrag).toContain('setReady(true)');
+    expect(touchDrag).toContain('ready,');
     expect(touchDrag).toContain('navigator.vibrate?.(18)');
     expect(touchDrag).toContain('document.elementFromPoint');
     expect(page).toContain('data-status-board-column-key={column.key}');
     expect(page).toContain('status-board-touch-drag-instructions');
     expect(page).not.toContain('touchDragEnabled={false}');
     expect(css).toContain('.cnc-board-card-shell--draggable');
+    expect(css).toContain('.status-board-card--touch-ready');
+    expect(css).toContain('.cnc-board-card-shell--touch-ready > .status-board-card');
+    expect(css).toContain('@keyframes statusBoardTouchReadyWiggle');
+    expect(css).toContain('.cnc-board-drag-outline');
+    expect(css).toMatch(/\.cnc-board-drag-outline\s*\{[^}]*position: fixed;[^}]*pointer-events: none;[^}]*border: 2px dashed var\(--status-color, #1677ff\);/s);
     expect(css).not.toContain('.cnc-card-move-actions');
-    expect(css).toContain('touch-action: none');
+    expect(css).toMatch(/\.cnc-board-card-shell--draggable\s*\{[^}]*touch-action: pan-x pan-y;/s);
+    expect(page).toContain('touchDragLockedRef.current = true');
+    expect(page).toContain("document.addEventListener('touchmove', preventTouchScroll");
+    expect(page).toContain("document.removeEventListener('touchmove', preventTouchScroll, true)");
+    const manualFrameStart = page.indexOf('const CncManualCardFrame: React.FC<CncManualCardFrameProps>');
+    const manualFrameEnd = page.indexOf('interface CncDetailedMachineMapsProps', manualFrameStart);
+    const manualFrame = page.slice(manualFrameStart, manualFrameEnd);
+    const lockedTouchMoveStart = manualFrame.indexOf('if (touchDragLockedRef.current) {');
+    const lockedTouchMoveEnd = manualFrame.indexOf('const deltaX', lockedTouchMoveStart);
+    const lockedTouchMove = manualFrame.slice(lockedTouchMoveStart, lockedTouchMoveEnd);
+    const preventTouchScrollStart = manualFrame.indexOf('const preventTouchScroll = (event: TouchEvent) => {');
+    const preventTouchScrollEnd = manualFrame.indexOf('document.addEventListener', preventTouchScrollStart);
+    const preventTouchScroll = manualFrame.slice(preventTouchScrollStart, preventTouchScrollEnd);
+    expect(lockedTouchMove).toContain('event.preventDefault()');
+    expect(preventTouchScroll).toContain('event.preventDefault()');
+    expect(lockedTouchMove).not.toContain('event.stopPropagation()');
+    expect(preventTouchScroll).not.toContain('event.stopPropagation()');
+    expect(page).toContain("touchReady ? 'cnc-board-card-shell--touch-locked' : ''");
+    expect(page).toContain("import { touchBoardEdgeScrollDelta } from './touchBoardDrag'");
+    expect(page).toContain('const startTouchDragAutoScroll = useCallback((handle: HTMLElement) => {');
+    expect(page).toContain('viewport.scrollLeft += touchBoardEdgeScrollDelta(');
+    expect(page).toContain('cards.scrollTop += touchBoardEdgeScrollDelta(');
+    expect(page).toContain('startTouchDragAutoScroll(handle)');
+    expect(css).toMatch(/\.cnc-board-card-shell--touch-locked,[\s\S]*?touch-action: none !important;/);
     expect(css).toContain('.status-board-viewport--touch-dragging');
     expect(css).toContain('scroll-snap-type: none');
+    expect(css).toMatch(/\.status-board-viewport--touch-dragging\s*\{[^}]*touch-action: none !important;/s);
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     expect(css).toContain('scroll-snap-type: x mandatory');
   });
@@ -126,35 +164,69 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('color: #cf1322');
   });
 
-  it('keeps every tablet board action in the forced one-row toolbar', () => {
+  it('keeps tablet board actions compact and MDF controls under the thin disclosure', () => {
     expect(page).toContain('className="status-board-toolbar__tablet-board-switch"');
     expect(page).toContain('aria-label="Переключатель досок"');
     expect(page).toContain('className="status-board-toolbar__tablet-refresh"');
     expect(page).toContain('className="status-board-toolbar__cnc-card-mode-text"');
     expect(tabletCss).toMatch(/data-modern-route="status-board"[^}]+\.status-board-toolbar \{[\s\S]*height: var\(--tablet-sticky-row\);/);
+    expect(tabletCss).toContain('--status-board-cnc-mobile-spoiler-row: 34px;');
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc\s*\{[^}]*min-height: var\(--status-board-cnc-mobile-spoiler-row\);[^}]*flex: 0 0 auto;[^}]*overflow: clip;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__toggle\s*\{[^}]*height: var\(--status-board-cnc-mobile-spoiler-row\);[^}]*padding: 0 10px;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content\s*\{[^}]*grid-template-rows: 0fr;[^}]*visibility: hidden;[^}]*opacity: 0;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc\.status-board-toolbar-disclosure--expanded \.status-board-toolbar-disclosure__content\s*\{[^}]*grid-template-rows: 1fr;[^}]*visibility: visible;[^}]*opacity: 1;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc \.status-board-toolbar\s*\{[^}]*position: static;[^}]*height: auto;[^}]*flex-wrap: wrap;/s,
+    );
     expect(tabletCss).toContain('.status-board-toolbar__tablet-board-switch .ant-segmented-item');
     expect(tabletCss).toContain('.status-board-toolbar__cnc-card-mode-text');
     expect(tabletCss).toContain('scrollbar-width: none');
-    expect(tabletCss).toContain('height: calc(100% - var(--tablet-sticky-row))');
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: auto;[^}]*overflow-x: auto;[^}]*overflow-y: auto;/s,
+    );
     expect(tabletCss).toMatch(/\.evolution-shell--tablet \.status-board-scrollbar \{\s*display: none;/);
     expect(tabletCss).toContain('overscroll-behavior-x: auto');
     expect(tabletCss).toContain('touch-action: pan-x pan-y');
     expect(tabletCss).toContain('scroll-snap-type: x proximity');
   });
 
-  it('collapses mobile board controls and doubles standard MDF columns', () => {
+  it('collapses mobile board controls and keeps MDF mobile columns denser', () => {
     expect(page).toContain('const StatusBoardToolbarDisclosure');
     expect(page).toContain('aria-expanded={expanded}');
     expect(page).toContain('setMobileToolbarExpanded((current) => !current)');
     expect(page).toContain('setMobileToolbarExpanded(true)');
-    expect(page).toContain("cardDisplayMode === 'standard' ? 'status-board-columns--cnc-standard' : ''");
+    expect(page).toContain("cncStandardColumnLayout ? 'status-board-columns--cnc-standard' : ''");
     expect(css).toContain('.status-board-toolbar-disclosure__toggle');
     expect(css).toContain('min-height: 44px');
+    expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure__toggle');
+    expect(css).toContain('height: 34px');
+    expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure__summary');
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content\s*\{[^}]*display: grid;[^}]*grid-template-rows: 0fr;[^}]*visibility: hidden;[^}]*opacity: 0;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content-inner\s*\{[^}]*min-height: 0;[^}]*display: block;[^}]*overflow: hidden;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\.status-board-toolbar-disclosure--expanded \.status-board-toolbar-disclosure__content\s*\{[^}]*grid-template-rows: 1fr;[^}]*visibility: visible;[^}]*opacity: 1;/s,
+    );
     expect(css).toContain('grid-template-rows: 0fr');
     expect(css).toContain('visibility: hidden');
     expect(css).toContain('transition-property: grid-template-rows, opacity, visibility');
-    expect(css).toContain('.status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed)');
-    expect(css).toContain('min-width: 200%');
+    expect(css).toContain('.status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
+    expect(css).toContain('--status-board-cnc-column-width: 187px');
+    expect(css).toContain('--status-board-cnc-column-width: 112px');
+    expect(css).toContain('min-width: 100% !important');
+    expect(page).toContain("'var(--status-board-cnc-column-width, 220px)'");
+    expect(css).not.toContain('min-width: 200%');
     expect(tabletCss).toContain('.status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed)');
     expect(tabletCss).toContain('clamp(480px, 48vw, 552px)');
   });
@@ -163,6 +235,35 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-column__cards \{[^}]*overscroll-behavior-x: auto;[^}]*overscroll-behavior-y: contain;[^}]*touch-action: pan-x pan-y;/,
     );
+    expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*overscroll-behavior-x: contain;[^}]*overscroll-behavior-y: auto;/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*overscroll-behavior-y: auto;/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-columns--cnc:not\(\.status-board-columns--cnc-detailed\) > \.status-board-column\s*\{[^}]*overflow: visible;/,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 768px\) \{[\s\S]*?\.status-board-page--cnc \.status-board-columns--cnc:not\(\.status-board-columns--cnc-detailed\) \.status-board-column__header\s*\{[^}]*position: sticky;[^}]*top: 0;[^}]*z-index: 18;[^}]*border-radius: 7px 7px 0 0;/,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc :where\([\s\S]*?\.status-board-viewport,[\s\S]*?\.cnc-board-card-shell,[\s\S]*?\.cnc-board-card-shell--draggable,[\s\S]*?\.status-board-card,[\s\S]*?\.cnc-bath-card[\s\S]*?\)\s*\{[^}]*touch-action: pan-x pan-y;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*overflow-x: auto;[^}]*overflow-y: auto;[^}]*touch-action: pan-x pan-y;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-columns--cnc\s*\{[^}]*height: auto;[^}]*min-height: 100%;[^}]*align-items: start;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-columns--cnc > \.status-board-column\s*\{[^}]*height: auto !important;[^}]*min-height: 100%;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: visible;/s,
+    );
+    expect(page).toContain('delayTouchStart: 420');
+    expect(page).toContain('touchSlop: 12');
     expect(page).toContain('{...touchDragHandleProps}');
     expect(css).not.toContain('.status-board-card__drag--touch');
   });
@@ -202,7 +303,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('overflow-x: auto');
   });
 
-  it('scrolls MDF board and column card lists to top after relation selection', () => {
+  it('keeps order-card relation selection in place and scrolls other relation selections to top', () => {
     expect(page).toContain('function scrollStatusBoardColumnCardsToTop');
     expect(page).toContain("viewport.closest<HTMLElement>('.status-board-page')");
     expect(page).toContain("block: 'start'");
@@ -210,6 +311,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("viewport.scrollTo({ top: 0, behavior: 'smooth' })");
     expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
     expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
+    expect(page).toContain("activeCncRelation.kind === 'order'");
+    expect(page).toContain('const sortedOrderCards = orderSourceCards;');
     expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
     expect(page).toContain('[activeCncRelation, cncRelationsEnabled, isCncToday]');
   });
@@ -227,7 +330,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('font-variant-numeric: tabular-nums');
   });
 
-  it('keeps desktop MDF auto-height but gives tablet a full-height pannable viewport', () => {
+  it('keeps desktop MDF order columns sticky inside the pannable board viewport', () => {
     expect(page).toContain("isCncToday ? ' status-board-page--cnc' : ''");
     expect(page).toContain('function useWorkspaceTabsHeight(): number');
     expect(page).toContain("document.querySelector('.workspace-tabs')");
@@ -235,14 +338,27 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("'--status-board-toolbar-sticky-top': `${workspaceTabsHeight}px`");
     expect(page).toContain('className="status-board-toolbar-disclosure--cnc"');
     expect(css).toMatch(
-      /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
+      /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: calc\(100dvh - 132px\);[^}]*overflow: hidden;/s,
+    );
+    expect(operationalCss).toMatch(
+      /\.evolution-shell__content\[data-modern-route="status-board"\] \.status-board-page\.status-board-page--cnc\s*\{[^}]*height: 100%;[^}]*overflow: hidden;/s,
     );
     expect(css).toMatch(
-      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\s*\{[^}]*position: sticky;[^}]*top: var\(--status-board-toolbar-sticky-top, 0px\);[^}]*z-index: 24;/s,
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc\s*\{[^}]*position: sticky;[^}]*top: var\(--status-board-toolbar-sticky-top, 0px\);[^}]*z-index: 48;/s,
     );
     expect(css).toContain('.status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar--cnc');
     expect(css).toMatch(
-      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*flex: 0 0 auto;[^}]*overflow-y: visible;/s,
+      /\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content,[\s\S]*?\.status-board-page--cnc \.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content-inner\s*\{[^}]*display: block;/s,
+    );
+    expect(tabletCss).toContain('.status-board-toolbar-disclosure--cnc');
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc\s*\{[^}]*min-height: var\(--status-board-cnc-mobile-spoiler-row\);[^}]*flex: 0 0 auto;/s,
+    );
+    expect(tabletCss).toMatch(
+      /\.status-board-toolbar-disclosure--cnc \.status-board-toolbar-disclosure__content\s*\{[^}]*grid-template-rows: 0fr;[^}]*visibility: hidden;[^}]*opacity: 0;/s,
+    );
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*flex: 1 1 auto;[^}]*overflow-y: auto;[^}]*overscroll-behavior: contain;/s,
     );
     expect(css).toMatch(
       /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*overflow-y: visible;/s,
@@ -251,6 +367,16 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*max-height: var\(--status-board-cnc-order-cards-max-height\);[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
     );
+    expect(page).not.toContain('interface CncOrderColumnViewportFrame');
+    expect(page).not.toContain('syncOrderColumnViewportFrame');
+    expect(page).not.toContain('window.visualViewport?.addEventListener');
+    expect(css).not.toContain('--status-board-cnc-order-column-offset-y');
+    expect(css).not.toContain('--status-board-cnc-order-column-visual-height');
+    expect(css).toMatch(
+      /\.status-board-page--cnc \.cnc-today-column--orders,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued\s*\{[^}]*position: sticky;[^}]*top: 4px;[^}]*align-self: start;[^}]*\}/s,
+    );
+    expect(css).not.toContain('translateY(var(--status-board-cnc-order-column-offset-y))');
+    expect(css).not.toContain('will-change: transform');
     expect(page).toContain('type CncOrderDisplayColumnKey = Extract<');
     expect(page).toContain('orderColumnScrollTopState');
     expect(page).toContain('syncOrderColumnScrollTopButton(orderColumnKey, event.currentTarget)');
@@ -283,6 +409,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('statusBoardHorizontalScrollDirection(viewport, nextLeft)');
     expect(page).toContain("viewport.scrollTo({ left: nextLeft, behavior: 'smooth' })");
     expect(page).not.toContain('if (topScrollbar) topScrollbar.scrollLeft = nextLeft');
+    expect(page).toContain('const [cncBoardScrollTopState, setCncBoardScrollTopState] =');
+    expect(page).toContain('syncCncBoardScrollTopButton(event.currentTarget)');
+    expect(page).toContain("viewport.scrollTo({ top: 0, behavior: 'smooth' })");
+    expect(page).toContain('className="cnc-board-scroll-top"');
+    expect(page).toContain('style={{ left: cncBoardScrollTopState.left }}');
+    expect(page).toContain('Прокрутить МДФ-доску наверх');
     expect(page).toContain('className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}');
     expect(page).toContain("cncBoardScrollDirection === 'left'");
     expect(page).toContain('Прокрутить МДФ-доску влево');
@@ -298,6 +430,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
     expect(css).toContain('background: rgba(17, 24, 39, 0.58)');
     expect(css).toContain('transform: translateY(-50%) scale(0.96)');
+    expect(css).toContain('.cnc-board-scroll-top.ant-btn');
+    expect(css).toContain('inset-block-end: calc(64px + env(safe-area-inset-bottom, 0px))');
+    expect(css).toContain('background: rgba(17, 24, 39, 0.6)');
+    expect(css).toContain('transform: translateX(-50%) scale(0.96)');
     expect(css).toMatch(
       /\.status-board-page--cnc \.cnc-detailed-workspace\s*\{[^}]*height: auto;[^}]*overflow: visible;/s,
     );
@@ -305,10 +441,10 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.status-board-page\.status-board-page--cnc\s*\{[^}]*height: 100% !important;[^}]*overflow: hidden !important;/s,
     );
     expect(tabletCss).toMatch(
-      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: calc\(100% - var\(--tablet-sticky-row\)\);[^}]*overflow-x: auto;/s,
+      /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*height: auto;[^}]*overflow-x: auto;[^}]*overflow-y: auto;/s,
     );
     expect(tabletCss).toMatch(
-      /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: auto;/s,
+      /\.status-board-page--cnc \.status-board-column__cards\s*\{[^}]*max-height: none;[^}]*overflow-y: visible;/s,
     );
     expect(tabletCss).toMatch(
       /\.status-board-page--cnc \.cnc-today-column--orders \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_ready \.status-board-column__cards,[\s\S]*?\.status-board-page--cnc \.cnc-today-column--orders_issued \.status-board-column__cards\s*\{[^}]*max-height: var\(--status-board-cnc-order-cards-max-height\);[^}]*overflow-y: auto;[^}]*scrollbar-gutter: stable;/s,
@@ -316,7 +452,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(tabletCss).toContain('.status-board-columns--cnc:not(.status-board-columns--cnc-detailed)');
     expect(tabletCss).toContain('clamp(240px, 24vw, 276px)');
     expect(tabletCss).toMatch(
-      /\.status-board-columns--cnc > \.status-board-column\s*\{[^}]*width: auto !important;[^}]*min-width: 0 !important;/s,
+      /\.status-board-columns--cnc > \.status-board-column\s*\{[^}]*width: auto !important;[^}]*min-width: 0 !important;[^}]*height: auto !important;[^}]*min-height: 100%;/s,
     );
   });
 
@@ -414,7 +550,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(model).toContain("key.set('period', state.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD)");
     expect(page).not.toContain("if (params.get('flow') === 'cnc') params.delete('order');");
     expect(page).toContain('const standardGridMinWidth = displayColumns.length * 220');
-    expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}px, 1fr))`');
+    expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}, 1fr))`');
     expect(page).toContain('buildCncColumnTotals(column, relationContext, detailedContext)');
     expect(page).toContain('CncBazisCutSetCardView');
     expect(page).toContain('Итоги по ERP-заказам набора');
@@ -488,8 +624,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cutApi.fetchSheetSvg');
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain('CutSheetLabelGenerateAction');
-    expect(page).toContain('detailInstancesFromRepeatedDetailIds(svgCutSheet.detailIds)');
-    expect(page).toContain('detailInstancesFromPacketItems(packet.items)');
+    expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
+    expect(page).toContain('buildLabelDetailsFromPacketItems(packet.items)');
+    expect(page).toContain('labelCoverage={labelCoverage}');
+    expect(page).toContain('labelCoverage: CutSheetLabelCoverage | null;');
+    expect(page).toContain('item.matchDetailQuantity');
+    expect(page).toContain('instance <= availableQuantity');
+    expect(page).toContain('В ERP у детали количество');
     expect(page).toContain('cutMapFallbackImageFromPacket(packet)');
     expect(page).toContain('ImagePrintPreviewModal');
     expect(page).toContain('aria-label={`Печать скрина листа ${title}`}');
@@ -587,6 +728,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 
   it('offers compact MDF cards with per-card temporary standard view', () => {
+    const mobileCncContainerStart = css.indexOf('@container status-board-viewport (max-width: 960px)');
+    const mobileCncContainerEnd = css.indexOf('@media (max-width: 768px)', mobileCncContainerStart);
+    const mobileCncContainer = css.slice(mobileCncContainerStart, mobileCncContainerEnd);
+
     expect(page).toContain('type CncCardDisplayMode,');
     expect(page).toContain('const [cncCardDisplayMode, setCncCardDisplayMode]');
     expect(page).toContain('aria-label="Формат карточек МДФ-доски"');
@@ -614,6 +759,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('blur(4px)');
     expect(css).toContain('cubic-bezier(0.2, 0, 0, 1)');
     expect(css).not.toContain('transition: all');
+    expect(mobileCncContainer).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__standard-grid',
+    );
+    expect(mobileCncContainer).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__sheet',
+    );
+    expect(mobileCncContainer).not.toContain(
+      '.status-board-columns--cnc .status-board-card__standard-grid',
+    );
+    expect(mobileCncContainer).not.toContain(
+      '.status-board-columns--cnc .cnc-packet-card__sheet',
+    );
+    expect(mobileCncContainer).not.toContain(
+      '.status-board-columns--cnc .status-board-card__top',
+    );
   });
 
   it('adds a number-only compact MDF card mode', () => {
@@ -626,9 +786,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     const bathMinimalEnd = page.indexOf(') : (', bathMinimalStart);
     const bathMinimal = page.slice(bathMinimalStart, bathMinimalEnd);
 
-    expect(model).toContain("export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal'");
+    expect(model).toContain("export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal' | 'screenshot'");
     expect(page).toContain("cardDisplayMode === 'minimal' ? 'status-board-columns--cnc-minimal' : ''");
-    expect(page).toContain("const cncColumnMinWidth = cardDisplayMode === 'minimal' ? 132 : 220");
+    expect(page).toContain("const cncColumnMinWidth = cardDisplayMode === 'minimal'");
+    expect(page).toContain("'var(--status-board-cnc-column-width, 132px)'");
+    expect(page).toContain("'var(--status-board-cnc-column-width, 220px)'");
     expect(page).toContain("displayMode={cardDisplayMode === 'minimal' ? 'minimal' : 'standard'}");
     expect(page).toContain('const compactCutNumber = formatCncPacketCompactNumber(packet);');
     expect(packetMinimal).toContain('href={cutJobPath}');
@@ -656,6 +818,24 @@ describe('OrderStatusBoardPage UX guards', () => {
       /\.cnc-bath-card--minimal \.cnc-compact-card__number\s*\{[^}]*font-size: 9\.8px;/s,
     );
     expect(css).not.toContain('.cnc-compact-card__refs');
+  });
+
+  it('opens MDF machine-file sheet previews as a user-scoped display mode', () => {
+    const packetCardStart = page.indexOf('const CncTelegramPacketCard =');
+    const packetCardEnd = page.indexOf('CncTelegramPacketCard.displayName', packetCardStart);
+    const packetCard = page.slice(packetCardStart, packetCardEnd);
+
+    expect(page).toContain("{ label: 'Скрин', value: 'screenshot' }");
+    expect(page).toContain('screenshot: <PictureOutlined />');
+    expect(page).toContain("const CNC_CARD_DISPLAY_STORAGE_PREFIX = 'erp.status-board.cnc-card-display'");
+    expect(page).toContain('useState<CncCardDisplayMode>(() => readCncCardDisplayPreference(currentUser?.id))');
+    expect(page).toContain('writeCncCardDisplayPreference(currentUser?.id, mode)');
+    expect(page).toContain("value === 'screenshot'");
+    expect(page).toContain('cncUsesStandardColumnLayout(cardDisplayMode)');
+    expect(page).toContain("cardDisplayMode === 'screenshot' ? 'status-board-columns--cnc-screenshot' : ''");
+    expect(packetCard).toContain("displayMode === 'screenshot' && hasSheetPreview");
+    expect(packetCard).toContain("setActiveAuxView('sheet')");
+    expect(packetCard).toContain("data-cnc-card-view={displayMode === 'screenshot' ? 'screenshot' : summaryOnly ? 'compact' : 'standard'}");
   });
 
   it('shows detail totals without position counts on every MDF card', () => {
@@ -734,9 +914,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-columns--cnc > .status-board-column');
     expect(css).toContain('container-name: status-board-viewport');
     expect(css).toContain('@container status-board-viewport (max-width: 960px)');
-    expect(css).toContain('.status-board-columns--cnc .cnc-packet-card__summary-meta');
-    expect(css).toContain('.status-board-columns--cnc .status-board-card__standard-grid');
-    expect(css).toContain('.status-board-columns--cnc .cnc-order-card__compact-client');
+    expect(css).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-meta',
+    );
+    expect(css).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__standard-grid',
+    );
+    expect(css).toContain(
+      '.status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-order-card__compact-client',
+    );
   });
 
   it('prints the compact MDF board in landscape with repeated column headers', () => {
@@ -1202,7 +1388,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
-    expect(sheetPreview).toContain('status="Скрин из Telegram-чата"');
+    expect(sheetPreview).toContain("status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}");
     expect(sheetPreview).toContain('printHeader={printHeader}');
     expect(sheetPreview).toContain('printMode="stretch-page-height"');
     expect(packetCard).toContain('const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);');

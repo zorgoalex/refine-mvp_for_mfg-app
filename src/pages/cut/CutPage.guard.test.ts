@@ -100,6 +100,13 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/landscape=\{\(\(\) => \{[\s\S]*sheetPreviewRotate90\(\s*p\.sheet_width_mm/);
   });
 
+  it('loads manual-only sheets from the selected preview variant', () => {
+    expect(source).toMatch(/const sheet = selectVariantSheets\(group, variant\)\.find/);
+    expect(source).toContain('const thumbSheets = selectVariantSheets(group, groupVariant);');
+    expect(source).toContain('for (const sheet of thumbSheets)');
+    expect(source).not.toContain('for (const sheet of group.sheets) {\n        void loadThumb');
+  });
+
   it('enables vacuum-bath meter guides from the shared eligibility contract', () => {
     expect(source).toMatch(/shouldShowBathMeterGuides\(\{/);
     expect(source).toMatch(/engineUsed:\s*group\.summary\?\.engine_used/);
@@ -140,6 +147,18 @@ describe('CutPage source guards', () => {
     // The reserved details are removable on the same job (release reservation).
     expect(source).toContain('cutApi.removeItem');
     expect(source).toContain('Убрать');
+  });
+
+  it('lists informational SVG details when a cut job has no ERP detail items', () => {
+    expect(source).toContain('cutJobInformationalDetails(job)');
+    expect(source).toContain('informationalJobDetailColumns');
+    expect(source).toContain('dataSource={informationalJobDetails}');
+    expect(source).toContain('В SVG не найдено распознанных деталей');
+  });
+
+  it('uses parsed SVG labels for informational cut job order links in list and export', () => {
+    expect(source).toContain('cutJobOrderRefsForJob(candidate).map(cutJobOrderLabel).join');
+    expect(source).toContain('refs={cutJobOrderRefsForJob(row)}');
   });
 
   it('shows the full per-detail order fields (position + names), never price/sum', () => {
@@ -392,6 +411,10 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toMatch(/next\.filter\(\(template\) => template\.isActive\)/);
     expect(sheetLabelSource).toContain('printLabelSvgPages');
     expect(sheetLabelSource).toContain('const runPrint = async () =>');
+    expect(sheetLabelSource).toContain('const [previewPageIndex, setPreviewPageIndex] = useState(0)');
+    expect(sheetLabelSource).toContain('visiblePreviewSvg');
+    expect(sheetLabelSource).toContain('Предыдущее');
+    expect(sheetLabelSource).toContain('Следующее');
     expect(sheetLabelSource).toContain('Скачать ZIP');
     expect(sheetLabelSource).toContain('cutSheetScope');
     expect(sheetLabelSource).not.toContain("element.kind === 'cut_map'");
@@ -528,17 +551,22 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain("title: 'Заказы'");
     expect(source).toContain('<CutJobOrderLinks');
     expect(source).toContain('items={row.items}');
-    expect(source).toContain('<span>Заказы: <CutJobOrderLinks items={job.items}');
+    expect(source).toContain('<span>Заказы: <CutJobOrderLinks items={job.items} refs={jobOrderRefs}');
     expect(source).toContain("title: 'Деталей'");
     expect(source).toContain("title: isOperational ? 'Площадь, м²' : 'Площадь, итого'");
     expect(source).toContain("title: isOperational ? 'Листы' : 'Кол-во листов раскроя'");
     expect(source).toContain("className: 'cut-jobs-name-cell'");
     expect(appCss).toContain('td.cut-jobs-name-cell');
     expect(appCss).toContain('text-align: left !important');
+    expect(appCss).toContain('.cut-jobs-table .ant-table-thead > tr > th .ant-table-column-title');
+    expect(appCss).toContain('min-height: 2.24em');
+    expect(appCss).toContain('white-space: normal !important');
     expect(source).toContain('width: 63');
     expect(source).toContain('width: 56');
     expect(source).toContain('width: 84');
     expect(source).toContain("title: 'Профиль'");
+    expect(source).toContain("title: 'Текстура'");
+    expect(source).toContain('cutTextureDirectionLabel(row.textureDirection)');
     expect(source).toContain("title: isOperational ? 'Материал' : 'Материал деталей'");
     expect(source).toContain('formatJobMaterialNames(row.materialNames)');
     expect(source).toContain("width: '20ch'");

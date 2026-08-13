@@ -22,6 +22,7 @@ import { HTML5Backend } from 'react-dnd-html5-backend';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { useInvalidate } from '@refinedev/core';
 import DayColumn from './DayColumn';
+import CalendarOrderDragLayer from './CalendarOrderDragLayer';
 import OrderContextMenu from './OrderContextMenu';
 import { useCalendarDays } from '../hooks/useCalendarDays';
 import { useCalendarData } from '../hooks/useCalendarData';
@@ -56,6 +57,7 @@ import {
 } from '../../../utils/packerStatusAccess';
 import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVisibility';
 import { cleanCalendarFilters } from '../utils/calendarFilters';
+import { isTabletTier, useDeviceTier } from '../../../hooks/useDeviceTier';
 
 interface CalendarBoardProps {
   filters: CalendarFilters;
@@ -71,6 +73,58 @@ interface MobileCalendarDisclosureProps {
   expanded: boolean;
   activeFilterCount: number;
   onToggle: () => void;
+}
+
+export type CalendarContextSubmenuDirection = 'right' | 'left';
+
+const CONTEXT_MENU_VIEWPORT_PADDING = 8;
+const DESKTOP_CONTEXT_MENU_WIDTH = 240;
+const DESKTOP_CONTEXT_SUBMENU_WIDTH = 240;
+const COMPACT_CONTEXT_MENU_MIN_WIDTH = 144;
+const COMPACT_CONTEXT_MENU_MAX_WIDTH = 190;
+const CONTEXT_MENU_HEIGHT = 260;
+
+function calculateCalendarContextMenuWidth(viewportWidth: number, compact: boolean): number {
+  if (!compact) {
+    return DESKTOP_CONTEXT_MENU_WIDTH;
+  }
+
+  return Math.min(
+    COMPACT_CONTEXT_MENU_MAX_WIDTH,
+    Math.max(
+      COMPACT_CONTEXT_MENU_MIN_WIDTH,
+      Math.floor((viewportWidth - CONTEXT_MENU_VIEWPORT_PADDING * 2) / 2),
+    ),
+  );
+}
+
+export function resolveCalendarContextMenuPosition(
+  clientX: number,
+  clientY: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  compact: boolean,
+): { x: number; y: number; submenuDirection: CalendarContextSubmenuDirection } {
+  const menuWidth = calculateCalendarContextMenuWidth(viewportWidth, compact);
+  const submenuWidth = compact ? menuWidth : DESKTOP_CONTEXT_SUBMENU_WIDTH;
+  const opensRight = clientX + menuWidth + submenuWidth + CONTEXT_MENU_VIEWPORT_PADDING <= viewportWidth;
+  const submenuDirection: CalendarContextSubmenuDirection = opensRight ? 'right' : 'left';
+  const maxX = Math.max(
+    CONTEXT_MENU_VIEWPORT_PADDING,
+    viewportWidth - menuWidth - CONTEXT_MENU_VIEWPORT_PADDING,
+  );
+  const minX = submenuDirection === 'left' && !compact
+    ? Math.min(maxX, CONTEXT_MENU_VIEWPORT_PADDING + submenuWidth)
+    : CONTEXT_MENU_VIEWPORT_PADDING;
+  const safeX = compact
+    ? (submenuDirection === 'right' ? CONTEXT_MENU_VIEWPORT_PADDING : maxX)
+    : Math.max(minX, Math.min(clientX, maxX));
+  const safeY = Math.max(
+    CONTEXT_MENU_VIEWPORT_PADDING,
+    Math.min(clientY, viewportHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_VIEWPORT_PADDING),
+  );
+
+  return { x: safeX, y: safeY, submenuDirection };
 }
 
 const MobileCalendarDisclosure: React.FC<MobileCalendarDisclosureProps> = ({
@@ -138,6 +192,9 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   const responsive = useResponsive(containerRef);
   const isMobile = responsive.isMobile;
   const isNarrow = responsive.isNarrow;
+  const deviceTier = useDeviceTier();
+  const isTabletLayout = isTabletTier(deviceTier);
+  const compactContextMenu = isMobile || isTabletLayout;
 
   // AD-2: pick DnD backend based on pointer precision.
   // TouchBackend only on touch-primary devices; touch-capable desktops
@@ -293,11 +350,15 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
     visible: boolean;
     x: number;
     y: number;
+    compact: boolean;
+    submenuDirection: CalendarContextSubmenuDirection;
     order: CalendarOrder | null;
   }>({
     visible: false,
     x: 0,
     y: 0,
+    compact: false,
+    submenuDirection: 'right',
     order: null,
   });
 
@@ -380,15 +441,20 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   // Обработчик открытия контекстного меню
   const handleContextMenu = (e: React.MouseEvent, order: CalendarOrder) => {
     e.preventDefault();
-    const menuWidth = 240;
-    const menuHeight = 260;
-    const safeX = Math.max(8, Math.min(e.clientX, window.innerWidth - menuWidth - 8));
-    const safeY = Math.max(8, Math.min(e.clientY, window.innerHeight - menuHeight - 8));
+    const menuPosition = resolveCalendarContextMenuPosition(
+      e.clientX,
+      e.clientY,
+      window.innerWidth,
+      window.innerHeight,
+      compactContextMenu,
+    );
 
     setContextMenu({
       visible: true,
-      x: safeX,
-      y: safeY,
+      x: menuPosition.x,
+      y: menuPosition.y,
+      compact: compactContextMenu,
+      submenuDirection: menuPosition.submenuDirection,
       order,
     });
   };
@@ -609,6 +675,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
       }
     >
       <div className="calendar-board" ref={containerRef}>
+        <CalendarOrderDragLayer enabled={isTabletLayout} />
         <MobileCalendarDisclosure
           mobile={isMobile}
           expanded={mobileControlsExpanded}
@@ -1014,6 +1081,8 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
           visible={contextMenu.visible}
           x={contextMenu.x}
           y={contextMenu.y}
+          compact={contextMenu.compact}
+          submenuDirection={contextMenu.submenuDirection}
           onClose={handleCloseContextMenu}
           onStatusChange={handleStatusChange}
           onProductionStatusToggle={handleProductionStatusToggle}

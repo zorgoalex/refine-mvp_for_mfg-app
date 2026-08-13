@@ -251,11 +251,65 @@
     min-width: 90vw;
     flex-shrink: 0;
   }
+}
 
-  /* На сверхузких экранах контекстное меню растягиваем во всю ширину */
-  .calendar-context-menu {
-    left: 8px !important;
-    right: 8px !important;
-    width: auto !important;
-  }
+.calendar-context-menu--compact {
+  width: calc((100vw - 16px) / 2) !important;
+  min-width: 144px;
+  max-width: 190px;
+}
+
+.calendar-context-menu--compact .ant-menu {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.calendar-context-menu--compact .ant-menu-item,
+.calendar-context-menu--compact .ant-menu-submenu-title {
+  min-height: 40px;
+  height: auto;
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  padding-inline: 10px 8px !important;
+  white-space: normal;
+}
+
+.calendar-context-menu--compact .ant-menu-title-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.calendar-context-submenu-popup {
+  z-index: 10000;
+}
+
+.calendar-context-submenu-popup .ant-menu {
+  min-width: 220px;
+}
+
+.calendar-context-submenu-popup--compact {
+  width: calc((100vw - 16px) / 2) !important;
+  min-width: 144px !important;
+  max-width: 190px !important;
+}
+
+.calendar-context-submenu-popup--compact .ant-menu {
+  width: 100% !important;
+  min-width: 0 !important;
+}
+
+.calendar-context-submenu-popup .ant-menu-item {
+  min-height: 40px;
+  height: auto;
+  line-height: 1.2;
+  display: flex;
+  align-items: center;
+  padding-inline: 10px !important;
+  white-space: normal;
+}
+
+.calendar-context-submenu-popup .ant-menu-title-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

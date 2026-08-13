@@ -11,9 +11,9 @@
 
 .status-board-page.status-board-page--cnc {
   --status-board-cnc-order-cards-max-height: max(320px, calc(100vh - 330px));
-  height: auto;
-  min-height: calc(100vh - 132px);
-  overflow: visible;
+  height: calc(100dvh - 132px);
+  min-height: 620px;
+  overflow: hidden;
 }
 
 .status-board-page__header {
@@ -62,30 +62,31 @@
   display: none;
 }
 
-@media (min-width: 769px) {
-  .status-board-page--cnc .status-board-toolbar-disclosure--cnc {
-    position: sticky;
-    top: var(--status-board-toolbar-sticky-top, 0px);
-    z-index: 24;
-    min-width: 0;
-    display: block;
-    flex: 0 0 auto;
-    padding-block: 2px 4px;
-    margin-block: -2px -4px;
-    border-radius: 12px;
-    background: var(--app-bg);
-    box-shadow: 0 12px 18px rgba(15, 23, 42, 0.08);
-  }
+.status-board-page--cnc .status-board-toolbar-disclosure--cnc {
+  position: sticky;
+  top: var(--status-board-toolbar-sticky-top, 0px);
+  z-index: 48;
+  min-width: 0;
+  display: block;
+  flex: 0 0 auto;
+  align-self: stretch;
+  padding-block: 2px 4px;
+  margin-block: -2px -4px;
+  border-radius: 12px;
+  background: var(--app-bg);
+  box-shadow: 0 12px 18px rgba(15, 23, 42, 0.08);
+  isolation: isolate;
+}
 
-  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content,
-  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content-inner {
-    display: contents;
-  }
+.status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content,
+.status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content-inner {
+  min-width: 0;
+  display: block;
+}
 
-  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar--cnc {
-    position: relative;
-    z-index: 1;
-  }
+.status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar--cnc {
+  position: relative;
+  z-index: 1;
 }
 
 .status-board-toolbar__search {
@@ -425,8 +426,9 @@
 
 .status-board-page--cnc .status-board-viewport {
   min-height: 0;
-  flex: 0 0 auto;
-  overflow-y: visible;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .status-board-columns {
@@ -450,7 +452,7 @@
 
 .status-board-page--cnc .status-board-columns--cnc {
   height: auto;
-  min-height: 0;
+  min-height: 100%;
 }
 
 .status-board-page--cnc .status-board-column {
@@ -475,7 +477,10 @@
 .status-board-page--cnc .cnc-today-column--orders,
 .status-board-page--cnc .cnc-today-column--orders_ready,
 .status-board-page--cnc .cnc-today-column--orders_issued {
-  position: relative;
+  position: sticky;
+  top: 4px;
+  z-index: 16;
+  align-self: start;
 }
 
 .status-board-page--cnc .cnc-detailed-workspace {
@@ -1110,6 +1115,38 @@
   box-shadow: 0 4px 12px var(--app-shadow);
 }
 
+.status-board-card--touch-ready,
+.cnc-board-card-shell--touch-ready > .status-board-card {
+  border-color: color-mix(in srgb, var(--status-color, #1677ff) 58%, var(--app-border-soft));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--status-color, #1677ff) 28%, transparent),
+    0 8px 18px var(--app-shadow);
+  transform-origin: center;
+  animation: statusBoardTouchReadyWiggle 360ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes statusBoardTouchReadyWiggle {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+
+  28% {
+    transform: translate3d(0, -1px, 0) rotate(-1.2deg) scale(1.015);
+  }
+
+  56% {
+    transform: translate3d(0, -1px, 0) rotate(1.2deg) scale(1.015);
+  }
+
+  78% {
+    transform: translate3d(0, 0, 0) rotate(-0.6deg) scale(1.008);
+  }
+
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+}
+
 .status-board-card:focus-visible {
   outline: 2px solid #1677ff;
   outline-offset: 2px;
@@ -1313,7 +1350,16 @@
 
 .status-board-viewport--touch-dragging {
   scroll-snap-type: none !important;
+  touch-action: none !important;
   user-select: none;
+}
+
+.status-board-viewport--touch-dragging :where(
+  .status-board-column__cards,
+  .cnc-board-card-shell,
+  .status-board-card
+) {
+  touch-action: none !important;
 }
 
 .status-board-touch-ghost {
@@ -1339,6 +1385,49 @@
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cnc-board-drag-outline {
+  position: fixed;
+  z-index: 3100;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  overflow: hidden;
+  pointer-events: none;
+  border: 2px dashed var(--status-color, #1677ff);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--status-color, #1677ff) 18%, transparent),
+    0 18px 36px rgba(0, 0, 0, 0.2);
+  color: var(--app-text);
+  opacity: 0.94;
+  transform: rotate(0.8deg) scale(1.01);
+  transition-property: opacity, transform;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+  backdrop-filter: blur(6px);
+}
+
+.cnc-board-drag-outline strong,
+.cnc-board-drag-outline span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cnc-board-drag-outline strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cnc-board-drag-outline span {
+  color: var(--app-text-muted);
+  font-size: 11px;
 }
 
 .status-board-card__client {
@@ -1495,9 +1584,14 @@
 
 .cnc-board-card-shell--draggable {
   cursor: grab;
-  touch-action: none;
+  touch-action: pan-x pan-y;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+.cnc-board-card-shell--touch-locked,
+.cnc-board-card-shell--touch-locked * {
+  touch-action: none !important;
 }
 
 .cnc-board-card-shell--draggable:active {
@@ -2775,6 +2869,39 @@
   transform: translateY(-50%) scale(0.96);
 }
 
+.cnc-board-scroll-top.ant-btn {
+  position: fixed;
+  inset-block-end: calc(64px + env(safe-area-inset-bottom, 0px));
+  z-index: 39;
+  width: 46px;
+  min-width: 46px;
+  height: 46px;
+  border-color: rgba(17, 24, 39, 0.28);
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.6);
+  color: #fff;
+  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.22);
+  opacity: 0.78;
+  transform: translateX(-50%);
+  transition-property: opacity, transform, background-color, box-shadow;
+  transition-duration: 140ms;
+  transition-timing-function: ease;
+  backdrop-filter: blur(8px);
+}
+
+.cnc-board-scroll-top.ant-btn:hover,
+.cnc-board-scroll-top.ant-btn:focus-visible {
+  border-color: rgba(17, 24, 39, 0.36);
+  background: rgba(17, 24, 39, 0.76);
+  color: #fff;
+  box-shadow: 0 14px 30px rgba(17, 24, 39, 0.26);
+  opacity: 0.94;
+}
+
+.cnc-board-scroll-top.ant-btn:active {
+  transform: translateX(-50%) scale(0.96);
+}
+
 .status-board-columns--cnc .status-board-card {
   min-width: 0;
   padding-inline: clamp(4px, 0.7vw, 11px);
@@ -2792,28 +2919,28 @@
 }
 
 @container status-board-viewport (max-width: 960px) {
-  .status-board-columns--cnc .status-board-column__marker,
-  .status-board-columns--cnc .cnc-today-column__totals,
-  .status-board-columns--cnc .cnc-today-column__totals-placeholder,
-  .status-board-columns--cnc .cnc-today-column__load,
-  .status-board-columns--cnc .cnc-card-display-toggle.ant-btn,
-  .status-board-columns--cnc .cnc-packet-card__summary-meta,
-  .status-board-columns--cnc .cnc-packet-card__summary-order-wrap .ant-tag,
-  .status-board-columns--cnc .cnc-packet-card__material,
-  .status-board-columns--cnc .cnc-packet-card__program,
-  .status-board-columns--cnc .cnc-packet-card__status-icons,
-  .status-board-columns--cnc .cnc-packet-card__notes,
-  .status-board-columns--cnc .cnc-packet-card__metrics,
-  .status-board-columns--cnc .cnc-packet-card__tabs,
-  .status-board-columns--cnc .cnc-packet-card__items-panel,
-  .status-board-columns--cnc .cnc-packet-card__sheet-panel,
-  .status-board-columns--cnc .cnc-packet-card__collapse,
-  .status-board-columns--cnc .cnc-packet-card__sheet,
-  .status-board-columns--cnc .status-board-card__footer,
-  .status-board-columns--cnc .cnc-bath-card__actions,
-  .status-board-columns--cnc .status-board-card__standard-grid,
-  .status-board-columns--cnc .status-board-card__compact-text,
-  .status-board-columns--cnc .cnc-order-card__compact-client {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-column__marker,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column__totals,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column__totals-placeholder,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column__load,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-card-display-toggle.ant-btn,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-meta,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-order-wrap .ant-tag,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__material,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__program,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__status-icons,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__notes,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__metrics,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__tabs,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__items-panel,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__sheet-panel,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__collapse,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__sheet,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__footer,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-bath-card__actions,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__standard-grid,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__compact-text,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-order-card__compact-client {
     display: none;
   }
 
@@ -2839,21 +2966,21 @@
     display: inline-flex;
   }
 
-  .status-board-columns--cnc .cnc-today-column .status-board-column__header {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column .status-board-column__header {
     min-height: 42px;
     padding: 4px;
   }
 
-  .status-board-columns--cnc .cnc-today-column__header-main {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-today-column__header-main {
     justify-content: center;
     gap: 3px;
   }
 
-  .status-board-columns--cnc .status-board-column__title .ant-typography {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-column__title .ant-typography {
     font-size: clamp(8px, 1.2vw, 11px);
   }
 
-  .status-board-columns--cnc .ant-badge-count {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .ant-badge-count {
     min-width: 16px;
     height: 16px;
     padding-inline: 4px;
@@ -2861,30 +2988,30 @@
     line-height: 16px;
   }
 
-  .status-board-columns--cnc .status-board-card,
-  .status-board-columns--cnc .cnc-card--summary-only,
-  .status-board-columns--cnc .cnc-order-card--summary-only {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-card--summary-only,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-order-card--summary-only {
     padding: 4px;
   }
 
-  .status-board-columns--cnc .status-board-card__top {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .status-board-card__top {
     min-height: 0;
   }
 
-  .status-board-columns--cnc .cnc-packet-card__summaries {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summaries {
     margin: 0;
     padding: 0;
   }
 
-  .status-board-columns--cnc .cnc-packet-card__summary-order,
-  .status-board-columns--cnc .cnc-packet-card__summary-order.ant-btn {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-order,
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-packet-card__summary-order.ant-btn {
     font-size: clamp(10px, 1.5vw, 15px);
     color: var(--app-text);
     font-weight: 700;
     line-height: 1.15;
   }
 
-  .status-board-columns--cnc .cnc-order-card .status-board-card__number {
+  .status-board-columns--cnc:not(.status-board-columns--cnc-standard) .cnc-order-card .status-board-card__number {
     font-size: clamp(14px, 4.8cqw, 16px);
     color: var(--app-text);
     font-weight: 700;
@@ -2902,6 +3029,7 @@
   .status-board-page.status-board-page--cnc {
     height: auto;
     min-height: calc(100vh - 116px);
+    overflow: visible;
   }
 
   .status-board-page > .operational-page-head,
@@ -2937,6 +3065,39 @@
     font: inherit;
     text-align: left;
     cursor: pointer;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure {
+    border-radius: 8px;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure__toggle {
+    min-height: 34px;
+    height: 34px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure__label {
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure__summary {
+    font-size: 11px;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content {
+    display: grid;
+    grid-template-rows: 0fr;
+    visibility: hidden;
+    opacity: 0;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc .status-board-toolbar-disclosure__content-inner {
+    min-height: 0;
+    display: block;
+    overflow: hidden;
   }
 
   .status-board-toolbar-disclosure__toggle:focus-visible {
@@ -3003,6 +3164,12 @@
     transition-delay: 0s;
   }
 
+  .status-board-page--cnc .status-board-toolbar-disclosure--cnc.status-board-toolbar-disclosure--expanded .status-board-toolbar-disclosure__content {
+    grid-template-rows: 1fr;
+    visibility: visible;
+    opacity: 1;
+  }
+
   .status-board-toolbar-disclosure .status-board-toolbar-disclosure__content-inner > .status-board-toolbar {
     position: static;
     width: 100%;
@@ -3014,6 +3181,11 @@
     border-radius: 0;
     background: transparent;
     box-shadow: none;
+  }
+
+  .status-board-page--cnc .status-board-toolbar-disclosure .status-board-toolbar-disclosure__content-inner > .status-board-toolbar {
+    padding: 8px;
+    gap: 6px;
   }
 
   .status-board-toolbar {
@@ -3103,9 +3275,49 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  .status-board-page--cnc .status-board-viewport {
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+  }
+
   .status-board-column__cards {
     overscroll-behavior-x: auto;
     overscroll-behavior-y: contain;
+    touch-action: pan-x pan-y;
+  }
+
+  .status-board-page--cnc .status-board-column__cards {
+    overscroll-behavior-y: auto;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) > .status-board-column {
+    overflow: visible;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) .status-board-column__header {
+    position: sticky;
+    top: 0;
+    z-index: 18;
+    border-radius: 7px 7px 0 0;
+    box-shadow:
+      0 1px 0 var(--app-border-soft),
+      0 8px 14px rgba(15, 23, 42, 0.08);
+  }
+
+  .status-board-page--cnc :where(
+    .status-board-viewport,
+    .status-board-columns--cnc,
+    .status-board-column,
+    .status-board-column__header,
+    .status-board-column__cards,
+    .cnc-board-card-shell,
+    .cnc-board-card-shell--draggable,
+    .status-board-card,
+    .cnc-card--summary-only,
+    .cnc-order-card--summary-only,
+    .cnc-packet-card,
+    .cnc-bath-card
+  ) {
     touch-action: pan-x pan-y;
   }
 
@@ -3120,9 +3332,18 @@
     min-width: calc((100vw - 48px) * 0.6);
   }
 
-  .status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed) {
-    width: 200%;
-    min-width: 200%;
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) {
+    --status-board-cnc-column-width: 187px;
+    width: max-content;
+    min-width: 100% !important;
+    grid-template-columns: repeat(
+      var(--status-board-cnc-column-count, 5),
+      minmax(var(--status-board-cnc-column-width), var(--status-board-cnc-column-width))
+    ) !important;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc-minimal:not(.status-board-columns--cnc-detailed) {
+    --status-board-cnc-column-width: 112px;
   }
 
   .status-board-card__actions .ant-btn {
@@ -3352,6 +3573,16 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .status-board-card--touch-ready,
+  .cnc-board-card-shell--touch-ready > .status-board-card {
+    animation: none;
+  }
+
+  .cnc-board-drag-outline {
+    transform: none;
+    transition: none;
+  }
+
   .status-board-toolbar-disclosure__content,
   .status-board-toolbar-disclosure__chevron,
   .status-board-column,

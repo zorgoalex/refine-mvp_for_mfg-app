@@ -1,3 +1,4 @@
+import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import {
   Alert,
@@ -16,6 +17,7 @@ import {
   Switch,
   Table,
   Typography,
+  Upload,
   message,
 } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -45,11 +47,16 @@ import { DeadlineTransitionRulesConfig } from './DeadlineTransitionRulesConfig';
 import {
   allowedConditionKeysForEvent,
   buildEventTypeSelectOptions,
+  buildStatusAutomationRulesExportFile,
   buildCreatePayload,
   buildUpdatePayload,
   describeConditions,
+  planStatusAutomationRulesImport,
+  readStatusAutomationRulesImportSource,
+  type StatusAutomationImportIssue,
   type StatusAutomationCatalogs,
   type StatusAutomationFormValues,
+  type StatusAutomationStatusCatalog,
 } from './statusAutomationView';
 
 const { Text } = Typography;
@@ -87,6 +94,12 @@ type EditorMode =
   | { kind: 'closed' }
   | { kind: 'create' }
   | { kind: 'edit'; rule: StatusAutomationRuleDto };
+
+interface StatusAutomationRulesImportReport {
+  createdCount: number;
+  skippedDuplicates: StatusAutomationImportIssue[];
+  failedRules: StatusAutomationImportIssue[];
+}
 
 const ACTION_LABELS: Record<StatusAutomationActionType, string> = {
   change_order_status: 'Статус заказа',
@@ -196,6 +209,9 @@ export function StatusAutomationConfig() {
   const [editor, setEditor] = useState<EditorMode>({ kind: 'closed' });
   const [form, setForm] = useState<StatusAutomationFormValues>(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [rulesImporting, setRulesImporting] = useState(false);
+  const [rulesImportReport, setRulesImportReport] =
+    useState<StatusAutomationRulesImportReport | null>(null);
   const [autoCutStatusSaving, setAutoCutStatusSaving] = useState(false);
   const [autoCutStatusEnabled, setAutoCutStatusEnabled] = useState(false);
   const [confirmedAutoCutStatusEnabled, setConfirmedAutoCutStatusEnabled] =
@@ -368,6 +384,31 @@ export function StatusAutomationConfig() {
       ),
     }),
     [orderStatusOptions, paymentStatusOptions, productionStatusOptions],
+  );
+  const importStatusCatalog = useMemo<StatusAutomationStatusCatalog>(
+    () => {
+      const orderStatusRows = orderStatusesData?.data ?? [];
+      const paymentStatusRows = paymentStatusesData?.data ?? [];
+      const productionStatusRows = productionStatusesData?.data ?? [];
+      return {
+        orderStatusIds: new Set(orderStatusRows.map((status) => status.order_status_id)),
+        activeOrderStatusIds: new Set(
+          orderStatusRows
+            .filter((status) => status.is_active !== false)
+            .map((status) => status.order_status_id),
+        ),
+        paymentStatusIds: new Set(paymentStatusRows.map((status) => status.payment_status_id)),
+        productionStatusIds: new Set(
+          productionStatusRows.map((status) => status.production_status_id),
+        ),
+        activeProductionStatusIds: new Set(
+          productionStatusRows
+            .filter((status) => status.is_active !== false)
+            .map((status) => status.production_status_id),
+        ),
+      };
+    },
+    [orderStatusesData, paymentStatusesData, productionStatusesData],
   );
 
   const eventTypeByName = useMemo(
@@ -575,6 +616,71 @@ export function StatusAutomationConfig() {
     }
   };
 
+  const handleRulesExport = () => {
+    const exportFile = buildStatusAutomationRulesExportFile(rules);
+    const blob = new Blob([JSON.stringify(exportFile, null, 2)], {
+      type: 'application/json;charset=utf-8',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `status-automation-rules-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    message.success(`Выгружено правил: ${exportFile.rules.length}`);
+  };
+
+  const handleRulesImport = async (file: File) => {
+    setRulesImporting(true);
+    try {
+      const parsedJson = JSON.parse(await file.text()) as unknown;
+      const rawRules = readStatusAutomationRulesImportSource(parsedJson);
+      const importPlan = planStatusAutomationRulesImport(rawRules, {
+        existingRules: rules,
+        eventTypes,
+        statusCatalog: importStatusCatalog,
+      });
+      const failedRules = [...importPlan.failedRules];
+      let createdCount = 0;
+
+      for (const item of importPlan.rulesToCreate) {
+        try {
+          await statusAutomationApi.create(item.rule);
+          createdCount += 1;
+        } catch (error) {
+          failedRules.push({
+            index: item.index,
+            name: item.name,
+            reasons: [errorText(error, 'Не удалось создать правило')],
+          });
+        }
+      }
+
+      if (createdCount > 0) {
+        await loadRules();
+      }
+      setRulesImportReport({
+        createdCount,
+        skippedDuplicates: importPlan.skippedDuplicates,
+        failedRules,
+      });
+
+      if (createdCount > 0) {
+        message.success(`Загружено правил: ${createdCount}`);
+      } else if (failedRules.length > 0) {
+        message.warning('Правила не загружены, проверьте отчет');
+      } else {
+        message.info('Новых правил для загрузки нет');
+      }
+    } catch (error) {
+      message.error(errorText(error, 'Не удалось прочитать JSON-файл правил'));
+    } finally {
+      setRulesImporting(false);
+    }
+  };
+
   const handleAutoCutStatusToggle = async (enabled: boolean) => {
     if (enabled && !cutProductionStatusAvailable) {
       message.warning('Сначала добавьте активный производственный статус «Распилен»');
@@ -666,6 +772,8 @@ export function StatusAutomationConfig() {
   const catalogsLoading = orderStatusesLoading || paymentStatusesLoading || productionStatusesLoading;
   const editorOpen = editor.kind !== 'closed';
   const editorTitle = editor.kind === 'create' ? 'Новое правило автостатусов' : 'Изменить автостатус';
+  const rulesImportDisabled =
+    !canManage || loading || catalogsLoading || rulesImporting || eventTypes.length === 0;
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%', padding: '16px 0' }}>
@@ -820,13 +928,37 @@ export function StatusAutomationConfig() {
         </Space>
       </Card>
 
-      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+      <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
         <Text strong>Правила автостатусов</Text>
-        {canManage && (
-          <Button type="primary" onClick={openCreate} disabled={eventTypes.length === 0}>
-            Создать правило
+        <Space wrap>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={handleRulesExport}
+            disabled={loading || rules.length === 0}
+          >
+            Выгрузить JSON
           </Button>
-        )}
+          {canManage && (
+            <Upload
+              accept=".json,application/json"
+              showUploadList={false}
+              disabled={rulesImportDisabled}
+              beforeUpload={(file) => {
+                void handleRulesImport(file);
+                return false;
+              }}
+            >
+              <Button icon={<UploadOutlined />} loading={rulesImporting} disabled={rulesImportDisabled}>
+                Загрузить JSON
+              </Button>
+            </Upload>
+          )}
+          {canManage && (
+            <Button type="primary" onClick={openCreate} disabled={eventTypes.length === 0}>
+              Создать правило
+            </Button>
+          )}
+        </Space>
       </Space>
 
       {loading || catalogsLoading ? (
@@ -1139,6 +1271,57 @@ export function StatusAutomationConfig() {
             </Form.Item>
           </Space>
         </Form>
+      </Modal>
+
+      <Modal
+        title="Результат загрузки правил"
+        open={rulesImportReport !== null}
+        onCancel={() => setRulesImportReport(null)}
+        footer={[
+          <Button key="close" type="primary" onClick={() => setRulesImportReport(null)}>
+            Закрыть
+          </Button>,
+        ]}
+        width={760}
+      >
+        {rulesImportReport && (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Alert
+              type={rulesImportReport.failedRules.length > 0 ? 'warning' : 'success'}
+              showIcon
+              message={`Загружено правил: ${rulesImportReport.createdCount}`}
+              description={`Дубликаты пропущены: ${rulesImportReport.skippedDuplicates.length}. Не удалось загрузить: ${rulesImportReport.failedRules.length}.`}
+            />
+            {rulesImportReport.failedRules.length > 0 && (
+              <div>
+                <Text strong>Не удалось загрузить из-за отсутствия или несоответствия элементов</Text>
+                <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
+                  {rulesImportReport.failedRules.map((issue) => (
+                    <li key={`failed-${issue.index}`}>
+                      <Text>
+                        {issue.index}. {issue.name}: {issue.reasons.join('; ')}
+                      </Text>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {rulesImportReport.skippedDuplicates.length > 0 && (
+              <div>
+                <Text strong>Пропущенные дубликаты</Text>
+                <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
+                  {rulesImportReport.skippedDuplicates.map((issue) => (
+                    <li key={`duplicate-${issue.index}`}>
+                      <Text>
+                        {issue.index}. {issue.name}: {issue.reasons.join('; ')}
+                      </Text>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </Space>
+        )}
       </Modal>
 
       <Card size="small" title="Дедлайн-события">

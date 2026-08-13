@@ -328,7 +328,7 @@ export const CutDefaultSettingsCard: React.FC<Props> = ({ config, canManage, onS
             {form.layout_mode === 'vacuum_table' && (
               <Form.Item
                 label="Направление подачи"
-                tooltip="Авто — оптимизатор выбирает направление. Вдоль — детали укладываются вдоль длинной стороны листа. Поперёк — поперёк длинной стороны."
+                tooltip="Авто — оптимизатор выбирает направление. Вдоль — высота детали параллельна длинной стороне листа. Поперёк — ширина детали параллельна длинной стороне."
                 extra={<Text type="secondary" style={{ fontSize: 12 }}>Ориентация деталей на вакуумном столе</Text>}
                 style={{ marginBottom: 12 }}
               >

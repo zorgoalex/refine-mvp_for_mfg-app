@@ -45,6 +45,7 @@ import type {
   CncTelegramIngestResponseDto,
   CncTelegramItemSource,
   CncTelegramManualSvgCommentPresetDto,
+  CncTelegramManualSvgUploadDto,
   CncTelegramManualSvgUploadResponseDto,
   CncTelegramMatchStatus,
   CncTelegramOrderCuttingSequenceDto,
@@ -304,6 +305,61 @@ interface DetailMatchRow extends QueryResultRow {
 
 type IngestItemInput = CncTelegramStructuredIngestDto['items'][number];
 
+interface ManualSvgOrderScopeDetailRow extends QueryResultRow {
+  order_id: string | number;
+  order_name: string | null;
+  detail_id: string | number;
+  detail_number: string | number | null;
+  width: string | number | null;
+  height: string | number | null;
+  quantity: string | number | null;
+}
+
+interface ManualSvgSelectedOrderRow extends QueryResultRow {
+  order_id: string | number;
+  order_name: string | null;
+}
+
+interface ManualSvgSelectedOrder {
+  orderId: number;
+  orderName: string | null;
+}
+
+interface ManualSvgOrderScopeDetail {
+  orderId: number;
+  orderName: string | null;
+  detailId: number;
+  detailNumber: number | null;
+  width: number | null;
+  height: number | null;
+  quantity: number;
+}
+
+interface ManualSvgOrderScopeProblem {
+  kind: 'unmatched' | 'outside_scope';
+  severity: 'error';
+  key: string;
+  title: string;
+  reason: string;
+  orderName: string;
+  detailNumber: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  quantity: number;
+}
+
+interface ManualSvgItemGroup {
+  key: string;
+  orderName: string;
+  detailNumber: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  quantity: number;
+  matchOrderIds: number[];
+  matchDetailIds: number[];
+  hasUnmatched: boolean;
+}
+
 interface DetailMatch {
   orderKey: string;
   orderId: number;
@@ -326,8 +382,19 @@ export class PgCncTelegramRepository
     const workdayFrom = command.workdayFrom ?? workday;
     const workdayTo = command.workdayTo ?? workday;
     const rows = await this.database.query<PacketJoinedRow>(
-      packetSelectSql('p.workday BETWEEN $1::date AND $2::date'),
-      [workdayFrom, workdayTo],
+      packetSelectSql(`
+        p.workday BETWEEN $1::date AND $2::date
+        AND (
+          p.source_chat_id IS DISTINCT FROM $3
+          OR EXISTS (
+            SELECT 1
+            FROM outbox_events manual_svg_mdf_card
+            WHERE manual_svg_mdf_card.idempotency_key =
+              'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+          )
+        )
+      `),
+      [workdayFrom, workdayTo, MANUAL_SVG_CHAT_ID],
     );
     const packets = mapPacketRows(rows.rows);
     const baths = await loadBathCards(this.database, workdayFrom, workdayTo);
@@ -644,16 +711,15 @@ export class PgCncTelegramRepository
         dto.source.version === Number(existing.source_version) &&
         existing.payload_hash === payloadHash
       ) {
-        const matchedDto = await resolveItemMatches(tx, dto, {
-          orderIds: command.dto.selectedOrderIds,
-          tolerantSizeMm: 8,
-        });
-        await assertManualSvgOrderScope(tx, command.dto.selectedOrderIds, matchedDto);
-        const resolvedDto = aggregateMatchedItems(matchedDto);
-        await assertMatchedDetailsBelongToOrders(tx, resolvedDto);
+        const prepared = await prepareManualSvgUploadDto(tx, dto, command.dto);
+        const { resolvedDto, matchSourceDto } = prepared;
         await ensureStoredCutLayout(tx, existing.packet_id, dto.cutLayout ?? null);
         await ensureCuttingSequenceNo(tx, existing.packet_id, resolvedDto, Number(command.currentUser.id));
-        await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchedDto, command.currentUser.id);
+        await syncSvgCutImport(tx, existing.packet_id, resolvedDto, matchSourceDto, command.currentUser.id, {
+          requestedCutJobId: command.dto.requestedCutJobId ?? null,
+          matchMode: command.dto.matchMode,
+          selectedOrderIds: command.dto.selectedOrderIds,
+        });
         await projectTelegramLabelMap(tx, {
           packetId: existing.packet_id,
           source: 'ingest',
@@ -664,46 +730,28 @@ export class PgCncTelegramRepository
             requestId,
           },
         });
-        let packet = await loadPacket(tx, existing.packet_id);
-        const beforeMdfPacket = packet;
+        const packet = await loadPacket(tx, existing.packet_id);
         let mdfCardCreatedAuditId: string | undefined;
         let mdfCardCreatedNow = false;
         if (command.dto.createMdfMachineFileCard) {
           assertManualSvgMachineFileCardReady(packet);
-          if (!packetIsCompleted(packet)) {
-            await completeManualSvgMachineFileCard(tx, existing.packet_id, command.currentUser.id);
-            packet = await loadPacket(tx, existing.packet_id);
+          if (!await manualSvgMdfCardEventExists(tx, packet)) {
+            mdfCardCreatedAuditId = await writeManualSvgMdfCardAudit(tx, {
+              command,
+              beforePacket: null,
+              packet,
+              requestId,
+              externalPacketKey: dto.externalPacketKey,
+            });
+            await enqueueManualSvgMdfCardEvent(tx, {
+              command,
+              packet,
+              requestId,
+              auditId: mdfCardCreatedAuditId,
+              externalPacketKey: dto.externalPacketKey,
+            });
             mdfCardCreatedNow = true;
           }
-        }
-        if (mdfCardCreatedNow) {
-          mdfCardCreatedAuditId = await writeManualSvgMdfCardAudit(tx, {
-            command,
-            beforePacket: beforeMdfPacket,
-            packet,
-            requestId,
-            externalPacketKey: dto.externalPacketKey,
-          });
-          await applyCompletedPacketAutoCutStatus(tx, {
-            command: resolvedDtoCommand(command, resolvedDto, requestId),
-            packet,
-            requestId,
-            packetAuditId: mdfCardCreatedAuditId,
-          });
-          await evaluateMdfBoardColumnAutomation(tx, {
-            eventType: 'mdf.board.completed',
-            orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
-            actor: command.currentUser,
-            requestId,
-            sourceIdempotencyKey: `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
-          });
-          await enqueueManualSvgMdfCardEvent(tx, {
-            command,
-            packet,
-            requestId,
-            auditId: mdfCardCreatedAuditId,
-            externalPacketKey: dto.externalPacketKey,
-          });
         }
         await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
           packet,
@@ -729,13 +777,8 @@ export class PgCncTelegramRepository
         return response;
       }
 
-      const matchedDto = await resolveItemMatches(tx, dto, {
-        orderIds: command.dto.selectedOrderIds,
-        tolerantSizeMm: 8,
-      });
-      await assertManualSvgOrderScope(tx, command.dto.selectedOrderIds, matchedDto);
-      const resolvedDto = aggregateMatchedItems(matchedDto);
-      await assertMatchedDetailsBelongToOrders(tx, resolvedDto);
+      const prepared = await prepareManualSvgUploadDto(tx, dto, command.dto);
+      const { resolvedDto, matchSourceDto } = prepared;
       const resolvedCommand: IngestCncTelegramPacketCommand = {
         currentUser: command.currentUser,
         dto: resolvedDto,
@@ -745,7 +788,11 @@ export class PgCncTelegramRepository
       const packetId = await insertPacket(tx, resolvedCommand, payloadHash);
       await replaceItems(tx, packetId, resolvedDto);
       await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));
-      await syncSvgCutImport(tx, packetId, resolvedDto, matchedDto, command.currentUser.id);
+      await syncSvgCutImport(tx, packetId, resolvedDto, matchSourceDto, command.currentUser.id, {
+        requestedCutJobId: command.dto.requestedCutJobId ?? null,
+        matchMode: command.dto.matchMode,
+        selectedOrderIds: command.dto.selectedOrderIds,
+      });
       await projectTelegramLabelMap(tx, {
         packetId,
         source: 'ingest',
@@ -757,6 +804,8 @@ export class PgCncTelegramRepository
         },
       });
 
+      let mdfCardAuditId: string | undefined;
+      let mdfCardCreatedNow = false;
       const packet = await loadPacket(tx, packetId);
       if (command.dto.createMdfMachineFileCard) {
         assertManualSvgMachineFileCardReady(packet);
@@ -767,8 +816,7 @@ export class PgCncTelegramRepository
         requestId,
         externalPacketKey: dto.externalPacketKey,
       });
-      let mdfCardAuditId: string | undefined;
-      if (packetIsCompleted(packet)) {
+      if (command.dto.createMdfMachineFileCard) {
         mdfCardAuditId = await writeManualSvgMdfCardAudit(tx, {
           command,
           beforePacket: null,
@@ -776,26 +824,14 @@ export class PgCncTelegramRepository
           requestId,
           externalPacketKey: dto.externalPacketKey,
         });
-        await applyCompletedPacketAutoCutStatus(tx, {
-          command: resolvedCommand,
-          packet,
-          requestId,
-          packetAuditId: mdfCardAuditId,
-        });
-        await evaluateMdfBoardColumnAutomation(tx, {
-          eventType: 'mdf.board.completed',
-          orderIds: packet.items.map((item) => item.orderId ?? item.matchOrderId),
-          actor: command.currentUser,
-          requestId,
-          sourceIdempotencyKey: `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-board-completed`,
-        });
+        mdfCardCreatedNow = true;
       }
       await evaluateMdfBoardBathColumnAutomationForPacket(tx, {
         packet,
         actor: command.currentUser,
         requestId,
       });
-      if (packetColumnKey(packet) === 'parsed') {
+      if (command.dto.createMdfMachineFileCard && packetColumnKey(packet) === 'parsed') {
         await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
           orderIds: packet.items.map((item) => item.orderId),
           actor: command.currentUser,
@@ -810,7 +846,7 @@ export class PgCncTelegramRepository
         auditId,
         externalPacketKey: dto.externalPacketKey,
       });
-      if (packetIsCompleted(packet)) {
+      if (mdfCardCreatedNow) {
         await enqueueManualSvgMdfCardEvent(tx, {
           command,
           packet,
@@ -826,7 +862,7 @@ export class PgCncTelegramRepository
         auditId,
         applied: true,
         ignoredStaleSourceVersion: false,
-      }, command.dto.createMdfMachineFileCard && packetIsCompleted(packet));
+      }, mdfCardCreatedNow);
       await completeIdempotency(tx, dto.idempotencyKey, response);
       return response;
     });
@@ -1085,7 +1121,6 @@ export class PgCncTelegramRepository
 function buildManualSvgStructuredDto(
   dto: ManualSvgUploadCommand['dto'],
 ): CncTelegramStructuredIngestDto {
-  const completionStatus = dto.createMdfMachineFileCard ? 'completed' : 'pending';
   return {
     idempotencyKey: dto.idempotencyKey,
     externalPacketKey: manualSvgExternalPacketKey(dto),
@@ -1098,11 +1133,14 @@ function buildManualSvgStructuredDto(
     programName: normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`,
     materialName: normalizeOptional(dto.materialName) ?? 'МДФ 16мм',
     parseStatus: 'parsed',
-    completionStatus,
-    thumbsUp: dto.createMdfMachineFileCard,
+    completionStatus: 'pending',
+    thumbsUp: false,
     rework: dto.rework === true,
     comments: dto.comments ?? [],
     tools: dto.tools ?? [],
+    analysisWarnings: dto.matchMode === 'informational'
+      ? ['Информативный SVG: размеры взяты из файла, сверка с деталями ERP отключена']
+      : [],
     ocrEngine: null,
     parserVersion: normalizeOptional(dto.parserVersion) ?? 'erp-manual-svg-upload-v1',
     cutLayout: dto.cutLayout,
@@ -1119,7 +1157,9 @@ function buildManualSvgStructuredDto(
 function manualSvgExternalPacketKey(dto: ManualSvgUploadCommand['dto']): string {
   const identityHash = sha256Json({
     kind: 'erp-manual-svg-upload-v1',
+    matchMode: dto.matchMode,
     selectedOrderIds: [...dto.selectedOrderIds].sort((a, b) => a - b),
+    requestedCutJobId: dto.requestedCutJobId ?? null,
     svgContentHash: dto.svgContentHash.toLowerCase(),
     workday: dto.workday ?? null,
     machine: normalizeOptional(dto.machine),
@@ -1143,16 +1183,81 @@ function manualSvgSourcePayloadDto(dto: CncTelegramStructuredIngestDto): CncTele
   };
 }
 
-function resolvedDtoCommand(
-  command: ManualSvgUploadCommand,
+async function prepareManualSvgUploadDto(
+  tx: TransactionClient,
   dto: CncTelegramStructuredIngestDto,
-  requestId: string,
-): IngestCncTelegramPacketCommand {
+  manualDto: CncTelegramManualSvgUploadDto,
+): Promise<{
+  resolvedDto: CncTelegramStructuredIngestDto;
+  matchSourceDto: CncTelegramStructuredIngestDto;
+}> {
+  if (manualDto.matchMode === 'informational') {
+    const selectedOrders = await assertManualSvgSelectedOrdersExist(tx, manualDto.selectedOrderIds);
+    const informationalDto = buildInformationalManualSvgDto(dto, selectedOrders);
+    return { resolvedDto: informationalDto, matchSourceDto: informationalDto };
+  }
+
+  const matchedDto = await resolveItemMatches(tx, dto, {
+    orderIds: manualDto.selectedOrderIds,
+    tolerantSizeMm: 8,
+  });
+  await assertManualSvgOrderScope(tx, manualDto.selectedOrderIds, matchedDto);
+  const resolvedDto = aggregateMatchedItems(matchedDto);
+  await assertMatchedDetailsBelongToOrders(tx, resolvedDto);
+  return { resolvedDto, matchSourceDto: matchedDto };
+}
+
+function buildInformationalManualSvgDto(
+  dto: CncTelegramStructuredIngestDto,
+  selectedOrders: ManualSvgSelectedOrder[],
+): CncTelegramStructuredIngestDto {
+  const orders = selectedOrders.length > 0 ? selectedOrders : [{ orderId: 0, orderName: null }];
   return {
-    currentUser: command.currentUser,
-    dto,
-    requestId,
+    ...dto,
+    items: dto.items.map((item, index) => {
+      const order = informationalOrderForItem(item, index, orders);
+      return {
+        ...item,
+        orderName: informationalOrderNameForItem(item, order),
+        matchOrderId: order.orderId > 0 ? order.orderId : null,
+        matchDetailId: null,
+        matchStatus: 'needs_review',
+        reviewNote: 'Информативный SVG: связь с деталями ERP не требуется',
+      };
+    }),
   };
+}
+
+function informationalOrderForItem(
+  item: IngestItemInput,
+  index: number,
+  selectedOrders: ManualSvgSelectedOrder[],
+): ManualSvgSelectedOrder {
+  const itemOrderKey = normalizeOrderKey(item.orderName);
+  const exact = itemOrderKey
+    ? selectedOrders.find((order) => (
+        normalizeOrderKey(order.orderName) === itemOrderKey ||
+        String(order.orderId) === item.orderName.trim()
+      ))
+    : null;
+  return exact ?? selectedOrders[index % selectedOrders.length] ?? selectedOrders[0]!;
+}
+
+function informationalOrderNameForItem(
+  item: IngestItemInput,
+  order: ManualSvgSelectedOrder,
+): string {
+  const current = normalizeOptional(item.orderName);
+  if (current && current !== 'SVG' && !current.includes('+')) {
+    const currentKey = normalizeOrderKey(current);
+    if (
+      currentKey &&
+      (currentKey === normalizeOrderKey(order.orderName) || current.trim() === String(order.orderId))
+    ) {
+      return current;
+    }
+  }
+  return normalizeOptional(order.orderName) ?? String(order.orderId);
 }
 
 async function assertManualSvgOrderScope(
@@ -1160,10 +1265,43 @@ async function assertManualSvgOrderScope(
   selectedOrderIds: number[],
   dto: CncTelegramStructuredIngestDto,
 ): Promise<void> {
-  const allowed = new Set(selectedOrderIds);
-  const orderRows = await tx.query<{ order_id: string | number }>(
+  await assertManualSvgSelectedOrdersExist(tx, selectedOrderIds);
+
+  const selectedDetails = await loadManualSvgSelectedOrderDetails(tx, selectedOrderIds);
+  const problems = buildManualSvgOrderScopeProblems(selectedOrderIds, dto.items, selectedDetails);
+  const unmatched = problems.filter((problem) => problem.kind === 'unmatched');
+  if (unmatched.length > 0) {
+    throw new ApiError(
+      422,
+      'MANUAL_SVG_UNMATCHED_DETAILS',
+      'Не все детали SVG найдены в выбранных заказах',
+      {
+        problems: unmatched.slice(0, 50),
+      },
+    );
+  }
+
+  const outsideScope = problems.filter((problem) => problem.kind === 'outside_scope');
+  if (outsideScope.length > 0) {
+    throw new ApiError(
+      422,
+      'MANUAL_SVG_ORDER_SCOPE_MISMATCH',
+      'В SVG есть детали из заказов, которые не выбраны',
+      {
+        selectedOrderIds,
+        problems: outsideScope.slice(0, 50),
+      },
+    );
+  }
+}
+
+async function assertManualSvgSelectedOrdersExist(
+  tx: TransactionClient,
+  selectedOrderIds: number[],
+): Promise<ManualSvgSelectedOrder[]> {
+  const orderRows = await tx.query<ManualSvgSelectedOrderRow>(
     `
-    SELECT order_id
+    SELECT order_id, order_name
     FROM orders
     WHERE order_id = ANY($1::bigint[])
       AND delete_flag = false
@@ -1181,46 +1319,257 @@ async function assertManualSvgOrderScope(
     );
   }
 
-  const unmatched = dto.items.filter((item) =>
-    item.matchStatus !== 'matched' ||
-    item.matchOrderId == null ||
-    item.matchDetailId == null,
+  const byId = new Map(orderRows.rows.map((row) => [toNumber(row.order_id), row.order_name]));
+  return selectedOrderIds.map((orderId) => ({
+    orderId,
+    orderName: byId.get(orderId) ?? null,
+  }));
+}
+
+async function loadManualSvgSelectedOrderDetails(
+  tx: TransactionClient,
+  selectedOrderIds: number[],
+): Promise<ManualSvgOrderScopeDetail[]> {
+  if (selectedOrderIds.length === 0) return [];
+  const result = await tx.query<ManualSvgOrderScopeDetailRow>(
+    `
+    SELECT
+      o.order_id,
+      o.order_name,
+      od.detail_id,
+      od.detail_number,
+      od.width,
+      od.height,
+      od.quantity
+    FROM orders o
+    JOIN order_details od ON od.order_id = o.order_id
+    WHERE o.order_id = ANY($1::bigint[])
+      AND o.delete_flag = false
+      AND od.delete_flag = false
+    ORDER BY o.order_id, od.detail_number NULLS LAST, od.detail_id
+    `,
+    [selectedOrderIds],
   );
-  if (unmatched.length > 0) {
-    throw new ApiError(
-      422,
-      'MANUAL_SVG_UNMATCHED_DETAILS',
-      'All manual SVG details must match selected active order details',
-      {
-        items: unmatched.slice(0, 20).map((item) => ({
-          orderName: item.orderName,
-          detailNumber: item.detailNumber ?? null,
-          widthMm: item.widthMm ?? null,
-          heightMm: item.heightMm ?? null,
-        })),
-      },
-    );
+  return result.rows.flatMap((row) => {
+    const orderId = toPositiveInteger(row.order_id);
+    const detailId = toPositiveInteger(row.detail_id);
+    if (orderId === null || detailId === null) return [];
+    return [{
+      orderId,
+      orderName: row.order_name,
+      detailId,
+      detailNumber: toNullablePositiveInteger(row.detail_number),
+      width: toNullableFiniteNumber(row.width),
+      height: toNullableFiniteNumber(row.height),
+      quantity: Math.max(0, Math.floor(toNullableFiniteNumber(row.quantity) ?? 0)),
+    }];
+  });
+}
+
+function buildManualSvgOrderScopeProblems(
+  selectedOrderIds: number[],
+  items: CncTelegramStructuredIngestDto['items'],
+  selectedDetails: ManualSvgOrderScopeDetail[],
+): ManualSvgOrderScopeProblem[] {
+  const allowedOrderIds = new Set(selectedOrderIds);
+  const detailsByOrderKey = new Map<string, ManualSvgOrderScopeDetail[]>();
+  for (const detail of selectedDetails) {
+    const key = normalizeOrderKey(detail.orderName);
+    if (!key) continue;
+    const bucket = detailsByOrderKey.get(key) ?? [];
+    bucket.push(detail);
+    detailsByOrderKey.set(key, bucket);
   }
 
-  const outsideScope = dto.items.filter((item) =>
-    item.matchOrderId != null && !allowed.has(item.matchOrderId),
-  );
-  if (outsideScope.length > 0) {
-    throw new ApiError(
-      422,
-      'MANUAL_SVG_ORDER_SCOPE_MISMATCH',
-      'SVG contains details outside the selected orders',
-      {
-        selectedOrderIds,
-        items: outsideScope.slice(0, 20).map((item) => ({
-          orderName: item.orderName,
-          detailNumber: item.detailNumber ?? null,
-          matchOrderId: item.matchOrderId ?? null,
-          matchDetailId: item.matchDetailId ?? null,
-        })),
-      },
-    );
+  const problems: ManualSvgOrderScopeProblem[] = [];
+  for (const group of groupManualSvgItems(items)) {
+    const outsideOrderIds = group.matchOrderIds.filter((orderId) => !allowedOrderIds.has(orderId));
+    if (outsideOrderIds.length > 0) {
+      problems.push(manualSvgOrderScopeProblem(
+        'outside_scope',
+        group,
+        `Деталь найдена в заказе #${outsideOrderIds[0]}, но этот заказ не выбран для загрузки`,
+      ));
+      continue;
+    }
+    const matchedInside = group.matchOrderIds.some((orderId) => allowedOrderIds.has(orderId))
+      && group.matchDetailIds.length > 0
+      && !group.hasUnmatched;
+    if (matchedInside) continue;
+
+    const orderKey = normalizeOrderKey(group.orderName);
+    const sameOrder = orderKey ? detailsByOrderKey.get(orderKey) ?? [] : [];
+    if (sameOrder.length === 0) {
+      problems.push(manualSvgOrderScopeProblem(
+        'unmatched',
+        group,
+        `Заказ ${group.orderName || '(пусто)'} не найден среди выбранных заказов, удален или номер заказа в SVG отличается от ERP`,
+      ));
+      continue;
+    }
+    if (group.detailNumber === null) {
+      problems.push(manualSvgOrderScopeProblem(
+        'unmatched',
+        group,
+        `В SVG не найден номер детали. В заказе есть детали: ${manualSvgDetailNumbersPreview(sameOrder)}`,
+      ));
+      continue;
+    }
+
+    const sameDetailNumber = sameOrder.filter((detail) => detail.detailNumber === group.detailNumber);
+    if (sameDetailNumber.length === 0) {
+      problems.push(manualSvgOrderScopeProblem(
+        'unmatched',
+        group,
+        `В заказе ${group.orderName} нет детали #${group.detailNumber}. Есть детали: ${manualSvgDetailNumbersPreview(sameOrder)}`,
+      ));
+      continue;
+    }
+    if (group.widthMm === null || group.heightMm === null) {
+      problems.push(manualSvgOrderScopeProblem(
+        'unmatched',
+        group,
+        `В SVG не найден размер детали. В ERP для #${group.detailNumber}: ${manualSvgDetailSizesPreview(sameDetailNumber)}`,
+      ));
+      continue;
+    }
+
+    const sameSize = sameDetailNumber.filter((detail) => manualSvgDetailSizeMatches(group, detail));
+    if (sameSize.length === 0) {
+      problems.push(manualSvgOrderScopeProblem(
+        'unmatched',
+        group,
+        `Размер в SVG ${formatMmPair(group.widthMm, group.heightMm)} не совпал с ERP. В ERP: ${manualSvgDetailSizesPreview(sameDetailNumber)}`,
+      ));
+      continue;
+    }
+    const availableQuantity = sameSize.reduce((sum, detail) => sum + detail.quantity, 0);
+    if (group.quantity > availableQuantity) {
+      problems.push(manualSvgOrderScopeProblem(
+        'unmatched',
+        group,
+        `Количество в SVG ${group.quantity}, в выбранных заказах доступно ${availableQuantity}`,
+      ));
+      continue;
+    }
+    if (sameSize.length > 1 || group.hasUnmatched) {
+      problems.push(manualSvgOrderScopeProblem(
+        'unmatched',
+        group,
+        `Найдено несколько возможных деталей в ERP: ${manualSvgDetailIdsPreview(sameSize)}. Нужно уточнить номер/размер в заказе или SVG`,
+      ));
+    }
   }
+  return problems;
+}
+
+function groupManualSvgItems(items: CncTelegramStructuredIngestDto['items']): ManualSvgItemGroup[] {
+  const groups = new Map<string, ManualSvgItemGroup>();
+  for (const item of items) {
+    const key = [
+      normalizeOrderKey(item.orderName) ?? '',
+      item.detailNumber ?? '',
+      manualSvgDimensionKey(item.widthMm),
+      manualSvgDimensionKey(item.heightMm),
+    ].join(':');
+    const existing = groups.get(key);
+    const group = existing ?? {
+      key,
+      orderName: item.orderName,
+      detailNumber: item.detailNumber ?? null,
+      widthMm: item.widthMm ?? null,
+      heightMm: item.heightMm ?? null,
+      quantity: 0,
+      matchOrderIds: [],
+      matchDetailIds: [],
+      hasUnmatched: false,
+    };
+    group.quantity += Math.max(1, item.quantity ?? 1);
+    if (isPositiveNumber(item.matchOrderId) && !group.matchOrderIds.includes(item.matchOrderId)) {
+      group.matchOrderIds.push(item.matchOrderId);
+    }
+    if (isPositiveNumber(item.matchDetailId) && !group.matchDetailIds.includes(item.matchDetailId)) {
+      group.matchDetailIds.push(item.matchDetailId);
+    }
+    if (
+      item.matchStatus !== 'matched' ||
+      !isPositiveNumber(item.matchOrderId) ||
+      !isPositiveNumber(item.matchDetailId)
+    ) {
+      group.hasUnmatched = true;
+    }
+    groups.set(key, group);
+  }
+  return Array.from(groups.values());
+}
+
+function manualSvgOrderScopeProblem(
+  kind: ManualSvgOrderScopeProblem['kind'],
+  group: ManualSvgItemGroup,
+  reason: string,
+): ManualSvgOrderScopeProblem {
+  return {
+    kind,
+    severity: 'error',
+    key: `${group.key}:${kind}`,
+    title: manualSvgItemGroupTitle(group),
+    reason,
+    orderName: group.orderName,
+    detailNumber: group.detailNumber,
+    widthMm: group.widthMm,
+    heightMm: group.heightMm,
+    quantity: group.quantity,
+  };
+}
+
+function manualSvgItemGroupTitle(group: ManualSvgItemGroup): string {
+  const detail = group.detailNumber === null ? 'деталь без номера' : `деталь #${group.detailNumber}`;
+  const size = group.widthMm !== null && group.heightMm !== null
+    ? ` ${formatMmPair(group.widthMm, group.heightMm)}`
+    : '';
+  const quantity = group.quantity > 1 ? `, ${group.quantity} шт.` : '';
+  return `${group.orderName || 'без заказа'} ${detail}${size}${quantity}`;
+}
+
+function manualSvgDetailNumbersPreview(details: ManualSvgOrderScopeDetail[]): string {
+  const values = uniqueValues(details.map((detail) => detail.detailNumber)).filter(isPositiveNumber);
+  return values.length > 0 ? values.slice(0, 20).map((value) => `#${value}`).join(', ') : 'нет номеров деталей';
+}
+
+function manualSvgDetailSizesPreview(details: ManualSvgOrderScopeDetail[]): string {
+  const values = uniqueValues(details.map((detail) => (
+    detail.width !== null && detail.height !== null
+      ? `${formatMmPair(detail.width, detail.height)}${detail.quantity > 1 ? `, ${detail.quantity} шт.` : ''}`
+      : 'размер не заполнен'
+  )));
+  return values.slice(0, 12).join(', ');
+}
+
+function manualSvgDetailIdsPreview(details: ManualSvgOrderScopeDetail[]): string {
+  return details.slice(0, 12).map((detail) => `#${detail.detailId}`).join(', ');
+}
+
+function manualSvgDetailSizeMatches(
+  group: Pick<ManualSvgItemGroup, 'widthMm' | 'heightMm'>,
+  detail: ManualSvgOrderScopeDetail,
+): boolean {
+  if (group.widthMm === null || group.heightMm === null || detail.width === null || detail.height === null) {
+    return false;
+  }
+  return closeEnoughSize(group.widthMm, group.heightMm, detail.width, detail.height, 8)
+    || closeEnoughSize(group.widthMm, group.heightMm, detail.height, detail.width, 8);
+}
+
+function manualSvgDimensionKey(value: number | null | undefined): string {
+  return value === null || value === undefined ? 'null' : String(round3(value));
+}
+
+function formatMmPair(width: number, height: number): string {
+  return `${formatMm(width)}x${formatMm(height)} мм`;
+}
+
+function formatMm(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(round3(value));
 }
 
 function manualSvgResponse(
@@ -1258,24 +1607,25 @@ function assertManualSvgMachineFileCardReady(packet: CncTelegramPacketDto): void
   );
 }
 
-async function completeManualSvgMachineFileCard(
+async function manualSvgMdfCardEventExists(
   tx: TransactionClient,
-  packetId: string,
-  actorUserId: string,
-): Promise<void> {
-  await tx.query(
+  packet: CncTelegramPacketDto,
+): Promise<boolean> {
+  const result = await tx.query<{ exists: boolean }>(
     `
-    UPDATE cnc_telegram_packets
-    SET completion_status = 'completed',
-        thumbs_up = true,
-        completed_at = COALESCE(completed_at, now()),
-        updated_by = $2,
-        updated_at = now()
-    WHERE packet_id = $1::uuid
-      AND (completion_status <> 'completed' OR thumbs_up IS DISTINCT FROM true)
+    SELECT EXISTS (
+      SELECT 1
+      FROM outbox_events
+      WHERE idempotency_key = $1
+    ) AS "exists"
     `,
-    [packetId, Number(actorUserId)],
+    [manualSvgMdfCardEventKey(packet)],
   );
+  return result.rows[0]?.exists === true;
+}
+
+function manualSvgMdfCardEventKey(packet: CncTelegramPacketDto): string {
+  return `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-card-created`;
 }
 
 async function writeManualSvgCreatedAudit(
@@ -1374,7 +1724,7 @@ async function enqueueManualSvgMdfCardEvent(
     eventType: MANUAL_SVG_COMPLETED_EVENT,
     aggregateType: 'cnc_telegram_packet',
     aggregateId: input.packet.packetId,
-    idempotencyKey: `cnc-manual-svg:${input.packet.packetId}:source-${input.packet.sourceVersion}:mdf-card-created`,
+    idempotencyKey: manualSvgMdfCardEventKey(input.packet),
     payload: manualSvgOutboxPayload(input, MANUAL_SVG_COMPLETED_EVENT),
   });
 }
@@ -1399,6 +1749,7 @@ function manualSvgOutboxPayload(
     svgContentHash: input.command.dto.svgContentHash.toLowerCase(),
     selectedOrderIds: input.command.dto.selectedOrderIds,
     createMdfMachineFileCard: input.command.dto.createMdfMachineFileCard,
+    matchMode: input.command.dto.matchMode,
     cutJobId: input.packet.svgCutJobId ?? null,
     cutResultId: input.packet.svgCutResultId ?? null,
     sourceChatId: input.packet.sourceChatId,
@@ -1444,6 +1795,7 @@ function manualSvgEventMetadata(
     svgContentHash: input.command.dto.svgContentHash.toLowerCase(),
     selectedOrderIds: input.command.dto.selectedOrderIds,
     createMdfMachineFileCard: input.command.dto.createMdfMachineFileCard,
+    matchMode: input.command.dto.matchMode,
     machine: input.packet.machine,
     programName: input.packet.programName,
     materialName: input.packet.materialName,
@@ -1540,16 +1892,15 @@ function packetSelectSql(whereSql: string): string {
             sheet.sheet_index,
             sheet.sheet_ordinal,
             sheet.variant,
-            jsonb_agg(
+            COALESCE(jsonb_agg(
               placement.order_detail_id
               ORDER BY placement.order_id, placement.order_detail_id, placement.instance
-            ) AS detail_ids
+            ) FILTER (WHERE placement.order_detail_id IS NOT NULL), '[]'::jsonb) AS detail_ids
           FROM cut_result_placement placement
           JOIN cut_result_sheet_map sheet
             ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
            AND sheet.is_effective = true
           WHERE placement.cut_result_id = p.svg_cut_result_id
-            AND placement.order_detail_id IS NOT NULL
           GROUP BY sheet.cut_group_id, sheet.sheet_index, sheet.sheet_ordinal, sheet.variant
         ) sheet_summary
       ) AS svg_cut_sheets_json,
@@ -1567,6 +1918,7 @@ function packetSelectSql(whereSql: string): string {
       i.confidence,
       i.match_order_id,
       i.match_detail_id,
+      matched_detail.quantity AS match_detail_quantity,
       i.match_status,
       i.review_note,
       CASE
@@ -2123,6 +2475,11 @@ async function syncSvgCutImport(
   dto: CncTelegramStructuredIngestDto,
   matchSourceDto: CncTelegramStructuredIngestDto,
   actorUserId: string,
+  options: {
+    requestedCutJobId?: number | null;
+    matchMode?: CncTelegramManualSvgUploadDto['matchMode'];
+    selectedOrderIds?: number[];
+  } = {},
 ): Promise<void> {
   const state = await tx.query<{
     svg_cut_job_id: string | number | null;
@@ -2139,7 +2496,7 @@ async function syncSvgCutImport(
   const row = state.rows[0];
   if (!row) return;
   if (row.svg_cut_import_status === 'imported' && row.svg_cut_job_id !== null && row.svg_cut_result_id !== null) {
-    await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, row.cutting_sequence_no);
+    await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, options.requestedCutJobId ?? row.cutting_sequence_no);
     return;
   }
 
@@ -2153,7 +2510,10 @@ async function syncSvgCutImport(
     return;
   }
 
-  const plan = await buildSvgCutImportPlan(tx, dto, matchSourceDto, layout);
+  const plan = await buildSvgCutImportPlan(tx, dto, matchSourceDto, layout, {
+    matchMode: options.matchMode ?? 'order_details',
+    selectedOrderIds: options.selectedOrderIds ?? [],
+  });
   if (!plan.ok) {
     await setSvgCutImportState(tx, packetId, 'needs_review', plan.reason, null, null);
     return;
@@ -2165,7 +2525,16 @@ async function syncSvgCutImport(
     return;
   }
 
-  const imported = await createSvgCutJob(tx, packetId, dto, layout, plan, cuttingSequenceNo, actorUserId);
+  const imported = await createSvgCutJob(
+    tx,
+    packetId,
+    dto,
+    layout,
+    plan,
+    cuttingSequenceNo,
+    actorUserId,
+    options.requestedCutJobId ?? null,
+  );
   await setSvgCutImportState(tx, packetId, 'imported', 'SVG layout imported into cut job', imported.cutJobId, imported.cutResultId);
 }
 
@@ -2235,11 +2604,21 @@ type SvgCutImportPlan =
       ok: true;
       sheetWidthMm: number;
       sheetHeightMm: number;
-      sheetMaterialTypeId: number;
+      sheetMaterialTypeId: number | null;
       filmId: number | null;
+      materialName: string | null;
+      informational: boolean;
       details: SvgCutDetail[];
-      placements: Array<CncTelegramCutLayoutItemDto & { orderId: number; orderDetailId: number }>;
+      placements: SvgCutPlacement[];
     };
+
+type SvgCutPlacement = CncTelegramCutLayoutItemDto & {
+  orderId: number | null;
+  orderDetailId: number | null;
+  itemKey: string;
+  orderName: string;
+  materialName?: string | null;
+};
 
 interface SvgCutDetail {
   detailId: number;
@@ -2315,6 +2694,10 @@ async function buildSvgCutImportPlan(
   dto: CncTelegramStructuredIngestDto,
   matchSourceDto: CncTelegramStructuredIngestDto,
   layout: CncTelegramCutLayoutDto,
+  options: {
+    matchMode: CncTelegramManualSvgUploadDto['matchMode'];
+    selectedOrderIds: number[];
+  } = { matchMode: 'order_details', selectedOrderIds: [] },
 ): Promise<SvgCutImportPlan> {
   const sheet = layout.sheet;
   const items = layout.items ?? [];
@@ -2323,6 +2706,9 @@ async function buildSvgCutImportPlan(
   }
   if (items.length === 0) {
     return { ok: false, reason: cutLayoutReason(layout, 'SVG layout has no placed details') };
+  }
+  if (options.matchMode === 'informational') {
+    return buildInformationalSvgCutImportPlan(tx, dto, layout, options.selectedOrderIds);
   }
 
   const matchedItems = new Map<string, IngestItemInput>();
@@ -2340,7 +2726,7 @@ async function buildSvgCutImportPlan(
     }
   }
 
-  const placements: Array<CncTelegramCutLayoutItemDto & { orderId: number; orderDetailId: number }> = [];
+  const placements: SvgCutPlacement[] = [];
   const countByDetail = new Map<number, number>();
   const countByLayoutKey = new Map<string, number>();
   for (const item of items) {
@@ -2353,7 +2739,12 @@ async function buildSvgCutImportPlan(
     if (!layoutGeometryInsideSheet(item, sheet.widthMm, sheet.heightMm)) {
       return { ok: false, reason: `SVG detail ${item.orderName}#${item.detailNumber} is outside sheet bounds` };
     }
-    placements.push({ ...item, orderId: match.matchOrderId, orderDetailId: match.matchDetailId });
+    placements.push({
+      ...item,
+      orderId: match.matchOrderId,
+      orderDetailId: match.matchDetailId,
+      itemKey: freecutItemId(match.matchDetailId),
+    });
     countByDetail.set(match.matchDetailId, (countByDetail.get(match.matchDetailId) ?? 0) + 1);
     countByLayoutKey.set(key, (countByLayoutKey.get(key) ?? 0) + 1);
   }
@@ -2396,9 +2787,93 @@ async function buildSvgCutImportPlan(
     sheetHeightMm: round3(sheet.heightMm),
     sheetMaterialTypeId: sheetMaterialIds[0],
     filmId: groupFilmId,
+    materialName: materialDetail?.materialName ?? normalizeOptional(dto.materialName),
+    informational: false,
     details,
     placements,
   };
+}
+
+async function buildInformationalSvgCutImportPlan(
+  tx: TransactionClient,
+  dto: CncTelegramStructuredIngestDto,
+  layout: CncTelegramCutLayoutDto,
+  selectedOrderIds: number[],
+): Promise<SvgCutImportPlan> {
+  const sheet = layout.sheet;
+  const items = layout.items ?? [];
+  if (!sheet || !isPositiveFinite(sheet.widthMm) || !isPositiveFinite(sheet.heightMm)) {
+    return { ok: false, reason: 'SVG layout has no valid sheet size' };
+  }
+  if (selectedOrderIds.length === 0) {
+    return { ok: false, reason: 'Для информативного SVG не выбраны заказы' };
+  }
+
+  const selectedOrders = await assertManualSvgSelectedOrdersExist(tx, selectedOrderIds);
+  const placements: SvgCutPlacement[] = [];
+  for (const [index, item] of items.entries()) {
+    if (!layoutGeometryInsideSheet(item, sheet.widthMm, sheet.heightMm)) {
+      return { ok: false, reason: `SVG деталь ${item.orderName}#${item.detailNumber} выходит за границы листа` };
+    }
+    const order = informationalOrderForLayoutItem(item, index, selectedOrders);
+    placements.push({
+      ...item,
+      orderName: informationalLayoutOrderName(item, order),
+      orderId: order.orderId,
+      orderDetailId: null,
+      itemKey: informationalSvgItemKey(item, index),
+      materialName: normalizeOptional(dto.materialName),
+    });
+  }
+
+  return {
+    ok: true,
+    sheetWidthMm: round3(sheet.widthMm),
+    sheetHeightMm: round3(sheet.heightMm),
+    sheetMaterialTypeId: null,
+    filmId: null,
+    materialName: normalizeOptional(dto.materialName),
+    informational: true,
+    details: [],
+    placements,
+  };
+}
+
+function informationalOrderForLayoutItem(
+  item: CncTelegramCutLayoutItemDto,
+  index: number,
+  selectedOrders: ManualSvgSelectedOrder[],
+): ManualSvgSelectedOrder {
+  const itemOrderKey = normalizeOrderKey(item.orderName);
+  const exact = itemOrderKey
+    ? selectedOrders.find((order) => (
+        normalizeOrderKey(order.orderName) === itemOrderKey ||
+        String(order.orderId) === item.orderName.trim()
+      ))
+    : null;
+  return exact ?? selectedOrders[index % selectedOrders.length] ?? selectedOrders[0]!;
+}
+
+function informationalLayoutOrderName(
+  item: CncTelegramCutLayoutItemDto,
+  order: ManualSvgSelectedOrder,
+): string {
+  const current = normalizeOptional(item.orderName);
+  if (current && current !== 'SVG' && !current.includes('+')) {
+    const currentKey = normalizeOrderKey(current);
+    if (
+      currentKey &&
+      (currentKey === normalizeOrderKey(order.orderName) || current.trim() === String(order.orderId))
+    ) {
+      return current;
+    }
+  }
+  return normalizeOptional(order.orderName) ?? String(order.orderId);
+}
+
+function informationalSvgItemKey(item: CncTelegramCutLayoutItemDto, index: number): string {
+  const sourceId = normalizeOptional(item.sourceElementId)?.replace(/[^a-zA-Z0-9:_-]/g, '_') ?? `part-${index + 1}`;
+  return `svg-${index + 1}-${sourceId}`.slice(0, 96);
 }
 
 async function loadSvgCutDetails(tx: TransactionClient, detailIds: number[]): Promise<Map<number, Omit<SvgCutDetail, 'cutQuantity'>>> {
@@ -2480,9 +2955,10 @@ async function createSvgCutJob(
   plan: Extract<SvgCutImportPlan, { ok: true }>,
   cuttingSequenceNo: number,
   actorUserId: string,
+  requestedCutJobId: number | null = null,
 ): Promise<{ cutJobId: number; cutResultId: number }> {
   const params = SVG_REVERSE_IMPORT_PARAMS;
-  const sourceDisplayNumber = String(cuttingSequenceNo);
+  const sourceDisplayNumber = String(requestedCutJobId ?? cuttingSequenceNo);
   const isManualSvgUpload = dto.source.chatId === MANUAL_SVG_CHAT_ID;
   const selectionSource = isManualSvgUpload ? 'manual_svg_upload' : 'cnc_telegram_svg';
   const selectionCriteria = {
@@ -2490,6 +2966,7 @@ async function createSvgCutJob(
     externalPacketKey: dto.externalPacketKey,
     packetId,
     cuttingSequenceNo,
+    requestedCutJobId,
     sourceVersion: dto.source.version,
     programName: dto.programName ?? null,
     machine: dto.machine ?? null,
@@ -2511,32 +2988,63 @@ async function createSvgCutJob(
     cuttingSequenceNo,
     requestHash,
   });
-  const job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
-    `
-    INSERT INTO cut_job (
-      name, status, source, selection_criteria, params, request_hash,
-      pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
-      sheet_material_type_id, combine_films, split_by_material, source_display_number
-    )
-    VALUES (
-      $1, 'ready', 'api', $2::jsonb, $3::jsonb, $4,
-      'pending', $5, 1, $3::jsonb, $6,
-      $7, false, true, $8
-    )
-    RETURNING cut_job_id, created_at
-    `,
-    [
-      jobName,
-      JSON.stringify(selectionCriteria),
-      JSON.stringify(params),
-      requestHash,
-      toNullableNumber(actorUserId),
-      requestHash,
-      plan.sheetMaterialTypeId,
-      sourceDisplayNumber,
-    ],
+  const cutJobInsertParams = [
+    jobName,
+    JSON.stringify(selectionCriteria),
+    JSON.stringify(params),
+    requestHash,
+    toNullableNumber(actorUserId),
+    requestHash,
+    plan.sheetMaterialTypeId,
+    sourceDisplayNumber,
+  ];
+  let job: { rows: Array<{ cut_job_id: string | number; created_at: string | Date }> };
+  job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
+    requestedCutJobId === null
+      ? `
+      INSERT INTO cut_job (
+        name, status, source, selection_criteria, params, request_hash,
+        pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
+        sheet_material_type_id, combine_films, split_by_material, source_display_number
+      )
+      VALUES (
+        $1, 'ready', 'api', $2::jsonb, $3::jsonb, $4,
+        'pending', $5, 1, $3::jsonb, $6,
+        $7, false, true, $8
+      )
+      RETURNING cut_job_id, created_at
+      `
+      : `
+      INSERT INTO cut_job (
+        cut_job_id, name, status, source, selection_criteria, params, request_hash,
+        pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
+        sheet_material_type_id, combine_films, split_by_material, source_display_number
+      )
+      VALUES (
+        $9, $1, 'ready', 'api', $2::jsonb, $3::jsonb, $4,
+        'pending', $5, 1, $3::jsonb, $6,
+        $7, false, true, $8
+      )
+      ON CONFLICT (cut_job_id) DO NOTHING
+      RETURNING cut_job_id, created_at
+      `,
+    requestedCutJobId === null
+      ? cutJobInsertParams
+      : [...cutJobInsertParams, requestedCutJobId],
   );
+  if (requestedCutJobId !== null && job.rows.length === 0) {
+    const suggestedCutJobIds = await suggestCutJobIds(tx, requestedCutJobId);
+    throw new ApiError(
+      409,
+      'CUT_JOB_NUMBER_CONFLICT',
+      `Задание на раскрой #${requestedCutJobId} уже существует`,
+      { requestedCutJobId, suggestedCutJobIds },
+    );
+  }
   const cutJobId = toNumber(job.rows[0].cut_job_id);
+  if (requestedCutJobId !== null) {
+    await syncCutJobIdentitySequence(tx);
+  }
   const cutJobCreatedAt = toIso(job.rows[0].created_at);
   await tx.query(
     `INSERT INTO cut_result_command
@@ -2544,7 +3052,7 @@ async function createSvgCutJob(
      VALUES ($1, $2::uuid, 'manual_save', $3, 'in_progress', $4)`,
     [cutJobId, commandId, commandPayloadHash, toNullableNumber(actorUserId)],
   );
-  const groupKey = `svg:m:${plan.sheetMaterialTypeId}:f:${plan.filmId ?? 'none'}`;
+  const groupKey = `svg:m:${plan.sheetMaterialTypeId ?? 'none'}:f:${plan.filmId ?? 'none'}`;
   const summary = buildSvgCutSummary(plan, selectionSource);
   const group = await tx.query<{ cut_group_id: string | number }>(
     `
@@ -2576,7 +3084,7 @@ async function createSvgCutJob(
 
   const itemByDetailId = new Map(items.map((item) => [item.orderDetailId, item]));
   const placements = buildSvgSheetPlacements(plan, itemByDetailId);
-  const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey);
+  const renderSnapshot = buildSvgRenderSnapshot(placements, itemByDetailId, dto.programName ?? dto.externalPacketKey, plan);
   const sheet = await tx.query<{ cut_group_sheet_id: string | number }>(
     `
     INSERT INTO cut_group_sheet (
@@ -2607,7 +3115,9 @@ async function createSvgCutJob(
     splitByMaterial: true,
     rotationAllowed: true,
     textureDirection: 'none',
-    materialNames: uniqueValues(plan.details.map((detail) => detail.materialName).filter((value): value is string => Boolean(value))),
+    materialNames: plan.details.length > 0
+      ? uniqueValues(plan.details.map((detail) => detail.materialName).filter((value): value is string => Boolean(value)))
+      : uniqueValues([plan.materialName].filter((value): value is string => Boolean(value))),
     totals,
     items,
     groups: [{
@@ -2675,6 +3185,33 @@ async function createSvgCutJob(
     [cutJobId, commandId, cutResultId],
   );
   return { cutJobId, cutResultId };
+}
+
+async function syncCutJobIdentitySequence(tx: TransactionClient): Promise<void> {
+  await tx.query(
+    `
+    SELECT setval(
+      pg_get_serial_sequence('cut_job', 'cut_job_id'),
+      GREATEST((SELECT COALESCE(MAX(cut_job_id), 1) FROM cut_job), 1),
+      true
+    )
+    `,
+  );
+}
+
+async function suggestCutJobIds(tx: TransactionClient, requestedCutJobId: number): Promise<number[]> {
+  const result = await tx.query<{ cut_job_id: string | number }>(
+    `
+    SELECT candidate.cut_job_id
+    FROM generate_series($1::bigint + 1, $1::bigint + 200) AS candidate(cut_job_id)
+    LEFT JOIN cut_job existing_job ON existing_job.cut_job_id = candidate.cut_job_id
+    WHERE existing_job.cut_job_id IS NULL
+    ORDER BY candidate.cut_job_id
+    LIMIT 5
+    `,
+    [requestedCutJobId],
+  );
+  return result.rows.map((row) => toNumber(row.cut_job_id)).filter(isPositiveNumber);
 }
 
 const SVG_REVERSE_IMPORT_PARAMS = {
@@ -2751,13 +3288,13 @@ function buildSvgSheetPlacements(
   plan: Extract<SvgCutImportPlan, { ok: true }>,
   itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
 ): SheetPlacementsJson {
-  const nextInstance = new Map<number, number>();
+  const nextInstance = new Map<string, number>();
   const pieces = plan.placements.map((item) => {
-    const instance = (nextInstance.get(item.orderDetailId) ?? 0) + 1;
-    nextInstance.set(item.orderDetailId, instance);
-    const jobItem = itemByDetailId.get(item.orderDetailId);
+    const instance = (nextInstance.get(item.itemKey) ?? 0) + 1;
+    nextInstance.set(item.itemKey, instance);
+    const jobItem = item.orderDetailId === null ? undefined : itemByDetailId.get(item.orderDetailId);
     return {
-      item_id: freecutItemId(item.orderDetailId),
+      item_id: item.itemKey,
       instance,
       x_mm: round3(item.xMm),
       y_mm: round3(item.yMm),
@@ -2766,9 +3303,12 @@ function buildSvgSheetPlacements(
       rotated: item.rotated === true,
       label: {
         orderId: item.orderId,
+        orderName: item.orderName,
+        detailId: item.orderDetailId,
         detailNumber: jobItem?.detail?.detailNumber ?? item.detailNumber,
         widthMm: jobItem?.detail?.width ?? item.widthMm,
         heightMm: jobItem?.detail?.height ?? item.heightMm,
+        materialName: item.materialName ?? jobItem?.detail?.materialName ?? plan.materialName ?? null,
       },
     };
   });
@@ -2784,25 +3324,37 @@ function buildSvgRenderSnapshot(
   placements: SheetPlacementsJson,
   itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
   machineFile: string,
+  plan: Extract<SvgCutImportPlan, { ok: true }>,
 ): CutSheetRenderSnapshotDto {
   const itemByItemId = new Map<string, CutJobItemDto>();
   for (const item of itemByDetailId.values()) itemByItemId.set(freecutItemId(item.orderDetailId), item);
   const quantities = new Map<string, number>();
   for (const piece of placements.pieces) quantities.set(piece.item_id, (quantities.get(piece.item_id) ?? 0) + 1);
-  const fillForOrder = createOrderFillResolver([...itemByDetailId.values()].map((item) => item.orderId));
+  const fillForOrder = createOrderFillResolver(plan.placements.map((item) => item.orderId).filter(isPositiveNumber));
   const labelFor = (piece: FreecutPlacement) => {
     const item = itemByItemId.get(piece.item_id);
-    const label = (piece as { label?: { orderId: number | null; detailNumber: number | null; widthMm: number | null; heightMm: number | null } }).label;
+    const label = (piece as {
+      label?: {
+        orderId: number | null;
+        orderName?: string | null;
+        detailId?: number | null;
+        detailNumber: number | null;
+        widthMm: number | null;
+        heightMm: number | null;
+        materialName?: string | null;
+      };
+    }).label;
     return composePieceLabelLines({
       orderId: label?.orderId ?? item?.orderId ?? null,
-      orderName: item?.orderName ?? null,
-      detailId: item?.orderDetailId ?? null,
+      orderName: label?.orderName ?? item?.orderName ?? null,
+      detailId: label?.detailId ?? item?.orderDetailId ?? null,
       detailNumber: label?.detailNumber ?? item?.detail?.detailNumber ?? null,
       widthMm: label?.widthMm ?? item?.detail?.width ?? null,
       heightMm: label?.heightMm ?? item?.detail?.height ?? null,
       itemId: piece.item_id,
       instance: piece.instance,
       qty: quantities.get(piece.item_id) ?? item?.qty ?? 1,
+      materialName: label?.materialName ?? item?.detail?.materialName ?? plan.materialName ?? null,
     });
   };
   const bathDetailInfoFor = (piece: FreecutPlacement) => {
@@ -2814,7 +3366,8 @@ function buildSvgRenderSnapshot(
     };
   };
   const fillFor = (piece: FreecutPlacement) => {
-    const orderId = itemByItemId.get(piece.item_id)?.orderId ?? null;
+    const label = (piece as { label?: { orderId: number | null } }).label;
+    const orderId = label?.orderId ?? itemByItemId.get(piece.item_id)?.orderId ?? null;
     return fillForOrder(orderId);
   };
   const views: CutSheetRenderSnapshotDto['views'] = {};
@@ -2834,18 +3387,26 @@ function buildSvgRenderSnapshot(
   return {
     contractVersion: 'cut_sheet_render_v1',
     views,
-    pdfMeta: buildSvgPdfMeta(itemByDetailId, machineFile),
-    pdfDetailRows: buildSvgPdfDetailRows(itemByDetailId, machineFile),
+    pdfMeta: buildSvgPdfMeta(itemByDetailId, machineFile, plan),
+    pdfDetailRows: buildSvgPdfDetailRows(itemByDetailId, machineFile, plan),
   };
 }
 
-function buildSvgPdfMeta(itemByDetailId: ReadonlyMap<number, CutJobItemDto>, machineFile: string): Record<string, unknown> {
+function buildSvgPdfMeta(
+  itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
+  machineFile: string,
+  plan: Extract<SvgCutImportPlan, { ok: true }>,
+): Record<string, unknown> {
   return {
-    orders: uniqueValues([...itemByDetailId.values()].map((item) => item.orderName ?? String(item.orderId))),
+    orders: itemByDetailId.size > 0
+      ? uniqueValues([...itemByDetailId.values()].map((item) => item.orderName ?? String(item.orderId)))
+      : uniqueValues(plan.placements.map((item) => item.orderName || String(item.orderId ?? ''))).filter(Boolean),
     clients: [],
     dates: [],
     readyDates: [],
-    materials: uniqueValues([...itemByDetailId.values()].map((item) => item.detail?.materialName).filter((value): value is string => Boolean(value))),
+    materials: itemByDetailId.size > 0
+      ? uniqueValues([...itemByDetailId.values()].map((item) => item.detail?.materialName).filter((value): value is string => Boolean(value)))
+      : uniqueValues([plan.materialName].filter((value): value is string => Boolean(value))),
     thicknesses: [],
     films: uniqueValues([...itemByDetailId.values()].map((item) => item.detail?.filmName).filter((value): value is string => Boolean(value))),
     edgeTypes: uniqueValues([...itemByDetailId.values()].map((item) => item.detail?.edgeTypeName).filter((value): value is string => Boolean(value))),
@@ -2853,7 +3414,14 @@ function buildSvgPdfMeta(itemByDetailId: ReadonlyMap<number, CutJobItemDto>, mac
   };
 }
 
-function buildSvgPdfDetailRows(itemByDetailId: ReadonlyMap<number, CutJobItemDto>, machineFile: string): Record<string, unknown>[] {
+function buildSvgPdfDetailRows(
+  itemByDetailId: ReadonlyMap<number, CutJobItemDto>,
+  machineFile: string,
+  plan: Extract<SvgCutImportPlan, { ok: true }>,
+): Record<string, unknown>[] {
+  if (plan.informational) {
+    return buildInformationalSvgPdfDetailRows(plan, machineFile);
+  }
   return [...itemByDetailId.values()]
     .sort((a, b) => a.orderId - b.orderId || (a.detail?.detailNumber ?? a.orderDetailId) - (b.detail?.detailNumber ?? b.orderDetailId))
     .map((item) => ({
@@ -2886,7 +3454,92 @@ function buildSvgPdfDetailRows(itemByDetailId: ReadonlyMap<number, CutJobItemDto
     }));
 }
 
+function buildInformationalSvgPdfDetailRows(
+  plan: Extract<SvgCutImportPlan, { ok: true }>,
+  machineFile: string,
+): Record<string, unknown>[] {
+  const groups = new Map<string, {
+    order: string;
+    orderId: number | null;
+    position: number;
+    widthMm: number;
+    heightMm: number;
+    quantity: number;
+    material: string | null;
+  }>();
+
+  for (const item of plan.placements) {
+    const key = [
+      item.orderId ?? '',
+      item.orderName,
+      item.detailNumber,
+      dimensionKey(item.widthMm),
+      dimensionKey(item.heightMm),
+      item.materialName ?? plan.materialName ?? '',
+    ].join(':');
+    const existing = groups.get(key);
+    if (existing) {
+      existing.quantity += Math.max(1, item.quantity ?? 1);
+      continue;
+    }
+    groups.set(key, {
+      order: item.orderName || String(item.orderId ?? ''),
+      orderId: item.orderId,
+      position: item.detailNumber,
+      widthMm: item.widthMm,
+      heightMm: item.heightMm,
+      quantity: Math.max(1, item.quantity ?? 1),
+      material: item.materialName ?? plan.materialName ?? null,
+    });
+  }
+
+  return [...groups.values()]
+    .sort((left, right) => (
+      left.order.localeCompare(right.order, 'ru', { numeric: true }) ||
+      left.position - right.position ||
+      left.widthMm - right.widthMm ||
+      left.heightMm - right.heightMm
+    ))
+    .map((item) => ({
+      order: item.order,
+      position: item.position,
+      lengthMm: Math.max(item.widthMm, item.heightMm),
+      widthMm: Math.min(item.widthMm, item.heightMm),
+      quantity: item.quantity,
+      machineFiles: [machineFile],
+      fields: {
+        detail_id: null,
+        order_id: item.orderId,
+        detail_number: item.position,
+        height: item.heightMm,
+        width: item.widthMm,
+        quantity: item.quantity,
+        sheet_quantity: item.quantity,
+        machine_file: machineFile,
+        machine_files: machineFile,
+        material_name: item.material,
+        materials: item.material,
+      },
+      material: item.material,
+      film: null,
+    }));
+}
+
 function buildSvgCutTotals(plan: Extract<SvgCutImportPlan, { ok: true }>): CutJobTotals {
+  if (plan.informational) {
+    const details = plan.placements.reduce((sum, item) => sum + Math.max(1, item.quantity ?? 1), 0);
+    const area = plan.placements.reduce((sum, item) =>
+      sum + (item.widthMm * item.heightMm * Math.max(1, item.quantity ?? 1)) / 1_000_000, 0);
+    return {
+      positions: plan.placements.length,
+      details,
+      area: round2(area),
+      sheets: 1,
+      materialsCount: plan.materialName ? 1 : 0,
+      filmsCount: 0,
+      filmUsage: [],
+    };
+  }
   const details = plan.details.reduce((sum, detail) => sum + detail.cutQuantity, 0);
   const area = plan.details.reduce((sum, detail) => sum + (detail.area ?? 0) * detail.cutQuantity, 0);
   const filmsCount = uniqueValues(plan.details.map((detail) => detail.filmId).filter((filmId): filmId is number => filmId !== null)).length;
@@ -2902,10 +3555,15 @@ function buildSvgCutTotals(plan: Extract<SvgCutImportPlan, { ok: true }>): CutJo
 }
 
 function buildSvgCutResultManifest(snapshot: CutJobDto): Record<string, unknown> {
+  const snapshotPieces = snapshot.groups.flatMap((group) =>
+    group.sheets.flatMap((sheet) => sheet.placements.pieces),
+  );
   return {
     groups: snapshot.groups.length,
-    items: snapshot.items.length,
-    instances: snapshot.items.reduce((sum, item) => sum + item.qty, 0),
+    items: snapshot.items.length || uniqueValues(snapshotPieces.map((piece) => piece.item_id)).length,
+    instances: snapshot.items.length > 0
+      ? snapshot.items.reduce((sum, item) => sum + item.qty, 0)
+      : snapshotPieces.length,
     unplaced: snapshot.unplaced?.length ?? 0,
     variants: snapshot.groups.map((group) => ({
       groupKey: group.groupKey ?? `group:${group.cutGroupId}`,
@@ -4337,6 +4995,8 @@ async function reconcileManualSvgUploadIdempotency(
     sourceVersion: input.dto.source.version,
     selectedOrderIds: input.command.dto.selectedOrderIds,
     createMdfMachineFileCard: input.command.dto.createMdfMachineFileCard,
+    matchMode: input.command.dto.matchMode,
+    requestedCutJobId: input.command.dto.requestedCutJobId ?? null,
     payloadHash: input.payloadHash,
   });
   const inserted = await tx.query<IdempotencyRow>(
@@ -5381,6 +6041,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         confidence: toNumber(row.confidence),
         matchOrderId: toNullableNumber(row.match_order_id),
         matchDetailId: toNullableNumber(row.match_detail_id),
+        matchDetailQuantity: toNullableNumber(row.match_detail_quantity),
         matchStatus: row.match_status ?? 'unmatched',
         reviewNote: row.review_note,
         laminatedOrLater:

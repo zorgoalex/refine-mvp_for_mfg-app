@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../../../../types/orders';
 import {
+  calculateOrderDetailTableBodyScrollY,
   isLastOrderDetailRow,
   pageContainingOrderDetail,
   sortOrderDetailsForPagination,
@@ -56,5 +57,12 @@ describe('order detail controlled pagination', () => {
       { detail_id: 11, detail_number: 2 },
     ] as OrderDetail[];
     expect(isLastOrderDetailRow(persisted, { detail_id: 11 } as OrderDetail)).toBe(true);
+  });
+
+  it('adds spare body height so the last filled detail row is not clipped', () => {
+    expect(calculateOrderDetailTableBodyScrollY(0, 0)).toBe(39);
+    expect(calculateOrderDetailTableBodyScrollY(0, 1)).toBe(78);
+    expect(calculateOrderDetailTableBodyScrollY(5, 5)).toBe(234);
+    expect(calculateOrderDetailTableBodyScrollY(100, 100)).toBe(560);
   });
 });

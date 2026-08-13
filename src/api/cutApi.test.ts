@@ -107,13 +107,24 @@ describe('cutApi', () => {
     // is never silently dead and browser cache keys differ.
     expect(svgUrl).toContain('origin=tl');
     expect(svgUrl).toContain('axisOrigin=top-left');
-    // PNG always includes labels=off (no baked labels; HTML overlay is the sole label source)
+    // PNG defaults to labels=off (HTML overlay is the usual label source).
     const pngUrl = fetchMock.mock.calls[1][0] as string;
     expect(pngUrl).toContain('/api/v1/cut-jobs/42/groups/100/sheets/0.png');
     expect(pngUrl).toContain('preset=thumb');
     expect(pngUrl).toContain('labels=off');
     expect(pngUrl).toContain('origin=tl');
     expect(pngUrl).toContain('axisOrigin=top-left');
+  });
+
+  it('can request baked labels for generated SVG card previews', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('PNG', { status: 200, headers: { 'Content-Type': 'image/png' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchSheetPng(42, 100, 0, 'thumb', false, 'auto', undefined, true, 'top-left', 3, false, true);
+
+    const pngUrl = fetchMock.mock.calls[0][0] as string;
+    expect(pngUrl).toContain('labels=on');
   });
 
   it('reads result history and uses frozen render routes', async () => {

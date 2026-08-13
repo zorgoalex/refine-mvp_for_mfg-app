@@ -16,16 +16,23 @@ const ORIGINAL_RETENTION_SQL = "interval '30 days'";
 const RESTORE_LEASE_SQL = "interval '5 minutes'";
 
 interface ScreenshotRow extends QueryResultRow {
+  kind: 'telegram' | 'svg_cut';
   packet_id: string;
-  source_message_id: string | number;
+  source_message_id: string | number | null;
   source_created_at: string | Date;
   program_name: string | null;
   material_name: string;
-  sheet_image_storage_key: string;
+  sheet_image_storage_key: string | null;
   sheet_image_content_type: string | null;
   sheet_image_size_bytes: string | number | null;
   matched_detail_count: string | number;
   item_quantity_total: string | number;
+  svg_cut_job_id: string | number | null;
+  svg_cut_result_no: string | number | null;
+  svg_cut_group_id: string | number | null;
+  svg_cut_sheet_index: string | number | null;
+  svg_cut_sheet_number: string | number | null;
+  svg_cut_variant: 'auto' | 'manual' | null;
   original_available: boolean;
   available_until: string | Date;
   restore_request_id: string | null;
@@ -88,6 +95,12 @@ export class PgCncTelegramMediaRepository {
         packetId,
       });
     }
+    if (row.kind !== 'telegram' || !row.sheet_image_storage_key || row.source_message_id === null) {
+      throw new ApiError(404, 'NOT_FOUND', 'Telegram-скрин раскроя для заказа не найден', {
+        orderId,
+        packetId,
+      });
+    }
     return {
       packetId: row.packet_id,
       sourceMessageId: Number(row.source_message_id),
@@ -112,8 +125,15 @@ export class PgCncTelegramMediaRepository {
         screenshotSelectSql('AND p.packet_id = $2::uuid'),
         [input.orderId, input.packetId],
       );
-      if (!packet.rows[0]) {
+      const packetRow = packet.rows[0];
+      if (!packetRow) {
         throw new ApiError(404, 'NOT_FOUND', 'Скрин раскроя для заказа не найден', {
+          orderId: input.orderId,
+          packetId: input.packetId,
+        });
+      }
+      if (packetRow.kind !== 'telegram') {
+        throw new ApiError(409, 'CNC_TELEGRAM_MEDIA_RESTORE_UNAVAILABLE', 'Для SVG-раскроя восстановление Telegram-скрина не требуется', {
           orderId: input.orderId,
           packetId: input.packetId,
         });
@@ -338,22 +358,48 @@ function screenshotSelectSql(extraWhere: string): string {
       WHERE COALESCE(item.match_order_id, order_key.order_id)=$1::bigint
       GROUP BY packet.packet_id
     )
-    SELECT p.packet_id, p.source_message_id, p.source_created_at,
+    SELECT
+           CASE
+             WHEN p.sheet_image_storage_key IS NOT NULL AND p.source_message_id IS NOT NULL
+               THEN 'telegram'
+             ELSE 'svg_cut'
+           END AS kind,
+           p.packet_id, p.source_message_id, COALESCE(p.source_created_at, p.created_at) AS source_created_at,
            p.program_name, p.material_name,
            p.sheet_image_storage_key, p.sheet_image_content_type, p.sheet_image_size_bytes,
            matched.matched_detail_count, matched.item_quantity_total,
-           (
-             p.source_created_at + ${ORIGINAL_RETENTION_SQL} > now()
-             OR (restore.status='completed' AND restore.available_until > now())
-           ) AS original_available,
-           GREATEST(
-             p.source_created_at + ${ORIGINAL_RETENTION_SQL},
-             COALESCE(restore.available_until, '-infinity'::timestamptz)
-           ) AS available_until,
+           p.svg_cut_job_id, svg_result.result_no AS svg_cut_result_no,
+           svg_sheet.cut_group_id AS svg_cut_group_id,
+           svg_sheet.sheet_index AS svg_cut_sheet_index,
+           svg_sheet.sheet_ordinal AS svg_cut_sheet_number,
+           svg_sheet.variant AS svg_cut_variant,
+           CASE
+             WHEN p.sheet_image_storage_key IS NOT NULL AND p.source_message_id IS NOT NULL THEN (
+               COALESCE(p.source_created_at, p.created_at) + ${ORIGINAL_RETENTION_SQL} > now()
+               OR (restore.status='completed' AND restore.available_until > now())
+             )
+             ELSE true
+           END AS original_available,
+           CASE
+             WHEN p.sheet_image_storage_key IS NOT NULL AND p.source_message_id IS NOT NULL THEN GREATEST(
+               COALESCE(p.source_created_at, p.created_at) + ${ORIGINAL_RETENTION_SQL},
+               COALESCE(restore.available_until, '-infinity'::timestamptz)
+             )
+             ELSE COALESCE(p.source_created_at, p.created_at) + interval '100 years'
+           END AS available_until,
            restore.restore_request_id, restore.status AS restore_status,
            restore.requested_at AS restore_requested_at, restore.last_error AS restore_error
     FROM matched_packets matched
     JOIN cnc_telegram_packets p ON p.packet_id=matched.packet_id
+    LEFT JOIN cut_result svg_result ON svg_result.cut_result_id=p.svg_cut_result_id
+    LEFT JOIN LATERAL (
+      SELECT sheet.cut_group_id, sheet.sheet_index, sheet.sheet_ordinal, sheet.variant
+      FROM cut_result_sheet_map sheet
+      WHERE sheet.cut_result_id=p.svg_cut_result_id
+        AND sheet.is_effective=true
+      ORDER BY sheet.sheet_ordinal, sheet.cut_group_id, sheet.sheet_index
+      LIMIT 1
+    ) svg_sheet ON true
     LEFT JOIN LATERAL (
       SELECT request.restore_request_id, request.status, request.requested_at,
              request.available_until, request.last_error
@@ -362,29 +408,53 @@ function screenshotSelectSql(extraWhere: string): string {
       ORDER BY request.requested_at DESC, request.restore_request_id DESC
       LIMIT 1
     ) restore ON true
-    WHERE p.sheet_image_storage_key IS NOT NULL
-      AND p.source_message_id IS NOT NULL
-      AND p.source_created_at IS NOT NULL
+    WHERE (
+        (
+          p.sheet_image_storage_key IS NOT NULL
+          AND p.source_message_id IS NOT NULL
+          AND COALESCE(p.source_created_at, p.created_at) IS NOT NULL
+        )
+        OR (
+          p.svg_cut_import_status='imported'
+          AND p.svg_cut_job_id IS NOT NULL
+          AND p.svg_cut_result_id IS NOT NULL
+          AND svg_result.result_no IS NOT NULL
+          AND svg_sheet.cut_group_id IS NOT NULL
+          AND COALESCE(p.source_created_at, p.created_at) IS NOT NULL
+        )
+      )
       ${extraWhere}
-    ORDER BY p.source_created_at DESC, p.source_message_id DESC, p.packet_id
+    ORDER BY COALESCE(p.source_created_at, p.created_at) DESC, p.source_message_id DESC NULLS LAST, p.packet_id
   `;
 }
 
 function mapScreenshotRow(row: ScreenshotRow, orderId: number): CncTelegramOrderScreenshotDto {
   const packetId = row.packet_id;
+  const kind = row.kind === 'svg_cut' ? 'svg_cut' : 'telegram';
   return {
+    kind,
     packetId,
-    sourceMessageId: Number(row.source_message_id),
+    sourceMessageId: row.source_message_id === null ? null : Number(row.source_message_id),
     sourceCreatedAt: toIso(row.source_created_at),
     programName: row.program_name,
     materialName: row.material_name,
     matchedDetailCount: Number(row.matched_detail_count),
     itemQuantityTotal: Number(row.item_quantity_total),
-    previewUrl: `/api/v1/cnc-telegram/orders/${orderId}/screenshots/${packetId}/preview`,
-    imageUrl: `/api/v1/cnc-telegram/orders/${orderId}/screenshots/${packetId}/image`,
+    previewUrl: kind === 'telegram'
+      ? `/api/v1/cnc-telegram/orders/${orderId}/screenshots/${packetId}/preview`
+      : null,
+    imageUrl: kind === 'telegram'
+      ? `/api/v1/cnc-telegram/orders/${orderId}/screenshots/${packetId}/image`
+      : null,
+    cutJobId: nullableNumber(row.svg_cut_job_id),
+    cutResultNo: nullableNumber(row.svg_cut_result_no),
+    cutGroupId: nullableNumber(row.svg_cut_group_id),
+    sheetIndex: nullableNumber(row.svg_cut_sheet_index),
+    sheetNumber: nullableNumber(row.svg_cut_sheet_number),
+    variant: row.svg_cut_variant === 'manual' ? 'manual' : row.svg_cut_variant === 'auto' ? 'auto' : null,
     originalAvailable: row.original_available === true,
     availableUntil: toIso(row.available_until),
-    restore: row.restore_request_id && row.restore_status && row.restore_requested_at
+    restore: kind === 'telegram' && row.restore_request_id && row.restore_status && row.restore_requested_at
       ? {
           requestId: row.restore_request_id,
           status: row.restore_status,

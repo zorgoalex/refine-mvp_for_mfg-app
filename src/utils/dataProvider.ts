@@ -227,7 +227,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "updated_at",
     "version",
     // Relationship: doweling links (many-to-many)
-    "order_doweling_links { order_doweling_link_id order_id doweling_order_id doweling_order { doweling_order_id doweling_order_name design_engineer_id } }",
+    "order_doweling_links(where: { delete_flag: { _eq: false } }) { order_doweling_link_id order_id doweling_order_id doweling_order { doweling_order_id doweling_order_name design_engineer_id } }",
   ],
   materials: [
     "material_id",

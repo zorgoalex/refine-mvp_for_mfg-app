@@ -176,6 +176,7 @@ export interface CutPieceOverlay {
   orderDeleted?: boolean;
   orderDetailId: number | null;
   detailNumber: number | null;
+  vacuumOrientationWarning?: SheetPlacementPiece['vacuum_orientation_warning'];
   leftPct: number;
   topPct: number;
   widthPct: number;
@@ -200,6 +201,10 @@ export function buildCutPieceTooltipRows(item: CutJobItemDto, piece: SheetPlacem
     { label: 'Кол-во в задании', value: formatTooltipValue(item.qty) },
   ];
 
+  if (piece.vacuum_orientation_warning) {
+    rows.push({ label: 'Предупреждение', value: piece.vacuum_orientation_warning.message });
+  }
+
   if (detail) {
     rows.push(
       { label: 'Высота', value: formatTooltipValue(detail.height) },
@@ -216,6 +221,37 @@ export function buildCutPieceTooltipRows(item: CutJobItemDto, piece: SheetPlacem
   }
 
   return rows;
+}
+
+function buildCutPieceLabelTooltipRows(piece: SheetPlacementPiece): CutPieceTooltipRow[] {
+  const label = piece.label;
+  const orderValue = label?.orderName?.trim() || label?.orderId || null;
+  const rows: CutPieceTooltipRow[] = [
+    { label: 'Заказ', value: formatTooltipValue(orderValue) },
+    { label: 'Позиция', value: formatTooltipValue(label?.detailNumber ?? null) },
+    { label: 'Экземпляр', value: formatTooltipValue(piece.instance) },
+    { label: 'Высота', value: formatTooltipValue(label?.heightMm ?? piece.height_mm) },
+    { label: 'Ширина', value: formatTooltipValue(label?.widthMm ?? piece.width_mm) },
+    { label: 'Материал', value: formatTooltipValue(label?.materialName ?? null) },
+  ];
+
+  if (piece.vacuum_orientation_warning) {
+    rows.push({ label: 'Предупреждение', value: piece.vacuum_orientation_warning.message });
+  }
+
+  return rows;
+}
+
+function pieceHasDisplayLabel(piece: SheetPlacementPiece): boolean {
+  const label = piece.label;
+  if (!label) return false;
+  return Boolean(
+    label.orderName?.trim() ||
+    label.orderId != null ||
+    label.detailNumber != null ||
+    label.widthMm != null ||
+    label.heightMm != null,
+  );
 }
 
 export function buildSheetPieceOverlays(
@@ -238,12 +274,12 @@ export function buildSheetPieceOverlays(
   for (const piece of placements.pieces) {
     const detailId = parseCutPieceDetailId(piece.item_id);
     const detail = (detailId === null ? undefined : itemByDetail.get(detailId))?.detail;
-    if (!detail) continue;
-    const nm = detail.materialName?.trim();
+    const labelMaterial = detail ? null : piece.label?.materialName?.trim();
+    const nm = detail?.materialName?.trim() || labelMaterial;
     const key =
-      detail.sheetMaterialTypeId !== null && detail.sheetMaterialTypeId !== undefined
+      detail?.sheetMaterialTypeId !== null && detail?.sheetMaterialTypeId !== undefined
         ? `s${detail.sheetMaterialTypeId}`
-        : detail.materialId !== null && detail.materialId !== undefined
+        : detail?.materialId !== null && detail?.materialId !== undefined
           ? `m${detail.materialId}`
           : nm
             ? `n${nm}`
@@ -256,7 +292,8 @@ export function buildSheetPieceOverlays(
     .map((piece) => {
       const detailId = parseCutPieceDetailId(piece.item_id);
       const item = detailId === null ? undefined : itemByDetail.get(detailId);
-      if (!item) return null;
+      const label = piece.label;
+      if (!item && !pieceHasDisplayLabel(piece)) return null;
 
       const x = placements.trim_mm.left + piece.x_mm;
       const y = placements.trim_mm.top + piece.y_mm;
@@ -273,29 +310,61 @@ export function buildSheetPieceOverlays(
 
       return {
         key: `${piece.item_id}:${piece.instance}`,
-        orderId: item.orderId,
-        orderDeleted: item.orderDeleted === true,
-        orderDetailId: item.orderDetailId,
-        detailNumber: item.detail?.detailNumber ?? null,
+        orderId: item?.orderId ?? label?.orderId ?? null,
+        orderDeleted: item?.orderDeleted === true,
+        orderDetailId: item?.orderDetailId ?? label?.detailId ?? null,
+        detailNumber: item?.detail?.detailNumber ?? label?.detailNumber ?? null,
+        vacuumOrientationWarning: piece.vacuum_orientation_warning,
         leftPct: (rect.x / rect.vw) * 100,
         topPct: (rect.y / rect.vh) * 100,
         widthPct: (rect.w / rect.vw) * 100,
         heightPct: (rect.h / rect.vh) * 100,
-        tooltipRows: buildCutPieceTooltipRows(item, piece),
+        tooltipRows: item ? buildCutPieceTooltipRows(item, piece) : buildCutPieceLabelTooltipRows(piece),
         labelLines: buildPieceLabelLines({
-          orderName: item.orderName ?? null,
-          orderId: item.orderId,
-          detailNumber: item.detail?.detailNumber ?? null,
+          orderName: item?.orderName ?? label?.orderName ?? null,
+          orderId: item?.orderId ?? label?.orderId ?? null,
+          detailNumber: item?.detail?.detailNumber ?? label?.detailNumber ?? null,
           instance: piece.instance,
-          qty: item.qty ?? null,
+          qty: item?.qty ?? null,
           widthMm: piece.label?.widthMm ?? piece.width_mm,
           heightMm: piece.label?.heightMm ?? piece.height_mm,
           // 4th line only on mixed-material sheets.
-          materialName: sheetMixesMaterials ? item.detail?.materialName ?? null : null,
+          materialName: sheetMixesMaterials ? item?.detail?.materialName ?? label?.materialName ?? null : null,
         }),
       };
     })
     .filter((overlay): overlay is CutPieceOverlay => overlay !== null);
+}
+
+export interface CutSheetVacuumOrientationWarningItem {
+  key: string;
+  text: string;
+}
+
+export function buildSheetVacuumOrientationWarnings(
+  placements: SheetPlacements,
+  items: readonly CutJobItemDto[],
+): CutSheetVacuumOrientationWarningItem[] {
+  const itemByDetail = new Map(items.map((item) => [item.orderDetailId, item]));
+  return placements.pieces
+    .filter((piece) => piece.vacuum_orientation_warning)
+    .map((piece) => {
+      const detailId = parseCutPieceDetailId(piece.item_id);
+      const item = detailId === null ? undefined : itemByDetail.get(detailId);
+      const orderText = item ? `заказ ${formatTooltipValue(item.orderId)}` : 'заказ —';
+      const detailNumber = item?.detail?.detailNumber ?? detailId;
+      const detailName = item?.detail?.detailName?.trim();
+      const detailText = [
+        orderText,
+        `позиция ${formatTooltipValue(detailNumber)}`,
+        ...(detailName ? [detailName] : []),
+        `экз. ${formatTooltipValue(piece.instance)}`,
+      ].join(', ');
+      return {
+        key: `${piece.item_id}:${piece.instance}`,
+        text: `${detailText}: ${piece.vacuum_orientation_warning!.message}`,
+      };
+    });
 }
 
 /**

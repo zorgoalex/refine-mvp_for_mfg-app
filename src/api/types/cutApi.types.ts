@@ -92,8 +92,23 @@ export interface SheetPlacementPiece {
   height_mm: number;
   rotated: boolean;
   rotation_forbidden?: boolean;
-  /** Frozen label snapshot from calculate (absent in legacy records). */
-  label?: { orderId: number | null; detailNumber: number | null; widthMm: number | null; heightMm: number | null };
+  vacuum_orientation_warning?: {
+    code: 'vacuum_profile_orientation_fallback';
+    profileDirection: 'width' | 'height';
+    requestedSide: 'width' | 'height';
+    actualSide: 'width' | 'height';
+    message: string;
+  };
+  /** Frozen label snapshot from calculate/import (absent in legacy records). */
+  label?: {
+    orderId: number | null;
+    orderName?: string | null;
+    detailId?: number | null;
+    detailNumber: number | null;
+    widthMm: number | null;
+    heightMm: number | null;
+    materialName?: string | null;
+  };
 }
 
 export interface SheetPlacements {

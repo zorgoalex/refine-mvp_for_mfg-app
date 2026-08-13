@@ -22,6 +22,12 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('cnc-telegram-packet:${packet.packetId}:source-${packet.sourceVersion}:machine-files');
   });
 
+  it('shows manual SVG packets on MDF board only after MDF-card creation marker', () => {
+    expect(repositorySource).toContain('manual_svg_mdf_card.idempotency_key');
+    expect(repositorySource).toContain("':mdf-card-created'");
+    expect(repositorySource).toContain('p.source_chat_id IS DISTINCT FROM $3');
+  });
+
   it('aggregates repeated SVG layout matches before placement-count comparison', () => {
     expect(repositorySource).toContain('existing.quantity + item.quantity');
     expect(repositorySource).toContain('countByLayoutKey.set(key, (countByLayoutKey.get(key) ?? 0) + 1)');
@@ -40,6 +46,37 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).not.toContain('manual-svg-upload-mdf-card-created');
   });
 
+  it('supports forced manual SVG cut-job number without breaking the identity sequence', () => {
+    expect(repositorySource).toContain('requestedCutJobId: command.dto.requestedCutJobId ?? null');
+    expect(repositorySource).toContain('CUT_JOB_NUMBER_CONFLICT');
+    expect(repositorySource).toContain('suggestedCutJobIds');
+    expect(repositorySource).toContain('suggestCutJobIds');
+    expect(repositorySource).toContain('ON CONFLICT (cut_job_id) DO NOTHING');
+    expect(repositorySource).toContain('syncCutJobIdentitySequence');
+    expect(repositorySource).toContain("pg_get_serial_sequence('cut_job', 'cut_job_id')");
+    expect(repositorySource).toContain('cut_job_id, name, status, source');
+  });
+
+  it('explains manual SVG order/detail match failures with per-detail reasons', () => {
+    expect(repositorySource).toContain('buildManualSvgOrderScopeProblems');
+    expect(repositorySource).toContain('Не все детали SVG найдены в выбранных заказах');
+    expect(repositorySource).toContain('Размер в SVG');
+    expect(repositorySource).toContain('Есть детали');
+    expect(repositorySource).toContain('Количество в SVG');
+    expect(repositorySource).toContain('problems: unmatched.slice(0, 50)');
+  });
+
+  it('supports informative non-MDF SVG imports without order-detail links', () => {
+    expect(repositorySource).toContain("manualDto.matchMode === 'informational'");
+    expect(repositorySource).toContain('buildInformationalSvgCutImportPlan');
+    expect(repositorySource).toContain('Информативный SVG: связь с деталями ERP не требуется');
+    expect(repositorySource).toContain('orderDetailId: null');
+    expect(repositorySource).toContain("itemKey: informationalSvgItemKey(item, index)");
+    expect(repositorySource).toContain("sheetMaterialTypeId: null");
+    expect(repositorySource).toContain('buildInformationalSvgPdfDetailRows');
+    expect(repositorySource).toContain('snapshotPieces.length');
+  });
+
   it('emits only one MDF-card event for repeated same-source manual SVG follow-up', async () => {
     const { queries, first, second } = await runManualSvgMdfFollowupSequence();
     const auditEvents = queries
@@ -54,12 +91,19 @@ describe('PgCncTelegramRepository', () => {
 
     expect(first.createdMdfMachineFileCard).toBe(true);
     expect(second.createdMdfMachineFileCard).toBe(false);
+    expect(first.packet.completionStatus).toBe('pending');
+    expect(first.packet.thumbsUp).toBe(false);
     expect(auditEvents.filter((event) => event === 'cnc.manual_svg_upload.created')).toHaveLength(0);
     expect(auditEvents.filter((event) => event === 'cnc.manual_svg_upload.mdf_card_created')).toHaveLength(1);
     expect(outboxEvents.filter((event) => event === 'cnc.manual_svg_upload.created')).toHaveLength(0);
     expect(outboxEvents.filter((event) => event === 'cnc.manual_svg_upload.mdf_card_created')).toHaveLength(1);
     expect(outboxKeys.filter((key) => key === 'cnc-manual-svg:00000000-0000-0000-0000-000000000091:source-1:mdf-card-created'))
       .toHaveLength(1);
+    expect(outboxEvents.filter((event) => event === 'mdf.board.completed')).toHaveLength(0);
+    expect(queries.some((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) &&
+      /completion_status = 'completed'/i.test(query.text),
+    )).toBe(false);
   });
 
   it('uses database current date for today when caller omits date', async () => {
@@ -78,7 +122,7 @@ describe('PgCncTelegramRepository', () => {
     const result = await repo.listToday({ currentUser: user() });
 
     expect(result.workday).toBe('2026-07-24');
-    expect(queries[1]?.params).toEqual(['2026-07-24', '2026-07-24']);
+    expect(queries[1]?.params).toEqual(['2026-07-24', '2026-07-24', 'erp-manual-svg-upload']);
   });
 
   it('queries packets and bath readiness for a date range', async () => {
@@ -99,7 +143,7 @@ describe('PgCncTelegramRepository', () => {
 
     expect(result.workday).toBe('2026-07-24');
     expect(queries[0]?.text).toContain('p.workday BETWEEN $1::date AND $2::date');
-    expect(queries[0]?.params).toEqual(['2026-07-18', '2026-07-24']);
+    expect(queries[0]?.params).toEqual(['2026-07-18', '2026-07-24', 'erp-manual-svg-upload']);
     expect(queries[1]?.text).toContain('p.workday BETWEEN $1::date AND $2::date');
     expect(queries[1]?.params).toEqual(['2026-07-18', '2026-07-24']);
   });
@@ -147,6 +191,7 @@ describe('PgCncTelegramRepository', () => {
         cuttingSequenceNo: 12,
         itemCount: 1,
         itemQuantityTotal: 4,
+        items: [{ matchDetailId: 3101, matchDetailQuantity: 4 }],
         svgCutSheets: [{ cutGroupId: 100, sheetIndex: 0, sheetNumber: 1, detailIds: [3101, 3101] }],
         sourceCreatedAt: '2026-07-24T07:59:00.000Z',
       },
@@ -158,6 +203,7 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('FROM unnest($1::bigint[], $2::bigint[])');
     expect(sql).toContain('svg_cut_sheets_json');
     expect(sql).toContain('cut_result_placement placement');
+    expect(sql).toContain('matched_detail.quantity AS match_detail_quantity');
     expect(sql).not.toMatch(/\b(raw_gcode|screenshot_path|file_path)\b/i);
     const idempotencyInsert = queries.find((query) =>
       /INSERT INTO command_idempotency_keys/i.test(query.text),
@@ -2583,6 +2629,7 @@ function packetRowBase() {
     confidence: 0.94,
     match_order_id: 2689,
     match_detail_id: 3101,
+    match_detail_quantity: 4,
     match_status: 'matched',
     review_note: null,
     laminated_or_later: false,
@@ -2596,7 +2643,9 @@ async function runManualSvgMdfFollowupSequence() {
   const dto = manualSvgUploadDto(true, 'cnc:test:manual-svg:mdf-followup-1');
   const payloadHash = manualSvgPayloadHashForTest(dto);
   let completed = false;
+  let mdfCardCreated = false;
   let auditIndex = 0;
+  const mdfCardEventKey = `cnc-manual-svg:${packetId}:source-1:mdf-card-created`;
   const tx = {
     query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
       queries.push({ text, params });
@@ -2621,8 +2670,8 @@ async function runManualSvgMdfFollowupSequence() {
           }],
         };
       }
-      if (/SELECT\s+order_id\s+FROM orders\s+WHERE order_id = ANY/i.test(text)) {
-        return { rows: [{ order_id: 2689 }] };
+      if (/SELECT\s+order_id,\s+order_name\s+FROM orders\s+WHERE order_id = ANY/i.test(text)) {
+        return { rows: [{ order_id: 2689, order_name: '2689' }] };
       }
       if (/SELECT\s+lower\(trim\(o\.order_name\)\) AS order_key/i.test(text)) {
         return {
@@ -2633,6 +2682,19 @@ async function runManualSvgMdfFollowupSequence() {
             detail_number: 31,
             width: 497,
             height: 477,
+          }],
+        };
+      }
+      if (/SELECT\s+o\.order_id,\s+o\.order_name,\s+od\.detail_id/i.test(text)) {
+        return {
+          rows: [{
+            order_id: 2689,
+            order_name: '2689',
+            detail_id: 3101,
+            detail_number: 31,
+            width: 497,
+            height: 477,
+            quantity: 4,
           }],
         };
       }
@@ -2653,8 +2715,15 @@ async function runManualSvgMdfFollowupSequence() {
       if (/SELECT packet_id, source_version, payload_hash, source_chat_id, source_message_id/i.test(text)) {
         return { rows: [] };
       }
+      if (/SELECT EXISTS/i.test(text) && /FROM outbox_events/i.test(text) && /idempotency_key = \$1/i.test(text)) {
+        return { rows: [{ exists: mdfCardCreated }] };
+      }
       if (/UPDATE cnc_telegram_packets/i.test(text) && /completion_status = 'completed'/i.test(text)) {
         completed = true;
+        return { rows: [] };
+      }
+      if (/INSERT INTO outbox_events/i.test(text)) {
+        if (params[4] === mdfCardEventKey) mdfCardCreated = true;
         return { rows: [] };
       }
       if (/FROM cnc_telegram_packets p/i.test(text)) {
@@ -2728,11 +2797,17 @@ function manualSvgPacketRow(packetId: string, completed: boolean) {
   });
 }
 
-function manualSvgUploadDto(createMdfMachineFileCard: boolean, idempotencyKey: string) {
+function manualSvgUploadDto(
+  createMdfMachineFileCard: boolean,
+  idempotencyKey: string,
+  requestedCutJobId: number | null = null,
+) {
   return {
     idempotencyKey,
     selectedOrderIds: [2689],
     createMdfMachineFileCard,
+    matchMode: 'order_details' as const,
+    requestedCutJobId,
     svgContentHash: 'a'.repeat(64),
     workday: '2026-08-12',
     machine: 'CNC#1',
@@ -2801,11 +2876,12 @@ function manualSvgStructuredDtoForTest(dto: ReturnType<typeof manualSvgUploadDto
     programName: dto.programName,
     materialName: dto.materialName,
     parseStatus: 'parsed',
-    completionStatus: dto.createMdfMachineFileCard ? 'completed' : 'pending',
-    thumbsUp: dto.createMdfMachineFileCard,
+    completionStatus: 'pending',
+    thumbsUp: false,
     rework: dto.rework,
     comments: dto.comments,
     tools: dto.tools,
+    analysisWarnings: [],
     ocrEngine: null,
     parserVersion: dto.parserVersion,
     cutLayout: dto.cutLayout,
@@ -2822,7 +2898,9 @@ function manualSvgStructuredDtoForTest(dto: ReturnType<typeof manualSvgUploadDto
 function manualSvgExternalPacketKeyForTest(dto: ReturnType<typeof manualSvgUploadDto>) {
   const identityHash = sha256JsonForTest({
     kind: 'erp-manual-svg-upload-v1',
+    matchMode: dto.matchMode,
     selectedOrderIds: [...dto.selectedOrderIds].sort((a, b) => a - b),
+    requestedCutJobId: dto.requestedCutJobId ?? null,
     svgContentHash: dto.svgContentHash.toLowerCase(),
     workday: dto.workday ?? null,
     machine: dto.machine?.trim() || null,

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildCutPieceTooltipRows,
   buildSheetPieceOverlays,
+  buildSheetVacuumOrientationWarnings,
   cutPdfPreviewBlockReason,
   displayedSheetExtents,
   formatSheetSide,
@@ -46,6 +47,7 @@ const autoSheet1 = makeSheet(1, ['det-2']);
 /** Manual layout: piece det-1 moved to sheet 1, det-2 stayed on sheet 0 (different from auto). */
 const manualSheet0 = makeSheet(0, ['det-2']);
 const manualSheet1 = makeSheet(1, ['det-1']);
+const manualSheet2 = makeSheet(2, ['det-3']);
 
 const baseGroup: CutGroupDto = {
   cutGroupId: 5,
@@ -209,6 +211,45 @@ describe('cutPreviewHelpers', () => {
       const overlay = buildSheetPieceOverlays(native, [item], false)[0];
       expect(overlay.labelLines).toContain('600*400');
     });
+
+    it('builds overlays for informational SVG pieces without ERP detail ids', () => {
+      const informational: SheetPlacements = {
+        ...placements,
+        pieces: [{
+          item_id: 'svg-1-__x007e__x007e_vyborka',
+          instance: 1,
+          x_mm: 0,
+          y_mm: 0,
+          width_mm: 345,
+          height_mm: 476,
+          rotated: true,
+          label: {
+            orderId: 11520,
+            orderName: '2777',
+            detailId: null,
+            detailNumber: 3,
+            widthMm: 476,
+            heightMm: 345,
+            materialName: 'ХДФ',
+          },
+        }],
+      };
+
+      const overlay = buildSheetPieceOverlays(informational, [], false)[0];
+
+      expect(overlay).toMatchObject({
+        key: 'svg-1-__x007e__x007e_vyborka:1',
+        orderId: 11520,
+        orderDetailId: null,
+        detailNumber: 3,
+      });
+      expect(overlay.labelLines).toEqual(['2777', '# 3 · 1', '476*345']);
+      expect(overlay.tooltipRows).toEqual(expect.arrayContaining([
+        { label: 'Заказ', value: '2777' },
+        { label: 'Позиция', value: '3' },
+        { label: 'Материал', value: 'ХДФ' },
+      ]));
+    });
     const item: CutJobItemDto = {
       cutJobItemId: 1,
       orderDetailId: 42,
@@ -360,6 +401,27 @@ describe('cutPreviewHelpers', () => {
       expect(rows.some((row) => row.label === 'detail_name' || row.label === 'note' || row.label === 'film_id')).toBe(false);
     });
 
+    it('carries vacuum orientation warnings into overlays, tooltip rows and sheet warning list', () => {
+      const warning = {
+        code: 'vacuum_profile_orientation_fallback' as const,
+        profileDirection: 'width' as const,
+        requestedSide: 'height' as const,
+        actualSide: 'width' as const,
+        message: 'Сторона высота не поместилась поперёк листа.',
+      };
+      const warnedPlacements: SheetPlacements = {
+        ...placements,
+        pieces: [{ ...placements.pieces[0], vacuum_orientation_warning: warning }],
+      };
+      const overlay = buildSheetPieceOverlays(warnedPlacements, [item], false)[0];
+      expect(overlay.vacuumOrientationWarning).toEqual(warning);
+      expect(overlay.tooltipRows).toContainEqual({ label: 'Предупреждение', value: warning.message });
+      expect(buildSheetVacuumOrientationWarnings(warnedPlacements, [item])).toEqual([{
+        key: 'det-42:1',
+        text: `заказ 777, позиция 3, Боковина, экз. 1: ${warning.message}`,
+      }]);
+    });
+
     it('marks deleted order references in sheet tooltip rows', () => {
       const rows = buildCutPieceTooltipRows({ ...item, orderDeleted: true }, placements.pieces[0]);
       expect(rows).toContainEqual({ label: 'Статус заказа', value: 'удалён' });
@@ -445,6 +507,24 @@ describe('cutPreviewHelpers', () => {
       };
       const result = selectVariantSheets(group, 'active');
       expect(result[0].placements.pieces.map((p) => p.item_id)).toEqual(['det-2']);
+    });
+
+    it('includes a manually added sheet that does not exist in auto group.sheets', () => {
+      const group: CutGroupDto = {
+        ...baseGroup,
+        manualLayout: {
+          groupKey: 'k1',
+          sheets: [manualSheet0, manualSheet1, manualSheet2],
+          isActive: true,
+          isStale: false,
+          version: 1,
+        },
+      };
+
+      const result = selectVariantSheets(group, 'manual');
+
+      expect(result.map((sheet) => sheet.sheetIndex)).toEqual([0, 1, 2]);
+      expect(result[2].placements.pieces.map((p) => p.item_id)).toEqual(['det-3']);
     });
   });
 });

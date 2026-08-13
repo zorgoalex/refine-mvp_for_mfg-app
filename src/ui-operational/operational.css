@@ -1448,12 +1448,16 @@
 }
 
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .cut-page-modern--list .cut-jobs-table .ant-table-thead > tr > th {
-  height: 36px;
+  height: 38px;
   padding: 6px 8px;
   color: var(--evo-text-muted);
   font-size: 8px;
   font-weight: 850;
-  text-transform: uppercase;
+  line-height: 1.12;
+  text-transform: none;
+  white-space: normal !important;
+  word-break: normal;
+  overflow-wrap: normal;
 }
 
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .cut-page-modern--list .cut-jobs-table .ant-table-tbody > tr > td {
@@ -1996,6 +2000,12 @@
   min-height: 0;
   padding: 0 0 2px;
   gap: 9px;
+}
+
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .evolution-shell__content[data-modern-route="status-board"] .status-board-page.status-board-page--cnc {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .status-board-tabs {

@@ -294,6 +294,7 @@ function manualSvgDto() {
     idempotencyKey: 'manual-svg:test:1',
     selectedOrderIds: [42],
     createMdfMachineFileCard: true,
+    matchMode: 'order_details' as const,
     svgContentHash: 'a'.repeat(64),
     cutLayout: {
       status: 'valid' as const,

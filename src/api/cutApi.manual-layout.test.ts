@@ -108,11 +108,11 @@ describe('cutApi manual-layout', () => {
     expect(url).toContain('variant=manual');
     expect(url).toContain('renderVersion=tokPNG');
     expect(url).toContain('preset=screen');
-    // On-screen preview always requests no baked labels
+    // On-screen preview defaults to no baked labels
     expect(url).toContain('labels=off');
   });
 
-  it('fetchSheetPng always includes labels=off (on-screen preview, no baked labels)', async () => {
+  it('fetchSheetPng defaults to labels=off (on-screen preview, no baked labels)', async () => {
     const fetchMock = imgFetch('image/png', 'PNG');
     await cutApi.fetchSheetPng(42, 100, 0, 'thumb');
     const url = fetchMock.mock.calls[0][0] as string;
