@@ -96,6 +96,7 @@ export interface CncTelegramPacket {
   parserVersion: string;
   cutLayout: CncTelegramCutLayout | null;
   svgCutJobId?: number | null;
+  svgCutJobDisplayNumber?: string | null;
   svgCutResultId?: number | null;
   svgCutResultNo?: number | null;
   svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
@@ -228,6 +229,7 @@ export interface CncTelegramOrderScreenshot {
   previewUrl: string | null;
   imageUrl: string | null;
   cutJobId?: number | null;
+  cutJobDisplayNumber?: string | null;
   cutResultNo?: number | null;
   cutGroupId?: number | null;
   sheetIndex?: number | null;
@@ -307,6 +309,7 @@ export interface CncTelegramManualSvgUploadResponse {
   applied: boolean;
   ignoredStaleSourceVersion: boolean;
   cutJobId: number | null;
+  cutJobDisplayNumber: string | null;
   cutResultId: number | null;
   cutJobPath: string | null;
   createdMdfMachineFileCard: boolean;

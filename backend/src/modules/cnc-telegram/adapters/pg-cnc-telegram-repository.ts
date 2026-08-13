@@ -115,6 +115,7 @@ interface PacketJoinedRow extends QueryResultRow {
   parser_version: string;
   cut_layout_json: unknown;
   svg_cut_job_id: string | number | null;
+  svg_cut_job_display_number: string | number | null;
   svg_cut_result_id: string | number | null;
   svg_cut_result_no: string | number | null;
   svg_cut_import_status: 'none' | 'skipped' | 'needs_review' | 'imported' | null;
@@ -1581,6 +1582,7 @@ function manualSvgResponse(
   return {
     ...response,
     cutJobId,
+    cutJobDisplayNumber: response.packet.svgCutJobDisplayNumber ?? null,
     cutResultId,
     cutJobPath: cutJobId ? `/cut?job=${cutJobId}` : null,
     createdMdfMachineFileCard,
@@ -1871,6 +1873,7 @@ function packetSelectSql(whereSql: string): string {
       p.parser_version,
       p.cut_layout_json,
       p.svg_cut_job_id,
+      svg_job.source_display_number AS svg_cut_job_display_number,
       p.svg_cut_result_id,
       svg_result.result_no AS svg_cut_result_no,
       p.svg_cut_import_status,
@@ -1934,6 +1937,8 @@ function packetSelectSql(whereSql: string): string {
         AND COALESCE(linked_order_status.all_details_packed_or_later, false)
         AS all_linked_order_details_packed_or_later
     FROM cnc_telegram_packets p
+    LEFT JOIN cut_job svg_job
+      ON svg_job.cut_job_id = p.svg_cut_job_id
     LEFT JOIN cut_result svg_result
       ON svg_result.cut_job_id = p.svg_cut_job_id
      AND svg_result.cut_result_id = p.svg_cut_result_id
@@ -2544,14 +2549,16 @@ async function syncSvgCutJobSourceDisplayNumber(
   cuttingSequenceNo: string | number | null,
 ): Promise<void> {
   const displayNumber = sourceDisplayNumberFromCuttingSequence(cuttingSequenceNo);
-  if (cutJobId === null || displayNumber === null) return;
+  const resolvedCutJobId = toNullableNumber(cutJobId);
+  if (resolvedCutJobId === null || displayNumber === null) return;
+  await ensureSvgCutJobDisplayNumberAvailable(tx, displayNumber, resolvedCutJobId);
   await tx.query(
     `UPDATE cut_job
      SET source_display_number = $2,
          updated_at = now()
      WHERE cut_job_id = $1
        AND source_display_number IS DISTINCT FROM $2`,
-    [toNumber(cutJobId), displayNumber],
+    [resolvedCutJobId, displayNumber],
   );
 }
 
@@ -2959,6 +2966,7 @@ async function createSvgCutJob(
 ): Promise<{ cutJobId: number; cutResultId: number }> {
   const params = SVG_REVERSE_IMPORT_PARAMS;
   const sourceDisplayNumber = String(requestedCutJobId ?? cuttingSequenceNo);
+  await ensureSvgCutJobDisplayNumberAvailable(tx, sourceDisplayNumber, null);
   const isManualSvgUpload = dto.source.chatId === MANUAL_SVG_CHAT_ID;
   const selectionSource = isManualSvgUpload ? 'manual_svg_upload' : 'cnc_telegram_svg';
   const selectionCriteria = {
@@ -2998,10 +3006,8 @@ async function createSvgCutJob(
     plan.sheetMaterialTypeId,
     sourceDisplayNumber,
   ];
-  let job: { rows: Array<{ cut_job_id: string | number; created_at: string | Date }> };
-  job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
-    requestedCutJobId === null
-      ? `
+  const job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
+    `
       INSERT INTO cut_job (
         name, status, source, selection_criteria, params, request_hash,
         pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
@@ -3013,38 +3019,10 @@ async function createSvgCutJob(
         $7, false, true, $8
       )
       RETURNING cut_job_id, created_at
-      `
-      : `
-      INSERT INTO cut_job (
-        cut_job_id, name, status, source, selection_criteria, params, request_hash,
-        pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
-        sheet_material_type_id, combine_films, split_by_material, source_display_number
-      )
-      VALUES (
-        $9, $1, 'ready', 'api', $2::jsonb, $3::jsonb, $4,
-        'pending', $5, 1, $3::jsonb, $6,
-        $7, false, true, $8
-      )
-      ON CONFLICT (cut_job_id) DO NOTHING
-      RETURNING cut_job_id, created_at
       `,
-    requestedCutJobId === null
-      ? cutJobInsertParams
-      : [...cutJobInsertParams, requestedCutJobId],
+    cutJobInsertParams,
   );
-  if (requestedCutJobId !== null && job.rows.length === 0) {
-    const suggestedCutJobIds = await suggestCutJobIds(tx, requestedCutJobId);
-    throw new ApiError(
-      409,
-      'CUT_JOB_NUMBER_CONFLICT',
-      `Задание на раскрой #${requestedCutJobId} уже существует`,
-      { requestedCutJobId, suggestedCutJobIds },
-    );
-  }
   const cutJobId = toNumber(job.rows[0].cut_job_id);
-  if (requestedCutJobId !== null) {
-    await syncCutJobIdentitySequence(tx);
-  }
   const cutJobCreatedAt = toIso(job.rows[0].created_at);
   await tx.query(
     `INSERT INTO cut_result_command
@@ -3187,25 +3165,44 @@ async function createSvgCutJob(
   return { cutJobId, cutResultId };
 }
 
-async function syncCutJobIdentitySequence(tx: TransactionClient): Promise<void> {
-  await tx.query(
+async function ensureSvgCutJobDisplayNumberAvailable(
+  tx: TransactionClient,
+  displayNumber: string,
+  currentCutJobId: number | null,
+): Promise<void> {
+  const result = await tx.query<{ cut_job_id: string | number }>(
     `
-    SELECT setval(
-      pg_get_serial_sequence('cut_job', 'cut_job_id'),
-      GREATEST((SELECT COALESCE(MAX(cut_job_id), 1) FROM cut_job), 1),
-      true
-    )
+    SELECT existing_job.cut_job_id
+    FROM cut_job existing_job
+    WHERE NULLIF(trim(existing_job.source_display_number::text), '') = $1
+      AND ($2::bigint IS NULL OR existing_job.cut_job_id <> $2::bigint)
+    LIMIT 1
     `,
+    [displayNumber, currentCutJobId],
+  );
+  if (result.rows.length === 0) return;
+  const requestedCutJobId = Number(displayNumber);
+  const suggestedCutJobIds = Number.isFinite(requestedCutJobId)
+    ? await suggestCutJobDisplayNumbers(tx, requestedCutJobId)
+    : [];
+  throw new ApiError(
+    409,
+    'CUT_JOB_NUMBER_CONFLICT',
+    `Задание на раскрой №${displayNumber} уже существует`,
+    { requestedCutJobId, suggestedCutJobIds },
   );
 }
 
-async function suggestCutJobIds(tx: TransactionClient, requestedCutJobId: number): Promise<number[]> {
+async function suggestCutJobDisplayNumbers(tx: TransactionClient, requestedCutJobId: number): Promise<number[]> {
   const result = await tx.query<{ cut_job_id: string | number }>(
     `
     SELECT candidate.cut_job_id
     FROM generate_series($1::bigint + 1, $1::bigint + 200) AS candidate(cut_job_id)
-    LEFT JOIN cut_job existing_job ON existing_job.cut_job_id = candidate.cut_job_id
-    WHERE existing_job.cut_job_id IS NULL
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM cut_job existing_job
+      WHERE NULLIF(trim(existing_job.source_display_number::text), '') = candidate.cut_job_id::text
+    )
     ORDER BY candidate.cut_job_id
     LIMIT 5
     `,
@@ -6008,6 +6005,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         parserVersion: row.parser_version,
         cutLayout: cutLayoutOrNull(row.cut_layout_json),
         svgCutJobId: toNullableNumber(row.svg_cut_job_id),
+        svgCutJobDisplayNumber: nullableDisplayNumber(row.svg_cut_job_id, row.svg_cut_job_display_number),
         svgCutResultId: toNullableNumber(row.svg_cut_result_id),
         svgCutResultNo: toNullableNumber(row.svg_cut_result_no),
         svgCutImportStatus: row.svg_cut_import_status ?? 'none',
@@ -6282,6 +6280,16 @@ function toNumber(value: string | number | null | undefined): number {
 function toNullableNumber(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === '') return null;
   return Number(value);
+}
+
+function nullableDisplayNumber(
+  cutJobId: string | number | null | undefined,
+  sourceDisplayNumber: string | number | null | undefined,
+): string | null {
+  const normalized = normalizeOptional(sourceDisplayNumber == null ? null : String(sourceDisplayNumber));
+  if (normalized) return normalized;
+  const fallbackCutJobId = toNullableNumber(cutJobId);
+  return fallbackCutJobId === null ? null : String(fallbackCutJobId);
 }
 
 function toNullableFiniteNumber(value: string | number | null | undefined): number | null {

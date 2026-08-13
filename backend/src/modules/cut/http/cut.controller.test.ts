@@ -122,10 +122,12 @@ describe('CutController', () => {
   it('parses and delegates backend-side cut job list filters', async () => {
     expect(parseListCutJobsQuery({
       orderSearch: ' 2700 ',
+      jobNumber: ' №67 ',
       createdFrom: '2026-08-01',
       createdTo: '2026-08-07',
     })).toEqual({
       orderSearch: '2700',
+      jobNumber: '№67',
       createdFrom: '2026-08-01',
       createdTo: '2026-08-07',
     });
@@ -135,12 +137,13 @@ describe('CutController', () => {
     const controller = createController({ service: { listJobs } });
     await controller.list(
       { user: currentUser(), requestId: 'req-list' } as never,
-      { orderSearch: '2700', createdFrom: '2026-08-01', createdTo: '2026-08-07' },
+      { orderSearch: '2700', jobNumber: '67', createdFrom: '2026-08-01', createdTo: '2026-08-07' },
     );
 
     expect(listJobs).toHaveBeenCalledWith(expect.objectContaining({
       filters: {
         orderSearch: '2700',
+        jobNumber: '67',
         createdFrom: '2026-08-01',
         createdTo: '2026-08-07',
       },

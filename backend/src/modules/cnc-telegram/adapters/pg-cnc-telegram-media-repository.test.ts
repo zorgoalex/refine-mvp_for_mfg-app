@@ -24,6 +24,8 @@ describe('PgCncTelegramMediaRepository', () => {
     expect(queries[0]?.text).toContain('COALESCE(item.match_order_id, order_key.order_id)=$1::bigint');
     expect(queries[0]?.text).toContain('p.sheet_image_storage_key IS NOT NULL');
     expect(queries[0]?.text).toContain("p.svg_cut_import_status='imported'");
+    expect(queries[0]?.text).toContain('LEFT JOIN cut_job svg_job');
+    expect(queries[0]?.text).toContain('svg_job.source_display_number AS svg_cut_job_display_number');
     expect(queries[0]?.text).toContain('cnc_telegram_media_restore_requests');
   });
 
@@ -35,6 +37,7 @@ describe('PgCncTelegramMediaRepository', () => {
           source_message_id: null,
           sheet_image_storage_key: null,
           svg_cut_job_id: 74,
+          svg_cut_job_display_number: '67',
           svg_cut_result_no: 1,
           svg_cut_group_id: 175,
           svg_cut_sheet_index: 0,
@@ -55,6 +58,7 @@ describe('PgCncTelegramMediaRepository', () => {
       previewUrl: null,
       imageUrl: null,
       cutJobId: 74,
+      cutJobDisplayNumber: '67',
       cutResultNo: 1,
       cutGroupId: 175,
       sheetIndex: 0,
@@ -131,7 +135,7 @@ function screenshotRow(overrides: Record<string, unknown> = {}) {
     packet_id: packetId(), source_message_id: 10847, source_created_at: '2026-08-01T08:00:00.000Z',
     program_name: 'CNC.TXT', material_name: 'MDF', sheet_image_storage_key: 'tg_100_10847.jpg',
     sheet_image_content_type: 'image/jpeg', sheet_image_size_bytes: 1200,
-    svg_cut_job_id: null, svg_cut_result_no: null, svg_cut_group_id: null,
+    svg_cut_job_id: null, svg_cut_job_display_number: null, svg_cut_result_no: null, svg_cut_group_id: null,
     svg_cut_sheet_index: null, svg_cut_sheet_number: null, svg_cut_variant: null,
     matched_detail_count: 2, item_quantity_total: 3, original_available: true,
     available_until: '2026-08-31T08:00:00.000Z', restore_request_id: null,

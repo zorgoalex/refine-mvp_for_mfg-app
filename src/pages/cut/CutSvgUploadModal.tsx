@@ -126,7 +126,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const defaultOrderNamesKey = defaultOrderNames.join('\u001f');
   const defaultOrderOptions = useMemo(() => defaultOrderIds.map((orderId, index) => ({
     value: orderId,
-    label: defaultOrderNames[index] ? `${defaultOrderNames[index]} · #${orderId}` : `#${orderId}`,
+    label: formatDefaultOrderOptionLabel(orderId, defaultOrderNames[index]),
   })), [defaultOrderIdsKey, defaultOrderNamesKey]);
   const [parsed, setParsed] = useState<ParsedSvgUpload | null>(null);
   const [svgPreview, setSvgPreview] = useState<SvgPreviewState | null>(null);
@@ -194,8 +194,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   const orderPresetText = useMemo(() => {
     const labels = selectedOrderIds
-      .map((orderId) => orderOptions.find((option) => option.value === orderId)?.label ?? `#${orderId}`)
-      .map((label) => label.split(' · ')[0]);
+      .map((orderId) => orderOptions.find((option) => option.value === orderId)?.label ?? formatDefaultOrderOptionLabel(orderId, null));
     return labels.length > 0 ? `весь заказ: ${labels.join(', ')}` : 'весь заказ';
   }, [orderOptions, selectedOrderIds]);
 
@@ -402,6 +401,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
       const cutJobId = response.cutJobId;
       const cutJobPath = response.cutJobPath ?? (cutJobId ? `/cut?job=${cutJobId}` : null);
+      const cutJobDisplayNumber = await resolveManualSvgCutJobDisplayNumber(response.cutJobDisplayNumber ?? response.packet.svgCutJobDisplayNumber ?? null, cutJobId);
+      const cutJobDisplayLabel = formatCutJobDisplayLabel(cutJobDisplayNumber, cutJobId);
       let mdfCardCreated = false;
       if (cutJobId && await askCreateMdfMachineFileCard()) {
         const mdfResponse = await cncTelegramApi.manualSvgUpload({
@@ -418,7 +419,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         : undefined;
       Modal.success({
         title: cutJobId
-          ? `Задание на раскрой #${cutJobId} сформировано`
+          ? `Задание на раскрой ${cutJobDisplayLabel} сформировано`
           : 'SVG загружен, требуется проверка раскроя',
         okText: cutJobPath ? 'Открыть задание' : 'OK',
         onOk: openCutJob,
@@ -429,7 +430,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
               icon={<LinkOutlined />}
               onClick={openCutJob}
             >
-              Открыть задание #{cutJobId}
+              Открыть задание {cutJobDisplayLabel}
             </Button>
             {mdfCardCreated && (
               <Typography.Text type="success">
@@ -1553,10 +1554,61 @@ function mergeOrderOptions(current: OrderOption[], orders: OrderListItemDto[]): 
   for (const order of orders) {
     map.set(order.orderId, {
       value: order.orderId,
-      label: `${order.orderName} · #${order.orderId}`,
+      label: formatOrderOptionLabel(order),
     });
   }
   return Array.from(map.values());
+}
+
+function formatOrderOptionLabel(order: OrderListItemDto): string {
+  return order.orderName.trim() || order.fullNumber.trim() || formatDefaultOrderOptionLabel(order.orderId, null);
+}
+
+function formatDefaultOrderOptionLabel(orderId: number, orderName: string | null | undefined): string {
+  return orderName?.trim() || `Заказ ${orderId}`;
+}
+
+async function resolveManualSvgCutJobDisplayNumber(
+  displayNumber: string | null | undefined,
+  cutJobId: number | null | undefined,
+): Promise<string | null> {
+  const normalized = normalizeDisplayNumber(displayNumber);
+  if (normalized || !isPositiveNumber(cutJobId)) return normalized;
+  try {
+    const job = await cutApi.get(cutJobId);
+    return normalizeDisplayNumber(job.displayNumber);
+  } catch {
+    return null;
+  }
+}
+
+function formatCutJobDisplayLabel(
+  displayNumber: string | null | undefined,
+  cutJobId: number | null | undefined,
+): string {
+  const normalized = normalizeDisplayNumber(displayNumber);
+  if (normalized) {
+    if (normalized.startsWith('№')) return normalized;
+    if (normalized.startsWith('#')) {
+      const withoutHash = normalized.slice(1).trim();
+      return withoutHash ? `№${withoutHash}` : normalized;
+    }
+    return `№${normalized}`;
+  }
+  return isPositiveNumber(cutJobId) ? `ID ${cutJobId}` : '—';
+}
+
+function normalizeDisplayNumber(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
+function normalizeDisplayNumberForCompare(value: string | null | undefined): string | null {
+  return normalizeDisplayNumber(value)?.replace(/^[№#]\s*/, '') || null;
+}
+
+function isPositiveNumber(value: number | null | undefined): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
 async function findOrdersByFileNameHints(orderNames: string[]): Promise<{
@@ -1670,7 +1722,7 @@ function renderCutJobNumberHelp(
                 type="link"
                 onClick={() => onPick(cutJobId)}
               >
-                #{cutJobId}
+                №{cutJobId}
               </Button>
             ))}
           </Space>
@@ -1689,7 +1741,7 @@ async function checkRequestedCutJobNumber(cutJobId: number): Promise<CutJobNumbe
   return {
     status: 'duplicate',
     suggestions: await suggestAvailableCutJobNumbers(cutJobId),
-    message: `Задание #${cutJobId} уже существует`,
+    message: `Задание №${cutJobId} уже существует`,
   };
 }
 
@@ -1702,13 +1754,8 @@ async function suggestAvailableCutJobNumbers(cutJobId: number): Promise<number[]
 }
 
 async function cutJobExists(cutJobId: number): Promise<boolean> {
-  try {
-    await cutApi.get(cutJobId);
-    return true;
-  } catch (error) {
-    if (isApiError(error) && (error.status === 404 || error.code === 'CUT_JOB_NOT_FOUND')) return false;
-    throw error;
-  }
+  const jobs = await cutApi.list({ jobNumber: String(cutJobId) });
+  return jobs.some((job) => normalizeDisplayNumberForCompare(job.displayNumber) === String(cutJobId));
 }
 
 function suggestedCutJobIdsFromErrorDetails(details: unknown): number[] {

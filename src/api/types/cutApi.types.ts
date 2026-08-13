@@ -12,6 +12,7 @@ export interface CutJobListFilters {
   status?: string;
   createdBy?: number;
   orderSearch?: string;
+  jobNumber?: string;
   createdFrom?: string;
   createdTo?: string;
 }

@@ -25,6 +25,7 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('Оставьте пустым для авто-номера');
     expect(modal).toContain('checkRequestedCutJobNumber');
     expect(modal).toContain('suggestAvailableCutJobNumbers');
+    expect(modal).toContain('cutApi.list({ jobNumber: String(cutJobId) })');
     expect(modal).toContain('buildSvgMatchProblems');
     expect(modal).toContain('Детали SVG не сопоставлены с выбранными заказами');
     expect(modal).toContain('Размер в SVG');
@@ -75,6 +76,11 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('normalizeManualSvgCommentForSubmit');
     expect(modal).toContain('comments: uploadComment ? [uploadComment] : []');
     expect(modal).toContain('Сохранить комментарий как пресет');
+    expect(modal).toContain('formatDefaultOrderOptionLabel');
+    expect(modal).toContain('formatOrderOptionLabel');
+    expect(modal).toContain('resolveManualSvgCutJobDisplayNumber');
+    expect(modal).toContain('formatCutJobDisplayLabel');
+    expect(modal).toContain('cutJobDisplayLabel');
     expect(modal).toContain("okText: cutJobPath ? 'Открыть задание' : 'OK'");
     expect(modal).toContain('onOk: openCutJob');
     expect(modal).toContain('minimized');

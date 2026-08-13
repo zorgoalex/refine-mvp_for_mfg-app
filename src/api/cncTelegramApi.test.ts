@@ -82,6 +82,7 @@ describe('cncTelegramApi', () => {
           applied: true,
           ignoredStaleSourceVersion: false,
           cutJobId: 42,
+          cutJobDisplayNumber: '42',
           cutResultId: 100,
           cutJobPath: '/cut?job=42',
           createdMdfMachineFileCard: true,

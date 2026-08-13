@@ -28,6 +28,7 @@ interface ScreenshotRow extends QueryResultRow {
   matched_detail_count: string | number;
   item_quantity_total: string | number;
   svg_cut_job_id: string | number | null;
+  svg_cut_job_display_number: string | number | null;
   svg_cut_result_no: string | number | null;
   svg_cut_group_id: string | number | null;
   svg_cut_sheet_index: string | number | null;
@@ -368,7 +369,8 @@ function screenshotSelectSql(extraWhere: string): string {
            p.program_name, p.material_name,
            p.sheet_image_storage_key, p.sheet_image_content_type, p.sheet_image_size_bytes,
            matched.matched_detail_count, matched.item_quantity_total,
-           p.svg_cut_job_id, svg_result.result_no AS svg_cut_result_no,
+           p.svg_cut_job_id, svg_job.source_display_number AS svg_cut_job_display_number,
+           svg_result.result_no AS svg_cut_result_no,
            svg_sheet.cut_group_id AS svg_cut_group_id,
            svg_sheet.sheet_index AS svg_cut_sheet_index,
            svg_sheet.sheet_ordinal AS svg_cut_sheet_number,
@@ -391,6 +393,7 @@ function screenshotSelectSql(extraWhere: string): string {
            restore.requested_at AS restore_requested_at, restore.last_error AS restore_error
     FROM matched_packets matched
     JOIN cnc_telegram_packets p ON p.packet_id=matched.packet_id
+    LEFT JOIN cut_job svg_job ON svg_job.cut_job_id=p.svg_cut_job_id
     LEFT JOIN cut_result svg_result ON svg_result.cut_result_id=p.svg_cut_result_id
     LEFT JOIN LATERAL (
       SELECT sheet.cut_group_id, sheet.sheet_index, sheet.sheet_ordinal, sheet.variant
@@ -447,6 +450,7 @@ function mapScreenshotRow(row: ScreenshotRow, orderId: number): CncTelegramOrder
       ? `/api/v1/cnc-telegram/orders/${orderId}/screenshots/${packetId}/image`
       : null,
     cutJobId: nullableNumber(row.svg_cut_job_id),
+    cutJobDisplayNumber: nullableDisplayNumber(row.svg_cut_job_id, row.svg_cut_job_display_number),
     cutResultNo: nullableNumber(row.svg_cut_result_no),
     cutGroupId: nullableNumber(row.svg_cut_group_id),
     sheetIndex: nullableNumber(row.svg_cut_sheet_index),
@@ -489,6 +493,16 @@ function storageIdentity(storageKey: string): string | null {
 
 function nullableNumber(value: string | number | null): number | null {
   return value === null ? null : Number(value);
+}
+
+function nullableDisplayNumber(
+  cutJobId: string | number | null,
+  sourceDisplayNumber: string | number | null,
+): string | null {
+  const normalized = sourceDisplayNumber == null ? '' : String(sourceDisplayNumber).trim();
+  if (normalized) return normalized;
+  const fallbackCutJobId = nullableNumber(cutJobId);
+  return fallbackCutJobId === null ? null : String(fallbackCutJobId);
 }
 
 function toIso(value: string | Date | null): string {

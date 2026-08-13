@@ -99,6 +99,7 @@ export interface CncTelegramPacketDto {
   parserVersion: string;
   cutLayout: CncTelegramCutLayoutDto | null;
   svgCutJobId?: number | null;
+  svgCutJobDisplayNumber?: string | null;
   svgCutResultId?: number | null;
   svgCutResultNo?: number | null;
   svgCutImportStatus?: 'none' | 'skipped' | 'needs_review' | 'imported';
@@ -238,6 +239,7 @@ export interface CncAutoCutStatusConfigureResponseDto {
 
 export interface CncTelegramManualSvgUploadResponseDto extends CncTelegramIngestResponseDto {
   cutJobId: number | null;
+  cutJobDisplayNumber: string | null;
   cutResultId: number | null;
   cutJobPath: string | null;
   createdMdfMachineFileCard: boolean;

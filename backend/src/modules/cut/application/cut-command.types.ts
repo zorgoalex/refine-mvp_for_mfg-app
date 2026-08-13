@@ -111,6 +111,8 @@ export interface ListCutJobsQuery {
     createdBy?: number;
     /** Match order id or orders.order_name before the list LIMIT is applied. */
     orderSearch?: string;
+    /** Match operator-facing job number before the list LIMIT is applied. */
+    jobNumber?: string;
     /** Inclusive cut_job.created_at lower bound, YYYY-MM-DD. */
     createdFrom?: string;
     /** Inclusive cut_job.created_at upper bound, YYYY-MM-DD. */

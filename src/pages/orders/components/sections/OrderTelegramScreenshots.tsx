@@ -206,7 +206,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
           ? 'Оригинал'
           : 'Сохранённое превью';
   const viewerTitle = selectedIsSvgCut
-    ? `Скрин раскроя · задание #${selected?.cutJobId ?? '—'}`
+    ? `Скрин раскроя · задание ${formatScreenshotCutJobLabel(selected)}`
     : `Скрин раскроя · Telegram #${selected?.sourceMessageId ?? '—'}`;
 
   return (
@@ -268,7 +268,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
                 <Button aria-label="Увеличить изображение" icon={<ZoomInOutlined />} disabled={scale >= MAX_SCALE} onClick={() => setScale((value) => clampScale(value + SCALE_STEP))} />
               </Tooltip>
               <Tooltip title={displayedUrl ? 'Печать текущего изображения' : 'Изображение ещё не загружено'}>
-                <Button aria-label="Печать скрина" icon={<PrinterOutlined />} disabled={!displayedUrl} onClick={() => displayedUrl && printImage(displayedUrl, selectedIsSvgCut ? `Раскрой ${selected?.cutJobId ?? ''}` : `Раскрой Telegram ${selected?.sourceMessageId ?? ''}`)}>
+                <Button aria-label="Печать скрина" icon={<PrinterOutlined />} disabled={!displayedUrl} onClick={() => displayedUrl && printImage(displayedUrl, selectedIsSvgCut ? `Раскрой ${formatScreenshotCutJobLabel(selected)}` : `Раскрой Telegram ${selected?.sourceMessageId ?? ''}`)}>
                   Печать
                 </Button>
               </Tooltip>
@@ -291,7 +291,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
               <img
                 src={displayedUrl}
                 alt={selectedIsSvgCut
-                  ? `Скрин задания на раскрой ${selected?.cutJobId ?? ''}`
+                  ? `Скрин задания на раскрой ${formatScreenshotCutJobLabel(selected)}`
                   : `Скрин раскроя из Telegram, сообщение ${selected?.sourceMessageId ?? ''}`}
                 style={{ width: `${scale * 100}%` }}
               />
@@ -345,12 +345,12 @@ function TelegramScreenshotThumbnail({
   const restoreLabel = item.restore?.status === 'pending' || item.restore?.status === 'processing'
     ? 'Восстанавливается'
     : item.kind === 'svg_cut'
-      ? `Раскрой #${item.cutJobId ?? '—'}`
+      ? `Раскрой ${formatScreenshotCutJobLabel(item)}`
       : item.originalAvailable
       ? 'Оригинал доступен'
       : 'Нажмите для загрузки';
   const title = item.kind === 'svg_cut'
-    ? `SVG-раскрой #${item.cutJobId ?? '—'}`
+    ? `SVG-раскрой ${formatScreenshotCutJobLabel(item)}`
     : `Telegram #${item.sourceMessageId ?? '—'}`;
   return (
     <button
@@ -403,6 +403,19 @@ async function fetchSvgCutScreenshotBlob(
 
 function isPositiveNumber(value: number | null | undefined): value is number {
   return Number.isInteger(value) && Number(value) > 0;
+}
+
+function formatScreenshotCutJobLabel(item: CncTelegramOrderScreenshot | null | undefined): string {
+  const normalized = item?.cutJobDisplayNumber?.trim();
+  if (normalized) {
+    if (normalized.startsWith('№')) return normalized;
+    if (normalized.startsWith('#')) {
+      const withoutHash = normalized.slice(1).trim();
+      return withoutHash ? `№${withoutHash}` : normalized;
+    }
+    return `№${normalized}`;
+  }
+  return isPositiveNumber(item?.cutJobId) ? `ID ${item.cutJobId}` : '—';
 }
 
 function clampScale(value: number): number {

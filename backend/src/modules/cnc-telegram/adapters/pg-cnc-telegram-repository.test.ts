@@ -46,15 +46,16 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).not.toContain('manual-svg-upload-mdf-card-created');
   });
 
-  it('supports forced manual SVG cut-job number without breaking the identity sequence', () => {
+  it('supports forced manual SVG cut-job display number without reusing the identity id', () => {
     expect(repositorySource).toContain('requestedCutJobId: command.dto.requestedCutJobId ?? null');
     expect(repositorySource).toContain('CUT_JOB_NUMBER_CONFLICT');
     expect(repositorySource).toContain('suggestedCutJobIds');
-    expect(repositorySource).toContain('suggestCutJobIds');
-    expect(repositorySource).toContain('ON CONFLICT (cut_job_id) DO NOTHING');
-    expect(repositorySource).toContain('syncCutJobIdentitySequence');
-    expect(repositorySource).toContain("pg_get_serial_sequence('cut_job', 'cut_job_id')");
-    expect(repositorySource).toContain('cut_job_id, name, status, source');
+    expect(repositorySource).toContain('ensureSvgCutJobDisplayNumberAvailable');
+    expect(repositorySource).toContain('suggestCutJobDisplayNumbers');
+    expect(repositorySource).toContain('source_display_number');
+    expect(repositorySource).toContain('existing_job.cut_job_id <> $2::bigint');
+    expect(repositorySource).not.toContain('ON CONFLICT (cut_job_id) DO NOTHING');
+    expect(repositorySource).not.toContain('syncCutJobIdentitySequence');
   });
 
   it('explains manual SVG order/detail match failures with per-detail reasons', () => {
@@ -280,6 +281,7 @@ describe('PgCncTelegramRepository', () => {
                 completion_status: 'completed',
                 thumbs_up: true,
                 svg_cut_job_id: 35,
+                svg_cut_job_display_number: '67',
                 svg_cut_result_id: 54,
                 svg_cut_result_no: 3,
               }),
@@ -303,9 +305,12 @@ describe('PgCncTelegramRepository', () => {
       ['completed_baths', 'Завершенные ванны', 0],
     ]);
     expect(queries[0]).toContain('LEFT JOIN cut_result svg_result');
+    expect(queries[0]).toContain('LEFT JOIN cut_job svg_job');
+    expect(queries[0]).toContain('svg_job.source_display_number AS svg_cut_job_display_number');
     expect(queries[0]).toContain('svg_result.result_no AS svg_cut_result_no');
     expect(result.columns[1].packets[0]).toMatchObject({
       svgCutJobId: 35,
+      svgCutJobDisplayNumber: '67',
       svgCutResultId: 54,
       svgCutResultNo: 3,
     });
@@ -2603,6 +2608,7 @@ function packetRowBase() {
     parser_version: 'cnc-telegram-structured-v1',
     cut_layout_json: null,
     svg_cut_job_id: 30,
+    svg_cut_job_display_number: '12',
     svg_cut_result_id: 500,
     svg_cut_result_no: null,
     svg_cut_import_status: 'imported',

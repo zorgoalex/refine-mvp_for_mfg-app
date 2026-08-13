@@ -15,6 +15,7 @@ export interface CncTelegramOrderScreenshotDto {
   previewUrl: string | null;
   imageUrl: string | null;
   cutJobId?: number | null;
+  cutJobDisplayNumber?: string | null;
   cutResultNo?: number | null;
   cutGroupId?: number | null;
   sheetIndex?: number | null;

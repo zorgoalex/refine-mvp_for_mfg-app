@@ -793,12 +793,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("'var(--status-board-cnc-column-width, 220px)'");
     expect(page).toContain("displayMode={cardDisplayMode === 'minimal' ? 'minimal' : 'standard'}");
     expect(page).toContain('const compactCutNumber = formatCncPacketCompactNumber(packet);');
+    expect(page).toContain('const displayCutJobNumber = cncPacketDisplayCutJobNumber(packet);');
     expect(packetMinimal).toContain('href={cutJobPath}');
     expect(packetMinimal).toContain('cnc-compact-card__number cnc-compact-card__number--link');
     expect(page).toContain('const cutJobPath = cncPacketCutJobPath(packet);');
     expect(page).toContain('function cncPacketCutJobPath(packet: CncTelegramPacket): string | null');
-    expect(page).toContain('packet.cuttingSequenceNo != null && packet.svgCutJobId != null');
-    expect(page).toContain("return packet.cuttingSequenceNo != null ? String(packet.cuttingSequenceNo) : '—';");
+    expect(page).toContain('return packet.svgCutJobId != null');
+    expect(page).toContain('function cncPacketDisplayCutJobNumber(packet: CncTelegramPacket): string | null');
+    expect(page).toContain('const svgDisplayNumber = packet.svgCutJobDisplayNumber?.trim();');
+    expect(page).toContain("return cncPacketDisplayCutJobNumber(packet) ?? '—';");
     expect(page).not.toContain('formatCncPacketBasisCutNumber');
     expect(page).not.toContain('packet.svgCutSheets ?? []');
     expect(packetMinimal).not.toContain('<span className="cnc-compact-card__ref-label">Раскрой</span>');
@@ -1388,7 +1391,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
-    expect(sheetPreview).toContain('status="Скрин из Telegram-чата"');
+    expect(sheetPreview).toContain("status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}");
     expect(sheetPreview).toContain('printHeader={printHeader}');
     expect(sheetPreview).toContain('printMode="stretch-page-height"');
     expect(packetCard).toContain('const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);');
