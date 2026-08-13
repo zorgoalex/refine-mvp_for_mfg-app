@@ -18,6 +18,7 @@ const CAPS: AuthSchemaCapabilities = {
   providerSessions: true,
   userIdentities: true,
   authMethod: true,
+  workosUserControls: true,
 };
 
 type LoginPolicy = 'local' | 'external' | 'both';

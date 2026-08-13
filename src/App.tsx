@@ -15,6 +15,7 @@ import { WarningNotificationBridge } from "./components/WarningNotificationBridg
 import { AuthSessionExpiryBridge } from "./components/AuthSessionExpiryBridge";
 import { LoginPage } from "./pages/login";
 import { WorkosCallbackPage } from "./pages/login/WorkosCallback";
+import { WorkosInvitationPage } from "./pages/login/WorkosInvitation";
 import { dataProvider } from "./utils/dataProvider";
 import { authProvider } from "./authProvider";
 import { i18nProvider } from "./utils/i18nProvider";
@@ -941,6 +942,7 @@ const ThemedApp = () => {
                   element={<Outlet />}
                 >
                   <Route path="/login" element={<LoginPage />} />
+                  <Route path="/auth/workos/invite" element={<WorkosInvitationPage />} />
                   <Route path="/auth/workos/callback" element={<WorkosCallbackPage />} />
                 </Route>
               </Routes>

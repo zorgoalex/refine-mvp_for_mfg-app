@@ -31,11 +31,18 @@ export const apiRoutes = {
     workosCallback: backendApiPath('/auth/workos/callback'),
     workosLinkStart: backendApiPath('/auth/workos/link/start'),
     workosLinkCallback: backendApiPath('/auth/workos/link/callback'),
+    workosInvitationStart: backendApiPath('/auth/workos/invitations/start'),
+    workosInvitationCallback: backendApiPath('/auth/workos/invitations/callback'),
     workosLinks: backendApiPath('/auth/workos/links'),
+    workosSettings: backendApiPath('/auth/workos/settings'),
     workosLinkById: (identityId: string) => backendApiPath(`/auth/workos/links/${identityId}`),
     workosAdminLinks: (userId: string) => backendApiPath(`/auth/workos/admin/users/${userId}/links`),
     workosAdminLinkById: (userId: string, identityId: string) =>
       backendApiPath(`/auth/workos/admin/users/${userId}/links/${identityId}`),
+    workosAdminSettings: (userId: string) =>
+      backendApiPath(`/auth/workos/admin/users/${userId}/settings`),
+    workosAdminInvitations: (userId: string) =>
+      backendApiPath(`/auth/workos/admin/users/${userId}/invitations`),
   },
   profile: {
     preferences: backendApiPath('/me/preferences'),

@@ -117,8 +117,8 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
         const sessionManager = createPgSessionManager(config, database, tokenService, capabilities);
         const workosClient = createWorkosClient(config);
 
-        // Fail closed (controller answers 503) until the FULL 052 schema is
-        // present — a lagging replica/partial rollout must not surface
+        // Fail closed (controller answers 503) until the base 052 identity
+        // schema and the 088 user-control schema are present — a partial rollout must not surface
         // /auth/workos/* that dies on runtime SQL.
         if (!workosClient || !sessionManager || !isWorkosSchemaReady(capabilities)) {
           return null;
@@ -137,6 +137,7 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
           permissions,
           deniedAudit: auditService,
           database,
+          frontendOrigin: config.get('FRONTEND_ORIGIN', { infer: true }) ?? 'http://localhost:5173',
           loadUserById: async (userId) => {
             const result = await database.query<{
               user_id: string | number;
@@ -199,14 +200,21 @@ export interface AuthSchemaCapabilities {
   userIdentities: boolean;
   /** user_identities.auth_method exists (post-052 additive column). */
   authMethod: boolean;
+  /** Per-user self-service controls + invitation table exist (migration 088). */
+  workosUserControls: boolean;
 }
 
 /**
- * The WorkOS entrypoints may come up ONLY when the full 052 schema is
- * present; otherwise they must fail closed as 503, not die on runtime SQL.
+ * The WorkOS entrypoints may come up ONLY when the 052 identity schema and
+ * 088 user-control schema are present; otherwise they fail closed as 503.
  */
 export function isWorkosSchemaReady(capabilities: AuthSchemaCapabilities): boolean {
-  return capabilities.loginPolicy && capabilities.providerSessions && capabilities.userIdentities;
+  return (
+    capabilities.loginPolicy &&
+    capabilities.providerSessions &&
+    capabilities.userIdentities &&
+    capabilities.workosUserControls
+  );
 }
 
 /**
@@ -214,15 +222,22 @@ export function isWorkosSchemaReady(capabilities: AuthSchemaCapabilities): boole
  * feature flag: turning the flag off is a rollback of the SSO entrypoints
  * only — login_policy enforcement and the provenance of already-issued
  * WorkOS sessions must survive it (plan §8 rollback semantics). The probe
- * keeps a pre-052 database deployable; on a probe hiccup it falls back to
- * the flag so boot never breaks.
+ * keeps a pre-052 database deployable. On a probe hiccup the legacy
+ * capabilities fall back to the flag, while migration-088 write paths stay
+ * fail-closed.
  */
 export async function resolveAuthSchemaCapabilities(
   config: ConfigService<BackendEnv, true>,
   database: DatabaseService,
 ): Promise<AuthSchemaCapabilities> {
   if (!database.isConfigured) {
-    return { loginPolicy: false, providerSessions: false, userIdentities: false, authMethod: false };
+    return {
+      loginPolicy: false,
+      providerSessions: false,
+      userIdentities: false,
+      authMethod: false,
+      workosUserControls: false,
+    };
   }
 
   try {
@@ -232,6 +247,9 @@ export async function resolveAuthSchemaCapabilities(
       has_auth_source: boolean;
       has_user_identities: boolean;
       has_auth_method: boolean;
+      has_workos_self_link_enabled: boolean;
+      has_workos_self_unlink_enabled: boolean;
+      has_workos_link_invitations: boolean;
     }>(
       `
       SELECT
@@ -252,7 +270,21 @@ export async function resolveAuthSchemaCapabilities(
         EXISTS (SELECT 1 FROM information_schema.columns
                 WHERE table_schema = current_schema()
                   AND table_name = 'user_identities'
-                  AND column_name = 'auth_method') AS has_auth_method
+                  AND column_name = 'auth_method') AS has_auth_method,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'users'
+                  AND column_name = 'workos_self_link_enabled') AS has_workos_self_link_enabled,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'users'
+                  AND column_name = 'workos_self_unlink_enabled') AS has_workos_self_unlink_enabled,
+        (SELECT count(*) FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = 'workos_link_invitations'
+           AND column_name IN ('invitation_id', 'target_user_id', 'created_by_user_id',
+                               'token_hash', 'expires_at', 'consumed_at', 'revoked_at')) = 7
+          AS has_workos_link_invitations
       `,
     );
     const row = result.rows[0];
@@ -262,10 +294,22 @@ export async function resolveAuthSchemaCapabilities(
       providerSessions: row?.has_provider_session_id === true && row?.has_auth_source === true,
       userIdentities: row?.has_user_identities === true,
       authMethod: row?.has_auth_method === true,
+      workosUserControls:
+        row?.has_workos_self_link_enabled === true &&
+        row?.has_workos_self_unlink_enabled === true &&
+        row?.has_workos_link_invitations === true,
     };
   } catch {
     const enabled = isWorkosEnabled(config);
-    return { loginPolicy: enabled, providerSessions: enabled, userIdentities: enabled, authMethod: false };
+    return {
+      loginPolicy: enabled,
+      providerSessions: enabled,
+      userIdentities: enabled,
+      authMethod: false,
+      // New write paths must never be assumed present after a failed probe.
+      // Keep WorkOS entrypoints fail-closed until the next healthy restart.
+      workosUserControls: false,
+    };
   }
 }
 

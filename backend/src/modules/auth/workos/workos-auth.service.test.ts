@@ -56,6 +56,12 @@ interface Harness {
     insertLink: ReturnType<typeof vi.fn>;
     deleteOne: ReturnType<typeof vi.fn>;
     deleteLink: ReturnType<typeof vi.fn>;
+    getSettings: ReturnType<typeof vi.fn>;
+    updateSettings: ReturnType<typeof vi.fn>;
+    createInvitation: ReturnType<typeof vi.fn>;
+    revokeInvitations: ReturnType<typeof vi.fn>;
+    findInvitation: ReturnType<typeof vi.fn>;
+    consumeInvitation: ReturnType<typeof vi.fn>;
     recordDenied: ReturnType<typeof vi.fn>;
     canUser: ReturnType<typeof vi.fn>;
     database: DatabaseService;
@@ -100,6 +106,37 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     })),
     deleteOne: vi.fn(async () => 'unlinked' as const),
     deleteLink: vi.fn(async () => 'unlinked' as const),
+    getSettings: vi.fn(async () => ({
+      loginPolicy: 'both' as const,
+      selfLinkEnabled: true,
+      selfUnlinkEnabled: true,
+    })),
+    updateSettings: vi.fn(async () => ({
+      status: 'updated' as const,
+      settings: {
+        loginPolicy: 'both' as const,
+        selfLinkEnabled: false,
+        selfUnlinkEnabled: false,
+      },
+    })),
+    createInvitation: vi.fn(async () => ({
+      status: 'created' as const,
+      invitation: {
+        invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+        targetUserId: '42',
+        expiresAt: '2026-07-26T20:00:00.000Z',
+      },
+    })),
+    revokeInvitations: vi.fn(async () => ({
+      status: 'revoked' as const,
+      revoked: true,
+    })),
+    findInvitation: vi.fn(async () => ({
+      invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+      targetUserId: '42',
+      expiresAt: '2026-07-26T20:00:00.000Z',
+    })),
+    consumeInvitation: vi.fn(async () => ({ status: 'linked' as const })),
     recordDenied: vi.fn(async () => 'audit-1'),
     canUser: vi.fn((user: CurrentUser | null | undefined, permission: string) => Boolean(user?.permissions.includes(permission))),
     database: {
@@ -133,6 +170,12 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
       insertLinkWithAudit: state.insertLink,
       deleteOneLinkWithAudit: state.deleteOne,
       deleteLinkWithAudit: state.deleteLink,
+      getUserSettings: state.getSettings,
+      updateUserSettingsWithAudit: state.updateSettings,
+      createLinkInvitationWithAudit: state.createInvitation,
+      revokeActiveLinkInvitationsWithAudit: state.revokeInvitations,
+      findActiveInvitationByHash: state.findInvitation,
+      consumeInvitationAndLinkWithAudit: state.consumeInvitation,
       writeLinkFailed: state.linkFailed,
       touchLastLogin: async () => undefined,
       isSessionActive: async () => state.sessionActive,
@@ -146,6 +189,7 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     permissions: { canUser: state.canUser } as WorkosAuthServicePorts['permissions'],
     deniedAudit: { recordDenied: state.recordDenied },
     database: state.database,
+    frontendOrigin: 'https://erp.example.test',
     loadUserById: async () => state.userById,
   };
 
@@ -518,6 +562,31 @@ describe('WorkosAuthService.multilink task 5', () => {
     // rejection proves the fail-fast fires before any repo/permission work.
   });
 
+  it('self and admin reads reject a revoked DB session even while the JWT is valid', async () => {
+    const harness = createHarness({ sessionActive: false });
+    const admin = {
+      ...CURRENT_USER,
+      id: '7',
+      role: 'admin' as const,
+      roleId: 1,
+      permissions: ['users.manage_sso'] as const,
+      sessionId: 'revoked-admin-session',
+    };
+
+    await expect(harness.service.listOwnLinks(CURRENT_USER)).rejects.toMatchObject({
+      code: 'SESSION_INACTIVE',
+      statusCode: 401,
+    });
+    await expect(
+      harness.service.adminListLinks({ currentUser: admin, targetUserId: '42' }),
+    ).rejects.toMatchObject({ code: 'SESSION_INACTIVE', statusCode: 401 });
+    await expect(
+      harness.service.adminGetSettings({ currentUser: admin, targetUserId: '42' }),
+    ).rejects.toMatchObject({ code: 'SESSION_INACTIVE', statusCode: 401 });
+    expect(harness.ports.canUser).not.toHaveBeenCalled();
+    expect(harness.ports.getSettings).not.toHaveBeenCalled();
+  });
+
   it('self AND admin unlink fail-fast 401 when currentUser.sessionId is absent (R12-MINOR)', async () => {
     const harness = createHarness({});
     const noSession = { ...CURRENT_USER, sessionId: undefined };
@@ -681,7 +750,7 @@ describe('WorkosAuthService.multilink task 5', () => {
     );
   });
 
-  it('admin unlink maps deleteOne not_found→404, external_policy→409, session_inactive→401', async () => {
+  it('admin unlink maps deleteOne not_found→404 and session_inactive→401', async () => {
     const admin = {
       ...CURRENT_USER,
       id: '7',
@@ -695,10 +764,6 @@ describe('WorkosAuthService.multilink task 5', () => {
     await expect(
       notFound.service.adminUnlink({ currentUser: admin, targetUserId: '42', identityId: '9' }),
     ).rejects.toMatchObject({ code: 'IDENTITY_NOT_FOUND', statusCode: 404 });
-    const external = createHarness({ deleteOne: vi.fn(async () => 'external_policy' as const) });
-    await expect(
-      external.service.adminUnlink({ currentUser: admin, targetUserId: '42', identityId: '1' }),
-    ).rejects.toMatchObject({ code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY', statusCode: 409 });
     const revoked = createHarness({ deleteOne: vi.fn(async () => 'session_inactive' as const) });
     await expect(
       revoked.service.adminUnlink({ currentUser: admin, targetUserId: '42', identityId: '1' }),
@@ -709,6 +774,135 @@ describe('WorkosAuthService.multilink task 5', () => {
     const harness = createHarness({ linkRecord: null, identity: { ...IDENTITY, authMethod: 'GoogleOAuth' } });
     await harness.service.linkWithCode({ code: 'c', currentUser: CURRENT_USER, requestId: 'r' });
     expect(harness.ports.insertLink).toHaveBeenCalledWith(expect.objectContaining({ authMethod: 'GoogleOAuth' }));
+  });
+
+  it('enforces the per-user self-link toggle from the guarded insert', async () => {
+    const harness = createHarness({
+      linkRecord: null,
+      insertLink: vi.fn(async () => ({ status: 'self_link_disabled' as const })),
+    });
+
+    await expect(
+      harness.service.linkWithCode({ code: 'c', currentUser: CURRENT_USER }),
+    ).rejects.toMatchObject({ code: 'SSO_SELF_LINK_DISABLED', statusCode: 403 });
+  });
+
+  it('enforces the per-user self-unlink toggle from the guarded delete', async () => {
+    const harness = createHarness({
+      deleteOne: vi.fn(async () => 'self_unlink_disabled' as const),
+    });
+
+    await expect(
+      harness.service.unlinkOwn({
+        currentUser: CURRENT_USER,
+        identityId: '1',
+        password: 'valid-password',
+      }),
+    ).rejects.toMatchObject({ code: 'SSO_SELF_UNLINK_DISABLED', statusCode: 403 });
+  });
+});
+
+describe('WorkosAuthService administrator controls', () => {
+  const admin: CurrentUser = {
+    id: '7',
+    username: 'admin',
+    role: 'admin',
+    roleId: 1,
+    permissions: ['users.manage_sso'],
+    sessionId: 'admin-session',
+  };
+
+  it('updates independent user settings only with manage_sso permission', async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.service.adminUpdateSettings({
+        currentUser: admin,
+        targetUserId: '42',
+        settings: {
+          loginPolicy: 'both',
+          selfLinkEnabled: false,
+          selfUnlinkEnabled: false,
+        },
+      }),
+    ).resolves.toEqual({
+      loginPolicy: 'both',
+      selfLinkEnabled: false,
+      selfUnlinkEnabled: false,
+    });
+    expect(harness.ports.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorSessionId: 'admin-session',
+        targetUserId: '42',
+        settings: expect.objectContaining({
+          selfLinkEnabled: false,
+          selfUnlinkEnabled: false,
+        }),
+      }),
+    );
+  });
+
+  it('creates a 24-hour invitation URL while passing only a SHA-256 hash to storage', async () => {
+    const harness = createHarness();
+
+    const result = await harness.service.adminCreateInvitation({
+      currentUser: admin,
+      targetUserId: '42',
+    });
+
+    const url = new URL(result.invitationUrl);
+    expect(url.origin).toBe('https://erp.example.test');
+    expect(url.pathname).toBe('/auth/workos/invite');
+    const rawToken = new URLSearchParams(url.hash.slice(1)).get('token');
+    expect(rawToken).toMatch(/^[A-Za-z0-9_-]{40,100}$/);
+    expect(harness.ports.createInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        targetUserId: '42',
+      }),
+    );
+    expect(JSON.stringify(harness.ports.createInvitation.mock.calls)).not.toContain(
+      rawToken,
+    );
+  });
+
+  it('revokes active invitations through the live admin-session transaction', async () => {
+    const harness = createHarness();
+
+    await expect(
+      harness.service.adminRevokeInvitations({ currentUser: admin, targetUserId: '42' }),
+    ).resolves.toEqual({ revoked: true });
+    expect(harness.ports.revokeInvitations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorSessionId: 'admin-session',
+        targetUserId: '42',
+        actor: expect.objectContaining({ userId: '7' }),
+      }),
+    );
+  });
+
+  it('validates the invitation token by hash and consumes it during provider callback', async () => {
+    const harness = createHarness();
+    const token = 'A'.repeat(43);
+
+    await expect(harness.service.prepareInvitation(token)).resolves.toEqual({
+      invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+    });
+    expect(harness.ports.findInvitation).toHaveBeenCalledWith(
+      expect.stringMatching(/^[0-9a-f]{64}$/),
+    );
+    await expect(
+      harness.service.linkWithInvitationCode({
+        invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+        code: 'provider-code',
+      }),
+    ).resolves.toEqual({ linked: true });
+    expect(harness.ports.consumeInvitation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+        providerUserId: IDENTITY.sub,
+      }),
+    );
   });
 });
 

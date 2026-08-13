@@ -122,6 +122,40 @@ describe('workos callback helpers contract', () => {
     expect(callbackSource).toContain('searchParams.get("state")');
   });
 
+  it('keeps invitation callback single-use and bound to the exact state', () => {
+    const invitationCallback =
+      authApiSource.split('async workosInvitationCallback')[1]?.split('async ')[0] ?? '';
+    const invitationPage = readFileSync(
+      new URL('../pages/login/WorkosInvitation.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(invitationCallback).toContain('skipAuthRefresh: true');
+    expect(callbackSource).toContain(
+      'sessionStorage.getItem(INVITATION_INTENT_KEY) === state',
+    );
+    expect(invitationPage).toContain('markWorkosInvitationIntent(state)');
+    expect(invitationPage).toContain('workosInvitationStartUrl(token)');
+  });
+
+  it('renders independent self-link/self-unlink controls in profile and admin UI', () => {
+    const profileCard = readFileSync(
+      new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url),
+      'utf8',
+    );
+    const adminCard = readFileSync(
+      new URL('../pages/users/WorkosAdminLinksCard.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(profileCard).toContain('selfLinkEnabled');
+    expect(profileCard).toContain('selfUnlinkEnabled');
+    expect(adminCard).toContain('workosAdminUpdateSettings');
+    expect(adminCard).toContain('workosAdminCreateInvitation');
+    expect(adminCard).toContain('selfLinkEnabled');
+    expect(adminCard).toContain('selfUnlinkEnabled');
+  });
+
   it('guards the single-use code against StrictMode double-mount', () => {
     expect(callbackSource).toContain('const consumedCodes = new Map<string, "pending" | "settled">()');
     // A revisit of a burned code shows an explicit error, never a dead spinner.

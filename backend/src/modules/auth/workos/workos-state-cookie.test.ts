@@ -22,6 +22,17 @@ describe('workos state cookie', () => {
     expect(payload?.sessionId).toBe('session-7');
   });
 
+  it('binds invitation mode to one server-side invitation id', () => {
+    const { cookieValue } = createWorkosState(SECRET, 'invitation', {
+      invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+    });
+    const payload = verifyWorkosState(SECRET, cookieValue);
+
+    expect(payload?.mode).toBe('invitation');
+    expect(payload?.invitationId).toBe('02bed022-f183-487b-8e2f-4603665a2add');
+    expect(payload?.sessionId).toBeUndefined();
+  });
+
   it('rejects tampered payloads and wrong secrets', () => {
     const { cookieValue } = createWorkosState(SECRET, 'link', 'session-7');
     const [encoded, signature] = [

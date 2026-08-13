@@ -21,6 +21,9 @@ describe('resolveAuthSchemaCapabilities', () => {
           has_auth_source: true,
           has_user_identities: true,
           has_auth_method: false,
+          has_workos_self_link_enabled: true,
+          has_workos_self_unlink_enabled: true,
+          has_workos_link_invitations: true,
         },
       ]),
     );
@@ -30,6 +33,7 @@ describe('resolveAuthSchemaCapabilities', () => {
       providerSessions: true,
       userIdentities: true,
       authMethod: false,
+      workosUserControls: true,
     });
   });
 
@@ -43,6 +47,9 @@ describe('resolveAuthSchemaCapabilities', () => {
           has_auth_source: false,
           has_user_identities: false,
           has_auth_method: false,
+          has_workos_self_link_enabled: false,
+          has_workos_self_unlink_enabled: false,
+          has_workos_link_invitations: false,
         },
       ]),
     );
@@ -52,10 +59,11 @@ describe('resolveAuthSchemaCapabilities', () => {
       providerSessions: false,
       userIdentities: false,
       authMethod: false,
+      workosUserControls: false,
     });
   });
 
-  it('falls back to the flag when the probe fails so boot never breaks', async () => {
+  it('falls legacy reads back to the flag but keeps migration-088 writes fail-closed', async () => {
     const failing = createDatabase([], new Error('probe failed'));
 
     await expect(
@@ -65,6 +73,7 @@ describe('resolveAuthSchemaCapabilities', () => {
       providerSessions: true,
       userIdentities: true,
       authMethod: false,
+      workosUserControls: false,
     });
     await expect(
       resolveAuthSchemaCapabilities(createConfig({ BACKEND_ENABLE_WORKOS_AUTH: false }), failing),
@@ -73,6 +82,7 @@ describe('resolveAuthSchemaCapabilities', () => {
       providerSessions: false,
       userIdentities: false,
       authMethod: false,
+      workosUserControls: false,
     });
   });
 
@@ -86,6 +96,7 @@ describe('resolveAuthSchemaCapabilities', () => {
       providerSessions: false,
       userIdentities: false,
       authMethod: false,
+      workosUserControls: false,
     });
   });
 
@@ -99,6 +110,9 @@ describe('resolveAuthSchemaCapabilities', () => {
           has_auth_source: true,
           has_user_identities: true,
           has_auth_method: true,
+          has_workos_self_link_enabled: true,
+          has_workos_self_unlink_enabled: true,
+          has_workos_link_invitations: true,
         },
       ]),
     );
@@ -113,6 +127,9 @@ describe('resolveAuthSchemaCapabilities', () => {
           has_auth_source: true,
           has_user_identities: true,
           has_auth_method: false,
+          has_workos_self_link_enabled: true,
+          has_workos_self_unlink_enabled: true,
+          has_workos_link_invitations: true,
         },
       ]),
     );
@@ -138,14 +155,44 @@ describe('isWorkosSchemaReady', () => {
     // must keep the workos providers null → controller answers 503 instead
     // of dying on runtime SQL.
     expect(
-      isWorkosSchemaReady({ loginPolicy: true, providerSessions: true, userIdentities: false }),
+      isWorkosSchemaReady({
+        loginPolicy: true,
+        providerSessions: true,
+        userIdentities: false,
+        authMethod: false,
+        workosUserControls: true,
+      }),
     ).toBe(false);
     expect(
-      isWorkosSchemaReady({ loginPolicy: false, providerSessions: true, userIdentities: true }),
+      isWorkosSchemaReady({
+        loginPolicy: false,
+        providerSessions: true,
+        userIdentities: true,
+        authMethod: false,
+        workosUserControls: true,
+      }),
     ).toBe(false);
     expect(
-      isWorkosSchemaReady({ loginPolicy: true, providerSessions: true, userIdentities: true }),
+      isWorkosSchemaReady({
+        loginPolicy: true,
+        providerSessions: true,
+        userIdentities: true,
+        authMethod: false,
+        workosUserControls: true,
+      }),
     ).toBe(true);
+  });
+
+  it('keeps WorkOS disabled until migration 088 user controls are present', () => {
+    expect(
+      isWorkosSchemaReady({
+        loginPolicy: true,
+        providerSessions: true,
+        userIdentities: true,
+        authMethod: true,
+        workosUserControls: false,
+      }),
+    ).toBe(false);
   });
 });
 

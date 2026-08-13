@@ -43,6 +43,8 @@ export const LoginPage: React.FC = () => {
     },
   });
   const [ssoLogoutWarning] = React.useState(consumeSsoLogoutWarning);
+  const invitationLinked =
+    new URLSearchParams(window.location.search).get("sso") === "invitation-linked";
 
   const onFinish = (values: { username: string; password: string }) => {
     postLoginTarget.current = resolvePostLoginTarget(
@@ -86,6 +88,15 @@ export const LoginPage: React.FC = () => {
             style={{ marginBottom: 16 }}
             message="Сессия SSO-провайдера может быть ещё активна"
             description="Не удалось завершить сессию провайдера входа. На общем компьютере завершите её вручную (выход из аккаунта провайдера)."
+          />
+        )}
+        {invitationLinked && (
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="SSO-вход привязан"
+            description="Теперь можно войти через SSO выбранной внешней учётной записью."
           />
         )}
         {loginError && (

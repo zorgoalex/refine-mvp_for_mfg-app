@@ -10,6 +10,11 @@ describe('workos identity OpenAPI contract', () => {
     expect(contract).toContain('  /api/v1/auth/workos/links/{identityId}:');
     expect(contract).toContain('  /api/v1/auth/workos/admin/users/{userId}/links:');
     expect(contract).toContain('  /api/v1/auth/workos/admin/users/{userId}/links/{identityId}:');
+    expect(contract).toContain('  /api/v1/auth/workos/settings:');
+    expect(contract).toContain('  /api/v1/auth/workos/invitations/start:');
+    expect(contract).toContain('  /api/v1/auth/workos/invitations/callback:');
+    expect(contract).toContain('  /api/v1/auth/workos/admin/users/{userId}/settings:');
+    expect(contract).toContain('  /api/v1/auth/workos/admin/users/{userId}/invitations:');
     expect(contract).not.toContain('  /api/v1/auth/workos/link:');
     expect(contract).not.toContain('    WorkosLinkStatusResponse:');
   });
@@ -91,9 +96,39 @@ describe('workos identity OpenAPI contract', () => {
     expect(adminUnlinkSection).toContain("$ref: '#/components/schemas/WorkosAdminUnlinkRequest'");
     expect(adminUnlinkRequestSchema).toContain('reason:');
     expect(adminUnlinkRequestSchema).not.toContain('required:');
-    for (const status of ["'200':", "'403':", "'404':", "'409':", "'422':"]) {
+    for (const status of ["'200':", "'403':", "'404':", "'422':"]) {
       expect(adminUnlinkSection).toContain(status);
     }
+  });
+
+  it('documents per-user controls and one-time administrator invitations', () => {
+    const contract = readOpenApiContract();
+    const settingsSection = sectionBetween(
+      contract,
+      '  /api/v1/auth/workos/admin/users/{userId}/settings:',
+      '  /api/v1/auth/workos/admin/users/{userId}/invitations:',
+    );
+    const invitationSection = sectionBetween(
+      contract,
+      '  /api/v1/auth/workos/admin/users/{userId}/invitations:',
+      '  /api/v1/me:',
+    );
+    const settingsSchema = sectionBetween(
+      contract,
+      '    WorkosUserSettings:',
+      '    WorkosUserSettingsPatch:',
+    );
+
+    expect(settingsSection).toContain('operationId: authWorkosAdminGetSettings');
+    expect(settingsSection).toContain('operationId: authWorkosAdminUpdateSettings');
+    expect(settingsSection).toContain("$ref: '#/components/schemas/WorkosUserSettingsPatch'");
+    expect(settingsSchema).toContain('loginPolicy:');
+    expect(settingsSchema).toContain('selfLinkEnabled:');
+    expect(settingsSchema).toContain('selfUnlinkEnabled:');
+    expect(invitationSection).toContain('operationId: authWorkosAdminCreateInvitation');
+    expect(invitationSection).toContain('operationId: authWorkosAdminRevokeInvitations');
+    expect(invitationSection).toContain("$ref: '#/components/schemas/WorkosInvitationResponse'");
+    expect(invitationSection).toContain("'201':");
   });
 });
 

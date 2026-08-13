@@ -423,6 +423,80 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/auth/workos/invitations/start:
+    post:
+      tags:
+        - Auth
+      operationId: authWorkosInvitationStart
+      summary: Начать привязку SSO по одноразовой админ-ссылке
+      description: |
+        Проверяет хеш одноразового токена, выставляет подписанный state
+        mode=invitation и выдаёт hosted AuthKit URL. Токен привязан к одному
+        ERP-пользователю, действует 24 часа и не хранится в базе открытым текстом.
+      x-rate-limit: auth_workos_invitation_start
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkosInvitationStartRequest'
+      responses:
+        '200':
+          description: AuthKit authorize URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosAuthorizeResponse'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/invitations/callback:
+    post:
+      tags:
+        - Auth
+      operationId: authWorkosInvitationCallback
+      summary: Завершить привязку SSO по одноразовой админ-ссылке
+      description: |
+        Проверяет подписанный state, verified email и атомарно привязывает
+        точный WorkOS sub к ERP-пользователю приглашения. Приглашение
+        потребляется только при успешной или уже выполненной привязке.
+      x-rate-limit: auth_workos_callback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkosCallbackRequest'
+      responses:
+        '200':
+          description: Identity привязана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosLinkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '410':
+          $ref: '#/components/responses/Gone'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/auth/workos/links:
     get:
       tags:
@@ -441,6 +515,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkosLinkListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/settings:
+    get:
+      tags:
+        - Auth
+      operationId: authWorkosGetSettings
+      summary: Получить собственные настройки SSO
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Настройки SSO текущего пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosUserSettings'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -584,6 +680,127 @@ paths:
           $ref: '#/components/responses/RateLimitExceeded'
         '500':
           $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/admin/users/{userId}/settings:
+    get:
+      tags:
+        - Auth
+      operationId: authWorkosAdminGetSettings
+      summary: Получить настройки SSO пользователя
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkosUserId'
+      responses:
+        '200':
+          description: Настройки SSO пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosUserSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    patch:
+      tags:
+        - Auth
+      operationId: authWorkosAdminUpdateSettings
+      summary: Изменить политику и self-service настройки SSO пользователя
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/WorkosUserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkosUserSettingsPatch'
+      responses:
+        '200':
+          description: Обновлённые настройки
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosUserSettings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /api/v1/auth/workos/admin/users/{userId}/invitations:
+    post:
+      tags:
+        - Auth
+      operationId: authWorkosAdminCreateInvitation
+      summary: Создать одноразовую ссылку привязки SSO для пользователя
+      security:
+        - bearerAuth: []
+      x-rate-limit: auth_workos_admin_invitation
+      parameters:
+        - $ref: '#/components/parameters/WorkosUserId'
+      responses:
+        '201':
+          description: Одноразовая ссылка создана; предыдущая активная ссылка отменена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkosInvitationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+    delete:
+      tags:
+        - Auth
+      operationId: authWorkosAdminRevokeInvitations
+      summary: Отозвать активную одноразовую ссылку привязки SSO пользователя
+      security:
+        - bearerAuth: []
+      x-rate-limit: auth_workos_admin_invitation_revoke
+      parameters:
+        - $ref: '#/components/parameters/WorkosUserId'
+      responses:
+        '200':
+          description: Активная ссылка отозвана либо отсутствовала
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - revoked
+                properties:
+                  revoked:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
@@ -12476,6 +12693,13 @@ components:
         example: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   parameters:
+    WorkosUserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[1-9][0-9]*$'
     Page:
       name: page
       in: query
@@ -12891,6 +13115,18 @@ components:
               value:
                 code: SHEET_MATERIAL_STALE_VERSION
                 message: Sheet material type version mismatch
+                requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
+    Gone:
+      description: Одноразовый ресурс истёк, отменён или уже использован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+          examples:
+            invitationInvalid:
+              value:
+                code: SSO_INVITATION_INVALID
+                message: Ссылка привязки недействительна, истекла или уже использована
                 requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
     InternalError:
       description: Внутренняя ошибка сервера
@@ -13707,6 +13943,60 @@ components:
           type: string
           minLength: 1
           description: Значение state, обязано совпасть с HttpOnly state-cookie.
+
+    WorkosInvitationStartRequest:
+      type: object
+      required:
+        - token
+      properties:
+        token:
+          type: string
+          minLength: 40
+          writeOnly: true
+          description: Одноразовый секрет из администраторской ссылки.
+
+    WorkosInvitationResponse:
+      type: object
+      required:
+        - invitationUrl
+        - expiresAt
+      properties:
+        invitationUrl:
+          type: string
+          format: uri
+          writeOnly: true
+        expiresAt:
+          type: string
+          format: date-time
+
+    WorkosUserSettings:
+      type: object
+      required:
+        - loginPolicy
+        - selfLinkEnabled
+        - selfUnlinkEnabled
+      properties:
+        loginPolicy:
+          type: string
+          enum: [local, external, both]
+        selfLinkEnabled:
+          type: boolean
+          description: Может ли пользователь сам добавлять новые WorkOS identity.
+        selfUnlinkEnabled:
+          type: boolean
+          description: Может ли пользователь сам удалять свои WorkOS identity.
+
+    WorkosUserSettingsPatch:
+      type: object
+      minProperties: 1
+      properties:
+        loginPolicy:
+          type: string
+          enum: [local, external, both]
+        selfLinkEnabled:
+          type: boolean
+        selfUnlinkEnabled:
+          type: boolean
 
     WorkosLinkResponse:
       type: object

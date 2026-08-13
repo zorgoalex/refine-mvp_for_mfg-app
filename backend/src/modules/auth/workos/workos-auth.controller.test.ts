@@ -302,19 +302,32 @@ describe('WorkosAuthController admin identity routes', () => {
     expect(harness.rateLimitRefunds).toEqual([]);
   });
 
-  it('propagates UNLINK_FORBIDDEN_EXTERNAL_POLICY unchanged on admin unlink and does not refund', async () => {
-    const harness = createHarness({
-      adminUnlinkError: new ApiError(409, 'UNLINK_FORBIDDEN_EXTERNAL_POLICY', 'blocked'),
-    });
+  it('revokes active invitations through a distinct bounded admin command', async () => {
+    const harness = createHarness({ adminRevokeInvitationsResult: { revoked: true } });
+    const request = createRequest();
 
     await expect(
-      harness.controller.adminUnlink(createRequest(), '99', '17', { reason: 'cleanup' }),
-    ).rejects.toMatchObject({
-      statusCode: 409,
-      code: 'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
-    });
+      harness.controller.adminRevokeInvitations(request, '99'),
+    ).resolves.toEqual({ revoked: true });
 
-    expect(harness.rateLimitRefunds).toEqual([]);
+    expect(harness.rateLimitConsumes).toEqual([
+      {
+        rule: { feature: 'auth_workos_admin_invitation_revoke', maxRequests: 30, windowMs: 60_000 },
+        subject: { route: 'auth/workos/admin/invitation/revoke', userId: '42' },
+      },
+    ]);
+    expect(harness.serviceCalls).toEqual([
+      {
+        method: 'adminRevokeInvitations',
+        input: {
+          currentUser: request.user,
+          targetUserId: '99',
+          requestId: 'req-1',
+          userAgent: 'test-agent',
+          ipAddress: '127.0.0.1',
+        },
+      },
+    ]);
   });
 });
 
@@ -335,6 +348,7 @@ function createHarness(options: {
   adminListLinksError?: Error;
   adminUnlinkResult?: { unlinked: boolean };
   adminUnlinkError?: Error;
+  adminRevokeInvitationsResult?: { revoked: boolean };
 }) {
   const serviceCalls: Array<{ method: string; input: unknown }> = [];
   const rateLimitConsumes: Array<{
@@ -347,6 +361,9 @@ function createHarness(options: {
   }> = [];
 
   const workos = {
+    async assertSelfLinkAllowed() {
+      return undefined;
+    },
     buildAuthorizeUrl(
       state: string,
       options: { forceFreshAuthentication?: boolean } = {},
@@ -378,6 +395,10 @@ function createHarness(options: {
         throw options.adminUnlinkError;
       }
       return options.adminUnlinkResult ?? { unlinked: true };
+    },
+    async adminRevokeInvitations(input: unknown) {
+      serviceCalls.push({ method: 'adminRevokeInvitations', input });
+      return options.adminRevokeInvitationsResult ?? { revoked: false };
     },
   };
 

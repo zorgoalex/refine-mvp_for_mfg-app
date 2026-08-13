@@ -5,13 +5,15 @@ export const WORKOS_STATE_COOKIE_NAME = 'erp_workos_state';
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 
-export type WorkosFlowMode = 'login' | 'link';
+export type WorkosFlowMode = 'login' | 'link' | 'invitation';
 
 export interface WorkosStatePayload {
   state: string;
   mode: WorkosFlowMode;
   /** Bound ERP session id; required and revalidated for mode='link'. */
   sessionId?: string;
+  /** One-time administrator invitation; required for mode='invitation'. */
+  invitationId?: string;
   expiresAt: number;
 }
 
@@ -35,12 +37,17 @@ export interface WorkosStateCookie {
 export function createWorkosState(
   secret: string,
   mode: WorkosFlowMode,
-  sessionId?: string,
+  contextOrSession: { sessionId?: string; invitationId?: string } | string = {},
 ): { state: string; cookieValue: string } {
+  const context =
+    typeof contextOrSession === 'string'
+      ? { sessionId: contextOrSession }
+      : contextOrSession;
   const payload: WorkosStatePayload = {
     state: randomUUID(),
     mode,
-    sessionId,
+    sessionId: context.sessionId,
+    invitationId: context.invitationId,
     expiresAt: Date.now() + STATE_TTL_MS,
   };
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -76,7 +83,16 @@ export function verifyWorkosState(secret: string, cookieValue: string | undefine
     if (typeof payload.state !== 'string' || !payload.state) {
       return null;
     }
-    if (payload.mode !== 'login' && payload.mode !== 'link') {
+    if (payload.mode !== 'login' && payload.mode !== 'link' && payload.mode !== 'invitation') {
+      return null;
+    }
+    if (payload.mode === 'link' && (typeof payload.sessionId !== 'string' || !payload.sessionId)) {
+      return null;
+    }
+    if (
+      payload.mode === 'invitation' &&
+      (typeof payload.invitationId !== 'string' || !payload.invitationId)
+    ) {
       return null;
     }
     if (typeof payload.expiresAt !== 'number' || payload.expiresAt < Date.now()) {

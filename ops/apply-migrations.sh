@@ -1403,6 +1403,21 @@ probe_file() {
                        );" \
                      "SELECT pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)
                               LIKE '%order_hdf_details%';" ;;
+    126_workos_user_controls*) probe_all \
+                     "$(q_col users workos_self_link_enabled)" \
+                     "$(q_col users workos_self_unlink_enabled)" \
+                     "$(q_tbl workos_link_invitations)" \
+                     "$(q_col workos_link_invitations invitation_id)" \
+                     "$(q_col workos_link_invitations target_user_id)" \
+                     "$(q_col workos_link_invitations created_by_user_id)" \
+                     "$(q_col workos_link_invitations token_hash)" \
+                     "$(q_col workos_link_invitations expires_at)" \
+                     "$(q_col workos_link_invitations consumed_at)" \
+                     "$(q_col workos_link_invitations revoked_at)" \
+                     "$(q_con ck_workos_link_invitations_token_hash)" \
+                     "$(q_con ck_workos_link_invitations_expiry)" \
+                     "$(q_idx idx_workos_link_invitations_target)" \
+                     "$(q_idx idx_workos_link_invitations_active)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1414,7 +1429,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
