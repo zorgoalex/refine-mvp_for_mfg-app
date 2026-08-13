@@ -1,7 +1,7 @@
 import { useShow, useList, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined, UploadOutlined } from "@ant-design/icons";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -56,7 +56,6 @@ import { TableTopScroll } from "../../components/TableTopScroll";
 import { useKeepAlive, useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
-import { CutSvgUploadModal } from "../cut/CutSvgUploadModal";
 import {
   EMPTY_GROUP_KEY,
   buildGroupedRows,
@@ -1154,7 +1153,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
   const [cutModalOpen, setCutModalOpen] = useState(false);
-  const [svgUploadOpen, setSvgUploadOpen] = useState(false);
   const [bazisCutModalOpen, setBazisCutModalOpen] = useState(false);
 
   useEffect(() => {
@@ -2369,12 +2367,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       label: 'Обновить',
                       disabled: isRefreshingOrder,
                     }] : []),
-                    ...(cutEnabled ? [{
-                      key: 'svg-upload',
-                      icon: <UploadOutlined />,
-                      label: 'SVG раскрой',
-                      disabled: !record,
-                    }] : []),
                     ...(canExportOrders ? [
                       ...(canViewFinancials ? [{
                         key: 'print',
@@ -2453,9 +2445,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     if (key === 'json') {
                       void handleExportSnapshot();
                     }
-                    if (key === 'svg-upload') {
-                      setSvgUploadOpen(true);
-                    }
                     if (key === 'move-project') {
                       setMoveModalOpen(true);
                     }
@@ -2478,15 +2467,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   loading={isRefreshingOrder}
                 >
                   Обновить
-                </Button>
-              )}
-              {cutEnabled && (
-                <Button
-                  icon={<UploadOutlined />}
-                  onClick={() => setSvgUploadOpen(true)}
-                  disabled={!record}
-                >
-                  SVG раскрой
                 </Button>
               )}
               {canExportOrders ? (
@@ -2522,14 +2502,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     items: [
                       ...(canExportOrders
                         ? [
-                            ...(cutEnabled
-                              ? [{
-                                  key: 'svg-upload',
-                                  icon: <UploadOutlined />,
-                                  label: 'SVG раскрой',
-                                  disabled: !record,
-                                }]
-                              : []),
                             {
                               key: 'excel-without-prices',
                               icon: <FileExcelOutlined />,
@@ -2590,9 +2562,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       }
                       if (key === 'json') {
                         void handleExportSnapshot();
-                      }
-                      if (key === 'svg-upload') {
-                        setSvgUploadOpen(true);
                       }
                       if (key === 'move-project') {
                         setMoveModalOpen(true);
@@ -2662,15 +2631,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         Обновить
                       </Button>
                     ) : null}
-                    {cutEnabled ? (
-                      <Button
-                        icon={<UploadOutlined />}
-                        onClick={() => setSvgUploadOpen(true)}
-                        disabled={!record}
-                      >
-                        SVG раскрой
-                      </Button>
-                    ) : null}
                     {canExportOrders ? (
                       <>
                         {productionPdfAction}
@@ -2711,15 +2671,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         loading={isRefreshingOrder}
                       >
                         Обновить
-                      </Button>
-                    ) : null}
-                    {cutEnabled ? (
-                      <Button
-                        icon={<UploadOutlined />}
-                        onClick={() => setSvgUploadOpen(true)}
-                        disabled={!record}
-                      >
-                        SVG раскрой
                       </Button>
                     ) : null}
                     {canExportOrders ? (
@@ -3435,18 +3386,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 setCutModalOpen(false);
                 setCutSelectMode(false);
                 setCutSelectedDetailIds([]);
-              }}
-            />
-          )}
-          {cutEnabled && record?.order_id && (
-            <CutSvgUploadModal
-              open={svgUploadOpen}
-              onClose={() => setSvgUploadOpen(false)}
-              defaultOrderIds={[record.order_id]}
-              defaultOrderNames={[record.order_name]}
-              onDone={() => {
-                setSvgUploadOpen(false);
-                void handleRefreshOrder();
               }}
             />
           )}

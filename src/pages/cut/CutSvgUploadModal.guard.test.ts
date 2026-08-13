@@ -5,6 +5,10 @@ const modal = readFileSync('src/pages/cut/CutSvgUploadModal.tsx', 'utf8');
 const cutPage = readFileSync('src/pages/cut/CutPage.tsx', 'utf8');
 const orderList = readFileSync('src/pages/orders/list.tsx', 'utf8');
 const orderShow = readFileSync('src/pages/orders/show.tsx', 'utf8');
+const globalAction = readFileSync('src/components/GlobalSvgCutUploadAction.tsx', 'utf8');
+const appHeader = readFileSync('src/components/AppHeader.tsx', 'utf8');
+const headerUtilities = readFileSync('src/ui-evolution/shell/EvolutionHeaderUtilities.tsx', 'utf8');
+const tabletUtilities = readFileSync('src/ui-evolution/shell/EvolutionTabletUtilities.tsx', 'utf8');
 const cncApi = readFileSync('src/api/cncTelegramApi.ts', 'utf8');
 
 describe('manual SVG cut upload UI guard', () => {
@@ -73,14 +77,26 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('Сохранить комментарий как пресет');
     expect(modal).toContain("okText: cutJobPath ? 'Открыть задание' : 'OK'");
     expect(modal).toContain('onOk: openCutJob');
+    expect(modal).toContain('minimized');
+    expect(modal).toContain('MinimizedSvgUpload');
+    expect(modal).toContain('Свернуть загрузку SVG-раскроя');
+    expect(modal).toContain('manual-svg-upload-minimized');
   });
 
-  it('wires upload button into cut and orders headers', () => {
+  it('wires upload into cut screen and global app actions, not orders screens', () => {
     expect(cutPage).toContain('<CutSvgUploadModal');
     expect(cutPage).toContain('setSvgUploadOpen(true)');
-    expect(orderList).toContain('<CutSvgUploadModal');
-    expect(orderList).toContain('setSvgUploadOpen(true)');
-    expect(orderShow).toContain('<CutSvgUploadModal');
-    expect(orderShow).toContain('defaultOrderIds={[record.order_id]}');
+    expect(globalAction).toContain('Загрузка SVG раскроя');
+    expect(globalAction).toContain('<CutSvgUploadModal');
+    expect(globalAction).toContain('featureFlags.useBackendCut');
+    expect(globalAction).toContain("can('cut.manage')");
+    expect(appHeader).toContain('<GlobalSvgCutUploadAction');
+    expect(headerUtilities).toContain('<GlobalSvgCutUploadAction');
+    expect(tabletUtilities).toContain('<GlobalSvgCutUploadAction');
+    expect(headerUtilities.indexOf('<GlobalSvgCutUploadAction')).toBeLessThan(headerUtilities.indexOf('<QrcodeOutlined'));
+    expect(orderList).not.toContain('<CutSvgUploadModal');
+    expect(orderList).not.toContain('setSvgUploadOpen(true)');
+    expect(orderShow).not.toContain('<CutSvgUploadModal');
+    expect(orderShow).not.toContain('setSvgUploadOpen(true)');
   });
 });

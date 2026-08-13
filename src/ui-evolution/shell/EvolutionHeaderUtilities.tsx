@@ -15,6 +15,7 @@ import { useGetIdentity, useLogout } from '@refinedev/core';
 import { useKBar } from '@refinedev/kbar';
 import { useNavigate } from 'react-router-dom';
 import { authSession } from '../../api/authSession';
+import { GlobalSvgCutUploadAction } from '../../components/GlobalSvgCutUploadAction';
 import { NotificationBell } from '../../components/NotificationBell';
 import { featureFlags } from '../../config/featureFlags';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -96,6 +97,7 @@ export const EvolutionHeaderUtilities: React.FC<EvolutionHeaderUtilitiesProps> =
             Все изменения сохранены
           </span>
         ) : null}
+        {identity && !tablet ? <GlobalSvgCutUploadAction /> : null}
         {identity && canScan && !operational && !tablet ? (
           <Tooltip title="Сканер бирок">
             <Button

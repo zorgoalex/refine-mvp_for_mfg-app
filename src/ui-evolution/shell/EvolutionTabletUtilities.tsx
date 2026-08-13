@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons';
 import { useGetIdentity, useLogout } from '@refinedev/core';
 import { useNavigate } from 'react-router-dom';
+import { GlobalSvgCutUploadAction } from '../../components/GlobalSvgCutUploadAction';
 import { NotificationBell } from '../../components/NotificationBell';
 import { featureFlags } from '../../config/featureFlags';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -59,6 +60,11 @@ export const EvolutionTabletUtilities: React.FC<EvolutionTabletUtilitiesProps> =
           placement={popupPlacement}
         />
       </Tooltip>
+      <GlobalSvgCutUploadAction
+        className="evolution-tablet-utility evolution-tablet-utility--global-actions"
+        placement={popupPlacement}
+        tooltipPlacement={tooltipPlacement}
+      />
       {canScan ? (
         <Tooltip placement={tooltipPlacement} title="Сканер бирок">
           <Button

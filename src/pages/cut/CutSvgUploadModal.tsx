@@ -21,6 +21,7 @@ import {
   FileAddOutlined,
   FullscreenOutlined,
   LinkOutlined,
+  MinusOutlined,
   PrinterOutlined,
   SaveOutlined,
   UploadOutlined,
@@ -130,6 +131,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const [parsed, setParsed] = useState<ParsedSvgUpload | null>(null);
   const [svgPreview, setSvgPreview] = useState<SvgPreviewState | null>(null);
   const [svgPreviewExpanded, setSvgPreviewExpanded] = useState(false);
+  const [minimized, setMinimized] = useState(false);
   const svgPreviewUrlRef = useRef<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -156,6 +158,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
+    setMinimized(false);
     setSelectedOrderIds(defaultOrderIds);
     setOrderOptions(defaultOrderOptions);
   }, [defaultOrderIdsKey, defaultOrderOptions, open]);
@@ -543,29 +546,66 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   const cutJobNumberSubmitBlocked = requestedCutJobId !== null && cutJobNumberCheck.status !== 'available';
   const orderDetailMatchLoading = !informationalUpload && eligibleLoading;
+  const floatingPreview = svgPreview && svgPreviewExpanded ? (
+    <FloatingSvgPreview
+      preview={svgPreview}
+      parsed={parsed}
+      onClose={() => setSvgPreviewExpanded(false)}
+    />
+  ) : null;
+
+  if (open && minimized) {
+    return (
+      <>
+        <MinimizedSvgUpload
+          fileName={parsed?.fileName ?? svgPreview?.fileName ?? null}
+          status={parsing ? 'Проверка файла' : submitting ? 'Формирование раскроя' : parsed ? 'Форма свернута' : 'Файл не выбран'}
+          onRestore={() => setMinimized(false)}
+        />
+        {floatingPreview}
+      </>
+    );
+  }
 
   return (
-    <Modal
-      open={open}
-      title="Загрузка SVG-раскроя"
-      width={1040}
-      onCancel={resetAndClose}
-      okText="Сформировать раскрой"
-      onOk={() => void submit()}
-      confirmLoading={submitting}
-      okButtonProps={{
-        disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0 || orderDetailMatchLoading || cutJobNumberSubmitBlocked,
-        icon: <FileAddOutlined />,
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          gap: 16,
-          alignItems: 'flex-start',
-          flexWrap: 'wrap',
+    <>
+      <Modal
+        open={open}
+        title={(
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingRight: 32 }}>
+            <span>Загрузка SVG-раскроя</span>
+            <Tooltip title="Свернуть">
+              <Button
+                aria-label="Свернуть загрузку SVG-раскроя"
+                icon={<MinusOutlined />}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setMinimized(true);
+                }}
+                size="small"
+                type="text"
+              />
+            </Tooltip>
+          </div>
+        )}
+        width={1040}
+        onCancel={resetAndClose}
+        okText="Сформировать раскрой"
+        onOk={() => void submit()}
+        confirmLoading={submitting}
+        okButtonProps={{
+          disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0 || orderDetailMatchLoading || cutJobNumberSubmitBlocked,
+          icon: <FileAddOutlined />,
         }}
       >
+        <div
+          style={{
+            display: 'flex',
+            gap: 16,
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+          }}
+        >
         <Space
           direction="vertical"
           size="middle"
@@ -681,17 +721,40 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
           parsed={parsed}
           onOpenExpanded={() => setSvgPreviewExpanded(true)}
         />
-      </div>
-      {svgPreview && svgPreviewExpanded && (
-        <FloatingSvgPreview
-          preview={svgPreview}
-          parsed={parsed}
-          onClose={() => setSvgPreviewExpanded(false)}
-        />
-      )}
-    </Modal>
+        </div>
+      </Modal>
+      {floatingPreview}
+    </>
   );
 };
+
+function MinimizedSvgUpload({
+  fileName,
+  status,
+  onRestore,
+}: {
+  fileName: string | null;
+  status: string;
+  onRestore: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="manual-svg-upload-minimized"
+      onClick={onRestore}
+      aria-label="Развернуть загрузку SVG-раскроя"
+    >
+      <span className="manual-svg-upload-minimized__icon" aria-hidden="true">
+        <UploadOutlined />
+      </span>
+      <span className="manual-svg-upload-minimized__copy">
+        <strong>Загрузка SVG-раскроя</strong>
+        <span>{fileName ?? status}</span>
+      </span>
+      {fileName ? <span className="manual-svg-upload-minimized__status">{status}</span> : null}
+    </button>
+  );
+}
 
 function SvgUploadPreview({
   preview,
