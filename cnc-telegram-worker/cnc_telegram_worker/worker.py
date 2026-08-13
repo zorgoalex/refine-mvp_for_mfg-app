@@ -228,11 +228,7 @@ class CncTelegramWorker:
                     path = write_manual_svg_send_file(send_dir, file_item, index)
                     paths.append(path)
                 caption = sanitize_text(str(task.get("messageText") or ""), 4096) or None
-                sent = await client.send_file(
-                    entity,
-                    [str(path) for path in paths],
-                    caption=caption,
-                )
+                sent = await send_manual_svg_upload_files(client, entity, paths, caption)
                 await self.erp.complete_manual_svg_telegram_send(request_id, {
                     "sentChatId": chat_id,
                     "sentMessageIds": manual_svg_sent_message_ids(sent),
@@ -1131,6 +1127,34 @@ async def send_cutting_sequence_reply(client: Any, entity: Any, image_message: A
         CUTTING_SEQUENCE_REPLY_TEXT.format(number=number),
         reply_to=int(image_message.id),
     )
+
+
+async def send_manual_svg_upload_files(client: Any, entity: Any, paths: list[Path], caption: str | None) -> Any:
+    try:
+        return await client.send_file(
+            entity,
+            [str(path) for path in paths],
+            caption=caption,
+            force_document=True,
+        )
+    except Exception as exc:
+        if not should_fallback_manual_svg_batch_send(exc) or len(paths) <= 1:
+            raise
+        sent_messages: list[Any] = []
+        for index, path in enumerate(paths):
+            sent = await client.send_file(
+                entity,
+                str(path),
+                caption=caption if index == 0 else None,
+                force_document=True,
+            )
+            sent_messages.extend(sent if isinstance(sent, list) else [sent])
+        return sent_messages
+
+
+def should_fallback_manual_svg_batch_send(exc: Exception) -> bool:
+    message = f"{type(exc).__name__}: {exc}".lower()
+    return "media invalid" in message or "sendmultimediarequest" in message
 
 
 def message_identity(message: Any, *, include_reactions: bool) -> dict[str, Any]:

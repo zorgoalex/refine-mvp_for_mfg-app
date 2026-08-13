@@ -54,11 +54,28 @@ class ManualSvgSendClient:
     def __init__(self) -> None:
         self.sent_files: list[str] = []
         self.caption: str | None = None
+        self.force_document: bool | None = None
 
-    async def send_file(self, _entity: object, files: list[str], *, caption: str | None = None):
-        self.sent_files = files
+    async def send_file(self, _entity: object, files: list[str] | str, *, caption: str | None = None, force_document: bool = False):
+        self.sent_files = files if isinstance(files, list) else [files]
         self.caption = caption
+        self.force_document = force_document
         return [SimpleNamespace(id=8000 + index) for index, _file in enumerate(files, start=1)]
+
+
+class ManualSvgBatchFallbackClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def send_file(self, _entity: object, files: list[str] | str, *, caption: str | None = None, force_document: bool = False):
+        self.calls.append({
+            "files": files if isinstance(files, list) else [files],
+            "caption": caption,
+            "forceDocument": force_document,
+        })
+        if isinstance(files, list):
+            raise RuntimeError("Media invalid (caused by SendMultiMediaRequest)")
+        return SimpleNamespace(id=9000 + len(self.calls))
 
 
 class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
@@ -199,10 +216,44 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(args[1]["sentChatId"], "-100")
             self.assertEqual(args[1]["sentMessageIds"], ["8001", "8002"])
             self.assertEqual(client.caption, "Фрезы для ХДФ: 8")
+            self.assertTrue(client.force_document)
             self.assertEqual([Path(path).name for path in client.sent_files], [
                 "CNC#1_2777+2723-HDF.svg",
                 "CNC#1_2777+2723-HDF.nc",
             ])
+
+    async def test_worker_falls_back_to_individual_manual_svg_document_sends(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000005",
+                        "messageText": "Черновой",
+                        "files": [
+                            manual_svg_send_file("svg", "CNC#2_2769-HDF.svg", b"<svg></svg>"),
+                            manual_svg_send_file("screenshot", "CNC#2_2769-HDF.png", png_bytes()),
+                        ],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+            )
+            client = ManualSvgBatchFallbackClient()
+
+            await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+            worker.erp.complete_manual_svg_telegram_send.assert_awaited_once()
+            worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
+            args = worker.erp.complete_manual_svg_telegram_send.await_args.args
+            self.assertEqual(args[1]["sentMessageIds"], ["9002", "9003"])
+            self.assertEqual(len(client.calls), 3)
+            self.assertEqual(client.calls[0]["caption"], "Черновой")
+            self.assertEqual(client.calls[1]["caption"], "Черновой")
+            self.assertIsNone(client.calls[2]["caption"])
+            self.assertTrue(all(call["forceDocument"] for call in client.calls))
 
     async def test_worker_rejects_manual_svg_file_hash_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as root:
