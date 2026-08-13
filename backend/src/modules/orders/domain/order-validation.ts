@@ -24,6 +24,7 @@ export function validateSaveOrderDto(
 
   validateHeader(order, options, errors);
   validateDetails(order.details, order.deleted.detailIds, errors);
+  validateHdfDetails(order, errors);
   validatePayments(order, errors);
   validateWorkshops(order.workshops, order.deleted.workshopIds, errors);
   validateRequirements(order.requirements, order.deleted.requirementIds, errors);
@@ -120,6 +121,7 @@ function validateHeader(
   validateOptionalDateOnly(header.paymentDate ?? null, 'header.paymentDate', errors);
   requireNonNegative(header.discount, 'header.discount', errors);
   requireNonNegative(header.surcharge, 'header.surcharge', errors);
+  requirePositiveIfPresent(header.hdfMinThresholdMm, 'header.hdfMinThresholdMm', errors);
 
   if (header.discount > 0 && header.surcharge > 0) {
     errors.push({
@@ -128,6 +130,20 @@ function validateHeader(
       code: 'DISCOUNT_SURCHARGE_MUTUALLY_EXCLUSIVE',
     });
   }
+}
+
+function validateHdfDetails(order: NormalizedSaveOrderDto, errors: OrderFieldError[]): void {
+  validateIds(order.hdfDetails, order.deleted.hdfDetailIds, 'hdfDetails', 'deleted.hdfDetailIds', errors);
+
+  order.hdfDetails.forEach((detail, index) => {
+    requirePositiveInteger(detail.id, `hdfDetails[${index}].id`, errors);
+    requirePositiveInteger(detail.version, `hdfDetails[${index}].version`, errors);
+    requirePositiveIntegerIfPresent(
+      detail.productionStatusId,
+      `hdfDetails[${index}].productionStatusId`,
+      errors,
+    );
+  });
 }
 
 function validateDetails(
@@ -481,6 +497,18 @@ function requirePositive(value: number | null | undefined, field: string, errors
   if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) {
     errors.push({ field, message: `${field} must be greater than zero` });
   }
+}
+
+function requirePositiveIfPresent(
+  value: number | null | undefined,
+  field: string,
+  errors: OrderFieldError[],
+): void {
+  if (value === null || value === undefined) {
+    return;
+  }
+
+  requirePositive(value, field, errors);
 }
 
 function requireNonNegative(

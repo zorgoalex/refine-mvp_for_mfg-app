@@ -1,4 +1,4 @@
-import type { OrderDetail } from '../../types/orders';
+import type { OrderDetail, OrderHdfDetail } from '../../types/orders';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 import type { OrderBathFilmUsageRow } from '../cut/cutFilmUsage';
 
@@ -37,7 +37,15 @@ interface SheetAccumulator {
   sheetMaterialTypeId: number;
   name: string;
   areaDetails: OrderDetail[];
+  hdfArea: number;
   detailsCount: number;
+}
+
+export function buildUsableHdfAreaM2(hdfDetails: ReadonlyArray<OrderHdfDetail>): number {
+  return roundTo2(hdfDetails.reduce((sum, detail) => {
+    if (!isUsableHdfDetail(detail)) return sum;
+    return sum + finiteNumber(detail.area_m2);
+  }, 0));
 }
 
 export function buildOrderFilmMaterialRows(
@@ -86,6 +94,7 @@ export function buildOrderFilmMaterialRows(
 export function buildOrderSheetMaterialRows(
   details: ReadonlyArray<OrderDetail>,
   materialNameOf: (detail: OrderDetail) => string | null | undefined,
+  hdfDetails: ReadonlyArray<OrderHdfDetail> = [],
 ): OrderSheetMaterialRow[] {
   const rows = new Map<string, SheetAccumulator>();
 
@@ -98,10 +107,29 @@ export function buildOrderSheetMaterialRows(
       sheetMaterialTypeId,
       name: cleanName(materialNameOf(detail)) ?? `ID: ${sheetMaterialTypeId}`,
       areaDetails: [],
+      hdfArea: 0,
       detailsCount: 0,
     };
     row.areaDetails.push(detail);
     row.detailsCount += 1;
+    rows.set(key, row);
+  }
+
+  for (const hdfDetail of hdfDetails) {
+    if (!isUsableHdfDetail(hdfDetail)) continue;
+    const sheetMaterialTypeId = positiveId(hdfDetail.hdf_sheet_material_type_id);
+    if (sheetMaterialTypeId === null) continue;
+    const key = `sheet:${sheetMaterialTypeId}`;
+    const row = rows.get(key) ?? {
+      key,
+      sheetMaterialTypeId,
+      name: cleanName(hdfDetail.hdf_sheet_material_name) ?? `ID: ${sheetMaterialTypeId}`,
+      areaDetails: [],
+      hdfArea: 0,
+      detailsCount: 0,
+    };
+    row.hdfArea = roundTo2(row.hdfArea + finiteNumber(hdfDetail.area_m2));
+    row.detailsCount += Math.max(0, Math.trunc(finiteNumber(hdfDetail.quantity)));
     rows.set(key, row);
   }
 
@@ -110,7 +138,7 @@ export function buildOrderSheetMaterialRows(
       key: row.key,
       sheetMaterialTypeId: row.sheetMaterialTypeId,
       name: row.name,
-      totalArea: calculateOrderTotalArea(row.areaDetails),
+      totalArea: roundTo2(calculateOrderTotalArea(row.areaDetails) + row.hdfArea),
       detailsCount: row.detailsCount,
     }))
     .sort((a, b) => a.name.localeCompare(b.name, 'ru') || a.sheetMaterialTypeId - b.sheetMaterialTypeId);
@@ -153,4 +181,12 @@ function finiteNumber(value: unknown): number {
 
 function roundTo1(value: number): number {
   return Math.round((value + Number.EPSILON) * 10) / 10;
+}
+
+function roundTo2(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function isUsableHdfDetail(detail: OrderHdfDetail): boolean {
+  return detail.status === 'ok' && detail.is_stale !== true && finiteNumber(detail.area_m2) > 0;
 }

@@ -12,6 +12,7 @@ import type { OrderGroupSummaryDto } from './order-group-link.dto';
 export interface OrderDto {
   header: OrderHeaderDto;
   details: OrderDetailDto[];
+  hdfDetails: OrderHdfDetailDto[];
   payments: OrderPaymentDto[];
   workshops: OrderWorkshopDto[];
   requirements: OrderRequirementDto[];
@@ -37,6 +38,12 @@ export interface OrderRefreshMetadataDto {
   baseVersion: number;
   version: number;
   updatedDowelingDetailIds: number[];
+  createdHdfDetailIds?: number[];
+  updatedHdfDetailIds?: number[];
+  deactivatedHdfDetailIds?: number[];
+  sourceChangedHdfDetailIds?: number[];
+  configMissingHdfDetailIds?: number[];
+  hdfStatusCounts?: Record<string, number>;
   auditId: string | null;
   refreshedAt: string;
   requestId: string;
@@ -193,6 +200,38 @@ export type OrderDetailDto = CalculatedOrderDetailDto & {
   bazisCutSets: OrderDetailBazisCutSetRefDto[];
   bazisProjects: OrderDetailBazisProjectRefDto[];
 };
+
+export interface OrderHdfDetailDto {
+  id: number;
+  orderId: number;
+  sourceOrderDetailId: number | null;
+  sourceOrderDetailIdSnapshot: number;
+  sourceDetailNumber: number | null;
+  sourceDetailName: string | null;
+  sourceHeightMm: number | null;
+  sourceWidthMm: number | null;
+  sourceQuantity: number | null;
+  millingTypeId: number | null;
+  millingTypeName: string | null;
+  edgeMm: number | null;
+  thresholdMm: number | null;
+  hdfSheetMaterialTypeId: number | null;
+  hdfSheetMaterialName: string | null;
+  hdfHeightMm: number | null;
+  hdfWidthMm: number | null;
+  quantity: number | null;
+  areaM2: number;
+  status: string;
+  configErrors: string[];
+  configRevision: number;
+  isStale: boolean;
+  productionStatusId: number | null;
+  productionStatusName: string | null;
+  productionStatusLocked: boolean;
+  version: number;
+  cutJob: OrderDetailCutJobRefDto | null;
+  bazisCutSets: OrderDetailBazisCutSetRefDto[];
+}
 
 export interface OrderDetailBazisCutSetRefDto {
   bazisCutSetId: number;

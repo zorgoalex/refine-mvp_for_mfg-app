@@ -62,6 +62,7 @@ export const orderHeaderSchema = z
     milling_type_id: z.number().nullable().optional(),
     edge_type_id: z.number().nullable().optional(),
     film_id: z.number().nullable().optional(),
+    hdf_min_threshold_mm: z.number().positive("Порог ХДФ должен быть больше 0").nullable().optional(),
 
     // File links
     link_cutting_file: z.string().url("Некорректный URL").nullable().optional().or(z.literal('')),
@@ -379,6 +380,16 @@ export const requirementSchema = z.object({
 });
 
 // ============================================================================
+// HDF DETAIL SCHEMA
+// ============================================================================
+
+export const hdfDetailSchema = z.object({
+  order_hdf_detail_id: z.number().int().positive(),
+  production_status_id: z.number().int().positive().nullable().optional(),
+  version: z.number().int().positive(),
+}).passthrough();
+
+// ============================================================================
 // FULL ORDER FORM SCHEMA
 // ============================================================================
 
@@ -386,12 +397,15 @@ export const orderFormSchema = z
   .object({
     header: orderHeaderSchema,
     details: z.array(orderDetailSchema).min(1, "Необходимо добавить минимум одну позицию (деталь)"),
+    hdfDetails: z.array(hdfDetailSchema).optional(),
+    dirtyHdfDetailIds: z.array(z.number()).optional(),
     payments: z.array(paymentSchema),
     workshops: z.array(workshopSchema),
     requirements: z.array(requirementSchema),
 
     // Deleted items (for tracking)
     deletedDetails: z.array(z.number()).optional(),
+    deletedHdfDetails: z.array(z.number()).optional(),
     deletedPayments: z.array(z.number()).optional(),
     deletedWorkshops: z.array(z.number()).optional(),
     deletedRequirements: z.array(z.number()).optional(),
@@ -422,4 +436,5 @@ export type OrderDetailInput = z.infer<typeof orderDetailSchema>;
 export type PaymentInput = z.infer<typeof paymentSchema>;
 export type WorkshopInput = z.infer<typeof workshopSchema>;
 export type RequirementInput = z.infer<typeof requirementSchema>;
+export type HdfDetailInput = z.infer<typeof hdfDetailSchema>;
 export type OrderFormInput = z.infer<typeof orderFormSchema>;

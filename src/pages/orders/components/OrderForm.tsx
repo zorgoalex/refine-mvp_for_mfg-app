@@ -60,6 +60,7 @@ import { makeOrderDeleteHandler } from '../orderDeleteAction';
 
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
+import { OrderHdfTab } from './tabs/OrderHdfTab';
 import { OrderPaymentsTab, OrderPaymentsTabRef } from './tabs/OrderPaymentsTab';
 import { CutPage } from '../../cut/CutPage';
 import {
@@ -1464,6 +1465,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             </OrderSaveValidationContext.Provider>
           </div>
         ),
+      },
+      {
+        key: 'hdf',
+        label: 'ХДФ',
+        children: <OrderHdfTab />,
       },
       {
         key: 'dates',

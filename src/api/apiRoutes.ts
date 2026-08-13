@@ -152,6 +152,11 @@ export const apiRoutes = {
     pdfTemplates: backendApiPath('/cut-config/pdf-templates'),
     pdfTemplate: (id: number) => backendApiPath(`/cut-config/pdf-templates/${id}`),
   },
+  productionTechSettings: {
+    hdf: backendApiPath('/production-tech-settings/hdf'),
+    hdfMillingType: (millingTypeId: number) =>
+      backendApiPath(`/production-tech-settings/hdf/milling-types/${millingTypeId}`),
+  },
   cncTelegram: {
     today: backendApiPath('/cnc-telegram/today'),
     ingest: backendApiPath('/cnc-telegram/ingest'),

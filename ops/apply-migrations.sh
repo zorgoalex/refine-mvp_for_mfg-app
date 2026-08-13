@@ -1376,6 +1376,33 @@ probe_file() {
                      "$(q_idx uq_cnc_manual_svg_telegram_send_idempotency_key)" \
                      "$(q_idx uq_cnc_manual_svg_telegram_send_active_packet)" \
                      "$(q_idx idx_cnc_manual_svg_telegram_send_claim)" ;;
+    125_order_hdf_details*) probe_all \
+                     "$(q_col app_settings version)" \
+                     "$(q_col milling_types hdf_enabled)" \
+                     "$(q_col milling_types hdf_edge_mm)" \
+                     "$(q_col orders hdf_min_threshold_mm)" \
+                     "$(q_tbl hdf_calculation_config_state)" \
+                     "$(q_tbl order_hdf_details)" \
+                     "$(q_col cut_job_item source_type)" \
+                     "$(q_col cut_job_item order_hdf_detail_id)" \
+                     "$(q_con_on cut_job_item chk_cut_job_item_source_exactly_one)" \
+                     "$(q_idx uq_cut_job_item_active_hdf_detail)" \
+                     "$(q_col bazis_cut_set_details source_type)" \
+                     "$(q_col bazis_cut_set_details source_order_hdf_detail_id)" \
+                     "$(q_con_on bazis_cut_set_details chk_bazis_cut_set_details_hdf_source_exclusive)" \
+                     "$(q_idx uq_bazis_cut_set_details_hdf_source)" \
+                     "$(q_col order_realtime_stream hdf_details_revision)" \
+                     "$(q_col order_realtime_stream materials_revision)" \
+                     "$(q_col realtime_event_log hdf_details_revision)" \
+                     "$(q_col realtime_event_log materials_revision)" \
+                     "SELECT count(*) = 2
+                        FROM app_settings
+                       WHERE setting_key IN (
+                         'production.hdf.min_side_threshold_mm',
+                         'production.hdf.sheet_material_type_id'
+                       );" \
+                     "SELECT pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)
+                              LIKE '%order_hdf_details%';" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1387,7 +1414,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

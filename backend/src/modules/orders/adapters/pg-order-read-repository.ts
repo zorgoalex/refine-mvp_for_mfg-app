@@ -98,6 +98,7 @@ interface OrderHeaderRow extends QueryResultRow {
   version: string | number;
   ref_key_1c: string | null;
   sheet_material_type_id: string | number | null;
+  hdf_min_threshold_mm: string | number | null;
   sheet_eligible: boolean | null;
   material_name: string | null;
   header_material_name: string | null;
@@ -174,6 +175,45 @@ interface OrderDetailRow extends QueryResultRow {
   bath_cut_job_profile_is_active: boolean | null;
   bazis_cut_sets: unknown;
   bazis_projects: unknown;
+}
+
+interface OrderHdfDetailRow extends QueryResultRow {
+  order_hdf_detail_id: string | number;
+  order_id: string | number;
+  source_order_detail_id: string | number | null;
+  source_order_detail_id_snapshot: string | number;
+  source_detail_number: string | number | null;
+  source_detail_name: string | null;
+  source_height_mm: string | number | null;
+  source_width_mm: string | number | null;
+  source_quantity: string | number | null;
+  milling_type_id: string | number | null;
+  milling_type_name: string | null;
+  edge_mm: string | number | null;
+  threshold_mm: string | number | null;
+  hdf_sheet_material_type_id: string | number | null;
+  hdf_sheet_material_name: string | null;
+  hdf_height_mm: string | number | null;
+  hdf_width_mm: string | number | null;
+  quantity: string | number | null;
+  area_m2: string | number | null;
+  status: string;
+  config_errors: unknown;
+  config_revision: string | number;
+  current_config_revision: string | number;
+  is_stale: boolean;
+  production_status_id: string | number | null;
+  production_status_name: string | null;
+  production_status_locked: boolean;
+  version: string | number;
+  cut_job_id: string | number | null;
+  cut_result_no: string | number | null;
+  cut_job_source_display_number: string | number | null;
+  cut_job_name: string | null;
+  cut_job_param_profile_id: string | number | null;
+  cut_job_profile_name: string | null;
+  cut_job_profile_is_active: boolean | null;
+  bazis_cut_sets: unknown;
 }
 
 interface OrderPaymentRow extends QueryResultRow {
@@ -297,6 +337,9 @@ interface MaterialLookupRow extends IdNameLookupRow {
 
 interface MillingTypeLookupRow extends IdNameLookupRow {
   cost_per_sqm: string | number | null;
+  hdf_enabled: boolean | null;
+  hdf_edge_mm: string | number | null;
+  version: string | number | null;
 }
 
 interface SheetMaterialTypeLookupRow extends IdNameLookupRow {
@@ -677,6 +720,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
         o.total_amount, o.final_amount, o.paid_amount, o.parts_count, o.total_area,
         o.created_at, o.updated_at, o.created_by, o.edited_by, o.version, o.ref_key_1c,
+        o.hdf_min_threshold_mm,
         ${headerSheetCols}${deletedHeaderSelect}
       FROM orders o
       LEFT JOIN clients c ON c.client_id = o.client_id
@@ -872,6 +916,70 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       `,
       [command.orderId],
     );
+    const hdfDetails = await this.database.query<OrderHdfDetailRow>(
+      `
+      WITH cut_candidates AS (
+        SELECT cji.order_hdf_detail_id,
+               cj.cut_job_id,
+               cj.source_display_number,
+               cj.name,
+               cr.result_no,
+               cj.param_profile_id,
+               cpp.name AS profile_name,
+               cpp.is_active AS profile_is_active
+        FROM cut_job_item cji
+        JOIN cut_job cj ON cj.cut_job_id = cji.cut_job_id
+        JOIN cut_result cr
+          ON cr.cut_result_id = cj.current_cut_result_id
+         AND cr.cut_job_id = cj.cut_job_id
+        LEFT JOIN cut_result_archive_state archived
+          ON archived.cut_job_id = cr.cut_job_id
+         AND archived.result_no = cr.result_no
+        LEFT JOIN cut_param_profiles cpp ON cpp.cut_param_profile_id = cj.param_profile_id
+        WHERE cji.order_id = $1
+          AND cji.source_type = 'order_hdf_detail'
+          AND cji.is_active = true
+          AND cj.status = 'ready'
+          AND cj.last_calc_basis IS NOT NULL
+          AND archived.cut_job_id IS NULL
+      ),
+      ranked_cut AS (
+        SELECT *,
+               row_number() OVER (
+                 PARTITION BY order_hdf_detail_id
+                 ORDER BY cut_job_id DESC
+               ) AS rn
+        FROM cut_candidates
+      )
+      SELECT h.*,
+             state.revision AS current_config_revision,
+             (h.config_revision <> state.revision) AS is_stale,
+             ps.production_status_name,
+             cut.cut_job_id,
+             cut.result_no AS cut_result_no,
+             cut.source_display_number AS cut_job_source_display_number,
+             cut.name AS cut_job_name,
+             cut.param_profile_id AS cut_job_param_profile_id,
+             cut.profile_name AS cut_job_profile_name,
+             cut.profile_is_active AS cut_job_profile_is_active,
+             (SELECT jsonb_agg(jsonb_build_object(
+                'bazisCutSetId', s.bazis_cut_set_id,
+                'name', s.name
+              ) ORDER BY s.bazis_cut_set_id)
+              FROM bazis_cut_set_details d
+              JOIN bazis_cut_sets s ON s.bazis_cut_set_id = d.bazis_cut_set_id
+              WHERE d.source_order_hdf_detail_id = h.order_hdf_detail_id) AS bazis_cut_sets
+      FROM order_hdf_details h
+      CROSS JOIN hdf_calculation_config_state state
+      LEFT JOIN production_statuses ps ON ps.production_status_id = h.production_status_id
+      LEFT JOIN ranked_cut cut
+        ON cut.order_hdf_detail_id = h.order_hdf_detail_id
+       AND cut.rn = 1
+      WHERE h.order_id = $1 AND h.delete_flag = false
+      ORDER BY h.source_detail_number NULLS LAST, h.order_hdf_detail_id
+      `,
+      [command.orderId],
+    );
     const payments = await this.database.query<OrderPaymentRow>(
       `
       SELECT *
@@ -930,6 +1038,7 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     return mapOrderDto(
       header,
       details.rows,
+      hdfDetails.rows,
       payments.rows,
       workshops.rows,
       requirements.rows,
@@ -1015,7 +1124,8 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       ),
       this.database.query<MillingTypeLookupRow>(
         `
-        SELECT milling_type_id AS id, milling_type_name AS name, cost_per_sqm, sort_order
+        SELECT milling_type_id AS id, milling_type_name AS name, cost_per_sqm, sort_order,
+               hdf_enabled, hdf_edge_mm, version
         FROM milling_types
         WHERE is_active = true
         ORDER BY sort_order ASC, milling_type_name ASC, milling_type_id ASC
@@ -1260,6 +1370,9 @@ function mapMillingTypeLookup(row: MillingTypeLookupRow) {
     id: toNumber(row.id),
     name: row.name,
     costPerSqm: toNullableNumber(row.cost_per_sqm),
+    hdfEnabled: row.hdf_enabled === true,
+    hdfEdgeMm: toNullableNumber(row.hdf_edge_mm),
+    version: toNumber(row.version ?? 0),
     sortOrder: toNumber(row.sort_order),
   };
 }
@@ -1325,6 +1438,7 @@ function mapAuditEvent(row: AuditLogRow): OrderAuditEventDto {
 function mapOrderDto(
   row: OrderHeaderRow,
   details: OrderDetailRow[],
+  hdfDetails: OrderHdfDetailRow[],
   payments: OrderPaymentRow[],
   workshops: OrderWorkshopRow[],
   requirements: OrderRequirementRow[],
@@ -1373,6 +1487,7 @@ function mapOrderDto(
       millingTypeId: toNullableNumber(row.milling_type_id),
       edgeTypeId: toNullableNumber(row.edge_type_id),
       filmId: toNullableNumber(row.film_id),
+      hdfMinThresholdMm: toNullableNumber(row.hdf_min_threshold_mm),
       ...(includeDeleted
         ? {
             deleteFlag: row.delete_flag,
@@ -1387,6 +1502,7 @@ function mapOrderDto(
       version: toNumber(row.version),
     },
     details: details.map(mapDetail),
+    hdfDetails: hdfDetails.map(mapHdfDetail),
     payments: payments.map(mapPayment),
     workshops: workshops.map(mapWorkshop),
     requirements: requirements.map(mapRequirement),
@@ -1512,6 +1628,55 @@ function mapDetail(row: OrderDetailRow) {
     bathCutJob: mapDetailCutJob(row, 'bath'),
     bazisCutSets: mapBazisCutSetRefs(row.bazis_cut_sets),
     bazisProjects: mapBazisProjectRefs(row.bazis_projects),
+  };
+}
+
+function mapHdfDetail(row: OrderHdfDetailRow) {
+  return {
+    id: toNumber(row.order_hdf_detail_id),
+    orderId: toNumber(row.order_id),
+    sourceOrderDetailId: toNullableNumber(row.source_order_detail_id),
+    sourceOrderDetailIdSnapshot: toNumber(row.source_order_detail_id_snapshot),
+    sourceDetailNumber: toNullableNumber(row.source_detail_number),
+    sourceDetailName: row.source_detail_name,
+    sourceHeightMm: toNullableNumber(row.source_height_mm),
+    sourceWidthMm: toNullableNumber(row.source_width_mm),
+    sourceQuantity: toNullableNumber(row.source_quantity),
+    millingTypeId: toNullableNumber(row.milling_type_id),
+    millingTypeName: row.milling_type_name,
+    edgeMm: toNullableNumber(row.edge_mm),
+    thresholdMm: toNullableNumber(row.threshold_mm),
+    hdfSheetMaterialTypeId: toNullableNumber(row.hdf_sheet_material_type_id),
+    hdfSheetMaterialName: row.hdf_sheet_material_name,
+    hdfHeightMm: toNullableNumber(row.hdf_height_mm),
+    hdfWidthMm: toNullableNumber(row.hdf_width_mm),
+    quantity: toNullableNumber(row.quantity),
+    areaM2: toNumber(row.area_m2 ?? 0),
+    status: row.status,
+    configErrors: readStringArray(row.config_errors),
+    configRevision: toNumber(row.config_revision),
+    isStale: row.is_stale === true,
+    productionStatusId: toNullableNumber(row.production_status_id),
+    productionStatusName: row.production_status_name,
+    productionStatusLocked: row.production_status_locked === true,
+    version: toNumber(row.version),
+    cutJob: mapHdfCutJob(row),
+    bazisCutSets: mapBazisCutSetRefs(row.bazis_cut_sets),
+  };
+}
+
+function mapHdfCutJob(row: OrderHdfDetailRow) {
+  const cutJobId = toNullableNumber(row.cut_job_id);
+  const resultNo = toNullableNumber(row.cut_result_no);
+  if (cutJobId === null || resultNo === null) return null;
+  return {
+    cutJobId,
+    resultNo,
+    cutNumber: `${row.cut_job_source_display_number ?? cutJobId}-${resultNo}`,
+    name: row.cut_job_name ?? '',
+    paramProfileId: toNullableNumber(row.cut_job_param_profile_id),
+    profileName: row.cut_job_profile_name,
+    profileIsActive: row.cut_job_profile_is_active,
   };
 }
 
@@ -1736,6 +1901,13 @@ function toStringArray(value: unknown[] | null | undefined): string[] {
     return [];
   }
 
+  return value
+    .map((item) => (item === null || item === undefined ? '' : String(item).trim()))
+    .filter((item) => item.length > 0);
+}
+
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
   return value
     .map((item) => (item === null || item === undefined ? '' : String(item).trim()))
     .filter((item) => item.length > 0);

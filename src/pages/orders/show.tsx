@@ -72,6 +72,7 @@ import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
+import { mapOrderDtoToFormValues } from '../../api/mappers/orderMapper';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
 import type { DetailCardLookups } from './mobile/detailCardModel';
@@ -787,6 +788,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       bazis_cut_sets: legacyBazisCutSetsByDetailId.get(Number(detail.detail_id)) ?? [],
     }));
   }, [legacyBazisCutSetsByDetailId, rawDetails, useBackendOrdersRead]);
+  const hdfDetails = useMemo(
+    () => (backendOrder ? mapOrderDtoToFormValues(backendOrder as OrderDto).hdfDetails ?? [] : []),
+    [backendOrder],
+  );
   const showLoading = shouldShowOrderLoading({
     orderLoading: isLoading,
     detailsLoading,
@@ -1309,8 +1314,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     () => buildOrderSheetMaterialRows(
       details as any,
       (detail) => resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap),
+      hdfDetails,
     ),
-    [details, resolvedNameByDetailId, materialsData],
+    [details, hdfDetails, resolvedNameByDetailId, materialsData],
   );
 
   // Detail grouping state (persisted per user+order; suppressed during cut selection).
@@ -2706,6 +2712,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               detailMaterialNames={headerMaterialNames}
               headerMaterialName={headerMaterialName}
               showFinancials={canViewFinancials}
+              hdfDetails={hdfDetails}
             />
 
             <div ref={orderShowTabsShellRef} className="order-show-tabs-shell">

@@ -7,6 +7,7 @@ import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 import {
   Order,
   OrderDetail,
+  OrderHdfDetail,
   Payment,
   OrderWorkshop,
   OrderResourceRequirement,
@@ -34,6 +35,8 @@ const generateTempId = (): number => {
   // ========== STATE ==========
   header: Partial<Order>;
   details: OrderDetail[];
+  hdfDetails: OrderHdfDetail[];
+  dirtyHdfDetailIds: number[];
   payments: Payment[];
   workshops: OrderWorkshop[];
   requirements: OrderResourceRequirement[];
@@ -42,6 +45,7 @@ const generateTempId = (): number => {
 
   // Deleted items (track for deletion on server)
   deletedDetails: number[];
+  deletedHdfDetails: number[];
   deletedPayments: number[];
   deletedWorkshops: number[];
   deletedRequirements: number[];
@@ -79,6 +83,9 @@ const generateTempId = (): number => {
   syncDetailsProductionStatus: (productionStatusId: number) => void;
   deleteDetail: (tempId: number, detailId?: number) => void;
   reorderDetails: () => void; // Renumber detail_number
+
+  // ========== ACTIONS: HDF DETAILS ==========
+  updateHdfDetail: (hdfDetailId: number, data: Partial<OrderHdfDetail>) => void;
 
   // ========== ACTIONS: PAYMENTS ==========
   addPayment: (payment: Omit<Payment, 'temp_id'>) => void;
@@ -130,12 +137,15 @@ const generateTempId = (): number => {
       production_status_from_details_enabled: true, // По умолчанию автообновление включено
     },
     details: [],
+    hdfDetails: [],
+    dirtyHdfDetailIds: [],
     payments: [],
     workshops: [],
     requirements: [],
     dowelingLinks: [],
     pdfImportCandidateTempIds: [],
     deletedDetails: [],
+    deletedHdfDetails: [],
     deletedPayments: [],
     deletedWorkshops: [],
     deletedRequirements: [],
@@ -377,6 +387,22 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
             }),
             false,
             'reorderDetails'
+          ),
+
+        // ========== HDF DETAILS ACTIONS ==========
+        updateHdfDetail: (hdfDetailId, data) =>
+          set(
+            (state) => ({
+              hdfDetails: state.hdfDetails.map((detail) =>
+                detail.order_hdf_detail_id === hdfDetailId ? { ...detail, ...data } : detail,
+              ),
+              dirtyHdfDetailIds: state.dirtyHdfDetailIds.includes(hdfDetailId)
+                ? state.dirtyHdfDetailIds
+                : [...state.dirtyHdfDetailIds, hdfDetailId],
+              isDirty: state.isInitializing ? state.isDirty : true,
+            }),
+            false,
+            'updateHdfDetail'
           ),
 
         // ========== PAYMENTS ACTIONS ==========
@@ -632,6 +658,8 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
                   ...d,
                   temp_id: d.detail_id || generateTempId(),
                 })) || [],
+              hdfDetails: order.hdfDetails || [],
+              dirtyHdfDetailIds: [],
               payments:
                 order.payments?.map((p) => ({
                   ...p,
@@ -653,6 +681,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
                   temp_id: l.order_doweling_link_id || generateTempId(),
                 })) || [],
               deletedDetails: [],
+              deletedHdfDetails: [],
               deletedPayments: [],
               deletedWorkshops: [],
               deletedRequirements: [],
@@ -717,12 +746,15 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
           const formValues = {
             header: state.header as Order,
             details: state.details,
+            hdfDetails: state.hdfDetails,
+            dirtyHdfDetailIds: state.dirtyHdfDetailIds,
             payments: state.payments,
             workshops: state.workshops,
             requirements: state.requirements,
             dowelingLinks: state.dowelingLinks,
             pdfImportCandidateTempIds: state.pdfImportCandidateTempIds,
             deletedDetails: state.deletedDetails,
+            deletedHdfDetails: state.deletedHdfDetails,
             deletedPayments: state.deletedPayments,
             deletedWorkshops: state.deletedWorkshops,
             deletedRequirements: state.deletedRequirements,
@@ -805,6 +837,8 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
               }, {}),
               // Clear deleted trackers after sync
               deletedDetails: [],
+              deletedHdfDetails: [],
+              dirtyHdfDetailIds: [],
               deletedPayments: [],
               deletedWorkshops: [],
               deletedRequirements: [],

@@ -9,6 +9,7 @@ export type OrderSaveMode = 'create' | 'update';
 export interface SaveOrderDto {
   header: SaveOrderHeaderDto;
   details: SaveOrderDetailDto[];
+  hdfDetails?: SaveOrderHdfDetailDto[];
   payments: SaveOrderPaymentDto[];
   workshops: SaveOrderWorkshopDto[];
   requirements: SaveOrderRequirementDto[];
@@ -49,6 +50,7 @@ export interface SaveOrderHeaderDto {
   millingTypeId?: number | null;
   edgeTypeId?: number | null;
   filmId?: number | null;
+  hdfMinThresholdMm?: number | null;
 }
 
 export interface SaveOrderDetailDto {
@@ -82,6 +84,12 @@ export interface SaveOrderDetailDto {
   linkCadFile?: string | null;
   linkPdfFile?: string | null;
   refKey1c?: string | null;
+}
+
+export interface SaveOrderHdfDetailDto {
+  id: number;
+  version: number;
+  productionStatusId?: number | null;
 }
 
 export interface SaveOrderPaymentDto {
@@ -144,6 +152,7 @@ export interface SaveOrderDowelingLinkDto {
 
 export interface SaveOrderDeletedDto {
   detailIds?: number[];
+  hdfDetailIds?: number[];
   paymentIds?: number[];
   workshopIds?: number[];
   requirementIds?: number[];
@@ -156,6 +165,7 @@ export type NormalizedSaveOrderDto = Omit<
 > & {
   header: NormalizedSaveOrderHeaderDto;
   details: NormalizedSaveOrderDetailDto[];
+  hdfDetails: NormalizedSaveOrderHdfDetailDto[];
   payments: NormalizedSaveOrderPaymentDto[];
   workshops: NormalizedSaveOrderWorkshopDto[];
   requirements: NormalizedSaveOrderRequirementDto[];
@@ -186,6 +196,7 @@ export type NormalizedSaveOrderHeaderDto = Required<
   > & {
     discount: number;
     surcharge: number;
+    hdfMinThresholdMm: number | null;
   };
 
 export type NormalizedSaveOrderDetailDto = Omit<
@@ -230,6 +241,12 @@ export type NormalizedSaveOrderDetailDto = Omit<
   linkCadFile: string | null;
   linkPdfFile: string | null;
   refKey1c: string | null;
+};
+
+export type NormalizedSaveOrderHdfDetailDto = Required<
+  Pick<SaveOrderHdfDetailDto, 'id' | 'version'>
+> & {
+  productionStatusId: number | null;
 };
 
 export type NormalizedSaveOrderPaymentDto = Omit<

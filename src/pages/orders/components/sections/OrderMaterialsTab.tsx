@@ -19,7 +19,7 @@ import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../o
 const { Text } = Typography;
 
 export const OrderMaterialsTab: React.FC = () => {
-  const { details, header } = useOrderFormStore();
+  const { details, hdfDetails, header } = useOrderFormStore();
   const detailIds = useMemo(
     () => details.map((detail) => detail.detail_id).filter((id): id is number => Number.isInteger(id) && id > 0),
     [details],
@@ -118,8 +118,9 @@ export const OrderMaterialsTab: React.FC = () => {
     () => buildOrderSheetMaterialRows(
       details,
       (detail) => resolveDetailMaterialName(detail, undefined, materialsMap),
+      hdfDetails,
     ),
-    [details, materialsMap],
+    [details, hdfDetails, materialsMap],
   );
 
   const sheetMaterialColumns = [

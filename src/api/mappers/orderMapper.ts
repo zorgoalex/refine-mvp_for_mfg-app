@@ -2,6 +2,7 @@ import type {
   Order,
   OrderDetail,
   OrderDowelingLink,
+  OrderHdfDetail,
   OrderFormValues,
   OrderResourceRequirement,
   OrderWorkshop,
@@ -19,6 +20,7 @@ import type {
   SaveOrderDetailDto,
   SaveOrderDowelingLinkDto,
   SaveOrderDto,
+  SaveOrderHdfDetailDto,
   SaveOrderPaymentDto,
   SaveOrderRequirementDto,
   SaveOrderWorkshopDto,
@@ -103,6 +105,7 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       millingTypeId: optionalNumber(header.milling_type_id),
       edgeTypeId: optionalNumber(header.edge_type_id),
       filmId: optionalNumber(header.film_id),
+      hdfMinThresholdMm: optionalNumber(header.hdf_min_threshold_mm),
 
       linkCuttingFile: normalizeOptionalString(header.link_cutting_file),
       linkCuttingImageFile: normalizeOptionalString(header.link_cutting_image_file),
@@ -113,6 +116,7 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
       refKey1c: normalizeOptionalString(header.ref_key_1c),
     },
     details,
+    hdfDetails: normalizeHdfDetails(values.hdfDetails ?? [], values.dirtyHdfDetailIds ?? []),
     bazisImportCandidateClientKeys: details
       .filter(
         (detail) =>
@@ -127,6 +131,7 @@ export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDt
     dowelingLinks: normalizeDowelingLinks(values.dowelingLinks ?? []),
     deleted: {
       detailIds: normalizeDeletedIds(values.deletedDetails),
+      hdfDetailIds: normalizeDeletedIds(values.deletedHdfDetails),
       paymentIds: normalizeDeletedIds(values.deletedPayments),
       workshopIds: normalizeDeletedIds(values.deletedWorkshops),
       requirementIds: normalizeDeletedIds(values.deletedRequirements),
@@ -190,6 +195,7 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     milling_type_id: optionalNumber(order.header.millingTypeId),
     edge_type_id: optionalNumber(order.header.edgeTypeId),
     film_id: optionalNumber(order.header.filmId),
+    hdf_min_threshold_mm: optionalNumber(order.header.hdfMinThresholdMm),
 
     link_cutting_file: order.header.linkCuttingFile ?? null,
     link_cutting_image_file: order.header.linkCuttingImageFile ?? null,
@@ -217,12 +223,14 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
   return {
     header,
     details: mapDetailsFromDto(order.details ?? [], order.header.orderId),
+    hdfDetails: mapHdfDetailsFromDto(order.hdfDetails ?? [], order.header.orderId),
     payments: mapPaymentsFromDto(order.payments ?? [], order.header.orderId),
     workshops: mapWorkshopsFromDto(order.workshops ?? [], order.header.orderId),
     requirements: mapRequirementsFromDto(order.requirements ?? [], order.header.orderId),
     dowelingLinks,
 
     deletedDetails: [],
+    deletedHdfDetails: [],
     deletedPayments: [],
     deletedWorkshops: [],
     deletedRequirements: [],
@@ -433,6 +441,19 @@ function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
     }));
 }
 
+function normalizeHdfDetails(details: OrderHdfDetail[], dirtyIds: number[]): SaveOrderHdfDetailDto[] {
+  const dirty = new Set(dirtyIds.filter((id) => Number.isInteger(id) && id > 0));
+  if (dirty.size === 0) return [];
+  return details
+    .filter((detail) => Number.isInteger(detail.order_hdf_detail_id) && detail.order_hdf_detail_id > 0)
+    .filter((detail) => dirty.has(detail.order_hdf_detail_id))
+    .map((detail) => ({
+      id: detail.order_hdf_detail_id,
+      version: requiredNumber(detail.version, 'hdfDetail.version'),
+      productionStatusId: optionalNumber(detail.production_status_id),
+    }));
+}
+
 function normalizePayments(payments: Payment[]): SaveOrderPaymentDto[] {
   return payments.filter((payment) => !isNewEmptyPayment(payment)).map((payment) => ({
     id: payment.payment_id,
@@ -548,6 +569,40 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     bath_cut_job: detail.bathCutJob ?? null,
     bazis_cut_sets: detail.bazisCutSets ?? [],
     bazis_projects: detail.bazisProjects ?? [],
+  }));
+}
+
+function mapHdfDetailsFromDto(details: NonNullable<OrderDto['hdfDetails']>, orderId: number): OrderHdfDetail[] {
+  return details.map((detail) => ({
+    order_hdf_detail_id: detail.id,
+    order_id: detail.orderId ?? orderId,
+    source_order_detail_id: detail.sourceOrderDetailId,
+    source_order_detail_id_snapshot: detail.sourceOrderDetailIdSnapshot,
+    source_detail_number: detail.sourceDetailNumber,
+    source_detail_name: detail.sourceDetailName,
+    source_height_mm: detail.sourceHeightMm,
+    source_width_mm: detail.sourceWidthMm,
+    source_quantity: detail.sourceQuantity,
+    milling_type_id: detail.millingTypeId,
+    milling_type_name: detail.millingTypeName,
+    edge_mm: detail.edgeMm,
+    threshold_mm: detail.thresholdMm,
+    hdf_sheet_material_type_id: detail.hdfSheetMaterialTypeId,
+    hdf_sheet_material_name: detail.hdfSheetMaterialName,
+    hdf_height_mm: detail.hdfHeightMm,
+    hdf_width_mm: detail.hdfWidthMm,
+    quantity: detail.quantity,
+    area_m2: detail.areaM2,
+    status: detail.status,
+    config_errors: detail.configErrors,
+    config_revision: detail.configRevision,
+    is_stale: detail.isStale,
+    production_status_id: detail.productionStatusId,
+    production_status_name: detail.productionStatusName,
+    production_status_locked: detail.productionStatusLocked,
+    version: detail.version,
+    cut_job: detail.cutJob ?? null,
+    bazis_cut_sets: detail.bazisCutSets ?? [],
   }));
 }
 

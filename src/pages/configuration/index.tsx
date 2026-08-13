@@ -31,6 +31,7 @@ import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
+import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
 import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
@@ -548,6 +549,16 @@ export const ConfigurationPage: React.FC = () => {
         </span>
       ),
       children: <ProductionWorkflowTab />,
+    },
+    {
+      key: 'production-thresholds',
+      label: (
+        <span>
+          <BuildOutlined />
+          Пороги техпроцессов
+        </span>
+      ),
+      children: <ProductionThresholdsConfigTab />,
     },
     ...(statusAutomationVisible
       ? [
