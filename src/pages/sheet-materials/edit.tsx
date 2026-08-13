@@ -160,6 +160,11 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
             </Form.Item>
           </Col>
           <Col xs={24} sm={12} md={8}>
+            <Form.Item label="Conversion Key">
+              <Input value={record?.conversion_key ?? '—'} disabled />
+            </Form.Item>
+          </Col>
+          <Col xs={24} sm={12} md={8}>
             <Form.Item name="sortOrder" label="Порядок сортировки" rules={[{ required: true }]}>
               <InputNumber min={-32768} max={32767} style={{ width: '100%' }} />
             </Form.Item>

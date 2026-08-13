@@ -69,11 +69,12 @@ export const SheetMaterialShow: React.FC<IResourceComponentsProps> = () => {
       <Divider />
       <Row gutter={[16, 16]}>
         <Col span={8}><Title level={5}>Ключ 1C</Title><TextField value={record?.ref_key_1c ?? '—'} /></Col>
+        <Col span={8}><Title level={5}>Conversion Key</Title><TextField value={record?.conversion_key ?? '—'} /></Col>
         <Col span={8}><Title level={5}>Создан</Title><TextField value={record?.created_by || '—'} /></Col>
-        <Col span={8}><Title level={5}>Изменён</Title><TextField value={record?.edited_by || '—'} /></Col>
       </Row>
       <Divider />
       <Row gutter={[16, 16]}>
+        <Col span={8}><Title level={5}>Изменён</Title><TextField value={record?.edited_by || '—'} /></Col>
         <Col span={8}><Title level={5}>Создано</Title><DateField value={record?.created_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} /></Col>
         <Col span={8}><Title level={5}>Обновлено</Title><DateField value={record?.updated_at} format={DISPLAY_DATE_TIME_SECONDS_FORMAT} /></Col>
       </Row>

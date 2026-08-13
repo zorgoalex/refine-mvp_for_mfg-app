@@ -65,10 +65,15 @@ describe('sheet-materials resource wiring', () => {
     expect(create).toMatch(/name=["']isCuttable["']/);
   });
 
-  it('shows conversion_key as read-only diagnostic info in the list', () => {
+  it('shows conversion_key as read-only diagnostic info', () => {
     expect(dp).toMatch(/["']conversion_key["']/);
     expect(list).toMatch(/dataIndex=["']conversion_key["']/);
     expect(list).toMatch(/title=["']Conversion Key["']/);
+    expect(show).toMatch(/Conversion Key/);
+    expect(show).toMatch(/conversion_key/);
+    expect(edit).toMatch(/Conversion Key/);
+    expect(edit).toMatch(/conversion_key/);
+    expect(edit).toMatch(/disabled/);
     expect(edit).not.toMatch(/name=["']conversion_key["']/);
     expect(create).not.toMatch(/name=["']conversion_key["']/);
   });
