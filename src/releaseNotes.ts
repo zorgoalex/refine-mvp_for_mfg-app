@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-13",
+    title: "Раскрой: контраст скрина SVG",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В модалке ручной загрузки SVG добавлен ползунок контраста для скрина, который генерируется из SVG; карточки раскроя, файлы станка и Telegram получают более читаемое изображение.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-13",
     title: "Заказы: расчёт ХДФ",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

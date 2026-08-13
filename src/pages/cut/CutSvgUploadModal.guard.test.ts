@@ -40,6 +40,12 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('SvgUploadPreview');
     expect(modal).toContain('FloatingSvgPreview');
     expect(modal).toContain('Превью SVG');
+    expect(modal).toContain('Контраст скрина');
+    expect(modal).toContain('MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT');
+    expect(modal).toContain('manualSvgScreenshotPreviewFilter');
+    expect(modal).toContain('manualSvgGeneratedScreenshotContrastKey');
+    expect(modal).toContain('generatedScreenshot');
+    expect(modal).toContain('<Slider');
     expect(modal).toContain('Превью SVG-раскроя');
     expect(modal).toContain('Крупное превью SVG-раскроя');
     expect(modal).toContain('Открыть крупное превью SVG');

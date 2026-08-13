@@ -149,6 +149,8 @@ const SHA256_RE = /^[a-f0-9]{64}$/i;
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 const MANUAL_SVG_UPLOAD_MAX_TOTAL_FILE_SIZE_BYTES = 36 * 1024 * 1024;
+const MANUAL_SVG_SCREENSHOT_CONTRAST_MIN = 1;
+const MANUAL_SVG_SCREENSHOT_CONTRAST_MAX = 3;
 
 const manualSvgUploadFileSchema = z.object({
   kind: z.enum(['svg', 'gcode', 'screenshot']),
@@ -193,6 +195,13 @@ const manualSvgUploadSchema = z.object({
   cutLayout: cutLayoutSchema,
   items: z.array(itemSchema).min(1).max(2000),
   sourceFiles: z.array(manualSvgUploadFileSchema).max(3).optional().default([]),
+  generatedScreenshot: z.object({
+    contrast: z.number()
+      .min(MANUAL_SVG_SCREENSHOT_CONTRAST_MIN)
+      .max(MANUAL_SVG_SCREENSHOT_CONTRAST_MAX)
+      .nullable()
+      .optional(),
+  }).strict().optional(),
   telegramSend: z.object({
     enabled: z.boolean(),
     message: z.string().trim().max(4096).nullable().optional(),

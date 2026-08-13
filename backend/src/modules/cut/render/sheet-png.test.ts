@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { PNG } from 'pngjs';
 import {
   RENDER_PRESETS,
   assertFontAvailable,
+  renderRawSvgPng,
   renderSheetPng,
   resolveFontPath,
 } from './sheet-png';
@@ -68,3 +70,38 @@ describe('renderSheetPng (resvg)', () => {
     expect(png.length).toBeLessThan(big.length);
   });
 });
+
+describe('renderRawSvgPng generated screenshot contrast', () => {
+  it('darkens pale SVG geometry against a white sheet', () => {
+    const svg = [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">',
+      '<rect width="20" height="20" fill="#fff"/>',
+      '<rect x="4" y="4" width="12" height="12" fill="#eeeeee"/>',
+      '</svg>',
+    ].join('');
+    const baseline = PNG.sync.read(renderRawSvgPng({
+      svg,
+      targetPx: 100,
+      sheetWidthMm: 20,
+      sheetHeightMm: 20,
+      contrast: 1,
+    }));
+    const enhanced = PNG.sync.read(renderRawSvgPng({
+      svg,
+      targetPx: 100,
+      sheetWidthMm: 20,
+      sheetHeightMm: 20,
+      contrast: 2,
+    }));
+    const baselineIndex = (50 * baseline.width + 50) * 4;
+    const enhancedIndex = (50 * enhanced.width + 50) * 4;
+
+    expect(pngChannel(enhanced, enhancedIndex)).toBeLessThan(pngChannel(baseline, baselineIndex));
+    expect(pngChannel(enhanced, enhancedIndex + 1)).toBeLessThan(pngChannel(baseline, baselineIndex + 1));
+    expect(pngChannel(enhanced, enhancedIndex + 2)).toBeLessThan(pngChannel(baseline, baselineIndex + 2));
+  });
+});
+
+function pngChannel(image: PNG, index: number): number {
+  return image.data[index] ?? 255;
+}

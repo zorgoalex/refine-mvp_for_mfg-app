@@ -264,6 +264,10 @@ export interface CncTelegramManualSvgTelegramSendDto {
   message?: string | null;
 }
 
+export interface CncTelegramManualSvgGeneratedScreenshotDto {
+  contrast?: number | null;
+}
+
 export interface CncTelegramManualSvgUploadDto {
   idempotencyKey: string;
   selectedOrderIds: number[];
@@ -282,6 +286,7 @@ export interface CncTelegramManualSvgUploadDto {
   cutLayout: CncTelegramCutLayoutDto;
   items: CncTelegramStructuredIngestDto['items'];
   sourceFiles?: CncTelegramManualSvgUploadFileDto[];
+  generatedScreenshot?: CncTelegramManualSvgGeneratedScreenshotDto;
   telegramSend?: CncTelegramManualSvgTelegramSendDto;
 }
 

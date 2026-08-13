@@ -1,6 +1,6 @@
 import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Tag, Typography, Upload, message } from 'antd';
+import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Slider, Space, Tag, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import {
   CloseOutlined,
@@ -92,6 +92,10 @@ const FLOATING_SVG_PREVIEW_MIN_HEIGHT = 320;
 const FLOATING_SVG_PREVIEW_DEFAULT_WIDTH = 760;
 const FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT = 620;
 const MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
+const MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT = 1.45;
+const MANUAL_SVG_SCREENSHOT_CONTRAST_MIN = 1;
+const MANUAL_SVG_SCREENSHOT_CONTRAST_MAX = 3;
+const MANUAL_SVG_SCREENSHOT_CONTRAST_STEP = 0.05;
 
 const DEFAULT_COMMENT_PRESETS: SvgCommentPresetOption[] = [
   { label: 'Фрезы', commentText: 'фрезы:', category: 'tool' },
@@ -140,6 +144,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const [svgSourceFile, setSvgSourceFile] = useState<ManualSvgUploadFileState | null>(null);
   const [gcodeSourceFile, setGcodeSourceFile] = useState<ManualSvgUploadFileState | null>(null);
   const [screenshotSourceFile, setScreenshotSourceFile] = useState<ManualSvgUploadFileState | null>(null);
+  const [generatedScreenshotContrast, setGeneratedScreenshotContrast] = useState(MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT);
   const [materialName, setMaterialName] = useState('');
   const [machineName, setMachineName] = useState('');
   const [requestedCutJobId, setRequestedCutJobId] = useState<number | null>(null);
@@ -261,6 +266,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       setSvgSourceFile(null);
       setGcodeSourceFile(null);
       setScreenshotSourceFile(null);
+      setGeneratedScreenshotContrast(MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT);
       return true;
     },
   };
@@ -317,6 +323,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setSvgSourceFile(null);
     setGcodeSourceFile(null);
     setScreenshotSourceFile(null);
+    setGeneratedScreenshotContrast(MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT);
     setMaterialName('');
     setMachineName('');
     setRequestedCutJobId(null);
@@ -396,6 +403,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     const idempotencyKey = createIdempotencyKey([
       parsed.svgContentHash,
       manualSvgUploadFilesFingerprint(sourceFiles),
+      manualSvgGeneratedScreenshotContrastKey(generatedScreenshotContrast, Boolean(screenshotSourceFile)),
       sendToTelegram ? telegramMessageText : 'telegram-off',
     ].join(':'));
     setSubmitting(true);
@@ -413,6 +421,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         comments: uploadComment ? [uploadComment] : [],
         parserVersion: 'erp-manual-svg-upload-v1',
         sourceFiles,
+        generatedScreenshot: {
+          contrast: screenshotSourceFile ? null : normalizeManualSvgGeneratedScreenshotContrast(generatedScreenshotContrast),
+        },
         telegramSend: {
           enabled: sendToTelegram,
           message: telegramMessageText || null,
@@ -503,6 +514,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     svgSourceFile,
     gcodeSourceFile,
     screenshotSourceFile,
+    generatedScreenshotContrast,
     machineName,
     materialName,
     matchSummary,
@@ -532,6 +544,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setSvgSourceFile(null);
     setGcodeSourceFile(null);
     setScreenshotSourceFile(null);
+    setGeneratedScreenshotContrast(MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT);
     replaceSvgPreview(createSvgPreview(file));
     try {
       const sourceFile = await fileToManualSvgUploadFile(file, 'svg');
@@ -602,6 +615,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     <FloatingSvgPreview
       preview={svgPreview}
       parsed={parsed}
+      screenshotContrast={generatedScreenshotContrast}
+      contrastEnabled={!screenshotSourceFile}
       onClose={() => setSvgPreviewExpanded(false)}
     />
   ) : null;
@@ -830,6 +845,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         <SvgUploadPreview
           preview={svgPreview}
           parsed={parsed}
+          screenshotContrast={generatedScreenshotContrast}
+          contrastEnabled={!screenshotSourceFile}
+          onContrastChange={setGeneratedScreenshotContrast}
           onOpenExpanded={() => setSvgPreviewExpanded(true)}
         />
         </div>
@@ -888,10 +906,16 @@ function ManualSvgAttachmentTag({
 function SvgUploadPreview({
   preview,
   parsed,
+  screenshotContrast,
+  contrastEnabled,
+  onContrastChange,
   onOpenExpanded,
 }: {
   preview: SvgPreviewState | null;
   parsed: ParsedSvgUpload | null;
+  screenshotContrast: number;
+  contrastEnabled: boolean;
+  onContrastChange: (value: number) => void;
   onOpenExpanded: () => void;
 }) {
   const sheetSize = parsed?.cutLayout.sheet
@@ -982,6 +1006,9 @@ function SvgUploadPreview({
               width: 'auto',
               height: 'auto',
               objectFit: 'contain',
+              filter: manualSvgScreenshotPreviewFilter(screenshotContrast, contrastEnabled),
+              background: '#ffffff',
+              outline: '1px solid rgba(0, 0, 0, 0.1)',
             }}
           />
         ) : (
@@ -990,13 +1017,39 @@ function SvgUploadPreview({
       </div>
       <div
         style={{
-          padding: '8px 12px',
+          padding: '8px 12px 10px',
           borderTop: '1px solid #f0f0f0',
         }}
       >
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          {sheetSize ?? 'Пропорции сохраняются при показе'}
-        </Typography.Text>
+        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              Контраст скрина
+            </Typography.Text>
+            <Typography.Text
+              type={contrastEnabled ? 'secondary' : 'warning'}
+              style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}
+            >
+              {contrastEnabled ? `${Math.round(screenshotContrast * 100)}%` : 'загружен скрин'}
+            </Typography.Text>
+          </div>
+          <Slider
+            min={MANUAL_SVG_SCREENSHOT_CONTRAST_MIN}
+            max={MANUAL_SVG_SCREENSHOT_CONTRAST_MAX}
+            step={MANUAL_SVG_SCREENSHOT_CONTRAST_STEP}
+            value={screenshotContrast}
+            onChange={(value) => {
+              const next = Array.isArray(value) ? value[0] ?? MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT : value;
+              onContrastChange(normalizeManualSvgGeneratedScreenshotContrast(next));
+            }}
+            disabled={!contrastEnabled}
+            tooltip={{ formatter: (value) => `${Math.round((value ?? screenshotContrast) * 100)}%` }}
+            style={{ margin: '0 2px 2px' }}
+          />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {sheetSize ?? 'Пропорции сохраняются при показе'}
+          </Typography.Text>
+        </Space>
       </div>
     </div>
   );
@@ -1005,10 +1058,14 @@ function SvgUploadPreview({
 function FloatingSvgPreview({
   preview,
   parsed,
+  screenshotContrast,
+  contrastEnabled,
   onClose,
 }: {
   preview: SvgPreviewState;
   parsed: ParsedSvgUpload | null;
+  screenshotContrast: number;
+  contrastEnabled: boolean;
   onClose: () => void;
 }) {
   const sheetSize = parsed?.cutLayout.sheet
@@ -1191,6 +1248,7 @@ function FloatingSvgPreview({
             objectFit: 'contain',
             outline: '1px solid rgba(0, 0, 0, 0.1)',
             background: '#ffffff',
+            filter: manualSvgScreenshotPreviewFilter(screenshotContrast, contrastEnabled),
           }}
         />
       </div>
@@ -1940,6 +1998,23 @@ function manualSvgUploadFilesFingerprint(files: CncTelegramManualSvgUploadFile[]
     .map((file) => `${file.kind}:${file.fileName}:${file.contentType}:${file.sizeBytes}:${file.sha256}`)
     .sort()
     .join('|');
+}
+
+function normalizeManualSvgGeneratedScreenshotContrast(value: number): number {
+  if (!Number.isFinite(value)) return MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT;
+  const clamped = Math.min(MANUAL_SVG_SCREENSHOT_CONTRAST_MAX, Math.max(MANUAL_SVG_SCREENSHOT_CONTRAST_MIN, value));
+  return Math.round(clamped * 100) / 100;
+}
+
+function manualSvgGeneratedScreenshotContrastKey(value: number, uploadedScreenshot: boolean): string {
+  if (uploadedScreenshot) return 'uploaded-screenshot';
+  return `generated-screenshot-contrast:${normalizeManualSvgGeneratedScreenshotContrast(value).toFixed(2)}`;
+}
+
+function manualSvgScreenshotPreviewFilter(value: number, enabled: boolean): string | undefined {
+  if (!enabled) return undefined;
+  const contrast = normalizeManualSvgGeneratedScreenshotContrast(value);
+  return `contrast(${contrast}) saturate(1.08)`;
 }
 
 async function fileToManualSvgUploadFile(

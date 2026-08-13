@@ -1875,6 +1875,7 @@ function renderManualSvgScreenshot(
     targetPx: RENDER_PRESETS.screen,
     sheetWidthMm: dto.cutLayout.sheet?.widthMm ?? null,
     sheetHeightMm: dto.cutLayout.sheet?.heightMm ?? null,
+    contrast: dto.generatedScreenshot?.contrast,
   });
   const sha256 = createHash('sha256').update(png).digest('hex');
   return {
@@ -1941,6 +1942,9 @@ async function writeManualSvgFileUploadedAudit(
       sizeBytes: input.file.sizeBytes,
       sha256: input.file.sha256,
       generated: input.file.generated,
+      generatedScreenshotContrast: input.file.kind === 'screenshot' && input.file.generated
+        ? input.command.dto.generatedScreenshot?.contrast ?? null
+        : null,
       expiresAt: input.file.expiresAt,
       packetId: input.packet.packetId,
       externalPacketKey: input.externalPacketKey,
@@ -5428,6 +5432,9 @@ async function reconcileManualSvgUploadIdempotency(
     matchMode: input.command.dto.matchMode,
     requestedCutJobId: input.command.dto.requestedCutJobId ?? null,
     sourceFiles: manualSvgSourceFileRequestSnapshot(input.command.dto.sourceFiles ?? []),
+    generatedScreenshot: {
+      contrast: input.command.dto.generatedScreenshot?.contrast ?? null,
+    },
     telegramSend: {
       enabled: input.command.dto.telegramSend?.enabled === true,
       message: input.command.dto.telegramSend?.message?.trim() ?? null,

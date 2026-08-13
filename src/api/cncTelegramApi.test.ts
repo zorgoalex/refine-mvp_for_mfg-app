@@ -98,6 +98,7 @@ describe('cncTelegramApi', () => {
       matchMode: 'informational',
       requestedCutJobId: 777,
       svgContentHash: 'a'.repeat(64),
+      generatedScreenshot: { contrast: 1.45 },
       cutLayout: {
         status: 'valid',
         reasons: [],
@@ -125,6 +126,7 @@ describe('cncTelegramApi', () => {
       createMdfMachineFileCard: true,
       matchMode: 'informational',
       requestedCutJobId: 777,
+      generatedScreenshot: { contrast: 1.45 },
     });
   });
 

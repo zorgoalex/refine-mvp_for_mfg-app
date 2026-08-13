@@ -52,6 +52,7 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('writeManualSvgFileUploadedAudit');
     expect(repositorySource).toContain("entityType: 'cnc_manual_svg_upload_file'");
     expect(repositorySource).toContain('telegramSendEnabled');
+    expect(repositorySource).toContain('generatedScreenshotContrast');
     expect(repositorySource).toContain('enqueueManualSvgTelegramSendRequest');
     expect(repositorySource).toContain('renderManualSvgScreenshot');
     expect(repositorySource).toContain('lockActiveManualSvgTelegramSend');

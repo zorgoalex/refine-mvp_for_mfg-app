@@ -161,6 +161,9 @@ describe('CncTelegramController parsing', () => {
         enabled: true,
         message: 'Фрезы для ХДФ: 8',
       },
+      generatedScreenshot: {
+        contrast: 1.85,
+      },
     }, 'manual-svg:test:files');
 
     expect(parsed.sourceFiles).toHaveLength(2);
@@ -173,6 +176,7 @@ describe('CncTelegramController parsing', () => {
       enabled: true,
       message: 'Фрезы для ХДФ: 8',
     });
+    expect(parsed.generatedScreenshot).toEqual({ contrast: 1.85 });
 
     expect(() => parseManualSvgUpload({
       ...manualSvgUploadPayload(),
@@ -182,6 +186,11 @@ describe('CncTelegramController parsing', () => {
       ],
       telegramSend: { enabled: true },
     }, 'manual-svg:test:duplicate')).toThrow(ApiError);
+
+    expect(() => parseManualSvgUpload({
+      ...manualSvgUploadPayload(),
+      generatedScreenshot: { contrast: 3.1 },
+    }, 'manual-svg:test:bad-contrast')).toThrow(ApiError);
   });
 
   it('rejects manual SVG upload without selected orders or valid layout', () => {

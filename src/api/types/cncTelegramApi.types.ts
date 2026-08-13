@@ -318,6 +318,9 @@ export interface CncTelegramManualSvgUploadRequest {
   tools?: CncTelegramTool[];
   parserVersion?: string | null;
   sourceFiles?: CncTelegramManualSvgUploadFile[];
+  generatedScreenshot?: {
+    contrast?: number | null;
+  };
   telegramSend?: {
     enabled: boolean;
     message?: string | null;
