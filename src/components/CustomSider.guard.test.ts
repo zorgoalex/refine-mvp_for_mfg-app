@@ -37,4 +37,11 @@ describe('CustomSider expanded labels', () => {
     expect(source).toContain('{collapsed && (');
     expect(settingsSource).toContain('Настроить порядок меню');
   });
+
+  it('persists collapsed state per user in the legacy sider', () => {
+    expect(source).toContain('loadSidebarCollapsed(currentUserId, true)');
+    expect(source).toContain('saveSidebarCollapsed(currentUserId, val)');
+    expect(source).toContain('onCollapse={handleCollapse}');
+    expect(source).not.toContain('useState(true)');
+  });
 });

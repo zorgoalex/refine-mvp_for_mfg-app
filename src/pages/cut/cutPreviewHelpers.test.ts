@@ -46,6 +46,7 @@ const autoSheet1 = makeSheet(1, ['det-2']);
 /** Manual layout: piece det-1 moved to sheet 1, det-2 stayed on sheet 0 (different from auto). */
 const manualSheet0 = makeSheet(0, ['det-2']);
 const manualSheet1 = makeSheet(1, ['det-1']);
+const manualSheet2 = makeSheet(2, ['det-3']);
 
 const baseGroup: CutGroupDto = {
   cutGroupId: 5,
@@ -445,6 +446,24 @@ describe('cutPreviewHelpers', () => {
       };
       const result = selectVariantSheets(group, 'active');
       expect(result[0].placements.pieces.map((p) => p.item_id)).toEqual(['det-2']);
+    });
+
+    it('includes a manually added sheet that does not exist in auto group.sheets', () => {
+      const group: CutGroupDto = {
+        ...baseGroup,
+        manualLayout: {
+          groupKey: 'k1',
+          sheets: [manualSheet0, manualSheet1, manualSheet2],
+          isActive: true,
+          isStale: false,
+          version: 1,
+        },
+      };
+
+      const result = selectVariantSheets(group, 'manual');
+
+      expect(result.map((sheet) => sheet.sheetIndex)).toEqual([0, 1, 2]);
+      expect(result[2].placements.pieces.map((p) => p.item_id)).toEqual(['det-3']);
     });
   });
 });

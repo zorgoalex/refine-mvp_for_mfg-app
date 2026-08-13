@@ -41,6 +41,7 @@ import {
 import { APP_VERSION } from "../version";
 import { SidebarMenuSettingsButton } from "./SidebarMenuSettingsButton";
 import { SIDER_RESOURCE_ICONS } from "./siderResourceIcons";
+import { loadSidebarCollapsed, saveSidebarCollapsed } from "./sidebarCollapsedPreference";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -107,16 +108,26 @@ export const CustomSider: React.FC = () => {
   const { push } = useNavigation();
   const location = useLocation();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(true);
   const { getSetting } = useAppSettings();
   const sidebarMenuPreferences = useSidebarMenuPreferences();
+  const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
+  const currentUserId = currentUser?.id;
+  const [collapsed, setCollapsed] = useState(() => loadSidebarCollapsed(currentUserId, true));
+
+  useEffect(() => {
+    setCollapsed(loadSidebarCollapsed(currentUserId, true));
+  }, [currentUserId]);
+
+  const handleCollapse = useCallback((val: boolean) => {
+    setCollapsed(val);
+    saveSidebarCollapsed(currentUserId, val);
+  }, [currentUserId]);
 
   // Warm DNS/TLS to Bitrix24 while the user works in ERP.
   useEffect(() => {
     if (bitrix24MenuConfig) ensureBitrix24ResourceHints(bitrix24MenuConfig.url);
   }, []);
 
-  const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
   const { canViewFinancials } = useOrderFinancialVisibility(currentUser);
   const currentRoleKey = getCurrentUserRoleKey(currentUser);
   const roleVisibilityMatrix = normalizeRoleVisibilityMatrix(
@@ -165,7 +176,7 @@ export const CustomSider: React.FC = () => {
   });
 
   return (
-    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={(val) => setCollapsed(val)} width={195} collapsedWidth={48}>
+    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={handleCollapse} width={195} collapsedWidth={48}>
       <div
         style={{
           padding: "8px 4px",

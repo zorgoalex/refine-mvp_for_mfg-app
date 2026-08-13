@@ -2053,7 +2053,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       // resetSheetViews() (clears maps + thumbReqRef + epoch); renderVersion stays
       // in the FETCH to bust the SERVER render cache.
       const key = `${group.cutGroupId}:${sheetIndex}:${variant}:${sheetPortrait ? 'P' : 'L'}:${sheetOriginTopLeft ? 'tl' : 'raw'}:${sheetAxisOrigin}`;
-      const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
+      const sheet = selectVariantSheets(group, variant).find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
@@ -2091,7 +2091,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const reqKey = `${cutJobId}:${key}`;
       if (thumbReqRef.current.has(reqKey)) return;
       thumbReqRef.current.add(reqKey);
-      const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
+      const sheet = selectVariantSheets(group, variant).find((candidate) => candidate.sheetIndex === sheetIndex);
       const rotate90 = sheet
         ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
         : sheetPortrait;
@@ -2123,7 +2123,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const showAlt = showAlternativeByGroup[group.cutGroupId] ?? false;
       const groupVariant: 'auto' | 'manual' | 'active' = showAlt ? 'manual' : 'auto';
       const groupRenderVersion = group.renderToken;
-      for (const sheet of group.sheets) {
+      const thumbSheets = selectVariantSheets(group, groupVariant);
+      for (const sheet of thumbSheets) {
         void loadThumb(job.cutJobId, group, sheet.sheetIndex, groupVariant, groupRenderVersion);
       }
     }

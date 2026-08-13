@@ -98,6 +98,13 @@ describe('evolution shell behavior preservation', () => {
     expect(styles).toContain('.evolution-sider.ant-layout-sider-collapsed .evolution-sider__nav');
   });
 
+  it('persists collapsed state per user in the modern sider shell', () => {
+    expect(layout).toContain('loadSidebarCollapsed(currentUserId, false)');
+    expect(layout).toContain('saveSidebarCollapsed(currentUserId, next)');
+    expect(layout).not.toContain('SIDEBAR_STORAGE_KEY');
+    expect(layout).not.toContain('erp.ui.evolution.sidebar.collapsed');
+  });
+
   it('renders AIR as a separate top-nav and utility-rail shell, not a recolored sider', () => {
     expect(layout).toContain("variant === 'air'");
     expect(layout).toContain('<EvolutionAirNavigation />');

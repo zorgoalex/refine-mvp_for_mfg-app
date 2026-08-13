@@ -100,6 +100,13 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/landscape=\{\(\(\) => \{[\s\S]*sheetPreviewRotate90\(\s*p\.sheet_width_mm/);
   });
 
+  it('loads manual-only sheets from the selected preview variant', () => {
+    expect(source).toMatch(/const sheet = selectVariantSheets\(group, variant\)\.find/);
+    expect(source).toContain('const thumbSheets = selectVariantSheets(group, groupVariant);');
+    expect(source).toContain('for (const sheet of thumbSheets)');
+    expect(source).not.toContain('for (const sheet of group.sheets) {\n        void loadThumb');
+  });
+
   it('enables vacuum-bath meter guides from the shared eligibility contract', () => {
     expect(source).toMatch(/shouldShowBathMeterGuides\(\{/);
     expect(source).toMatch(/engineUsed:\s*group\.summary\?\.engine_used/);
