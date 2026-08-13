@@ -1321,8 +1321,33 @@ probe_file() {
                        SELECT 1
                          FROM cnc_manual_svg_comment_presets
                         WHERE lower(trim(comment_text)) = lower('Фреза для ламинированной стороны:')
-                          AND category = 'tool'
+                         AND category = 'tool'
                      );" ;;
+    121_cut_result_informational_snapshots*) probe_all \
+                     "SELECT pg_get_functiondef('cut_result_expected_manifest(jsonb)'::regprocedure)
+                              LIKE '%piece_rows AS%'
+                         AND pg_get_functiondef('cut_result_expected_manifest(jsonb)'::regprocedure)
+                              LIKE '%count(DISTINCT item_id)%';" \
+                     "SELECT pg_get_functiondef('cut_result_snapshot_is_complete(jsonb,jsonb,text)'::regprocedure)
+                              LIKE '%informational_snapshot := item_count = 0%'
+                         AND pg_get_functiondef('cut_result_snapshot_is_complete(jsonb,jsonb,text)'::regprocedure)
+                              LIKE '%max_instance <> instances%'
+                         AND pg_get_functiondef('cut_result_snapshot_is_complete(jsonb,jsonb,text)'::regprocedure)
+                              LIKE '%label,detailId%';" ;;
+    122_cut_result_informational_label_maps*) probe_all \
+                     "SELECT COALESCE((
+                        SELECT attnotnull = false
+                          FROM pg_attribute
+                         WHERE attrelid = 'public.cut_result_placement'::regclass
+                           AND attname = 'order_detail_id'
+                           AND NOT attisdropped
+                     ), false);" \
+                     "SELECT pg_get_functiondef('project_cut_result_label_maps(bigint)'::regprocedure)
+                              LIKE '%informational_snapshot := jsonb_array_length%'
+                         AND pg_get_functiondef('project_cut_result_label_maps(bigint)'::regprocedure)
+                              LIKE '%piece_json #> ''{label,orderId}''%'
+                         AND pg_get_functiondef('project_cut_result_label_maps(bigint)'::regprocedure)
+                              LIKE '%has unknown order for item%';" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1334,7 +1359,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

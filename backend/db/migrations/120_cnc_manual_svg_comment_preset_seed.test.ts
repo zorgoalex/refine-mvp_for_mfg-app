@@ -18,6 +18,6 @@ describe('120_cnc_manual_svg_comment_preset_seed migration', () => {
   it('is classified by the migration runner probe map', () => {
     expect(runner).toContain('120_cnc_manual_svg_comment_preset_seed*) probe_all');
     expect(runner).toContain("lower(trim(comment_text)) = lower('Фрезы для ХДФ: 8')");
-    expect(runner).toContain('120_*)');
+    expect(runner).toContain('120_*');
   });
 });

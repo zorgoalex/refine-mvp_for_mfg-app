@@ -40,6 +40,11 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('Открыть крупное превью SVG');
     expect(modal).toContain('onPointerDown');
     expect(modal).toContain('setPointerCapture');
+    expect(modal).toContain('stopFloatingSvgPreviewActionPointerDown');
+    expect(modal).toContain('resizeFloatingSvgPreviewRect');
+    expect(modal).toContain('floatingSvgPreviewResizeHandleStyle');
+    expect(modal).toContain('FLOATING_SVG_PREVIEW_MIN_WIDTH');
+    expect(modal).toContain('bottom-right');
     expect(modal).toContain('printSvgPreview');
     expect(modal).toContain('Распечатать SVG');
     expect(modal).toContain('URL.createObjectURL');

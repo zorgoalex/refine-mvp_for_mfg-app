@@ -81,10 +81,22 @@ interface SvgPreviewState {
 
 type SvgUploadMatchMode = 'order_details' | 'informational';
 type SvgCommentPresetOption = Pick<CncTelegramManualSvgCommentPreset, 'label' | 'commentText' | 'category'>;
+type FloatingSvgPreviewResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+interface FloatingSvgPreviewRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
 
 const EMPTY_DEFAULT_ORDER_IDS: number[] = [];
 const EMPTY_DEFAULT_ORDER_NAMES: string[] = [];
 const EMPTY_CUT_JOB_NUMBER_CHECK: CutJobNumberCheck = { status: 'idle', suggestions: [] };
+const FLOATING_SVG_PREVIEW_MARGIN = 16;
+const FLOATING_SVG_PREVIEW_MIN_WIDTH = 360;
+const FLOATING_SVG_PREVIEW_MIN_HEIGHT = 320;
+const FLOATING_SVG_PREVIEW_DEFAULT_WIDTH = 760;
+const FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT = 620;
 
 const DEFAULT_COMMENT_PRESETS: SvgCommentPresetOption[] = [
   { label: 'Фрезы', commentText: 'фрезы:', category: 'tool' },
@@ -810,17 +822,23 @@ function FloatingSvgPreview({
   const sheetSize = parsed?.cutLayout.sheet
     ? `${parsed.cutLayout.sheet.widthMm} x ${parsed.cutLayout.sheet.heightMm} мм`
     : 'размер листа не определен';
-  const [position, setPosition] = useState(defaultFloatingSvgPreviewPosition);
+  const [rect, setRect] = useState(defaultFloatingSvgPreviewRect);
   const dragRef = useRef<{
     pointerId: number;
     startX: number;
     startY: number;
-    left: number;
-    top: number;
+    rect: FloatingSvgPreviewRect;
+  } | null>(null);
+  const resizeRef = useRef<{
+    pointerId: number;
+    corner: FloatingSvgPreviewResizeCorner;
+    startX: number;
+    startY: number;
+    rect: FloatingSvgPreviewRect;
   } | null>(null);
 
   useEffect(() => {
-    const handleResize = () => setPosition((current) => clampFloatingSvgPreviewPosition(current));
+    const handleResize = () => setRect((current) => clampFloatingSvgPreviewRect(current));
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
@@ -839,18 +857,18 @@ function FloatingSvgPreview({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      left: position.left,
-      top: position.top,
+      rect,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
-  }, [position.left, position.top]);
+  }, [rect]);
 
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    setPosition(clampFloatingSvgPreviewPosition({
-      left: drag.left + event.clientX - drag.startX,
-      top: drag.top + event.clientY - drag.startY,
+    setRect(clampFloatingSvgPreviewRect({
+      ...drag.rect,
+      left: drag.rect.left + event.clientX - drag.startX,
+      top: drag.rect.top + event.clientY - drag.startY,
     }));
   }, []);
 
@@ -858,15 +876,48 @@ function FloatingSvgPreview({
     if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
   }, []);
 
+  const handleResizePointerDown = useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    corner: FloatingSvgPreviewResizeCorner,
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeRef.current = {
+      pointerId: event.pointerId,
+      corner,
+      startX: event.clientX,
+      startY: event.clientY,
+      rect,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [rect]);
+
+  const handleResizePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    setRect(resizeFloatingSvgPreviewRect(
+      resize.rect,
+      event.clientX - resize.startX,
+      event.clientY - resize.startY,
+      resize.corner,
+    ));
+  }, []);
+
+  const finishResize = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (resizeRef.current?.pointerId === event.pointerId) resizeRef.current = null;
+  }, []);
+
   return (
     <div
       style={{
         position: 'fixed',
-        left: position.left,
-        top: position.top,
+        left: rect.left,
+        top: rect.top,
         zIndex: 1100,
-        width: 'min(760px, calc(100vw - 32px))',
-        height: 'min(620px, calc(100vh - 32px))',
+        width: rect.width,
+        height: rect.height,
         borderRadius: 8,
         background: '#ffffff',
         boxShadow: '0 18px 45px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.1)',
@@ -902,7 +953,7 @@ function FloatingSvgPreview({
             {sheetSize}
           </Typography.Text>
         </div>
-        <Space size={4}>
+        <Space size={4} onPointerDown={stopFloatingSvgPreviewActionPointerDown}>
           <Tooltip title="Распечатать SVG">
             <Button
               type="text"
@@ -951,29 +1002,122 @@ function FloatingSvgPreview({
           }}
         />
       </div>
+      {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as const).map((corner) => (
+        <div
+          key={corner}
+          aria-label={`Изменить размер крупного превью SVG: ${corner}`}
+          onPointerDown={(event) => handleResizePointerDown(event, corner)}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={finishResize}
+          onPointerCancel={finishResize}
+          style={floatingSvgPreviewResizeHandleStyle(corner)}
+        />
+      ))}
     </div>
   );
 }
 
-function defaultFloatingSvgPreviewPosition(): { left: number; top: number } {
-  if (typeof window === 'undefined') return { left: 24, top: 72 };
-  const width = Math.min(760, Math.max(320, window.innerWidth - 32));
-  const height = Math.min(620, Math.max(320, window.innerHeight - 32));
-  return clampFloatingSvgPreviewPosition({
+function stopFloatingSvgPreviewActionPointerDown(event: React.PointerEvent): void {
+  event.stopPropagation();
+}
+
+function defaultFloatingSvgPreviewRect(): FloatingSvgPreviewRect {
+  if (typeof window === 'undefined') {
+    return {
+      left: 24,
+      top: 72,
+      width: FLOATING_SVG_PREVIEW_DEFAULT_WIDTH,
+      height: FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT,
+    };
+  }
+  const width = Math.min(
+    FLOATING_SVG_PREVIEW_DEFAULT_WIDTH,
+    Math.max(FLOATING_SVG_PREVIEW_MIN_WIDTH, window.innerWidth - FLOATING_SVG_PREVIEW_MARGIN * 2),
+  );
+  const height = Math.min(
+    FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT,
+    Math.max(FLOATING_SVG_PREVIEW_MIN_HEIGHT, window.innerHeight - FLOATING_SVG_PREVIEW_MARGIN * 2),
+  );
+  return clampFloatingSvgPreviewRect({
     left: window.innerWidth - width - 24,
     top: Math.min(88, window.innerHeight - height - 16),
+    width,
+    height,
   });
 }
 
-function clampFloatingSvgPreviewPosition(position: { left: number; top: number }): { left: number; top: number } {
-  if (typeof window === 'undefined') return position;
-  const width = Math.min(760, Math.max(320, window.innerWidth - 32));
-  const height = Math.min(620, Math.max(320, window.innerHeight - 32));
-  const margin = 16;
+function clampFloatingSvgPreviewRect(rect: FloatingSvgPreviewRect): FloatingSvgPreviewRect {
+  if (typeof window === 'undefined') return rect;
+  const maxWidth = Math.max(FLOATING_SVG_PREVIEW_MIN_WIDTH, window.innerWidth - FLOATING_SVG_PREVIEW_MARGIN * 2);
+  const maxHeight = Math.max(FLOATING_SVG_PREVIEW_MIN_HEIGHT, window.innerHeight - FLOATING_SVG_PREVIEW_MARGIN * 2);
+  const width = clampNumber(rect.width, FLOATING_SVG_PREVIEW_MIN_WIDTH, maxWidth);
+  const height = clampNumber(rect.height, FLOATING_SVG_PREVIEW_MIN_HEIGHT, maxHeight);
   return {
-    left: Math.min(Math.max(margin, position.left), Math.max(margin, window.innerWidth - width - margin)),
-    top: Math.min(Math.max(margin, position.top), Math.max(margin, window.innerHeight - height - margin)),
+    left: clampNumber(
+      rect.left,
+      FLOATING_SVG_PREVIEW_MARGIN,
+      Math.max(FLOATING_SVG_PREVIEW_MARGIN, window.innerWidth - width - FLOATING_SVG_PREVIEW_MARGIN),
+    ),
+    top: clampNumber(
+      rect.top,
+      FLOATING_SVG_PREVIEW_MARGIN,
+      Math.max(FLOATING_SVG_PREVIEW_MARGIN, window.innerHeight - height - FLOATING_SVG_PREVIEW_MARGIN),
+    ),
+    width,
+    height,
   };
+}
+
+function resizeFloatingSvgPreviewRect(
+  rect: FloatingSvgPreviewRect,
+  deltaX: number,
+  deltaY: number,
+  corner: FloatingSvgPreviewResizeCorner,
+): FloatingSvgPreviewRect {
+  const next = { ...rect };
+  const maxWidth = typeof window === 'undefined'
+    ? FLOATING_SVG_PREVIEW_DEFAULT_WIDTH
+    : Math.max(FLOATING_SVG_PREVIEW_MIN_WIDTH, window.innerWidth - FLOATING_SVG_PREVIEW_MARGIN * 2);
+  const maxHeight = typeof window === 'undefined'
+    ? FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT
+    : Math.max(FLOATING_SVG_PREVIEW_MIN_HEIGHT, window.innerHeight - FLOATING_SVG_PREVIEW_MARGIN * 2);
+  if (corner.includes('right')) {
+    next.width = clampNumber(rect.width + deltaX, FLOATING_SVG_PREVIEW_MIN_WIDTH, maxWidth);
+  } else {
+    const right = rect.left + rect.width;
+    next.left = clampNumber(rect.left + deltaX, right - maxWidth, right - FLOATING_SVG_PREVIEW_MIN_WIDTH);
+    next.width = right - next.left;
+  }
+  if (corner.includes('bottom')) {
+    next.height = clampNumber(rect.height + deltaY, FLOATING_SVG_PREVIEW_MIN_HEIGHT, maxHeight);
+  } else {
+    const bottom = rect.top + rect.height;
+    next.top = clampNumber(rect.top + deltaY, bottom - maxHeight, bottom - FLOATING_SVG_PREVIEW_MIN_HEIGHT);
+    next.height = bottom - next.top;
+  }
+  return clampFloatingSvgPreviewRect(next);
+}
+
+function floatingSvgPreviewResizeHandleStyle(corner: FloatingSvgPreviewResizeCorner): React.CSSProperties {
+  const size = 18;
+  const inset = -2;
+  const style: React.CSSProperties = {
+    position: 'absolute',
+    width: size,
+    height: size,
+    zIndex: 1,
+    touchAction: 'none',
+    cursor: corner === 'top-left' || corner === 'bottom-right' ? 'nwse-resize' : 'nesw-resize',
+  };
+  if (corner.includes('top')) style.top = inset;
+  if (corner.includes('bottom')) style.bottom = inset;
+  if (corner.includes('left')) style.left = inset;
+  if (corner.includes('right')) style.right = inset;
+  return style;
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function printSvgPreview(url: string, title: string): void {
