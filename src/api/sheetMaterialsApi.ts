@@ -16,6 +16,7 @@ export interface SheetMaterialTypeInput {
   color?: string | null;
   refKey1c?: string | null;
   isActive?: boolean;
+  isCuttable?: boolean;
   sortOrder?: number;
 }
 
@@ -34,6 +35,7 @@ export interface SheetMaterialTypeDto {
   color: string | null;
   refKey1c: string | null;
   isActive: boolean;
+  isCuttable: boolean;
   sortOrder: number;
   version: number;
 }

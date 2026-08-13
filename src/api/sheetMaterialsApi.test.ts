@@ -14,8 +14,8 @@ describe('sheetMaterialsApi', () => {
 
   it('update PUTs with version in body', async () => {
     (httpClient.put as any).mockResolvedValue({});
-    await sheetMaterialsApi.update(5, { name: 'X', materialTypeId: 1, unitId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070 }, 3);
-    expect(httpClient.put).toHaveBeenCalledWith('/api/v1/sheet-material-types/5', expect.objectContaining({ name: 'X', version: 3 }));
+    await sheetMaterialsApi.update(5, { name: 'X', materialTypeId: 1, unitId: 1, thicknessMm: 16, widthMm: 2800, heightMm: 2070, isCuttable: false }, 3);
+    expect(httpClient.put).toHaveBeenCalledWith('/api/v1/sheet-material-types/5', expect.objectContaining({ name: 'X', isCuttable: false, version: 3 }));
   });
 
   it('deactivate DELETEs with version body', async () => {
