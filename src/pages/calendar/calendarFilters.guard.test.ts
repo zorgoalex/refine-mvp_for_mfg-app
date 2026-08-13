@@ -83,4 +83,12 @@ describe('calendar filters integration', () => {
     expect(dataHook).not.toMatch(/const materialOptions = useMemo\(\(\) => \{[\s\S]*material\?\.material_name[\s\S]*\}, \[[^\]]*materialsData\?\.data/);
     expect(dataHook).not.toMatch(/const materialOptions = useMemo\(\(\) => \{[\s\S]*detail\?\.material_name[\s\S]*\}, \[[^\]]*detailNamesData\?\.data/);
   });
+
+  it('loads only active doweling links for calendar order cards', () => {
+    const dowelingLinksQuery = dataHook.split("resource: 'order_doweling_links'")[1]?.split('pagination')[0] ?? '';
+
+    expect(dowelingLinksQuery).toContain("field: 'delete_flag'");
+    expect(dowelingLinksQuery).toContain("operator: 'eq'");
+    expect(dowelingLinksQuery).toContain('value: false');
+  });
 });

@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-13",
+    title: "Календарь: присадки в карточках заказов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Карточки заказов в календаре больше не показывают номер присадки после удаления связи присадки из заказа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-13",
     title: "Раскрой: SVG других материалов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
