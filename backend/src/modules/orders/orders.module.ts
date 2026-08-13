@@ -36,6 +36,7 @@ import { OrderDetailTransferService } from './application/order-detail-transfer.
 import { OrderTransactionService } from './application/order-transaction.service';
 import { OrderQueryService } from './application/order-query.service';
 import { OrderRefreshService } from './application/order-refresh.service';
+import { OrderHdfSettingsService } from './application/order-hdf-settings.service';
 import { OrderResourceDemandService } from './application/order-resource-demand.service';
 import { OrderStatusBoardService } from './application/order-status-board.service';
 import { MdfBoardManualMoveService } from './application/mdf-board-manual-move.service';
@@ -48,6 +49,7 @@ import { MdfBoardManualMoveController } from './http/mdf-board-manual-move.contr
 import { OrderResourceDemandController } from './http/order-resource-demand.controller';
 import { OrderSnapshotController } from './http/order-snapshot.controller';
 import { OrdersController } from './http/orders.controller';
+import { OrderHdfSettingsController } from './http/order-hdf-settings.controller';
 import { OrderStatusBoardController } from './http/order-status-board.controller';
 import { OrdersRuntimeConfigService } from './http/orders-runtime-config.service';
 
@@ -75,11 +77,17 @@ export function shouldEnableOrderDeadlineSync(input: {
     OrderSnapshotController,
     OrderGroupLinksController,
     OrderResourceDemandController,
+    OrderHdfSettingsController,
     OrdersController,
   ],
   providers: [
     OrdersRuntimeConfigService,
     GroupsRuntimeConfigService,
+    {
+      provide: OrderHdfSettingsService,
+      useFactory: (database: DatabaseService) => new OrderHdfSettingsService(database),
+      inject: [DatabaseService],
+    },
     {
       provide: OrderTransactionService,
       useFactory: async (database: DatabaseService, config: ConfigService<BackendEnv, true>) => {

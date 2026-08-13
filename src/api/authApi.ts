@@ -17,6 +17,14 @@ export type WorkosLinkItem = {
   lastLoginAt: string | null;
 };
 
+export type WorkosLoginPolicy = 'local' | 'external' | 'both';
+
+export type WorkosUserSettings = {
+  loginPolicy: WorkosLoginPolicy;
+  selfLinkEnabled: boolean;
+  selfUnlinkEnabled: boolean;
+};
+
 export const authApi = {
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     const response = await httpClient.post<LoginResponse>(apiRoutes.auth.login, credentials, {
@@ -81,8 +89,29 @@ export const authApi = {
     );
   },
 
+  async workosInvitationStartUrl(token: string): Promise<string> {
+    const response = await httpClient.post<{ url: string }>(
+      apiRoutes.auth.workosInvitationStart,
+      { token },
+      { skipAuthRefresh: true },
+    );
+    return response.url;
+  },
+
+  async workosInvitationCallback(code: string, state: string): Promise<{ linked: true }> {
+    return httpClient.post<{ linked: true }>(
+      apiRoutes.auth.workosInvitationCallback,
+      { code, state },
+      { skipAuthRefresh: true },
+    );
+  },
+
   async workosListLinks(): Promise<{ links: WorkosLinkItem[] }> {
     return httpClient.get<{ links: WorkosLinkItem[] }>(apiRoutes.auth.workosLinks);
+  },
+
+  async workosGetSettings(): Promise<WorkosUserSettings> {
+    return httpClient.get<WorkosUserSettings>(apiRoutes.auth.workosSettings);
   },
 
   // skipAuthRefresh: a wrong password comes back as a business 401 and the
@@ -98,6 +127,36 @@ export const authApi = {
 
   async workosAdminListLinks(userId: string): Promise<{ links: WorkosLinkItem[] }> {
     return httpClient.get<{ links: WorkosLinkItem[] }>(apiRoutes.auth.workosAdminLinks(userId));
+  },
+
+  async workosAdminGetSettings(userId: string): Promise<WorkosUserSettings> {
+    return httpClient.get<WorkosUserSettings>(apiRoutes.auth.workosAdminSettings(userId));
+  },
+
+  async workosAdminUpdateSettings(
+    userId: string,
+    settings: WorkosUserSettings,
+  ): Promise<WorkosUserSettings> {
+    return httpClient.patch<WorkosUserSettings>(
+      apiRoutes.auth.workosAdminSettings(userId),
+      settings,
+    );
+  },
+
+  async workosAdminCreateInvitation(
+    userId: string,
+  ): Promise<{ invitationUrl: string; expiresAt: string }> {
+    return httpClient.post<{ invitationUrl: string; expiresAt: string }>(
+      apiRoutes.auth.workosAdminInvitations(userId),
+      undefined,
+    );
+  },
+
+  async workosAdminRevokeInvitations(userId: string): Promise<{ revoked: boolean }> {
+    return httpClient.delete<{ revoked: boolean }>(
+      apiRoutes.auth.workosAdminInvitations(userId),
+      { skipAuthRefresh: true },
+    );
   },
 
   // skipAuthRefresh: admin unlink is destructive too, so a 401 must never

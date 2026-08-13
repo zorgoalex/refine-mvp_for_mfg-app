@@ -1,3 +1,4 @@
+import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Table
 // Displays list of order details with inline editing capabilities
 //
@@ -6,7 +7,7 @@
 // Решение: используем useRef для синхронного хранения значений полей
 
 import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback, useContext, useSyncExternalStore } from 'react';
-import { Table, Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Tooltip, Divider, Checkbox, notification } from 'antd';
+import { Button, Tag, Space, Form, InputNumber, Input, Select, Dropdown, Divider, Checkbox, notification } from 'antd';
 import type { MenuProps } from 'antd';
 import { EditOutlined, DeleteOutlined, CheckOutlined, CloseOutlined, ExclamationCircleOutlined, PlusOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
 import { Link } from 'react-router-dom';
@@ -28,7 +29,15 @@ import {
   filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
 import { buildNameByIdMap, resolveReferenceLabel } from './referenceNameMaps';
-import { buildGroupedRows, GROUP_TINT_COUNT, type GroupField } from '../../detailGrouping';
+import {
+  EMPTY_GROUP_KEY,
+  buildGroupedRows,
+  extractCutJobGroupValue,
+  formatBazisCutSetsGroupLabel,
+  formatCutJobGroupLabel,
+  GROUP_TINT_COUNT,
+  type GroupField,
+} from '../../detailGrouping';
 import { groupCheckboxState, toggleGroupSelection } from '../../groupSelection';
 import {
   applyOrderDetailColumnSettings,
@@ -2710,28 +2719,93 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     ? orderFormData.isLoading
     : !millingTypeSelectProps.options;
 
-  const groupLabelOf = useCallback((sample: any, field: string) => {
+  const tableNumberGroupLabel = useCallback((value: unknown, digits = 0): string => {
+    if (value === null || value === undefined || value === '') return '—';
+    const num = Number(value);
+    return Number.isFinite(num)
+      ? num.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+      : '—';
+  }, []);
+
+  const groupValueOf = useCallback((sample: OrderDetail, field: GroupField): string | null | undefined => {
     switch (field) {
-      case 'milling': return millingNameById.get(sample.milling_type_id) || '—';
-      case 'material': return sheetNameById.get(sample.sheet_material_type_id) || '—';
-      case 'film': return sample.film_id != null ? (filmNameById.get(sample.film_id) || '—') : '—';
-      case 'edge': return edgeNameById.get(sample.edge_type_id) || '—';
-      case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
-      case 'note': return (sample.note || '').trim() || '—';
-      case 'doweling': return sample.doweling === true ? 'Присадка' : '—';
+      case 'production_status': {
+        const statusId = Number(getDisplayedField(sample, 'production_status_id'));
+        return Number.isFinite(statusId) && statusId > 0 ? String(statusId) : EMPTY_GROUP_KEY;
+      }
+      case 'cut_job': {
+        const detailId = Number(sample?.detail_id);
+        const ref = Number.isInteger(detailId) ? cutJobByDetailId?.get(detailId) : undefined;
+        return extractCutJobGroupValue(ref ?? sample?.cut_job);
+      }
+      case 'bath_cut_job': {
+        const detailId = Number(sample?.detail_id);
+        const ref = Number.isInteger(detailId) ? bathCutJobByDetailId?.get(detailId) : undefined;
+        return extractCutJobGroupValue(ref ?? sample?.bath_cut_job);
+      }
+      default:
+        return undefined;
+    }
+  }, [bathCutJobByDetailId, cutJobByDetailId, getDisplayedField]);
+
+  const groupLabelOf = useCallback((sample: OrderDetail, field: GroupField) => {
+    switch (field) {
+      case 'detail_number': return tableNumberGroupLabel(getDisplayedField(sample, 'detail_number'));
+      case 'area': return `${tableNumberGroupLabel(getDisplayedField(sample, 'area'), 2)} м²`;
+      case 'milling': return millingNameById.get(getDisplayedField(sample, 'milling_type_id')) || '—';
+      case 'edge': return edgeNameById.get(getDisplayedField(sample, 'edge_type_id')) || '—';
+      case 'material': return sheetNameById.get(getDisplayedField(sample, 'sheet_material_type_id') ?? 0) || sample.material_name_resolved || '—';
+      case 'note': return String(getDisplayedField(sample, 'note') || '').trim() || '—';
+      case 'price': return getDisplayedField(sample, 'milling_cost_per_sqm') != null ? String(getDisplayedField(sample, 'milling_cost_per_sqm')) : '—';
+      case 'detail_cost': return tableNumberGroupLabel(getDisplayedField(sample, 'detail_cost'));
+      case 'film': {
+        const filmId = getDisplayedField(sample, 'film_id');
+        return filmId != null ? (filmNameById.get(filmId) || '—') : '—';
+      }
+      case 'production_status': {
+        const statusId = getDisplayedField(sample, 'production_status_id');
+        return statusId != null ? (productionStatusNameById.get(statusId) || sample.production_status_name || '—') : '—';
+      }
+      case 'doweling': return getDisplayedField(sample, 'doweling') === true ? 'Присадка' : '—';
+      case 'cut_job': {
+        const detailId = Number(sample?.detail_id);
+        const ref = Number.isInteger(detailId) ? cutJobByDetailId?.get(detailId) : undefined;
+        return formatCutJobGroupLabel(ref ?? sample?.cut_job);
+      }
+      case 'bath_cut_job': {
+        const detailId = Number(sample?.detail_id);
+        const ref = Number.isInteger(detailId) ? bathCutJobByDetailId?.get(detailId) : undefined;
+        return formatCutJobGroupLabel(ref ?? sample?.bath_cut_job);
+      }
+      case 'basis_project': {
+        const primaryBazisProject = sample.bazis_projects?.[0];
+        return String(getDisplayedField(sample, 'basis_project') || primaryBazisProject?.name || '').trim() || '—';
+      }
+      case 'bazis_cut_sets': return formatBazisCutSetsGroupLabel(sample.bazis_cut_sets);
       default: return '—';
     }
-  }, [millingNameById, sheetNameById, filmNameById, edgeNameById]);
+  }, [
+    bathCutJobByDetailId,
+    cutJobByDetailId,
+    edgeNameById,
+    filmNameById,
+    getDisplayedField,
+    millingNameById,
+    productionStatusNameById,
+    sheetNameById,
+    tableNumberGroupLabel,
+  ]);
 
   const tableRows = useMemo(
     () => (groupingActive
       ? buildGroupedRows(sortedDetails, groupField!, {
           includeLeadingSeparator: cutSelectable,
           groupKeyOf: (dd: any) => (dd.detail_id != null ? (dd.temp_id ?? dd.detail_id) : null),
+          groupValueOf,
           groupLabelOf,
         })
       : paginatedDetails),
-    [groupingActive, sortedDetails, paginatedDetails, groupField, cutSelectable, groupLabelOf],
+    [groupingActive, sortedDetails, paginatedDetails, groupField, cutSelectable, groupValueOf, groupLabelOf],
   );
 
   const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {

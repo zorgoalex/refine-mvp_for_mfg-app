@@ -21,6 +21,7 @@ import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 import { collectOrderBasisProjects } from './orderBasisProjects';
+import { buildUsableHdfAreaM2 } from '../../orderMaterialsSummary';
 
 const { Text } = Typography;
 
@@ -30,7 +31,7 @@ interface OrderHeaderSummaryProps {
 
 export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactSticky = false }) => {
   const isOperational = useOperationalUi();
-  const { header, details, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
+  const { header, details, hdfDetails, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
   const { getSetting } = useAppSettings();
 
   // Context menu state
@@ -357,6 +358,8 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
   const basisProjectSummary =
     basisProjects.length > 0 ? basisProjects.join(', ') : fallbackBasisProjectName;
   const compactMaterialSummary = materialsSummary;
+  const hdfAreaM2 = useMemo(() => buildUsableHdfAreaM2(hdfDetails || []), [hdfDetails]);
+  const hdfSummary = hdfAreaM2 > 0 ? `ХДФ: ${formatNumber(hdfAreaM2, 2)} м²` : null;
 
   if (isOperational) {
     const deadlineAt = header.planned_completion_date ? dayjs(header.planned_completion_date) : null;
@@ -409,7 +412,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
           </div>
           <div className="order-show-operational-summary__metric">
             <strong>{materialsSummary}</strong>
-            <small>{`${totals.parts_count} деталей · ${formatNumber(totals.total_area, 2)} м²`}</small>
+            <small>{`${totals.parts_count} деталей · ${formatNumber(totals.total_area, 2)} м²${hdfSummary ? ` · ${hdfSummary}` : ''}`}</small>
           </div>
           <div className="order-show-operational-summary__money">
             <strong>{formatNumber(finalAmount, 0)} {CURRENCY_SYMBOL}</strong>
@@ -484,6 +487,11 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
             <span className="order-show-header__compact-item order-show-header__compact-material" title={compactMaterialSummary}>
               <Text strong className="order-show-header__compact-text">{compactMaterialSummary}</Text>
             </span>
+            {hdfSummary ? (
+              <span className="order-show-header__compact-item order-show-header__compact-metrics">
+                {hdfSummary}
+              </span>
+            ) : null}
             <span className="order-show-header__compact-item order-show-header__compact-metrics">
               поз. <Text strong>{formatNumber(totals.positions_count, 0)}</Text>
               {' · '}
@@ -834,6 +842,11 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
           <Text style={{ fontSize: 12, color: 'var(--app-text)' }}>
             Площадь: <Text strong>{formatNumber(totals.total_area, 2)} м²</Text>
           </Text>
+          {hdfSummary ? (
+            <Text style={{ fontSize: 12, color: 'var(--app-text)' }}>
+              ХДФ: <Text strong>{formatNumber(hdfAreaM2, 2)} м²</Text>
+            </Text>
+          ) : null}
         </Space>
       </div>
 

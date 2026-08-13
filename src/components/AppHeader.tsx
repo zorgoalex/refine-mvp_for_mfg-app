@@ -1,5 +1,6 @@
+import { Tooltip } from '../ui/tooltipDelay';
 import React from "react";
-import { Layout, Space, Avatar, Typography, Dropdown, Button, Switch, Tooltip } from "antd";
+import { Layout, Space, Avatar, Typography, Dropdown, Button, Switch } from "antd";
 import {
   UserOutlined,
   LogoutOutlined,
@@ -13,6 +14,7 @@ import {
 import { useGetIdentity, useLogout } from "@refinedev/core";
 import { useNavigate } from "react-router-dom";
 import type { UserIdentity } from "../types/auth";
+import { GlobalSvgCutUploadAction } from "./GlobalSvgCutUploadAction";
 import { NotificationBell } from "./NotificationBell";
 import { useAppTheme } from "../theme/ThemeProvider";
 import { authStorage } from "../utils/auth";
@@ -102,6 +104,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onOpenSider }) => {
       <Space size="middle" align="center">
         {identity && (
           <>
+            <GlobalSvgCutUploadAction />
             {canScan && (
               <Button
                 type="text"

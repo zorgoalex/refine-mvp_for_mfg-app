@@ -1,7 +1,8 @@
-﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { Table } from '../../ui/tooltipDelay';
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Badge } from "antd";
+import { Space, Badge } from "antd";
 import { useHighlightRow } from "../../hooks/useHighlightRow";
 import { LocalizedList } from "../../components/LocalizedList";
 

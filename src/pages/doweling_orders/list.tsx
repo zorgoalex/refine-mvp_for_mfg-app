@@ -1,8 +1,9 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useState } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton, List } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Button, Space, Table, Tooltip } from "antd";
+import { Badge, Button, Space, Switch } from "antd";
 import { EyeOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { formatNumber } from "../../utils/numberFormat";
@@ -11,11 +12,21 @@ import { QuickCreateDowelingModal } from "./QuickCreateDowelingModal";
 
 export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
   // Используем doweling_orders_view - одна строка = одна пара присадка-заказ (через order_doweling_links);
   // standalone присадки (без связи) показываются одной строкой с NULL order-колонками (LEFT JOIN).
   const { tableProps, tableQueryResult } = useTable({
     resource: "doweling_orders_view",
     syncWithLocation: true,
+    filters: {
+      permanent: [
+        {
+          field: "delete_flag",
+          operator: "in",
+          value: showInactive ? [false, true] : [false],
+        },
+      ],
+    },
     sorters: {
       initial: [
         { field: "doweling_order_id", order: "desc" },
@@ -54,17 +65,27 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
   return (
     <List
       title="Присадка"
-      headerButtons={() =>
-        can("doweling.create") ? (
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => setQuickCreateOpen(true)}
-          >
-            Быстрое создание присадки
-          </Button>
-        ) : null
-      }
+      headerButtons={() => (
+        <Space size={12} wrap>
+          <Space size={8}>
+            <Switch
+              checked={showInactive}
+              onChange={setShowInactive}
+              aria-label="Показывать неактивные"
+            />
+            <span>Показывать неактивные</span>
+          </Space>
+          {can("doweling.create") ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setQuickCreateOpen(true)}
+            >
+              Быстрое создание присадки
+            </Button>
+          ) : null}
+        </Space>
+      )}
     >
       <QuickCreateDowelingModal
         open={quickCreateOpen}
@@ -108,6 +129,21 @@ export const DowelOrderList: React.FC<IResourceComponentsProps> = () => {
           sorter
           width={100}
           render={(value) => <span style={{ color: '#DC2626', letterSpacing: '0.8px' }}>{value || "—"}</span>}
+        />
+        <Table.Column
+          dataIndex="delete_flag"
+          title="Активен"
+          sorter
+          width={110}
+          render={(value) => {
+            const active = value !== true;
+            return (
+              <Badge
+                status={active ? "success" : "default"}
+                text={active ? "Активен" : "Неактивен"}
+              />
+            );
+          }}
         />
         <Table.Column
           dataIndex="order_name"

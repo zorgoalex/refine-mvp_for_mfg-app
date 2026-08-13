@@ -1,16 +1,7 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Layout as AntLayout, Menu, Collapse, Button, Typography, Tooltip } from "antd";
-import {
-  PlusOutlined,
-  DollarOutlined,
-  InboxOutlined,
-  ToolOutlined,
-  TeamOutlined,
-  SettingOutlined,
-  ContactsOutlined,
-  DatabaseOutlined,
-  AuditOutlined,
-} from "@ant-design/icons";
+import { Tooltip } from '../ui/tooltipDelay';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Layout as AntLayout, Menu, Collapse, Button, Typography } from "antd";
+import { PlusOutlined, DollarOutlined, InboxOutlined, ToolOutlined, TeamOutlined, SettingOutlined, ContactsOutlined, DatabaseOutlined, AuditOutlined, } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { useResource, useNavigation } from "@refinedev/core";
 import { useLocation } from "react-router-dom";
@@ -47,7 +38,7 @@ const { Panel } = Collapse;
 const { Title } = Typography;
 
 const menuLabelWithTooltip = (label: string) => (
-  <Tooltip title={label} placement="right" mouseEnterDelay={0.35}>
+  <Tooltip title={label} placement="right">
     <span className="sidebar-menu-label">{label}</span>
   </Tooltip>
 );

@@ -1,5 +1,6 @@
+import { Table } from '../../../../ui/tooltipDelay';
 import React from 'react';
-import { Table, Tag } from 'antd';
+import { Tag } from 'antd';
 import type { EntityGroupLink } from '../../../../api/types/groupApi.types';
 
 export const GroupHistoryTable: React.FC<{ links: EntityGroupLink[] }> = ({ links }) => (

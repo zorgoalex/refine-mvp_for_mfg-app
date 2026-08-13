@@ -1,24 +1,7 @@
+import { Table } from '../../../ui/tooltipDelay';
 import { useGetIdentity, useList } from '@refinedev/core';
 import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  Empty,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Spin,
-  Switch,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
+  Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { notificationRulesApi } from '../../../api/notificationRulesApi';

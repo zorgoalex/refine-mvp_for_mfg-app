@@ -339,6 +339,27 @@ describe('authApi', () => {
     expect(authSession.getAccessToken()).toBe('access-token');
     expect(authSession.getUser()).toMatchObject({ username: 'manager' });
   });
+
+  it('never refreshes and replays the destructive invitation-revoke DELETE', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { code: 'SESSION_INACTIVE', message: 'Session ended' } }),
+        { status: 401, statusText: 'Unauthorized', headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    authSession.setAccessToken('stale-access-token');
+
+    await expect(authApi.workosAdminRevokeInvitations('42')).rejects.toMatchObject({
+      code: 'SESSION_INACTIVE',
+      status: 401,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/auth/workos/admin/users/42/invitations',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
 });
 
 function mockFetch(body: unknown) {

@@ -2,7 +2,22 @@
 import type { OrderDetail } from '../../types/orders';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
 
-export type GroupField = 'milling' | 'material' | 'film' | 'edge' | 'price' | 'note' | 'doweling';
+export type GroupField =
+  | 'detail_number'
+  | 'area'
+  | 'milling'
+  | 'edge'
+  | 'material'
+  | 'note'
+  | 'price'
+  | 'detail_cost'
+  | 'film'
+  | 'production_status'
+  | 'doweling'
+  | 'cut_job'
+  | 'bath_cut_job'
+  | 'basis_project'
+  | 'bazis_cut_sets';
 
 export interface GroupFieldDef {
   field: GroupField;
@@ -10,13 +25,21 @@ export interface GroupFieldDef {
 }
 
 export const GROUP_FIELDS: GroupFieldDef[] = [
+  { field: 'detail_number', label: 'по №' },
+  { field: 'area', label: 'по площади' },
   { field: 'milling', label: 'по фрезеровке' },
-  { field: 'material', label: 'по материалам' },
-  { field: 'film', label: 'по пленкам' },
   { field: 'edge', label: 'по обкату' },
-  { field: 'price', label: 'по ценам' },
-  { field: 'doweling', label: 'по присадке' },
+  { field: 'material', label: 'по материалам' },
   { field: 'note', label: 'по примечанию' },
+  { field: 'price', label: 'по ценам' },
+  { field: 'detail_cost', label: 'по сумме' },
+  { field: 'film', label: 'по пленкам' },
+  { field: 'production_status', label: 'по статусу' },
+  { field: 'doweling', label: 'по присадке' },
+  { field: 'cut_job', label: 'по раскрою' },
+  { field: 'bath_cut_job', label: 'по расчету ванны' },
+  { field: 'basis_project', label: 'по Базис проекту' },
+  { field: 'bazis_cut_sets', label: 'по Базис-раскрою' },
 ];
 
 export const EMPTY_GROUP_KEY = '__EMPTY__';
@@ -32,25 +55,97 @@ const idValue = (raw: unknown): string => {
   return Number.isFinite(num) && num > 0 ? String(num) : EMPTY_GROUP_KEY;
 };
 
+const numberValue = (raw: unknown): string => {
+  if (raw === null || raw === undefined || raw === '') return EMPTY_GROUP_KEY;
+  const num = Number(raw);
+  return Number.isFinite(num) ? String(num) : EMPTY_GROUP_KEY;
+};
+
+const positiveNumberValue = (raw: unknown): string => {
+  if (raw === null || raw === undefined || raw === '') return EMPTY_GROUP_KEY;
+  const num = Number(raw);
+  return Number.isFinite(num) && num > 0 ? String(num) : EMPTY_GROUP_KEY;
+};
+
+const textValue = (raw: unknown): string => {
+  const trimmed = String(raw ?? '').trim();
+  return trimmed === '' ? EMPTY_GROUP_KEY : trimmed;
+};
+
+export function extractCutJobGroupValue(ref: OrderDetail['cut_job'] | undefined): string {
+  if (!ref) return EMPTY_GROUP_KEY;
+  const cutJobId = Number(ref.cutJobId);
+  const resultNo = Number(ref.resultNo);
+  if (!Number.isFinite(cutJobId) || cutJobId <= 0) return EMPTY_GROUP_KEY;
+  return `${cutJobId}:${Number.isFinite(resultNo) ? resultNo : 0}`;
+}
+
+export function formatCutJobGroupLabel(ref: OrderDetail['cut_job'] | undefined): string {
+  if (!ref) return '—';
+  const name = String(ref.name || '').trim();
+  const cutNumber = String(ref.cutNumber || '').trim();
+  if (cutNumber && name) return `${cutNumber}: ${name}`;
+  return name || cutNumber || `Раскрой ${ref.cutJobId}`;
+}
+
+export function extractBazisCutSetsGroupValue(cutSets: OrderDetail['bazis_cut_sets'] | undefined): string {
+  const values = (cutSets ?? [])
+    .map((cutSet) => {
+      const id = Number(cutSet?.bazisCutSetId);
+      if (Number.isFinite(id) && id > 0) return `id:${id}`;
+      const name = textValue(cutSet?.name);
+      return name === EMPTY_GROUP_KEY ? null : `name:${name}`;
+    })
+    .filter((value): value is string => value !== null)
+    .sort();
+  return values.length > 0 ? values.join('|') : EMPTY_GROUP_KEY;
+}
+
+export function formatBazisCutSetsGroupLabel(cutSets: OrderDetail['bazis_cut_sets'] | undefined): string {
+  const labels = (cutSets ?? [])
+    .map((cutSet) => {
+      const id = Number(cutSet?.bazisCutSetId);
+      if (Number.isFinite(id) && id > 0) return `БР-${id}`;
+      return String(cutSet?.name ?? '').trim();
+    })
+    .filter(Boolean);
+  return labels.length > 0 ? labels.join(', ') : '—';
+}
+
+export function extractBasisProjectGroupValue(detail: OrderDetail): string {
+  const projectId = Number(detail.bazis_project_id ?? detail.bazis_projects?.[0]?.bazisProjectId);
+  if (Number.isFinite(projectId) && projectId > 0) return `id:${projectId}`;
+  return textValue(detail.basis_project ?? detail.bazis_projects?.[0]?.name);
+}
+
+export function formatBasisProjectGroupLabel(detail: OrderDetail): string {
+  return String(detail.basis_project || detail.bazis_projects?.[0]?.name || '').trim() || '—';
+}
+
 export function extractGroupValue(detail: OrderDetail, field: GroupField): string {
   switch (field) {
+    case 'detail_number': return positiveNumberValue(detail.detail_number);
+    case 'area': return numberValue(detail.area);
     case 'milling': return idValue(detail.milling_type_id);
+    case 'edge': return idValue(detail.edge_type_id);
     case 'material': return idValue(detail.sheet_material_type_id);
     case 'film': return idValue(detail.film_id);
-    case 'edge': return idValue(detail.edge_type_id);
     case 'price': {
-      const raw = detail.milling_cost_per_sqm;
-      if (raw === null || raw === undefined) return EMPTY_GROUP_KEY;
-      const num = Number(raw);
-      return Number.isFinite(num) ? String(num) : EMPTY_GROUP_KEY;
+      return numberValue(detail.milling_cost_per_sqm);
     }
+    case 'detail_cost': return numberValue(detail.detail_cost);
     case 'note': {
       const trimmed = (detail.note || '').trim();
       return trimmed === '' ? EMPTY_GROUP_KEY : trimmed;
     }
+    case 'production_status': return idValue(detail.production_status_id);
     // Boolean: детали с присадкой — своя группа, остальные падают в «пустую»
     // (EMPTY сортируется последней, присадочные оказываются сверху).
     case 'doweling': return detail.doweling === true ? 'yes' : EMPTY_GROUP_KEY;
+    case 'cut_job': return extractCutJobGroupValue(detail.cut_job);
+    case 'bath_cut_job': return extractCutJobGroupValue(detail.bath_cut_job);
+    case 'basis_project': return extractBasisProjectGroupValue(detail);
+    case 'bazis_cut_sets': return extractBazisCutSetsGroupValue(detail.bazis_cut_sets);
     default: return EMPTY_GROUP_KEY;
   }
 }
@@ -73,6 +168,7 @@ export type GroupedRow =
 export interface BuildGroupedRowsOptions {
   includeLeadingSeparator?: boolean;
   groupKeyOf?: (detail: OrderDetail) => number | string | null;
+  groupValueOf?: (detail: OrderDetail, field: GroupField) => string | null | undefined;
   groupLabelOf?: (sampleDetail: OrderDetail, field: GroupField) => string;
 }
 
@@ -84,7 +180,10 @@ export function buildGroupedRows(
   const order: string[] = [];
   const buckets = new Map<string, OrderDetail[]>();
   for (const detail of details) {
-    const key = extractGroupValue(detail, field);
+    const customKey = options?.groupValueOf?.(detail, field);
+    const key = customKey === null || customKey === undefined || customKey === ''
+      ? extractGroupValue(detail, field)
+      : customKey;
     if (!buckets.has(key)) {
       buckets.set(key, []);
       if (key !== EMPTY_GROUP_KEY) order.push(key);
@@ -135,6 +234,7 @@ export function selectedGroupLabelForCut(
   selectedDetailIds: ReadonlyArray<number>,
   field: GroupField | null | undefined,
   groupLabelOf: (sampleDetail: OrderDetail, field: GroupField) => string,
+  groupValueOf?: (detail: OrderDetail, field: GroupField) => string | null | undefined,
 ): string | null {
   if (!field || selectedDetailIds.length === 0) return null;
 
@@ -149,7 +249,10 @@ export function selectedGroupLabelForCut(
   const seenLabels = new Set<string>();
 
   for (const detail of selectedDetails) {
-    const groupValue = extractGroupValue(detail, field);
+    const customGroupValue = groupValueOf?.(detail, field);
+    const groupValue = customGroupValue === null || customGroupValue === undefined || customGroupValue === ''
+      ? extractGroupValue(detail, field)
+      : customGroupValue;
     if (seenGroups.has(groupValue)) continue;
     seenGroups.add(groupValue);
 

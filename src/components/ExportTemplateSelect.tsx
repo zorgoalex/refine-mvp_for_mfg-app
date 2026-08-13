@@ -1,5 +1,6 @@
+import { Tooltip } from '../ui/tooltipDelay';
 import React, { useEffect, useState } from 'react';
-import { Select, Tooltip } from 'antd';
+import { Select } from 'antd';
 import {
   exportTemplatesApi,
   type ExportTemplateSource,

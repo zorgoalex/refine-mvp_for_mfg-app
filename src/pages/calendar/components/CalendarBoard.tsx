@@ -1,5 +1,6 @@
+import { Tooltip } from '../../../ui/tooltipDelay';
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Spin, Alert, Badge, Button, Space, Segmented, Tooltip, message, Input, Card, Form, Row, Col, Select } from 'antd';
+import { Spin, Alert, Badge, Button, Space, Segmented, message, Input, Card, Form, Row, Col, Select } from 'antd';
 import {
   AppstoreOutlined,
   BarsOutlined,

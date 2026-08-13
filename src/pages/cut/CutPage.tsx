@@ -1,26 +1,6 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  Collapse,
-  DatePicker,
-  Empty,
-  Form,
-  Input,
-  Modal,
-  Radio,
-  Select,
-  Space,
-  Spin,
-  Table,
-  Tag,
-  Tooltip,
-  Typography,
-  message,
-  theme,
-} from 'antd';
+import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tag, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
@@ -54,6 +34,7 @@ import { resolveProfileLabel, formatArea, describeCutProfile } from './cutProfil
 import { jobMaterialTypeIds, partitionSheetOptions, isMixedMaterialSelection, formatSheetOptionLabel } from './cutSheetSelectHelpers';
 import {
   applyCutProfileSelection,
+  cutJobNameFirstWord,
   isVacuumTableProfile,
   resolveCutJobLayoutKind,
   resolveSheetAxisOriginForJob,
@@ -943,6 +924,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [isEditingJobName, setIsEditingJobName] = useState(false);
   const [jobNameDraft, setJobNameDraft] = useState('');
   const [jobNameSaving, setJobNameSaving] = useState(false);
+  const manualNamePrefixJobIdsRef = useRef<Set<number>>(new Set());
   const [selectedResult, setSelectedResult] = useState<CutResultSummary | null>(null);
   const [isFrozenResultSelection, setIsFrozenResultSelection] = useState(false);
   const calcCommandRef = useRef<{ cutJobId: number; version: number; commandId: string } | null>(null);
@@ -1446,6 +1428,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       if (!job) return;
       setBusy(true);
       try {
+        const syncProfileDrivenName = !manualNamePrefixJobIdsRef.current.has(job.cutJobId);
         const { bathSheetMissing } = await applyCutProfileSelection({
           currentJob: job,
           paramProfileId,
@@ -1453,6 +1436,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           sheetOptions,
           mutations: {
             setProfile: cutApi.setProfile,
+            ...(syncProfileDrivenName ? { setName: cutApi.setName } : {}),
             setTextureDirection: cutApi.setTextureDirection,
             setSplitByMaterial: cutApi.setSplitByMaterial,
             setCombineFilms: cutApi.setCombineFilms,
@@ -1627,10 +1611,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       setIsEditingJobName(false);
       return;
     }
+    const firstWordChanged = (cutJobNameFirstWord(job.name) ?? '').toLocaleLowerCase('ru-RU')
+      !== (cutJobNameFirstWord(name) ?? '').toLocaleLowerCase('ru-RU');
     setBusy(true);
     setJobNameSaving(true);
     try {
       const updated = await cutApi.setName(job.cutJobId, name, job.version);
+      if (firstWordChanged) {
+        manualNamePrefixJobIdsRef.current.add(job.cutJobId);
+      }
       setJob(updated);
       setJobNameDraft(updated.name);
       setIsEditingJobName(false);

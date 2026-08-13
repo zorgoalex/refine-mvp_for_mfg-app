@@ -1,18 +1,8 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGetIdentity } from '@refinedev/core';
 import {
-  Alert,
-  Button,
-  DatePicker,
-  Form,
-  Input,
-  Select,
-  Space,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
+  Alert, Button, DatePicker, Form, Input, Select, Space, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { groupsApi } from '../../api/groupsApi';
 import type {

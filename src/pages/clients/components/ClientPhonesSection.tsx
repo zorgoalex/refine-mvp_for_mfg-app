@@ -1,21 +1,9 @@
+import { Table } from '../../../ui/tooltipDelay';
 // Client Phones Section
 // Component for managing client phone numbers with CRUD operations
 
 import React, { useState } from "react";
-import {
-  Card,
-  Table,
-  Button,
-  Space,
-  Input,
-  Checkbox,
-  Modal,
-  message,
-  Typography,
-  Tag,
-  Form,
-  Select,
-} from "antd";
+import { Card, Button, Space, Input, Checkbox, Modal, message, Typography, Tag, Form, Select } from "antd";
 import {
   PlusOutlined,
   DeleteOutlined,

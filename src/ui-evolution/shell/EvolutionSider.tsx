@@ -1,5 +1,6 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React from 'react';
-import { Button, Layout, Menu, Tooltip, Typography } from 'antd';
+import { Button, Layout, Menu, Typography } from 'antd';
 import {
   AppstoreOutlined,
   AuditOutlined,

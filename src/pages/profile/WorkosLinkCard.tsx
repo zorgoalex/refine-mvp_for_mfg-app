@@ -1,9 +1,14 @@
+import { Table } from '../../ui/tooltipDelay';
 import React from "react";
 import { DateField } from "@refinedev/antd";
-import { Alert, Button, Card, Input, Modal, Space, Table, Typography } from "antd";
+import { Alert, Button, Card, Input, Modal, Space, Typography } from "antd";
 import { DisconnectOutlined, LinkOutlined } from "@ant-design/icons";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
-import { authApi, type WorkosLinkItem } from "../../api/authApi";
+import {
+  authApi,
+  type WorkosLinkItem,
+  type WorkosUserSettings,
+} from "../../api/authApi";
 import { ApiError } from "../../api/httpClient";
 import { markWorkosLinkIntent } from "../login/WorkosCallback";
 
@@ -13,6 +18,7 @@ import { markWorkosLinkIntent } from "../login/WorkosCallback";
  */
 export const WorkosLinkCard: React.FC = () => {
   const [links, setLinks] = React.useState<WorkosLinkItem[]>([]);
+  const [settings, setSettings] = React.useState<WorkosUserSettings | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -28,14 +34,14 @@ export const WorkosLinkCard: React.FC = () => {
   React.useEffect(() => {
     let active = true;
 
-    authApi
-      .workosListLinks()
-      .then((response) => {
+    Promise.all([authApi.workosListLinks(), authApi.workosGetSettings()])
+      .then(([response, settingsResponse]) => {
         if (!active) {
           return;
         }
 
         setLinks(response.links);
+        setSettings(settingsResponse);
       })
       .catch(() => {
         if (!active) {
@@ -44,6 +50,7 @@ export const WorkosLinkCard: React.FC = () => {
 
         setError("Не удалось загрузить привязанные SSO-входы.");
         setLinks([]);
+        setSettings(null);
       })
       .finally(() => {
         if (active) {
@@ -114,7 +121,13 @@ export const WorkosLinkCard: React.FC = () => {
     <Card
       title="Вход через SSO"
       extra={
-        <Button type="primary" icon={<LinkOutlined />} loading={busy} onClick={startLink}>
+        <Button
+          type="primary"
+          icon={<LinkOutlined />}
+          loading={busy}
+          disabled={!settings?.selfLinkEnabled}
+          onClick={startLink}
+        >
           Привязать ещё
         </Button>
       }
@@ -122,6 +135,22 @@ export const WorkosLinkCard: React.FC = () => {
       <Space direction="vertical" style={{ width: "100%" }} size="middle">
         {justLinked && <Alert type="success" message="SSO привязан к вашей учётной записи" showIcon />}
         {error && <Alert type="error" message={error} showIcon />}
+        {settings && !settings.selfLinkEnabled && (
+          <Alert
+            type="info"
+            showIcon
+            message="Самостоятельная привязка отключена"
+            description="Новый SSO-вход может добавить администратор одноразовой ссылкой."
+          />
+        )}
+        {settings && !settings.selfUnlinkEnabled && (
+          <Alert
+            type="info"
+            showIcon
+            message="Самостоятельная отвязка отключена"
+            description="Для удаления SSO-входа обратитесь к администратору."
+          />
+        )}
         <Typography.Text>
           Привяжите внешний вход (пароль SSO / Google), чтобы входить без локального пароля.
         </Typography.Text>
@@ -159,6 +188,7 @@ export const WorkosLinkCard: React.FC = () => {
               <Button
                 danger
                 icon={<DisconnectOutlined />}
+                disabled={!settings?.selfUnlinkEnabled}
                 onClick={() => openUnlinkModal(link)}
               >
                 Отвязать
@@ -207,6 +237,12 @@ function describeError(error: unknown): string {
     }
     if (error.code === "IDENTITY_CONFLICT") {
       return "Этот внешний аккаунт уже привязан к другому пользователю.";
+    }
+    if (error.code === "SSO_SELF_LINK_DISABLED") {
+      return "Самостоятельная привязка SSO отключена администратором.";
+    }
+    if (error.code === "SSO_SELF_UNLINK_DISABLED") {
+      return "Самостоятельная отвязка SSO отключена администратором.";
     }
   }
 

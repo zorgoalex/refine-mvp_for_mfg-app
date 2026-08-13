@@ -1,5 +1,6 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useState } from 'react';
-import { Space, Tooltip } from 'antd';
+import { Space } from 'antd';
 import { CheckCircleFilled } from '@ant-design/icons';
 import { OrderDeletedTag } from '../../components/OrderDeletedTag';
 import { displayedSheetExtents, formatSheetSide, type CutPieceOverlay } from './cutPreviewHelpers';
@@ -88,7 +89,7 @@ function OverlayLayer({
         const warningIconSize = Math.max(10, Math.min(16, Math.min(boxWpx || 12, boxHpx || 12) * 0.22));
 
         return (
-          <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)} mouseEnterDelay={0.15}>
+          <Tooltip key={overlay.key} title={renderOverlayTooltip(overlay)}>
             <span
               aria-label={`Заказ ${overlay.orderId ?? '—'}, позиция ${overlay.detailNumber ?? '—'}`}
               onClick={onClick}
@@ -108,7 +109,7 @@ function OverlayLayer({
               }}
             >
               {overlay.vacuumOrientationWarning && (
-                <Tooltip title={overlay.vacuumOrientationWarning.message} mouseEnterDelay={0.1}>
+                <Tooltip title={overlay.vacuumOrientationWarning.message}>
                   <span
                     aria-label={overlay.vacuumOrientationWarning.message}
                     style={{

@@ -1,8 +1,9 @@
+import { Table } from '../../../../ui/tooltipDelay';
 // Order Finance Block (Read-only for show page)
 // Table-style layout with borders
 
 import React, { useMemo } from 'react';
-import { Typography, Table } from 'antd';
+import { Typography } from 'antd';
 import { useList } from '@refinedev/core';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';

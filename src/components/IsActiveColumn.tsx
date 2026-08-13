@@ -1,5 +1,6 @@
+import { Table } from '../ui/tooltipDelay';
 import React from "react";
-import { Table, Badge } from "antd";
+import { Badge } from "antd";
 import type { ColumnType } from "antd/es/table";
 
 /**

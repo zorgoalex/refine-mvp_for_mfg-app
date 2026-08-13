@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { ConfigService } from '@nestjs/config';
@@ -43,6 +43,16 @@ const callbackBodySwaggerSchema = {
   properties: {
     code: { type: 'string', minLength: 1, writeOnly: true },
     state: { type: 'string', minLength: 1 },
+  },
+} as const;
+
+const settingsSwaggerSchema = {
+  type: 'object',
+  required: ['loginPolicy', 'selfLinkEnabled', 'selfUnlinkEnabled'],
+  properties: {
+    loginPolicy: { type: 'string', enum: ['local', 'external', 'both'] },
+    selfLinkEnabled: { type: 'boolean' },
+    selfUnlinkEnabled: { type: 'boolean' },
   },
 } as const;
 
@@ -104,7 +114,47 @@ export class WorkosAuthController {
       subject: { route: 'auth/workos/link/start', userId: currentUser.id },
     });
 
-    return { url: this.startFlow(service, response, 'link', currentUser.sessionId) };
+    await service.assertSelfLinkAllowed(currentUser);
+    return {
+      url: this.startFlow(service, response, 'link', { sessionId: currentUser.sessionId }),
+    };
+  }
+
+  @ApiBody({
+    schema: swaggerSchema({
+      type: 'object',
+      required: ['token'],
+      properties: { token: { type: 'string', minLength: 40, writeOnly: true } },
+    }),
+  })
+  @ApiResponse({ status: 200, description: 'AuthKit invitation link URL', schema: swaggerSchema(authorizeResponseSwaggerSchema) })
+  @ApiResponse({ status: 410, description: 'Invitation invalid, expired, or consumed' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosInvitationStart', summary: 'Start a one-time administrator-approved SSO link' })
+  @Post('auth/workos/invitations/start')
+  @HttpCode(200)
+  async invitationStart(
+    @Req() request: WorkosRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Body() body: { token?: string },
+  ): Promise<{ url: string }> {
+    const service = this.assertEnabled();
+    this.assertOriginAllowed(request);
+    const token = typeof body?.token === 'string' ? body.token.trim() : '';
+    if (!token) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Не передан токен приглашения');
+    }
+    await this.rateLimits.assertAllowed({
+      rule: { feature: 'auth_workos_invitation_start', maxRequests: 10, windowMs: 60_000 },
+      subject: { route: 'auth/workos/invitations/start', ipAddress: request.ip },
+    });
+    const invitation = await service.prepareInvitation(token);
+
+    return {
+      url: this.startFlow(service, response, 'invitation', {
+        invitationId: invitation.invitationId,
+      }),
+    };
   }
 
   @ApiBody({ schema: swaggerSchema(callbackBodySwaggerSchema) })
@@ -192,6 +242,40 @@ export class WorkosAuthController {
     });
   }
 
+  @ApiBody({ schema: swaggerSchema(callbackBodySwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Identity linked by administrator invitation' })
+  @ApiResponse({ status: 401, description: 'Identity rejected' })
+  @ApiResponse({ status: 409, description: 'Identity already linked to another user' })
+  @ApiResponse({ status: 410, description: 'Invitation invalid, expired, or consumed' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosInvitationCallback', summary: 'Finish a one-time administrator-approved SSO link' })
+  @Post('auth/workos/invitations/callback')
+  @HttpCode(200)
+  async invitationCallback(
+    @Req() request: WorkosRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Body() body: { code?: string; state?: string },
+  ): Promise<{ linked: true }> {
+    const service = this.assertEnabled();
+    this.assertOriginAllowed(request);
+    await this.rateLimits.assertAllowed({
+      rule: { feature: 'auth_workos_callback', maxRequests: 10, windowMs: 60_000 },
+      subject: { route: 'auth/workos/callback', ipAddress: request.ip },
+    });
+    const { payload, code } = this.consumeState(request, response, body, 'invitation');
+    if (!payload.invitationId) {
+      throw new ApiError(401, 'WORKOS_STATE_MISMATCH', 'Проверка приглашения не пройдена');
+    }
+
+    return service.linkWithInvitationCode({
+      invitationId: payload.invitationId,
+      code,
+      userAgent: request.get('user-agent') ?? undefined,
+      ipAddress: request.ip,
+      requestId: request.requestId,
+    });
+  }
+
   @ApiBearerAuth()
   @ApiResponse({ status: 200, description: 'Linked SSO identities for the current user' })
   @ApiResponse({ status: 401, description: 'Authentication required' })
@@ -205,6 +289,17 @@ export class WorkosAuthController {
     const currentUser = this.assertCurrentUser(request);
 
     return { links: await service.listOwnLinks(currentUser) };
+  }
+
+  @ApiBearerAuth()
+  @ApiResponse({ status: 200, description: 'Current user SSO settings', schema: swaggerSchema(settingsSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosGetSettings', summary: 'Get current user SSO controls' })
+  @Get('auth/workos/settings')
+  async getSettings(@Req() request: WorkosRequest) {
+    const service = this.assertEnabled();
+    return service.getOwnSettings(this.assertCurrentUser(request));
   }
 
   @ApiBearerAuth()
@@ -297,6 +392,134 @@ export class WorkosAuthController {
   }
 
   @ApiBearerAuth()
+  @ApiResponse({ status: 200, description: 'Target user SSO settings', schema: swaggerSchema(settingsSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Permission denied' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosAdminGetSettings', summary: 'Get SSO controls for a user' })
+  @Get('auth/workos/admin/users/:userId/settings')
+  async adminGetSettings(
+    @Req() request: WorkosRequest,
+    @Param('userId') userIdParam: string,
+  ) {
+    const service = this.assertEnabled();
+    const currentUser = this.assertCurrentUser(request);
+    const userId = this.parseNumericId(userIdParam, 'userId');
+
+    return service.adminGetSettings({
+      currentUser,
+      targetUserId: userId,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiBearerAuth()
+  @ApiBody({ schema: swaggerSchema(settingsSwaggerSchema) })
+  @ApiResponse({ status: 200, description: 'Updated target user SSO settings', schema: swaggerSchema(settingsSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Permission denied' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 409, description: 'External-only policy requires a linked identity' })
+  @ApiResponse({ status: 422, description: 'Validation error' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosAdminUpdateSettings', summary: 'Update SSO controls for a user' })
+  @Patch('auth/workos/admin/users/:userId/settings')
+  async adminUpdateSettings(
+    @Req() request: WorkosRequest,
+    @Param('userId') userIdParam: string,
+    @Body() body: {
+      loginPolicy?: string;
+      selfLinkEnabled?: boolean;
+      selfUnlinkEnabled?: boolean;
+    },
+  ) {
+    const service = this.assertEnabled();
+    const currentUser = this.assertCurrentUser(request);
+    const userId = this.parseNumericId(userIdParam, 'userId');
+    const settings = this.parseSettingsPatch(body);
+
+    return service.adminUpdateSettings({
+      currentUser,
+      targetUserId: userId,
+      settings,
+      requestId: request.requestId,
+      userAgent: request.get('user-agent') ?? undefined,
+      ipAddress: request.ip,
+    });
+  }
+
+  @ApiBearerAuth()
+  @ApiResponse({
+    status: 201,
+    description: 'One-time invitation created',
+    schema: swaggerSchema({
+      type: 'object',
+      required: ['invitationUrl', 'expiresAt'],
+      properties: {
+        invitationUrl: { type: 'string', format: 'uri', writeOnly: true },
+        expiresAt: { type: 'string', format: 'date-time' },
+      },
+    }),
+  })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Permission denied' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosAdminCreateInvitation', summary: 'Create a one-time SSO link invitation for a user' })
+  @Post('auth/workos/admin/users/:userId/invitations')
+  async adminCreateInvitation(
+    @Req() request: WorkosRequest,
+    @Param('userId') userIdParam: string,
+  ): Promise<{ invitationUrl: string; expiresAt: string }> {
+    const service = this.assertEnabled();
+    const currentUser = this.assertCurrentUser(request);
+    const userId = this.parseNumericId(userIdParam, 'userId');
+    await this.rateLimits.assertAllowed({
+      rule: { feature: 'auth_workos_admin_invitation', maxRequests: 10, windowMs: 60_000 },
+      subject: { route: 'auth/workos/admin/invitation', userId: currentUser.id },
+    });
+
+    return service.adminCreateInvitation({
+      currentUser,
+      targetUserId: userId,
+      requestId: request.requestId,
+      userAgent: request.get('user-agent') ?? undefined,
+      ipAddress: request.ip,
+    });
+  }
+
+  @ApiBearerAuth()
+  @ApiResponse({ status: 200, description: 'Active SSO link invitation revoked' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Permission denied' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiOperation({ operationId: 'authWorkosAdminRevokeInvitations', summary: 'Revoke active SSO link invitations for a user' })
+  @Delete('auth/workos/admin/users/:userId/invitations')
+  @HttpCode(200)
+  async adminRevokeInvitations(
+    @Req() request: WorkosRequest,
+    @Param('userId') userIdParam: string,
+  ): Promise<{ revoked: boolean }> {
+    const service = this.assertEnabled();
+    const currentUser = this.assertCurrentUser(request);
+    const userId = this.parseNumericId(userIdParam, 'userId');
+    await this.rateLimits.assertAllowed({
+      rule: { feature: 'auth_workos_admin_invitation_revoke', maxRequests: 30, windowMs: 60_000 },
+      subject: { route: 'auth/workos/admin/invitation/revoke', userId: currentUser.id },
+    });
+
+    return service.adminRevokeInvitations({
+      currentUser,
+      targetUserId: userId,
+      requestId: request.requestId,
+      userAgent: request.get('user-agent') ?? undefined,
+      ipAddress: request.ip,
+    });
+  }
+
+  @ApiBearerAuth()
   @ApiBody({
     schema: swaggerSchema({
       type: 'object',
@@ -307,7 +530,6 @@ export class WorkosAuthController {
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Permission denied' })
   @ApiResponse({ status: 404, description: 'User or identity not found' })
-  @ApiResponse({ status: 409, description: 'Unlink is forbidden for external-only login policy' })
   @ApiResponse({ status: 422, description: 'Validation error' })
   @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
   @ApiOperation({ operationId: 'authWorkosAdminUnlinkOne', summary: 'Unlink one SSO identity for a user' })
@@ -344,10 +566,10 @@ export class WorkosAuthController {
     service: WorkosAuthService,
     response: Response,
     mode: WorkosFlowMode,
-    sessionId?: string,
+    context: { sessionId?: string; invitationId?: string } = {},
   ): string {
     const secret = this.config.get('JWT_ACCESS_SECRET', { infer: true }) ?? '';
-    const { state, cookieValue } = createWorkosState(secret, mode, sessionId);
+    const { state, cookieValue } = createWorkosState(secret, mode, context);
     const flags = this.runtimeConfig.getFeatureFlags();
     const cookie = createWorkosStateCookie(cookieValue, {
       nodeEnv: flags.nodeEnv,
@@ -358,7 +580,7 @@ export class WorkosAuthController {
     response.cookie(cookie.name, cookie.value, cookie.options);
 
     return service.buildAuthorizeUrl(state, {
-      forceFreshAuthentication: mode === 'link',
+      forceFreshAuthentication: mode === 'link' || mode === 'invitation',
     });
   }
 
@@ -443,6 +665,52 @@ export class WorkosAuthController {
     }
 
     return value;
+  }
+
+  private parseSettingsPatch(body: {
+    loginPolicy?: string;
+    selfLinkEnabled?: boolean;
+    selfUnlinkEnabled?: boolean;
+  }) {
+    const settings: {
+      loginPolicy?: 'local' | 'external' | 'both';
+      selfLinkEnabled?: boolean;
+      selfUnlinkEnabled?: boolean;
+    } = {};
+
+    if (body?.loginPolicy !== undefined) {
+      if (
+        body.loginPolicy !== 'local' &&
+        body.loginPolicy !== 'external' &&
+        body.loginPolicy !== 'both'
+      ) {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректная политика входа', {
+          field: 'loginPolicy',
+        });
+      }
+      settings.loginPolicy = body.loginPolicy;
+    }
+    if (body?.selfLinkEnabled !== undefined) {
+      if (typeof body.selfLinkEnabled !== 'boolean') {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный флаг привязки', {
+          field: 'selfLinkEnabled',
+        });
+      }
+      settings.selfLinkEnabled = body.selfLinkEnabled;
+    }
+    if (body?.selfUnlinkEnabled !== undefined) {
+      if (typeof body.selfUnlinkEnabled !== 'boolean') {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный флаг отвязки', {
+          field: 'selfUnlinkEnabled',
+        });
+      }
+      settings.selfUnlinkEnabled = body.selfUnlinkEnabled;
+    }
+    if (Object.keys(settings).length === 0) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'Не переданы настройки SSO');
+    }
+
+    return settings;
   }
 
   /** Defense-in-depth for browser calls; non-browser clients send no Origin. */

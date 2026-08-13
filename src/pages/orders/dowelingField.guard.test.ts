@@ -73,7 +73,7 @@ describe('order detail doweling field guards', () => {
     expect(grouping).toContain("{ field: 'doweling', label: 'по присадке' }");
     expect(grouping).toMatch(/case 'doweling': return detail\.doweling === true \? 'yes' : EMPTY_GROUP_KEY;/);
     // Оба groupLabelOf (edit-таблица и show) обязаны знать поле.
-    expect(detailTable).toContain("case 'doweling': return sample.doweling === true ? 'Присадка' : '—';");
+    expect(detailTable).toContain("case 'doweling': return getDisplayedField(sample, 'doweling') === true ? 'Присадка' : '—';");
     expect(showPage).toContain("case 'doweling': return sample.doweling === true ? 'Присадка' : '—';");
     // Кнопка сброса любого выделения (чекбоксы + pending drag).
     expect(detailsTab).toContain('Сбросить выделение');

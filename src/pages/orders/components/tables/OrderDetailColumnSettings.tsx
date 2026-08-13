@@ -1,5 +1,6 @@
+import { Tooltip } from '../../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Checkbox, Modal, Space, Tooltip, message } from 'antd';
+import { Button, Checkbox, Modal, Space, message } from 'antd';
 import { ArrowDownOutlined, ArrowUpOutlined, HolderOutlined, SettingOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { profileApi } from '../../../../api/profileApi';

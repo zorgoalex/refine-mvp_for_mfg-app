@@ -1,8 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal,
-  Popconfirm, Row, Space, Table, Typography, message,
-} from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Space, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, SaveOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';

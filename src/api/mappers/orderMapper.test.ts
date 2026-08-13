@@ -102,6 +102,7 @@ describe('orderMapper', () => {
       workshopIds: [81],
       requirementIds: [82],
       dowelingLinkIds: [91],
+      hdfDetailIds: [],
     });
 
     const json = JSON.stringify(dto);
@@ -250,6 +251,7 @@ describe('orderMapper', () => {
       workshopIds: [82],
       requirementIds: [92],
       dowelingLinkIds: [102],
+      hdfDetailIds: [],
     });
     const json = JSON.stringify(dto);
     expect(json).not.toContain('created_by');
@@ -595,6 +597,29 @@ describe('orderMapper', () => {
     expect(form.deletedWorkshops).toEqual([]);
     expect(form.deletedRequirements).toEqual([]);
     expect(form.deletedDowelingLinks).toEqual([]);
+
+    const dtoWithoutTotals = {
+      ...dto,
+      header: {
+        ...dto.header,
+        totalAmount: 810,
+        finalAmount: 710,
+        paidAmount: 410,
+        partsCount: 3,
+        totalArea: 0.45,
+      },
+      totals: undefined,
+    } as unknown as OrderDto;
+
+    const formWithoutTotals = mapOrderDtoToFormValues(dtoWithoutTotals);
+
+    expect(formWithoutTotals.header).toMatchObject({
+      total_amount: 810,
+      final_amount: 710,
+      paid_amount: 410,
+      parts_count: 3,
+      total_area: 0.45,
+    });
   });
 
   // Variant B: sheet-only material contract

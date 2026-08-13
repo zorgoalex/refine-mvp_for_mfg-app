@@ -1,7 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Alert, Button, Col, DatePicker, Empty, Modal, Row, Select, Space, Table, Typography, message,
-} from 'antd';
+import { Alert, Button, Col, DatePicker, Empty, Modal, Row, Select, Space, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, PlusOutlined, UndoOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';

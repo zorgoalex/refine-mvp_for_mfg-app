@@ -1,7 +1,8 @@
-﻿import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
+import { Table } from '../../ui/tooltipDelay';
+import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { ShowButton, EditButton } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
-import { Space, Table, Tag, Badge } from "antd";
+import { Space, Tag, Badge } from "antd";
 import { LocalizedList } from "../../components/LocalizedList";
 
 export const MaterialTransactionTypeList: React.FC<IResourceComponentsProps> =

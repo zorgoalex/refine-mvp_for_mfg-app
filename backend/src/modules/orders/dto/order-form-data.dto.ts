@@ -10,6 +10,9 @@ export interface MaterialLookupDto extends IdNameLookupDto {
 
 export interface MillingTypeLookupDto extends IdNameLookupDto {
   costPerSqm: number | null;
+  hdfEnabled?: boolean;
+  hdfEdgeMm?: number | null;
+  version?: number;
 }
 
 // SP3: sheet-material picker option. Carries dimensions for the FE dimension

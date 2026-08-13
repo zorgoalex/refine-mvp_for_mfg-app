@@ -24,6 +24,8 @@ describe('PgCncTelegramMediaRepository', () => {
     expect(queries[0]?.text).toContain('COALESCE(item.match_order_id, order_key.order_id)=$1::bigint');
     expect(queries[0]?.text).toContain('p.sheet_image_storage_key IS NOT NULL');
     expect(queries[0]?.text).toContain("p.svg_cut_import_status='imported'");
+    expect(queries[0]?.text).toContain('LEFT JOIN cut_job svg_job');
+    expect(queries[0]?.text).toContain('svg_job.source_display_number AS svg_cut_job_display_number');
     expect(queries[0]?.text).toContain('cnc_telegram_media_restore_requests');
   });
 
@@ -35,6 +37,7 @@ describe('PgCncTelegramMediaRepository', () => {
           source_message_id: null,
           sheet_image_storage_key: null,
           svg_cut_job_id: 74,
+          svg_cut_job_display_number: '67',
           svg_cut_result_no: 1,
           svg_cut_group_id: 175,
           svg_cut_sheet_index: 0,
@@ -55,6 +58,7 @@ describe('PgCncTelegramMediaRepository', () => {
       previewUrl: null,
       imageUrl: null,
       cutJobId: 74,
+      cutJobDisplayNumber: '67',
       cutResultNo: 1,
       cutGroupId: 175,
       sheetIndex: 0,
@@ -123,6 +127,65 @@ describe('PgCncTelegramMediaRepository', () => {
     expect(queries[0]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
     expect(queries[0]?.text).toContain("request.claimed_at < now() - interval '5 minutes'");
   });
+
+  it('lists manual SVG files linked to an order with download URLs', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        return { rows: [manualSvgFileRow()] };
+      }),
+    };
+    const repository = new PgCncTelegramMediaRepository(database as never);
+
+    const result = await repository.listOrderManualSvgFiles(11520);
+
+    expect(result[0]).toMatchObject({
+      fileId: manualSvgFileId(),
+      kind: 'svg',
+      fileName: 'CNC#1_2777+2723-HDF.svg',
+      downloadUrl: `/api/v1/cnc-telegram/orders/11520/manual-svg-files/${manualSvgFileId()}`,
+      telegramSendStatus: 'sent',
+    });
+    expect(queries[0]?.params).toEqual([11520]);
+    expect(queries[0]?.text).toContain('cnc_manual_svg_upload_file_orders');
+    expect(queries[0]?.text).toContain('f.expires_at > now()');
+  });
+
+  it('claims manual SVG Telegram sends as pending-only SKIP LOCKED tasks and marks stale processing unknown', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (text.includes('WITH candidates AS')) {
+          return { rows: [{
+            request_id: manualSvgSendRequestId(),
+            packet_id: packetId(),
+            message_text: 'Фрезы для ХДФ: 8',
+            attempt_count: 1,
+            files_json: [manualSvgClaimFile()],
+          }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = { transaction: vi.fn((handler) => handler(tx)) };
+    const repository = new PgCncTelegramMediaRepository(database as never);
+
+    await expect(repository.claimManualSvgTelegramSends(5)).resolves.toEqual([{
+      requestId: manualSvgSendRequestId(),
+      packetId: packetId(),
+      messageText: 'Фрезы для ХДФ: 8',
+      attempt: 1,
+      files: [manualSvgClaimFile()],
+    }]);
+    expect(queries[0]?.text).toContain("SET status='unknown'");
+    expect(queries[0]?.text).toContain("WHERE status='processing'");
+    expect(queries[1]?.params).toEqual([5]);
+    expect(queries[1]?.text).toContain("WHERE request.status='pending'");
+    expect(queries[1]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
+    expect(queries[1]?.text).toContain("encode(file.content_bytes, 'base64')");
+  });
 });
 
 function screenshotRow(overrides: Record<string, unknown> = {}) {
@@ -131,7 +194,7 @@ function screenshotRow(overrides: Record<string, unknown> = {}) {
     packet_id: packetId(), source_message_id: 10847, source_created_at: '2026-08-01T08:00:00.000Z',
     program_name: 'CNC.TXT', material_name: 'MDF', sheet_image_storage_key: 'tg_100_10847.jpg',
     sheet_image_content_type: 'image/jpeg', sheet_image_size_bytes: 1200,
-    svg_cut_job_id: null, svg_cut_result_no: null, svg_cut_group_id: null,
+    svg_cut_job_id: null, svg_cut_job_display_number: null, svg_cut_result_no: null, svg_cut_group_id: null,
     svg_cut_sheet_index: null, svg_cut_sheet_number: null, svg_cut_variant: null,
     matched_detail_count: 2, item_quantity_total: 3, original_available: true,
     available_until: '2026-08-31T08:00:00.000Z', restore_request_id: null,
@@ -149,3 +212,38 @@ function restoreRow() {
 
 function packetId() { return '00000000-0000-4000-8000-000000000001'; }
 function restoreId() { return '00000000-0000-4000-8000-000000000002'; }
+function manualSvgFileId() { return '00000000-0000-4000-8000-000000000003'; }
+function manualSvgSendRequestId() { return '00000000-0000-4000-8000-000000000004'; }
+
+function manualSvgFileRow(overrides: Record<string, unknown> = {}) {
+  return {
+    file_id: manualSvgFileId(),
+    packet_id: packetId(),
+    file_kind: 'svg',
+    original_file_name: 'CNC#1_2777+2723-HDF.svg',
+    content_type: 'image/svg+xml',
+    content_sha256: 'a'.repeat(64),
+    size_bytes: 1200,
+    generated: false,
+    created_at: '2026-08-07T10:00:00.000Z',
+    expires_at: '2026-09-06T10:00:00.000Z',
+    svg_cut_job_id: 212,
+    svg_cut_job_display_number: '67',
+    svg_cut_result_id: 991,
+    svg_cut_result_no: 1,
+    telegram_send_status: 'sent',
+    ...overrides,
+  };
+}
+
+function manualSvgClaimFile() {
+  return {
+    fileId: manualSvgFileId(),
+    kind: 'svg',
+    fileName: 'CNC#1_2777+2723-HDF.svg',
+    contentType: 'image/svg+xml',
+    sizeBytes: 11,
+    sha256: 'b'.repeat(64),
+    base64Content: 'PHN2Zz48L3N2Zz4=',
+  };
+}

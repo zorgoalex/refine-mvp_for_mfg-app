@@ -1,5 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Modal, Radio, Select, Space, Spin, Table, Typography, message } from 'antd';
+import { Button, Modal, Radio, Select, Space, Spin, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ApiError, isApiError } from '../../api/apiError';
 import { bazisApi } from '../../api/bazisApi';

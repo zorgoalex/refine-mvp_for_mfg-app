@@ -1,25 +1,10 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useState, useCallback, useEffect } from "react";
 import { IResourceComponentsProps, useNavigation } from "@refinedev/core";
 import { List, ShowButton, useSelect } from "@refinedev/antd";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import {
-  Space,
-  Table,
-  Badge,
-  Input,
-  Button,
-  message,
-  Tooltip,
-  Typography,
-  Form,
-  Row,
-  Col,
-  Select,
-  DatePicker,
-  InputNumber,
-  Card,
-  Checkbox,
-} from "antd";
+  Space, Badge, Input, Button, message, Typography, Form, Row, Col, Select, DatePicker, InputNumber, Card, Checkbox } from "antd";
 import {
   SearchOutlined,
   FilterOutlined,

@@ -10,6 +10,7 @@ describe('groupingButtonLabel', () => {
   });
   it('shows current field label', () => {
     expect(groupingButtonLabel('material')).toBe('Группировка: по материалам');
+    expect(groupingButtonLabel('production_status')).toBe('Группировка: по статусу');
   });
 });
 

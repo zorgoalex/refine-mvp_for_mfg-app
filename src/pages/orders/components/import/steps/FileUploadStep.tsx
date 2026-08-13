@@ -1,7 +1,8 @@
+import { Table } from '../../../../../ui/tooltipDelay';
 // Step 1: File Upload with drag-and-drop and sheet selection
 
 import React, { useCallback } from 'react';
-import { Upload, Select, Table, Typography, Space, Alert, Spin } from 'antd';
+import { Upload, Select, Typography, Space, Alert, Spin } from 'antd';
 import { InboxOutlined, FileExcelOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import type { ParsedSheet } from '../types/importTypes';

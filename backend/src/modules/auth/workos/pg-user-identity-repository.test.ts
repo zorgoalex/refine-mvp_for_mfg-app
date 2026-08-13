@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import { PgUserIdentityRepository, type IdentityActor } from './pg-user-identity-repository';
 
-const CAPS_ON = { loginPolicy: true, providerSessions: true, userIdentities: true, authMethod: true };
+const CAPS_ON = {
+  loginPolicy: true,
+  providerSessions: true,
+  userIdentities: true,
+  authMethod: true,
+  workosUserControls: true,
+};
 const CAPS_PRE055 = { ...CAPS_ON, authMethod: false };
 
 const ACTOR: IdentityActor = {
@@ -72,6 +78,27 @@ describe('PgUserIdentityRepository.insertLinkWithAudit', () => {
       status: 'user_inactive',
     });
     expect(database.queries.filter((query) => query.text.includes('INSERT INTO user_identities'))).toHaveLength(0);
+  });
+
+  it('denies self-service linking when the target user toggle is off under lock', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      {
+        rows: [{
+          login_policy: 'both',
+          workos_self_link_enabled: false,
+          workos_self_unlink_enabled: true,
+        }],
+      },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.insertLinkWithAudit(input)).resolves.toEqual({
+      status: 'self_link_disabled',
+    });
+    expect(
+      database.queries.filter((query) => query.text.includes('INSERT INTO user_identities')),
+    ).toHaveLength(0);
   });
 
   it('resolves a concurrent conflict deterministically: same user → already_linked, other user → conflict', async () => {
@@ -291,6 +318,27 @@ describe('PgUserIdentityRepository.deleteOneLinkWithAudit', () => {
     expect(audit?.params[4]).toBe(42);
   });
 
+  it('denies self-service unlink when its independent toggle is off', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      {
+        rows: [{
+          login_policy: 'both',
+          is_active: true,
+          workos_self_unlink_enabled: false,
+        }],
+      },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.deleteOneLinkWithAudit(base)).resolves.toBe(
+      'self_unlink_disabled',
+    );
+    expect(
+      database.queries.filter((query) => query.text.includes('DELETE FROM user_identities')),
+    ).toHaveLength(0);
+  });
+
   it('returns not_found when the identity is not the target user’s (no audit)', async () => {
     const database = createTransactionalDatabase([
       { rows: [{ '?column?': 1 }] },
@@ -314,6 +362,30 @@ describe('PgUserIdentityRepository.deleteOneLinkWithAudit', () => {
     await expect(repository.deleteOneLinkWithAudit(base)).resolves.toBe('external_policy');
     expect(database.queries.filter((q) => q.text.includes('DELETE FROM user_identities'))).toHaveLength(0);
     expect(database.queries.filter((q) => q.text.includes('auth.identity.unlinked'))).toHaveLength(0);
+  });
+
+  it('allows an admin to remove the last external-only identity and revokes target sessions', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'external', is_active: true }] },
+      { rows: [{ identity_id: '1', provider_user_id: 'sub-a', email_at_link: 'a@example.com', auth_method: null }] },
+      { rows: [] },
+      { rows: [{ session_id: '02bed022-f183-487b-8e2f-4603665a2add' }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.deleteOneLinkWithAudit({
+      ...base,
+      mode: 'admin',
+      actorSessionId: 'admin-session',
+      actor: { userId: '7', username: 'admin', roleId: 1 },
+    })).resolves.toBe('unlinked');
+    expect(database.queries.some((query) => query.text.includes('count(*)'))).toBe(false);
+    expect(database.queries.some((query) => query.text.includes('DELETE FROM user_identities'))).toBe(true);
+    expect(database.queries.some((query) => query.text.includes('UPDATE auth_sessions'))).toBe(true);
+    expect(database.queries.some((query) => query.text.includes('auth.identity.unlinked'))).toBe(true);
   });
 
   it('returns not_found (404-priority) BEFORE the external-guard for a wrong identity', async () => {
@@ -390,6 +462,49 @@ describe('PgUserIdentityRepository.deleteOneLinkWithAudit', () => {
     const meta = JSON.parse(String(audit?.params[audit.params.length - 1]));
     expect(meta).toMatchObject({ mode: 'admin', reason: 'уволен', identityId: '1' });
   });
+
+  it('revokes all target sessions and refresh tokens on administrator unlink', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ login_policy: 'both', is_active: true }] },
+      {
+        rows: [{
+          identity_id: '1',
+          provider_user_id: 'sub-a',
+          email_at_link: 'a@example.com',
+          auth_method: 'GoogleOAuth',
+        }],
+      },
+      { rows: [] },
+      { rows: [{ session_id: '02bed022-f183-487b-8e2f-4603665a2add' }] },
+      { rows: [] },
+      { rows: [] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await repository.deleteOneLinkWithAudit({
+      ...base,
+      mode: 'admin',
+      actorSessionId: 'admin-session',
+      actor: { userId: '7', username: 'admin', roleId: 1 },
+    });
+
+    expect(
+      database.queries.find((query) => query.text.includes('UPDATE auth_sessions'))?.text,
+    ).toContain("status = 'revoked'");
+    expect(
+      database.queries.find((query) => query.text.includes('UPDATE refresh_tokens'))?.params,
+    ).toEqual([
+      ['02bed022-f183-487b-8e2f-4603665a2add'],
+      'sso_identity_admin_unlinked',
+    ]);
+    const audit = database.queries.find((query) =>
+      query.text.includes('auth.identity.unlinked'),
+    );
+    expect(JSON.parse(String(audit?.params[audit.params.length - 1]))).toMatchObject({
+      revokedSessions: 1,
+    });
+  });
 });
 
 describe('PgUserIdentityRepository.writeLinkFailed', () => {
@@ -411,6 +526,179 @@ describe('PgUserIdentityRepository.writeLinkFailed', () => {
     expect(insert.params[4]).toBe(42);
     const metadata = JSON.parse(String(insert.params[8])) as Record<string, unknown>;
     expect(metadata).toMatchObject({ reason: 'identity_conflict', conflictUserId: '99' });
+  });
+});
+
+describe('PgUserIdentityRepository administrator controls', () => {
+  it('refuses external-only policy without an allowed SSO identity', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      {
+        rows: [{
+          login_policy: 'both',
+          workos_self_link_enabled: true,
+          workos_self_unlink_enabled: true,
+        }],
+      },
+      { rows: [{ count: '0' }] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(
+      repository.updateUserSettingsWithAudit({
+        actor: { userId: '7', username: 'admin', roleId: 1 },
+        actorSessionId: 'admin-session',
+        targetUserId: '42',
+        settings: { loginPolicy: 'external' },
+      }),
+    ).resolves.toEqual({ status: 'external_requires_identity' });
+    expect(
+      database.queries.filter((query) => query.text.includes('UPDATE users')),
+    ).toHaveLength(0);
+  });
+
+  it('revokes an active invitation with the actor session and audit in one transaction', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ invitation_id: '02bed022-f183-487b-8e2f-4603665a2add' }] },
+      { rows: [] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.revokeActiveLinkInvitationsWithAudit({
+      actor: { userId: '7', username: 'admin', roleId: 1, requestId: 'req-revoke' },
+      actorSessionId: 'admin-session',
+      targetUserId: '42',
+    })).resolves.toEqual({ status: 'revoked', revoked: true });
+    expect(database.queries[0].text).toContain("status = 'active'");
+    expect(database.queries[1].text).toContain('FOR UPDATE');
+    expect(database.queries[2].text).toContain('SET revoked_at = now()');
+    expect(database.queries[2].text).toContain('expires_at > now()');
+    const audit = database.queries[3];
+    expect(audit.text).toContain('auth.identity.invitation_revoked');
+    expect(audit.params.join(' ')).not.toContain('token');
+    expect(JSON.parse(String(audit.params[audit.params.length - 1]))).toEqual({
+      mode: 'admin',
+      revokedInvitations: 1,
+    });
+  });
+
+  it('returns revoked=false without an audit when there is no live invitation', async () => {
+    const database = createTransactionalDatabase([
+      { rows: [{ '?column?': 1 }] },
+      { rows: [{ '?column?': 1 }] },
+      { rows: [] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(repository.revokeActiveLinkInvitationsWithAudit({
+      actor: { userId: '7', username: 'admin', roleId: 1 },
+      actorSessionId: 'admin-session',
+      targetUserId: '42',
+    })).resolves.toEqual({ status: 'revoked', revoked: false });
+    expect(database.queries.some((query) => query.text.includes('audit_log'))).toBe(false);
+  });
+
+  it('atomically consumes an invitation and links the exact provider sub', async () => {
+    const database = createTransactionalDatabase([
+      {
+        rows: [{
+          target_user_id: '42',
+          created_by_user_id: '7',
+          expires_at: '2099-07-26T20:00:00.000Z',
+          consumed_at: null,
+          revoked_at: null,
+          is_active: true,
+          actor_username: 'admin',
+          actor_role_id: 1,
+        }],
+      },
+      {
+        rows: [{
+          identity_id: '9',
+          user_id: '42',
+          provider: 'workos',
+          provider_user_id: 'sub-approved',
+          email_at_link: 'approved@example.com',
+        }],
+      },
+      { rows: [] },
+      { rows: [] },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(
+      repository.consumeInvitationAndLinkWithAudit({
+        invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+        provider: 'workos',
+        providerUserId: 'sub-approved',
+        emailAtLink: 'approved@example.com',
+        emailVerified: true,
+        authMethod: 'GoogleOAuth',
+      }),
+    ).resolves.toEqual({ status: 'linked' });
+
+    const identityInsert = database.queries.find((query) =>
+      query.text.includes('INSERT INTO user_identities'),
+    );
+    expect(identityInsert?.params.slice(0, 4)).toEqual([
+      '42',
+      'workos',
+      'sub-approved',
+      'approved@example.com',
+    ]);
+    expect(
+      database.queries.find((query) =>
+        query.text.includes('SET consumed_at = now()'),
+      )?.params,
+    ).toEqual(['02bed022-f183-487b-8e2f-4603665a2add']);
+    const audit = database.queries.find((query) =>
+      query.text.includes('auth.identity.linked'),
+    );
+    expect(audit?.params[0]).toBe('42');
+    expect(audit?.params[1]).toBe(7);
+  });
+
+  it('does not consume an invitation when the provider sub belongs to another user', async () => {
+    const database = createTransactionalDatabase([
+      {
+        rows: [{
+          target_user_id: '42',
+          created_by_user_id: '7',
+          expires_at: '2099-07-26T20:00:00.000Z',
+          consumed_at: null,
+          revoked_at: null,
+          is_active: true,
+          actor_username: 'admin',
+          actor_role_id: 1,
+        }],
+      },
+      { rows: [] },
+      {
+        rows: [{
+          identity_id: '4',
+          user_id: '99',
+          provider: 'workos',
+          provider_user_id: 'sub-conflict',
+          email_at_link: 'other@example.com',
+        }],
+      },
+    ]);
+    const repository = new PgUserIdentityRepository(database.service, CAPS_ON);
+
+    await expect(
+      repository.consumeInvitationAndLinkWithAudit({
+        invitationId: '02bed022-f183-487b-8e2f-4603665a2add',
+        provider: 'workos',
+        providerUserId: 'sub-conflict',
+        emailAtLink: 'other@example.com',
+        emailVerified: true,
+      }),
+    ).resolves.toEqual({ status: 'conflict', conflictUserId: '99' });
+    expect(
+      database.queries.some((query) => query.text.includes('SET consumed_at = now()')),
+    ).toBe(false);
   });
 });
 

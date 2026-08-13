@@ -1,3 +1,4 @@
+import { Table } from '../../../../ui/tooltipDelay';
 // Order Basic Info Section
 // Row 1: Client, Order Name, Order Date
 // Row 2: Order Status, Payment Status, Manager, Priority
@@ -5,7 +6,7 @@
 // Row 4: Doweling Orders Table (Name, Engineer)
 
 import React, { useCallback, useRef, useState } from 'react';
-import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Table, Popconfirm, notification } from 'antd';
+import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Popconfirm, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useSelect } from '@refinedev/antd';
 import { useDataProvider, useInvalidate } from '@refinedev/core';

@@ -1,5 +1,6 @@
+import { Table } from '../../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Empty, Space, Table, Tag, message } from 'antd';
+import { Button, Empty, Space, Tag, message } from 'antd';
 import { EditOutlined, PlusOutlined, StopOutlined } from '@ant-design/icons';
 import { ApiError } from '../../../api/apiError';
 import { labelsApi } from '../../../api/labelsApi';

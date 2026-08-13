@@ -1,9 +1,10 @@
+import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 // Order Payments Table
 // Displays list of order payments with inline editing capabilities
 // Pattern: same as OrderDetailTable for consistency
 
 import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
-import { Table, Button, Space, Form, InputNumber, Input, Select, DatePicker, Typography, Tooltip, Dropdown } from 'antd';
+import { Button, Space, Form, InputNumber, Input, Select, DatePicker, Typography, Dropdown } from 'antd';
 import { EditOutlined, CheckOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';

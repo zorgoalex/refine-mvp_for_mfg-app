@@ -1,5 +1,6 @@
+import { Table } from '../ui/tooltipDelay';
 import React from 'react';
-import { Form, InputNumber, Table, Typography } from 'antd';
+import { Form, InputNumber, Typography } from 'antd';
 import { TextField } from '@refinedev/antd';
 
 const { Title } = Typography;

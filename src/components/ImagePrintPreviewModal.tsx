@@ -1,10 +1,6 @@
-import {
-  CloseOutlined,
-  PrinterOutlined,
-  ZoomInOutlined,
-  ZoomOutOutlined,
-} from '@ant-design/icons';
-import { Button, Modal, Tooltip } from 'antd';
+import { Tooltip } from '../ui/tooltipDelay';
+import { CloseOutlined, PrinterOutlined, ZoomInOutlined, ZoomOutOutlined, } from '@ant-design/icons';
+import { Button, Modal } from 'antd';
 import { useEffect, useState, type ReactNode } from 'react';
 
 export const DEFAULT_IMAGE_PREVIEW_SCALE = 0.25;

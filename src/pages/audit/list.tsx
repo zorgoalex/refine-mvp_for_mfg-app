@@ -1,20 +1,6 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import {
-  Table,
-  Form,
-  Button,
-  Card,
-  Space,
-  Typography,
-  Tooltip,
-  Tag,
-  Empty,
-  Alert,
-  DatePicker,
-  Segmented,
-  Select,
-  Tabs,
-} from 'antd';
+import { Form, Button, Card, Space, Typography, Tag, Empty, Alert, DatePicker, Segmented, Select, Tabs } from 'antd';
 import { FilterOutlined, ClearOutlined, AuditOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { auditApi } from '../../api/auditApi';
@@ -39,6 +25,8 @@ import { TelegramWorkerAudit } from './TelegramWorkerAudit';
 const { Text } = Typography;
 
 const PAGE_SIZE_DEFAULT = 50;
+const MANUAL_SVG_FILE_UPLOADED_EVENT = 'cnc.manual_svg_upload.file_uploaded';
+const MANUAL_SVG_FILE_AUDIT_FILTERS: FilterValues = { event: MANUAL_SVG_FILE_UPLOADED_EVENT };
 
 type AuditViewMode = 'readable' | 'technical';
 type AuditTableMode = 'audit' | 'business-history';
@@ -416,6 +404,7 @@ export interface HistoryJournalTableProps {
   embedded?: boolean;
   title?: string;
   defaultFiltersVisible?: boolean;
+  initialFilters?: FilterValues;
 }
 
 export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
@@ -423,6 +412,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
   embedded = false,
   title,
   defaultFiltersVisible = false,
+  initialFilters,
 }) => {
   const businessHistoryMode = mode === 'business-history';
   const resolvedTitle = title ?? (businessHistoryMode ? 'История бизнеса' : 'Технический аудит');
@@ -433,11 +423,11 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
     businessHistoryMode ? 'history-journal:list' : 'audit:list',
     PAGE_SIZE_DEFAULT
   );
-  const [query, setQuery] = useState<AuditLogListQuery>({
-    page: 1,
-    pageSize: preferredPageSize,
-    ...(businessHistoryMode ? { scope: 'business' as const } : {}),
-  });
+  const initialQuery = useMemo(
+    () => buildAuditQuery(initialFilters ?? {}, preferredPageSize, businessHistoryMode ? 'business' : 'all'),
+    [businessHistoryMode, initialFilters, preferredPageSize],
+  );
+  const [query, setQuery] = useState<AuditLogListQuery>(initialQuery);
   const [data, setData] = useState<AuditLogEventDto[]>([]);
   const [pagination, setPagination] = useState({
     page: 1,
@@ -605,11 +595,7 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
 
   const handleClearFilters = () => {
     form.resetFields();
-    setQuery({
-      page: 1,
-      pageSize: query.pageSize ?? PAGE_SIZE_DEFAULT,
-      ...(businessHistoryMode ? { scope: 'business' as const } : {}),
-    });
+    setQuery(buildAuditQuery(initialFilters ?? {}, query.pageSize ?? PAGE_SIZE_DEFAULT, businessHistoryMode ? 'business' : 'all'));
   };
 
   const handleTableChange = (pag: { current?: number; pageSize?: number }) => {
@@ -747,7 +733,13 @@ export const HistoryJournalTable: React.FC<HistoryJournalTableProps> = ({
             .audit-filters-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: flex-end; }
             .audit-filters-grid > .aff-item { flex-shrink: 0; }
           `}</style>
-          <Form form={form} layout="vertical" onFinish={handleFilter} className="audit-filters">
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleFilter}
+            className="audit-filters"
+            initialValues={initialFilters}
+          >
             {businessHistoryMode ? (
               <div className="audit-filters-grid">
                 <div className="aff-item">
@@ -1166,6 +1158,18 @@ export const AuditList: React.FC = () => (
               defaultActiveKey="erp"
               items={[
                 { key: 'erp', label: 'Действия ERP', children: <HistoryJournalTable embedded title="Действия ERP" /> },
+                {
+                  key: 'manual-svg-files',
+                  label: 'Файлы раскроя',
+                  children: (
+                    <HistoryJournalTable
+                      embedded
+                      title="Файлы раскроя"
+                      defaultFiltersVisible
+                      initialFilters={MANUAL_SVG_FILE_AUDIT_FILTERS}
+                    />
+                  ),
+                },
                 { key: 'telegram', label: 'Telegram-бот', children: <TelegramWorkerAudit /> },
               ]}
             />

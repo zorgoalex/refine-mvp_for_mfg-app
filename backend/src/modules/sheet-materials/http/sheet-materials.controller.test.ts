@@ -1,4 +1,23 @@
 import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('@nestjs/common', () => ({
+  Body: () => () => undefined,
+  Controller: () => () => undefined,
+  Delete: () => () => undefined,
+  Get: () => () => undefined,
+  HttpCode: () => () => undefined,
+  Param: () => () => undefined,
+  Post: () => () => undefined,
+  Put: () => () => undefined,
+  Query: () => () => undefined,
+  Req: () => () => undefined,
+}));
+vi.mock('@nestjs/swagger', () => ({
+  ApiBearerAuth: () => () => undefined,
+  ApiOperation: () => () => undefined,
+  ApiTags: () => () => undefined,
+}));
+
 import { SheetMaterialsController } from './sheet-materials.controller';
 
 const svc = { list: vi.fn(), getById: vi.fn(), create: vi.fn(), update: vi.fn(), deactivate: vi.fn() } as any;
@@ -24,6 +43,23 @@ describe('SheetMaterialsController', () => {
     svc.create.mockResolvedValueOnce({});
     const ctrl = new SheetMaterialsController(svc, rc);
     await expect(ctrl.create(reqUser, validBody)).resolves.toBeDefined();
+  });
+
+  it('passes isCuttable through create/update bodies', async () => {
+    const rc = { getFeatureFlags: () => ({ sheetMaterialsEnabled: true }) } as any;
+    svc.create.mockResolvedValueOnce({});
+    svc.update.mockResolvedValueOnce({});
+    const ctrl = new SheetMaterialsController(svc, rc);
+    await ctrl.create(reqUser, { ...validBody, isCuttable: false });
+    expect(svc.create).toHaveBeenCalledWith(expect.objectContaining({
+      input: expect.objectContaining({ isCuttable: false }),
+    }));
+    await ctrl.update(reqUser, '5', { ...validBody, isCuttable: true, version: 2 });
+    expect(svc.update).toHaveBeenCalledWith(expect.objectContaining({
+      id: 5,
+      expectedVersion: 2,
+      input: expect.objectContaining({ isCuttable: true }),
+    }));
   });
 
   it('accepts a non-RFC 1C-style UUID refKey1c, rejects a non-UUID with 422', async () => {

@@ -1,5 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Input, Modal, Popconfirm, Space, Table, Typography, message } from 'antd';
+import { Alert, Button, Card, Input, Modal, Popconfirm, Space, Typography, message } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 

@@ -1,18 +1,7 @@
+import { Table } from '../../../ui/tooltipDelay';
 import { useGetIdentity } from '@refinedev/core';
 import {
-  Alert,
-  Button,
-  Collapse,
-  Empty,
-  Input,
-  Modal,
-  Space,
-  Spin,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
+  Alert, Button, Collapse, Empty, Input, Modal, Space, Spin, Tag, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { deadlinesApi } from '../../../api/deadlinesApi';
 import type {

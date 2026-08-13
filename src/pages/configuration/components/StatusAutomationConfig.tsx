@@ -1,25 +1,8 @@
+import { Table } from '../../../ui/tooltipDelay';
 import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  Empty,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Spin,
-  Switch,
-  Table,
-  Typography,
-  Upload,
-  message,
-} from 'antd';
+  Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Typography, Upload, message } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { cncTelegramApi } from '../../../api/cncTelegramApi';

@@ -105,6 +105,25 @@ class ErpClient:
             payload={"error": error[:500]},
         )
 
+    async def claim_manual_svg_telegram_sends(self) -> dict[str, Any]:
+        return await self._authorized_post("/cnc-telegram/manual-svg-telegram-sends/claim")
+
+    async def complete_manual_svg_telegram_send(self, request_id: str, media: dict[str, Any]) -> dict[str, Any]:
+        if not request_id:
+            raise RuntimeError("manual SVG Telegram send request id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/manual-svg-telegram-sends/{request_id}/complete",
+            payload=media,
+        )
+
+    async def fail_manual_svg_telegram_send(self, request_id: str, error: str) -> dict[str, Any]:
+        if not request_id:
+            raise RuntimeError("manual SVG Telegram send request id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/manual-svg-telegram-sends/{request_id}/fail",
+            payload={"error": error[:500]},
+        )
+
     async def _authorized_post(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         headers = {"Authorization": await self._authorization_header()}
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:

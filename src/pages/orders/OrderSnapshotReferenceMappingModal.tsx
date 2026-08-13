@@ -1,5 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useMemo } from "react";
-import { Alert, Modal, Select, Space, Table, Typography } from "antd";
+import { Alert, Modal, Select, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type {
   ImportOrderSnapshotUnmappedReference,

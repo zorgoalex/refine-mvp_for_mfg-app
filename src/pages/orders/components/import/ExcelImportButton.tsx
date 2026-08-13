@@ -1,7 +1,8 @@
+import { Tooltip } from '../../../../ui/tooltipDelay';
 // Button to trigger Excel Import Modal
 
 import React, { useState, useCallback, Suspense, lazy } from 'react';
-import { Button, Tooltip, Spin } from 'antd';
+import { Button, Spin } from 'antd';
 import { FileExcelOutlined } from '@ant-design/icons';
 
 const ExcelImportModal = lazy(async () => ({

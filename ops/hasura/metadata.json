@@ -1380,7 +1380,8 @@
                                     "created_at",
                                     "updated_at",
                                     "client_ref_key_1c",
-                                    "order_ref_key_1c"
+                                    "order_ref_key_1c",
+                                    "delete_flag"
                                 ],
                                 "filter": {},
                                 "allow_aggregations": true
@@ -1423,7 +1424,8 @@
                                     "created_at",
                                     "updated_at",
                                     "client_ref_key_1c",
-                                    "order_ref_key_1c"
+                                    "order_ref_key_1c",
+                                    "delete_flag"
                                 ],
                                 "filter": {},
                                 "allow_aggregations": true
@@ -1466,7 +1468,8 @@
                                     "created_at",
                                     "updated_at",
                                     "client_ref_key_1c",
-                                    "order_ref_key_1c"
+                                    "order_ref_key_1c",
+                                    "delete_flag"
                                 ],
                                 "filter": {},
                                 "allow_aggregations": true
@@ -1509,7 +1512,8 @@
                                     "created_at",
                                     "updated_at",
                                     "client_ref_key_1c",
-                                    "order_ref_key_1c"
+                                    "order_ref_key_1c",
+                                    "delete_flag"
                                 ],
                                 "filter": {},
                                 "allow_aggregations": true
@@ -1552,7 +1556,8 @@
                                     "created_at",
                                     "updated_at",
                                     "client_ref_key_1c",
-                                    "order_ref_key_1c"
+                                    "order_ref_key_1c",
+                                    "delete_flag"
                                 ],
                                 "filter": {},
                                 "allow_aggregations": true

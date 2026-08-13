@@ -2474,10 +2474,11 @@ export class PgCutRepository implements CutRepositoryPort {
   async listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]> {
     const conditions: string[] = [];
     const params: unknown[] = [];
+    const jobNumber = normalizeCutJobNumberFilter(query.filters?.jobNumber);
     if (query.filters?.status) {
       params.push(query.filters.status);
       conditions.push(`j.status = $${params.length}`);
-    } else {
+    } else if (!jobNumber) {
       params.push('archived');
       conditions.push(`j.status <> $${params.length}`);
     }
@@ -2492,6 +2493,10 @@ export class PgCutRepository implements CutRepositoryPort {
     if (query.filters?.createdTo) {
       params.push(query.filters.createdTo);
       conditions.push(`j.created_at < ($${params.length}::date + INTERVAL '1 day')`);
+    }
+    if (jobNumber) {
+      params.push(jobNumber);
+      conditions.push(`NULLIF(trim(j.source_display_number::text), '') = $${params.length}`);
     }
     const orderSearch = query.filters?.orderSearch?.trim();
     if (orderSearch) {
@@ -5961,6 +5966,11 @@ function uniqueSorted(values: Array<string | null | undefined>): string[] {
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+function normalizeCutJobNumberFilter(value: string | null | undefined): string | null {
+  const normalized = value?.trim().replace(/^[№#]\s*/, '');
+  return normalized ? normalized : null;
 }
 
 async function setSessionUser(tx: TransactionClient, userId: string | number): Promise<void> {

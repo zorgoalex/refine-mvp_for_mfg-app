@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
@@ -22,9 +23,12 @@ import type {
 } from '../auth.types';
 import type {
   DeleteOneOutcome,
+  InvitationCreateOutcome,
+  InvitationRevokeOutcome,
   PgUserIdentityRepository,
   UserIdentityListItem,
   UserIdentityRecord,
+  WorkosUserSettings,
 } from './pg-user-identity-repository';
 import type {
   WorkosApiClient,
@@ -71,6 +75,23 @@ export interface WorkosAdminUnlinkCommand extends WorkosAdminListLinksCommand {
   ipAddress?: string;
 }
 
+export interface WorkosAdminUpdateSettingsCommand extends WorkosAdminListLinksCommand {
+  settings: Partial<WorkosUserSettings>;
+  userAgent?: string;
+  ipAddress?: string;
+}
+
+export interface WorkosAdminCreateInvitationCommand extends WorkosAdminListLinksCommand {
+  userAgent?: string;
+  ipAddress?: string;
+}
+
+export interface WorkosAdminRevokeInvitationCommand extends WorkosAdminCreateInvitationCommand {}
+
+export interface WorkosInvitationLinkCommand extends WorkosLoginCommand {
+  invitationId: string;
+}
+
 export interface WorkosAuthServicePorts {
   workos: WorkosApiClient;
   users: AuthUserRepositoryPort;
@@ -82,6 +103,7 @@ export interface WorkosAuthServicePorts {
   permissions: PermissionsService;
   deniedAudit: Pick<typeof auditService, 'recordDenied'>;
   database: DatabaseService;
+  frontendOrigin: string;
   /** Loads a user by internal id; used to re-check is_active at link time. */
   loadUserById: (userId: string) => Promise<AuthUserRecord | null>;
 }
@@ -295,6 +317,30 @@ export class WorkosAuthService {
           providerUserId: identity.sub,
         });
         throw new UserInactiveError();
+      case 'self_link_disabled':
+        throw new ApiError(
+          403,
+          'SSO_SELF_LINK_DISABLED',
+          'Самостоятельная привязка SSO отключена администратором',
+        );
+    }
+  }
+
+  async assertSelfLinkAllowed(currentUser: CurrentUser): Promise<void> {
+    if (!currentUser.sessionId || !(await this.ports.identities.isSessionActive(currentUser.sessionId))) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+
+    const settings = await this.ports.identities.getUserSettings(currentUser.id);
+    if (!settings) {
+      throw new ApiError(404, 'USER_NOT_FOUND', 'Пользователь не найден');
+    }
+    if (!settings.selfLinkEnabled) {
+      throw new ApiError(
+        403,
+        'SSO_SELF_LINK_DISABLED',
+        'Самостоятельная привязка SSO отключена администратором',
+      );
     }
   }
 
@@ -304,7 +350,20 @@ export class WorkosAuthService {
     if (!currentUser.sessionId) {
       throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
     }
+    await this.requireLiveSession(currentUser);
     return this.ports.identities.listLinks(currentUser.id, WORKOS_PROVIDER);
+  }
+
+  async getOwnSettings(currentUser: CurrentUser): Promise<WorkosUserSettings> {
+    if (!currentUser.sessionId) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+    await this.requireLiveSession(currentUser);
+    const settings = await this.ports.identities.getUserSettings(currentUser.id);
+    if (!settings) {
+      throw new ApiError(404, 'USER_NOT_FOUND', 'Пользователь не найден');
+    }
+    return settings;
   }
 
   async unlinkOwn(command: WorkosUnlinkOwnCommand): Promise<{ unlinked: boolean }> {
@@ -354,6 +413,8 @@ export class WorkosAuthService {
       throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
     }
 
+    await this.requireLiveSession(command.currentUser);
+
     await this.requireManageSso(command, 'auth.identity.list_denied');
 
     const user = await this.ports.loadUserById(command.targetUserId);
@@ -365,6 +426,143 @@ export class WorkosAuthService {
     return this.ports.identities.listLinks(command.targetUserId, WORKOS_PROVIDER);
   }
 
+  async adminGetSettings(command: WorkosAdminListLinksCommand): Promise<WorkosUserSettings> {
+    await this.requireLiveSession(command.currentUser);
+    await this.requireManageSso(command, 'auth.identity.settings_read_denied');
+
+    const settings = await this.ports.identities.getUserSettings(command.targetUserId);
+    if (!settings) {
+      throw new ApiError(404, 'USER_NOT_FOUND', 'Пользователь не найден');
+    }
+    return settings;
+  }
+
+  async adminUpdateSettings(
+    command: WorkosAdminUpdateSettingsCommand,
+  ): Promise<WorkosUserSettings> {
+    const sessionId = this.assertLiveAdminSession(command.currentUser);
+    await this.requireManageSso(command, 'auth.identity.settings_update_denied');
+
+    const outcome = await this.ports.identities.updateUserSettingsWithAudit({
+      actor: this.toActor(command),
+      actorSessionId: sessionId,
+      targetUserId: command.targetUserId,
+      settings: command.settings,
+    });
+
+    switch (outcome.status) {
+      case 'updated':
+        return outcome.settings;
+      case 'not_found':
+        throw new ApiError(404, 'USER_NOT_FOUND', 'Пользователь не найден');
+      case 'session_inactive':
+        throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+      case 'external_requires_identity':
+        throw new ApiError(
+          409,
+          'SSO_IDENTITY_REQUIRED',
+          'Для режима «только SSO» нужна хотя бы одна привязанная SSO-учётная запись',
+        );
+    }
+  }
+
+  async adminCreateInvitation(
+    command: WorkosAdminCreateInvitationCommand,
+  ): Promise<{ invitationUrl: string; expiresAt: string }> {
+    const sessionId = this.assertLiveAdminSession(command.currentUser);
+    await this.requireManageSso(command, 'auth.identity.invitation_create_denied');
+
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const outcome = await this.ports.identities.createLinkInvitationWithAudit({
+      invitationId: randomUUID(),
+      tokenHash: hashInvitationToken(token),
+      expiresAt,
+      targetUserId: command.targetUserId,
+      actor: this.toActor(command),
+      actorSessionId: sessionId,
+    });
+    const invitation = this.mapInvitationCreateOutcome(outcome);
+    const invitationUrl = new URL('/auth/workos/invite', this.ports.frontendOrigin);
+    invitationUrl.hash = new URLSearchParams({ token }).toString();
+
+    return {
+      invitationUrl: invitationUrl.toString(),
+      expiresAt: invitation.expiresAt,
+    };
+  }
+
+  async adminRevokeInvitations(
+    command: WorkosAdminRevokeInvitationCommand,
+  ): Promise<{ revoked: boolean }> {
+    const sessionId = this.assertLiveAdminSession(command.currentUser);
+    await this.requireManageSso(command, 'auth.identity.invitation_revoke_denied');
+
+    const outcome = await this.ports.identities.revokeActiveLinkInvitationsWithAudit({
+      targetUserId: command.targetUserId,
+      actor: this.toActor(command),
+      actorSessionId: sessionId,
+    });
+
+    return this.mapInvitationRevokeOutcome(outcome);
+  }
+
+  async prepareInvitation(token: string): Promise<{ invitationId: string }> {
+    if (!/^[A-Za-z0-9_-]{40,100}$/.test(token)) {
+      throw invalidInvitationError();
+    }
+    const invitation = await this.ports.identities.findActiveInvitationByHash(
+      hashInvitationToken(token),
+    );
+    if (!invitation) {
+      throw invalidInvitationError();
+    }
+    return { invitationId: invitation.invitationId };
+  }
+
+  async linkWithInvitationCode(
+    command: WorkosInvitationLinkCommand,
+  ): Promise<{ linked: true }> {
+    let identity: WorkosIdentity;
+    try {
+      identity = await this.ports.workos.authenticateWithCode(command.code);
+    } catch (error) {
+      throw error;
+    }
+
+    if (!identity.emailVerified) {
+      throw new ApiError(401, 'EMAIL_NOT_VERIFIED', 'E-mail внешнего аккаунта не подтверждён');
+    }
+
+    const outcome = await this.ports.identities.consumeInvitationAndLinkWithAudit({
+      invitationId: command.invitationId,
+      provider: WORKOS_PROVIDER,
+      providerUserId: identity.sub,
+      emailAtLink: identity.email,
+      emailVerified: identity.emailVerified,
+      authMethod: identity.authMethod,
+      requestId: command.requestId,
+      userAgent: command.userAgent,
+      ipAddress: command.ipAddress,
+    });
+
+    switch (outcome.status) {
+      case 'linked':
+      case 'already_linked':
+        return { linked: true };
+      case 'conflict':
+        throw new ApiError(
+          409,
+          'IDENTITY_CONFLICT',
+          'Этот внешний аккаунт уже привязан к другому пользователю',
+        );
+      case 'invitation_invalid':
+        throw invalidInvitationError();
+      case 'user_inactive':
+        throw new UserInactiveError();
+    }
+  }
+
   async adminUnlink(command: WorkosAdminUnlinkCommand): Promise<{ unlinked: boolean }> {
     const sessionId = command.currentUser.sessionId;
 
@@ -374,7 +572,7 @@ export class WorkosAuthService {
 
     await this.requireManageSso(command, 'auth.identity.unlink_denied');
 
-    return this.mapDeleteOneOutcome(
+    return this.mapAdminDeleteOneOutcome(
       await this.ports.identities.deleteOneLinkWithAudit({
         identityId: command.identityId,
         targetUserId: command.targetUserId,
@@ -449,6 +647,12 @@ export class WorkosAuthService {
           'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
           'Нельзя отвязать SSO: вход по паролю для пользователя отключён',
         );
+      case 'self_unlink_disabled':
+        throw new ApiError(
+          403,
+          'SSO_SELF_UNLINK_DISABLED',
+          'Самостоятельная отвязка SSO отключена администратором',
+        );
     }
   }
 
@@ -480,7 +684,13 @@ export class WorkosAuthService {
 
   private async requireManageSso(
     command: Pick<WorkosAdminUnlinkCommand, 'currentUser' | 'targetUserId' | 'requestId'>,
-    event: 'auth.identity.list_denied' | 'auth.identity.unlink_denied',
+    event:
+      | 'auth.identity.list_denied'
+      | 'auth.identity.unlink_denied'
+      | 'auth.identity.settings_read_denied'
+      | 'auth.identity.settings_update_denied'
+      | 'auth.identity.invitation_create_denied'
+      | 'auth.identity.invitation_revoke_denied',
   ): Promise<void> {
     if (this.ports.permissions.canUser(command.currentUser, MANAGE_SSO_PERMISSION)) {
       return;
@@ -526,6 +736,68 @@ export class WorkosAuthService {
           'UNLINK_FORBIDDEN_EXTERNAL_POLICY',
           'Нельзя отвязать SSO: вход по паролю для пользователя отключён',
         );
+      case 'self_unlink_disabled':
+        throw new ApiError(
+          403,
+          'SSO_SELF_UNLINK_DISABLED',
+          'Самостоятельная отвязка SSO отключена администратором',
+        );
+    }
+  }
+
+  private mapAdminDeleteOneOutcome(outcome: DeleteOneOutcome): { unlinked: true } {
+    switch (outcome) {
+      case 'unlinked':
+        return { unlinked: true };
+      case 'not_found':
+        throw new ApiError(404, 'IDENTITY_NOT_FOUND', 'Привязка SSO не найдена');
+      case 'session_inactive':
+        throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+      case 'user_inactive':
+      case 'external_policy':
+      case 'self_unlink_disabled':
+        throw new Error(`unexpected administrator unlink outcome: ${outcome}`);
+    }
+  }
+
+  private assertLiveAdminSession(currentUser: CurrentUser): string {
+    if (!currentUser.sessionId) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+    return currentUser.sessionId;
+  }
+
+  private async requireLiveSession(currentUser: CurrentUser): Promise<string> {
+    const sessionId = this.assertLiveAdminSession(currentUser);
+    if (!(await this.ports.identities.isSessionActive(sessionId))) {
+      throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+    return sessionId;
+  }
+
+  private mapInvitationCreateOutcome(
+    outcome: InvitationCreateOutcome,
+  ): Extract<InvitationCreateOutcome, { status: 'created' }>['invitation'] {
+    switch (outcome.status) {
+      case 'created':
+        return outcome.invitation;
+      case 'not_found':
+        throw new ApiError(404, 'USER_NOT_FOUND', 'Пользователь не найден');
+      case 'user_inactive':
+        throw new UserInactiveError();
+      case 'session_inactive':
+        throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
+    }
+  }
+
+  private mapInvitationRevokeOutcome(outcome: InvitationRevokeOutcome): { revoked: boolean } {
+    switch (outcome.status) {
+      case 'revoked':
+        return { revoked: outcome.revoked };
+      case 'not_found':
+        throw new ApiError(404, 'USER_NOT_FOUND', 'Пользователь не найден');
+      case 'session_inactive':
+        throw new ApiError(401, 'SESSION_INACTIVE', 'Сессия завершена — войдите заново');
     }
   }
 
@@ -627,4 +899,16 @@ export class WorkosAuthService {
       },
     };
   }
+}
+
+function hashInvitationToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function invalidInvitationError(): ApiError {
+  return new ApiError(
+    410,
+    'SSO_INVITATION_INVALID',
+    'Ссылка привязки недействительна, истекла или уже использована',
+  );
 }

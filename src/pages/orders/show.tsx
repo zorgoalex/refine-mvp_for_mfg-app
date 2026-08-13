@@ -1,7 +1,8 @@
+import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { useShow, useList, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Table, Breadcrumb, message, Dropdown, Tooltip, Space, Modal, Select } from "antd";
-import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined, UploadOutlined } from "@ant-design/icons";
+import { Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
+import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -56,12 +57,22 @@ import { TableTopScroll } from "../../components/TableTopScroll";
 import { useKeepAlive, useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
-import { CutSvgUploadModal } from "../cut/CutSvgUploadModal";
-import { buildGroupedRows, GROUP_TINT_COUNT, selectedGroupLabelForCut } from './detailGrouping';
+import {
+  EMPTY_GROUP_KEY,
+  buildGroupedRows,
+  extractCutJobGroupValue,
+  formatBasisProjectGroupLabel,
+  formatBazisCutSetsGroupLabel,
+  formatCutJobGroupLabel,
+  GROUP_TINT_COUNT,
+  selectedGroupLabelForCut,
+  type GroupField,
+} from './detailGrouping';
 import { useDetailGrouping } from './useDetailGrouping';
 import { DetailGroupingControls } from './components/DetailGroupingControls';
 import { groupCheckboxState, toggleGroupSelection, filterNumericKeys } from './groupSelection';
 import { authSession } from '../../api/authSession';
+import { mapOrderDtoToFormValues } from '../../api/mappers/orderMapper';
 import { useIsMobile } from '../../hooks/useDeviceTier';
 import { DetailCardList } from './mobile/DetailCardList';
 import type { DetailCardLookups } from './mobile/detailCardModel';
@@ -777,6 +788,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       bazis_cut_sets: legacyBazisCutSetsByDetailId.get(Number(detail.detail_id)) ?? [],
     }));
   }, [legacyBazisCutSetsByDetailId, rawDetails, useBackendOrdersRead]);
+  const hdfDetails = useMemo(
+    () => (backendOrder ? mapOrderDtoToFormValues(backendOrder as OrderDto).hdfDetails ?? [] : []),
+    [backendOrder],
+  );
   const showLoading = shouldShowOrderLoading({
     orderLoading: isLoading,
     detailsLoading,
@@ -1144,7 +1159,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
   const [cutModalOpen, setCutModalOpen] = useState(false);
-  const [svgUploadOpen, setSvgUploadOpen] = useState(false);
   const [bazisCutModalOpen, setBazisCutModalOpen] = useState(false);
 
   useEffect(() => {
@@ -1300,8 +1314,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     () => buildOrderSheetMaterialRows(
       details as any,
       (detail) => resolveDetailMaterialName(detail, resolvedNameByDetailId, materialsMap),
+      hdfDetails,
     ),
-    [details, resolvedNameByDetailId, materialsData],
+    [details, hdfDetails, resolvedNameByDetailId, materialsData],
   );
 
   // Detail grouping state (persisted per user+order; suppressed during cut selection).
@@ -1309,26 +1324,97 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const grouping = useDetailGrouping(groupingUserId, record?.order_id ?? 'new');
 
   useEffect(() => {
-    if (!canViewFinancials && grouping.state.field === 'price') grouping.setField(null);
+    if (!canViewFinancials && (grouping.state.field === 'price' || grouping.state.field === 'detail_cost')) grouping.setField(null);
   }, [canViewFinancials, grouping.setField, grouping.state.field]);
 
   // Active only when a field is chosen and separation is on (grouping stays
   // visible even during cut-select so users can select by group).
   const groupingActive = !!grouping.state.field && grouping.state.showSeparation;
 
-  // Resolve a human-readable group label per field using the show page lookup maps.
-  const groupLabelOf = useCallback((sample: any, field: string) => {
+  const resolveGroupProductionStatusId = useCallback((detail: any): number | null => {
+    const detailId = Number(detail?.detail_id);
+    if (Number.isInteger(detailId) && currentDetailProductionStatusById.has(detailId)) {
+      return normalizeProductionStatusId(currentDetailProductionStatusById.get(detailId));
+    }
+    return normalizeProductionStatusId(detail?.production_status_id);
+  }, [currentDetailProductionStatusById]);
+
+  const orderShowNumberGroupLabel = useCallback((value: unknown, digits = 0): string => {
+    if (value === null || value === undefined || value === '') return '—';
+    const num = Number(value);
+    return Number.isFinite(num)
+      ? num.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+      : '—';
+  }, []);
+
+  const groupValueOf = useCallback((sample: any, field: GroupField): string | null | undefined => {
     switch (field) {
+      case 'production_status': {
+        const statusId = resolveGroupProductionStatusId(sample);
+        return statusId == null ? EMPTY_GROUP_KEY : String(statusId);
+      }
+      case 'cut_job': {
+        const detailId = Number(sample?.detail_id);
+        const ref = Number.isInteger(detailId) ? cutJobByDetailId.get(detailId) : undefined;
+        return extractCutJobGroupValue(ref ?? sample?.cut_job);
+      }
+      case 'bath_cut_job': {
+        const detailId = Number(sample?.detail_id);
+        const ref = Number.isInteger(detailId) ? bathCutJobByDetailId.get(detailId) : undefined;
+        return extractCutJobGroupValue(ref ?? sample?.bath_cut_job);
+      }
+      default:
+        return undefined;
+    }
+  }, [bathCutJobByDetailId, cutJobByDetailId, resolveGroupProductionStatusId]);
+
+  // Resolve a human-readable group label per field using the show page lookup maps.
+  const groupLabelOf = useCallback((sample: any, field: GroupField) => {
+    switch (field) {
+      case 'detail_number': return orderShowNumberGroupLabel(sample.detail_number);
+      case 'area': return `${orderShowNumberGroupLabel(sample.area, 2)} м²`;
       case 'milling': return millingTypesMap.get(sample.milling_type_id) || '—';
-      case 'material': return resolveDetailMaterialName(sample, resolvedNameByDetailId, materialsMap) || '—';
-      case 'film': return (sample.film_id != null ? filmsMap.get(sample.film_id) : '') || '—';
       case 'edge': return edgeTypesMap.get(sample.edge_type_id) || '—';
-      case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
+      case 'material': return resolveDetailMaterialName(sample, resolvedNameByDetailId, materialsMap) || '—';
       case 'note': return (sample.note || '').trim() || '—';
+      case 'price': return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
+      case 'detail_cost': return orderShowNumberGroupLabel(sample.detail_cost);
+      case 'film': return (sample.film_id != null ? filmsMap.get(sample.film_id) : '') || '—';
+      case 'production_status': {
+        const statusId = resolveGroupProductionStatusId(sample);
+        if (statusId == null) return '—';
+        const baseStatusId = normalizeProductionStatusId(sample.production_status_id);
+        return productionStatusesById.get(statusId)?.name
+          || (statusId === baseStatusId ? sample.production_status_name : '')
+          || String(statusId);
+      }
       case 'doweling': return sample.doweling === true ? 'Присадка' : '—';
+      case 'cut_job': {
+        const detailId = Number(sample?.detail_id);
+        const ref = Number.isInteger(detailId) ? cutJobByDetailId.get(detailId) : undefined;
+        return formatCutJobGroupLabel(ref ?? sample?.cut_job);
+      }
+      case 'bath_cut_job': {
+        const detailId = Number(sample?.detail_id);
+        const ref = Number.isInteger(detailId) ? bathCutJobByDetailId.get(detailId) : undefined;
+        return formatCutJobGroupLabel(ref ?? sample?.bath_cut_job);
+      }
+      case 'basis_project': return formatBasisProjectGroupLabel(sample);
+      case 'bazis_cut_sets': return formatBazisCutSetsGroupLabel(sample.bazis_cut_sets);
       default: return '—';
     }
-  }, [millingTypesMap, materialsMap, resolvedNameByDetailId, filmsMap, edgeTypesMap]);
+  }, [
+    bathCutJobByDetailId,
+    cutJobByDetailId,
+    edgeTypesMap,
+    filmsMap,
+    materialsMap,
+    millingTypesMap,
+    orderShowNumberGroupLabel,
+    productionStatusesById,
+    resolveGroupProductionStatusId,
+    resolvedNameByDetailId,
+  ]);
 
   const sortedDetails = useMemo(() => {
     if (!orderShowActiveSorter) return details;
@@ -1424,9 +1510,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // OrderDetail; let TS infer.
   const groupedDataSource = useMemo(
     () => (groupingActive
-      ? buildGroupedRows(sortedDetails, grouping.state.field!, { includeLeadingSeparator: cutSelectMode, groupLabelOf })
+      ? buildGroupedRows(sortedDetails, grouping.state.field!, { includeLeadingSeparator: cutSelectMode, groupValueOf, groupLabelOf })
       : sortedDetails),
-    [groupingActive, sortedDetails, grouping.state.field, cutSelectMode, groupLabelOf],
+    [groupingActive, sortedDetails, grouping.state.field, cutSelectMode, groupValueOf, groupLabelOf],
   );
   const orderShowLiveRowsRef = useRef<any[]>([]);
   const orderShowDetailsDataSource = useMemo(() => {
@@ -1501,8 +1587,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         cutSelectedDetailIds,
         groupingActive ? grouping.state.field : null,
         groupLabelOf,
+        groupValueOf,
       ),
-    [details, cutSelectedDetailIds, groupingActive, grouping.state.field, groupLabelOf],
+    [details, cutSelectedDetailIds, groupingActive, grouping.state.field, groupLabelOf, groupValueOf],
   );
 
   // Загрузка платежей для расчёта статуса оплаты и экспорта
@@ -1596,7 +1683,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     });
 
     return groupingActive && grouping.state.field
-      ? buildGroupedRows(details, grouping.state.field, { groupLabelOf }).flatMap((row) => {
+      ? buildGroupedRows(details, grouping.state.field, { groupValueOf, groupLabelOf }).flatMap((row) => {
         if (row.kind === 'separator') return [{ kind: 'blank' as const }];
         if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)];
         return [];
@@ -2149,7 +2236,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             state={grouping.state}
             onFieldChange={grouping.setField}
             onToggleSeparation={grouping.setShowSeparation}
-            hiddenFields={canViewFinancials ? [] : ['price']}
+            hiddenFields={canViewFinancials ? [] : ['price', 'detail_cost']}
           />
           {detailSelectionEnabled && details.length > 0 && (
             <>
@@ -2287,12 +2374,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       label: 'Обновить',
                       disabled: isRefreshingOrder,
                     }] : []),
-                    ...(cutEnabled ? [{
-                      key: 'svg-upload',
-                      icon: <UploadOutlined />,
-                      label: 'SVG раскрой',
-                      disabled: !record,
-                    }] : []),
                     ...(canExportOrders ? [
                       ...(canViewFinancials ? [{
                         key: 'print',
@@ -2371,9 +2452,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     if (key === 'json') {
                       void handleExportSnapshot();
                     }
-                    if (key === 'svg-upload') {
-                      setSvgUploadOpen(true);
-                    }
                     if (key === 'move-project') {
                       setMoveModalOpen(true);
                     }
@@ -2396,15 +2474,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   loading={isRefreshingOrder}
                 >
                   Обновить
-                </Button>
-              )}
-              {cutEnabled && (
-                <Button
-                  icon={<UploadOutlined />}
-                  onClick={() => setSvgUploadOpen(true)}
-                  disabled={!record}
-                >
-                  SVG раскрой
                 </Button>
               )}
               {canExportOrders ? (
@@ -2440,14 +2509,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     items: [
                       ...(canExportOrders
                         ? [
-                            ...(cutEnabled
-                              ? [{
-                                  key: 'svg-upload',
-                                  icon: <UploadOutlined />,
-                                  label: 'SVG раскрой',
-                                  disabled: !record,
-                                }]
-                              : []),
                             {
                               key: 'excel-without-prices',
                               icon: <FileExcelOutlined />,
@@ -2508,9 +2569,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                       }
                       if (key === 'json') {
                         void handleExportSnapshot();
-                      }
-                      if (key === 'svg-upload') {
-                        setSvgUploadOpen(true);
                       }
                       if (key === 'move-project') {
                         setMoveModalOpen(true);
@@ -2580,15 +2638,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         Обновить
                       </Button>
                     ) : null}
-                    {cutEnabled ? (
-                      <Button
-                        icon={<UploadOutlined />}
-                        onClick={() => setSvgUploadOpen(true)}
-                        disabled={!record}
-                      >
-                        SVG раскрой
-                      </Button>
-                    ) : null}
                     {canExportOrders ? (
                       <>
                         {productionPdfAction}
@@ -2631,15 +2680,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                         Обновить
                       </Button>
                     ) : null}
-                    {cutEnabled ? (
-                      <Button
-                        icon={<UploadOutlined />}
-                        onClick={() => setSvgUploadOpen(true)}
-                        disabled={!record}
-                      >
-                        SVG раскрой
-                      </Button>
-                    ) : null}
                     {canExportOrders ? (
                       <>
                         {productionPdfAction}
@@ -2672,6 +2712,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
               detailMaterialNames={headerMaterialNames}
               headerMaterialName={headerMaterialName}
               showFinancials={canViewFinancials}
+              hdfDetails={hdfDetails}
             />
 
             <div ref={orderShowTabsShellRef} className="order-show-tabs-shell">
@@ -3353,18 +3394,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 setCutModalOpen(false);
                 setCutSelectMode(false);
                 setCutSelectedDetailIds([]);
-              }}
-            />
-          )}
-          {cutEnabled && record?.order_id && (
-            <CutSvgUploadModal
-              open={svgUploadOpen}
-              onClose={() => setSvgUploadOpen(false)}
-              defaultOrderIds={[record.order_id]}
-              defaultOrderNames={[record.order_name]}
-              onDone={() => {
-                setSvgUploadOpen(false);
-                void handleRefreshOrder();
               }}
             />
           )}

@@ -1,6 +1,7 @@
 import type {
   NormalizedSaveOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
+  NormalizedSaveOrderHdfDetailDto,
   NormalizedSaveOrderDto,
   NormalizedSaveOrderHeaderDto,
   NormalizedSaveOrderPaymentDto,
@@ -9,6 +10,7 @@ import type {
   SaveOrderDeletedDto,
   SaveOrderDetailDto,
   SaveOrderDowelingLinkDto,
+  SaveOrderHdfDetailDto,
   SaveOrderDto,
   SaveOrderHeaderDto,
   SaveOrderPaymentDto,
@@ -27,6 +29,11 @@ export function normalizeSaveOrderDto(input: SaveOrderDto): NormalizedSaveOrderD
   const raw = input as unknown as RawRecord;
 
   const details = normalizeRequiredArray<SaveOrderDetailDto>(raw.details, 'details', errors);
+  const hdfDetails = normalizeOptionalArray<SaveOrderHdfDetailDto>(
+    raw.hdfDetails,
+    'hdfDetails',
+    errors,
+  );
   const payments = normalizeRequiredArray<SaveOrderPaymentDto>(raw.payments, 'payments', errors);
   const workshops = normalizeRequiredArray<SaveOrderWorkshopDto>(raw.workshops, 'workshops', errors);
   const requirements = normalizeRequiredArray<SaveOrderRequirementDto>(
@@ -60,6 +67,7 @@ export function normalizeSaveOrderDto(input: SaveOrderDto): NormalizedSaveOrderD
   return {
     header: normalizeHeader(raw.header as SaveOrderHeaderDto),
     details: details.filter((detail) => !isBlankNewDetail(detail)).map(normalizeDetail),
+    hdfDetails: hdfDetails.map(normalizeHdfDetail),
     payments: payments.filter((payment) => !isBlankNewPayment(payment)).map(normalizePayment),
     workshops: workshops.map(normalizeWorkshop),
     requirements: requirements.map(normalizeRequirement),
@@ -128,6 +136,7 @@ function normalizeHeader(header: SaveOrderHeaderDto): NormalizedSaveOrderHeaderD
     millingTypeId: optionalInteger(raw.millingTypeId, 'header.millingTypeId'),
     edgeTypeId: optionalInteger(raw.edgeTypeId, 'header.edgeTypeId'),
     filmId: optionalInteger(raw.filmId, 'header.filmId'),
+    hdfMinThresholdMm: optionalNumber(raw.hdfMinThresholdMm, 'header.hdfMinThresholdMm'),
   };
 }
 
@@ -181,6 +190,15 @@ function normalizePayment(payment: SaveOrderPaymentDto): NormalizedSaveOrderPaym
     paymentDate: normalizeDateOnly(raw.paymentDate) ?? '',
     notes: normalizeOptionalString(raw.notes),
     refKey1c: normalizeOptionalString(raw.refKey1c),
+  };
+}
+
+function normalizeHdfDetail(detail: SaveOrderHdfDetailDto): NormalizedSaveOrderHdfDetailDto {
+  const raw = detail as unknown as RawRecord;
+  return {
+    id: requiredNumber(raw.id, 'hdfDetails[].id'),
+    version: requiredNumber(raw.version, 'hdfDetails[].version'),
+    productionStatusId: optionalInteger(raw.productionStatusId, 'hdfDetails[].productionStatusId'),
   };
 }
 
@@ -259,11 +277,27 @@ function normalizeDeleted(deleted: SaveOrderDeletedDto): Required<SaveOrderDelet
 
   return {
     detailIds: normalizeIdArray(raw.detailIds),
+    hdfDetailIds: normalizeIdArray(raw.hdfDetailIds),
     paymentIds: normalizeIdArray(raw.paymentIds),
     workshopIds: normalizeIdArray(raw.workshopIds),
     requirementIds: normalizeIdArray(raw.requirementIds),
     dowelingLinkIds: normalizeIdArray(raw.dowelingLinkIds),
   };
+}
+
+function normalizeOptionalArray<T>(
+  value: unknown,
+  field: string,
+  errors: OrderFieldError[],
+): T[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    errors.push({ field, message: `${field} must be an array` });
+    return [];
+  }
+  return value as T[];
 }
 
 function normalizeIdArray(value: unknown): number[] {

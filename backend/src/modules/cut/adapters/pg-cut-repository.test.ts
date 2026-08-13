@@ -1586,6 +1586,7 @@ describe('PgCutRepository', () => {
       currentUser: currentUser(),
       filters: {
         orderSearch: '2700',
+        jobNumber: '№67',
         createdFrom: '2026-08-01',
         createdTo: '2026-08-07',
       },
@@ -1594,16 +1595,18 @@ describe('PgCutRepository', () => {
 
     const listQuery = db.queries.find((q) => normalize(q.text).startsWith('SELECT j.cut_job_id FROM cut_job j'));
     const sql = normalize(listQuery?.text ?? '');
+    expect(sql).not.toContain('j.status <> $');
     expect(sql).toContain('j.created_at >= $');
     expect(sql).toContain("j.created_at < ($");
+    expect(sql).toContain("NULLIF(trim(j.source_display_number::text), '') = $");
     expect(sql).toContain('EXISTS ( SELECT 1 FROM cut_job_item cji LEFT JOIN orders o');
     expect(sql).toContain('cji.order_id::text ILIKE $');
     expect(sql).toContain('o.order_name ILIKE $');
     expect(sql.indexOf('EXISTS')).toBeLessThan(sql.indexOf('ORDER BY j.cut_job_id DESC LIMIT 200'));
     expect(listQuery?.params).toEqual([
-      'archived',
       '2026-08-01',
       '2026-08-07',
+      '67',
       '%2700%',
     ]);
   });

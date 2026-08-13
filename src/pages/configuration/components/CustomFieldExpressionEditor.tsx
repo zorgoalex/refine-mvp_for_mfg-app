@@ -1,11 +1,7 @@
+import { Tooltip } from '../../../ui/tooltipDelay';
 import React from 'react';
-import {
-  ArrowDownOutlined,
-  ArrowUpOutlined,
-  DeleteOutlined,
-  PlusOutlined,
-} from '@ant-design/icons';
-import { Button, Input, Select, Space, Tooltip, Typography } from 'antd';
+import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, PlusOutlined, } from '@ant-design/icons';
+import { Button, Input, Select, Space, Typography } from 'antd';
 import type {
   LabelConditionOperator,
   LabelCustomExpressionAggregateFunction,

@@ -1,5 +1,6 @@
+import { Tooltip, Table } from '../../ui/tooltipDelay';
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, Tabs, Typography, Space, InputNumber, Input, Button, Tooltip, message, Spin, Table, Checkbox } from 'antd';
+import { Card, Tabs, Typography, Space, InputNumber, Input, Button, message, Spin, Checkbox } from 'antd';
 import { useList, useResource } from '@refinedev/core';
 import {
   SettingOutlined,
@@ -30,6 +31,7 @@ import { CutConfigTab } from './components/CutConfigTab';
 import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
+import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
 import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
@@ -547,6 +549,16 @@ export const ConfigurationPage: React.FC = () => {
         </span>
       ),
       children: <ProductionWorkflowTab />,
+    },
+    {
+      key: 'production-thresholds',
+      label: (
+        <span>
+          <BuildOutlined />
+          Пороги техпроцессов
+        </span>
+      ),
+      children: <ProductionThresholdsConfigTab />,
     },
     ...(statusAutomationVisible
       ? [

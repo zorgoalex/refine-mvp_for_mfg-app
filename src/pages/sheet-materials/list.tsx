@@ -1,8 +1,9 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useMemo } from 'react';
 import { IResourceComponentsProps, useMany, useNavigation } from '@refinedev/core';
 import { ShowButton, EditButton, CreateButton } from '@refinedev/antd';
 import { usePersistentTable as useTable } from '../../hooks/usePersistentTable';
-import { Space, Table, Badge, Tag, Button } from 'antd';
+import { Space, Badge, Tag, Button } from 'antd';
 import { useHighlightRow } from '../../hooks/useHighlightRow';
 import { LocalizedList } from '../../components/LocalizedList';
 import { can } from '../../utils/permissions';
@@ -79,6 +80,11 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
         <Table.Column dataIndex="name" title="Название" sorter />
         <Table.Column dataIndex="sort_order" title="Порядок" sorter />
         <Table.Column
+          dataIndex="conversion_key"
+          title="Conversion Key"
+          render={(value: string | null | undefined) => value ? <Tag>{value}</Tag> : '—'}
+        />
+        <Table.Column
           dataIndex="material_type_id"
           title="Тип материала"
           render={(_, record: any) => typeMap[record?.material_type_id] ?? record?.material_type_id}
@@ -106,6 +112,15 @@ export const SheetMaterialList: React.FC<IResourceComponentsProps> = () => {
           dataIndex="texture"
           title="Текстура"
           render={(v) => (v === null || v === undefined ? '—' : v ? <Tag color="blue">Да</Tag> : <Tag>Нет</Tag>)}
+        />
+        <Table.Column
+          dataIndex="is_cuttable"
+          title="Для раскроя"
+          sorter
+          render={(value: boolean | null | undefined) => (
+            value === null || value === undefined ? '—' : value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>
+          )}
+          filters={[{ text: 'Да', value: true }, { text: 'Нет', value: false }]}
         />
         <Table.Column dataIndex="color" title="Цвет" render={(v) => v ?? '—'} />
         <Table.Column

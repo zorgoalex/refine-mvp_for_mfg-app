@@ -1,3 +1,4 @@
+import { Table } from '../../ui/tooltipDelay';
 // Вкладка «Материалы»: единый список всех материалов ревизии — листовые
 // (со сматченным ERP-материалом из справочника), кромки (с суммарной
 // длиной), плёнки и фурнитура. Сводка по узлам живёт на вкладке «Дерево».
@@ -6,7 +7,7 @@
 // кнопкой «Сопоставить материалы» без переимпорта.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Empty, Modal, Space, Spin, Table, Tag, message } from 'antd';
+import { Alert, Button, Empty, Modal, Space, Spin, Tag, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { bazisApi } from '../../api/bazisApi';
 import type { BazisRevisionMaterialsSummary } from '../../api/types/bazisApi.types';

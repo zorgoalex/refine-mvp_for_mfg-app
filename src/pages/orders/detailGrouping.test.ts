@@ -11,18 +11,42 @@ const d = (over: Partial<OrderDetail>): OrderDetail =>
   } as OrderDetail);
 
 describe('GROUP_FIELDS', () => {
-  it('has the seven mirrored fields with RU labels', () => {
+  it('has the order-show detail fields except dimensions and quantity with RU labels', () => {
     expect(GROUP_FIELDS.map(f => f.field)).toEqual(
-      ['milling', 'material', 'film', 'edge', 'price', 'doweling', 'note']
+      [
+        'detail_number',
+        'area',
+        'milling',
+        'edge',
+        'material',
+        'note',
+        'price',
+        'detail_cost',
+        'film',
+        'production_status',
+        'doweling',
+        'cut_job',
+        'bath_cut_job',
+        'basis_project',
+        'bazis_cut_sets',
+      ]
     );
     const byField = Object.fromEntries(GROUP_FIELDS.map(f => [f.field, f.label]));
+    expect(byField.detail_number).toBe('по №');
+    expect(byField.area).toBe('по площади');
     expect(byField.milling).toBe('по фрезеровке');
-    expect(byField.material).toBe('по материалам');
-    expect(byField.film).toBe('по пленкам');
     expect(byField.edge).toBe('по обкату');
-    expect(byField.price).toBe('по ценам');
-    expect(byField.doweling).toBe('по присадке');
+    expect(byField.material).toBe('по материалам');
     expect(byField.note).toBe('по примечанию');
+    expect(byField.price).toBe('по ценам');
+    expect(byField.detail_cost).toBe('по сумме');
+    expect(byField.film).toBe('по пленкам');
+    expect(byField.production_status).toBe('по статусу');
+    expect(byField.doweling).toBe('по присадке');
+    expect(byField.cut_job).toBe('по раскрою');
+    expect(byField.bath_cut_job).toBe('по расчету ванны');
+    expect(byField.basis_project).toBe('по Базис проекту');
+    expect(byField.bazis_cut_sets).toBe('по Базис-раскрою');
   });
 });
 
@@ -45,6 +69,29 @@ describe('extractGroupValue', () => {
   it('treats null / NaN price as empty', () => {
     expect(extractGroupValue(d({ milling_cost_per_sqm: null }), 'price')).toBe('__EMPTY__');
     expect(extractGroupValue(d({ milling_cost_per_sqm: 1200 }), 'price')).toBe('1200');
+  });
+  it('extracts numeric, status, cut and Bazis fields from the detail table', () => {
+    const cutRef = {
+      cutJobId: 21,
+      resultNo: 3,
+      cutNumber: '21-3',
+      name: 'Раскрой заказа',
+      paramProfileId: null,
+      profileName: null,
+      profileIsActive: null,
+    };
+    expect(extractGroupValue(d({ detail_number: 7 }), 'detail_number')).toBe('7');
+    expect(extractGroupValue(d({ area: 1.25 }), 'area')).toBe('1.25');
+    expect(extractGroupValue(d({ detail_cost: 1250 }), 'detail_cost')).toBe('1250');
+    expect(extractGroupValue(d({ production_status_id: 4 }), 'production_status')).toBe('4');
+    expect(extractGroupValue(d({ cut_job: cutRef }), 'cut_job')).toBe('21:3');
+    expect(extractGroupValue(d({ bath_cut_job: { ...cutRef, cutJobId: 31, resultNo: 1 } }), 'bath_cut_job')).toBe('31:1');
+    expect(extractGroupValue(d({ bazis_project_id: 9, basis_project: 'Проект 9' }), 'basis_project')).toBe('id:9');
+    expect(extractGroupValue(d({ basis_project: '  Проект без id  ' }), 'basis_project')).toBe('Проект без id');
+    expect(extractGroupValue(
+      d({ bazis_cut_sets: [{ bazisCutSetId: 4, name: 'БР-4' }, { bazisCutSetId: 2, name: 'БР-2' }] }),
+      'bazis_cut_sets',
+    )).toBe('id:2|id:4');
   });
 });
 
@@ -123,6 +170,20 @@ describe('buildGroupedRows', () => {
       .map(r => (r as any).key);
     expect(new Set(syntheticKeys).size).toBe(syntheticKeys.length);
   });
+  it('can group by an external resolver when visible data comes from live maps', () => {
+    const rows = buildGroupedRows(
+      [d({ detail_id: 1 }), d({ detail_id: 2 }), d({ detail_id: 3 })],
+      'cut_job',
+      {
+        groupValueOf: (detail) => detail.detail_id === 2 ? 'cut:live' : undefined,
+        groupLabelOf: (detail) => detail.detail_id === 2 ? 'Live cut' : '—',
+      },
+    );
+
+    expect(rows.map((row) => row.kind)).toEqual(['detail', 'summary', 'separator', 'detail', 'detail', 'summary']);
+    const separator = rows.find((row) => row.kind === 'separator') as any;
+    expect(separator.selectionKeys).toEqual([1, 3]);
+  });
 });
 
 describe('selectedGroupLabelForCut', () => {
@@ -159,6 +220,24 @@ describe('selectedGroupLabelForCut', () => {
         (sample) => labels.get(sample.milling_type_id) ?? '—',
       ),
     ).toBe('Модерн, Классика');
+  });
+
+  it('deduplicates selected labels by an external group resolver', () => {
+    const details = [
+      d({ detail_id: 11 }),
+      d({ detail_id: 12 }),
+      d({ detail_id: 13 }),
+    ];
+
+    expect(
+      selectedGroupLabelForCut(
+        details,
+        [11, 12, 13],
+        'cut_job',
+        (sample) => sample.detail_id === 12 ? 'Раскрой 2' : 'Раскрой 1',
+        (sample) => sample.detail_id === 12 ? 'cut:2' : 'cut:1',
+      ),
+    ).toBe('Раскрой 1, Раскрой 2');
   });
 
   it('returns null for missing grouping or empty labels', () => {

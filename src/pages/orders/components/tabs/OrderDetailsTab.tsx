@@ -1,8 +1,9 @@
+import { Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
 import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
-import { Card, Button, Space, Modal, message, Tooltip, Alert } from 'antd';
+import { Card, Button, Space, Modal, message, Alert } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -30,7 +31,15 @@ import { authSession } from '../../../../api/authSession';
 import { AddToCutModal } from '../AddToCutModal';
 import { AddToBazisCutModal } from '../../../bazis-cut/AddToBazisCutModal';
 import { selectedDetailIds } from '../../groupSelection';
-import { selectedGroupLabelForCut, type GroupField } from '../../detailGrouping';
+import {
+  EMPTY_GROUP_KEY,
+  extractCutJobGroupValue,
+  formatBasisProjectGroupLabel,
+  formatBazisCutSetsGroupLabel,
+  formatCutJobGroupLabel,
+  selectedGroupLabelForCut,
+  type GroupField,
+} from '../../detailGrouping';
 import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
@@ -204,29 +213,89 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     () => new Map(orderFormData.references.sheetMaterialTypes.map((option) => [option.value, option.label])),
     [orderFormData.references.sheetMaterialTypes],
   );
+  const groupNumberLabel = useCallback((value: unknown, digits = 0): string => {
+    if (value === null || value === undefined || value === '') return '—';
+    const num = Number(value);
+    return Number.isFinite(num)
+      ? num.toLocaleString('ru-RU', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+      : '—';
+  }, []);
+  const groupValueOf = useCallback(
+    (sample: OrderDetail, field: GroupField): string | null | undefined => {
+      switch (field) {
+        case 'production_status': {
+          const statusId = Number(sample.production_status_id);
+          return Number.isFinite(statusId) && statusId > 0 ? String(statusId) : EMPTY_GROUP_KEY;
+        }
+        case 'cut_job': {
+          const detailId = Number(sample.detail_id);
+          const ref = Number.isInteger(detailId) ? cutJobMaps.cutJobByDetailId.get(detailId) : undefined;
+          return extractCutJobGroupValue(ref ?? sample.cut_job);
+        }
+        case 'bath_cut_job': {
+          const detailId = Number(sample.detail_id);
+          const ref = Number.isInteger(detailId) ? cutJobMaps.bathCutJobByDetailId.get(detailId) : undefined;
+          return extractCutJobGroupValue(ref ?? sample.bath_cut_job);
+        }
+        default:
+          return undefined;
+      }
+    },
+    [cutJobMaps.bathCutJobByDetailId, cutJobMaps.cutJobByDetailId],
+  );
   const groupLabelOf = useCallback(
     (sample: OrderDetail, field: GroupField) => {
       switch (field) {
+        case 'detail_number':
+          return groupNumberLabel(sample.detail_number);
+        case 'area':
+          return `${groupNumberLabel(sample.area, 2)} м²`;
         case 'milling':
           return orderFormData.references.millingTypeNameById.get(sample.milling_type_id) || '—';
-        case 'material':
-          return sample.material_name_resolved || sheetNameById.get(sample.sheet_material_type_id ?? 0) || '—';
-        case 'film':
-          return sample.film_id != null ? (orderFormData.references.filmNameById.get(sample.film_id) || '—') : '—';
         case 'edge':
           return orderFormData.references.edgeTypeNameById.get(sample.edge_type_id) || '—';
-        case 'price':
-          return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
+        case 'material':
+          return sample.material_name_resolved || sheetNameById.get(sample.sheet_material_type_id ?? 0) || '—';
         case 'note':
           return (sample.note || '').trim() || '—';
+        case 'price':
+          return sample.milling_cost_per_sqm != null ? String(sample.milling_cost_per_sqm) : '—';
+        case 'detail_cost':
+          return groupNumberLabel(sample.detail_cost);
+        case 'film':
+          return sample.film_id != null ? (orderFormData.references.filmNameById.get(sample.film_id) || '—') : '—';
+        case 'production_status':
+          return sample.production_status_id != null
+            ? orderFormData.references.productionStatusNameById.get(sample.production_status_id) || sample.production_status_name || '—'
+            : '—';
+        case 'doweling':
+          return sample.doweling === true ? 'Присадка' : '—';
+        case 'cut_job': {
+          const detailId = Number(sample.detail_id);
+          const ref = Number.isInteger(detailId) ? cutJobMaps.cutJobByDetailId.get(detailId) : undefined;
+          return formatCutJobGroupLabel(ref ?? sample.cut_job);
+        }
+        case 'bath_cut_job': {
+          const detailId = Number(sample.detail_id);
+          const ref = Number.isInteger(detailId) ? cutJobMaps.bathCutJobByDetailId.get(detailId) : undefined;
+          return formatCutJobGroupLabel(ref ?? sample.bath_cut_job);
+        }
+        case 'basis_project':
+          return formatBasisProjectGroupLabel(sample);
+        case 'bazis_cut_sets':
+          return formatBazisCutSetsGroupLabel(sample.bazis_cut_sets);
         default:
           return '—';
       }
     },
     [
+      cutJobMaps.bathCutJobByDetailId,
+      cutJobMaps.cutJobByDetailId,
+      groupNumberLabel,
       orderFormData.references.edgeTypeNameById,
       orderFormData.references.filmNameById,
       orderFormData.references.millingTypeNameById,
+      orderFormData.references.productionStatusNameById,
       sheetNameById,
     ],
   );
@@ -237,8 +306,9 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         eligibleCutDetailIds,
         grouping.state.showSeparation ? grouping.state.field : null,
         groupLabelOf,
+        groupValueOf,
       ),
-    [details, eligibleCutDetailIds, grouping.state.field, grouping.state.showSeparation, groupLabelOf],
+    [details, eligibleCutDetailIds, grouping.state.field, grouping.state.showSeparation, groupLabelOf, groupValueOf],
   );
 
   // Expose methods via ref for parent (OrderForm) to call

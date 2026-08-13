@@ -55,6 +55,18 @@ interface DetailCutJobRow extends QueryResultRow {
   cut_job_id: string | number;
 }
 
+interface ResourceDemandHdfRow extends QueryResultRow {
+  order_hdf_detail_id: string | number;
+  order_id: string | number;
+  hdf_height_mm: string | number | null;
+  hdf_width_mm: string | number | null;
+  quantity: string | number | null;
+  hdf_sheet_material_type_id: string | number | null;
+  hdf_sheet_material_name: string | null;
+  supplier_id: string | number | null;
+  supplier_name: string | null;
+}
+
 export interface ResourceDemandCutGroupRow extends QueryResultRow {
   cut_job_id: string | number;
   cut_group_id: string | number;
@@ -96,6 +108,7 @@ interface FilmAccumulator {
 interface ProjectionInput {
   orders: OrderRow[];
   details: ResourceDemandDetailRow[];
+  hdfDetails: ResourceDemandHdfRow[];
   detailCutJobs: DetailCutJobRow[];
   cutGroups: ResourceDemandCutGroupRow[];
   cutSheets: ResourceDemandCutSheetRow[];
@@ -186,6 +199,35 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
       detailParams,
     );
 
+    const hdfParams: unknown[] = [orderIds];
+    const hdfResourceFilters = buildHdfResourceFilters(command.query, hdfParams, 'hdf', 'hdf_smt');
+    const hdfResult = await client.query<ResourceDemandHdfRow>(
+      `
+      SELECT
+        hdf.order_hdf_detail_id,
+        hdf.order_id,
+        hdf.hdf_height_mm,
+        hdf.hdf_width_mm,
+        hdf.quantity,
+        hdf.hdf_sheet_material_type_id,
+        hdf.hdf_sheet_material_name,
+        hdf_smt.supplier_id,
+        supplier.supplier_name
+      FROM order_hdf_details hdf
+      JOIN hdf_calculation_config_state hdf_state ON hdf_state.id = 1
+      LEFT JOIN sheet_material_types hdf_smt
+        ON hdf_smt.sheet_material_type_id = hdf.hdf_sheet_material_type_id
+      LEFT JOIN suppliers supplier ON supplier.supplier_id = hdf_smt.supplier_id
+      WHERE hdf.order_id = ANY($1::bigint[])
+        AND hdf.delete_flag = false
+        AND hdf.status = 'ok'
+        AND hdf.config_revision = hdf_state.revision
+        ${hdfResourceFilters.length > 0 ? `AND ${hdfResourceFilters.join('\n        AND ')}` : ''}
+      ORDER BY hdf.order_id, hdf.source_detail_number, hdf.order_hdf_detail_id
+      `,
+      hdfParams,
+    );
+
     const detailIds = detailResult.rows.map((row) => toNumber(row.detail_id));
     if (detailIds.length === 0) {
       return response(
@@ -194,6 +236,7 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
         buildOrderResourceDemandProjection({
           orders: orderResult.rows,
           details: [],
+          hdfDetails: hdfResult.rows,
           detailCutJobs: [],
           cutGroups: [],
           cutSheets: [],
@@ -223,6 +266,7 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
         buildOrderResourceDemandProjection({
           orders: orderResult.rows,
           details: detailResult.rows,
+          hdfDetails: hdfResult.rows,
           detailCutJobs: [],
           cutGroups: [],
           cutSheets: [],
@@ -271,6 +315,7 @@ export class PgOrderResourceDemandRepository implements OrderResourceDemandRepos
       buildOrderResourceDemandProjection({
         orders: orderResult.rows,
         details: detailResult.rows,
+        hdfDetails: hdfResult.rows,
         detailCutJobs: detailCutJobs.rows,
         cutGroups: cutGroups.rows,
         cutSheets: cutSheets.rows,
@@ -325,6 +370,25 @@ export function buildOrderResourceDemandProjection(input: ProjectionInput): Orde
       current.detailsCount += 1;
       rows.set(filmId, current);
     }
+  }
+
+  for (const hdf of input.hdfDetails) {
+    const orderId = toNumber(hdf.order_id);
+    const sheetMaterialTypeId = toNullableNumber(hdf.hdf_sheet_material_type_id);
+    if (sheetMaterialTypeId === null) continue;
+    const areaMm2 = hdfAreaMm2(hdf);
+    const rows = getOrCreate(sheetByOrder, orderId, () => new Map());
+    const current = rows.get(sheetMaterialTypeId) ?? {
+      sheetMaterialTypeId,
+      name: cleanName(hdf.hdf_sheet_material_name) ?? `ID: ${sheetMaterialTypeId}`,
+      areaMm2: 0,
+      detailsCount: 0,
+      supplierId: toNullableNumber(hdf.supplier_id),
+      supplierName: cleanName(hdf.supplier_name),
+    };
+    current.areaMm2 += areaMm2;
+    current.detailsCount += Math.max(0, Math.trunc(positiveNumber(hdf.quantity) ?? 0));
+    rows.set(sheetMaterialTypeId, current);
   }
 
   const autoSheetsByGroup = new Map<number, ResourceDemandCutSheetRow[]>();
@@ -444,19 +508,53 @@ function buildOrderWhere(command: ListOrderResourceDemandsCommand): { whereSql: 
 
   const resourceFilters = buildResourceFilters(command.query, params, 'od_filter', 'smt_filter', 'film_filter');
   if (resourceFilters.length > 0) {
-    clauses.push(`EXISTS (
-      SELECT 1
-      FROM order_details od_filter
-      LEFT JOIN sheet_material_types smt_filter
-        ON smt_filter.sheet_material_type_id = od_filter.sheet_material_type_id
-      LEFT JOIN films film_filter ON film_filter.film_id = od_filter.film_id
-      WHERE od_filter.order_id = o.order_id
-        AND od_filter.delete_flag = false
-        AND ${resourceFilters.join('\n        AND ')}
+    const hdfResourceFilters = buildHdfResourceFilters(command.query, params, 'hdf_filter', 'hdf_smt_filter');
+    clauses.push(`(
+      EXISTS (
+        SELECT 1
+        FROM order_details od_filter
+        LEFT JOIN sheet_material_types smt_filter
+          ON smt_filter.sheet_material_type_id = od_filter.sheet_material_type_id
+        LEFT JOIN films film_filter ON film_filter.film_id = od_filter.film_id
+        WHERE od_filter.order_id = o.order_id
+          AND od_filter.delete_flag = false
+          AND ${resourceFilters.join('\n          AND ')}
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM order_hdf_details hdf_filter
+        JOIN hdf_calculation_config_state hdf_state_filter ON hdf_state_filter.id = 1
+        LEFT JOIN sheet_material_types hdf_smt_filter
+          ON hdf_smt_filter.sheet_material_type_id = hdf_filter.hdf_sheet_material_type_id
+        WHERE hdf_filter.order_id = o.order_id
+          AND hdf_filter.delete_flag = false
+          AND hdf_filter.status = 'ok'
+          AND hdf_filter.config_revision = hdf_state_filter.revision
+          AND ${hdfResourceFilters.join('\n          AND ')}
+      )
     )`);
   }
 
   return { whereSql: clauses.join('\n        AND '), params };
+}
+
+function buildHdfResourceFilters(
+  query: OrderResourceDemandQuery,
+  params: unknown[],
+  hdfAlias: string,
+  sheetAlias: string,
+): string[] {
+  const filters: string[] = [];
+  if (query.sheetMaterialTypeId !== undefined) {
+    filters.push(`${hdfAlias}.hdf_sheet_material_type_id = $${params.push(query.sheetMaterialTypeId)}`);
+  }
+  if (query.supplierId !== undefined) {
+    filters.push(`${sheetAlias}.supplier_id = $${params.push(query.supplierId)}`);
+  }
+  if (query.filmId !== undefined || query.vendorId !== undefined) {
+    filters.push('FALSE');
+  }
+  return filters.length > 0 ? filters : ['TRUE'];
 }
 
 function buildResourceFilters(
@@ -543,6 +641,13 @@ function readPlacements(value: unknown): SheetPlacementsJson | null {
 function detailAreaMm2(detail: ResourceDemandDetailRow): number {
   const height = positiveNumber(detail.height);
   const width = positiveNumber(detail.width);
+  const quantity = positiveNumber(detail.quantity);
+  return height === null || width === null || quantity === null ? 0 : height * width * quantity;
+}
+
+function hdfAreaMm2(detail: ResourceDemandHdfRow): number {
+  const height = positiveNumber(detail.hdf_height_mm);
+  const width = positiveNumber(detail.hdf_width_mm);
   const quantity = positiveNumber(detail.quantity);
   return height === null || width === null || quantity === null ? 0 : height * width * quantity;
 }

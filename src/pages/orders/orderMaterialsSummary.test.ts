@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../../types/orders';
-import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from './orderMaterialsSummary';
+import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows, buildUsableHdfAreaM2 } from './orderMaterialsSummary';
 
 const detail = (overrides: Partial<OrderDetail> = {}): OrderDetail => ({
   detail_id: 1,
@@ -58,5 +58,66 @@ describe('order material summary helpers', () => {
       totalArea: 1.2,
       detailsCount: 2,
     }]);
+  });
+
+  it('adds only fresh usable HDF rows to sheet material summary', () => {
+    const rows = buildOrderSheetMaterialRows(
+      [detail({ detail_id: 1, sheet_material_type_id: 8, material_name_resolved: 'МДФ 16мм' })],
+      (row) => row.material_name_resolved,
+      [
+        {
+          order_hdf_detail_id: 11,
+          source_order_detail_id_snapshot: 1,
+          hdf_sheet_material_type_id: 9,
+          hdf_sheet_material_name: 'ХДФ 3мм',
+          quantity: 2,
+          area_m2: 0.45,
+          status: 'ok',
+          is_stale: false,
+          version: 1,
+        },
+        {
+          order_hdf_detail_id: 12,
+          source_order_detail_id_snapshot: 2,
+          hdf_sheet_material_type_id: 9,
+          hdf_sheet_material_name: 'ХДФ 3мм',
+          quantity: 10,
+          area_m2: 9,
+          status: 'too_narrow',
+          is_stale: false,
+          version: 1,
+        },
+      ],
+    );
+
+    expect(rows).toEqual([
+      {
+        key: 'sheet:8',
+        sheetMaterialTypeId: 8,
+        name: 'МДФ 16мм',
+        totalArea: 1,
+        detailsCount: 1,
+      },
+      {
+        key: 'sheet:9',
+        sheetMaterialTypeId: 9,
+        name: 'ХДФ 3мм',
+        totalArea: 0.45,
+        detailsCount: 2,
+      },
+    ]);
+  });
+
+  it('returns zero usable HDF area when order has no fresh HDF', () => {
+    expect(buildUsableHdfAreaM2([
+      {
+        order_hdf_detail_id: 11,
+        source_order_detail_id_snapshot: 1,
+        area_m2: 0.45,
+        status: 'ok',
+        is_stale: true,
+        version: 1,
+      },
+    ])).toBe(0);
   });
 });

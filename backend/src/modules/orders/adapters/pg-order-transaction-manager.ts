@@ -47,12 +47,17 @@ import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
+  NormalizedSaveOrderHdfDetailDto,
   NormalizedSaveOrderHeaderDto,
   NormalizedSaveOrderPaymentDto,
   NormalizedSaveOrderRequirementDto,
   NormalizedSaveOrderWorkshopDto,
   OrderTotalsDto,
 } from '../dto/save-order.dto';
+import {
+  calculateOrderHdfDetail,
+  type OrderHdfConfigInput,
+} from '../domain/order-hdf-calculations';
 import {
   OrderDeleteIdempotencyFailedError,
   OrderDeleteIdempotencyInProgressError,
@@ -125,6 +130,48 @@ interface OrderDetailStatusAuditDbRow {
   production_status_id: string | number | null;
   production_status_name: string | null;
   production_status_code: string | null;
+}
+
+interface HdfConfigRow {
+  threshold_mm: string | number | null;
+  hdf_sheet_material_type_id: string | number | null;
+  hdf_sheet_material_name: string | null;
+  config_revision: string | number;
+}
+
+interface HdfSourceRow {
+  detail_id: string | number;
+  detail_number: string | number | null;
+  detail_name: string | null;
+  height: string | number | null;
+  width: string | number | null;
+  quantity: string | number | null;
+  sheet_material_type_id: string | number | null;
+  sheet_material_name: string | null;
+  milling_type_id: string | number | null;
+  milling_type_name: string | null;
+  hdf_enabled: boolean | null;
+  hdf_edge_mm: string | number | null;
+  production_status_id: string | number | null;
+}
+
+interface ExistingHdfRow {
+  order_hdf_detail_id: string | number;
+  source_order_detail_id: string | number | null;
+  source_order_detail_id_snapshot: string | number;
+  source_snapshot_hash: string;
+  config_revision: string | number;
+  status: string;
+  production_status_id: string | number | null;
+  production_status_locked: boolean;
+  has_cut_link: boolean;
+  has_bazis_link: boolean;
+}
+
+interface HdfStatusEditRow {
+  order_hdf_detail_id: string | number;
+  version: string | number;
+  production_status_id: string | number | null;
 }
 
 export class PgOrderTransactionManager implements OrderTransactionManagerPort {
@@ -619,7 +666,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
              link_cad_file AS "linkCadFile", link_pdf_file AS "linkPdfFile",
              notes, material_id AS "materialId", milling_type_id AS "millingTypeId",
              edge_type_id AS "edgeTypeId", film_id AS "filmId", ref_key_1c AS "refKey1c",
-             sheet_material_type_id AS "sheetMaterialTypeId", sheet_eligible AS "sheetEligible"
+             sheet_material_type_id AS "sheetMaterialTypeId", sheet_eligible AS "sheetEligible",
+             hdf_min_threshold_mm AS "hdfMinThresholdMm"
       FROM orders
       WHERE order_id = $1
       `,
@@ -746,7 +794,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
         link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
         notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c,
-        sheet_material_type_id, project_id, version
+        sheet_material_type_id, hdf_min_threshold_mm, project_id, version
       )
       VALUES (
         $1, $2, $3, $4, $5,
@@ -755,7 +803,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         $10, $11, $12, $13,
         $14, $15, $16, $17, $18, $19, $20,
         $21, $22, $23, $24,
-        $25, $26, $27, $28, $29, $30, $31, $32, 1
+        $25, $26, $27, $28, $29, $30, $31, $32, $33, 1
       )
       RETURNING order_id
       `,
@@ -792,6 +840,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.filmId ?? null,
         input.header.refKey1c ?? null,
         input.header.sheetMaterialTypeId ?? null,
+        input.header.hdfMinThresholdMm ?? null,
         input.projectId,
       ],
     );
@@ -833,7 +882,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           edge_type_id = $22,
           film_id = $23,
           ref_key_1c = $24,
-          sheet_material_type_id = $25
+          sheet_material_type_id = $25,
+          hdf_min_threshold_mm = $26
       WHERE order_id = $1 AND delete_flag = false
       `,
       [
@@ -863,6 +913,7 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
         input.header.filmId ?? null,
         input.header.refKey1c ?? null,
         input.header.sheetMaterialTypeId ?? null,
+        input.header.hdfMinThresholdMm ?? null,
       ],
     );
   }
@@ -912,6 +963,261 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
 
   async deleteDetails(orderId: number, ids: readonly number[]): Promise<void> {
     await deleteByIds(this.tx, 'order_details', 'detail_id', orderId, ids);
+  }
+
+  async applyHdfStatusEdits(input: {
+    orderId: number;
+    edits: readonly NormalizedSaveOrderHdfDetailDto[];
+    currentUser: CurrentUser;
+    requestId?: string;
+  }): Promise<void> {
+    if (input.edits.length === 0) return;
+    for (const edit of input.edits) {
+      const before = await this.tx.query<HdfStatusEditRow>(
+        `
+        SELECT order_hdf_detail_id, version, production_status_id
+        FROM order_hdf_details
+        WHERE order_hdf_detail_id = $1 AND order_id = $2 AND delete_flag = false
+        FOR UPDATE
+        `,
+        [edit.id, input.orderId],
+      );
+      const row = before.rows[0];
+      if (!row) {
+        throw new ApiError(422, 'HDF_DETAIL_NOT_FOUND', 'HDF detail does not belong to order', {
+          orderId: input.orderId,
+          hdfDetailId: edit.id,
+        });
+      }
+      const currentVersion = Number(row.version);
+      if (currentVersion !== edit.version) {
+        throw new ApiError(409, 'HDF_DETAIL_VERSION_CONFLICT', 'HDF detail was changed by another command', {
+          hdfDetailId: edit.id,
+          expectedVersion: edit.version,
+          currentVersion,
+        });
+      }
+      const previousStatusId = toNullableNumber(row.production_status_id);
+      if (previousStatusId === edit.productionStatusId) {
+        continue;
+      }
+      await this.tx.query(
+        `
+        UPDATE order_hdf_details
+        SET production_status_id = $3,
+            production_status_locked = true,
+            edited_by = $4,
+            updated_at = now(),
+            version = version + 1
+        WHERE order_hdf_detail_id = $1 AND order_id = $2 AND version = $5
+        `,
+        [
+          edit.id,
+          input.orderId,
+          edit.productionStatusId,
+          actorUserId(input.currentUser),
+          edit.version,
+        ],
+      );
+      await auditService.record(this.tx, {
+        event: 'orders.hdf_detail_production_status_change',
+        entityType: 'order_hdf_detail',
+        entityId: edit.id,
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        requestId: input.requestId ?? 'orders-hdf-status',
+        source: SOURCE,
+        relatedOrderId: input.orderId,
+        before: { hdfDetailId: edit.id, productionStatusId: previousStatusId, version: currentVersion },
+        after: { hdfDetailId: edit.id, productionStatusId: edit.productionStatusId, version: currentVersion + 1 },
+        diff: {
+          productionStatusId: { before: previousStatusId, after: edit.productionStatusId },
+          version: { before: currentVersion, after: currentVersion + 1 },
+        },
+        metadata: { action: 'hdf_detail_production_status_change', orderId: input.orderId, hdfDetailId: edit.id },
+        relatedEntities: [
+          { entityType: 'order', entityId: input.orderId },
+          { entityType: 'order_hdf_detail', entityId: edit.id },
+        ],
+      });
+    }
+  }
+
+  async deleteHdfDetails(orderId: number, ids: readonly number[]): Promise<void> {
+    if (ids.length === 0) return;
+    await this.tx.query(
+      `
+      UPDATE order_hdf_details
+      SET delete_flag = true,
+          deleted_at = now(),
+          updated_at = now(),
+          version = version + 1
+      WHERE order_hdf_detail_id = ANY($1::bigint[])
+        AND order_id = $2
+        AND delete_flag = false
+        AND NOT EXISTS (
+          SELECT 1 FROM cut_job_item cji
+          WHERE cji.order_hdf_detail_id = order_hdf_details.order_hdf_detail_id
+            AND cji.is_active = true
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM bazis_cut_set_details b
+          WHERE b.source_order_hdf_detail_id = order_hdf_details.order_hdf_detail_id
+        )
+      `,
+      [ids, orderId],
+    );
+  }
+
+  async reconcileHdfDetails(input: {
+    orderId: number;
+    currentUser: CurrentUser;
+    requestId?: string;
+  }) {
+    const config = await loadHdfConfig(this.tx, input.orderId);
+    const sources = await loadHdfSourceRows(this.tx, input.orderId);
+    const existing = await loadExistingHdfRows(this.tx, input.orderId);
+    const existingBySource = new Map<number, ExistingHdfRow>();
+    for (const row of existing) {
+      const sourceId = toNullableNumber(row.source_order_detail_id);
+      if (sourceId !== null) existingBySource.set(sourceId, row);
+    }
+
+    const seenSourceIds = new Set<number>();
+    const createdHdfDetailIds: number[] = [];
+    const updatedHdfDetailIds: number[] = [];
+    const deactivatedHdfDetailIds: number[] = [];
+    const sourceChangedHdfDetailIds: number[] = [];
+    const configMissingHdfDetailIds: number[] = [];
+    const statusCounts: Record<string, number> = {};
+
+    for (const source of sources) {
+      const sourceId = Number(source.detail_id);
+      seenSourceIds.add(sourceId);
+      const calculated = calculateOrderHdfDetail(
+        {
+          detailId: sourceId,
+          detailNumber: toNullableNumber(source.detail_number),
+          detailName: source.detail_name,
+          heightMm: toNullableNumber(source.height),
+          widthMm: toNullableNumber(source.width),
+          quantity: toNullableNumber(source.quantity),
+          sheetMaterialTypeId: toNullableNumber(source.sheet_material_type_id),
+          sheetMaterialName: source.sheet_material_name,
+          millingTypeId: toNullableNumber(source.milling_type_id),
+          millingTypeName: source.milling_type_name,
+          productionStatusId: toNullableNumber(source.production_status_id),
+        },
+        {
+          hdfEnabled: source.hdf_enabled === true,
+          hdfEdgeMm: toNullableNumber(source.hdf_edge_mm),
+        },
+        config,
+      );
+      statusCounts[calculated.status] = (statusCounts[calculated.status] ?? 0) + 1;
+      const current = existingBySource.get(sourceId);
+      const shouldPersist = calculated.status !== 'disabled' || current !== undefined;
+      if (!shouldPersist) continue;
+
+      if (!current) {
+        const inserted = await insertHdfDetail(this.tx, input, source, calculated, config);
+        createdHdfDetailIds.push(inserted);
+        if (calculated.status === 'config_missing') configMissingHdfDetailIds.push(inserted);
+        continue;
+      }
+
+      const hdfId = Number(current.order_hdf_detail_id);
+      const hasLinks = current.has_cut_link || current.has_bazis_link;
+      if (hasLinks && current.source_snapshot_hash !== calculated.sourceSnapshotHash) {
+        await markHdfSourceChanged(this.tx, hdfId, input.currentUser, calculated);
+        sourceChangedHdfDetailIds.push(hdfId);
+        statusCounts.source_changed = (statusCounts.source_changed ?? 0) + 1;
+        continue;
+      }
+
+      if (calculated.status === 'disabled') {
+        await softDeleteHdfRow(this.tx, hdfId, input.currentUser);
+        deactivatedHdfDetailIds.push(hdfId);
+        continue;
+      }
+
+      const sourceProductionStatusId = toNullableNumber(source.production_status_id);
+      const currentProductionStatusId = toNullableNumber(current.production_status_id);
+      const productionStatusChanged = current.production_status_locked !== true
+        && currentProductionStatusId !== sourceProductionStatusId;
+      const changed = current.source_snapshot_hash !== calculated.sourceSnapshotHash
+        || Number(current.config_revision) !== calculated.configRevision
+        || current.status !== calculated.status
+        || productionStatusChanged;
+      if (changed) {
+        await updateHdfDetail(this.tx, input, hdfId, source, calculated, config, current.production_status_locked);
+        updatedHdfDetailIds.push(hdfId);
+        if (calculated.status === 'config_missing') configMissingHdfDetailIds.push(hdfId);
+      }
+    }
+
+    for (const current of existing) {
+      const sourceId = toNullableNumber(current.source_order_detail_id);
+      if (sourceId !== null && seenSourceIds.has(sourceId)) continue;
+      const hdfId = Number(current.order_hdf_detail_id);
+      if (current.has_cut_link || current.has_bazis_link) {
+        await this.tx.query(
+          `
+          UPDATE order_hdf_details
+          SET status = 'source_changed',
+              updated_at = now(),
+              edited_by = $2,
+              version = version + 1
+          WHERE order_hdf_detail_id = $1 AND status <> 'source_changed'
+          `,
+          [hdfId, actorUserId(input.currentUser)],
+        );
+        sourceChangedHdfDetailIds.push(hdfId);
+      } else {
+        await softDeleteHdfRow(this.tx, hdfId, input.currentUser);
+        deactivatedHdfDetailIds.push(hdfId);
+      }
+    }
+
+    if (
+      createdHdfDetailIds.length
+      || updatedHdfDetailIds.length
+      || deactivatedHdfDetailIds.length
+      || sourceChangedHdfDetailIds.length
+    ) {
+      await auditService.record(this.tx, {
+        event: 'orders.hdf_reconciled',
+        entityType: 'order',
+        entityId: input.orderId,
+        actorUserId: input.currentUser.id,
+        actorUsername: input.currentUser.username,
+        actorRole: input.currentUser.role,
+        requestId: input.requestId ?? 'orders-hdf-reconcile',
+        source: SOURCE,
+        relatedOrderId: input.orderId,
+        before: {},
+        after: { createdHdfDetailIds, updatedHdfDetailIds, deactivatedHdfDetailIds, sourceChangedHdfDetailIds },
+        diff: { hdfStatusCounts: statusCounts },
+        metadata: { action: 'hdf_reconciled', configRevision: config.configRevision, hdfStatusCounts: statusCounts },
+        relatedEntities: [
+          { entityType: 'order', entityId: input.orderId },
+          ...createdHdfDetailIds.map((id) => ({ entityType: 'order_hdf_detail', entityId: id })),
+          ...updatedHdfDetailIds.map((id) => ({ entityType: 'order_hdf_detail', entityId: id })),
+          ...deactivatedHdfDetailIds.map((id) => ({ entityType: 'order_hdf_detail', entityId: id })),
+          ...sourceChangedHdfDetailIds.map((id) => ({ entityType: 'order_hdf_detail', entityId: id })),
+        ],
+      });
+    }
+
+    return {
+      createdHdfDetailIds,
+      updatedHdfDetailIds,
+      deactivatedHdfDetailIds,
+      sourceChangedHdfDetailIds,
+      configMissingHdfDetailIds,
+      hdfStatusCounts: statusCounts,
+    };
   }
 
   async recalcOrderProductionStatus(orderId: number): Promise<void> {
@@ -2026,6 +2332,271 @@ function groupChildReferences(refs: readonly OrderChildReference[]) {
   }
 
   return [...grouped.entries()].map(([entityType, ids]) => [entityType, [...new Set(ids)]] as const);
+}
+
+async function loadHdfConfig(tx: TransactionClient, orderId: number): Promise<OrderHdfConfigInput> {
+  const result = await tx.query<HdfConfigRow>(
+    `
+    WITH settings AS (
+      SELECT
+        MAX(CASE WHEN setting_key = 'production.hdf.min_side_threshold_mm' THEN value_json END) AS threshold_json,
+        MAX(CASE WHEN setting_key = 'production.hdf.sheet_material_type_id' THEN value_json END) AS material_json
+      FROM app_settings
+      WHERE setting_key IN ('production.hdf.min_side_threshold_mm', 'production.hdf.sheet_material_type_id')
+        AND is_active = true
+    ), parsed AS (
+      SELECT
+        CASE
+          WHEN COALESCE(settings.threshold_json->>'value', '') ~ '^[0-9]+(\\.[0-9]+)?$'
+            THEN (settings.threshold_json->>'value')::numeric
+          ELSE NULL
+        END AS global_threshold_mm,
+        CASE
+          WHEN COALESCE(settings.material_json->>'value', '') ~ '^[1-9][0-9]*$'
+            THEN (settings.material_json->>'value')::bigint
+          ELSE NULL
+        END AS configured_material_id
+      FROM settings
+    )
+    SELECT
+      COALESCE(o.hdf_min_threshold_mm, parsed.global_threshold_mm) AS threshold_mm,
+      valid_configured.sheet_material_type_id AS hdf_sheet_material_type_id,
+      resolved.name AS hdf_sheet_material_name,
+      state.revision AS config_revision
+    FROM orders o
+    CROSS JOIN parsed
+    CROSS JOIN hdf_calculation_config_state state
+    LEFT JOIN sheet_material_types valid_configured
+      ON valid_configured.sheet_material_type_id = parsed.configured_material_id
+     AND valid_configured.is_active = true
+    LEFT JOIN sheet_material_types resolved
+      ON resolved.sheet_material_type_id = valid_configured.sheet_material_type_id
+    WHERE o.order_id = $1
+    `,
+    [orderId],
+  );
+  const row = result.rows[0];
+  return {
+    thresholdMm: toNullableNumber(row?.threshold_mm),
+    hdfSheetMaterialTypeId: toNullableNumber(row?.hdf_sheet_material_type_id),
+    hdfSheetMaterialName: row?.hdf_sheet_material_name ?? null,
+    configRevision: Number(row?.config_revision ?? 1),
+  };
+}
+
+async function loadHdfSourceRows(tx: TransactionClient, orderId: number): Promise<HdfSourceRow[]> {
+  const result = await tx.query<HdfSourceRow>(
+    `
+    SELECT od.detail_id, od.detail_number, od.detail_name, od.height, od.width,
+           od.quantity, od.sheet_material_type_id, smt.name AS sheet_material_name,
+           od.milling_type_id, mt.milling_type_name, mt.hdf_enabled, mt.hdf_edge_mm,
+           od.production_status_id
+    FROM order_details od
+    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+    LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
+    WHERE od.order_id = $1 AND od.delete_flag = false
+    ORDER BY od.detail_id
+    FOR UPDATE OF od
+    `,
+    [orderId],
+  );
+  return result.rows;
+}
+
+async function loadExistingHdfRows(tx: TransactionClient, orderId: number): Promise<ExistingHdfRow[]> {
+  const result = await tx.query<ExistingHdfRow>(
+    `
+    SELECT h.order_hdf_detail_id, h.source_order_detail_id, h.source_order_detail_id_snapshot,
+           h.source_snapshot_hash, h.config_revision, h.status, h.production_status_id, h.production_status_locked,
+           EXISTS (
+             SELECT 1 FROM cut_job_item cji
+             WHERE cji.order_hdf_detail_id = h.order_hdf_detail_id AND cji.is_active = true
+           ) AS has_cut_link,
+           EXISTS (
+             SELECT 1 FROM bazis_cut_set_details b
+             WHERE b.source_order_hdf_detail_id = h.order_hdf_detail_id
+           ) AS has_bazis_link
+    FROM order_hdf_details h
+    WHERE h.order_id = $1 AND h.delete_flag = false
+    ORDER BY h.order_hdf_detail_id
+    FOR UPDATE
+    `,
+    [orderId],
+  );
+  return result.rows;
+}
+
+async function insertHdfDetail(
+  tx: TransactionClient,
+  input: { orderId: number; currentUser: CurrentUser },
+  source: HdfSourceRow,
+  calculated: ReturnType<typeof calculateOrderHdfDetail>,
+  config: OrderHdfConfigInput,
+): Promise<number> {
+  const result = await tx.query<{ order_hdf_detail_id: string | number }>(
+    `
+    INSERT INTO order_hdf_details (
+      order_id, source_order_detail_id, source_order_detail_id_snapshot,
+      source_detail_number, source_detail_name, source_height_mm, source_width_mm,
+      source_quantity, source_sheet_material_type_id, source_sheet_material_name,
+      milling_type_id, milling_type_name, hdf_enabled, edge_mm, threshold_mm,
+      hdf_sheet_material_type_id, hdf_sheet_material_name, hdf_height_mm, hdf_width_mm,
+      quantity, area_m2, status, config_errors, source_snapshot_hash,
+      source_snapshot_json, config_revision, production_status_id, production_status_locked,
+      created_by, edited_by
+    )
+    VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
+      $11,$12,$13,$14,$15,$16,$17,$18,$19,
+      $20,$21,$22,$23::jsonb,$24,$25::jsonb,$26,$27,false,$28,$28
+    )
+    RETURNING order_hdf_detail_id
+    `,
+    hdfDetailParams(input.orderId, source, calculated, config, actorUserId(input.currentUser)),
+  );
+  return Number(result.rows[0].order_hdf_detail_id);
+}
+
+async function updateHdfDetail(
+  tx: TransactionClient,
+  input: { orderId: number; currentUser: CurrentUser },
+  hdfId: number,
+  source: HdfSourceRow,
+  calculated: ReturnType<typeof calculateOrderHdfDetail>,
+  config: OrderHdfConfigInput,
+  productionStatusLocked: boolean,
+): Promise<void> {
+  const params = hdfDetailParams(input.orderId, source, calculated, config, actorUserId(input.currentUser));
+  await tx.query(
+    `
+    UPDATE order_hdf_details
+    SET source_order_detail_id = $2,
+        source_order_detail_id_snapshot = $3,
+        source_detail_number = $4,
+        source_detail_name = $5,
+        source_height_mm = $6,
+        source_width_mm = $7,
+        source_quantity = $8,
+        source_sheet_material_type_id = $9,
+        source_sheet_material_name = $10,
+        milling_type_id = $11,
+        milling_type_name = $12,
+        hdf_enabled = $13,
+        edge_mm = $14,
+        threshold_mm = $15,
+        hdf_sheet_material_type_id = $16,
+        hdf_sheet_material_name = $17,
+        hdf_height_mm = $18,
+        hdf_width_mm = $19,
+        quantity = $20,
+        area_m2 = $21,
+        status = $22,
+        config_errors = $23::jsonb,
+        source_snapshot_hash = $24,
+        source_snapshot_json = $25::jsonb,
+        config_revision = $26,
+        production_status_id = CASE WHEN $30::boolean THEN production_status_id ELSE $27 END,
+        edited_by = $28,
+        updated_at = now(),
+        version = version + 1
+    WHERE order_hdf_detail_id = $29 AND order_id = $1
+    `,
+    [...params, hdfId, productionStatusLocked],
+  );
+}
+
+async function markHdfSourceChanged(
+  tx: TransactionClient,
+  hdfId: number,
+  currentUser: CurrentUser,
+  calculated: ReturnType<typeof calculateOrderHdfDetail>,
+): Promise<void> {
+  await tx.query(
+    `
+    UPDATE order_hdf_details
+    SET status = 'source_changed',
+        source_snapshot_hash = $2,
+        source_snapshot_json = $3::jsonb,
+        config_revision = $4,
+        edited_by = $5,
+        updated_at = now(),
+        version = version + 1
+    WHERE order_hdf_detail_id = $1
+    `,
+    [
+      hdfId,
+      calculated.sourceSnapshotHash,
+      JSON.stringify(calculated.sourceSnapshotJson),
+      calculated.configRevision,
+      actorUserId(currentUser),
+    ],
+  );
+}
+
+async function softDeleteHdfRow(tx: TransactionClient, hdfId: number, currentUser: CurrentUser): Promise<void> {
+  await tx.query(
+    `
+    UPDATE order_hdf_details
+    SET delete_flag = true,
+        deleted_at = now(),
+        edited_by = $2,
+        updated_at = now(),
+        version = version + 1
+    WHERE order_hdf_detail_id = $1 AND delete_flag = false
+    `,
+    [hdfId, actorUserId(currentUser)],
+  );
+}
+
+function hdfDetailParams(
+  orderId: number,
+  source: HdfSourceRow,
+  calculated: ReturnType<typeof calculateOrderHdfDetail>,
+  config: OrderHdfConfigInput,
+  actorId: number | null,
+) {
+  const sourceId = Number(source.detail_id);
+  return [
+    orderId,
+    sourceId,
+    sourceId,
+    toNullableNumber(source.detail_number),
+    source.detail_name,
+    toNullableNumber(source.height),
+    toNullableNumber(source.width),
+    toNullableNumber(source.quantity),
+    toNullableNumber(source.sheet_material_type_id),
+    source.sheet_material_name,
+    toNullableNumber(source.milling_type_id),
+    source.milling_type_name,
+    source.hdf_enabled === true,
+    calculated.edgeMm,
+    calculated.thresholdMm,
+    config.hdfSheetMaterialTypeId,
+    config.hdfSheetMaterialName,
+    calculated.hdfHeightMm,
+    calculated.hdfWidthMm,
+    calculated.quantity,
+    calculated.areaM2,
+    calculated.status,
+    JSON.stringify(calculated.configErrors),
+    calculated.sourceSnapshotHash,
+    JSON.stringify(calculated.sourceSnapshotJson),
+    calculated.configRevision,
+    toNullableNumber(source.production_status_id),
+    actorId,
+  ];
+}
+
+function actorUserId(user: CurrentUser): number | null {
+  const parsed = Number(user.id);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function detailParams(id: number, orderId: number, detail: CalculatedOrderDetailDto) {

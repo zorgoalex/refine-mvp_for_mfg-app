@@ -1,16 +1,9 @@
-import {
-  Fragment,
-  useCallback,
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { Table } from '../../ui/tooltipDelay';
+import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, } from 'react';
 import type { Key } from 'react';
 import type { IResourceComponentsProps } from '@refinedev/core';
 import { DownloadOutlined, FileTextOutlined, FilterFilled, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Checkbox, DatePicker, Input, Modal, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Checkbox, DatePicker, Input, Modal, Segmented, Select, Space, Tag, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import type { FilterDropdownProps, SortOrder } from 'antd/es/table/interface';
 import dayjs, { type Dayjs } from 'dayjs';

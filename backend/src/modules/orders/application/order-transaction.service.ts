@@ -271,7 +271,13 @@ export class OrderTransactionService {
         currentUser: command.currentUser,
       });
 
-      const detailIdsByClientKey = await this.persistChildren(unitOfWork, orderId, prepared);
+      const detailIdsByClientKey = await this.persistChildren(
+        unitOfWork,
+        orderId,
+        prepared,
+        command.currentUser,
+        command.requestId,
+      );
       const version = await unitOfWork.updateOrderTotalsAndVersion({
         orderId,
         totals: prepared.totals,
@@ -592,7 +598,13 @@ export class OrderTransactionService {
         totals: prepared.totals,
         currentUser: command.currentUser,
       });
-      const detailIdsByClientKey = await this.persistChildren(unitOfWork, command.orderId, prepared);
+      const detailIdsByClientKey = await this.persistChildren(
+        unitOfWork,
+        command.orderId,
+        prepared,
+        command.currentUser,
+        command.requestId,
+      );
       const version = await unitOfWork.updateOrderTotalsAndVersion({
         orderId: command.orderId,
         totals: prepared.totals,
@@ -907,9 +919,19 @@ export class OrderTransactionService {
     unitOfWork: OrderWriteUnitOfWork,
     orderId: number,
     prepared: PreparedOrderSave,
+    currentUser: CurrentUser,
+    requestId?: string,
   ): Promise<Map<string, number>> {
     await unitOfWork.upsertDetails(orderId, prepared.details);
     await unitOfWork.deleteDetails(orderId, prepared.order.deleted.detailIds);
+    await unitOfWork.applyHdfStatusEdits({
+      orderId,
+      edits: prepared.order.hdfDetails,
+      currentUser,
+      requestId,
+    });
+    await unitOfWork.deleteHdfDetails(orderId, prepared.order.deleted.hdfDetailIds);
+    await unitOfWork.reconcileHdfDetails({ orderId, currentUser, requestId });
     await unitOfWork.recalcOrderProductionStatus(orderId);
     await unitOfWork.upsertPayments(orderId, prepared.order.payments);
     await unitOfWork.deletePayments(orderId, prepared.order.deleted.paymentIds);

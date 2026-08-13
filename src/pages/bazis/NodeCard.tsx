@@ -1,5 +1,6 @@
+import { Table } from '../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Collapse, Descriptions, Empty, Space, Spin, Table, Tag, Typography } from 'antd';
+import { Alert, Collapse, Descriptions, Empty, Space, Spin, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { Link } from 'react-router-dom';
 import { bazisApi } from '../../api/bazisApi';

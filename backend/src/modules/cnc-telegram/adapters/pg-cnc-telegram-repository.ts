@@ -20,6 +20,7 @@ import {
   composePieceLabelLines,
   createOrderFillResolver,
 } from '../../cut/render/sheet-svg';
+import { RENDER_PRESETS, renderRawSvgPng } from '../../cut/render/sheet-png';
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
@@ -45,6 +46,7 @@ import type {
   CncTelegramIngestResponseDto,
   CncTelegramItemSource,
   CncTelegramManualSvgCommentPresetDto,
+  CncTelegramManualSvgUploadFileDto,
   CncTelegramManualSvgUploadDto,
   CncTelegramManualSvgUploadResponseDto,
   CncTelegramMatchStatus,
@@ -75,6 +77,7 @@ const MANUAL_SVG_COMMAND_NAME = 'cnc.manual_svg_upload';
 const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
 const MANUAL_SVG_EVENT = 'cnc.manual_svg_upload.created';
 const MANUAL_SVG_COMPLETED_EVENT = 'cnc.manual_svg_upload.mdf_card_created';
+const MANUAL_SVG_FILE_UPLOADED_EVENT = 'cnc.manual_svg_upload.file_uploaded';
 const MANUAL_SVG_PRESET_COMMAND_NAME = 'cnc.manual_svg_comment_preset.create';
 const MANUAL_SVG_PRESET_CREATE_EVENT = 'cnc.manual_svg_comment_preset.created';
 const CNC_AUTO_CUT_STATUS_CONFIGURE_COMMAND = 'cnc.telegram_packet.auto_cut_status.configure';
@@ -115,6 +118,7 @@ interface PacketJoinedRow extends QueryResultRow {
   parser_version: string;
   cut_layout_json: unknown;
   svg_cut_job_id: string | number | null;
+  svg_cut_job_display_number: string | number | null;
   svg_cut_result_id: string | number | null;
   svg_cut_result_no: string | number | null;
   svg_cut_import_status: 'none' | 'skipped' | 'needs_review' | 'imported' | null;
@@ -367,6 +371,33 @@ interface DetailMatch {
   detailNumber: number | null;
   width: number | null;
   height: number | null;
+}
+
+interface ManualSvgDecodedUploadFile {
+  kind: CncTelegramManualSvgUploadFileDto['kind'];
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  raw: Buffer;
+  generated: boolean;
+}
+
+interface ManualSvgStoredFile {
+  fileId: string;
+  kind: CncTelegramManualSvgUploadFileDto['kind'];
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  generated: boolean;
+  expiresAt: string;
+}
+
+interface ManualSvgFilePersistenceResult {
+  storedFileCount: number;
+  telegramSendRequestId: string | null;
+  telegramSendStatus: 'pending' | 'processing' | 'sent' | 'failed' | 'unknown' | null;
 }
 
 export class PgCncTelegramRepository
@@ -731,6 +762,12 @@ export class PgCncTelegramRepository
           },
         });
         const packet = await loadPacket(tx, existing.packet_id);
+        const filePersistence = await persistManualSvgUploadFiles(tx, {
+          command,
+          packet,
+          requestId,
+          externalPacketKey: dto.externalPacketKey,
+        });
         let mdfCardCreatedAuditId: string | undefined;
         let mdfCardCreatedNow = false;
         if (command.dto.createMdfMachineFileCard) {
@@ -772,7 +809,7 @@ export class PgCncTelegramRepository
           auditId: mdfCardCreatedAuditId,
           applied: false,
           ignoredStaleSourceVersion: false,
-        }, mdfCardCreatedNow);
+        }, mdfCardCreatedNow, filePersistence);
         await completeIdempotency(tx, dto.idempotencyKey, response);
         return response;
       }
@@ -811,6 +848,12 @@ export class PgCncTelegramRepository
         assertManualSvgMachineFileCardReady(packet);
       }
       const auditId = await writeManualSvgCreatedAudit(tx, {
+        command,
+        packet,
+        requestId,
+        externalPacketKey: dto.externalPacketKey,
+      });
+      const filePersistence = await persistManualSvgUploadFiles(tx, {
         command,
         packet,
         requestId,
@@ -862,7 +905,7 @@ export class PgCncTelegramRepository
         auditId,
         applied: true,
         ignoredStaleSourceVersion: false,
-      }, mdfCardCreatedNow);
+      }, mdfCardCreatedNow, filePersistence);
       await completeIdempotency(tx, dto.idempotencyKey, response);
       return response;
     });
@@ -1575,15 +1618,24 @@ function formatMm(value: number): string {
 function manualSvgResponse(
   response: CncTelegramIngestResponseDto,
   createdMdfMachineFileCard: boolean,
+  files: ManualSvgFilePersistenceResult = {
+    storedFileCount: 0,
+    telegramSendRequestId: null,
+    telegramSendStatus: null,
+  },
 ): CncTelegramManualSvgUploadResponseDto {
   const cutJobId = response.packet.svgCutJobId ?? null;
   const cutResultId = response.packet.svgCutResultId ?? null;
   return {
     ...response,
     cutJobId,
+    cutJobDisplayNumber: response.packet.svgCutJobDisplayNumber ?? null,
     cutResultId,
     cutJobPath: cutJobId ? `/cut?job=${cutJobId}` : null,
     createdMdfMachineFileCard,
+    storedFileCount: files.storedFileCount,
+    telegramSendRequestId: files.telegramSendRequestId,
+    telegramSendStatus: files.telegramSendStatus,
   };
 }
 
@@ -1626,6 +1678,393 @@ async function manualSvgMdfCardEventExists(
 
 function manualSvgMdfCardEventKey(packet: CncTelegramPacketDto): string {
   return `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-card-created`;
+}
+
+async function persistManualSvgUploadFiles(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    externalPacketKey: string;
+  },
+): Promise<ManualSvgFilePersistenceResult> {
+  const decodedFiles = prepareManualSvgUploadFiles(input.command.dto);
+  if (decodedFiles.length === 0) {
+    if (input.command.dto.telegramSend?.enabled) {
+      throw new ApiError(422, 'MANUAL_SVG_TELEGRAM_FILES_REQUIRED', 'Для отправки в Telegram нужен SVG-файл');
+    }
+    return { storedFileCount: 0, telegramSendRequestId: null, telegramSendStatus: null };
+  }
+
+  const stored: ManualSvgStoredFile[] = [];
+  const activeTelegramSend = await lockActiveManualSvgTelegramSend(tx, input.packet.packetId);
+  if (activeTelegramSend?.status === 'processing') {
+    throw new ApiError(
+      409,
+      'MANUAL_SVG_TELEGRAM_SEND_IN_PROGRESS',
+      'Предыдущая отправка файлов раскроя в Telegram ещё выполняется',
+      { packetId: input.packet.packetId, requestId: activeTelegramSend.requestId },
+    );
+  }
+  for (const file of decodedFiles) {
+    const row = await tx.query<{ file_id: string; expires_at: string | Date }>(
+      `INSERT INTO cnc_manual_svg_upload_files (
+         packet_id, file_kind, original_file_name, content_type, content_sha256,
+         size_bytes, content_bytes, generated, created_by
+       )
+       VALUES ($1::uuid, $2, $3, $4, $5, $6::bigint, $7, $8, $9)
+       ON CONFLICT (packet_id, file_kind) DO UPDATE
+       SET original_file_name=EXCLUDED.original_file_name,
+           content_type=EXCLUDED.content_type,
+           content_sha256=EXCLUDED.content_sha256,
+           size_bytes=EXCLUDED.size_bytes,
+           content_bytes=EXCLUDED.content_bytes,
+           generated=EXCLUDED.generated,
+           created_by=EXCLUDED.created_by,
+           updated_at=now(),
+           expires_at=now() + interval '30 days'
+       RETURNING file_id, expires_at`,
+      [
+        input.packet.packetId,
+        file.kind,
+        file.fileName,
+        file.contentType,
+        file.sha256,
+        file.sizeBytes,
+        file.raw,
+        file.generated,
+        Number(input.command.currentUser.id),
+      ],
+    );
+    const fileId = row.rows[0]?.file_id;
+    const expiresAt = row.rows[0]?.expires_at;
+    if (!fileId || !expiresAt) throw new Error('manual SVG upload file insert returned no row');
+    const storedFile: ManualSvgStoredFile = {
+      fileId,
+      kind: file.kind,
+      fileName: file.fileName,
+      contentType: file.contentType,
+      sizeBytes: file.sizeBytes,
+      sha256: file.sha256,
+      generated: file.generated,
+      expiresAt: toIso(expiresAt),
+    };
+    stored.push(storedFile);
+    await tx.query('DELETE FROM cnc_manual_svg_upload_file_orders WHERE file_id=$1::uuid', [fileId]);
+    await linkManualSvgFileOrders(tx, fileId, input.command.dto.selectedOrderIds);
+    await writeManualSvgFileUploadedAudit(tx, {
+      ...input,
+      file: storedFile,
+    });
+  }
+
+  const send = await enqueueManualSvgTelegramSendRequest(tx, {
+    ...input,
+    files: stored,
+  });
+  return {
+    storedFileCount: stored.length,
+    telegramSendRequestId: send?.requestId ?? null,
+    telegramSendStatus: send?.status ?? null,
+  };
+}
+
+async function lockActiveManualSvgTelegramSend(
+  tx: TransactionClient,
+  packetId: string,
+): Promise<{ requestId: string; status: ManualSvgFilePersistenceResult['telegramSendStatus'] } | null> {
+  const active = await tx.query<{ request_id: string; status: ManualSvgFilePersistenceResult['telegramSendStatus'] }>(
+    `SELECT request_id, status
+     FROM cnc_manual_svg_telegram_send_requests
+     WHERE packet_id=$1::uuid
+       AND status IN ('pending', 'processing')
+     ORDER BY requested_at DESC, request_id DESC
+     LIMIT 1
+     FOR UPDATE`,
+    [packetId],
+  );
+  const row = active.rows[0];
+  return row ? { requestId: row.request_id, status: row.status } : null;
+}
+
+function prepareManualSvgUploadFiles(dto: CncTelegramManualSvgUploadDto): ManualSvgDecodedUploadFile[] {
+  const files = (dto.sourceFiles ?? []).map(decodeManualSvgUploadFile);
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file.kind)) {
+      throw new ApiError(422, 'MANUAL_SVG_DUPLICATE_FILE_KIND', 'Нельзя загрузить несколько файлов одного типа', {
+        kind: file.kind,
+      });
+    }
+    seen.add(file.kind);
+  }
+  const svg = files.find((file) => file.kind === 'svg');
+  if (svg && !files.some((file) => file.kind === 'screenshot')) {
+    const screenshot = renderManualSvgScreenshot(dto, svg);
+    files.push(screenshot);
+  }
+  return files.sort((left, right) => manualSvgFileKindOrder(left.kind) - manualSvgFileKindOrder(right.kind));
+}
+
+function decodeManualSvgUploadFile(file: CncTelegramManualSvgUploadFileDto): ManualSvgDecodedUploadFile {
+  const raw = Buffer.from(file.base64Content, 'base64');
+  const sha256 = createHash('sha256').update(raw).digest('hex');
+  if (raw.length !== file.sizeBytes || sha256 !== file.sha256.toLowerCase()) {
+    throw new ApiError(422, 'MANUAL_SVG_FILE_CONTENT_MISMATCH', 'Содержимое файла не совпадает с размером или SHA-256', {
+      kind: file.kind,
+      fileName: file.fileName,
+    });
+  }
+  assertManualSvgDecodedFileSafe(file.kind, file.fileName, file.contentType, raw);
+  return {
+    kind: file.kind,
+    fileName: sanitizeManualSvgFileName(file.fileName),
+    contentType: file.contentType.trim(),
+    sizeBytes: raw.length,
+    sha256,
+    raw,
+    generated: false,
+  };
+}
+
+function assertManualSvgDecodedFileSafe(
+  kind: CncTelegramManualSvgUploadFileDto['kind'],
+  fileName: string,
+  contentType: string,
+  raw: Buffer,
+): void {
+  if (kind === 'svg') {
+    const text = raw.toString('utf8');
+    if (!/<svg[\s>]/i.test(text)) {
+      throw new ApiError(422, 'MANUAL_SVG_FILE_INVALID', 'Загруженный SVG-файл не содержит SVG-разметку', { fileName });
+    }
+    if (/<script\b|<foreignObject\b|(?:href|xlink:href)\s*=\s*["']\s*(?:https?:|file:|data:)/i.test(text)) {
+      throw new ApiError(422, 'MANUAL_SVG_FILE_UNSAFE', 'SVG содержит внешние ссылки или активное содержимое', { fileName });
+    }
+  }
+  if (kind === 'screenshot' && !imageMagicMatchesContentType(raw, contentType)) {
+    throw new ApiError(422, 'MANUAL_SVG_SCREENSHOT_INVALID', 'Формат изображения не совпадает с типом файла', { fileName });
+  }
+}
+
+function imageMagicMatchesContentType(raw: Buffer, contentType: string): boolean {
+  const normalized = contentType.toLowerCase();
+  if (normalized === 'image/png') {
+    return raw.length > 8 &&
+      raw[0] === 0x89 &&
+      raw[1] === 0x50 &&
+      raw[2] === 0x4e &&
+      raw[3] === 0x47;
+  }
+  if (normalized === 'image/jpeg') {
+    return raw.length > 3 && raw[0] === 0xff && raw[1] === 0xd8 && raw[2] === 0xff;
+  }
+  if (normalized === 'image/webp') {
+    return raw.length > 12 && raw.subarray(0, 4).toString('ascii') === 'RIFF' && raw.subarray(8, 12).toString('ascii') === 'WEBP';
+  }
+  return false;
+}
+
+function renderManualSvgScreenshot(
+  dto: CncTelegramManualSvgUploadDto,
+  svg: ManualSvgDecodedUploadFile,
+): ManualSvgDecodedUploadFile {
+  const png = renderRawSvgPng({
+    svg: svg.raw.toString('utf8'),
+    targetPx: RENDER_PRESETS.screen,
+    sheetWidthMm: dto.cutLayout.sheet?.widthMm ?? null,
+    sheetHeightMm: dto.cutLayout.sheet?.heightMm ?? null,
+    contrast: dto.generatedScreenshot?.contrast,
+  });
+  const sha256 = createHash('sha256').update(png).digest('hex');
+  return {
+    kind: 'screenshot',
+    fileName: `${manualSvgFileBaseName(svg.fileName)}.png`,
+    contentType: 'image/png',
+    sizeBytes: png.length,
+    sha256,
+    raw: png,
+    generated: true,
+  };
+}
+
+async function linkManualSvgFileOrders(
+  tx: TransactionClient,
+  fileId: string,
+  selectedOrderIds: number[],
+): Promise<void> {
+  for (const orderId of selectedOrderIds) {
+    await tx.query(
+      `INSERT INTO cnc_manual_svg_upload_file_orders (file_id, order_id)
+       VALUES ($1::uuid, $2::bigint)
+       ON CONFLICT DO NOTHING`,
+      [fileId, orderId],
+    );
+  }
+}
+
+async function writeManualSvgFileUploadedAudit(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    externalPacketKey: string;
+    file: ManualSvgStoredFile;
+  },
+): Promise<string> {
+  const selectedOrderIds = input.command.dto.selectedOrderIds;
+  return auditService.record(tx, {
+    event: MANUAL_SVG_FILE_UPLOADED_EVENT,
+    entityType: 'cnc_manual_svg_upload_file',
+    entityId: input.file.fileId,
+    actorUserId: input.command.currentUser.id,
+    actorUsername: input.command.currentUser.username ?? null,
+    actorRole: input.command.currentUser.role ?? null,
+    requestId: input.requestId,
+    source: MANUAL_SVG_SOURCE,
+    relatedOrderId: selectedOrderIds.length === 1 ? selectedOrderIds[0] : undefined,
+    before: null,
+    after: manualSvgStoredFileAuditSnapshot(input),
+    diff: {
+      uploaded: true,
+      fileKind: input.file.kind,
+      generated: input.file.generated,
+    },
+    metadata: {
+      source: MANUAL_SVG_SOURCE,
+      action: 'manual_svg_file_upload',
+      fileId: input.file.fileId,
+      fileKind: input.file.kind,
+      fileName: input.file.fileName,
+      contentType: input.file.contentType,
+      sizeBytes: input.file.sizeBytes,
+      sha256: input.file.sha256,
+      generated: input.file.generated,
+      generatedScreenshotContrast: input.file.kind === 'screenshot' && input.file.generated
+        ? input.command.dto.generatedScreenshot?.contrast ?? null
+        : null,
+      expiresAt: input.file.expiresAt,
+      packetId: input.packet.packetId,
+      externalPacketKey: input.externalPacketKey,
+      svgContentHash: input.command.dto.svgContentHash.toLowerCase(),
+      selectedOrderIds,
+      cutJobId: input.packet.svgCutJobId ?? null,
+      cutJobDisplayNumber: input.packet.svgCutJobDisplayNumber ?? null,
+      cutResultId: input.packet.svgCutResultId ?? null,
+      telegramSendEnabled: input.command.dto.telegramSend?.enabled === true,
+    },
+    relatedEntities: [
+      ...selectedOrderIds.map((orderId) => ({ entityType: 'order', entityId: orderId })),
+      ...(input.packet.svgCutJobId ? [{ entityType: 'cut_job', entityId: input.packet.svgCutJobId }] : []),
+      ...(input.packet.svgCutResultId ? [{ entityType: 'cut_result', entityId: input.packet.svgCutResultId }] : []),
+    ],
+  });
+}
+
+function manualSvgStoredFileAuditSnapshot(input: {
+  packet: CncTelegramPacketDto;
+  file: ManualSvgStoredFile;
+}): Record<string, unknown> {
+  return {
+    fileId: input.file.fileId,
+    packetId: input.packet.packetId,
+    fileKind: input.file.kind,
+    fileName: input.file.fileName,
+    contentType: input.file.contentType,
+    sizeBytes: input.file.sizeBytes,
+    sha256: input.file.sha256,
+    generated: input.file.generated,
+    expiresAt: input.file.expiresAt,
+    cutJobId: input.packet.svgCutJobId ?? null,
+    cutJobDisplayNumber: input.packet.svgCutJobDisplayNumber ?? null,
+    cutResultId: input.packet.svgCutResultId ?? null,
+  };
+}
+
+async function enqueueManualSvgTelegramSendRequest(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    externalPacketKey: string;
+    files: ManualSvgStoredFile[];
+  },
+): Promise<{ requestId: string; status: ManualSvgFilePersistenceResult['telegramSendStatus'] } | null> {
+  if (input.command.dto.telegramSend?.enabled !== true) return null;
+  if (input.files.length === 0) {
+    throw new ApiError(422, 'MANUAL_SVG_TELEGRAM_FILES_REQUIRED', 'Для отправки в Telegram нужны файлы');
+  }
+
+  const active = await tx.query<{ request_id: string; status: ManualSvgFilePersistenceResult['telegramSendStatus'] }>(
+    `SELECT request_id, status
+     FROM cnc_manual_svg_telegram_send_requests
+     WHERE packet_id=$1::uuid
+       AND status IN ('pending', 'processing')
+     ORDER BY requested_at DESC, request_id DESC
+     LIMIT 1
+     FOR UPDATE`,
+    [input.packet.packetId],
+  );
+  if (active.rows[0]) {
+    return { requestId: active.rows[0].request_id, status: active.rows[0].status };
+  }
+
+  const sendKey = `cnc-manual-svg-telegram:${input.packet.packetId}:${input.command.dto.idempotencyKey}`;
+  const inserted = await tx.query<{ request_id: string; status: ManualSvgFilePersistenceResult['telegramSendStatus'] }>(
+    `INSERT INTO cnc_manual_svg_telegram_send_requests (
+       packet_id, send_idempotency_key, requested_by, message_text
+     )
+     VALUES ($1::uuid, $2, $3::bigint, $4)
+     ON CONFLICT (send_idempotency_key) DO UPDATE
+     SET updated_at=now()
+     RETURNING request_id, status`,
+    [
+      input.packet.packetId,
+      sendKey,
+      Number(input.command.currentUser.id),
+      manualSvgTelegramMessage(input.command.dto),
+    ],
+  );
+  const row = inserted.rows[0];
+  if (!row) throw new Error('manual SVG Telegram send request insert returned no row');
+  if (row.status === 'pending') {
+    await tx.query('DELETE FROM cnc_manual_svg_telegram_send_request_files WHERE request_id=$1::uuid', [row.request_id]);
+    for (const file of input.files) {
+      await tx.query(
+        `INSERT INTO cnc_manual_svg_telegram_send_request_files (request_id, file_id, send_order)
+         VALUES ($1::uuid, $2::uuid, $3::integer)
+         ON CONFLICT DO NOTHING`,
+        [row.request_id, file.fileId, manualSvgFileKindOrder(file.kind)],
+      );
+    }
+  }
+  return { requestId: row.request_id, status: row.status };
+}
+
+function manualSvgTelegramMessage(dto: CncTelegramManualSvgUploadDto): string {
+  const custom = dto.telegramSend?.message?.trim();
+  if (custom) return custom.slice(0, 4096);
+  return (dto.comments ?? []).join(' ').trim().slice(0, 4096);
+}
+
+function sanitizeManualSvgFileName(value: string): string {
+  const trimmed = value.trim().replace(/[/\\\0\r\n\t]/g, '_');
+  return trimmed.length > 0 ? trimmed.slice(0, 240) : 'manual-svg-upload-file';
+}
+
+function manualSvgFileBaseName(fileName: string): string {
+  const sanitized = sanitizeManualSvgFileName(fileName);
+  const dot = sanitized.lastIndexOf('.');
+  return (dot > 0 ? sanitized.slice(0, dot) : sanitized).slice(0, 220) || 'manual-svg-upload';
+}
+
+function manualSvgFileKindOrder(kind: CncTelegramManualSvgUploadFileDto['kind']): number {
+  if (kind === 'svg') return 1;
+  if (kind === 'gcode') return 2;
+  return 3;
 }
 
 async function writeManualSvgCreatedAudit(
@@ -1871,6 +2310,7 @@ function packetSelectSql(whereSql: string): string {
       p.parser_version,
       p.cut_layout_json,
       p.svg_cut_job_id,
+      svg_job.source_display_number AS svg_cut_job_display_number,
       p.svg_cut_result_id,
       svg_result.result_no AS svg_cut_result_no,
       p.svg_cut_import_status,
@@ -1934,6 +2374,8 @@ function packetSelectSql(whereSql: string): string {
         AND COALESCE(linked_order_status.all_details_packed_or_later, false)
         AS all_linked_order_details_packed_or_later
     FROM cnc_telegram_packets p
+    LEFT JOIN cut_job svg_job
+      ON svg_job.cut_job_id = p.svg_cut_job_id
     LEFT JOIN cut_result svg_result
       ON svg_result.cut_job_id = p.svg_cut_job_id
      AND svg_result.cut_result_id = p.svg_cut_result_id
@@ -2544,14 +2986,16 @@ async function syncSvgCutJobSourceDisplayNumber(
   cuttingSequenceNo: string | number | null,
 ): Promise<void> {
   const displayNumber = sourceDisplayNumberFromCuttingSequence(cuttingSequenceNo);
-  if (cutJobId === null || displayNumber === null) return;
+  const resolvedCutJobId = toNullableNumber(cutJobId);
+  if (resolvedCutJobId === null || displayNumber === null) return;
+  await ensureSvgCutJobDisplayNumberAvailable(tx, displayNumber, resolvedCutJobId);
   await tx.query(
     `UPDATE cut_job
      SET source_display_number = $2,
          updated_at = now()
      WHERE cut_job_id = $1
        AND source_display_number IS DISTINCT FROM $2`,
-    [toNumber(cutJobId), displayNumber],
+    [resolvedCutJobId, displayNumber],
   );
 }
 
@@ -2959,6 +3403,7 @@ async function createSvgCutJob(
 ): Promise<{ cutJobId: number; cutResultId: number }> {
   const params = SVG_REVERSE_IMPORT_PARAMS;
   const sourceDisplayNumber = String(requestedCutJobId ?? cuttingSequenceNo);
+  await ensureSvgCutJobDisplayNumberAvailable(tx, sourceDisplayNumber, null);
   const isManualSvgUpload = dto.source.chatId === MANUAL_SVG_CHAT_ID;
   const selectionSource = isManualSvgUpload ? 'manual_svg_upload' : 'cnc_telegram_svg';
   const selectionCriteria = {
@@ -2998,10 +3443,8 @@ async function createSvgCutJob(
     plan.sheetMaterialTypeId,
     sourceDisplayNumber,
   ];
-  let job: { rows: Array<{ cut_job_id: string | number; created_at: string | Date }> };
-  job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
-    requestedCutJobId === null
-      ? `
+  const job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
+    `
       INSERT INTO cut_job (
         name, status, source, selection_criteria, params, request_hash,
         pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
@@ -3013,38 +3456,10 @@ async function createSvgCutJob(
         $7, false, true, $8
       )
       RETURNING cut_job_id, created_at
-      `
-      : `
-      INSERT INTO cut_job (
-        cut_job_id, name, status, source, selection_criteria, params, request_hash,
-        pdf_prewarm_state, created_by, version, last_calc_params, last_calc_basis,
-        sheet_material_type_id, combine_films, split_by_material, source_display_number
-      )
-      VALUES (
-        $9, $1, 'ready', 'api', $2::jsonb, $3::jsonb, $4,
-        'pending', $5, 1, $3::jsonb, $6,
-        $7, false, true, $8
-      )
-      ON CONFLICT (cut_job_id) DO NOTHING
-      RETURNING cut_job_id, created_at
       `,
-    requestedCutJobId === null
-      ? cutJobInsertParams
-      : [...cutJobInsertParams, requestedCutJobId],
+    cutJobInsertParams,
   );
-  if (requestedCutJobId !== null && job.rows.length === 0) {
-    const suggestedCutJobIds = await suggestCutJobIds(tx, requestedCutJobId);
-    throw new ApiError(
-      409,
-      'CUT_JOB_NUMBER_CONFLICT',
-      `Задание на раскрой #${requestedCutJobId} уже существует`,
-      { requestedCutJobId, suggestedCutJobIds },
-    );
-  }
   const cutJobId = toNumber(job.rows[0].cut_job_id);
-  if (requestedCutJobId !== null) {
-    await syncCutJobIdentitySequence(tx);
-  }
   const cutJobCreatedAt = toIso(job.rows[0].created_at);
   await tx.query(
     `INSERT INTO cut_result_command
@@ -3187,25 +3602,44 @@ async function createSvgCutJob(
   return { cutJobId, cutResultId };
 }
 
-async function syncCutJobIdentitySequence(tx: TransactionClient): Promise<void> {
-  await tx.query(
+async function ensureSvgCutJobDisplayNumberAvailable(
+  tx: TransactionClient,
+  displayNumber: string,
+  currentCutJobId: number | null,
+): Promise<void> {
+  const result = await tx.query<{ cut_job_id: string | number }>(
     `
-    SELECT setval(
-      pg_get_serial_sequence('cut_job', 'cut_job_id'),
-      GREATEST((SELECT COALESCE(MAX(cut_job_id), 1) FROM cut_job), 1),
-      true
-    )
+    SELECT existing_job.cut_job_id
+    FROM cut_job existing_job
+    WHERE NULLIF(trim(existing_job.source_display_number::text), '') = $1
+      AND ($2::bigint IS NULL OR existing_job.cut_job_id <> $2::bigint)
+    LIMIT 1
     `,
+    [displayNumber, currentCutJobId],
+  );
+  if (result.rows.length === 0) return;
+  const requestedCutJobId = Number(displayNumber);
+  const suggestedCutJobIds = Number.isFinite(requestedCutJobId)
+    ? await suggestCutJobDisplayNumbers(tx, requestedCutJobId)
+    : [];
+  throw new ApiError(
+    409,
+    'CUT_JOB_NUMBER_CONFLICT',
+    `Задание на раскрой №${displayNumber} уже существует`,
+    { requestedCutJobId, suggestedCutJobIds },
   );
 }
 
-async function suggestCutJobIds(tx: TransactionClient, requestedCutJobId: number): Promise<number[]> {
+async function suggestCutJobDisplayNumbers(tx: TransactionClient, requestedCutJobId: number): Promise<number[]> {
   const result = await tx.query<{ cut_job_id: string | number }>(
     `
     SELECT candidate.cut_job_id
     FROM generate_series($1::bigint + 1, $1::bigint + 200) AS candidate(cut_job_id)
-    LEFT JOIN cut_job existing_job ON existing_job.cut_job_id = candidate.cut_job_id
-    WHERE existing_job.cut_job_id IS NULL
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM cut_job existing_job
+      WHERE NULLIF(trim(existing_job.source_display_number::text), '') = candidate.cut_job_id::text
+    )
     ORDER BY candidate.cut_job_id
     LIMIT 5
     `,
@@ -4997,6 +5431,14 @@ async function reconcileManualSvgUploadIdempotency(
     createMdfMachineFileCard: input.command.dto.createMdfMachineFileCard,
     matchMode: input.command.dto.matchMode,
     requestedCutJobId: input.command.dto.requestedCutJobId ?? null,
+    sourceFiles: manualSvgSourceFileRequestSnapshot(input.command.dto.sourceFiles ?? []),
+    generatedScreenshot: {
+      contrast: input.command.dto.generatedScreenshot?.contrast ?? null,
+    },
+    telegramSend: {
+      enabled: input.command.dto.telegramSend?.enabled === true,
+      message: input.command.dto.telegramSend?.message?.trim() ?? null,
+    },
     payloadHash: input.payloadHash,
   });
   const inserted = await tx.query<IdempotencyRow>(
@@ -5046,6 +5488,25 @@ async function reconcileManualSvgUploadIdempotency(
     throw idempotencyError('IDEMPOTENCY_FAILED', input.dto.idempotencyKey);
   }
   throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.dto.idempotencyKey);
+}
+
+function manualSvgSourceFileRequestSnapshot(
+  files: CncTelegramManualSvgUploadFileDto[],
+): Array<Record<string, unknown>> {
+  return files
+    .map((file) => ({
+      kind: file.kind,
+      fileName: sanitizeManualSvgFileName(file.fileName),
+      contentType: file.contentType.trim().toLowerCase(),
+      sizeBytes: file.sizeBytes,
+      sha256: file.sha256.toLowerCase(),
+    }))
+    .sort((left, right) => {
+      const leftOrder = manualSvgFileKindOrder(left.kind as CncTelegramManualSvgUploadFileDto['kind']);
+      const rightOrder = manualSvgFileKindOrder(right.kind as CncTelegramManualSvgUploadFileDto['kind']);
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return String(left.fileName).localeCompare(String(right.fileName));
+    });
 }
 
 async function reconcileManualSvgPresetIdempotency(
@@ -6008,6 +6469,7 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
         parserVersion: row.parser_version,
         cutLayout: cutLayoutOrNull(row.cut_layout_json),
         svgCutJobId: toNullableNumber(row.svg_cut_job_id),
+        svgCutJobDisplayNumber: nullableDisplayNumber(row.svg_cut_job_id, row.svg_cut_job_display_number),
         svgCutResultId: toNullableNumber(row.svg_cut_result_id),
         svgCutResultNo: toNullableNumber(row.svg_cut_result_no),
         svgCutImportStatus: row.svg_cut_import_status ?? 'none',
@@ -6282,6 +6744,16 @@ function toNumber(value: string | number | null | undefined): number {
 function toNullableNumber(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === '') return null;
   return Number(value);
+}
+
+function nullableDisplayNumber(
+  cutJobId: string | number | null | undefined,
+  sourceDisplayNumber: string | number | null | undefined,
+): string | null {
+  const normalized = normalizeOptional(sourceDisplayNumber == null ? null : String(sourceDisplayNumber));
+  if (normalized) return normalized;
+  const fallbackCutJobId = toNullableNumber(cutJobId);
+  return fallbackCutJobId === null ? null : String(fallbackCutJobId);
 }
 
 function toNullableFiniteNumber(value: string | number | null | undefined): number | null {

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
+import { PNG } from 'pngjs';
 
 /**
  * Per-sheet PNG rasterization (plan §7). resvg-js (pure-rust prebuilt binary, no
@@ -17,6 +18,10 @@ export const RENDER_PRESETS = {
   screen: 1400,
   print: 3500,
 } as const;
+
+export const RAW_SVG_SCREENSHOT_CONTRAST_DEFAULT = 1.45;
+export const RAW_SVG_SCREENSHOT_CONTRAST_MIN = 1;
+export const RAW_SVG_SCREENSHOT_CONTRAST_MAX = 3;
 
 export type RenderPreset = keyof typeof RENDER_PRESETS;
 
@@ -82,4 +87,70 @@ export function renderSheetPng(input: RenderSheetPngInput): Buffer {
     },
   });
   return Buffer.from(resvg.render().asPng());
+}
+
+export interface RenderRawSvgPngInput {
+  svg: string;
+  /** longest-side cap in px */
+  targetPx: number;
+  sheetWidthMm?: number | null;
+  sheetHeightMm?: number | null;
+  contrast?: number | null;
+}
+
+export function renderRawSvgPng(input: RenderRawSvgPngInput): Buffer {
+  const width = input.sheetWidthMm;
+  const height = input.sheetHeightMm;
+  const fitTo = width != null && height != null && width > 0 && height > 0 && width < height
+    ? ({ mode: 'height', value: input.targetPx } as const)
+    : ({ mode: 'width', value: input.targetPx } as const);
+
+  const resvg = new Resvg(input.svg, {
+    fitTo,
+    font: {
+      fontFiles: [requireFontPath()],
+      defaultFontFamily: FONT_FAMILY,
+      loadSystemFonts: false,
+    },
+  });
+  return enhanceRawSvgScreenshotContrast(Buffer.from(resvg.render().asPng()), input.contrast);
+}
+
+export function normalizeRawSvgScreenshotContrast(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return RAW_SVG_SCREENSHOT_CONTRAST_DEFAULT;
+  }
+  const clamped = Math.min(RAW_SVG_SCREENSHOT_CONTRAST_MAX, Math.max(RAW_SVG_SCREENSHOT_CONTRAST_MIN, value));
+  return Math.round(clamped * 100) / 100;
+}
+
+export function enhanceRawSvgScreenshotContrast(png: Buffer, contrast: number | null | undefined): Buffer {
+  const factor = normalizeRawSvgScreenshotContrast(contrast);
+  if (factor <= 1.0001) return png;
+
+  const image = PNG.sync.read(png);
+  const data = image.data;
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3] ?? 0;
+    if (alpha <= 5) {
+      data[index] = 255;
+      data[index + 1] = 255;
+      data[index + 2] = 255;
+      data[index + 3] = 255;
+      continue;
+    }
+    const opacity = alpha / 255;
+    const red = data[index] ?? 255;
+    const green = data[index + 1] ?? 255;
+    const blue = data[index + 2] ?? 255;
+    data[index] = darkenAgainstWhite(red * opacity + 255 * (1 - opacity), factor);
+    data[index + 1] = darkenAgainstWhite(green * opacity + 255 * (1 - opacity), factor);
+    data[index + 2] = darkenAgainstWhite(blue * opacity + 255 * (1 - opacity), factor);
+    data[index + 3] = 255;
+  }
+  return PNG.sync.write(image);
+}
+
+function darkenAgainstWhite(value: number, factor: number): number {
+  return Math.max(0, Math.min(255, Math.round(255 - (255 - value) * factor)));
 }

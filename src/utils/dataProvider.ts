@@ -389,8 +389,9 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "supplier_id", "supplier { supplier_id supplier_name }",
     "vendor_id", "vendor { vendor_id vendor_name }",
     "supplier_article", "texture", "color",
+    "conversion_key",
     "thickness_mm", "width_mm", "height_mm",
-    "is_active", "version", "ref_key_1c",
+    "is_active", "is_cuttable", "version", "ref_key_1c",
     "created_by", "edited_by", "created_at", "updated_at",
   ],
   film_types: [
@@ -758,6 +759,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "edited_by",
     "created_at",
     "updated_at",
+    "delete_flag",
   ],
   doweling_orders: [
     "doweling_order_id",

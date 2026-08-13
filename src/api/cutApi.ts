@@ -365,6 +365,7 @@ export function buildCutJobListQuery(filters: CutJobListFilters): string {
     params.append('createdBy', String(filters.createdBy));
   }
   appendText(params, 'orderSearch', filters.orderSearch);
+  appendText(params, 'jobNumber', filters.jobNumber);
   appendDate(params, 'createdFrom', filters.createdFrom);
   appendDate(params, 'createdTo', filters.createdTo);
   return params.toString();

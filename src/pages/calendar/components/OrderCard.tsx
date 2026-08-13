@@ -1,5 +1,6 @@
+import { Tooltip } from '../../../ui/tooltipDelay';
 import React, { useRef } from 'react';
-import { Checkbox, Tag, Tooltip } from 'antd';
+import { Checkbox, Tag } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useDrag, useDragDropManager } from 'react-dnd';

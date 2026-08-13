@@ -1007,12 +1007,14 @@ export function parseCreateCutJobRequest(body: unknown) {
 
 export function parseListCutJobsQuery(query: Record<string, string | undefined>) {
   const orderSearch = parseOptionalSearch(query.orderSearch, 'orderSearch');
+  const jobNumber = parseOptionalSearch(query.jobNumber, 'jobNumber');
   return {
     ...(query.status ? { status: query.status.trim() } : {}),
     ...(query.createdBy && Number.isInteger(Number(query.createdBy)) && Number(query.createdBy) > 0
       ? { createdBy: Number(query.createdBy) }
       : {}),
     ...(orderSearch ? { orderSearch } : {}),
+    ...(jobNumber ? { jobNumber } : {}),
     ...(parseOptionalDateOnly(query.createdFrom, 'createdFrom') ? { createdFrom: parseOptionalDateOnly(query.createdFrom, 'createdFrom') } : {}),
     ...(parseOptionalDateOnly(query.createdTo, 'createdTo') ? { createdTo: parseOptionalDateOnly(query.createdTo, 'createdTo') } : {}),
   };

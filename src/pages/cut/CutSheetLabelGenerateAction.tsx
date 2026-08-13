@@ -1,5 +1,6 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Checkbox, Modal, Select, Space, Tooltip, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, Modal, Select, Space, Typography, message } from 'antd';
 import { DownloadOutlined, LeftOutlined, PrinterOutlined, RightOutlined, TagsOutlined } from '@ant-design/icons';
 import { authSession } from '../../api/authSession';
 import { labelsApi } from '../../api/labelsApi';

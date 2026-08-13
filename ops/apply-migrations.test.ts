@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -311,7 +311,24 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "obj_description(oid, 'pg_constraint') LIKE 'mdf-board-manual-moves-v2:%'",
     ]) expect(migration118Probe).toContain(marker);
 
-    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\)/);
+    const migration125Probe = probeFn.slice(
+      probeFn.indexOf('125_order_hdf_details*'),
+      probeFn.indexOf('*) return 2'),
+    );
+    for (const marker of [
+      'q_tbl order_hdf_details',
+      'q_tbl hdf_calculation_config_state',
+      'q_col orders hdf_min_threshold_mm',
+      'q_col cut_job_item order_hdf_detail_id',
+      'chk_cut_job_item_source_exactly_one',
+      'q_col bazis_cut_set_details source_order_hdf_detail_id',
+      'chk_bazis_cut_set_details_hdf_source_exclusive',
+      'q_col order_realtime_stream hdf_details_revision',
+      'production.hdf.min_side_threshold_mm',
+      "pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)",
+    ]) expect(migration125Probe).toContain(marker);
+
+    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\)/);
   });
 });
 

@@ -6,6 +6,7 @@ import type { DeleteOrderResponseDto, OrderDto, RestoreOrderResponseDto } from '
 import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
+  NormalizedSaveOrderHdfDetailDto,
   NormalizedSaveOrderHeaderDto,
   NormalizedSaveOrderPaymentDto,
   NormalizedSaveOrderRequirementDto,
@@ -248,6 +249,15 @@ export interface OrderAutomationSourceOutboxEvent {
   payload: Record<string, unknown>;
 }
 
+export interface OrderHdfReconcileResult {
+  createdHdfDetailIds: number[];
+  updatedHdfDetailIds: number[];
+  deactivatedHdfDetailIds: number[];
+  sourceChangedHdfDetailIds: number[];
+  configMissingHdfDetailIds: number[];
+  hdfStatusCounts: Record<string, number>;
+}
+
 /** Transaction-scoped context threaded into shadow-material audit writes. */
 export interface SaveContext {
   actorUserId: number | null;
@@ -390,6 +400,18 @@ export interface OrderWriteUnitOfWork {
   }): Promise<void>;
   upsertDetails(orderId: number, details: readonly CalculatedOrderDetailDto[]): Promise<void>;
   deleteDetails(orderId: number, ids: readonly number[]): Promise<void>;
+  applyHdfStatusEdits(input: {
+    orderId: number;
+    edits: readonly NormalizedSaveOrderHdfDetailDto[];
+    currentUser: CurrentUser;
+    requestId?: string;
+  }): Promise<void>;
+  deleteHdfDetails(orderId: number, ids: readonly number[]): Promise<void>;
+  reconcileHdfDetails(input: {
+    orderId: number;
+    currentUser: CurrentUser;
+    requestId?: string;
+  }): Promise<OrderHdfReconcileResult>;
   recalcOrderProductionStatus(orderId: number): Promise<void>;
   upsertPayments(orderId: number, payments: readonly NormalizedSaveOrderPaymentDto[]): Promise<void>;
   deletePayments(orderId: number, ids: readonly number[]): Promise<void>;

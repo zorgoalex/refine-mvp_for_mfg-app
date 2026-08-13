@@ -38,6 +38,21 @@ export function textureDirectionForCutProfile(
   return 'none';
 }
 
+export function cutJobNameFirstWord(value: string): string | null {
+  return value.trimStart().match(/^\S+/u)?.[0] ?? null;
+}
+
+export function profileDrivenCutJobName(
+  name: string,
+  profileId: number | null,
+  profiles: CutParamProfile[],
+): string {
+  const word = cutJobNameFirstWord(name)?.toLocaleLowerCase('ru-RU');
+  if (word !== 'раскрой' && word !== 'ванна') return name;
+  const prefix = isVacuumTableProfile(profileId, profiles) ? 'Ванна' : 'Раскрой';
+  return name.replace(/^(\s*)\S+/u, `$1${prefix}`);
+}
+
 export function isVacuumTableJob(
   profileId: number | null,
   profiles: CutParamProfile[],
@@ -98,6 +113,7 @@ export function firstBathSheetMaterialId(options: CutSheetTypeOption[]): number 
 
 interface CutProfileMutations {
   setProfile(cutJobId: number, profileId: number | null, version: number): Promise<CutJobDto>;
+  setName?(cutJobId: number, name: string, version: number): Promise<CutJobDto>;
   setTextureDirection(cutJobId: number, textureDirection: CutTextureDirection, version: number): Promise<CutJobDto>;
   setSplitByMaterial(cutJobId: number, value: boolean, version: number): Promise<CutJobDto>;
   setCombineFilms(cutJobId: number, value: boolean, version: number): Promise<CutJobDto>;
@@ -124,6 +140,12 @@ export async function applyCutProfileSelection(input: {
     onUpdated?.(updated);
     return updated;
   };
+  const syncProfileDrivenName = async (candidate: CutJobDto): Promise<CutJobDto> => {
+    if (!mutations.setName) return candidate;
+    const nextName = profileDrivenCutJobName(candidate.name, paramProfileId, profiles);
+    if (nextName === candidate.name) return candidate;
+    return publish(await mutations.setName(candidate.cutJobId, nextName, candidate.version));
+  };
 
   let updated = publish(await mutations.setProfile(
     currentJob.cutJobId,
@@ -139,6 +161,7 @@ export async function applyCutProfileSelection(input: {
     ));
   }
   if (!isVacuumTableProfile(paramProfileId, profiles)) {
+    updated = await syncProfileDrivenName(updated);
     return { job: updated, bathSheetMissing: false };
   }
 
@@ -159,6 +182,7 @@ export async function applyCutProfileSelection(input: {
 
   const bathSheetMaterialId = firstBathSheetMaterialId(sheetOptions);
   if (bathSheetMaterialId === null) {
+    updated = await syncProfileDrivenName(updated);
     return { job: updated, bathSheetMissing: true };
   }
   if (updated.sheetMaterialTypeId !== bathSheetMaterialId) {
@@ -169,5 +193,6 @@ export async function applyCutProfileSelection(input: {
     ));
   }
 
+  updated = await syncProfileDrivenName(updated);
   return { job: updated, bathSheetMissing: false };
 }

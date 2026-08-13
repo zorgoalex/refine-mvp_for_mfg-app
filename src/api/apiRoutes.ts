@@ -31,11 +31,18 @@ export const apiRoutes = {
     workosCallback: backendApiPath('/auth/workos/callback'),
     workosLinkStart: backendApiPath('/auth/workos/link/start'),
     workosLinkCallback: backendApiPath('/auth/workos/link/callback'),
+    workosInvitationStart: backendApiPath('/auth/workos/invitations/start'),
+    workosInvitationCallback: backendApiPath('/auth/workos/invitations/callback'),
     workosLinks: backendApiPath('/auth/workos/links'),
+    workosSettings: backendApiPath('/auth/workos/settings'),
     workosLinkById: (identityId: string) => backendApiPath(`/auth/workos/links/${identityId}`),
     workosAdminLinks: (userId: string) => backendApiPath(`/auth/workos/admin/users/${userId}/links`),
     workosAdminLinkById: (userId: string, identityId: string) =>
       backendApiPath(`/auth/workos/admin/users/${userId}/links/${identityId}`),
+    workosAdminSettings: (userId: string) =>
+      backendApiPath(`/auth/workos/admin/users/${userId}/settings`),
+    workosAdminInvitations: (userId: string) =>
+      backendApiPath(`/auth/workos/admin/users/${userId}/invitations`),
   },
   profile: {
     preferences: backendApiPath('/me/preferences'),
@@ -152,6 +159,11 @@ export const apiRoutes = {
     pdfTemplates: backendApiPath('/cut-config/pdf-templates'),
     pdfTemplate: (id: number) => backendApiPath(`/cut-config/pdf-templates/${id}`),
   },
+  productionTechSettings: {
+    hdf: backendApiPath('/production-tech-settings/hdf'),
+    hdfMillingType: (millingTypeId: number) =>
+      backendApiPath(`/production-tech-settings/hdf/milling-types/${millingTypeId}`),
+  },
   cncTelegram: {
     today: backendApiPath('/cnc-telegram/today'),
     ingest: backendApiPath('/cnc-telegram/ingest'),
@@ -160,6 +172,8 @@ export const apiRoutes = {
     autoCutStatus: backendApiPath('/cnc-telegram/auto-cut-status'),
     orderCuttingSequences: (orderId: number) => backendApiPath(`/cnc-telegram/orders/${orderId}/cutting-sequences`),
     orderScreenshots: (orderId: number) => backendApiPath(`/cnc-telegram/orders/${orderId}/screenshots`),
+    orderManualSvgFile: (orderId: number, fileId: string) =>
+      backendApiPath(`/cnc-telegram/orders/${orderId}/manual-svg-files/${encodeURIComponent(fileId)}`),
     orderScreenshotPreview: (orderId: number, packetId: string) =>
       backendApiPath(`/cnc-telegram/orders/${orderId}/screenshots/${encodeURIComponent(packetId)}/preview`),
     orderScreenshotImage: (orderId: number, packetId: string) =>

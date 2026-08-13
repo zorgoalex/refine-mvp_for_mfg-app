@@ -1,3 +1,4 @@
+import { Tooltip } from '../../ui/tooltipDelay';
 // Схема панели: контур в масштабе + отверстия из геометрии raw_json.
 // Управление: зум ×2/÷2, поворот на 90°, размеры сторон на выносках.
 // Рисуем только когда данных достаточно (габариты панели и координаты).
@@ -8,13 +9,8 @@
 // координат (не CSS-rotate), чтобы подписи размеров оставались ровными.
 
 import React, { useMemo, useState } from 'react';
-import {
-  RotateLeftOutlined,
-  RotateRightOutlined,
-  ZoomInOutlined,
-  ZoomOutOutlined,
-} from '@ant-design/icons';
-import { Button, Space, Tooltip, Typography } from 'antd';
+import { RotateLeftOutlined, RotateRightOutlined, ZoomInOutlined, ZoomOutOutlined, } from '@ant-design/icons';
+import { Button, Space, Typography } from 'antd';
 import type { HoleGeometry } from './parseNodeRaw';
 
 const { Text } = Typography;

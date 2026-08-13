@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
 
 export type CncTelegramMediaRestoreStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type CncTelegramManualSvgFileKind = 'svg' | 'gcode' | 'screenshot';
+export type CncTelegramManualSvgTelegramSendStatus = 'pending' | 'processing' | 'sent' | 'failed' | 'unknown';
 
 export interface CncTelegramOrderScreenshotDto {
   kind: 'telegram' | 'svg_cut';
@@ -15,6 +17,7 @@ export interface CncTelegramOrderScreenshotDto {
   previewUrl: string | null;
   imageUrl: string | null;
   cutJobId?: number | null;
+  cutJobDisplayNumber?: string | null;
   cutResultNo?: number | null;
   cutGroupId?: number | null;
   sheetIndex?: number | null;
@@ -35,6 +38,26 @@ export interface CncTelegramOrderScreenshotsResponseDto {
   generatedAt: string;
   originalRetentionDays: 30;
   screenshots: CncTelegramOrderScreenshotDto[];
+  manualFiles: CncTelegramManualSvgOrderFileDto[];
+}
+
+export interface CncTelegramManualSvgOrderFileDto {
+  fileId: string;
+  packetId: string;
+  kind: CncTelegramManualSvgFileKind;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  generated: boolean;
+  createdAt: string;
+  expiresAt: string;
+  downloadUrl: string;
+  cutJobId: number | null;
+  cutJobDisplayNumber: string | null;
+  cutResultId: number | null;
+  cutResultNo: number | null;
+  telegramSendStatus: CncTelegramManualSvgTelegramSendStatus | null;
 }
 
 export interface CncTelegramMediaRestoreResponseDto {
@@ -57,6 +80,45 @@ export interface CncTelegramMediaRestoreTaskDto {
 export interface CncTelegramMediaRestoreClaimResponseDto {
   capability: 'cnc_telegram_media_restore_v1';
   tasks: CncTelegramMediaRestoreTaskDto[];
+}
+
+export interface CncTelegramManualSvgTelegramFileTaskDto {
+  fileId: string;
+  kind: CncTelegramManualSvgFileKind;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  base64Content: string;
+}
+
+export interface CncTelegramManualSvgTelegramSendTaskDto {
+  requestId: string;
+  packetId: string;
+  messageText: string;
+  attempt: number;
+  files: CncTelegramManualSvgTelegramFileTaskDto[];
+}
+
+export interface CncTelegramManualSvgTelegramSendClaimResponseDto {
+  capability: 'cnc_manual_svg_telegram_send_v1';
+  tasks: CncTelegramManualSvgTelegramSendTaskDto[];
+}
+
+export interface CncTelegramManualSvgTelegramSendResponseDto {
+  requestId: string;
+  packetId: string;
+  status: CncTelegramManualSvgTelegramSendStatus;
+  requestedAt: string;
+  finishedAt: string | null;
+  sentChatId: string | null;
+  sentMessageIds: string[];
+  error: string | null;
+}
+
+export interface CncTelegramManualSvgTelegramSendCompleteDto {
+  sentChatId: string;
+  sentMessageIds: string[];
 }
 
 export interface CncTelegramMediaRestoreCompleteDto {
@@ -89,6 +151,11 @@ const failSchema = z.object({
   error: z.string().trim().min(1).max(500),
 }).strict();
 
+const telegramSendCompleteSchema = z.object({
+  sentChatId: z.string().trim().min(1).max(120),
+  sentMessageIds: z.array(z.string().trim().min(1).max(80)).min(1).max(10),
+}).strict();
+
 const uuidSchema = z.string().trim().uuid();
 
 export function parseCncTelegramMediaRestoreComplete(value: unknown): CncTelegramMediaRestoreCompleteDto {
@@ -99,12 +166,22 @@ export function parseCncTelegramMediaRestoreFailure(value: unknown): string {
   return (parse(failSchema, value, 'body') as { error: string }).error;
 }
 
+export function parseCncTelegramManualSvgTelegramSendComplete(
+  value: unknown,
+): CncTelegramManualSvgTelegramSendCompleteDto {
+  return parse(telegramSendCompleteSchema, value, 'body') as CncTelegramManualSvgTelegramSendCompleteDto;
+}
+
 export function parseCncTelegramMediaRestoreRequestId(value: string): string {
   return parse(uuidSchema, value, 'requestId') as string;
 }
 
 export function parseCncTelegramPacketId(value: string): string {
   return parse(uuidSchema, value, 'packetId') as string;
+}
+
+export function parseCncTelegramManualSvgFileId(value: string): string {
+  return parse(uuidSchema, value, 'fileId') as string;
 }
 
 function parse(schema: z.ZodType, value: unknown, field: string): unknown {

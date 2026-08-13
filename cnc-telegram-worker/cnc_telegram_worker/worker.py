@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import mimetypes
@@ -81,6 +82,12 @@ class SvgGroup:
         return self.vector_message
 
 
+@dataclass(frozen=True)
+class ManualSvgSendFile:
+    kind: str
+    path: Path
+
+
 class CncTelegramWorker:
     def __init__(self, config: WorkerConfig) -> None:
         self.config = config
@@ -133,6 +140,8 @@ class CncTelegramWorker:
             chat_id = peer_id(entity)
             assert_allowed_chat(chat_id, self.config.telegram_allowed_chat_ids)
             await self.process_media_restore_requests(client, entity, chat_id)
+            if self.config.can_send_manual_svg_uploads:
+                await self.process_manual_svg_telegram_send_requests(client, entity, chat_id)
             me = await client.get_me()
             session_user_id = str(me.id) if getattr(me, "id", None) is not None else None
             reconciled_replies = await reconcile_pending_replies(
@@ -207,6 +216,37 @@ class CncTelegramWorker:
                 except Exception as report_exc:
                     print(f"restore {request_id} failure delivery deferred: {report_exc}", flush=True)
                 print(f"restore {request_id} failed: {error_message}", flush=True)
+
+    async def process_manual_svg_telegram_send_requests(self, client: Any, entity: Any, chat_id: str) -> None:
+        claim = await self.erp.claim_manual_svg_telegram_sends()
+        if claim.get("capability") != "cnc_manual_svg_telegram_send_v1":
+            raise RuntimeError("backend does not expose cnc_manual_svg_telegram_send_v1")
+        for task in claim.get("tasks") or []:
+            request_id = str(task.get("requestId") or "")
+            try:
+                files = task.get("files") or []
+                if not isinstance(files, list) or not files:
+                    raise RuntimeError("manual SVG Telegram send task has no files")
+                send_dir = self.config.temp_dir / f"manual-svg-send-{request_id}"
+                send_dir.mkdir(parents=True, exist_ok=True)
+                send_files: list[ManualSvgSendFile] = []
+                for index, file_item in enumerate(files, start=1):
+                    path = write_manual_svg_send_file(send_dir, file_item, index)
+                    kind = str(file_item.get("kind") or "").lower() if isinstance(file_item, dict) else ""
+                    send_files.append(ManualSvgSendFile(kind=kind, path=path))
+                message_text = sanitize_text(str(task.get("messageText") or ""), 4096) or None
+                sent = await send_manual_svg_upload_files(client, entity, send_files, message_text)
+                await self.erp.complete_manual_svg_telegram_send(request_id, {
+                    "sentChatId": chat_id,
+                    "sentMessageIds": manual_svg_sent_message_ids(sent),
+                })
+            except Exception as exc:
+                error_message = sanitize_text(str(exc), 500) or "Manual SVG Telegram send failed"
+                try:
+                    await self.erp.fail_manual_svg_telegram_send(request_id, error_message)
+                except Exception as report_exc:
+                    print(f"manual SVG send {request_id} failure delivery deferred: {report_exc}", flush=True)
+                print(f"manual SVG send {request_id} failed: {error_message}", flush=True)
 
     async def run_daemon(self, days: int | None = None) -> None:
         if not self.config.enabled:
@@ -1096,6 +1136,31 @@ async def send_cutting_sequence_reply(client: Any, entity: Any, image_message: A
     )
 
 
+MANUAL_SVG_SEND_KIND_ORDER = {
+    "gcode": 0,
+    "svg": 1,
+    "screenshot": 2,
+}
+
+
+async def send_manual_svg_upload_files(client: Any, entity: Any, files: list[ManualSvgSendFile], message_text: str | None) -> Any:
+    sent_messages: list[Any] = []
+    ordered_files = sorted(
+        enumerate(files),
+        key=lambda item: (MANUAL_SVG_SEND_KIND_ORDER.get(item[1].kind, 99), item[0]),
+    )
+    for _index, file_item in ordered_files:
+        sent = await client.send_file(
+            entity,
+            str(file_item.path),
+            force_document=file_item.kind != "screenshot",
+        )
+        sent_messages.extend(sent if isinstance(sent, list) else [sent])
+    if message_text:
+        sent_messages.append(await client.send_message(entity, message_text))
+    return sent_messages
+
+
 def message_identity(message: Any, *, include_reactions: bool) -> dict[str, Any]:
     return {
         "id": int(message.id),
@@ -1113,6 +1178,57 @@ async def download_media(message: Any, run_dir: Path, prefix: str) -> Path | Non
     target = run_dir / f"{prefix}-{int(message.id)}{suffix}"
     result = await message.download_media(file=str(target))
     return Path(result) if result else None
+
+
+def write_manual_svg_send_file(send_dir: Path, file_item: Any, index: int) -> Path:
+    if not isinstance(file_item, dict):
+        raise RuntimeError("manual SVG Telegram send file payload is invalid")
+    file_name = safe_manual_svg_send_file_name(str(file_item.get("fileName") or f"file-{index}"))
+    target = unique_child_path(send_dir, file_name)
+    content = str(file_item.get("base64Content") or "")
+    normalized_content = re.sub(r"\s+", "", content)
+    try:
+        raw = base64.b64decode(normalized_content.encode("ascii"), validate=True)
+    except Exception as exc:
+        raise RuntimeError(f"{file_name}: invalid base64 content") from exc
+    size_bytes = int(file_item.get("sizeBytes") or -1)
+    if len(raw) != size_bytes:
+        raise RuntimeError(f"{file_name}: size mismatch")
+    expected_sha = str(file_item.get("sha256") or "").lower()
+    actual_sha = hashlib.sha256(raw).hexdigest()
+    if expected_sha != actual_sha:
+        raise RuntimeError(f"{file_name}: SHA-256 mismatch")
+    target.write_bytes(raw)
+    return target
+
+
+def safe_manual_svg_send_file_name(value: str) -> str:
+    name = Path(value.replace("\x00", "_")).name.strip()
+    name = re.sub(r"[\r\n\t/\\]+", "_", name)
+    return name[:180] or "manual-svg-file"
+
+
+def unique_child_path(directory: Path, file_name: str) -> Path:
+    target = directory / file_name
+    if not target.exists():
+        return target
+    stem = target.stem or "file"
+    suffix = target.suffix
+    for index in range(2, 100):
+        candidate = directory / f"{stem}-{index}{suffix}"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"cannot allocate unique filename for {file_name}")
+
+
+def manual_svg_sent_message_ids(sent: Any) -> list[str]:
+    values = sent if isinstance(sent, list) else [sent]
+    result: list[str] = []
+    for item in values:
+        message_id = getattr(item, "id", None)
+        if isinstance(message_id, int) and message_id > 0:
+            result.append(str(message_id))
+    return result
 
 
 def persist_sheet_image(

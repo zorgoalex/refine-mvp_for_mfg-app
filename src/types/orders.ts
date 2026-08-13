@@ -49,6 +49,7 @@ export interface Order {
   milling_type_id?: number | null;
   edge_type_id?: number | null;
   film_id?: number | null;
+  hdf_min_threshold_mm?: number | null;
   material_id?: number | null;
   sheet_material_type_id?: number | null;
   // SP3: durable SP3-era marker (orders.sheet_eligible). Existing pre-SP3 orders
@@ -88,6 +89,38 @@ export interface Order {
   edited_by?: number | null;
   created_at?: Date | string;
   updated_at?: Date | string;
+}
+
+export interface OrderHdfDetail {
+  order_hdf_detail_id: number;
+  order_id?: number;
+  source_order_detail_id?: number | null;
+  source_order_detail_id_snapshot: number;
+  source_detail_number?: number | null;
+  source_detail_name?: string | null;
+  source_height_mm?: number | null;
+  source_width_mm?: number | null;
+  source_quantity?: number | null;
+  milling_type_id?: number | null;
+  milling_type_name?: string | null;
+  edge_mm?: number | null;
+  threshold_mm?: number | null;
+  hdf_sheet_material_type_id?: number | null;
+  hdf_sheet_material_name?: string | null;
+  hdf_height_mm?: number | null;
+  hdf_width_mm?: number | null;
+  quantity?: number | null;
+  area_m2: number;
+  status: string;
+  config_errors?: string[];
+  config_revision?: number;
+  is_stale?: boolean;
+  production_status_id?: number | null;
+  production_status_name?: string | null;
+  production_status_locked?: boolean;
+  version: number;
+  cut_job?: CutDetailLastReadyJobRef | null;
+  bazis_cut_sets?: Array<{ bazisCutSetId: number; name: string }>;
 }
 
 // ============================================================================
@@ -301,6 +334,8 @@ export interface OrderFormValues {
 
   // Child tables
   details: OrderDetail[];
+  hdfDetails?: OrderHdfDetail[];
+  dirtyHdfDetailIds?: number[];
   payments: Payment[];
   workshops: OrderWorkshop[];
   requirements: OrderResourceRequirement[];
@@ -312,6 +347,7 @@ export interface OrderFormValues {
 
   // Deleted items (track for deletion on server)
   deletedDetails?: number[];
+  deletedHdfDetails?: number[];
   deletedPayments?: number[];
   deletedWorkshops?: number[];
   deletedRequirements?: number[];

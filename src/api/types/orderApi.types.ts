@@ -7,6 +7,7 @@ import type { CutDetailLastReadyJobRef } from './cutApi.types';
 export interface SaveOrderDto {
   header: SaveOrderHeaderDto;
   details: SaveOrderDetailDto[];
+  hdfDetails?: SaveOrderHdfDetailDto[];
   payments: SaveOrderPaymentDto[];
   workshops: SaveOrderWorkshopDto[];
   requirements: SaveOrderRequirementDto[];
@@ -309,6 +310,9 @@ export interface MaterialLookup extends IdNameLookup {
 
 export interface MillingTypeLookup extends IdNameLookup {
   costPerSqm: number | null;
+  hdfEnabled?: boolean;
+  hdfEdgeMm?: number | null;
+  version?: number;
 }
 
 // SP3: present only when the caller has sheet_materials.view (service-masked).
@@ -383,6 +387,7 @@ export interface SaveOrderHeaderDto {
   millingTypeId?: number | null;
   edgeTypeId?: number | null;
   filmId?: number | null;
+  hdfMinThresholdMm?: number | null;
 
   linkCuttingFile?: string | null;
   linkCuttingImageFile?: string | null;
@@ -430,6 +435,12 @@ export interface SaveOrderDetailDto {
   doweling?: boolean;
 
   refKey1c?: string | null;
+}
+
+export interface SaveOrderHdfDetailDto {
+  id: number;
+  version: number;
+  productionStatusId?: number | null;
 }
 
 export interface SaveOrderPaymentDto {
@@ -502,6 +513,7 @@ export interface SaveOrderDowelingLinkDto {
 
 export interface DeletedOrderChildrenDto {
   detailIds: number[];
+  hdfDetailIds?: number[];
   paymentIds: number[];
   workshopIds: number[];
   requirementIds: number[];
@@ -511,6 +523,7 @@ export interface DeletedOrderChildrenDto {
 export interface OrderDto {
   header: OrderHeaderDto;
   details: OrderDetailDto[];
+  hdfDetails?: OrderHdfDetailDto[];
   payments: PaymentDto[];
   workshops: OrderWorkshopDto[];
   requirements: OrderResourceRequirementDto[];
@@ -551,6 +564,7 @@ export interface OrderHeaderDto {
   millingTypeId?: number | null;
   edgeTypeId?: number | null;
   filmId?: number | null;
+  hdfMinThresholdMm?: number | null;
   linkCuttingFile?: string | null;
   linkCuttingImageFile?: string | null;
   linkCadFile?: string | null;
@@ -607,6 +621,38 @@ export interface OrderDetailDto {
   bathCutJob?: CutDetailLastReadyJobRef | null;
   bazisCutSets?: OrderDetailBazisCutSetRefDto[];
   bazisProjects?: OrderDetailBazisProjectRefDto[];
+}
+
+export interface OrderHdfDetailDto {
+  id: number;
+  orderId: number;
+  sourceOrderDetailId: number | null;
+  sourceOrderDetailIdSnapshot: number;
+  sourceDetailNumber: number | null;
+  sourceDetailName: string | null;
+  sourceHeightMm: number | null;
+  sourceWidthMm: number | null;
+  sourceQuantity: number | null;
+  millingTypeId: number | null;
+  millingTypeName: string | null;
+  edgeMm: number | null;
+  thresholdMm: number | null;
+  hdfSheetMaterialTypeId: number | null;
+  hdfSheetMaterialName: string | null;
+  hdfHeightMm: number | null;
+  hdfWidthMm: number | null;
+  quantity: number | null;
+  areaM2: number;
+  status: string;
+  configErrors: string[];
+  configRevision: number;
+  isStale: boolean;
+  productionStatusId: number | null;
+  productionStatusName: string | null;
+  productionStatusLocked: boolean;
+  version: number;
+  cutJob?: CutDetailLastReadyJobRef | null;
+  bazisCutSets?: OrderDetailBazisCutSetRefDto[];
 }
 
 export interface OrderDetailBazisCutSetRefDto {

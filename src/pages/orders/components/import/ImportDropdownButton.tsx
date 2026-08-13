@@ -1,7 +1,8 @@
+import { Tooltip } from '../../../../ui/tooltipDelay';
 // Dropdown button with Excel, PDF and VLM image import options
 
 import React, { useState, useCallback, Suspense, lazy } from 'react';
-import { Dropdown, Button, Tooltip, Spin } from 'antd';
+import { Dropdown, Button, Spin } from 'antd';
 import type { MenuProps } from 'antd';
 import { ImportOutlined, FileExcelOutlined, FilePdfOutlined, CameraOutlined, DownOutlined } from '@ant-design/icons';
 import { OrderToolbarLabel } from '../OrderDetailsToolbar';

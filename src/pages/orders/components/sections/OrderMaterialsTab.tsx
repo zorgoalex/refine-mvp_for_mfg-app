@@ -1,8 +1,9 @@
+import { Table } from '../../../../ui/tooltipDelay';
 // Order Materials Tab
 // Displays aggregated data for materials and films
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Row, Col, Table, Typography } from 'antd';
+import { Row, Col, Typography } from 'antd';
 import { useList } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
@@ -18,7 +19,7 @@ import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../o
 const { Text } = Typography;
 
 export const OrderMaterialsTab: React.FC = () => {
-  const { details, header } = useOrderFormStore();
+  const { details, hdfDetails, header } = useOrderFormStore();
   const detailIds = useMemo(
     () => details.map((detail) => detail.detail_id).filter((id): id is number => Number.isInteger(id) && id > 0),
     [details],
@@ -117,8 +118,9 @@ export const OrderMaterialsTab: React.FC = () => {
     () => buildOrderSheetMaterialRows(
       details,
       (detail) => resolveDetailMaterialName(detail, undefined, materialsMap),
+      hdfDetails,
     ),
-    [details, materialsMap],
+    [details, hdfDetails, materialsMap],
   );
 
   const sheetMaterialColumns = [

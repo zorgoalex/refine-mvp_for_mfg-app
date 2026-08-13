@@ -1,9 +1,10 @@
+import { Tooltip } from '../../../ui/tooltipDelay';
 // Main Order Form Component
 // Master-Detail form with Tabs for child entities
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Tooltip, Popconfirm, message } from 'antd';
+import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useOne, useList, useNavigation } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
@@ -59,6 +60,7 @@ import { makeOrderDeleteHandler } from '../orderDeleteAction';
 
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
+import { OrderHdfTab } from './tabs/OrderHdfTab';
 import { OrderPaymentsTab, OrderPaymentsTabRef } from './tabs/OrderPaymentsTab';
 import { CutPage } from '../../cut/CutPage';
 import {
@@ -1463,6 +1465,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             </OrderSaveValidationContext.Provider>
           </div>
         ),
+      },
+      {
+        key: 'hdf',
+        label: 'ХДФ',
+        children: <OrderHdfTab />,
       },
       {
         key: 'dates',

@@ -1,5 +1,6 @@
+import { Table } from '../../../../ui/tooltipDelay';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Empty, Input, Select, Space, Table, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Empty, Input, Select, Space, Typography, message } from 'antd';
 import { SaveOutlined, SearchOutlined, ZoomInOutlined, ZoomOutOutlined } from '@ant-design/icons';
 import { labelsApi } from '../../../../api/labelsApi';
 import type { LabelTemplate, LatestOrderLabelsPreview, OrderLabelData } from '../../../../api/types/labelsApi.types';

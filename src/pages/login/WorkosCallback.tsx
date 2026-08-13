@@ -12,6 +12,7 @@ import { ApiError } from "../../api/httpClient";
 const consumedCodes = new Map<string, "pending" | "settled">();
 
 const LINK_INTENT_KEY = "erp_workos_link_intent";
+const INVITATION_INTENT_KEY = "erp_workos_invitation_intent";
 
 // Backend errors raised BEFORE the state/code were consumed (throttle, origin
 // check, feature off, validation, expired bearer on the link path): the code
@@ -32,6 +33,10 @@ const PRE_EXCHANGE_ERROR_CODES = new Set([
  */
 export function markWorkosLinkIntent(state: string): void {
   sessionStorage.setItem(LINK_INTENT_KEY, state);
+}
+
+export function markWorkosInvitationIntent(state: string): void {
+  sessionStorage.setItem(INVITATION_INTENT_KEY, state);
 }
 
 /**
@@ -68,9 +73,13 @@ export const WorkosCallbackPage: React.FC = () => {
     // Link mode only when the stored intent matches THIS flow's state; a
     // stale flag from an aborted link attempt is discarded, not trusted.
     const isLink = sessionStorage.getItem(LINK_INTENT_KEY) === state;
+    const isInvitation = sessionStorage.getItem(INVITATION_INTENT_KEY) === state;
     if (!isLink) {
       // Mismatched (dead) intent from some earlier aborted flow.
       sessionStorage.removeItem(LINK_INTENT_KEY);
+    }
+    if (!isInvitation) {
+      sessionStorage.removeItem(INVITATION_INTENT_KEY);
     }
 
     // The code is promoted to 'settled' (and the link intent cleared) ONLY
@@ -89,6 +98,9 @@ export const WorkosCallbackPage: React.FC = () => {
         consumedCodes.set(code, "settled");
         if (isLink) {
           sessionStorage.removeItem(LINK_INTENT_KEY);
+        }
+        if (isInvitation) {
+          sessionStorage.removeItem(INVITATION_INTENT_KEY);
         }
         return;
       }
@@ -109,6 +121,12 @@ export const WorkosCallbackPage: React.FC = () => {
     };
 
     const run = async () => {
+      if (isInvitation) {
+        await exchange(() => authApi.workosInvitationCallback(code, state));
+        navigate("/login?sso=invitation-linked", { replace: true });
+        return;
+      }
+
       if (isLink) {
         await authApi.refresh();
         await exchange(() => authApi.workosLinkCallback(code, state));

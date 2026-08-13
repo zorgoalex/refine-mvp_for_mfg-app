@@ -22,14 +22,15 @@ describe('cutApi', () => {
   it('builds cut-job list filters for backend-side order/date search', async () => {
     expect(buildCutJobListQuery({
       orderSearch: ' 2700 ',
+      jobNumber: ' №67 ',
       createdFrom: '2026-08-01',
       createdTo: '2026-08-07',
-    })).toBe('orderSearch=2700&createdFrom=2026-08-01&createdTo=2026-08-07');
+    })).toBe('orderSearch=2700&jobNumber=%E2%84%9667&createdFrom=2026-08-01&createdTo=2026-08-07');
 
     const fetchMock = mockFetch([]);
-    await cutApi.list({ orderSearch: '2700', createdFrom: '2026-08-01', createdTo: '2026-08-07' });
+    await cutApi.list({ orderSearch: '2700', jobNumber: '67', createdFrom: '2026-08-01', createdTo: '2026-08-07' });
     expect(fetchMock.mock.calls[0][0]).toBe(
-      '/api/v1/cut-jobs?orderSearch=2700&createdFrom=2026-08-01&createdTo=2026-08-07',
+      '/api/v1/cut-jobs?orderSearch=2700&jobNumber=67&createdFrom=2026-08-01&createdTo=2026-08-07',
     );
   });
 
