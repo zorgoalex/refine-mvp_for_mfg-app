@@ -1350,7 +1350,16 @@
 
 .status-board-viewport--touch-dragging {
   scroll-snap-type: none !important;
+  touch-action: none !important;
   user-select: none;
+}
+
+.status-board-viewport--touch-dragging :where(
+  .status-board-column__cards,
+  .cnc-board-card-shell,
+  .status-board-card
+) {
+  touch-action: none !important;
 }
 
 .status-board-touch-ghost {
@@ -1578,6 +1587,11 @@
   touch-action: pan-x pan-y;
   user-select: none;
   -webkit-touch-callout: none;
+}
+
+.cnc-board-card-shell--touch-locked,
+.cnc-board-card-shell--touch-locked * {
+  touch-action: none !important;
 }
 
 .cnc-board-card-shell--draggable:active {
@@ -3304,9 +3318,18 @@
     min-width: calc((100vw - 48px) * 0.6);
   }
 
-  .status-board-columns--cnc-standard:not(.status-board-columns--cnc-detailed) {
-    width: 200%;
-    min-width: 200%;
+  .status-board-page--cnc .status-board-columns--cnc:not(.status-board-columns--cnc-detailed) {
+    --status-board-cnc-column-width: 187px;
+    width: max-content;
+    min-width: 100% !important;
+    grid-template-columns: repeat(
+      var(--status-board-cnc-column-count, 5),
+      minmax(var(--status-board-cnc-column-width), var(--status-board-cnc-column-width))
+    ) !important;
+  }
+
+  .status-board-page--cnc .status-board-columns--cnc-minimal:not(.status-board-columns--cnc-detailed) {
+    --status-board-cnc-column-width: 112px;
   }
 
   .status-board-card__actions .ant-btn {

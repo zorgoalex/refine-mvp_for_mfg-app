@@ -81,3 +81,44 @@ test('fits detailed machine SVG maps and screenshot fallback to viewport height'
   expect(tallViewport.portrait.height).toBeLessThanOrEqual(720);
   expect(tallViewport.screenshot.height).toBeLessThanOrEqual(720);
 });
+
+test('keeps MDF phone columns 15 percent denser than desktop runtime grid', async ({ page }) => {
+  await page.setViewportSize({ width: 408, height: 816 });
+  await page.setContent(`
+    <style>${boardCss}</style>
+    <section class="status-board-page status-board-page--cnc">
+      <section class="status-board-viewport" style="width: 408px; height: 640px;">
+        <div
+          class="status-board-columns status-board-columns--cnc status-board-columns--cnc-standard"
+          style="--status-board-cnc-column-count: 5; grid-template-columns: repeat(5, minmax(var(--status-board-cnc-column-width, 220px), 1fr)); min-width: 1148px;"
+        >
+          ${Array.from({ length: 5 }, (_, index) => `
+            <article class="status-board-column" data-testid="mdf-column-${index}">
+              <header class="status-board-column__header"></header>
+              <div class="status-board-column__cards"></div>
+            </article>
+          `).join('')}
+        </div>
+      </section>
+    </section>
+  `);
+
+  const geometry = await page.evaluate(() => {
+    const columns = Array.from(document.querySelectorAll<HTMLElement>('.status-board-column'));
+    const grid = document.querySelector<HTMLElement>('.status-board-columns--cnc')!;
+    const firstColumn = columns[0]!;
+    return {
+      columnCount: columns.length,
+      columnWidth: Math.round(firstColumn.getBoundingClientRect().width),
+      cssColumnWidth: getComputedStyle(grid).getPropertyValue('--status-board-cnc-column-width').trim(),
+      gridTemplateColumns: getComputedStyle(grid).gridTemplateColumns,
+      viewportScrollWidth: grid.parentElement?.scrollWidth ?? 0,
+    };
+  });
+
+  expect(geometry.columnCount).toBe(5);
+  expect(geometry.cssColumnWidth).toBe('187px');
+  expect(geometry.columnWidth).toBe(187);
+  expect(geometry.gridTemplateColumns).not.toContain('220px');
+  expect(geometry.viewportScrollWidth).toBeGreaterThan(408);
+});
