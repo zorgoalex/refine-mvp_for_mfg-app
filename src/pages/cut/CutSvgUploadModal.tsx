@@ -165,6 +165,10 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     () => matchProblems.filter((problem) => problem.severity === 'error'),
     [matchProblems],
   );
+  const warningMatchProblems = useMemo(
+    () => matchProblems.filter((problem) => problem.severity === 'warning'),
+    [matchProblems],
+  );
 
   const matchSummary = useMemo(() => {
     if (!parsed?.cutLayout.items.length) return null;
@@ -310,6 +314,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         : 'Дождитесь проверки номера задания');
       return;
     }
+    if (warningMatchProblems.length > 0 && !await confirmSvgMatchWarnings(warningMatchProblems)) {
+      return;
+    }
 
     const idempotencyKey = createIdempotencyKey(parsed.svgContentHash);
     setSubmitting(true);
@@ -401,6 +408,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     materialName,
     matchSummary,
     blockingMatchProblems,
+    warningMatchProblems,
     eligibleLoading,
     navigate,
     onClose,
@@ -680,6 +688,35 @@ function showSvgMatchProblems(problems: SvgMatchProblem[]): void {
         ))}
       </Space>
     ),
+  });
+}
+
+function confirmSvgMatchWarnings(problems: SvgMatchProblem[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    Modal.confirm({
+      title: 'Детали уже есть в активных раскроях',
+      width: 720,
+      okText: 'Формировать всё равно',
+      cancelText: 'Вернуться',
+      content: (
+        <Space direction="vertical" size={8}>
+          <Typography.Text>
+            Это предупреждение не запрещает новый раскрой. Проверьте список и продолжите, если это ожидаемо.
+          </Typography.Text>
+          {problems.map((problem) => (
+            <Alert
+              key={problem.key}
+              type="warning"
+              showIcon
+              message={problem.title}
+              description={problem.reason}
+            />
+          ))}
+        </Space>
+      ),
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
   });
 }
 

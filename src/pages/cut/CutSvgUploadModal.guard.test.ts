@@ -28,6 +28,10 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('MANUAL_SVG_UNMATCHED_DETAILS');
     expect(modal).toContain('MANUAL_SVG_ORDER_SCOPE_MISMATCH');
     expect(modal).toContain('Деталь уже есть в активных раскроях');
+    expect(modal).toContain('warningMatchProblems');
+    expect(modal).toContain('confirmSvgMatchWarnings');
+    expect(modal).toContain('Формировать всё равно');
+    expect(modal).toContain('Это предупреждение не запрещает новый раскрой');
     expect(modal).toContain('manual-svg-preset:${asciiHash(commentText)}');
     expect(modal).toContain("okText: cutJobPath ? 'Открыть задание' : 'OK'");
     expect(modal).toContain('onOk: openCutJob');
