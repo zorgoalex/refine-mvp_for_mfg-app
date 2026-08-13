@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -67,6 +67,11 @@ interface SvgItemGroup {
   quantity: number;
 }
 
+interface SvgPreviewState {
+  url: string;
+  fileName: string;
+}
+
 const EMPTY_DEFAULT_ORDER_IDS: number[] = [];
 const EMPTY_DEFAULT_ORDER_NAMES: string[] = [];
 const EMPTY_CUT_JOB_NUMBER_CHECK: CutJobNumberCheck = { status: 'idle', suggestions: [] };
@@ -92,6 +97,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     label: defaultOrderNames[index] ? `${defaultOrderNames[index]} · #${orderId}` : `#${orderId}`,
   })), [defaultOrderIdsKey, defaultOrderNamesKey]);
   const [parsed, setParsed] = useState<ParsedSvgUpload | null>(null);
+  const [svgPreview, setSvgPreview] = useState<SvgPreviewState | null>(null);
+  const svgPreviewUrlRef = useRef<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>(defaultOrderIds);
@@ -170,6 +177,17 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     [matchProblems],
   );
 
+  const replaceSvgPreview = useCallback((next: SvgPreviewState | null) => {
+    revokeObjectUrl(svgPreviewUrlRef.current);
+    svgPreviewUrlRef.current = next?.url ?? null;
+    setSvgPreview(next);
+  }, []);
+
+  useEffect(() => () => {
+    revokeObjectUrl(svgPreviewUrlRef.current);
+    svgPreviewUrlRef.current = null;
+  }, []);
+
   const matchSummary = useMemo(() => {
     if (!parsed?.cutLayout.items.length) return null;
     const unmatched = blockingMatchProblems.reduce((sum, problem) => sum + Math.max(1, problem.quantity), 0);
@@ -191,6 +209,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     },
     onRemove: () => {
       setParsed(null);
+      replaceSvgPreview(null);
       setEligibleDetails([]);
       setSelectedOrderIds(defaultOrderIds);
       setOrderOptions(defaultOrderOptions);
@@ -257,7 +276,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
     setRework(false);
     setEligibleDetails([]);
-  }, []);
+    replaceSvgPreview(null);
+  }, [replaceSvgPreview]);
 
   useEffect(() => {
     if (!open || requestedCutJobId === null) {
@@ -428,6 +448,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   async function handleFile(file: File) {
     setParsing(true);
+    replaceSvgPreview(createSvgPreview(file));
     try {
       const result = await parseSvgCutUploadFile(file);
       setParsed(result);
@@ -477,7 +498,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     <Modal
       open={open}
       title="Загрузка SVG-раскроя"
-      width={760}
+      width={1040}
       onCancel={resetAndClose}
       okText="Сформировать раскрой"
       onOk={() => void submit()}
@@ -487,111 +508,229 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         icon: <FileAddOutlined />,
       }}
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Upload.Dragger {...uploadProps} disabled={parsing || submitting}>
-          <p className="ant-upload-drag-icon"><UploadOutlined /></p>
-          <p className="ant-upload-text">SVG-файл раскроя</p>
-          <p className="ant-upload-hint">Файл проверяется сразу после выбора</p>
-        </Upload.Dragger>
+      <div
+        style={{
+          display: 'flex',
+          gap: 16,
+          alignItems: 'flex-start',
+          flexWrap: 'wrap',
+        }}
+      >
+        <Space
+          direction="vertical"
+          size="middle"
+          style={{
+            flex: '1 1 560px',
+            minWidth: 0,
+          }}
+        >
+          <Upload.Dragger {...uploadProps} disabled={parsing || submitting}>
+            <p className="ant-upload-drag-icon"><UploadOutlined /></p>
+            <p className="ant-upload-text">SVG-файл раскроя</p>
+            <p className="ant-upload-hint">Файл проверяется сразу после выбора</p>
+          </Upload.Dragger>
 
-        {parsed && (
-          <SvgValidationSummary
-            parsed={parsed}
-            eligibleLoading={eligibleLoading}
-            matchSummary={matchSummary}
-            matchProblems={matchProblems}
-          />
-        )}
-
-        <Form layout="vertical">
-          <Form.Item label="Заказы в раскрое" required>
-            <Select
-              mode="multiple"
-              showSearch
-              filterOption={false}
-              value={selectedOrderIds}
-              options={orderOptions}
-              loading={orderSearchLoading}
-              onSearch={searchOrders}
-              onChange={(values) => setSelectedOrderIds(values)}
-              placeholder="Найдите заказ по номеру или названию"
+          {parsed && (
+            <SvgValidationSummary
+              parsed={parsed}
+              eligibleLoading={eligibleLoading}
+              matchSummary={matchSummary}
+              matchProblems={matchProblems}
             />
-          </Form.Item>
+          )}
 
-          <Space size="middle" style={{ width: '100%' }} align="start">
-            <Form.Item label="Материал" style={{ flex: 1, minWidth: 220 }}>
-              <Input
-                value={materialName}
-                onChange={(event) => setMaterialName(event.target.value)}
-                placeholder="МДФ 16мм"
+          <Form layout="vertical">
+            <Form.Item label="Заказы в раскрое" required>
+              <Select
+                mode="multiple"
+                showSearch
+                filterOption={false}
+                value={selectedOrderIds}
+                options={orderOptions}
+                loading={orderSearchLoading}
+                onSearch={searchOrders}
+                onChange={(values) => setSelectedOrderIds(values)}
+                placeholder="Найдите заказ по номеру или названию"
               />
             </Form.Item>
-            <Form.Item label="Станок" style={{ flex: 1, minWidth: 180 }}>
-              <Input
-                value={machineName}
-                onChange={(event) => setMachineName(event.target.value)}
-                placeholder="manual-svg-upload"
-              />
-            </Form.Item>
-            <Form.Item
-              label="№ задания"
-              tooltip="Оставьте пустым для авто-номера"
-              validateStatus={cutJobNumberValidateStatus(cutJobNumberCheck)}
-              help={renderCutJobNumberHelp(cutJobNumberCheck, setRequestedCutJobId)}
-              style={{ width: 190 }}
-            >
-              <InputNumber
-                value={requestedCutJobId}
-                onChange={(value) => setRequestedCutJobId(normalizeRequestedCutJobId(value))}
-                min={1}
-                max={Number.MAX_SAFE_INTEGER}
-                precision={0}
-                controls={false}
-                placeholder="авто"
-                style={{ width: '100%' }}
-              />
-            </Form.Item>
-            <Form.Item label="Тип">
-              <Checkbox checked={rework} onChange={(event) => setRework(event.target.checked)}>
-                Переделка
-              </Checkbox>
-            </Form.Item>
-          </Space>
 
-          <Form.Item label="Пресеты комментариев">
-            <Space wrap>
-              {allPresets.map((preset, index) => (
-                <Button
-                  key={`${preset.category}:${preset.commentText}:${index}`}
-                  size="small"
-                  onClick={() => addPreset(preset.commentText)}
-                >
-                  {preset.label}
-                </Button>
-              ))}
+            <Space size="middle" style={{ width: '100%' }} align="start">
+              <Form.Item label="Материал" style={{ flex: 1, minWidth: 220 }}>
+                <Input
+                  value={materialName}
+                  onChange={(event) => setMaterialName(event.target.value)}
+                  placeholder="МДФ 16мм"
+                />
+              </Form.Item>
+              <Form.Item label="Станок" style={{ flex: 1, minWidth: 180 }}>
+                <Input
+                  value={machineName}
+                  onChange={(event) => setMachineName(event.target.value)}
+                  placeholder="manual-svg-upload"
+                />
+              </Form.Item>
+              <Form.Item
+                label="№ задания"
+                tooltip="Оставьте пустым для авто-номера"
+                validateStatus={cutJobNumberValidateStatus(cutJobNumberCheck)}
+                help={renderCutJobNumberHelp(cutJobNumberCheck, setRequestedCutJobId)}
+                style={{ width: 190 }}
+              >
+                <InputNumber
+                  value={requestedCutJobId}
+                  onChange={(value) => setRequestedCutJobId(normalizeRequestedCutJobId(value))}
+                  min={1}
+                  max={Number.MAX_SAFE_INTEGER}
+                  precision={0}
+                  controls={false}
+                  placeholder="авто"
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+              <Form.Item label="Тип">
+                <Checkbox checked={rework} onChange={(event) => setRework(event.target.checked)}>
+                  Переделка
+                </Checkbox>
+              </Form.Item>
             </Space>
-          </Form.Item>
 
-          <Form.Item label="Комментарии">
-            <Input.TextArea
-              value={commentText}
-              onChange={(event) => setCommentText(event.target.value)}
-              autoSize={{ minRows: 3, maxRows: 6 }}
-              placeholder="весь заказ, фрезы, материал, переделка"
-            />
-          </Form.Item>
-          <Button
-            icon={<SaveOutlined />}
-            loading={presetSaving}
-            onClick={() => void savePreset()}
-          >
-            Сохранить первый комментарий как пресет
-          </Button>
-        </Form>
-      </Space>
+            <Form.Item label="Пресеты комментариев">
+              <Space wrap>
+                {allPresets.map((preset, index) => (
+                  <Button
+                    key={`${preset.category}:${preset.commentText}:${index}`}
+                    size="small"
+                    onClick={() => addPreset(preset.commentText)}
+                  >
+                    {preset.label}
+                  </Button>
+                ))}
+              </Space>
+            </Form.Item>
+
+            <Form.Item label="Комментарии">
+              <Input.TextArea
+                value={commentText}
+                onChange={(event) => setCommentText(event.target.value)}
+                autoSize={{ minRows: 3, maxRows: 6 }}
+                placeholder="весь заказ, фрезы, материал, переделка"
+              />
+            </Form.Item>
+            <Button
+              icon={<SaveOutlined />}
+              loading={presetSaving}
+              onClick={() => void savePreset()}
+            >
+              Сохранить первый комментарий как пресет
+            </Button>
+          </Form>
+        </Space>
+
+        <SvgUploadPreview preview={svgPreview} parsed={parsed} />
+      </div>
     </Modal>
   );
 };
+
+function SvgUploadPreview({
+  preview,
+  parsed,
+}: {
+  preview: SvgPreviewState | null;
+  parsed: ParsedSvgUpload | null;
+}) {
+  const sheetSize = parsed?.cutLayout.sheet
+    ? `${parsed.cutLayout.sheet.widthMm} x ${parsed.cutLayout.sheet.heightMm} мм`
+    : null;
+  return (
+    <div
+      style={{
+        flex: '0 0 320px',
+        maxWidth: '100%',
+        height: 360,
+        borderRadius: 8,
+        background: '#ffffff',
+        boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.12)',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <div
+        style={{
+          padding: '10px 12px',
+          borderBottom: '1px solid #f0f0f0',
+        }}
+      >
+        <Typography.Text strong>Превью SVG</Typography.Text>
+        <Typography.Text
+          type="secondary"
+          ellipsis={preview ? { tooltip: preview.fileName } : true}
+          style={{
+            display: 'block',
+            maxWidth: '100%',
+            fontSize: 12,
+          }}
+        >
+          {preview?.fileName ?? 'Файл не выбран'}
+        </Typography.Text>
+      </div>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#fafafa',
+          padding: 8,
+        }}
+      >
+        {preview ? (
+          <img
+            src={preview.url}
+            alt="Превью SVG-раскроя"
+            draggable={false}
+            decoding="async"
+            style={{
+              display: 'block',
+              maxWidth: '100%',
+              maxHeight: '100%',
+              width: 'auto',
+              height: 'auto',
+              objectFit: 'contain',
+            }}
+          />
+        ) : (
+          <Typography.Text type="secondary">Выберите SVG-файл</Typography.Text>
+        )}
+      </div>
+      <div
+        style={{
+          padding: '8px 12px',
+          borderTop: '1px solid #f0f0f0',
+        }}
+      >
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {sheetSize ?? 'Пропорции сохраняются при показе'}
+        </Typography.Text>
+      </div>
+    </div>
+  );
+}
+
+function createSvgPreview(file: File): SvgPreviewState | null {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
+  return {
+    url: URL.createObjectURL(file),
+    fileName: file.name,
+  };
+}
+
+function revokeObjectUrl(url: string | null): void {
+  if (!url || typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+  URL.revokeObjectURL(url);
+}
 
 function SvgValidationSummary({
   parsed,
