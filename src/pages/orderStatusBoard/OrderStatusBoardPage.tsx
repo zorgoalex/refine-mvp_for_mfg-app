@@ -3463,7 +3463,6 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
     touchDragPointRef.current = { x: touch.clientX, y: touch.clientY };
     if (touchDragLockedRef.current) {
       if (event.cancelable) event.preventDefault();
-      event.stopPropagation();
       return;
     }
     const deltaX = touch.clientX - start.x;
@@ -3484,7 +3483,6 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
     const preventTouchScroll = (event: TouchEvent) => {
       if (!touchDragLockedRef.current) return;
       if (event.cancelable) event.preventDefault();
-      event.stopPropagation();
     };
     document.addEventListener('touchmove', preventTouchScroll, {
       capture: true,
