@@ -3811,7 +3811,6 @@ function FieldPalette({
                   return (
                     <Tooltip
                       key={field.id}
-                      mouseEnterDelay={0.25}
                       title={
                         <Space direction="vertical" size={2}>
                           <div style={{ fontWeight: 600 }}>{field.category}: {field.label}</div>

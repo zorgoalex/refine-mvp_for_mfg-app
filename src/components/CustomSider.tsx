@@ -38,7 +38,7 @@ const { Panel } = Collapse;
 const { Title } = Typography;
 
 const menuLabelWithTooltip = (label: string) => (
-  <Tooltip title={label} placement="right" mouseEnterDelay={0.35}>
+  <Tooltip title={label} placement="right">
     <span className="sidebar-menu-label">{label}</span>
   </Tooltip>
 );

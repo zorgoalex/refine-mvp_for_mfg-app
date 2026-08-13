@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import { Card, Empty, InputNumber, Select, Space, Table, Tag, Typography } from 'antd';
+import { Table } from '../../../../ui/tooltipDelay';
+import { Card, Empty, InputNumber, Select, Space, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import type { OrderHdfDetail } from '../../../../types/orders';

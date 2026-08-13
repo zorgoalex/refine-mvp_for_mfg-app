@@ -25,6 +25,7 @@
     0 2px 4px 0 rgba(0, 0, 0, 0.06);
   --app-image-outline: rgba(0, 0, 0, 0.1);
   --app-workspace-gap: #f0f0f0;
+  --app-tooltip-enter-delay: 0.9s;
   /* Detail visual-grouping: distinct LIGHT pastel hue per group (cycles). */
   --app-group-tint-0: #eef4fc;
   --app-group-tint-1: #eef8f0;
@@ -99,6 +100,17 @@ html {
 
 :where(.app-tabular, .ant-statistic-content, .ant-table-cell, .ant-tag, .ant-badge-count) {
   font-variant-numeric: tabular-nums;
+}
+
+.ant-tooltip.ant-zoom-big-fast-enter,
+.ant-tooltip.ant-zoom-big-fast-appear,
+.ant-tooltip.ant-zoom-big-fast-enter.ant-zoom-big-fast-enter-active,
+.ant-tooltip.ant-zoom-big-fast-appear.ant-zoom-big-fast-appear-active,
+.ant-popover.ant-zoom-big-enter,
+.ant-popover.ant-zoom-big-appear,
+.ant-popover.ant-zoom-big-enter.ant-zoom-big-enter-active,
+.ant-popover.ant-zoom-big-appear.ant-zoom-big-appear-active {
+  animation-delay: var(--app-tooltip-enter-delay) !important;
 }
 
 .app-image-outline {

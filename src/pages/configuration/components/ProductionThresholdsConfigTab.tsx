@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, InputNumber, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
+import { Table } from '../../../ui/tooltipDelay';
+import { Alert, Button, Card, InputNumber, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useList } from '@refinedev/core';
 import { ApiError } from '../../../api/apiError';
