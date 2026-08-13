@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-13",
+    title: "Заказы: группировка деталей",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В форме заказа список «Группировать по…» расширен до полей таблицы деталей из просмотра заказа, кроме размеров и количества.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-13",
     title: "Заказы: удалённые присадки",
     services: ["ERP"],
     repositories: ["repo_erp"],

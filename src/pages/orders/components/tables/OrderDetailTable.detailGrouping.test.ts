@@ -84,6 +84,7 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain('toggleGroupSelection');
     expect(table).toMatch(/detail_id\s*!=\s*null/); // groupKeyOf excludes temp-only rows
     expect(table).toContain('groupLabelOf');
+    expect(table).toContain('groupValueOf');
     expect(table).toContain('row as any).label');
   });
   it('edit tab wires add-to-cut with persisted-id mapping + group-selectable table', () => {

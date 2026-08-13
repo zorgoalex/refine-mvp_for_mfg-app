@@ -37,6 +37,7 @@ describe('show.tsx detail grouping integration', () => {
   });
   it('renders the group label on separator rows + resolves it via groupLabelOf', () => {
     expect(src).toContain('groupLabelOf');
+    expect(src).toContain('groupValueOf');
     expect(src).toContain('row.label');
   });
   it('renders per-group totals in the same columns and colors as the overall summary', () => {
@@ -51,7 +52,7 @@ describe('show.tsx detail grouping integration', () => {
   it('exports active detail grouping as blank rows between groups without summary rows', () => {
     expect(src).toContain('const buildOrderExportDetailRows = (): OrderExcelDetailRow[] =>');
     expect(src).toContain('return groupingActive && grouping.state.field');
-    expect(src).toContain('buildGroupedRows(details, grouping.state.field, { groupLabelOf })');
+    expect(src).toContain('buildGroupedRows(details, grouping.state.field, { groupValueOf, groupLabelOf })');
     expect(src).toContain("if (row.kind === 'separator') return [{ kind: 'blank' as const }]");
     expect(src).toContain("if (row.kind === 'detail') return [mapDetailToExcelRow(row.detail)]");
     expect(src).toContain('return [];');
