@@ -1130,31 +1130,16 @@ async def send_cutting_sequence_reply(client: Any, entity: Any, image_message: A
 
 
 async def send_manual_svg_upload_files(client: Any, entity: Any, paths: list[Path], caption: str | None) -> Any:
-    try:
-        return await client.send_file(
+    sent_messages: list[Any] = []
+    for index, path in enumerate(paths):
+        sent = await client.send_file(
             entity,
-            [str(path) for path in paths],
-            caption=caption,
+            str(path),
+            caption=caption if index == 0 else None,
             force_document=True,
         )
-    except Exception as exc:
-        if not should_fallback_manual_svg_batch_send(exc) or len(paths) <= 1:
-            raise
-        sent_messages: list[Any] = []
-        for index, path in enumerate(paths):
-            sent = await client.send_file(
-                entity,
-                str(path),
-                caption=caption if index == 0 else None,
-                force_document=True,
-            )
-            sent_messages.extend(sent if isinstance(sent, list) else [sent])
-        return sent_messages
-
-
-def should_fallback_manual_svg_batch_send(exc: Exception) -> bool:
-    message = f"{type(exc).__name__}: {exc}".lower()
-    return "media invalid" in message or "sendmultimediarequest" in message
+        sent_messages.extend(sent if isinstance(sent, list) else [sent])
+    return sent_messages
 
 
 def message_identity(message: Any, *, include_reactions: bool) -> dict[str, Any]:
