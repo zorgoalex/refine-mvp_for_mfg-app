@@ -399,6 +399,10 @@ describe('CutPage source guards', () => {
     expect(sheetLabelSource).toMatch(/next\.filter\(\(template\) => template\.isActive\)/);
     expect(sheetLabelSource).toContain('printLabelSvgPages');
     expect(sheetLabelSource).toContain('const runPrint = async () =>');
+    expect(sheetLabelSource).toContain('const [previewPageIndex, setPreviewPageIndex] = useState(0)');
+    expect(sheetLabelSource).toContain('visiblePreviewSvg');
+    expect(sheetLabelSource).toContain('Предыдущее');
+    expect(sheetLabelSource).toContain('Следующее');
     expect(sheetLabelSource).toContain('Скачать ZIP');
     expect(sheetLabelSource).toContain('cutSheetScope');
     expect(sheetLabelSource).not.toContain("element.kind === 'cut_map'");
