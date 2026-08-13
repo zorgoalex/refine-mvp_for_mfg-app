@@ -99,8 +99,16 @@ export interface SheetPlacementPiece {
     actualSide: 'width' | 'height';
     message: string;
   };
-  /** Frozen label snapshot from calculate (absent in legacy records). */
-  label?: { orderId: number | null; detailNumber: number | null; widthMm: number | null; heightMm: number | null };
+  /** Frozen label snapshot from calculate/import (absent in legacy records). */
+  label?: {
+    orderId: number | null;
+    orderName?: string | null;
+    detailId?: number | null;
+    detailNumber: number | null;
+    widthMm: number | null;
+    heightMm: number | null;
+    materialName?: string | null;
+  };
 }
 
 export interface SheetPlacements {

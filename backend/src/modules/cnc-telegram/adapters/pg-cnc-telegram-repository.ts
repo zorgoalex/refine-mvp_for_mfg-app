@@ -1892,16 +1892,15 @@ function packetSelectSql(whereSql: string): string {
             sheet.sheet_index,
             sheet.sheet_ordinal,
             sheet.variant,
-            jsonb_agg(
+            COALESCE(jsonb_agg(
               placement.order_detail_id
               ORDER BY placement.order_id, placement.order_detail_id, placement.instance
-            ) AS detail_ids
+            ) FILTER (WHERE placement.order_detail_id IS NOT NULL), '[]'::jsonb) AS detail_ids
           FROM cut_result_placement placement
           JOIN cut_result_sheet_map sheet
             ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
            AND sheet.is_effective = true
           WHERE placement.cut_result_id = p.svg_cut_result_id
-            AND placement.order_detail_id IS NOT NULL
           GROUP BY sheet.cut_group_id, sheet.sheet_index, sheet.sheet_ordinal, sheet.variant
         ) sheet_summary
       ) AS svg_cut_sheets_json,

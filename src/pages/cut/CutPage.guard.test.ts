@@ -149,6 +149,18 @@ describe('CutPage source guards', () => {
     expect(source).toContain('Убрать');
   });
 
+  it('lists informational SVG details when a cut job has no ERP detail items', () => {
+    expect(source).toContain('cutJobInformationalDetails(job)');
+    expect(source).toContain('informationalJobDetailColumns');
+    expect(source).toContain('dataSource={informationalJobDetails}');
+    expect(source).toContain('В SVG не найдено распознанных деталей');
+  });
+
+  it('uses parsed SVG labels for informational cut job order links in list and export', () => {
+    expect(source).toContain('cutJobOrderRefsForJob(candidate).map(cutJobOrderLabel).join');
+    expect(source).toContain('refs={cutJobOrderRefsForJob(row)}');
+  });
+
   it('shows the full per-detail order fields (position + names), never price/sum', () => {
     // Position number + resolved dictionary names mirror the order form's detail.
     expect(source).toContain('detailNumber');
@@ -539,7 +551,7 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain("title: 'Заказы'");
     expect(source).toContain('<CutJobOrderLinks');
     expect(source).toContain('items={row.items}');
-    expect(source).toContain('<span>Заказы: <CutJobOrderLinks items={job.items}');
+    expect(source).toContain('<span>Заказы: <CutJobOrderLinks items={job.items} refs={jobOrderRefs}');
     expect(source).toContain("title: 'Деталей'");
     expect(source).toContain("title: isOperational ? 'Площадь, м²' : 'Площадь, итого'");
     expect(source).toContain("title: isOperational ? 'Листы' : 'Кол-во листов раскроя'");

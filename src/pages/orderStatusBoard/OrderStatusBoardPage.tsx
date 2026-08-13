@@ -4898,6 +4898,8 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
             true,
             'top-left',
             cutResultNo ?? undefined,
+            false,
+            true,
           )
         : Promise.reject(new Error('Нет связанного превью раскроя'));
     loadPreview
@@ -4926,6 +4928,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
 
   if (!open) return null;
   const hasCutSheetScope = Boolean(cutJobId && labelSheet);
+  const generatedSvgPreview = !imageUrl && hasCutSheetScope;
   const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null);
   const disabledLabelReason = labelDetailInstances.length === 0
     ? 'Нет сопоставленных деталей для бирок'
@@ -4989,9 +4992,9 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
         open={printPreviewOpen}
         imageUrl={objectUrl}
         title={`Скрин раскроя · ${title}`}
-        status="Скрин из Telegram-чата"
+        status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}
         alt={`Скрин листа ${title}`}
-        printTitle={`Раскрой Telegram ${title}`}
+        printTitle={generatedSvgPreview ? `Раскрой ${title}` : `Раскрой Telegram ${title}`}
         printHeader={printHeader}
         printMode="stretch-page-height"
         onClose={() => setPrintPreviewOpen(false)}

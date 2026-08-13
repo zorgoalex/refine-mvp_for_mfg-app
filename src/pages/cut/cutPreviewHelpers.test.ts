@@ -211,6 +211,45 @@ describe('cutPreviewHelpers', () => {
       const overlay = buildSheetPieceOverlays(native, [item], false)[0];
       expect(overlay.labelLines).toContain('600*400');
     });
+
+    it('builds overlays for informational SVG pieces without ERP detail ids', () => {
+      const informational: SheetPlacements = {
+        ...placements,
+        pieces: [{
+          item_id: 'svg-1-__x007e__x007e_vyborka',
+          instance: 1,
+          x_mm: 0,
+          y_mm: 0,
+          width_mm: 345,
+          height_mm: 476,
+          rotated: true,
+          label: {
+            orderId: 11520,
+            orderName: '2777',
+            detailId: null,
+            detailNumber: 3,
+            widthMm: 476,
+            heightMm: 345,
+            materialName: 'ХДФ',
+          },
+        }],
+      };
+
+      const overlay = buildSheetPieceOverlays(informational, [], false)[0];
+
+      expect(overlay).toMatchObject({
+        key: 'svg-1-__x007e__x007e_vyborka:1',
+        orderId: 11520,
+        orderDetailId: null,
+        detailNumber: 3,
+      });
+      expect(overlay.labelLines).toEqual(['2777', '# 3 · 1', '476*345']);
+      expect(overlay.tooltipRows).toEqual(expect.arrayContaining([
+        { label: 'Заказ', value: '2777' },
+        { label: 'Позиция', value: '3' },
+        { label: 'Материал', value: 'ХДФ' },
+      ]));
+    });
     const item: CutJobItemDto = {
       cutJobItemId: 1,
       orderDetailId: 42,

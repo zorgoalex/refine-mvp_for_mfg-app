@@ -12,8 +12,9 @@ describe('order Telegram screenshot UI wiring', () => {
     expect(filesBlock).toMatch(/OrderTelegramScreenshots orderId=\{Number\(record\?\.order_id\)\}/);
     expect(filesSection).toMatch(/OrderTelegramScreenshots orderId=\{Number\(header\.order_id\)\}/);
     expect(orderForm).toMatch(/OrderTelegramScreenshots orderId=\{header\.order_id \?\? orderId\}/);
-    expect(component).toContain('Скрины раскроя из Telegram');
+    expect(component).toContain('Скрины раскроя');
     expect(component).toMatch(/downloadOrderScreenshotPreview/);
+    expect(component).toMatch(/fetchSvgCutScreenshotBlob/);
   });
 
   it('opens fullscreen viewer with zoom, print, close and authenticated blob cleanup', () => {

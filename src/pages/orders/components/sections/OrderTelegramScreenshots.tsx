@@ -9,6 +9,7 @@ import {
 import { Alert, Button, Modal, Spin, Tag, Tooltip, Typography } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cncTelegramApi } from '../../../../api/cncTelegramApi';
+import { cutApi } from '../../../../api/cutApi';
 import { isApiError } from '../../../../api/apiError';
 import type {
   CncTelegramOrderScreenshot,
@@ -89,6 +90,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
   }, []);
 
   const requestRestore = useCallback(async (item: CncTelegramOrderScreenshot) => {
+    if (item.kind !== 'telegram') return;
     if (!validOrderId) return;
     setViewerError(null);
     setRestorePolling(true);
@@ -109,8 +111,10 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
     setOriginalLoading(true);
     setViewerError(null);
     try {
-      const result = await cncTelegramApi.downloadOrderScreenshotImage(validOrderId, item.packetId);
-      const nextUrl = URL.createObjectURL(result.blob);
+      const blob = item.kind === 'svg_cut'
+        ? await fetchSvgCutScreenshotBlob(item, 'print')
+        : (await cncTelegramApi.downloadOrderScreenshotImage(validOrderId, item.packetId)).blob;
+      const nextUrl = URL.createObjectURL(blob);
       if (viewerPacketIdRef.current === item.packetId) {
         replaceOriginalUrl(nextUrl);
         setRestorePolling(false);
@@ -119,10 +123,10 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
       }
     } catch (error) {
       if (viewerPacketIdRef.current !== item.packetId) return;
-      if (isApiError(error) && (error.status === 404 || error.status === 410)) {
+      if (item.kind === 'telegram' && isApiError(error) && (error.status === 404 || error.status === 410)) {
         await requestRestore(item);
       } else {
-        setViewerError(readError(error, 'Не удалось открыть оригинал скрина'));
+        setViewerError(readError(error, item.kind === 'svg_cut' ? 'Не удалось открыть SVG-раскрой' : 'Не удалось открыть оригинал скрина'));
       }
     } finally {
       if (originalLoadingPacketRef.current === item.packetId) {
@@ -169,7 +173,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
     setScale(DEFAULT_SCALE);
     setViewerError(null);
     setRestorePolling(false);
-    if (item.originalAvailable) void loadOriginal(item);
+    if (item.kind === 'svg_cut' || item.originalAvailable) void loadOriginal(item);
     else void requestRestore(item);
   }, [loadOriginal, replaceOriginalUrl, requestRestore]);
 
@@ -187,18 +191,28 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
   if (!validOrderId) return null;
   const screenshots = response?.screenshots ?? [];
   const displayedUrl = originalUrl || selectedPreviewUrl;
-  const viewerStatus = originalLoading
-    ? 'Загрузка оригинала…'
-    : restorePolling
-      ? 'Восстанавливаем оригинал из Telegram…'
+  const selectedIsSvgCut = selected?.kind === 'svg_cut';
+  const viewerStatus = selectedIsSvgCut
+    ? originalLoading
+      ? 'Генерация раскроя…'
       : originalUrl
-        ? 'Оригинал'
-        : 'Сохранённое превью';
+        ? 'SVG-раскрой'
+        : 'Сохранённое превью'
+    : originalLoading
+      ? 'Загрузка оригинала…'
+      : restorePolling
+        ? 'Восстанавливаем оригинал из Telegram…'
+        : originalUrl
+          ? 'Оригинал'
+          : 'Сохранённое превью';
+  const viewerTitle = selectedIsSvgCut
+    ? `Скрин раскроя · задание #${selected?.cutJobId ?? '—'}`
+    : `Скрин раскроя · Telegram #${selected?.sourceMessageId ?? '—'}`;
 
   return (
     <section className={`order-telegram-screenshots${compact ? ' order-telegram-screenshots--compact' : ''}`}>
       <div className="order-telegram-screenshots__heading">
-        <span>Скрины раскроя из Telegram</span>
+        <span>Скрины раскроя</span>
         {screenshots.length > 0 ? <Tag>{screenshots.length}</Tag> : null}
       </div>
       {loading ? <Spin size="small" /> : null}
@@ -240,7 +254,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
         <div className="order-telegram-viewer">
           <div className="order-telegram-viewer__toolbar">
             <div className="order-telegram-viewer__title">
-              <strong>Скрин раскроя · Telegram #{selected?.sourceMessageId}</strong>
+              <strong>{viewerTitle}</strong>
               <span>{viewerStatus}</span>
             </div>
             <div className="order-telegram-viewer__actions">
@@ -254,7 +268,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
                 <Button aria-label="Увеличить изображение" icon={<ZoomInOutlined />} disabled={scale >= MAX_SCALE} onClick={() => setScale((value) => clampScale(value + SCALE_STEP))} />
               </Tooltip>
               <Tooltip title={displayedUrl ? 'Печать текущего изображения' : 'Изображение ещё не загружено'}>
-                <Button aria-label="Печать скрина" icon={<PrinterOutlined />} disabled={!displayedUrl} onClick={() => displayedUrl && printImage(displayedUrl, `Раскрой Telegram ${selected?.sourceMessageId ?? ''}`)}>
+                <Button aria-label="Печать скрина" icon={<PrinterOutlined />} disabled={!displayedUrl} onClick={() => displayedUrl && printImage(displayedUrl, selectedIsSvgCut ? `Раскрой ${selected?.cutJobId ?? ''}` : `Раскрой Telegram ${selected?.sourceMessageId ?? ''}`)}>
                   Печать
                 </Button>
               </Tooltip>
@@ -269,14 +283,16 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
               type="warning"
               showIcon
               message={viewerError}
-              action={selected ? <Button size="small" icon={<ReloadOutlined />} onClick={() => void requestRestore(selected)}>Повторить</Button> : null}
+              action={selected && selected.kind === 'telegram' ? <Button size="small" icon={<ReloadOutlined />} onClick={() => void requestRestore(selected)}>Повторить</Button> : null}
             />
           ) : null}
           <div className="order-telegram-viewer__canvas" aria-live="polite">
             {displayedUrl ? (
               <img
                 src={displayedUrl}
-                alt={`Скрин раскроя из Telegram, сообщение ${selected?.sourceMessageId ?? ''}`}
+                alt={selectedIsSvgCut
+                  ? `Скрин задания на раскрой ${selected?.cutJobId ?? ''}`
+                  : `Скрин раскроя из Telegram, сообщение ${selected?.sourceMessageId ?? ''}`}
                 style={{ width: `${scale * 100}%` }}
               />
             ) : (
@@ -308,9 +324,12 @@ function TelegramScreenshotThumbnail({
     let cancelled = false;
     let objectUrl: string | null = null;
     setFailed(false);
-    void cncTelegramApi.downloadOrderScreenshotPreview(orderId, item.packetId)
-      .then((result) => {
-        objectUrl = URL.createObjectURL(result.blob);
+    const load = item.kind === 'svg_cut'
+      ? fetchSvgCutScreenshotBlob(item, 'thumb')
+      : cncTelegramApi.downloadOrderScreenshotPreview(orderId, item.packetId).then((result) => result.blob);
+    void load
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
         if (cancelled) URL.revokeObjectURL(objectUrl);
         else setUrl(objectUrl);
       })
@@ -321,30 +340,69 @@ function TelegramScreenshotThumbnail({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [item.packetId, orderId]);
+  }, [item, orderId]);
 
   const restoreLabel = item.restore?.status === 'pending' || item.restore?.status === 'processing'
     ? 'Восстанавливается'
-    : item.originalAvailable
+    : item.kind === 'svg_cut'
+      ? `Раскрой #${item.cutJobId ?? '—'}`
+      : item.originalAvailable
       ? 'Оригинал доступен'
       : 'Нажмите для загрузки';
+  const title = item.kind === 'svg_cut'
+    ? `SVG-раскрой #${item.cutJobId ?? '—'}`
+    : `Telegram #${item.sourceMessageId ?? '—'}`;
   return (
     <button
       type="button"
       className="order-telegram-screenshot-card"
       onClick={() => onOpen(item, url)}
-      aria-label={`Открыть скрин раскроя Telegram ${item.sourceMessageId}`}
+      aria-label={`Открыть скрин раскроя ${title}`}
     >
       <span className="order-telegram-screenshot-card__image">
         {url ? <img src={url} alt="" /> : <span className="order-telegram-screenshot-card__placeholder"><PictureOutlined />{failed ? 'Превью недоступно' : 'Загрузка…'}</span>}
       </span>
       <span className="order-telegram-screenshot-card__meta">
-        <strong>Telegram #{item.sourceMessageId}</strong>
+        <strong>{title}</strong>
         <span>{formatDate(item.sourceCreatedAt)} · {item.matchedDetailCount} поз.</span>
         <span className={item.originalAvailable ? 'is-available' : 'is-expired'}>{restoreLabel}</span>
       </span>
     </button>
   );
+}
+
+async function fetchSvgCutScreenshotBlob(
+  item: CncTelegramOrderScreenshot,
+  preset: 'thumb' | 'print',
+): Promise<Blob> {
+  if (
+    item.kind !== 'svg_cut' ||
+    !isPositiveNumber(item.cutJobId) ||
+    !isPositiveNumber(item.cutResultNo) ||
+    !isPositiveNumber(item.cutGroupId) ||
+    !Number.isInteger(item.sheetIndex) ||
+    item.sheetIndex < 0
+  ) {
+    throw new Error('SVG-раскрой не содержит данных листа');
+  }
+  return cutApi.fetchSheetPng(
+    item.cutJobId,
+    item.cutGroupId,
+    item.sheetIndex,
+    preset,
+    false,
+    item.variant ?? 'auto',
+    undefined,
+    true,
+    'top-left',
+    item.cutResultNo,
+    false,
+    true,
+  );
+}
+
+function isPositiveNumber(value: number | null | undefined): value is number {
+  return Number.isInteger(value) && Number(value) > 0;
 }
 
 function clampScale(value: number): number {

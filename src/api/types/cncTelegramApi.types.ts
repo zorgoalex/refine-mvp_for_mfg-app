@@ -217,15 +217,22 @@ export interface CncTelegramOrderCuttingSequencesResponse {
 export type CncTelegramMediaRestoreStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface CncTelegramOrderScreenshot {
+  kind: 'telegram' | 'svg_cut';
   packetId: string;
-  sourceMessageId: number;
+  sourceMessageId: number | null;
   sourceCreatedAt: string;
   programName: string | null;
   materialName: string;
   matchedDetailCount: number;
   itemQuantityTotal: number;
-  previewUrl: string;
-  imageUrl: string;
+  previewUrl: string | null;
+  imageUrl: string | null;
+  cutJobId?: number | null;
+  cutResultNo?: number | null;
+  cutGroupId?: number | null;
+  sheetIndex?: number | null;
+  sheetNumber?: number | null;
+  variant?: 'auto' | 'manual' | null;
   originalAvailable: boolean;
   availableUntil: string;
   restore: {

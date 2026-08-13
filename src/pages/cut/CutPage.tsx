@@ -190,6 +190,17 @@ type CutJobOrderRef = {
   orderDeleted: boolean;
 };
 
+type InformationalCutDetailRow = {
+  key: string;
+  orderId: number | null;
+  orderName: string | null;
+  detailNumber: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  materialName: string | null;
+  quantity: number;
+};
+
 type CutPreviewSummaryRow = {
   key: string;
   filmName: string;
@@ -441,12 +452,13 @@ function mergeCutSelectOptions<T extends { value: number }>(base: T[], extra: T[
 
 function cutJobOrderOptions(job: CutJobDto | null): CutOrderSelectOption[] {
   const byId = new Map<number, CutOrderSelectOption>();
-  for (const item of job?.items ?? []) {
-    if (byId.has(item.orderId)) continue;
-    const label = item.orderName?.trim() || `#${item.orderId}`;
-    const title = item.orderDeleted ? `${label} · удалён` : label;
-    byId.set(item.orderId, {
-      value: item.orderId,
+  const refs = job ? cutJobOrderRefsForJob(job) : [];
+  for (const ref of refs) {
+    if (byId.has(ref.orderId)) continue;
+    const label = cutJobOrderLabel(ref);
+    const title = ref.orderDeleted ? `${label} · удалён` : label;
+    byId.set(ref.orderId, {
+      value: ref.orderId,
       label,
       title,
       searchText: label.toLowerCase(),
@@ -476,6 +488,77 @@ function cutJobOrderRefs(items: readonly CutJobItemDto[]): CutJobOrderRef[] {
     const right = b.orderName ?? `#${b.orderId}`;
     return left.localeCompare(right, 'ru', { numeric: true });
   });
+}
+
+function cutJobOrderRefsForJob(job: CutJobDto): CutJobOrderRef[] {
+  const byId = new Map<number, CutJobOrderRef>();
+  for (const ref of cutJobOrderRefs(job.items)) {
+    byId.set(ref.orderId, { ...ref });
+  }
+  for (const row of cutJobInformationalDetails(job)) {
+    if (!isPositiveInt(row.orderId)) continue;
+    const existing = byId.get(row.orderId);
+    if (existing) {
+      if (!existing.orderName && row.orderName?.trim()) existing.orderName = row.orderName.trim();
+      continue;
+    }
+    byId.set(row.orderId, {
+      orderId: row.orderId,
+      orderName: row.orderName?.trim() || null,
+      orderDeleted: false,
+    });
+  }
+  return [...byId.values()].sort((a, b) => cutJobOrderLabel(a).localeCompare(cutJobOrderLabel(b), 'ru', { numeric: true }));
+}
+
+function cutJobInformationalDetails(job: CutJobDto): InformationalCutDetailRow[] {
+  const rows = new Map<string, InformationalCutDetailRow>();
+  for (const group of job.groups) {
+    for (const sheet of group.sheets) {
+      for (const piece of sheet.placements.pieces) {
+        const label = piece.label;
+        if (!label) continue;
+        const orderName = label.orderName?.trim() || null;
+        const widthMm = label.widthMm ?? piece.width_mm ?? null;
+        const heightMm = label.heightMm ?? piece.height_mm ?? null;
+        if (!orderName && !isPositiveInt(label.orderId) && label.detailNumber == null && widthMm == null && heightMm == null) continue;
+        const materialName = label.materialName?.trim() || null;
+        const key = [
+          label.orderId ?? '',
+          orderName ?? '',
+          label.detailNumber ?? '',
+          widthMm ?? '',
+          heightMm ?? '',
+          materialName ?? '',
+        ].join(':');
+        const existing = rows.get(key);
+        if (existing) {
+          existing.quantity += 1;
+          continue;
+        }
+        rows.set(key, {
+          key,
+          orderId: isPositiveInt(label.orderId) ? label.orderId : null,
+          orderName,
+          detailNumber: label.detailNumber ?? null,
+          widthMm,
+          heightMm,
+          materialName,
+          quantity: 1,
+        });
+      }
+    }
+  }
+  return [...rows.values()].sort((a, b) => (
+    (a.orderName ?? String(a.orderId ?? '')).localeCompare(b.orderName ?? String(b.orderId ?? ''), 'ru', { numeric: true }) ||
+    (a.detailNumber ?? 0) - (b.detailNumber ?? 0) ||
+    (a.widthMm ?? 0) - (b.widthMm ?? 0) ||
+    (a.heightMm ?? 0) - (b.heightMm ?? 0)
+  ));
+}
+
+function isPositiveInt(value: number | null | undefined): value is number {
+  return Number.isInteger(value) && Number(value) > 0;
 }
 
 function cutJobOrderLabel(ref: CutJobOrderRef): string {
@@ -513,7 +596,7 @@ function cutJobCreatedAtInRange(value: string | null | undefined, range: CutOrde
 function cutJobMatchesOrderFilter(job: CutJobDto, query: string): boolean {
   const needle = query.trim().toLocaleLowerCase('ru-RU');
   if (!needle) return true;
-  return cutJobOrderRefs(job.items).some((ref) =>
+  return cutJobOrderRefsForJob(job).some((ref) =>
     `${ref.orderId} ${ref.orderName ?? ''}`
       .toLocaleLowerCase('ru-RU')
       .includes(needle),
@@ -550,16 +633,18 @@ function CutOrderReference({
 
 function CutJobOrderLinks({
   items,
+  refs,
   onOpen,
 }: {
   items: readonly CutJobItemDto[];
+  refs?: readonly CutJobOrderRef[];
   onOpen: (orderId: number) => void;
 }): JSX.Element {
-  const refs = cutJobOrderRefs(items);
-  if (refs.length === 0) return <Text type="secondary">—</Text>;
+  const resolvedRefs = refs ?? cutJobOrderRefs(items);
+  if (resolvedRefs.length === 0) return <Text type="secondary">—</Text>;
   return (
     <span className="cut-job-order-links">
-      {refs.map((ref, index) => (
+      {resolvedRefs.map((ref, index) => (
         <React.Fragment key={ref.orderId}>
           {index > 0 ? <span className="cut-job-order-links__separator">, </span> : null}
           <CutOrderReference
@@ -2544,7 +2629,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         cutJobStatusLabel(candidate.status),
         cutJobSourceLabel(candidate.source),
         candidate.totals.positions,
-        cutJobOrderRefs(candidate.items).map(cutJobOrderLabel).join(', '),
+        cutJobOrderRefsForJob(candidate).map(cutJobOrderLabel).join(', '),
         candidate.totals.details,
         candidate.totals.area,
         candidate.status === 'ready' ? candidate.totals.sheets : '',
@@ -2685,6 +2770,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         render: (_: unknown, row: CutJobDto) => (
           <CutJobOrderLinks
             items={row.items}
+            refs={cutJobOrderRefsForJob(row)}
             onOpen={(orderId) => show('orders_view', orderId, 'push')}
           />
         ),
@@ -2931,6 +3017,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     () => job?.items.map((item) => item.orderDetailId).filter((id) => Number.isInteger(id) && id > 0) ?? [],
     [job?.items],
   );
+  const informationalJobDetails = useMemo(
+    () => job && job.items.length === 0 ? cutJobInformationalDetails(job) : [],
+    [job],
+  );
+  const informationalJobDetailTotal = useMemo(
+    () => informationalJobDetails.reduce((sum, row) => sum + row.quantity, 0),
+    [informationalJobDetails],
+  );
+  const jobOrderRefs = useMemo(
+    () => job ? cutJobOrderRefsForJob(job) : [],
+    [job],
+  );
   const { bathCutJobByDetailId: jobBathCutJobByDetailId } = useCutDetailLastReady({
     enabled: canViewCut && jobItemDetailIds.length > 0,
     detailIds: jobItemDetailIds,
@@ -3063,6 +3161,41 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       },
     ];
   }, [busy, canManage, isArchivedJob, jobBathCutJobByDetailId, openJob, removeJobItem, show]);
+
+  const informationalJobDetailColumns: ColumnsType<InformationalCutDetailRow> = useMemo(() => {
+    const dash = (value: unknown) => (value === null || value === undefined || value === '' ? '—' : String(value));
+    return [
+      {
+        title: 'Заказ',
+        dataIndex: 'orderName',
+        key: 'order',
+        width: 160,
+        fixed: 'left',
+        render: (_: unknown, row: InformationalCutDetailRow) => (
+          isPositiveInt(row.orderId) ? (
+            <CutOrderReference
+              orderId={row.orderId}
+              orderName={row.orderName}
+              onOpen={() => show('orders_view', row.orderId!, 'push')}
+            />
+          ) : dash(row.orderName)
+        ),
+      },
+      { title: 'Поз.', dataIndex: 'detailNumber', key: 'position', width: 80, render: dash },
+      {
+        title: 'Размер (Ш×В)',
+        key: 'size',
+        width: 140,
+        render: (_: unknown, row: InformationalCutDetailRow) => (
+          row.widthMm !== null || row.heightMm !== null
+            ? `${dash(row.widthMm)}×${dash(row.heightMm)}`
+            : '—'
+        ),
+      },
+      { title: 'Кол-во', dataIndex: 'quantity', key: 'quantity', width: 90 },
+      { title: 'Материал', dataIndex: 'materialName', key: 'material', width: 180, render: dash },
+    ];
+  }, [show]);
 
   const noSheetMsg = noSheetSpecMessage(noSheetSpecCount);
   const isCreationPreview = job === null && eligible !== null;
@@ -3775,7 +3908,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 <div className="cut-results-operational-summary">
                   <Text strong>Сводка</Text>
                   <dl>
-                    <div><dt>Заказы</dt><dd><CutJobOrderLinks items={job.items} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></dd></div>
+                    <div><dt>Заказы</dt><dd><CutJobOrderLinks items={job.items} refs={jobOrderRefs} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></dd></div>
                     <div><dt>Материалов</dt><dd>{job.totals.materialsCount}</dd></div>
                     <div><dt>Плёнок</dt><dd>{job.totals.filmsCount}</dd></div>
                     <div><dt>Автор</dt><dd>{authSession.getUser()?.username ?? '—'}</dd></div>
@@ -3858,7 +3991,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <>
                 <Space className="cut-job-operational-stats" size="large" style={{ marginBottom: 12 }} wrap>
                   <span>Позиции: <b>{job.totals.positions}</b></span>
-                  <span>Заказы: <CutJobOrderLinks items={job.items} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></span>
+                  <span>Заказы: <CutJobOrderLinks items={job.items} refs={jobOrderRefs} onOpen={(orderId) => show('orders_view', orderId, 'push')} /></span>
                   <span>Деталей: <b>{job.totals.details}</b></span>
                   <span>Материалов: <b>{job.totals.materialsCount}</b></span>
                   <span>Плёнок: <b>{job.totals.filmsCount}</b></span>
@@ -4096,24 +4229,37 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
       {job && (
         <Collapse className="cut-page-modern__details" size="small" defaultActiveKey={[]}>
-          <Panel header={`Детали задания (${job.items.length})`} key="cut-job-details">
+          <Panel header={`Детали задания (${job.items.length > 0 ? job.items.length : informationalJobDetailTotal})`} key="cut-job-details">
             <TableTopScroll>
-              <Table<CutJobItemDto>
-                className="cut-job-details-table details-grouped"
-                size="small"
-                rowKey="cutJobItemId"
-                columns={jobItemColumns}
-                dataSource={job.items}
-                pagination={false}
-                scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}
-                rowClassName={(row) =>
-                  orderDeletedReferenceClassName(
-                    row.orderDeleted,
-                    `detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}`,
-                  )
-                }
-                locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
-              />
+              {job.items.length > 0 ? (
+                <Table<CutJobItemDto>
+                  className="cut-job-details-table details-grouped"
+                  size="small"
+                  rowKey="cutJobItemId"
+                  columns={jobItemColumns}
+                  dataSource={job.items}
+                  pagination={false}
+                  scroll={{ x: 1900, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}
+                  rowClassName={(row) =>
+                    orderDeletedReferenceClassName(
+                      row.orderDeleted,
+                      `detail-group-tint-${jobItemOrderTintByOrderId.get(row.orderId) ?? 0}`,
+                    )
+                  }
+                  locale={{ emptyText: 'В задании пока нет деталей — добавьте их из заказа или через «Загрузить подходящие детали»' }}
+                />
+              ) : (
+                <Table<InformationalCutDetailRow>
+                  className="cut-job-details-table details-grouped"
+                  size="small"
+                  rowKey="key"
+                  columns={informationalJobDetailColumns}
+                  dataSource={informationalJobDetails}
+                  pagination={false}
+                  scroll={{ x: 650, y: CUT_JOB_DETAILS_TABLE_BODY_HEIGHT }}
+                  locale={{ emptyText: 'В SVG не найдено распознанных деталей' }}
+                />
+              )}
             </TableTopScroll>
           </Panel>
         </Collapse>

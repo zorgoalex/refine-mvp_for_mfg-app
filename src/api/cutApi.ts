@@ -156,15 +156,17 @@ export const cutApi = {
     axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     resultNo?: number,
     pieceMetadata = false,
+    showLabels = false,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetPng(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
       : apiRoutes.cutJobs.resultSheetPng(validateCutJobId(cutJobId), validateCutJobId(resultNo), validateCutJobId(groupId), sheetIndex);
     const params = new URLSearchParams();
     params.append('preset', preset);
-    // On-screen preview always requests no baked labels so the HTML overlay
-    // is the sole label source and there is no double-label collision.
-    params.append('labels', 'off');
+    // Most on-screen cut previews use no baked labels because the HTML overlay
+    // is the label source. Imported SVG cards have no overlay, so callers can
+    // request baked labels explicitly.
+    params.append('labels', showLabels ? 'on' : 'off');
     if (landscape) params.append('orientation', 'landscape');
     // origin top-left (transpose) is the default; emit explicitly so the RAW
     // (legacy 90° CW) half is never silently dead and browser cache keys differ.
