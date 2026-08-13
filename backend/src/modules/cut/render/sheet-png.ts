@@ -83,3 +83,29 @@ export function renderSheetPng(input: RenderSheetPngInput): Buffer {
   });
   return Buffer.from(resvg.render().asPng());
 }
+
+export interface RenderRawSvgPngInput {
+  svg: string;
+  /** longest-side cap in px */
+  targetPx: number;
+  sheetWidthMm?: number | null;
+  sheetHeightMm?: number | null;
+}
+
+export function renderRawSvgPng(input: RenderRawSvgPngInput): Buffer {
+  const width = input.sheetWidthMm;
+  const height = input.sheetHeightMm;
+  const fitTo = width != null && height != null && width > 0 && height > 0 && width < height
+    ? ({ mode: 'height', value: input.targetPx } as const)
+    : ({ mode: 'width', value: input.targetPx } as const);
+
+  const resvg = new Resvg(input.svg, {
+    fitTo,
+    font: {
+      fontFiles: [requireFontPath()],
+      defaultFontFamily: FONT_FAMILY,
+      loadSystemFonts: false,
+    },
+  });
+  return Buffer.from(resvg.render().asPng());
+}

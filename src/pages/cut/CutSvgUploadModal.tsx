@@ -19,6 +19,8 @@ import { ordersApi } from '../../api/ordersApi';
 import { isApiError, type ApiError } from '../../api/apiError';
 import type {
   CncTelegramManualSvgCommentPreset,
+  CncTelegramManualSvgUploadFile,
+  CncTelegramManualSvgUploadFileKind,
   CncTelegramManualSvgUploadRequest,
 } from '../../api/types/cncTelegramApi.types';
 import type { EligibleDetailDto } from '../../api/types/cutApi.types';
@@ -66,6 +68,11 @@ interface SvgPreviewState {
   fileName: string;
 }
 
+interface ManualSvgUploadFileState {
+  payload: CncTelegramManualSvgUploadFile;
+  selectedAt: number;
+}
+
 type SvgUploadMatchMode = 'order_details' | 'informational';
 type SvgCommentPresetOption = Pick<CncTelegramManualSvgCommentPreset, 'label' | 'commentText' | 'category'>;
 type FloatingSvgPreviewResizeCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
@@ -84,6 +91,7 @@ const FLOATING_SVG_PREVIEW_MIN_WIDTH = 360;
 const FLOATING_SVG_PREVIEW_MIN_HEIGHT = 320;
 const FLOATING_SVG_PREVIEW_DEFAULT_WIDTH = 760;
 const FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT = 620;
+const MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 
 const DEFAULT_COMMENT_PRESETS: SvgCommentPresetOption[] = [
   { label: 'Фрезы', commentText: 'фрезы:', category: 'tool' },
@@ -127,6 +135,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const [eligibleDetails, setEligibleDetails] = useState<EligibleDetailDto[]>([]);
   const [eligibleLoading, setEligibleLoading] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [telegramMessage, setTelegramMessage] = useState('');
+  const [sendToTelegram, setSendToTelegram] = useState(true);
+  const [svgSourceFile, setSvgSourceFile] = useState<ManualSvgUploadFileState | null>(null);
+  const [gcodeSourceFile, setGcodeSourceFile] = useState<ManualSvgUploadFileState | null>(null);
+  const [screenshotSourceFile, setScreenshotSourceFile] = useState<ManualSvgUploadFileState | null>(null);
   const [materialName, setMaterialName] = useState('');
   const [machineName, setMachineName] = useState('');
   const [requestedCutJobId, setRequestedCutJobId] = useState<number | null>(null);
@@ -245,6 +258,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       setOrderOptions(defaultOrderOptions);
       setRequestedCutJobId(null);
       setCutJobNumberCheck(EMPTY_CUT_JOB_NUMBER_CHECK);
+      setSvgSourceFile(null);
+      setGcodeSourceFile(null);
+      setScreenshotSourceFile(null);
       return true;
     },
   };
@@ -296,6 +312,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const resetFormState = useCallback(() => {
     setParsed(null);
     setCommentText('');
+    setTelegramMessage('');
+    setSendToTelegram(true);
+    setSvgSourceFile(null);
+    setGcodeSourceFile(null);
+    setScreenshotSourceFile(null);
     setMaterialName('');
     setMachineName('');
     setRequestedCutJobId(null);
@@ -364,8 +385,19 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       return;
     }
 
-    const idempotencyKey = createIdempotencyKey(parsed.svgContentHash);
+    if (!svgSourceFile) {
+      message.warning('Перезагрузите SVG-файл: не удалось подготовить файл для хранения');
+      return;
+    }
+
     const uploadComment = normalizeManualSvgCommentForSubmit(commentText);
+    const telegramMessageText = normalizeManualSvgCommentForSubmit(telegramMessage) || uploadComment;
+    const sourceFiles = manualSvgUploadSourceFiles([svgSourceFile, gcodeSourceFile, screenshotSourceFile]);
+    const idempotencyKey = createIdempotencyKey([
+      parsed.svgContentHash,
+      manualSvgUploadFilesFingerprint(sourceFiles),
+      sendToTelegram ? telegramMessageText : 'telegram-off',
+    ].join(':'));
     setSubmitting(true);
     try {
       const uploadBody: CncTelegramManualSvgUploadRequest = {
@@ -380,6 +412,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         rework,
         comments: uploadComment ? [uploadComment] : [],
         parserVersion: 'erp-manual-svg-upload-v1',
+        sourceFiles,
+        telegramSend: {
+          enabled: sendToTelegram,
+          message: telegramMessageText || null,
+        },
         cutLayout: parsed.cutLayout,
         items: parsed.items,
       };
@@ -394,6 +431,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         const mdfResponse = await cncTelegramApi.manualSvgUpload({
           ...uploadBody,
           createMdfMachineFileCard: true,
+          sourceFiles: [],
+          telegramSend: { enabled: false, message: null },
         }, createIdempotencyKey(`${parsed.svgContentHash}:mdf-card`));
         mdfCardCreated = mdfResponse.createdMdfMachineFileCard;
       }
@@ -423,6 +462,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
                 Карточка файла станка создана для Доски МДФ
               </Typography.Text>
             )}
+            {response.storedFileCount ? (
+              <Typography.Text type="secondary">
+                Файлы сохранены: {response.storedFileCount}. Telegram: {formatTelegramSendStatus(response.telegramSendStatus)}
+              </Typography.Text>
+            ) : null}
           </Space>
         ) : (
           response.packet.svgCutImportNote ?? 'Проверьте карточку файла станка на Доске МДФ'
@@ -454,6 +498,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     }
   }, [
     commentText,
+    telegramMessage,
+    sendToTelegram,
+    svgSourceFile,
+    gcodeSourceFile,
+    screenshotSourceFile,
     machineName,
     materialName,
     matchSummary,
@@ -480,8 +529,12 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   async function handleFile(file: File) {
     setParsing(true);
+    setSvgSourceFile(null);
+    setGcodeSourceFile(null);
+    setScreenshotSourceFile(null);
     replaceSvgPreview(createSvgPreview(file));
     try {
+      const sourceFile = await fileToManualSvgUploadFile(file, 'svg');
       const fileNameHints = parseSvgCutUploadFileNameHints(file.name);
       const parseAsInformational = svgUploadMaterialIsInformational(
         fileNameHints.materialName ?? materialName,
@@ -492,6 +545,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         fallbackOrderName: fileNameHints.orderNames.join('+') || defaultOrderNames[0] || null,
       });
       setParsed(result);
+      setSvgSourceFile({ payload: sourceFile, selectedAt: Date.now() });
       if (fileNameHints.machineName) {
         setMachineName(fileNameHints.machineName);
       }
@@ -509,6 +563,17 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       message.error(error instanceof Error ? error.message : 'Не удалось прочитать SVG');
     } finally {
       setParsing(false);
+    }
+  }
+
+  async function handleAuxiliaryFile(file: File, kind: 'gcode' | 'screenshot') {
+    try {
+      const payload = await fileToManualSvgUploadFile(file, kind);
+      const state = { payload, selectedAt: Date.now() };
+      if (kind === 'gcode') setGcodeSourceFile(state);
+      else setScreenshotSourceFile(state);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось подготовить файл');
     }
   }
 
@@ -693,6 +758,65 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
                 placeholder="весь заказ, фрезы, материал, переделка"
               />
             </Form.Item>
+            <Form.Item label="Telegram и файлы">
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Checkbox
+                  checked={sendToTelegram}
+                  onChange={(event) => setSendToTelegram(event.target.checked)}
+                >
+                  Отправить файлы в Telegram-чат
+                </Checkbox>
+                <Input
+                  value={telegramMessage}
+                  onChange={(event) => setTelegramMessage(normalizeManualSvgCommentInput(event.target.value))}
+                  placeholder="Сообщение в Telegram; если пусто, будет использован комментарий"
+                  disabled={!sendToTelegram}
+                />
+                <Space wrap>
+                  <Upload
+                    accept=".nc,.cnc,.tap,.gcode,.iso,.txt,text/plain"
+                    maxCount={1}
+                    showUploadList={false}
+                    beforeUpload={(file) => {
+                      void handleAuxiliaryFile(file, 'gcode');
+                      return false;
+                    }}
+                    disabled={submitting}
+                  >
+                    <Button icon={<UploadOutlined />}>G-code</Button>
+                  </Upload>
+                  <Upload
+                    accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                    maxCount={1}
+                    showUploadList={false}
+                    beforeUpload={(file) => {
+                      void handleAuxiliaryFile(file, 'screenshot');
+                      return false;
+                    }}
+                    disabled={submitting}
+                  >
+                    <Button icon={<UploadOutlined />}>Скрин</Button>
+                  </Upload>
+                  {gcodeSourceFile && (
+                    <ManualSvgAttachmentTag
+                      file={gcodeSourceFile.payload}
+                      onClose={() => setGcodeSourceFile(null)}
+                    />
+                  )}
+                  {screenshotSourceFile && (
+                    <ManualSvgAttachmentTag
+                      file={screenshotSourceFile.payload}
+                      onClose={() => setScreenshotSourceFile(null)}
+                    />
+                  )}
+                  {svgSourceFile && (
+                    <Tag color="blue">
+                      SVG: {svgSourceFile.payload.fileName}
+                    </Tag>
+                  )}
+                </Space>
+              </Space>
+            </Form.Item>
             <Button
               icon={<SaveOutlined />}
               loading={presetSaving}
@@ -740,6 +864,24 @@ function MinimizedSvgUpload({
       </span>
       {fileName ? <span className="manual-svg-upload-minimized__status">{status}</span> : null}
     </button>
+  );
+}
+
+function ManualSvgAttachmentTag({
+  file,
+  onClose,
+}: {
+  file: CncTelegramManualSvgUploadFile;
+  onClose: () => void;
+}) {
+  return (
+    <Tag
+      closable
+      onClose={onClose}
+      color={file.kind === 'gcode' ? 'purple' : 'cyan'}
+    >
+      {manualSvgUploadFileKindLabel(file.kind)}: {file.fileName}
+    </Tag>
   );
 }
 
@@ -1785,6 +1927,90 @@ function normalizeManualSvgCommentInput(value: string): string {
 
 function normalizeManualSvgCommentForSubmit(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function manualSvgUploadSourceFiles(files: Array<ManualSvgUploadFileState | null>): CncTelegramManualSvgUploadFile[] {
+  return files
+    .filter((file): file is ManualSvgUploadFileState => file !== null)
+    .map((file) => file.payload);
+}
+
+function manualSvgUploadFilesFingerprint(files: CncTelegramManualSvgUploadFile[]): string {
+  return files
+    .map((file) => `${file.kind}:${file.fileName}:${file.contentType}:${file.sizeBytes}:${file.sha256}`)
+    .sort()
+    .join('|');
+}
+
+async function fileToManualSvgUploadFile(
+  file: File,
+  kind: CncTelegramManualSvgUploadFileKind,
+): Promise<CncTelegramManualSvgUploadFile> {
+  if (file.size <= 0) throw new Error('Файл пустой');
+  if (file.size > MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES) {
+    throw new Error('Файл больше 15 МБ');
+  }
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const sha256 = await sha256Hex(buffer);
+  return {
+    kind,
+    fileName: file.name,
+    contentType: normalizeManualSvgUploadContentType(file, kind),
+    sizeBytes: file.size,
+    sha256,
+    base64Content: bytesToBase64(bytes),
+  };
+}
+
+async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    throw new Error('Браузер не может посчитать SHA-256 для файла');
+  }
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function normalizeManualSvgUploadContentType(file: File, kind: CncTelegramManualSvgUploadFileKind): string {
+  const type = file.type.trim();
+  if (kind === 'svg') return 'image/svg+xml';
+  if (kind === 'gcode') return type || 'text/plain';
+  if (type === 'image/jpg') return 'image/jpeg';
+  return type || screenshotContentTypeFromFileName(file.name) || 'image/png';
+}
+
+function screenshotContentTypeFromFileName(fileName: string): string | null {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  return null;
+}
+
+function manualSvgUploadFileKindLabel(kind: CncTelegramManualSvgUploadFileKind): string {
+  if (kind === 'svg') return 'SVG';
+  if (kind === 'gcode') return 'G-code';
+  return 'Скрин';
+}
+
+function formatTelegramSendStatus(status: string | null | undefined): string {
+  if (status === 'sent') return 'отправлено';
+  if (status === 'processing') return 'отправляется';
+  if (status === 'pending') return 'в очереди';
+  if (status === 'failed') return 'ошибка отправки';
+  if (status === 'unknown') return 'статус неизвестен';
+  return 'не отправлялось';
 }
 
 function createIdempotencyKey(svgContentHash: string): string {

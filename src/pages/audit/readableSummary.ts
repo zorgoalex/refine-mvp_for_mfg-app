@@ -75,6 +75,9 @@ const EVENT_TITLES: Record<string, string> = {
   'org.direction_head_added': 'Назначен руководитель направления',
   'org.direction_head_removed': 'Снят руководитель направления',
   'production.action_denied': 'Отказано в производственном действии',
+  'cnc.manual_svg_upload.file_uploaded': 'Загружен файл раскроя',
+  'cnc.manual_svg_upload.telegram_send_completed': 'Файлы раскроя отправлены в Telegram',
+  'cnc.manual_svg_upload.telegram_send_failed': 'Ошибка отправки файлов раскроя в Telegram',
 };
 
 const ENTITY_LABELS: Record<string, string> = {
@@ -90,6 +93,8 @@ const ENTITY_LABELS: Record<string, string> = {
   employee: 'Сотрудник',
   direction: 'Направление',
   group: 'Группа',
+  cnc_manual_svg_upload_file: 'Файл раскроя',
+  cnc_manual_svg_telegram_send_request: 'Отправка файлов раскроя',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -158,6 +163,7 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
   addDetailTransferSummary(record, metadata, changes, notes);
   addStatusChange(record, before, after, diff, metadata, changes);
   addProductionModeChange(record, diff, before, after, changes);
+  addManualSvgFileUploadSummary(record, metadata, changes, notes);
   addGenericChanges(diff, changes);
   addDetailNotes(record, diff, metadata, notes);
   addSourceNote(record, metadata, notes);
@@ -314,6 +320,28 @@ function addProductionModeChange(
     before: formatFieldValue('productionStatusFromDetailsEnabled', pair.before),
     after: formatFieldValue('productionStatusFromDetailsEnabled', pair.after),
   });
+}
+
+function addManualSvgFileUploadSummary(
+  record: AuditLogEventDto,
+  metadata: JsonObject,
+  changes: AuditReadableChange[],
+  notes: string[],
+): void {
+  if (record.event !== 'cnc.manual_svg_upload.file_uploaded') return;
+  const fileName = stringValue(metadata.fileName) ?? stringValue(metadata.originalFileName) ?? 'файл';
+  const kind = stringValue(metadata.fileKind);
+  const sizeBytes = numberValue(metadata.sizeBytes);
+  const generated = metadata.generated === true;
+  changes.push({
+    label: 'Файл',
+    before: '—',
+    after: `${manualSvgFileKindLabel(kind)} ${fileName}`,
+  });
+  if (sizeBytes != null) notes.push(`Размер: ${formatBytes(sizeBytes)}`);
+  if (generated) notes.push('Скрин создан из SVG');
+  const cutJobNumber = stringValue(metadata.cutJobDisplayNumber);
+  if (cutJobNumber) notes.push(`Раскрой: ${formatDisplayNumber(cutJobNumber)}`);
 }
 
 function addGenericChanges(diff: JsonObject, changes: AuditReadableChange[]): void {
@@ -614,6 +642,31 @@ function formatStringValue(value: string): string {
   }
 
   return trimmed;
+}
+
+function manualSvgFileKindLabel(kind: string | undefined): string {
+  if (kind === 'svg') return 'SVG';
+  if (kind === 'gcode') return 'G-code';
+  if (kind === 'screenshot') return 'скрин';
+  return 'файл';
+}
+
+function formatDisplayNumber(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) return '—';
+  if (normalized.startsWith('№')) return normalized;
+  if (normalized.startsWith('#')) {
+    const withoutHash = normalized.slice(1).trim();
+    return withoutHash ? `№${withoutHash}` : normalized;
+  }
+  return `№${normalized}`;
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 Б';
+  if (value < 1024) return `${value} Б`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} КБ`;
+  return `${(value / 1024 / 1024).toFixed(1)} МБ`;
 }
 
 function humanizeEvent(event: string): string {

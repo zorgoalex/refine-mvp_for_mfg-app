@@ -160,6 +160,8 @@ export const apiRoutes = {
     autoCutStatus: backendApiPath('/cnc-telegram/auto-cut-status'),
     orderCuttingSequences: (orderId: number) => backendApiPath(`/cnc-telegram/orders/${orderId}/cutting-sequences`),
     orderScreenshots: (orderId: number) => backendApiPath(`/cnc-telegram/orders/${orderId}/screenshots`),
+    orderManualSvgFile: (orderId: number, fileId: string) =>
+      backendApiPath(`/cnc-telegram/orders/${orderId}/manual-svg-files/${encodeURIComponent(fileId)}`),
     orderScreenshotPreview: (orderId: number, packetId: string) =>
       backendApiPath(`/cnc-telegram/orders/${orderId}/screenshots/${encodeURIComponent(packetId)}/preview`),
     orderScreenshotImage: (orderId: number, packetId: string) =>

@@ -1,11 +1,21 @@
 import { Tooltip } from '../../../../ui/tooltipDelay';
-import { CloseOutlined, PictureOutlined, PrinterOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined, } from '@ant-design/icons';
-import { Alert, Button, Modal, Spin, Tag, Typography } from 'antd';
+import {
+  CloseOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
+  PictureOutlined,
+  PrinterOutlined,
+  ReloadOutlined,
+  ZoomInOutlined,
+  ZoomOutOutlined,
+} from '@ant-design/icons';
+import { Alert, Button, Modal, Spin, Tag, Typography, message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cncTelegramApi } from '../../../../api/cncTelegramApi';
 import { cutApi } from '../../../../api/cutApi';
 import { isApiError } from '../../../../api/apiError';
 import type {
+  CncTelegramManualSvgOrderFile,
   CncTelegramOrderScreenshot,
   CncTelegramOrderScreenshotsResponse,
 } from '../../../../api/types/cncTelegramApi.types';
@@ -184,6 +194,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
 
   if (!validOrderId) return null;
   const screenshots = response?.screenshots ?? [];
+  const manualFiles = response?.manualFiles ?? [];
   const displayedUrl = originalUrl || selectedPreviewUrl;
   const selectedIsSvgCut = selected?.kind === 'svg_cut';
   const viewerStatus = selectedIsSvgCut
@@ -207,7 +218,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
     <section className={`order-telegram-screenshots${compact ? ' order-telegram-screenshots--compact' : ''}`}>
       <div className="order-telegram-screenshots__heading">
         <span>Скрины раскроя</span>
-        {screenshots.length > 0 ? <Tag>{screenshots.length}</Tag> : null}
+        {screenshots.length + manualFiles.length > 0 ? <Tag>{screenshots.length + manualFiles.length}</Tag> : null}
       </div>
       {loading ? <Spin size="small" /> : null}
       {loadError ? (
@@ -218,7 +229,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
           action={<Button size="small" icon={<ReloadOutlined />} onClick={() => void refresh()}>Повторить</Button>}
         />
       ) : null}
-      {!loading && !loadError && screenshots.length === 0 ? (
+      {!loading && !loadError && screenshots.length === 0 && manualFiles.length === 0 ? (
         <Text type="secondary">—</Text>
       ) : null}
       {screenshots.length > 0 ? (
@@ -229,6 +240,17 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
               orderId={validOrderId}
               item={item}
               onOpen={openViewer}
+            />
+          ))}
+        </div>
+      ) : null}
+      {manualFiles.length > 0 ? (
+        <div className="order-telegram-screenshots__files">
+          {manualFiles.map((file) => (
+            <ManualSvgOrderFileLink
+              key={file.fileId}
+              orderId={validOrderId}
+              file={file}
             />
           ))}
         </div>
@@ -365,6 +387,55 @@ function TelegramScreenshotThumbnail({
   );
 }
 
+function ManualSvgOrderFileLink({
+  orderId,
+  file,
+}: {
+  orderId: number;
+  file: CncTelegramManualSvgOrderFile;
+}) {
+  const [downloading, setDownloading] = useState(false);
+  const download = async () => {
+    setDownloading(true);
+    try {
+      const result = await cncTelegramApi.downloadOrderManualSvgFile(orderId, file.fileId);
+      saveBlob(result.blob, result.fileName || file.fileName);
+    } catch (error) {
+      message.error(readError(error, 'Не удалось скачать файл раскроя'));
+    } finally {
+      setDownloading(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="order-telegram-manual-file"
+      onClick={() => void download()}
+      aria-label={`Скачать файл раскроя ${file.fileName}`}
+    >
+      <span className="order-telegram-manual-file__icon" aria-hidden="true">
+        {file.kind === 'screenshot' ? <PictureOutlined /> : <FileTextOutlined />}
+      </span>
+      <span className="order-telegram-manual-file__body">
+        <strong>{file.fileName}</strong>
+        <span>
+          {manualSvgOrderFileKindLabel(file.kind)}
+          {' · '}
+          {formatBytes(file.sizeBytes)}
+          {file.cutJobDisplayNumber ? ` · раскрой ${formatDisplayCutJobNumber(file.cutJobDisplayNumber)}` : ''}
+        </span>
+        <span>
+          До {formatDate(file.expiresAt)}
+          {file.telegramSendStatus ? ` · Telegram: ${formatTelegramSendStatus(file.telegramSendStatus)}` : ''}
+        </span>
+      </span>
+      <span className="order-telegram-manual-file__download" aria-hidden="true">
+        {downloading ? <Spin size="small" /> : <DownloadOutlined />}
+      </span>
+    </button>
+  );
+}
+
 async function fetchSvgCutScreenshotBlob(
   item: CncTelegramOrderScreenshot,
   preset: 'thumb' | 'print',
@@ -410,6 +481,50 @@ function formatScreenshotCutJobLabel(item: CncTelegramOrderScreenshot | null | u
     return `№${normalized}`;
   }
   return isPositiveNumber(item?.cutJobId) ? `ID ${item.cutJobId}` : '—';
+}
+
+function formatDisplayCutJobNumber(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) return '—';
+  if (normalized.startsWith('№')) return normalized;
+  if (normalized.startsWith('#')) {
+    const withoutHash = normalized.slice(1).trim();
+    return withoutHash ? `№${withoutHash}` : normalized;
+  }
+  return `№${normalized}`;
+}
+
+function manualSvgOrderFileKindLabel(kind: CncTelegramManualSvgOrderFile['kind']): string {
+  if (kind === 'svg') return 'SVG';
+  if (kind === 'gcode') return 'G-code';
+  return 'Скрин';
+}
+
+function formatTelegramSendStatus(status: CncTelegramManualSvgOrderFile['telegramSendStatus']): string {
+  if (status === 'sent') return 'отправлено';
+  if (status === 'processing') return 'отправляется';
+  if (status === 'pending') return 'в очереди';
+  if (status === 'failed') return 'ошибка';
+  if (status === 'unknown') return 'неизвестно';
+  return '—';
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 Б';
+  if (value < 1024) return `${value} Б`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} КБ`;
+  return `${(value / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+function saveBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName || 'manual-svg-file';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function clampScale(value: number): number {

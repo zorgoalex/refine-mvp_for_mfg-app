@@ -127,6 +127,65 @@ describe('PgCncTelegramMediaRepository', () => {
     expect(queries[0]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
     expect(queries[0]?.text).toContain("request.claimed_at < now() - interval '5 minutes'");
   });
+
+  it('lists manual SVG files linked to an order with download URLs', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        return { rows: [manualSvgFileRow()] };
+      }),
+    };
+    const repository = new PgCncTelegramMediaRepository(database as never);
+
+    const result = await repository.listOrderManualSvgFiles(11520);
+
+    expect(result[0]).toMatchObject({
+      fileId: manualSvgFileId(),
+      kind: 'svg',
+      fileName: 'CNC#1_2777+2723-HDF.svg',
+      downloadUrl: `/api/v1/cnc-telegram/orders/11520/manual-svg-files/${manualSvgFileId()}`,
+      telegramSendStatus: 'sent',
+    });
+    expect(queries[0]?.params).toEqual([11520]);
+    expect(queries[0]?.text).toContain('cnc_manual_svg_upload_file_orders');
+    expect(queries[0]?.text).toContain('f.expires_at > now()');
+  });
+
+  it('claims manual SVG Telegram sends as pending-only SKIP LOCKED tasks and marks stale processing unknown', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (text.includes('WITH candidates AS')) {
+          return { rows: [{
+            request_id: manualSvgSendRequestId(),
+            packet_id: packetId(),
+            message_text: 'Фрезы для ХДФ: 8',
+            attempt_count: 1,
+            files_json: [manualSvgClaimFile()],
+          }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = { transaction: vi.fn((handler) => handler(tx)) };
+    const repository = new PgCncTelegramMediaRepository(database as never);
+
+    await expect(repository.claimManualSvgTelegramSends(5)).resolves.toEqual([{
+      requestId: manualSvgSendRequestId(),
+      packetId: packetId(),
+      messageText: 'Фрезы для ХДФ: 8',
+      attempt: 1,
+      files: [manualSvgClaimFile()],
+    }]);
+    expect(queries[0]?.text).toContain("SET status='unknown'");
+    expect(queries[0]?.text).toContain("WHERE status='processing'");
+    expect(queries[1]?.params).toEqual([5]);
+    expect(queries[1]?.text).toContain("WHERE request.status='pending'");
+    expect(queries[1]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
+    expect(queries[1]?.text).toContain("encode(file.content_bytes, 'base64')");
+  });
 });
 
 function screenshotRow(overrides: Record<string, unknown> = {}) {
@@ -153,3 +212,38 @@ function restoreRow() {
 
 function packetId() { return '00000000-0000-4000-8000-000000000001'; }
 function restoreId() { return '00000000-0000-4000-8000-000000000002'; }
+function manualSvgFileId() { return '00000000-0000-4000-8000-000000000003'; }
+function manualSvgSendRequestId() { return '00000000-0000-4000-8000-000000000004'; }
+
+function manualSvgFileRow(overrides: Record<string, unknown> = {}) {
+  return {
+    file_id: manualSvgFileId(),
+    packet_id: packetId(),
+    file_kind: 'svg',
+    original_file_name: 'CNC#1_2777+2723-HDF.svg',
+    content_type: 'image/svg+xml',
+    content_sha256: 'a'.repeat(64),
+    size_bytes: 1200,
+    generated: false,
+    created_at: '2026-08-07T10:00:00.000Z',
+    expires_at: '2026-09-06T10:00:00.000Z',
+    svg_cut_job_id: 212,
+    svg_cut_job_display_number: '67',
+    svg_cut_result_id: 991,
+    svg_cut_result_no: 1,
+    telegram_send_status: 'sent',
+    ...overrides,
+  };
+}
+
+function manualSvgClaimFile() {
+  return {
+    fileId: manualSvgFileId(),
+    kind: 'svg',
+    fileName: 'CNC#1_2777+2723-HDF.svg',
+    contentType: 'image/svg+xml',
+    sizeBytes: 11,
+    sha256: 'b'.repeat(64),
+    base64Content: 'PHN2Zz48L3N2Zz4=',
+  };
+}

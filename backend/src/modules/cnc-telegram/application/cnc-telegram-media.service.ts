@@ -5,6 +5,9 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { PgCncTelegramMediaRepository } from '../adapters/pg-cnc-telegram-media-repository';
 import type {
+  CncTelegramManualSvgTelegramSendClaimResponseDto,
+  CncTelegramManualSvgTelegramSendCompleteDto,
+  CncTelegramManualSvgTelegramSendResponseDto,
   CncTelegramMediaRestoreClaimResponseDto,
   CncTelegramMediaRestoreCompleteDto,
   CncTelegramMediaRestoreResponseDto,
@@ -27,11 +30,13 @@ export class CncTelegramMediaService {
   ): Promise<CncTelegramOrderScreenshotsResponseDto> {
     this.assertOrderViewer(currentUser);
     const screenshots = await this.repository.listOrderScreenshots(orderId);
+    const manualFiles = await this.repository.listOrderManualSvgFiles(orderId);
     return {
       orderId,
       generatedAt: new Date().toISOString(),
       originalRetentionDays: 30,
       screenshots,
+      manualFiles,
     };
   }
 
@@ -62,6 +67,11 @@ export class CncTelegramMediaService {
     });
   }
 
+  async openManualSvgFile(currentUser: CurrentUser, orderId: number, fileId: string) {
+    this.assertOrderViewer(currentUser);
+    return this.repository.resolveOrderManualSvgFile(orderId, fileId);
+  }
+
   async requestRestore(input: {
     currentUser: CurrentUser;
     orderId: number;
@@ -81,6 +91,40 @@ export class CncTelegramMediaService {
       capability: 'cnc_telegram_media_restore_v1',
       tasks: await this.repository.claimRestores(allowedChats, 5),
     };
+  }
+
+  async claimManualSvgTelegramSends(currentUser: CurrentUser): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto> {
+    this.assertWorker(currentUser);
+    return {
+      capability: 'cnc_manual_svg_telegram_send_v1',
+      tasks: await this.repository.claimManualSvgTelegramSends(5),
+    };
+  }
+
+  async completeManualSvgTelegramSend(input: {
+    currentUser: CurrentUser;
+    requestId: string;
+    completion: CncTelegramManualSvgTelegramSendCompleteDto;
+    requestTraceId?: string;
+  }): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
+    this.assertWorker(input.currentUser);
+    return this.repository.completeManualSvgTelegramSend({
+      ...input,
+      requestTraceId: input.requestTraceId || 'cnc-manual-svg-telegram-send-complete',
+    });
+  }
+
+  async failManualSvgTelegramSend(input: {
+    currentUser: CurrentUser;
+    requestId: string;
+    error: string;
+    requestTraceId?: string;
+  }): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
+    this.assertWorker(input.currentUser);
+    return this.repository.failManualSvgTelegramSend({
+      ...input,
+      requestTraceId: input.requestTraceId || 'cnc-manual-svg-telegram-send-fail',
+    });
   }
 
   async completeRestore(input: {

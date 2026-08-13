@@ -46,6 +46,17 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).not.toContain('manual-svg-upload-mdf-card-created');
   });
 
+  it('records one audit event per manual SVG uploaded file and queues Telegram sending', () => {
+    expect(repositorySource).toContain("const MANUAL_SVG_FILE_UPLOADED_EVENT = 'cnc.manual_svg_upload.file_uploaded'");
+    expect(repositorySource).toContain('for (const file of decodedFiles)');
+    expect(repositorySource).toContain('writeManualSvgFileUploadedAudit');
+    expect(repositorySource).toContain("entityType: 'cnc_manual_svg_upload_file'");
+    expect(repositorySource).toContain('telegramSendEnabled');
+    expect(repositorySource).toContain('enqueueManualSvgTelegramSendRequest');
+    expect(repositorySource).toContain('renderManualSvgScreenshot');
+    expect(repositorySource).toContain('lockActiveManualSvgTelegramSend');
+  });
+
   it('supports forced manual SVG cut-job display number without reusing the identity id', () => {
     expect(repositorySource).toContain('requestedCutJobId: command.dto.requestedCutJobId ?? null');
     expect(repositorySource).toContain('CUT_JOB_NUMBER_CONFLICT');

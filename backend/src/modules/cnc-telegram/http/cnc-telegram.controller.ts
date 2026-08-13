@@ -146,6 +146,35 @@ const ingestSchema = z.object({
 }).strict();
 
 const SHA256_RE = /^[a-f0-9]{64}$/i;
+const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
+const MANUAL_SVG_UPLOAD_MAX_TOTAL_FILE_SIZE_BYTES = 36 * 1024 * 1024;
+
+const manualSvgUploadFileSchema = z.object({
+  kind: z.enum(['svg', 'gcode', 'screenshot']),
+  fileName: z.string().trim().min(1).max(240),
+  contentType: z.string().trim().min(1).max(120),
+  sizeBytes: z.number().int().positive().max(MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES),
+  sha256: z.string().trim().regex(SHA256_RE).transform((value) => value.toLowerCase()),
+  base64Content: z.string().trim().min(1).max(Math.ceil(MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES * 4 / 3) + 8).regex(BASE64_RE),
+}).strict().superRefine((file, context) => {
+  const name = file.fileName.toLowerCase();
+  const contentType = file.contentType.toLowerCase();
+  if (file.kind === 'svg' && !name.endsWith('.svg')) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['fileName'], message: 'SVG-файл должен иметь расширение .svg' });
+  }
+  if (file.kind === 'gcode' && !/\.(?:nc|cnc|tap|gcode|iso|txt)$/i.test(name)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['fileName'], message: 'G-code должен иметь расширение .nc, .cnc, .tap, .gcode, .iso или .txt' });
+  }
+  if (file.kind === 'screenshot') {
+    if (!/\.(?:png|jpe?g|webp)$/i.test(name)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['fileName'], message: 'Скрин должен быть файлом .png, .jpg, .jpeg или .webp' });
+    }
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(contentType)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['contentType'], message: 'Тип скрина должен быть image/png, image/jpeg или image/webp' });
+    }
+  }
+});
 
 const manualSvgUploadSchema = z.object({
   selectedOrderIds: z.array(z.number().int().positive()).min(1).max(100),
@@ -163,7 +192,40 @@ const manualSvgUploadSchema = z.object({
   parserVersion: z.string().trim().min(1).max(120).nullable().optional(),
   cutLayout: cutLayoutSchema,
   items: z.array(itemSchema).min(1).max(2000),
-}).strict();
+  sourceFiles: z.array(manualSvgUploadFileSchema).max(3).optional().default([]),
+  telegramSend: z.object({
+    enabled: z.boolean(),
+    message: z.string().trim().max(4096).nullable().optional(),
+  }).strict().optional().default({ enabled: false }),
+}).strict().superRefine((value, context) => {
+  const kinds = new Set<string>();
+  let totalSize = 0;
+  for (const file of value.sourceFiles) {
+    if (kinds.has(file.kind)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sourceFiles'],
+        message: `Файл типа ${file.kind} уже выбран`,
+      });
+    }
+    kinds.add(file.kind);
+    totalSize += file.sizeBytes;
+  }
+  if (totalSize > MANUAL_SVG_UPLOAD_MAX_TOTAL_FILE_SIZE_BYTES) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['sourceFiles'],
+      message: 'Загруженные файлы слишком большие',
+    });
+  }
+  if (value.telegramSend.enabled && !kinds.has('svg')) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['telegramSend'],
+      message: 'Для отправки в Telegram нужен исходный SVG-файл',
+    });
+  }
+});
 
 const commentPresetSchema = z.object({
   label: z.string().trim().min(1).max(120),

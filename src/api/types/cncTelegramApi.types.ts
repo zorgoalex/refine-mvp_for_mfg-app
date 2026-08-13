@@ -250,6 +250,7 @@ export interface CncTelegramOrderScreenshotsResponse {
   generatedAt: string;
   originalRetentionDays: 30;
   screenshots: CncTelegramOrderScreenshot[];
+  manualFiles?: CncTelegramManualSvgOrderFile[];
 }
 
 export interface CncTelegramMediaRestoreResponse {
@@ -258,6 +259,37 @@ export interface CncTelegramMediaRestoreResponse {
   status: CncTelegramMediaRestoreStatus;
   requestedAt: string;
   availableUntil: string | null;
+}
+
+export type CncTelegramManualSvgUploadFileKind = 'svg' | 'gcode' | 'screenshot';
+export type CncTelegramManualSvgTelegramSendStatus = 'pending' | 'processing' | 'sent' | 'failed' | 'unknown';
+
+export interface CncTelegramManualSvgUploadFile {
+  kind: CncTelegramManualSvgUploadFileKind;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  base64Content: string;
+}
+
+export interface CncTelegramManualSvgOrderFile {
+  fileId: string;
+  packetId: string;
+  kind: CncTelegramManualSvgUploadFileKind;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  generated: boolean;
+  createdAt: string;
+  expiresAt: string;
+  downloadUrl: string;
+  cutJobId: number | null;
+  cutJobDisplayNumber: string | null;
+  cutResultId: number | null;
+  cutResultNo: number | null;
+  telegramSendStatus: CncTelegramManualSvgTelegramSendStatus | null;
 }
 
 export interface CncAutoCutStatusConfigureResponse {
@@ -285,6 +317,11 @@ export interface CncTelegramManualSvgUploadRequest {
   comments?: string[];
   tools?: CncTelegramTool[];
   parserVersion?: string | null;
+  sourceFiles?: CncTelegramManualSvgUploadFile[];
+  telegramSend?: {
+    enabled: boolean;
+    message?: string | null;
+  };
   cutLayout: CncTelegramCutLayout;
   items: Array<{
     sourceItemKey: string;
@@ -313,6 +350,9 @@ export interface CncTelegramManualSvgUploadResponse {
   cutResultId: number | null;
   cutJobPath: string | null;
   createdMdfMachineFileCard: boolean;
+  storedFileCount?: number;
+  telegramSendRequestId?: string | null;
+  telegramSendStatus?: CncTelegramManualSvgTelegramSendStatus | null;
 }
 
 export interface CncTelegramManualSvgCommentPreset {

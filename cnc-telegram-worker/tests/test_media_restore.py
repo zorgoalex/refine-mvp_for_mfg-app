@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import base64
+import hashlib
 import os
 import sys
 import tempfile
@@ -46,6 +48,17 @@ class RestoreClient:
 
     async def get_messages(self, _entity: object, *, ids: int):
         return self.message if self.message and ids == self.message.id else None
+
+
+class ManualSvgSendClient:
+    def __init__(self) -> None:
+        self.sent_files: list[str] = []
+        self.caption: str | None = None
+
+    async def send_file(self, _entity: object, files: list[str], *, caption: str | None = None):
+        self.sent_files = files
+        self.caption = caption
+        return [SimpleNamespace(id=8000 + index) for index, _file in enumerate(files, start=1)]
 
 
 class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
@@ -153,11 +166,86 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
             worker.erp.fail_media_restore.assert_awaited_once()
             self.assertIn("unavailable", worker.erp.fail_media_restore.await_args.args[1])
 
+    async def test_worker_sends_manual_svg_files_and_completes_request(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000003",
+                        "packetId": "00000000-0000-4000-8000-000000000011",
+                        "messageText": "Фрезы для ХДФ: 8",
+                        "files": [
+                            manual_svg_send_file("svg", "CNC#1_2777+2723-HDF.svg", b"<svg></svg>"),
+                            manual_svg_send_file("gcode", "CNC#1_2777+2723-HDF.nc", b"G01 X1"),
+                        ],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+            )
+            client = ManualSvgSendClient()
+
+            await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+            worker.erp.complete_manual_svg_telegram_send.assert_awaited_once()
+            worker.erp.fail_manual_svg_telegram_send.assert_not_awaited()
+            args = worker.erp.complete_manual_svg_telegram_send.await_args.args
+            self.assertEqual(args[0], "00000000-0000-4000-8000-000000000003")
+            self.assertEqual(args[1]["sentChatId"], "-100")
+            self.assertEqual(args[1]["sentMessageIds"], ["8001", "8002"])
+            self.assertEqual(client.caption, "Фрезы для ХДФ: 8")
+            self.assertEqual([Path(path).name for path in client.sent_files], [
+                "CNC#1_2777+2723-HDF.svg",
+                "CNC#1_2777+2723-HDF.nc",
+            ])
+
+    async def test_worker_rejects_manual_svg_file_hash_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            payload = manual_svg_send_file("svg", "bad.svg", b"<svg></svg>")
+            payload["sha256"] = "0" * 64
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000004",
+                        "messageText": "",
+                        "files": [payload],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+            )
+            client = ManualSvgSendClient()
+
+            await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+            worker.erp.complete_manual_svg_telegram_send.assert_not_awaited()
+            worker.erp.fail_manual_svg_telegram_send.assert_awaited_once()
+            self.assertEqual(client.sent_files, [])
+            self.assertIn("SHA-256 mismatch", worker.erp.fail_manual_svg_telegram_send.await_args.args[1])
+
 
 def png_bytes() -> bytes:
     stream = io.BytesIO()
     Image.new("RGB", (1200, 800), "#2f6fed").save(stream, format="PNG")
     return stream.getvalue()
+
+
+def manual_svg_send_file(kind: str, file_name: str, body: bytes) -> dict[str, object]:
+    return {
+        "fileId": "00000000-0000-4000-8000-000000000099",
+        "kind": kind,
+        "fileName": file_name,
+        "contentType": "image/svg+xml" if kind == "svg" else "text/plain",
+        "sizeBytes": len(body),
+        "sha256": hashlib.sha256(body).hexdigest(),
+        "base64Content": base64.b64encode(body).decode("ascii"),
+    }
 
 
 if __name__ == "__main__":

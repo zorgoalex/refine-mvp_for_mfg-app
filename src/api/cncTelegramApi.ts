@@ -59,6 +59,10 @@ export const cncTelegramApi = {
       {},
     );
   },
+  downloadOrderManualSvgFile(orderId: number, fileId: string) {
+    assertOrderManualSvgFileIdentity(orderId, fileId);
+    return httpClient.download(apiRoutes.cncTelegram.orderManualSvgFile(orderId, fileId));
+  },
   workerLogs(query: TelegramWorkerAuditQuery = {}): Promise<TelegramWorkerAuditListResponse> {
     return httpClient.get<TelegramWorkerAuditListResponse>(
       withQuery(apiRoutes.cncTelegram.workerLogs, query),
@@ -121,6 +125,13 @@ function assertOrderScreenshotIdentity(orderId: number, packetId: string): void 
   assertOrderId(orderId);
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(packetId)) {
     throw new Error('Invalid packetId');
+  }
+}
+
+function assertOrderManualSvgFileIdentity(orderId: number, fileId: string): void {
+  assertOrderId(orderId);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fileId)) {
+    throw new Error('Invalid fileId');
   }
 }
 

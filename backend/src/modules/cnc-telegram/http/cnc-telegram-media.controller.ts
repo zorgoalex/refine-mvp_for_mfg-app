@@ -5,11 +5,15 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CncTelegramMediaService } from '../application/cnc-telegram-media.service';
 import type {
+  CncTelegramManualSvgTelegramSendClaimResponseDto,
+  CncTelegramManualSvgTelegramSendResponseDto,
   CncTelegramMediaRestoreClaimResponseDto,
   CncTelegramMediaRestoreResponseDto,
   CncTelegramOrderScreenshotsResponseDto,
 } from '../dto/cnc-telegram-media.dto';
 import {
+  parseCncTelegramManualSvgFileId,
+  parseCncTelegramManualSvgTelegramSendComplete,
   parseCncTelegramMediaRestoreComplete,
   parseCncTelegramMediaRestoreFailure,
   parseCncTelegramMediaRestoreRequestId,
@@ -102,6 +106,25 @@ export class CncTelegramMediaController {
     });
   }
 
+  @ApiOperation({ operationId: 'downloadOrderManualSvgFile', summary: 'Download a manual SVG upload file linked to an order' })
+  @ApiResponse({ status: 200, description: 'Manual SVG upload file' })
+  @ApiResponse({ status: 410, description: 'Stored file expired in ERP' })
+  @Get('orders/:orderId/manual-svg-files/:fileId')
+  async manualSvgFile(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderId: string,
+    @Param('fileId') fileId: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    this.assertEnabled();
+    const file = await this.media.openManualSvgFile(
+      this.requireCurrentUser(request),
+      parsePositiveId(orderId, 'orderId'),
+      parseCncTelegramManualSvgFileId(fileId),
+    );
+    sendAttachment(response, file.raw, file.contentType, file.fileName, 300);
+  }
+
   @ApiOperation({ operationId: 'claimTelegramScreenshotRestores', summary: 'Claim queued screenshot restores for the configured Telegram worker' })
   @Post('media-restores/claim')
   @HttpCode(200)
@@ -144,6 +167,50 @@ export class CncTelegramMediaController {
     });
   }
 
+  @ApiOperation({ operationId: 'claimManualSvgTelegramSends', summary: 'Claim queued manual SVG files for Telegram sending' })
+  @Post('manual-svg-telegram-sends/claim')
+  @HttpCode(200)
+  claimManualSvgTelegramSends(
+    @Req() request: RequestWithCurrentUser,
+  ): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto> {
+    this.assertEnabled();
+    return this.media.claimManualSvgTelegramSends(this.requireCurrentUser(request));
+  }
+
+  @ApiOperation({ operationId: 'completeManualSvgTelegramSend', summary: 'Complete one manual SVG Telegram send request' })
+  @Post('manual-svg-telegram-sends/:requestId/complete')
+  @HttpCode(200)
+  completeManualSvgTelegramSend(
+    @Req() request: RequestWithCurrentUser,
+    @Param('requestId') requestId: string,
+    @Body() body: unknown,
+  ): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
+    this.assertEnabled();
+    return this.media.completeManualSvgTelegramSend({
+      currentUser: this.requireCurrentUser(request),
+      requestId: parseCncTelegramMediaRestoreRequestId(requestId),
+      completion: parseCncTelegramManualSvgTelegramSendComplete(body),
+      requestTraceId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'failManualSvgTelegramSend', summary: 'Fail one manual SVG Telegram send request' })
+  @Post('manual-svg-telegram-sends/:requestId/fail')
+  @HttpCode(200)
+  failManualSvgTelegramSend(
+    @Req() request: RequestWithCurrentUser,
+    @Param('requestId') requestId: string,
+    @Body() body: unknown,
+  ): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
+    this.assertEnabled();
+    return this.media.failManualSvgTelegramSend({
+      currentUser: this.requireCurrentUser(request),
+      requestId: parseCncTelegramMediaRestoreRequestId(requestId),
+      error: parseCncTelegramMediaRestoreFailure(body),
+      requestTraceId: request.requestId,
+    });
+  }
+
   private assertEnabled(): void {
     if (!this.runtimeConfig.getFeatureFlags().cncTelegramEnabled) {
       throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'CNC Telegram API is disabled', {
@@ -179,6 +246,26 @@ function sendImage(
   response.setHeader('Cache-Control', `private, max-age=${maxAgeSeconds}`);
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.end(body);
+}
+
+function sendAttachment(
+  response: Response,
+  body: Buffer,
+  contentType: string,
+  fileName: string,
+  maxAgeSeconds: number,
+): void {
+  response.setHeader('Content-Type', contentType);
+  response.setHeader('Content-Length', String(body.length));
+  response.setHeader('Content-Disposition', contentDispositionAttachment(fileName));
+  response.setHeader('Cache-Control', `private, max-age=${maxAgeSeconds}`);
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.end(body);
+}
+
+function contentDispositionAttachment(fileName: string): string {
+  const fallback = fileName.replace(/["\\\r\n]/g, '_').replace(/[^\x20-\x7e]/g, '_') || 'manual-svg-file';
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
 }
 
 function extensionFor(contentType: string): string {

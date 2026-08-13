@@ -243,6 +243,25 @@ export interface CncTelegramManualSvgUploadResponseDto extends CncTelegramIngest
   cutResultId: number | null;
   cutJobPath: string | null;
   createdMdfMachineFileCard: boolean;
+  storedFileCount?: number;
+  telegramSendRequestId?: string | null;
+  telegramSendStatus?: 'pending' | 'processing' | 'sent' | 'failed' | 'unknown' | null;
+}
+
+export type CncTelegramManualSvgUploadFileKind = 'svg' | 'gcode' | 'screenshot';
+
+export interface CncTelegramManualSvgUploadFileDto {
+  kind: CncTelegramManualSvgUploadFileKind;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+  base64Content: string;
+}
+
+export interface CncTelegramManualSvgTelegramSendDto {
+  enabled: boolean;
+  message?: string | null;
 }
 
 export interface CncTelegramManualSvgUploadDto {
@@ -262,6 +281,8 @@ export interface CncTelegramManualSvgUploadDto {
   parserVersion?: string | null;
   cutLayout: CncTelegramCutLayoutDto;
   items: CncTelegramStructuredIngestDto['items'];
+  sourceFiles?: CncTelegramManualSvgUploadFileDto[];
+  telegramSend?: CncTelegramManualSvgTelegramSendDto;
 }
 
 export interface CncTelegramManualSvgCommentPresetDto {

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import {
@@ -149,6 +150,40 @@ describe('CncTelegramController parsing', () => {
     });
   });
 
+  it('accepts manual SVG source files and Telegram send options', () => {
+    const parsed = parseManualSvgUpload({
+      ...manualSvgUploadPayload(),
+      sourceFiles: [
+        manualSvgUploadFile('svg', 'CNC#1_2777+2723-HDF.svg', 'image/svg+xml', '<svg></svg>'),
+        manualSvgUploadFile('gcode', 'CNC#1_2777+2723-HDF.nc', 'text/plain', 'G01 X1'),
+      ],
+      telegramSend: {
+        enabled: true,
+        message: 'Фрезы для ХДФ: 8',
+      },
+    }, 'manual-svg:test:files');
+
+    expect(parsed.sourceFiles).toHaveLength(2);
+    expect(parsed.sourceFiles?.[0]).toMatchObject({
+      kind: 'svg',
+      fileName: 'CNC#1_2777+2723-HDF.svg',
+      sha256: createHash('sha256').update('<svg></svg>').digest('hex'),
+    });
+    expect(parsed.telegramSend).toEqual({
+      enabled: true,
+      message: 'Фрезы для ХДФ: 8',
+    });
+
+    expect(() => parseManualSvgUpload({
+      ...manualSvgUploadPayload(),
+      sourceFiles: [
+        manualSvgUploadFile('svg', 'one.svg', 'image/svg+xml', '<svg></svg>'),
+        manualSvgUploadFile('svg', 'two.svg', 'image/svg+xml', '<svg></svg>'),
+      ],
+      telegramSend: { enabled: true },
+    }, 'manual-svg:test:duplicate')).toThrow(ApiError);
+  });
+
   it('rejects manual SVG upload without selected orders or valid layout', () => {
     expect(() =>
       parseManualSvgUpload({
@@ -283,5 +318,22 @@ function manualSvgUploadPayload() {
       }],
     },
     items: [structuredPayload().items[0]],
+  };
+}
+
+function manualSvgUploadFile(
+  kind: 'svg' | 'gcode' | 'screenshot',
+  fileName: string,
+  contentType: string,
+  content: string,
+) {
+  const body = Buffer.from(content);
+  return {
+    kind,
+    fileName,
+    contentType,
+    sizeBytes: body.length,
+    sha256: createHash('sha256').update(body).digest('hex'),
+    base64Content: body.toString('base64'),
   };
 }

@@ -1543,6 +1543,67 @@ html {
   gap: 10px;
 }
 
+.order-telegram-screenshots__files {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.order-telegram-manual-file {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  color: var(--app-text);
+  text-align: left;
+  background: var(--app-surface, #fff);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.order-telegram-manual-file:hover,
+.order-telegram-manual-file:focus-visible {
+  border-color: #1677ff;
+}
+
+.order-telegram-manual-file:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.order-telegram-manual-file__icon,
+.order-telegram-manual-file__download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1677ff;
+}
+
+.order-telegram-manual-file__body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.order-telegram-manual-file__body strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-telegram-manual-file__body span {
+  color: var(--app-text-muted);
+}
+
 .order-telegram-screenshot-card {
   display: flex;
   min-width: 0;
