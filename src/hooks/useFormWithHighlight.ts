@@ -22,9 +22,18 @@ export const useFormWithHighlight = <
   resource: string;
   idField: string;
   action?: "create" | "edit";
+  successResource?: string;
+  navigateOnSuccess?: boolean;
   formProps?: UseFormProps<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>;
 }): UseFormReturnType<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError> => {
-  const { resource, idField, action = "create", formProps: additionalProps } = props;
+  const {
+    resource,
+    idField,
+    action = "create",
+    successResource = resource,
+    navigateOnSuccess = true,
+    formProps: additionalProps,
+  } = props;
   const go = useGo();
 
   const formReturn = useRefineForm<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>({
@@ -34,19 +43,23 @@ export const useFormWithHighlight = <
       // Call original onMutationSuccess if provided
       additionalProps?.onMutationSuccess?.(data, variables, context, isAutoSave);
 
+      if (!navigateOnSuccess) {
+        return;
+      }
+
       // Navigate manually with highlightId
       const recordId = data.data?.[idField];
       if (recordId) {
         if (action === "edit") {
           // After edit: navigate to show page
           go({
-            to: { resource, action: "show", id: recordId },
+            to: { resource: successResource, action: "show", id: recordId },
             type: "replace",
           });
         } else {
           // After create: navigate to list page with highlight parameter
           go({
-            to: { resource, action: "list" },
+            to: { resource: successResource, action: "list" },
             query: { highlightId: recordId },
             type: "replace",
           });
