@@ -29,6 +29,7 @@ const inputSchema = z.object({
     .or(z.literal(''))
     .nullish(),
   isActive: z.boolean().optional(),
+  isCuttable: z.boolean().optional(),
   sortOrder: z.number().int().min(-32768).max(32767).optional(),
 });
 const createSchema = inputSchema.strict();

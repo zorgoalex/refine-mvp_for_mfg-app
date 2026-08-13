@@ -38,6 +38,12 @@ export function validateSheetMaterialTypeInput(input: SheetMaterialTypeInput): v
   if (input.texture != null && typeof input.texture !== 'boolean') {
     errors.push({ field: 'texture', message: 'texture must be boolean' });
   }
+  if (input.isActive != null && typeof input.isActive !== 'boolean') {
+    errors.push({ field: 'isActive', message: 'isActive must be boolean' });
+  }
+  if (input.isCuttable != null && typeof input.isCuttable !== 'boolean') {
+    errors.push({ field: 'isCuttable', message: 'isCuttable must be boolean' });
+  }
   if (input.sortOrder != null && (!Number.isInteger(input.sortOrder) || input.sortOrder < -32768 || input.sortOrder > 32767)) {
     errors.push({ field: 'sortOrder', message: 'sortOrder must be a small integer' });
   }

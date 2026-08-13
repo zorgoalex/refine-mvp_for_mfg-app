@@ -40,6 +40,10 @@ describe('validateSheetMaterialTypeInput', () => {
   it('accepts null/omitted supplierId/vendorId', () => {
     expect(() => validateSheetMaterialTypeInput({ ...valid, supplierId: null, vendorId: null })).not.toThrow();
   });
+  it('accepts isCuttable boolean and rejects non-boolean', () => {
+    expect(() => validateSheetMaterialTypeInput({ ...valid, isCuttable: false })).not.toThrow();
+    expect(failedFields({ ...valid, isCuttable: 'false' as unknown as boolean })).toContain('isCuttable');
+  });
   it('rejects a non-UUID refKey1c', () => {
     expect(failedFields({ ...valid, refKey1c: 'not-a-uuid' })).toContain('refKey1c');
   });

@@ -9,6 +9,7 @@ const mobile = readFileSync(new URL('../../components/MobileSiderDrawer.tsx', im
 const create = readFileSync(new URL('./create.tsx', import.meta.url), 'utf8');
 const show = readFileSync(new URL('./show.tsx', import.meta.url), 'utf8');
 const edit = readFileSync(new URL('./edit.tsx', import.meta.url), 'utf8');
+const list = readFileSync(new URL('./list.tsx', import.meta.url), 'utf8');
 
 describe('sheet-materials resource wiring', () => {
   it('registers resource', () => expect(app).toMatch(/name:\s*["']sheet_material_types["']/));
@@ -39,7 +40,6 @@ describe('sheet-materials resource wiring', () => {
   });
 
   it('write UI is gated on sheet_materials.manage', () => {
-    const list = readFileSync(new URL('./list.tsx', import.meta.url), 'utf8');
     expect(list).toMatch(/sheet_materials\.manage/);   // create/edit buttons gated
     expect(create).toMatch(/sheet_materials\.manage/);  // create page guards on manage
   });
@@ -51,5 +51,25 @@ describe('sheet-materials resource wiring', () => {
     expect(edit).toMatch(/useRecordTabTitle/);
     expect(edit).toMatch(/actionLabel:\s*['"]Редактирование['"]/);
     expect(edit).toMatch(/preferredFields:\s*\[\s*['"]name['"]\s*\]/);
+  });
+
+  it('exposes is_cuttable in list/show/edit/create surfaces', () => {
+    expect(dp).toMatch(/["']is_cuttable["']/);
+    expect(list).toMatch(/dataIndex=["']is_cuttable["']/);
+    expect(list).toMatch(/title=["']Для раскроя["']/);
+    expect(show).toMatch(/Для раскроя/);
+    expect(show).toMatch(/is_cuttable/);
+    expect(edit).toMatch(/isCuttable:\s*record\.is_cuttable/);
+    expect(edit).toMatch(/name=["']isCuttable["']/);
+    expect(create).toMatch(/initialValues=\{\{[^}]*isCuttable:\s*true/);
+    expect(create).toMatch(/name=["']isCuttable["']/);
+  });
+
+  it('shows conversion_key as read-only diagnostic info in the list', () => {
+    expect(dp).toMatch(/["']conversion_key["']/);
+    expect(list).toMatch(/dataIndex=["']conversion_key["']/);
+    expect(list).toMatch(/title=["']Conversion Key["']/);
+    expect(edit).not.toMatch(/name=["']conversion_key["']/);
+    expect(create).not.toMatch(/name=["']conversion_key["']/);
   });
 });

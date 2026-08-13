@@ -46,6 +46,7 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
         color: record.color,
         refKey1c: record.ref_key_1c,
         isActive: record.is_active,
+        isCuttable: record.is_cuttable ?? true,
         sortOrder: record.sort_order,
       });
     }
@@ -165,6 +166,11 @@ export const SheetMaterialEdit: React.FC<IResourceComponentsProps> = () => {
           </Col>
           <Col xs={24} sm={12} md={8}>
             <Form.Item name="texture" label="Текстура" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </Col>
+          <Col xs={24} sm={12} md={8}>
+            <Form.Item name="isCuttable" label="Для раскроя" valuePropName="checked">
               <Switch />
             </Form.Item>
           </Col>
