@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-13",
+    title: "Календарь: мобильное контекстное меню",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "На телефоне контекстное меню карточки заказа стало уже, а вложенные пункты открываются справа отдельной панелью вместо раскрытия вниз.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-12",
     title: "Раскрой: загрузка SVG",
     services: ["ERP", "Cutting"],

@@ -11,6 +11,7 @@ export interface OrderContextMenuProps {
   visible: boolean;
   x: number;
   y: number;
+  mobile?: boolean;
   onClose: () => void;
   onStatusChange: (fieldName: string, statusId: number, statusName: string) => void;
   onProductionStatusToggle: (statusId: number, statusName: string) => void;
@@ -29,6 +30,8 @@ export interface OrderContextMenuProps {
     productionStatuses: Array<{ id: number; name: string }>;
   };
 }
+
+const CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS = 'calendar-context-submenu-popup';
 
 function resolveCurrentSourceDate(order: CalendarOrder): string {
   if (!order.planned_completion_date) {
@@ -66,6 +69,7 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   visible,
   x,
   y,
+  mobile = false,
   onClose,
   onStatusChange,
   onProductionStatusToggle,
@@ -189,12 +193,14 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
       key: 'order_status',
       label: 'Статус заказа',
       children: orderStatusItems,
+      popupClassName: CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS,
     },
     ...(paymentStatusItems.length > 0
       ? [{
           key: 'payment_status',
           label: 'Статус оплаты',
           children: paymentStatusItems,
+          popupClassName: CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS,
         }]
       : []),
     ...(productionStatusItems.length > 0
@@ -202,6 +208,7 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
           key: 'production_status',
           label: 'Статус производства',
           children: productionStatusItems,
+          popupClassName: CALENDAR_CONTEXT_SUBMENU_POPUP_CLASS,
         }]
       : []),
     ...(onMoveToDate
@@ -221,7 +228,7 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
     <>
       {visible && (
         <div
-          className="calendar-context-menu"
+          className={`calendar-context-menu${mobile ? ' calendar-context-menu--mobile' : ''}`}
           style={{
             position: 'fixed',
             top: y,
@@ -231,11 +238,13 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
           onClick={(e) => e.stopPropagation()}
         >
           <Menu
-            mode="inline"
+            mode={mobile ? 'vertical' : 'inline'}
             inlineIndent={12}
+            triggerSubMenuAction={mobile ? 'click' : 'hover'}
             items={menuItems}
             style={{
-              minWidth: 220,
+              minWidth: mobile ? 0 : 220,
+              width: mobile ? '100%' : undefined,
               border: 'none',
               boxShadow: '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,0.08)',
             }}

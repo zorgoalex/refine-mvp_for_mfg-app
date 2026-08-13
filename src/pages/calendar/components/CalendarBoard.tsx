@@ -73,6 +73,36 @@ interface MobileCalendarDisclosureProps {
   onToggle: () => void;
 }
 
+const CONTEXT_MENU_VIEWPORT_PADDING = 8;
+const DESKTOP_CONTEXT_MENU_WIDTH = 240;
+const CONTEXT_MENU_HEIGHT = 260;
+
+export function resolveCalendarContextMenuPosition(
+  clientX: number,
+  clientY: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  mobile: boolean,
+): { x: number; y: number } {
+  const mobileMenuWidth = Math.max(
+    144,
+    Math.floor((viewportWidth - CONTEXT_MENU_VIEWPORT_PADDING * 2) / 2),
+  );
+  const menuWidth = mobile ? mobileMenuWidth : DESKTOP_CONTEXT_MENU_WIDTH;
+  const safeX = mobile
+    ? CONTEXT_MENU_VIEWPORT_PADDING
+    : Math.max(
+        CONTEXT_MENU_VIEWPORT_PADDING,
+        Math.min(clientX, viewportWidth - menuWidth - CONTEXT_MENU_VIEWPORT_PADDING),
+      );
+  const safeY = Math.max(
+    CONTEXT_MENU_VIEWPORT_PADDING,
+    Math.min(clientY, viewportHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_VIEWPORT_PADDING),
+  );
+
+  return { x: safeX, y: safeY };
+}
+
 const MobileCalendarDisclosure: React.FC<MobileCalendarDisclosureProps> = ({
   children,
   mobile,
@@ -380,15 +410,18 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   // Обработчик открытия контекстного меню
   const handleContextMenu = (e: React.MouseEvent, order: CalendarOrder) => {
     e.preventDefault();
-    const menuWidth = 240;
-    const menuHeight = 260;
-    const safeX = Math.max(8, Math.min(e.clientX, window.innerWidth - menuWidth - 8));
-    const safeY = Math.max(8, Math.min(e.clientY, window.innerHeight - menuHeight - 8));
+    const menuPosition = resolveCalendarContextMenuPosition(
+      e.clientX,
+      e.clientY,
+      window.innerWidth,
+      window.innerHeight,
+      isMobile,
+    );
 
     setContextMenu({
       visible: true,
-      x: safeX,
-      y: safeY,
+      x: menuPosition.x,
+      y: menuPosition.y,
       order,
     });
   };
@@ -1014,6 +1047,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
           visible={contextMenu.visible}
           x={contextMenu.x}
           y={contextMenu.y}
+          mobile={isMobile}
           onClose={handleCloseContextMenu}
           onStatusChange={handleStatusChange}
           onProductionStatusToggle={handleProductionStatusToggle}

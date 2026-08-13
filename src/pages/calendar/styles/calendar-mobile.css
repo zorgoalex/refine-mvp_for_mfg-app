@@ -252,10 +252,57 @@
     flex-shrink: 0;
   }
 
-  /* На сверхузких экранах контекстное меню растягиваем во всю ширину */
-  .calendar-context-menu {
-    left: 8px !important;
-    right: 8px !important;
-    width: auto !important;
+  .calendar-context-menu--mobile {
+    width: calc((100vw - 16px) / 2) !important;
+    min-width: 144px;
+    max-width: 190px;
+  }
+
+  .calendar-context-menu--mobile .ant-menu {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .calendar-context-menu--mobile .ant-menu-item,
+  .calendar-context-menu--mobile .ant-menu-submenu-title {
+    min-height: 40px;
+    height: auto;
+    line-height: 1.2;
+    display: flex;
+    align-items: center;
+    padding-inline: 10px 8px !important;
+    white-space: normal;
+  }
+
+  .calendar-context-menu--mobile .ant-menu-title-content {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .calendar-context-submenu-popup {
+    width: calc((100vw - 16px) / 2) !important;
+    min-width: 144px !important;
+    max-width: 190px !important;
+    z-index: 10000;
+  }
+
+  .calendar-context-submenu-popup .ant-menu {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .calendar-context-submenu-popup .ant-menu-item {
+    min-height: 40px;
+    height: auto;
+    line-height: 1.2;
+    display: flex;
+    align-items: center;
+    padding-inline: 10px !important;
+    white-space: normal;
+  }
+
+  .calendar-context-submenu-popup .ant-menu-title-content {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 }
