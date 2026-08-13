@@ -27,10 +27,17 @@ describe('calendar filters integration', () => {
   });
 
   it('uses workspace scrolling and one immediately compact icon-only sticky calendar bar on tablets', () => {
+    const tabletCalendarGridRule = tabletStyles.match(/\.evolution-shell--tablet \.calendar-grid \{[^}]*\}/)?.[0] ?? '';
+
     expect(board).toContain('className="calendar-navigation__tablet-filter"');
     expect(board).toContain('className="calendar-navigation__mode-text"');
     expect(tabletStyles).toMatch(/\.evolution-shell--tablet \.calendar-page-wrapper \{[\s\S]*height: auto;[\s\S]*overflow: visible !important;/);
-    expect(tabletStyles).toMatch(/\.evolution-shell--tablet \.calendar-grid \{[\s\S]*height: auto;[\s\S]*max-height: none;/);
+    expect(tabletStyles).toMatch(/\.evolution-shell__content\.ant-layout-content\.calendar-page-active \{[\s\S]*overflow-x: auto !important;[\s\S]*overflow-y: auto !important;[\s\S]*-webkit-overflow-scrolling: touch;[\s\S]*touch-action: pan-x pan-y;/);
+    expect(tabletCalendarGridRule).toContain('height: auto;');
+    expect(tabletCalendarGridRule).toContain('max-height: none;');
+    expect(tabletCalendarGridRule).toContain('overflow: visible;');
+    expect(tabletCalendarGridRule).not.toContain('overflow-x');
+    expect(tabletCalendarGridRule).not.toContain('overflow-y');
     expect(tabletStyles).toMatch(/data-modern-route="calendar"[^}]+\.calendar-navigation \{[\s\S]*position: sticky;[\s\S]*height: var\(--tablet-sticky-row\);/);
     expect(tabletStyles).toContain('.calendar-navigation__tablet-filter');
     expect(tabletStyles).toContain('.calendar-navigation__mode-text');
