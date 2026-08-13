@@ -558,10 +558,15 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain("className: 'cut-jobs-name-cell'");
     expect(appCss).toContain('td.cut-jobs-name-cell');
     expect(appCss).toContain('text-align: left !important');
+    expect(appCss).toContain('.cut-jobs-table .ant-table-thead > tr > th .ant-table-column-title');
+    expect(appCss).toContain('min-height: 2.24em');
+    expect(appCss).toContain('white-space: normal !important');
     expect(source).toContain('width: 63');
     expect(source).toContain('width: 56');
     expect(source).toContain('width: 84');
     expect(source).toContain("title: 'Профиль'");
+    expect(source).toContain("title: 'Текстура'");
+    expect(source).toContain('cutTextureDirectionLabel(row.textureDirection)');
     expect(source).toContain("title: isOperational ? 'Материал' : 'Материал деталей'");
     expect(source).toContain('formatJobMaterialNames(row.materialNames)');
     expect(source).toContain("width: '20ch'");

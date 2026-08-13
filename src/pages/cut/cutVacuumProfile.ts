@@ -1,5 +1,5 @@
 import type { CutParamProfile } from '../../api/cutConfigApi';
-import type { CutJobDto, CutSheetTypeOption } from '../../api/types/cutApi.types';
+import type { CutJobDto, CutSheetTypeOption, CutTextureDirection } from '../../api/types/cutApi.types';
 
 export const NON_VACUUM_SHEET_AXIS_ORIGIN = 'top-left' as const;
 export type CutJobLayoutKind = 'vacuum' | 'non-vacuum' | 'unknown';
@@ -13,6 +13,29 @@ export function isVacuumTableProfile(
       profile.cutParamProfileId === profileId
       && profile.params?.layout_mode === 'vacuum_table',
   );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function textureDirectionForCutProfile(
+  profileId: number | null,
+  profiles: CutParamProfile[],
+): CutTextureDirection | null {
+  const profile = profiles.find((candidate) => candidate.cutParamProfileId === profileId);
+  if (profile?.params?.layout_mode !== 'vacuum_table') {
+    return null;
+  }
+  const vacuum = profile.params.vacuum;
+  const direction = isPlainObject(vacuum) ? vacuum.direction : undefined;
+  if (direction === 'width') {
+    return 'vertical';
+  }
+  if (direction === 'height') {
+    return 'horizontal';
+  }
+  return 'none';
 }
 
 export function isVacuumTableJob(
@@ -75,6 +98,7 @@ export function firstBathSheetMaterialId(options: CutSheetTypeOption[]): number 
 
 interface CutProfileMutations {
   setProfile(cutJobId: number, profileId: number | null, version: number): Promise<CutJobDto>;
+  setTextureDirection(cutJobId: number, textureDirection: CutTextureDirection, version: number): Promise<CutJobDto>;
   setSplitByMaterial(cutJobId: number, value: boolean, version: number): Promise<CutJobDto>;
   setCombineFilms(cutJobId: number, value: boolean, version: number): Promise<CutJobDto>;
   setSheetMaterial(cutJobId: number, sheetMaterialTypeId: number | null, version: number): Promise<CutJobDto>;
@@ -106,6 +130,14 @@ export async function applyCutProfileSelection(input: {
     paramProfileId,
     currentJob.version,
   ));
+  const profileTextureDirection = textureDirectionForCutProfile(paramProfileId, profiles);
+  if (profileTextureDirection !== null && updated.textureDirection !== profileTextureDirection) {
+    updated = publish(await mutations.setTextureDirection(
+      updated.cutJobId,
+      profileTextureDirection,
+      updated.version,
+    ));
+  }
   if (!isVacuumTableProfile(paramProfileId, profiles)) {
     return { job: updated, bathSheetMissing: false };
   }

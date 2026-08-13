@@ -151,11 +151,19 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
   { value: 'bath_profiles', label: 'Профили ванны' },
 ];
 
-const CUT_TEXTURE_DIRECTION_OPTIONS: Array<{ value: CutTextureDirection; label: string }> = [
-  { value: 'vertical', label: 'вдоль полотна' },
-  { value: 'horizontal', label: 'поперёк полотна' },
-  { value: 'none', label: 'отсутствует' },
-];
+const CUT_TEXTURE_DIRECTION_LABELS: Record<CutTextureDirection, string> = {
+  vertical: 'вдоль полотна',
+  horizontal: 'поперёк полотна',
+  none: 'отсутствует',
+};
+
+const CUT_TEXTURE_DIRECTION_OPTIONS: Array<{ value: CutTextureDirection; label: string }> = Object.entries(
+  CUT_TEXTURE_DIRECTION_LABELS,
+).map(([value, label]) => ({ value: value as CutTextureDirection, label }));
+
+function cutTextureDirectionLabel(value: CutTextureDirection | null | undefined): string {
+  return CUT_TEXTURE_DIRECTION_LABELS[value ?? 'none'] ?? CUT_TEXTURE_DIRECTION_LABELS.none;
+}
 
 const { Title, Text } = Typography;
 const { RangePicker } = DatePicker;
@@ -1445,6 +1453,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           sheetOptions,
           mutations: {
             setProfile: cutApi.setProfile,
+            setTextureDirection: cutApi.setTextureDirection,
             setSplitByMaterial: cutApi.setSplitByMaterial,
             setCombineFilms: cutApi.setCombineFilms,
             setSheetMaterial: cutApi.setSheetMaterial,
@@ -2621,7 +2630,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }), [jobs]);
   const exportJobs = useCallback(() => {
     const cells = [
-      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Материал'],
+      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Текстура', 'Материал'],
       ...filteredJobs.map((candidate) => [
         formatCutJobDisplayNumber(candidate, profiles),
         formatCutJobCreatedDate(candidate.createdAt),
@@ -2637,6 +2646,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ? formatFilmLinearMeters(totalFilmUsageMeters(candidate.totals.filmUsage))
           : '',
         resolveProfileLabel(candidate.paramProfileId, profiles, cutSettings),
+        cutTextureDirectionLabel(candidate.textureDirection),
         candidate.materialNames.join(', '),
       ]),
     ];
@@ -2819,6 +2829,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         key: 'profile',
         width: 180,
         render: (_: unknown, row: CutJobDto) => resolveProfileLabel(row.paramProfileId, profiles, cutSettings),
+      },
+      {
+        title: 'Текстура',
+        key: 'texture',
+        width: 118,
+        render: (_: unknown, row: CutJobDto) => cutTextureDirectionLabel(row.textureDirection),
       },
       {
         title: isOperational ? 'Материал' : 'Материал деталей',
