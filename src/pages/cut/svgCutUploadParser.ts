@@ -19,7 +19,7 @@ export type SvgPoint = [number, number];
 type Point = SvgPoint;
 type Bbox = [number, number, number, number];
 
-interface PartContourGeometry {
+export interface PartContourGeometry {
   elementId: string;
   xMm: number;
   yMm: number;
@@ -33,14 +33,16 @@ interface VisualTextLine {
   yMm: number;
 }
 
-interface VisualDetailLabel {
+export interface VisualDetailLabel {
   key: string;
   orderName: string;
   detailNumber: number;
-  widthMm: number;
-  heightMm: number;
+  widthMm: number | null;
+  heightMm: number | null;
+  hasExplicitSize: boolean;
   cxMm: number;
   cyMm: number;
+  linePointsMm: SvgPoint[];
   rawLines: string[];
 }
 
@@ -76,20 +78,20 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
   });
 
   if (!fileName.toLowerCase().endsWith('.svg')) {
-    return invalid(['not an SVG file']);
+    return invalid(['Файл должен быть SVG']);
   }
   if (typeof DOMParser === 'undefined') {
-    return invalid(['DOMParser is unavailable in this browser']);
+    return invalid(['Браузер не может разобрать SVG']);
   }
 
   const doc = new DOMParser().parseFromString(text, 'image/svg+xml');
   const parseError = doc.querySelector('parsererror');
   if (parseError) {
-    return invalid([`XML parse error: ${parseError.textContent?.trim() || 'invalid XML'}`]);
+    return invalid([`Ошибка XML в SVG: ${parseError.textContent?.trim() || 'некорректный XML'}`]);
   }
   const root = doc.documentElement;
   if (!root || localName(root) !== 'svg') {
-    return invalid(['missing SVG root element']);
+    return invalid(['В SVG нет корневого элемента <svg>']);
   }
 
   const sheetWidth = parseMm(root.getAttribute('width'));
@@ -97,12 +99,12 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
   const viewBox = parseViewBox(root.getAttribute('viewBox'));
   const partialSheet = sheetWidth && sheetHeight ? { widthMm: sheetWidth, heightMm: sheetHeight } : null;
   if (!sheetWidth || !sheetHeight || !viewBox) {
-    return invalid(['missing root width/height mm or viewBox'], partialSheet);
+    return invalid(['В SVG нет width/height в мм или viewBox'], partialSheet);
   }
 
   const [vbMinX, vbMinY, vbWidth, vbHeight] = viewBox;
   if (sheetWidth <= 0 || sheetHeight <= 0 || vbWidth <= 0 || vbHeight <= 0) {
-    return invalid(['invalid root width/height or viewBox'], partialSheet);
+    return invalid(['Некорректные размеры SVG или viewBox'], partialSheet);
   }
   const scaleX = vbWidth / sheetWidth;
   const scaleY = vbHeight / sheetHeight;
@@ -130,7 +132,7 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
     const bbox = pointsBbox(points);
     if (!bbox) {
       if (visualLabels.length > 0) {
-        rejected.add('PartContour detail outlines have no geometry');
+        rejected.add('Контуры деталей PartContour без геометрии');
       }
       continue;
     }
@@ -146,7 +148,7 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
       xMm + placedWidthMm <= sheetWidth + LAYOUT_BOUNDS_TOLERANCE_MM &&
       yMm + placedHeightMm <= sheetHeight + LAYOUT_BOUNDS_TOLERANCE_MM;
     if (!insideSheet) {
-      rejected.add('PartContour detail outlines outside sheet');
+      rejected.add('Контуры деталей PartContour выходят за границы листа');
       continue;
     }
 
@@ -164,14 +166,15 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
     for (const contour of partContours) {
       const parsed = visualMatches.get(contour);
       if (!parsed) {
-        rejected.add('PartContour detail outline has no matching visual label');
+        rejected.add('Для контура детали PartContour не найдена верхняя подпись с заказом/позицией');
         continue;
       }
+      const resolvedSize = resolveVisualLabelSize(parsed, contour);
       const key = [
         parsed.orderName,
         parsed.detailNumber,
-        parsed.widthMm,
-        parsed.heightMm,
+        resolvedSize.widthMm,
+        resolvedSize.heightMm,
         contour.elementId,
       ].join('|');
       if (seenGeometry.has(key)) continue;
@@ -179,32 +182,32 @@ export function parseSvgCutUploadText(text: string, fileName = 'upload.svg'): Om
       layoutItems.push({
         orderName: parsed.orderName,
         detailNumber: parsed.detailNumber,
-        widthMm: parsed.widthMm,
-        heightMm: parsed.heightMm,
+        widthMm: resolvedSize.widthMm,
+        heightMm: resolvedSize.heightMm,
         quantity: 1,
-        confidence: 0.99,
+        confidence: parsed.hasExplicitSize ? 0.99 : 0.82,
         sourceElementId: contour.elementId,
         xMm: round2(contour.xMm),
         yMm: round2(contour.yMm),
         placedWidthMm: round2(contour.placedWidthMm),
         placedHeightMm: round2(contour.placedHeightMm),
-        rotated: Math.round(contour.placedWidthMm) === Math.round(parsed.heightMm) &&
-          Math.round(contour.placedHeightMm) === Math.round(parsed.widthMm),
+        rotated: Math.round(contour.placedWidthMm) === Math.round(resolvedSize.heightMm) &&
+          Math.round(contour.placedHeightMm) === Math.round(resolvedSize.widthMm),
       });
     }
   }
 
   const reasons: string[] = [];
   if (visualLabels.length === 0) {
-    reasons.push('no readable top-layer detail labels');
+    reasons.push('Не найдены читаемые верхние подписи деталей: заказ / позиция / размер');
   }
   if (visualLabels.length > 0 && layoutItems.length === 0) {
-    reasons.push('visual detail labels exist but no label matched a PartContour outline');
+    reasons.push('Верхние подписи деталей найдены, но ни одна не сопоставилась с контуром PartContour');
   }
-  if (partContourCount === 0) reasons.push('no PartContour detail outlines');
+  if (partContourCount === 0) reasons.push('В SVG нет контуров деталей PartContour');
   reasons.push(...Array.from(rejected).sort());
   if (partContourCount > 0 && layoutItems.length === 0) {
-    reasons.push('PartContour outlines exist but no placed detail passed geometry checks');
+    reasons.push('Контуры PartContour есть, но ни одна деталь не прошла проверку геометрии');
   }
 
   const status = layoutItems.length > 0 && reasons.length === 0 ? 'valid' : 'invalid';
@@ -361,13 +364,74 @@ function groupVisualDetailLabels(lines: VisualTextLine[]): VisualDetailLabel[] {
       detailNumber,
       widthMm: size.widthMm,
       heightMm: size.heightMm,
+      hasExplicitSize: true,
       cxMm: round2((orderLine.xMm + detailLine.xMm + sizeLine.xMm) / 3),
       cyMm: round2((orderLine.yMm + detailLine.yMm + sizeLine.yMm) / 3),
+      linePointsMm: [
+        [orderLine.xMm, orderLine.yMm],
+        [detailLine.xMm, detailLine.yMm],
+        [sizeLine.xMm, sizeLine.yMm],
+      ],
       rawLines: [orderLine.text, detailLine.text, sizeLine.text],
     });
   }
 
+  for (const detailLine of sorted) {
+    const detailNumber = parseVisualDetailLine(detailLine.text);
+    if (detailNumber === null) continue;
+    const orderLine = findVisualOrderLineForDetail(sorted, detailLine);
+    if (!orderLine) continue;
+    const orderName = parseVisualOrderLine(orderLine.text);
+    if (!orderName) continue;
+    if (hasExplicitVisualLabelNear(labels, orderName, detailNumber, orderLine, detailLine)) continue;
+
+    labels.push({
+      key: `${orderName}:${detailNumber}:no-size:${round2(detailLine.xMm)}:${round2(detailLine.yMm)}`,
+      orderName,
+      detailNumber,
+      widthMm: null,
+      heightMm: null,
+      hasExplicitSize: false,
+      cxMm: round2((orderLine.xMm + detailLine.xMm) / 2),
+      cyMm: round2((orderLine.yMm + detailLine.yMm) / 2),
+      linePointsMm: [
+        [orderLine.xMm, orderLine.yMm],
+        [detailLine.xMm, detailLine.yMm],
+      ],
+      rawLines: [orderLine.text, detailLine.text],
+    });
+  }
+
   return dedupeVisualLabels(labels);
+}
+
+function findVisualOrderLineForDetail(lines: VisualTextLine[], detailLine: VisualTextLine): VisualTextLine | null {
+  return lines
+    .filter((line) =>
+      line.yMm < detailLine.yMm &&
+      detailLine.yMm - line.yMm <= 160 &&
+      Math.abs(line.xMm - detailLine.xMm) <= 260 &&
+      parseVisualOrderLine(line.text) !== null,
+    )
+    .sort((left, right) => right.yMm - left.yMm || Math.abs(left.xMm - detailLine.xMm) - Math.abs(right.xMm - detailLine.xMm))[0] ?? null;
+}
+
+function hasExplicitVisualLabelNear(
+  labels: VisualDetailLabel[],
+  orderName: string,
+  detailNumber: number,
+  orderLine: VisualTextLine,
+  detailLine: VisualTextLine,
+): boolean {
+  const cxMm = (orderLine.xMm + detailLine.xMm) / 2;
+  const cyMm = (orderLine.yMm + detailLine.yMm) / 2;
+  return labels.some((label) =>
+    label.hasExplicitSize &&
+    label.orderName === orderName &&
+    label.detailNumber === detailNumber &&
+    Math.abs(label.cxMm - cxMm) <= 260 &&
+    Math.abs(label.cyMm - cyMm) <= 180,
+  );
 }
 
 function parseVisualOrderLine(text: string): string | null {
@@ -400,7 +464,7 @@ function dedupeVisualLabels(labels: VisualDetailLabel[]): VisualDetailLabel[] {
   return out;
 }
 
-function matchVisualLabelsToPartContours(
+export function matchVisualLabelsToPartContours(
   contours: PartContourGeometry[],
   labels: VisualDetailLabel[],
 ): Map<PartContourGeometry, VisualDetailLabel> {
@@ -412,7 +476,7 @@ function matchVisualLabelsToPartContours(
 
   for (const contour of orderedContours) {
     const match = labels
-      .filter((label) => !usedLabels.has(label) && sizeMatches(label.widthMm, label.heightMm, contour.placedWidthMm, contour.placedHeightMm))
+      .filter((label) => !usedLabels.has(label))
       .map((label) => ({ label, score: visualLabelContourScore(label, contour) }))
       .filter((candidate) => candidate.score !== null)
       .sort((left, right) => Number(left.score) - Number(right.score))[0];
@@ -427,10 +491,30 @@ function matchVisualLabelsToPartContours(
 function visualLabelContourScore(label: VisualDetailLabel, contour: PartContourGeometry): number | null {
   const center = contourCenter(contour);
   const distance = Math.hypot(label.cxMm - center[0], label.cyMm - center[1]);
-  const inside = pointInsideContour(label.cxMm, label.cyMm, contour, Math.max(8, Math.min(contour.placedWidthMm, contour.placedHeightMm) * 0.2));
-  const maxDistance = Math.max(30, Math.hypot(contour.placedWidthMm, contour.placedHeightMm) * 0.6);
-  if (!inside && distance > maxDistance) return null;
-  return distance + (inside ? 0 : maxDistance);
+  const points = label.linePointsMm.length > 0 ? label.linePointsMm : [[label.cxMm, label.cyMm] as Point];
+  const insideTolerance = Math.max(10, Math.min(contour.placedWidthMm, contour.placedHeightMm) * 0.2);
+  const nearTolerance = Math.max(35, Math.min(220, Math.min(contour.placedWidthMm, contour.placedHeightMm) * 0.45));
+  const minContourDistance = Math.min(...points.map(([x, y]) => pointDistanceToContour(x, y, contour)));
+  const inside = points.some(([x, y]) => pointInsideContour(x, y, contour, insideTolerance)) ||
+    pointInsideContour(label.cxMm, label.cyMm, contour, insideTolerance);
+  const maxCenterDistance = Math.max(80, Math.hypot(contour.placedWidthMm, contour.placedHeightMm) * 0.85);
+  const sizeDelta = visualLabelContourSizeDelta(label, contour);
+  const positionOk = inside || minContourDistance <= nearTolerance || distance <= maxCenterDistance;
+  if (!positionOk) return null;
+
+  if (
+    label.hasExplicitSize &&
+    sizeDelta > Math.max(120, Math.min(contour.placedWidthMm, contour.placedHeightMm) * 0.5) &&
+    !inside &&
+    minContourDistance > nearTolerance * 0.5
+  ) {
+    return null;
+  }
+
+  const sizePenalty = label.hasExplicitSize && sizeDelta > DETAIL_SIZE_TOLERANCE_MM
+    ? Math.min(sizeDelta, 200) * 3
+    : 0;
+  return minContourDistance * 3 + distance * 0.2 + sizePenalty + (inside ? 0 : 25) + (label.hasExplicitSize ? 0 : 40);
 }
 
 function contourCenter(contour: PartContourGeometry): Point {
@@ -445,6 +529,32 @@ function pointInsideContour(x: number, y: number, contour: PartContourGeometry, 
     y >= contour.yMm - toleranceMm &&
     x <= contour.xMm + contour.placedWidthMm + toleranceMm &&
     y <= contour.yMm + contour.placedHeightMm + toleranceMm;
+}
+
+function pointDistanceToContour(x: number, y: number, contour: PartContourGeometry): number {
+  const dx = Math.max(contour.xMm - x, 0, x - (contour.xMm + contour.placedWidthMm));
+  const dy = Math.max(contour.yMm - y, 0, y - (contour.yMm + contour.placedHeightMm));
+  return Math.hypot(dx, dy);
+}
+
+function visualLabelContourSizeDelta(label: VisualDetailLabel, contour: PartContourGeometry): number {
+  if (!label.hasExplicitSize || label.widthMm === null || label.heightMm === null) return 0;
+  const expected = [label.widthMm, label.heightMm].sort((a, b) => a - b);
+  const actual = [contour.placedWidthMm, contour.placedHeightMm].sort((a, b) => a - b);
+  return Math.max(Math.abs(expected[0] - actual[0]), Math.abs(expected[1] - actual[1]));
+}
+
+function resolveVisualLabelSize(
+  label: VisualDetailLabel,
+  contour: PartContourGeometry,
+): { widthMm: number; heightMm: number } {
+  if (label.hasExplicitSize && label.widthMm !== null && label.heightMm !== null) {
+    return { widthMm: label.widthMm, heightMm: label.heightMm };
+  }
+  return {
+    widthMm: round2(Math.max(contour.placedWidthMm, contour.placedHeightMm)),
+    heightMm: round2(Math.min(contour.placedWidthMm, contour.placedHeightMm)),
+  };
 }
 
 function coordinateAttr(element: Element, name: string): number | null {
@@ -544,24 +654,24 @@ export function parseSvgTransformList(value: string | null): { matrix: SvgMatrix
     const matchIndex = match.index ?? 0;
     const between = raw.slice(cursor, matchIndex);
     if (between.trim().replaceAll(',', '') !== '') {
-      return { matrix: identityMatrix(), error: 'unsupported SVG transform syntax' };
+      return { matrix: identityMatrix(), error: 'Неподдерживаемый синтаксис SVG transform' };
     }
     matched = true;
     cursor = matchIndex + match[0].length;
 
     const numbers = transformNumbers(match[2]);
     if (!numbers) {
-      return { matrix: identityMatrix(), error: `unsupported SVG transform: ${match[1]}` };
+      return { matrix: identityMatrix(), error: `Неподдерживаемый SVG transform: ${match[1]}` };
     }
     const transform = transformMatrix(match[1], numbers);
     if (!transform) {
-      return { matrix: identityMatrix(), error: `unsupported SVG transform: ${match[1]}` };
+      return { matrix: identityMatrix(), error: `Неподдерживаемый SVG transform: ${match[1]}` };
     }
     current = composeMatrix(transform, current);
   }
 
   if (!matched || raw.slice(cursor).trim().replaceAll(',', '') !== '') {
-    return { matrix: identityMatrix(), error: 'unsupported SVG transform syntax' };
+    return { matrix: identityMatrix(), error: 'Неподдерживаемый синтаксис SVG transform' };
   }
   return { matrix: current, error: null };
 }

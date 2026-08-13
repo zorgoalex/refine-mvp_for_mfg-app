@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-13",
+    title: "Раскрой: чтение SVG-подписей",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Ручная загрузка SVG устойчивее сопоставляет верхние подписи деталей с контурами PartContour, включая маленькие детали с подписью из двух строк и контуры с небольшим расхождением bbox-размера.",
+      "Сообщения валидации SVG переведены на русский вместо сырого текста parser reasons.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-13",
     title: "Календарь: мобильное контекстное меню",
     services: ["ERP"],
     repositories: ["repo_erp"],
