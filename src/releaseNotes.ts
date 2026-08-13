@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-13",
+    title: "Присадка: активные и неактивные записи",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке присадок добавлена колонка «Активен» и переключатель «Показывать неактивные» над таблицей.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-13",
     title: "Присадка: сохранение редактирования",
     services: ["ERP"],
     repositories: ["repo_erp"],

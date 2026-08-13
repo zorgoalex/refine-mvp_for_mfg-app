@@ -758,6 +758,7 @@ const RESOURCE_FIELDS: Record<string, string[]> = {
     "edited_by",
     "created_at",
     "updated_at",
+    "delete_flag",
   ],
   doweling_orders: [
     "doweling_order_id",
