@@ -13,6 +13,7 @@ const TRANSFORM_RE = /([a-zA-Z]+)\(([^)]*)\)/g;
 const GEOMETRY_TAGS = new Set(['rect', 'polygon', 'polyline', 'path']);
 const LAYOUT_BOUNDS_TOLERANCE_MM = 2;
 const DETAIL_SIZE_TOLERANCE_MM = 8;
+const SHEET_OUTLINE_TOLERANCE_MM = 3;
 
 export type SvgMatrix = [number, number, number, number, number, number];
 export type SvgPoint = [number, number];
@@ -121,20 +122,21 @@ export function parseSvgCutUploadText(
   const scaleX = vbWidth / sheetWidth;
   const scaleY = vbHeight / sheetHeight;
 
-  const layoutItems: CncTelegramCutLayout['items'] = [];
   const partContours: PartContourGeometry[] = [];
-  const seenGeometry = new Set<string>();
-  const rejected = new Set<string>();
+  const genericContours: PartContourGeometry[] = [];
+  const rejectedPartContours = new Set<string>();
+  const rejectedGenericContours = new Set<string>();
   const visualLabels = extractVisualDetailLabels(root, vbMinX, vbMinY, scaleX, scaleY);
   const rawCommentCount = visualLabels.length;
-  let partContourCount = 0;
+  const allowGenericGeometry = options.allowGeometryFallbackItems === true;
 
   for (const { element, matrix, transformError } of traverse(root)) {
     if (!GEOMETRY_TAGS.has(localName(element))) continue;
+    if (hasIgnoredGeometryAncestor(element)) continue;
     const elementId = element.getAttribute('id') ?? '';
-    if (!elementId.includes('PartContour')) continue;
-
-    partContourCount += 1;
+    const isPartContour = elementId.includes('PartContour');
+    if (!isPartContour && !allowGenericGeometry) continue;
+    const rejected = isPartContour ? rejectedPartContours : rejectedGenericContours;
     if (transformError) {
       rejected.add(transformError);
       continue;
@@ -144,7 +146,7 @@ export function parseSvgCutUploadText(
     const bbox = pointsBbox(points);
     if (!bbox) {
       if (visualLabels.length > 0 || options.allowGeometryFallbackItems === true) {
-        rejected.add('Контуры деталей PartContour без геометрии');
+        rejected.add(isPartContour ? 'Контуры деталей PartContour без геометрии' : 'Контуры деталей без геометрии');
       }
       continue;
     }
@@ -153,6 +155,22 @@ export function parseSvgCutUploadText(
     const yMm = (bbox[1] - vbMinY) / scaleY;
     const placedWidthMm = Math.abs(bbox[2] - bbox[0]) / scaleX;
     const placedHeightMm = Math.abs(bbox[3] - bbox[1]) / scaleY;
+    const contour = {
+      elementId: elementId || `${localName(element)}-${partContours.length + 1}`,
+      xMm,
+      yMm,
+      placedWidthMm,
+      placedHeightMm,
+    };
+    if (!isPartContour && !svgUploadGeometryIsInformationalDetailContour(
+      contour,
+      sheetWidth,
+      sheetHeight,
+      elementId,
+      element.getAttribute('class') ?? '',
+    )) {
+      continue;
+    }
 
     const insideSheet =
       xMm >= -LAYOUT_BOUNDS_TOLERANCE_MM &&
@@ -160,23 +178,77 @@ export function parseSvgCutUploadText(
       xMm + placedWidthMm <= sheetWidth + LAYOUT_BOUNDS_TOLERANCE_MM &&
       yMm + placedHeightMm <= sheetHeight + LAYOUT_BOUNDS_TOLERANCE_MM;
     if (!insideSheet) {
-      rejected.add('Контуры деталей PartContour выходят за границы листа');
+      rejected.add(isPartContour ? 'Контуры деталей PartContour выходят за границы листа' : 'Контуры деталей выходят за границы листа');
       continue;
     }
 
-    partContours.push({
-      elementId,
-      xMm,
-      yMm,
-      placedWidthMm,
-      placedHeightMm,
-    });
+    if (isPartContour) partContours.push(contour);
+    else genericContours.push(contour);
   }
 
+  const selectedContours = partContours.length > 0 || !allowGenericGeometry ? partContours : genericContours;
+  const builtLayout = buildSvgUploadLayoutItemsFromContours(selectedContours, visualLabels, options);
+  const rejected = new Set<string>();
+  if (!allowGenericGeometry || selectedContours.length === 0) {
+    for (const reason of rejectedPartContours) rejected.add(reason);
+    if (allowGenericGeometry) {
+      for (const reason of rejectedGenericContours) rejected.add(reason);
+    }
+  }
+  for (const reason of builtLayout.rejected) rejected.add(reason);
+
+  const reasons: string[] = [];
+  if (visualLabels.length === 0 && options.allowGeometryFallbackItems !== true) {
+    reasons.push('Не найдены читаемые верхние подписи деталей: заказ / позиция / размер');
+  }
+  if (visualLabels.length > 0 && builtLayout.layoutItems.length === 0) {
+    reasons.push(allowGenericGeometry
+      ? 'Верхние подписи деталей найдены, но ни одна не сопоставилась с контуром детали'
+      : 'Верхние подписи деталей найдены, но ни одна не сопоставилась с контуром PartContour');
+  }
+  const reportContourCount = selectedContours.length;
+  if (reportContourCount === 0) {
+    reasons.push(allowGenericGeometry
+      ? 'В SVG нет контуров деталей: нужны PartContour или обычные rect/path/polygon/polyline с геометрией'
+      : 'В SVG нет контуров деталей PartContour');
+  }
+  reasons.push(...Array.from(rejected).sort());
+  if (reportContourCount > 0 && builtLayout.layoutItems.length === 0) {
+    reasons.push(allowGenericGeometry
+      ? 'Контуры деталей есть, но ни одна деталь не прошла проверку геометрии'
+      : 'Контуры PartContour есть, но ни одна деталь не прошла проверку геометрии');
+  }
+
+  const status = builtLayout.layoutItems.length > 0 && reasons.length === 0 ? 'valid' : 'invalid';
+  const cutLayout: CncTelegramCutLayout = {
+    status,
+    reasons,
+    sheet: { widthMm: round2(sheetWidth), heightMm: round2(sheetHeight) },
+    rawCommentCount,
+    partContourCount: reportContourCount,
+    acceptedItemCount: status === 'valid' ? builtLayout.layoutItems.length : 0,
+    items: status === 'valid' ? builtLayout.layoutItems : [],
+  };
+  return {
+    fileName,
+    cutLayout,
+    items: layoutItemsToRequestItems(cutLayout),
+  };
+}
+
+export function buildSvgUploadLayoutItemsFromContours(
+  contours: PartContourGeometry[],
+  visualLabels: VisualDetailLabel[],
+  options: SvgCutUploadParseOptions = {},
+): { layoutItems: CncTelegramCutLayout['items']; rejected: string[] } {
+  const layoutItems: CncTelegramCutLayout['items'] = [];
+  const rejected = new Set<string>();
+  const seenGeometry = new Set<string>();
   const visualMatches = visualLabels.length > 0
-    ? matchVisualLabelsToPartContours(partContours, visualLabels)
+    ? matchVisualLabelsToPartContours(contours, visualLabels)
     : new Map<PartContourGeometry, VisualDetailLabel>();
-  for (const [index, contour] of partContours.entries()) {
+
+  for (const [index, contour] of contours.entries()) {
     const parsed = visualMatches.get(contour);
     if (!parsed) {
       if (options.allowGeometryFallbackItems === true) {
@@ -223,34 +295,35 @@ export function parseSvgCutUploadText(
     });
   }
 
-  const reasons: string[] = [];
-  if (visualLabels.length === 0 && options.allowGeometryFallbackItems !== true) {
-    reasons.push('Не найдены читаемые верхние подписи деталей: заказ / позиция / размер');
-  }
-  if (visualLabels.length > 0 && layoutItems.length === 0) {
-    reasons.push('Верхние подписи деталей найдены, но ни одна не сопоставилась с контуром PartContour');
-  }
-  if (partContourCount === 0) reasons.push('В SVG нет контуров деталей PartContour');
-  reasons.push(...Array.from(rejected).sort());
-  if (partContourCount > 0 && layoutItems.length === 0) {
-    reasons.push('Контуры PartContour есть, но ни одна деталь не прошла проверку геометрии');
-  }
+  return { layoutItems, rejected: Array.from(rejected).sort() };
+}
 
-  const status = layoutItems.length > 0 && reasons.length === 0 ? 'valid' : 'invalid';
-  const cutLayout: CncTelegramCutLayout = {
-    status,
-    reasons,
-    sheet: { widthMm: round2(sheetWidth), heightMm: round2(sheetHeight) },
-    rawCommentCount,
-    partContourCount,
-    acceptedItemCount: status === 'valid' ? layoutItems.length : 0,
-    items: status === 'valid' ? layoutItems : [],
-  };
-  return {
-    fileName,
-    cutLayout,
-    items: layoutItemsToRequestItems(cutLayout),
-  };
+export function svgUploadGeometryIsInformationalDetailContour(
+  contour: PartContourGeometry,
+  sheetWidthMm: number,
+  sheetHeightMm: number,
+  elementId = '',
+  className = '',
+): boolean {
+  if (
+    contour.placedWidthMm <= 0 ||
+    contour.placedHeightMm <= 0 ||
+    !Number.isFinite(contour.xMm) ||
+    !Number.isFinite(contour.yMm) ||
+    !Number.isFinite(contour.placedWidthMm) ||
+    !Number.isFinite(contour.placedHeightMm)
+  ) {
+    return false;
+  }
+  const coversSheet =
+    Math.abs(contour.xMm) <= SHEET_OUTLINE_TOLERANCE_MM &&
+    Math.abs(contour.yMm) <= SHEET_OUTLINE_TOLERANCE_MM &&
+    Math.abs(contour.placedWidthMm - sheetWidthMm) <= SHEET_OUTLINE_TOLERANCE_MM * 2 &&
+    Math.abs(contour.placedHeightMm - sheetHeightMm) <= SHEET_OUTLINE_TOLERANCE_MM * 2;
+  if (!coversSheet) return true;
+
+  const marker = `${elementId} ${className}`.toLowerCase();
+  return Boolean(elementId.trim()) && !/(sheet|border|ramka|лист|str0)/i.test(marker);
 }
 
 function fallbackLayoutItemFromContour(
@@ -636,7 +709,7 @@ function elementPoints(element: Element): Point[] {
     return parsePoints(element.getAttribute('points') ?? '');
   }
   if (tag === 'path') {
-    return parsePathPoints(element.getAttribute('d') ?? '');
+    return parseSvgPathPointsForUpload(element.getAttribute('d') ?? '');
   }
   return [];
 }
@@ -790,7 +863,7 @@ function parsePoints(value: string): Point[] {
   return points;
 }
 
-function parsePathPoints(value: string): Point[] {
+export function parseSvgPathPointsForUpload(value: string): Point[] {
   const tokens = value.replaceAll(',', ' ').match(PATH_TOKEN_RE) ?? [];
   const points: Point[] = [];
   let index = 0;
@@ -807,11 +880,11 @@ function parsePathPoints(value: string): Point[] {
     index += 1;
     return number;
   };
-  const readPair = (relative: boolean): Point | null => {
+  const readPair = (relative: boolean, baseX = x, baseY = y): Point | null => {
     const left = readNumber();
     const right = readNumber();
     if (left === null || right === null) return null;
-    return relative ? [x + left, y + right] : [left, right];
+    return relative ? [baseX + left, baseY + right] : [left, right];
   };
 
   while (index < tokens.length) {
@@ -874,12 +947,16 @@ function parsePathPoints(value: string): Point[] {
           y = relative ? y + Number(values[6]) : Number(values[6]);
           points.push([x, y]);
         } else {
+          const baseX = x;
+          const baseY = y;
+          const commandPoints: Point[] = [];
           for (let pairIndex = 0; pairIndex < pairsPerCommand; pairIndex += 1) {
-            const pair = readPair(relative);
+            const pair = readPair(relative, baseX, baseY);
             if (!pair) return [];
-            [x, y] = pair;
-            points.push([x, y]);
+            commandPoints.push(pair);
+            points.push(pair);
           }
+          [x, y] = commandPoints[commandPoints.length - 1];
         }
         consumed = true;
       }
@@ -928,6 +1005,17 @@ function sizeMatches(
   const expected = [declaredWidth, declaredHeight].sort((a, b) => a - b);
   const actual = [placedWidth, placedHeight].sort((a, b) => a - b);
   return Math.max(Math.abs(expected[0] - actual[0]), Math.abs(expected[1] - actual[1])) <= DETAIL_SIZE_TOLERANCE_MM;
+}
+
+function hasIgnoredGeometryAncestor(element: Element): boolean {
+  let current = element.parentElement;
+  while (current) {
+    if (['defs', 'font', 'glyph', 'missing-glyph', 'text', 'tspan', 'metadata', 'style'].includes(localName(current))) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
 }
 
 function localName(element: Element): string {

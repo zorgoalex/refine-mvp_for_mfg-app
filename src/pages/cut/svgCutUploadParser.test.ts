@@ -2,8 +2,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   applySvgMatrixToPoint,
+  buildSvgUploadLayoutItemsFromContours,
   matchVisualLabelsToPartContours,
+  parseSvgPathPointsForUpload,
   parseSvgTransformList,
+  svgUploadGeometryIsInformationalDetailContour,
   type PartContourGeometry,
   type VisualDetailLabel,
 } from './svgCutUploadParser';
@@ -69,6 +72,20 @@ describe('svgCutUploadParser transforms', () => {
     expect(parseSvgTransformList('translate(10 20px)').error)
       .toBe('Неподдерживаемый SVG transform: translate');
   });
+
+  it('keeps relative cubic path control points relative to the segment start', () => {
+    const points = parseSvgPathPointsForUpload('M100 100c10 0 20 0 30 0c10 0 20 0 30 0');
+
+    expect(points).toEqual([
+      [100, 100],
+      [110, 100],
+      [120, 100],
+      [130, 100],
+      [140, 100],
+      [150, 100],
+      [160, 100],
+    ]);
+  });
 });
 
 describe('svgCutUploadParser visual labels', () => {
@@ -91,6 +108,95 @@ describe('svgCutUploadParser visual labels', () => {
     expect(parserSource).toContain('fallbackOrderName');
     expect(parserSource).toContain('confidence: 0.72');
     expect(parserSource).toContain('options.allowGeometryFallbackItems !== true');
+    expect(parserSource).toContain('svgUploadGeometryIsInformationalDetailContour');
+  });
+
+  it('accepts non-PartContour HDF rectangles as informational detail geometry', () => {
+    const sheetBorder = contour({
+      elementId: 'rect-1',
+      xMm: 0.1,
+      yMm: 0.1,
+      placedWidthMm: 2069.9,
+      placedHeightMm: 2799.9,
+    });
+    const hdfPiece = contour({
+      elementId: '__x007e__x007e_vyborka',
+      xMm: 368.09,
+      yMm: 325.08,
+      placedWidthMm: 344.98,
+      placedHeightMm: 475.97,
+    });
+
+    expect(svgUploadGeometryIsInformationalDetailContour(sheetBorder, 2070.2, 2800.2, '', 'fil0 str0'))
+      .toBe(false);
+    expect(svgUploadGeometryIsInformationalDetailContour(hdfPiece, 2070.2, 2800.2, hdfPiece.elementId, 'fil0 str1'))
+      .toBe(true);
+  });
+
+  it('builds informational items from generic HDF rectangles and two-line labels', () => {
+    const hdfPieces = [
+      contour({
+        elementId: '__x007e__x007e_vyborka',
+        xMm: 368.09,
+        yMm: 325.08,
+        placedWidthMm: 344.98,
+        placedHeightMm: 475.97,
+      }),
+      contour({
+        elementId: '__x007e__x007e_vyborka_5',
+        xMm: 726.07,
+        yMm: 1371.03,
+        placedWidthMm: 281.99,
+        placedHeightMm: 213.99,
+      }),
+    ];
+    const result = buildSvgUploadLayoutItemsFromContours(
+      hdfPieces,
+      [
+        visualLabel({
+          key: '2777:3:no-size',
+          orderName: '2777',
+          detailNumber: 3,
+          widthMm: null,
+          heightMm: null,
+          hasExplicitSize: false,
+          cxMm: 450.98,
+          cyMm: 572.11,
+          linePointsMm: [[404.42, 542.98], [497.53, 601.23]],
+          rawLines: ['2777', '# 3'],
+        }),
+        visualLabel({
+          key: '2723:1:no-size',
+          orderName: '2723',
+          detailNumber: 1,
+          widthMm: null,
+          heightMm: null,
+          hasExplicitSize: false,
+          cxMm: 779.33,
+          cyMm: 1522.09,
+          linePointsMm: [[730.85, 1492.55], [827.82, 1551.63]],
+          rawLines: ['2723', '# 1'],
+        }),
+      ],
+      { allowGeometryFallbackItems: true, fallbackOrderName: '2777+2723' },
+    );
+
+    expect(result.rejected).toEqual([]);
+    expect(result.layoutItems).toHaveLength(2);
+    expect(result.layoutItems).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        orderName: '2723',
+        detailNumber: 1,
+        widthMm: 281.99,
+        heightMm: 213.99,
+      }),
+      expect.objectContaining({
+        orderName: '2777',
+        detailNumber: 3,
+        widthMm: 475.97,
+        heightMm: 344.98,
+      }),
+    ]));
   });
 
   it('matches visual labels by position when contour bbox size is slightly noisy', () => {
