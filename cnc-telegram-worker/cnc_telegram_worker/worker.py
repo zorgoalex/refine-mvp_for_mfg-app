@@ -82,6 +82,12 @@ class SvgGroup:
         return self.vector_message
 
 
+@dataclass(frozen=True)
+class ManualSvgSendFile:
+    kind: str
+    path: Path
+
+
 class CncTelegramWorker:
     def __init__(self, config: WorkerConfig) -> None:
         self.config = config
@@ -223,12 +229,13 @@ class CncTelegramWorker:
                     raise RuntimeError("manual SVG Telegram send task has no files")
                 send_dir = self.config.temp_dir / f"manual-svg-send-{request_id}"
                 send_dir.mkdir(parents=True, exist_ok=True)
-                paths: list[Path] = []
+                send_files: list[ManualSvgSendFile] = []
                 for index, file_item in enumerate(files, start=1):
                     path = write_manual_svg_send_file(send_dir, file_item, index)
-                    paths.append(path)
-                caption = sanitize_text(str(task.get("messageText") or ""), 4096) or None
-                sent = await send_manual_svg_upload_files(client, entity, paths, caption)
+                    kind = str(file_item.get("kind") or "").lower() if isinstance(file_item, dict) else ""
+                    send_files.append(ManualSvgSendFile(kind=kind, path=path))
+                message_text = sanitize_text(str(task.get("messageText") or ""), 4096) or None
+                sent = await send_manual_svg_upload_files(client, entity, send_files, message_text)
                 await self.erp.complete_manual_svg_telegram_send(request_id, {
                     "sentChatId": chat_id,
                     "sentMessageIds": manual_svg_sent_message_ids(sent),
@@ -1129,16 +1136,28 @@ async def send_cutting_sequence_reply(client: Any, entity: Any, image_message: A
     )
 
 
-async def send_manual_svg_upload_files(client: Any, entity: Any, paths: list[Path], caption: str | None) -> Any:
+MANUAL_SVG_SEND_KIND_ORDER = {
+    "gcode": 0,
+    "svg": 1,
+    "screenshot": 2,
+}
+
+
+async def send_manual_svg_upload_files(client: Any, entity: Any, files: list[ManualSvgSendFile], message_text: str | None) -> Any:
     sent_messages: list[Any] = []
-    for index, path in enumerate(paths):
+    ordered_files = sorted(
+        enumerate(files),
+        key=lambda item: (MANUAL_SVG_SEND_KIND_ORDER.get(item[1].kind, 99), item[0]),
+    )
+    for _index, file_item in ordered_files:
         sent = await client.send_file(
             entity,
-            str(path),
-            caption=caption if index == 0 else None,
-            force_document=True,
+            str(file_item.path),
+            force_document=file_item.kind != "screenshot",
         )
         sent_messages.extend(sent if isinstance(sent, list) else [sent])
+    if message_text:
+        sent_messages.append(await client.send_message(entity, message_text))
     return sent_messages
 
 
