@@ -60,6 +60,7 @@ import {
 } from './cutVacuumProfile';
 import {
   buildSheetPieceOverlays,
+  buildSheetVacuumOrientationWarnings,
   cutPdfPreviewBlockReason,
   loadNonVacuumSheetAxisOrigin,
   loadSheetAxisOrigin,
@@ -151,9 +152,9 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
 ];
 
 const CUT_TEXTURE_DIRECTION_OPTIONS: Array<{ value: CutTextureDirection; label: string }> = [
-  { value: 'vertical', label: 'Вертикальное' },
-  { value: 'horizontal', label: 'Горизонтальное' },
-  { value: 'none', label: 'Отсутствует' },
+  { value: 'vertical', label: 'вдоль полотна' },
+  { value: 'horizontal', label: 'поперёк полотна' },
+  { value: 'none', label: 'отсутствует' },
 ];
 
 const { Title, Text } = Typography;
@@ -4535,6 +4536,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   const displayHeightMm = rotate90 ? widthMm : heightMm;
                   const isPortraitPreview = displayHeightMm > displayWidthMm;
                   const overlays = buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin);
+                  const vacuumOrientationWarnings = buildSheetVacuumOrientationWarnings(sheet.placements, job.items);
                   const sheetDetailInstances = detailInstancesForSheet(sheet);
                   const bathFilmUsage = showBathMeterGuides ? calculateBathSheetFilmUsage(sheet.placements) : null;
                   return (
@@ -4605,6 +4607,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                           />
                         </Space>
                       </div>
+                      {vacuumOrientationWarnings.length > 0 && (
+                        <div
+                          data-testid="cut-vacuum-orientation-warning-list"
+                          style={{ color: token.colorError, fontStyle: 'italic', marginTop: 4, lineHeight: 1.35 }}
+                        >
+                          {vacuumOrientationWarnings.map((warning) => (
+                            <div key={warning.key}>• {warning.text}</div>
+                          ))}
+                        </div>
+                      )}
                       {sheetThumbs[key] && !sheetImages[key] && (
                         <SheetPreview
                           src={sheetThumbs[key]}

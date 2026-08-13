@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildCutPieceTooltipRows,
   buildSheetPieceOverlays,
+  buildSheetVacuumOrientationWarnings,
   cutPdfPreviewBlockReason,
   displayedSheetExtents,
   formatSheetSide,
@@ -359,6 +360,27 @@ describe('cutPreviewHelpers', () => {
       expect(rows).toContainEqual({ label: 'Плёнка', value: 'Белая матовая' });
       expect(rows.some((row) => row.label.endsWith('ID') || row.label.includes('ID '))).toBe(false);
       expect(rows.some((row) => row.label === 'detail_name' || row.label === 'note' || row.label === 'film_id')).toBe(false);
+    });
+
+    it('carries vacuum orientation warnings into overlays, tooltip rows and sheet warning list', () => {
+      const warning = {
+        code: 'vacuum_profile_orientation_fallback' as const,
+        profileDirection: 'width' as const,
+        requestedSide: 'height' as const,
+        actualSide: 'width' as const,
+        message: 'Сторона высота не поместилась поперёк листа.',
+      };
+      const warnedPlacements: SheetPlacements = {
+        ...placements,
+        pieces: [{ ...placements.pieces[0], vacuum_orientation_warning: warning }],
+      };
+      const overlay = buildSheetPieceOverlays(warnedPlacements, [item], false)[0];
+      expect(overlay.vacuumOrientationWarning).toEqual(warning);
+      expect(overlay.tooltipRows).toContainEqual({ label: 'Предупреждение', value: warning.message });
+      expect(buildSheetVacuumOrientationWarnings(warnedPlacements, [item])).toEqual([{
+        key: 'det-42:1',
+        text: `заказ 777, позиция 3, Боковина, экз. 1: ${warning.message}`,
+      }]);
     });
 
     it('marks deleted order references in sheet tooltip rows', () => {

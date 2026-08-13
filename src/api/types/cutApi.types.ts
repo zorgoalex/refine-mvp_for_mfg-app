@@ -92,6 +92,13 @@ export interface SheetPlacementPiece {
   height_mm: number;
   rotated: boolean;
   rotation_forbidden?: boolean;
+  vacuum_orientation_warning?: {
+    code: 'vacuum_profile_orientation_fallback';
+    profileDirection: 'width' | 'height';
+    requestedSide: 'width' | 'height';
+    actualSide: 'width' | 'height';
+    message: string;
+  };
   /** Frozen label snapshot from calculate (absent in legacy records). */
   label?: { orderId: number | null; detailNumber: number | null; widthMm: number | null; heightMm: number | null };
 }

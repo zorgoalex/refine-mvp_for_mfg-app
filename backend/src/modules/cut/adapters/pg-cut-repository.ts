@@ -33,6 +33,7 @@ import {
   assertWithinInstanceLimit,
   backMapSolutions,
   buildOptimizeRequest,
+  buildOptimizeRequestWithWarnings,
   freecutItemId,
   NATIVE_PORTRAIT_COORDINATE_CONTRACT,
   parseFreecutItemId,
@@ -999,20 +1000,21 @@ export class PgCutRepository implements CutRepositoryPort {
           totalInstances,
           this.heuristicAutoThresholdInstances,
         );
-        const request = buildOptimizeRequest({
+        const optimizeInput = buildOptimizeRequestWithWarnings({
           stock: { id: `smt-${group.sheetMaterialTypeId}`, width_mm: group.smtWidthMm, height_mm: group.smtHeightMm },
           items: freecutItems,
           params: engineSelection.params,
           includeSvg: false,
           nativePortrait: this.nativePortraitWriter,
         });
+        const request = optimizeInput.request;
         if (!job.rotationAllowed) {
           request.items = request.items.map((item) => ({ ...item, rotation: 'forbid' }));
         }
         // Per-group pre-call guards (a fan-out group can independently exceed limits).
         assertWithinInstanceLimit(freecutItems);
         assertWithinBodyLimit(request);
-        return { group, request, engineSelection, totalInstances };
+        return { group, request, engineSelection, totalInstances, vacuumWarningsByItemId: optimizeInput.vacuumWarningsByItemId };
       });
 
       // Reflect the lifecycle: draft|ready -> calculating, and BUMP version so a
@@ -1117,6 +1119,7 @@ export class PgCutRepository implements CutRepositoryPort {
         const filmTextureByItemId = new Map(groupPrep.request.items.map((item) => [item.id, item.rotation === 'forbid']));
         const violations = backMapSolutions(response, {
           requestItems: groupPrep.request.items,
+          vacuumWarningsByItemId: groupPrep.vacuumWarningsByItemId,
           ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
         }).flatMap((sheet) =>
           validateSheetPlacements({
@@ -1220,6 +1223,7 @@ export class PgCutRepository implements CutRepositoryPort {
 
         for (const sheet of backMapSolutions(response, {
           requestItems: request.items,
+          vacuumWarningsByItemId: groupPrep.vacuumWarningsByItemId,
           ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
         })) {
           const placementsWithLabels: SheetPlacementsJson = {
@@ -4527,6 +4531,7 @@ export class PgCutRepository implements CutRepositoryPort {
                 heightMm: piece.height_mm,
               },
               rotationForbidden: piece.rotation_forbidden,
+              vacuumOrientationWarning: piece.vacuum_orientation_warning,
             });
           }
         }
@@ -5575,11 +5580,11 @@ function normalizeCutTextureDirection(value: string | null | undefined): CutText
 function cutTextureDirectionLabel(value: string | null | undefined): string {
   switch (normalizeCutTextureDirection(value)) {
     case 'vertical':
-      return 'Вертикальное';
+      return 'вдоль полотна';
     case 'horizontal':
-      return 'Горизонтальное';
+      return 'поперёк полотна';
     default:
-      return 'Отсутствует';
+      return 'отсутствует';
   }
 }
 

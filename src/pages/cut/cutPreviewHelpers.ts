@@ -176,6 +176,7 @@ export interface CutPieceOverlay {
   orderDeleted?: boolean;
   orderDetailId: number | null;
   detailNumber: number | null;
+  vacuumOrientationWarning?: SheetPlacementPiece['vacuum_orientation_warning'];
   leftPct: number;
   topPct: number;
   widthPct: number;
@@ -199,6 +200,10 @@ export function buildCutPieceTooltipRows(item: CutJobItemDto, piece: SheetPlacem
     { label: 'Экземпляр', value: formatTooltipValue(piece.instance) },
     { label: 'Кол-во в задании', value: formatTooltipValue(item.qty) },
   ];
+
+  if (piece.vacuum_orientation_warning) {
+    rows.push({ label: 'Предупреждение', value: piece.vacuum_orientation_warning.message });
+  }
 
   if (detail) {
     rows.push(
@@ -277,6 +282,7 @@ export function buildSheetPieceOverlays(
         orderDeleted: item.orderDeleted === true,
         orderDetailId: item.orderDetailId,
         detailNumber: item.detail?.detailNumber ?? null,
+        vacuumOrientationWarning: piece.vacuum_orientation_warning,
         leftPct: (rect.x / rect.vw) * 100,
         topPct: (rect.y / rect.vh) * 100,
         widthPct: (rect.w / rect.vw) * 100,
@@ -296,6 +302,37 @@ export function buildSheetPieceOverlays(
       };
     })
     .filter((overlay): overlay is CutPieceOverlay => overlay !== null);
+}
+
+export interface CutSheetVacuumOrientationWarningItem {
+  key: string;
+  text: string;
+}
+
+export function buildSheetVacuumOrientationWarnings(
+  placements: SheetPlacements,
+  items: readonly CutJobItemDto[],
+): CutSheetVacuumOrientationWarningItem[] {
+  const itemByDetail = new Map(items.map((item) => [item.orderDetailId, item]));
+  return placements.pieces
+    .filter((piece) => piece.vacuum_orientation_warning)
+    .map((piece) => {
+      const detailId = parseCutPieceDetailId(piece.item_id);
+      const item = detailId === null ? undefined : itemByDetail.get(detailId);
+      const orderText = item ? `заказ ${formatTooltipValue(item.orderId)}` : 'заказ —';
+      const detailNumber = item?.detail?.detailNumber ?? detailId;
+      const detailName = item?.detail?.detailName?.trim();
+      const detailText = [
+        orderText,
+        `позиция ${formatTooltipValue(detailNumber)}`,
+        ...(detailName ? [detailName] : []),
+        `экз. ${formatTooltipValue(piece.instance)}`,
+      ].join(', ');
+      return {
+        key: `${piece.item_id}:${piece.instance}`,
+        text: `${detailText}: ${piece.vacuum_orientation_warning!.message}`,
+      };
+    });
 }
 
 /**

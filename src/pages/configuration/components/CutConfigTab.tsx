@@ -559,7 +559,7 @@ const PDF_PREVIEW_VALUES: Record<string, string> = {
   'job.name': 'Раскрой заказ 11380',
   'job.number': '19',
   'job.pdf_template': 'Профили ванны',
-  'job.texture_direction': 'Вертикальное',
+  'job.texture_direction': 'вдоль полотна',
   'cut.number': '19-3',
   'cut.current_version': '19-4',
   'group.number': '1',
