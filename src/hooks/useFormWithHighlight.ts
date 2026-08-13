@@ -38,6 +38,7 @@ export const useFormWithHighlight = <
 
   const formReturn = useRefineForm<TQueryFnData, TError, TVariables, TData, TResponse, TResponseError>({
     ...additionalProps,
+    resource,
     redirect: false,
     onMutationSuccess: (data, variables, context, isAutoSave) => {
       // Call original onMutationSuccess if provided

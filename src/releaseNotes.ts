@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-13",
+    title: "Присадка: сохранение редактирования",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Редактирование присадки сохраняет изменения в базовой записи справочника, а не пытается обновить read-only представление присадок.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-13",
     title: "Присадка: полнофункциональное редактирование",
     services: ["ERP"],
     repositories: ["repo_erp"],

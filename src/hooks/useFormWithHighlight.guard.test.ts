@@ -12,6 +12,10 @@ describe('useFormWithHighlight tab title enrichment', () => {
 });
 
 describe('useFormWithHighlight success navigation', () => {
+  it('uses the explicit data resource for Refine form mutations', () => {
+    expect(source).toMatch(/useRefineForm[\s\S]*\{\s*\.\.\.additionalProps,\s*resource,\s*redirect:\s*false/);
+  });
+
   it('resolves registered resource routes instead of deriving URLs from resource names', () => {
     expect(source).toMatch(/useGo/);
     expect(source).toMatch(/successResource\s*=\s*resource/);
