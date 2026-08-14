@@ -3,8 +3,8 @@ import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { ROLE_POLICIES, type Scope } from '../../../permissions/policies/role-policies';
-import { allowsScope } from '../../../permissions/policies/scope';
+import type { Scope } from '../../../permissions/policies/role-policies';
+import { allowsScope, rolePolicyForUser } from '../../../permissions/policies/scope';
 import type {
   GetOrderStatusBoardCommand,
   OrderStatusBoardQuery,
@@ -96,7 +96,7 @@ export class PgOrderStatusBoardRepository implements OrderStatusBoardRepositoryP
       command.query.board === 'order'
         ? 'o.order_status_id::text'
         : `COALESCE(o.production_status_id::text, '${UNASSIGNED_COLUMN}')`;
-    const policy = ROLE_POLICIES[command.currentUser.role];
+    const policy = rolePolicyForUser(command.currentUser);
     if (command.query.board === 'production' && policy.productionTasks.view === 'none') {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра доски производства', {
         requiredPermissions: ['productionTasks.view'],
@@ -664,7 +664,7 @@ function mapBoardCard(row: BoardRow, currentUser: CurrentUser): OrderStatusBoard
   const createdBy = nullableString(row.created_by);
   const managerUserId = nullableString(row.manager_id);
   const assigned = row.current_user_assigned === true;
-  const policy = ROLE_POLICIES[currentUser.role];
+  const policy = rolePolicyForUser(currentUser);
   const scopedEntity = {
     createdByUserId: createdBy,
     managerUserId,

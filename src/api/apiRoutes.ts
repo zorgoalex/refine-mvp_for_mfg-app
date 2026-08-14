@@ -277,6 +277,11 @@ export const apiRoutes = {
     byId: (ruleId: string) => backendApiPath(`/notification-rules/${encodeURIComponent(ruleId)}`),
     eventTypes: backendApiPath('/notification-event-types'),
   },
+  permissions: {
+    rolesMatrix: backendApiPath('/permissions/roles-matrix'),
+    resetRoleToDefaults: (roleId: number) =>
+      backendApiPath(`/permissions/roles/${roleId}/reset-to-defaults`),
+  },
   statusAutomation: {
     rules: backendApiPath('/status-automation/rules'),
     ruleById: (ruleId: number) => backendApiPath(`/status-automation/rules/${ruleId}`),

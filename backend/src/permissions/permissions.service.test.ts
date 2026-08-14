@@ -29,4 +29,19 @@ describe('PermissionsService', () => {
       ),
     ).toBe(true);
   });
+
+  it('uses static authorization version when database is not configured', async () => {
+    await expect(service.getAuthorizationVersion()).resolves.toBe(0);
+    await expect(service.loadRoleAuthorization(10)).resolves.toMatchObject({
+      version: 0,
+      scopes: {
+        payments: {
+          view: 'own',
+          create: 'own',
+          update: 'own',
+          delete: 'own',
+        },
+      },
+    });
+  });
 });

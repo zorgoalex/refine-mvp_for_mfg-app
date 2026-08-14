@@ -4,6 +4,7 @@ import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, mapRoleIdToRole } from '../../../permissions/permissions';
+import type { PermissionsService } from '../../../permissions/permissions.service';
 import { LoginMethodNotAllowedError, UserInactiveError } from '../auth.errors';
 import type {
   AuthResponse,
@@ -85,6 +86,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     private readonly tokenService: TokenService,
     private readonly accessTokens: JwtAccessTokenIssuer,
     private readonly options: PgAuthSessionManagerOptions,
+    private readonly permissions?: Pick<PermissionsService, 'loadRoleAuthorization'>,
   ) {}
 
   async createLoginSession(user: AuthUserRecord, context: LoginSessionContext): Promise<AuthSessionRecord> {
@@ -328,7 +330,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         },
       });
 
-      const currentUser = this.toCurrentUser(current, current.session_id);
+      const currentUser = await this.toCurrentUser(current, current.session_id);
       const issuedAccessToken = await this.accessTokens.issueAccessToken(currentUser, {
         notAfter: sessionExpiresAt,
       });
@@ -668,7 +670,7 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
     );
   }
 
-  private toCurrentUser(row: RefreshSessionRow, sessionId: string): CurrentUser {
+  private async toCurrentUser(row: RefreshSessionRow, sessionId: string): Promise<CurrentUser> {
     const roleId = Number(row.role_id);
     const role = mapRoleIdToRole(roleId);
 
@@ -678,12 +680,18 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
       });
     }
 
+    const authorization = this.permissions
+      ? await this.permissions.loadRoleAuthorization(roleId)
+      : { permissions: getPermissionsForRole(role), scopes: undefined, version: 0 };
+
     return {
       id: String(row.user_id),
       username: row.username,
       role,
       roleId,
-      permissions: getPermissionsForRole(role),
+      permissions: authorization.permissions,
+      policyScopes: authorization.scopes,
+      permissionsVersion: authorization.version,
       sessionId,
     };
   }

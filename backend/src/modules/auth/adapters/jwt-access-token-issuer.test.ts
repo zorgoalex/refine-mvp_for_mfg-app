@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import jwt from 'jsonwebtoken';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import { JwtAccessTokenIssuer } from './jwt-access-token-issuer';
 
 describe('JwtAccessTokenIssuer', () => {
@@ -20,6 +21,8 @@ describe('JwtAccessTokenIssuer', () => {
       username: 'manager',
       role: 'manager',
       roleId: 10,
+      permissionsVersion: 5,
+      policyScopes: ROLE_POLICIES.manager,
       sessionId: 'session-1',
     });
   });
@@ -61,6 +64,8 @@ function currentUser(): CurrentUser {
     role: 'manager',
     roleId: 10,
     permissions: getPermissionsForRole('manager'),
+    policyScopes: ROLE_POLICIES.manager,
+    permissionsVersion: 5,
     sessionId: 'session-1',
   };
 }
