@@ -17,8 +17,28 @@ export interface HdfMillingSettingsDto {
   name: string;
   hdfEnabled: boolean;
   hdfEdgeMm: number | null;
+  hdfParameterName: string | null;
+  extraResources: MillingExtraResourceDto[];
   version: number;
   isActive: boolean;
+}
+
+export interface MillingExtraResourceDto {
+  id: number;
+  millingTypeId: number;
+  resourceKind: string;
+  resourceRefType: string | null;
+  resourceRefId: number | null;
+  resourceName: string;
+  unitId: number | null;
+  accountingMethod: string;
+  parameterName: string;
+  parameterMm: number | null;
+  hdfAutoEnabled: boolean;
+  comment: string;
+  isActive: boolean;
+  sortOrder: number;
+  version: number;
 }
 
 export interface UpdateHdfProductionTechSettingsRequest {
@@ -29,9 +49,28 @@ export interface UpdateHdfProductionTechSettingsRequest {
 }
 
 export interface UpdateHdfMillingSettingsRequest {
-  hdfEnabled: boolean;
-  hdfEdgeMm: number | null;
+  hdfEnabled?: boolean;
+  hdfEdgeMm?: number | null;
+  hdfParameterName?: string | null;
+  extraResources?: UpdateMillingExtraResourceRequest[];
   expectedVersion: number;
+}
+
+export interface UpdateMillingExtraResourceRequest {
+  id?: number;
+  version?: number;
+  resourceKind: string;
+  resourceRefType?: string | null;
+  resourceRefId?: number | null;
+  resourceName: string;
+  unitId?: number | null;
+  accountingMethod?: string;
+  parameterName?: string;
+  parameterMm?: number | null;
+  hdfAutoEnabled?: boolean;
+  comment?: string;
+  isActive?: boolean;
+  sortOrder?: number;
 }
 
 export const productionTechSettingsApi = {

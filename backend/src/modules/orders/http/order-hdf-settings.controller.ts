@@ -12,9 +12,28 @@ const hdfSettingsBodySchema = z.object({
   sheetMaterialVersion: z.number().int().positive().optional(),
 }).strict();
 
+const millingExtraResourceBodySchema = z.object({
+  id: z.number().int().positive().optional(),
+  version: z.number().int().positive().optional(),
+  resourceKind: z.string().trim().min(1).max(50),
+  resourceRefType: z.string().trim().min(1).max(50).nullable().optional(),
+  resourceRefId: z.number().int().positive().nullable().optional(),
+  resourceName: z.string().trim().min(1).max(200),
+  unitId: z.number().int().positive().nullable().optional(),
+  accountingMethod: z.string().trim().max(500).optional(),
+  parameterName: z.string().trim().max(100).optional(),
+  parameterMm: z.number().positive().nullable().optional(),
+  hdfAutoEnabled: z.boolean().optional(),
+  comment: z.string().trim().max(1000).optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(32767).optional(),
+}).strict();
+
 const hdfMillingBodySchema = z.object({
-  hdfEnabled: z.boolean(),
-  hdfEdgeMm: z.number().positive().nullable(),
+  hdfEnabled: z.boolean().optional(),
+  hdfEdgeMm: z.number().positive().nullable().optional(),
+  hdfParameterName: z.string().trim().max(100).nullable().optional(),
+  extraResources: z.array(millingExtraResourceBodySchema).optional(),
   expectedVersion: z.number().int().positive(),
 }).strict();
 
@@ -65,6 +84,8 @@ export class OrderHdfSettingsController {
       millingTypeId: parseId(millingTypeIdParam),
       hdfEnabled: parsed.hdfEnabled,
       hdfEdgeMm: parsed.hdfEdgeMm,
+      hdfParameterName: parsed.hdfParameterName,
+      extraResources: parsed.extraResources,
       expectedVersion: parsed.expectedVersion,
       idempotencyKey: parseIdempotencyKey(idempotencyKeyHeader),
       requestId: request.requestId,
