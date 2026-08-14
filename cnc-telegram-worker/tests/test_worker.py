@@ -530,6 +530,10 @@ class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(len(worker.erp.packets), 1)
             self.assertIsNone(worker.erp.packets[0]["cuttingSequenceNo"])
+            self.assertEqual(worker.erp.packets[0]["svgImportMode"], {
+                "validationMode": "lenient",
+                "refreshImported": False,
+            })
             operation_records = [
                 operation
                 for payload in worker.erp.audit_batches
@@ -1301,6 +1305,7 @@ def make_worker(
         can_write_chat=can_write_chat,
         resend_unchanged=False,
         parser_version="test-svg-v1",
+        svg_validation_mode="lenient",
         enable_glm_ocr=enable_glm_ocr,
         ocr_engine=ocr_engine,
         ocr_command=ocr_command,

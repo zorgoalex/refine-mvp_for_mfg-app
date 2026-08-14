@@ -19,6 +19,11 @@ def main() -> None:
     once.add_argument("--date", dest="workday", help="Workday YYYY-MM-DD")
     once.add_argument("--days", type=int, help="Backfill days ending at --date or today")
 
+    svg_refresh = subparsers.add_parser("svg-refresh-backfill", help="Reparse Telegram SVGs with lenient mode")
+    svg_refresh.add_argument("--date", dest="workday", help="Workday YYYY-MM-DD")
+    svg_refresh.add_argument("--days", type=int, help="Backfill days ending at --date or today")
+    svg_refresh.add_argument("--write", action="store_true", help="Send refreshed SVG layouts to ERP")
+
     daemon = subparsers.add_parser("daemon", help="Scan history forever")
     daemon.add_argument("--days", type=int, help="Backfill days per polling pass")
 
@@ -40,6 +45,11 @@ def main() -> None:
     if args.command == "once":
         workday = parse_workday(args.workday) if args.workday else None
         asyncio.run(worker.run_once(workday=workday, days=args.days))
+        return
+
+    if args.command == "svg-refresh-backfill":
+        workday = parse_workday(args.workday) if args.workday else None
+        asyncio.run(worker.run_svg_refresh_backfill(workday=workday, days=args.days, write=args.write))
         return
 
     if args.command == "daemon":

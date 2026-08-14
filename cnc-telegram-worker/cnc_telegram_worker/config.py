@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 
 WORKER_ROLES = {"disabled", "reader", "writer"}
+SVG_VALIDATION_MODES = {"strict", "lenient"}
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class WorkerConfig:
     glm_ocr_client_timeout_seconds: int
     ocr_engine: str
     parser_version: str
+    svg_validation_mode: str
     default_machine: str
     default_material: str
     business_timezone_name: str
@@ -78,7 +80,8 @@ class WorkerConfig:
             ocr_command_timeout_seconds=positive_int_env("CNC_OCR_COMMAND_TIMEOUT_SECONDS", 180),
             glm_ocr_client_timeout_seconds=positive_int_env("GLM_OCR_CLIENT_TIMEOUT_SECONDS", 660),
             ocr_engine=env("CNC_OCR_ENGINE", "rapidocr-ppocrv5-eslav"),
-            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v14"),
+            parser_version=env("CNC_PARSER_VERSION", "cnc-telegram-worker-v15-lenient-svg"),
+            svg_validation_mode=validated_env("CNC_SVG_VALIDATION_MODE", "lenient", SVG_VALIDATION_MODES),
             default_machine=env("CNC_MACHINE_DEFAULT"),
             default_material=env("CNC_DEFAULT_MATERIAL", "МДФ 16мм"),
             business_timezone_name=env("CNC_BUSINESS_TIMEZONE", "Asia/Almaty"),
@@ -160,6 +163,13 @@ def env(name: str, default: str = "") -> str:
 
 def normalized_env(name: str, default: str = "") -> str:
     return env(name, default).lower()
+
+
+def validated_env(name: str, default: str, allowed: set[str]) -> str:
+    value = normalized_env(name, default)
+    if value not in allowed:
+        raise RuntimeError(f"{name} must be one of: {', '.join(sorted(allowed))}")
+    return value
 
 
 def csv_env(name: str) -> tuple[str, ...]:

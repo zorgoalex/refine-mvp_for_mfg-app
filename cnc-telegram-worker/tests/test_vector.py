@@ -89,6 +89,33 @@ class VectorParserTest(unittest.TestCase):
         self.assertIn("no PartContour detail outlines", layout.reasons)
         self.assertEqual(parse_vector_file(path), [])
 
+    def test_lenient_mode_extracts_visual_labels_and_source_svg(self) -> None:
+        path = write_svg(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="1000mm" height="500mm" viewBox="0 0 1000 500">
+              <g id="detail-a">
+                <rect id="fallback-contour" x="20" y="30" width="200" height="100"/>
+                <path id="milling" d="M40 50 L180 110"/>
+                <text x="120" y="55">2723</text>
+                <text x="120" y="80">дет. 7</text>
+                <text x="120" y="105">200x100</text>
+              </g>
+            </svg>
+            """
+        )
+
+        strict = parse_svg_cut_layout(path)
+        layout = parse_svg_cut_layout(path, mode="lenient")
+        item = layout_to_dict(layout)["items"][0]
+
+        self.assertEqual(strict.status, "invalid")
+        self.assertEqual(layout.status, "valid")
+        self.assertEqual(len(layout.items), 1)
+        self.assertEqual(item["orderName"], "2723")
+        self.assertEqual(item["detailNumber"], 7)
+        self.assertIn("sourceSvg", item)
+        self.assertIn("<path", item["sourceSvg"]["body"])
+
     def test_rejects_part_contours_outside_sheet(self) -> None:
         path = write_svg(
             """

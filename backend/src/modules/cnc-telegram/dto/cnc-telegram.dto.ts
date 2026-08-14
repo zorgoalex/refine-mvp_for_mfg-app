@@ -77,6 +77,11 @@ export interface CncTelegramCutLayoutDto {
   items: CncTelegramCutLayoutItemDto[];
 }
 
+export interface CncTelegramSvgImportModeDto {
+  validationMode?: 'strict' | 'lenient';
+  refreshImported?: boolean;
+}
+
 export interface CncTelegramPacketCutSheetDto {
   cutGroupId: number;
   sheetIndex: number;
@@ -358,6 +363,7 @@ export interface CncTelegramStructuredIngestDto {
   analysisWarnings?: string[];
   ocrEngine?: string | null;
   parserVersion?: string | null;
+  svgImportMode?: CncTelegramSvgImportModeDto;
   cutLayout?: CncTelegramCutLayoutDto | null;
   items: Array<{
     sourceItemKey: string;

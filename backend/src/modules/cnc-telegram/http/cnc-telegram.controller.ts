@@ -136,6 +136,11 @@ const cutLayoutSchema = z.object({
   items: z.array(cutLayoutItemSchema).max(5000).default([]),
 }).strict();
 
+const svgImportModeSchema = z.object({
+  validationMode: z.enum(['strict', 'lenient']).optional().default('strict'),
+  refreshImported: z.boolean().optional().default(false),
+}).strict();
+
 const ingestSchema = z.object({
   externalPacketKey: z.string().trim().min(1).max(200),
   source: z.object({
@@ -167,6 +172,7 @@ const ingestSchema = z.object({
   analysisWarnings: z.array(z.string().trim().min(1).max(500)).max(100).optional(),
   ocrEngine: z.string().trim().min(1).max(120).nullable().optional(),
   parserVersion: z.string().trim().min(1).max(120).nullable().optional(),
+  svgImportMode: svgImportModeSchema.optional(),
   cutLayout: cutLayoutSchema.nullable().optional(),
   items: z.array(itemSchema).min(1).max(2000),
 }).strict();

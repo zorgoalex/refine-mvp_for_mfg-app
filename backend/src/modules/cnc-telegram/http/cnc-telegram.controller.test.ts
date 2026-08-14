@@ -35,6 +35,13 @@ describe('CncTelegramController parsing', () => {
         idempotencyKey: 'cnc:test:body',
       }, 'cnc:test:1'),
     ).toThrow(ApiError);
+
+    expect(parseStructuredIngest({
+      ...payload,
+      svgImportMode: { validationMode: 'lenient', refreshImported: true },
+    }, 'cnc:test:1')).toMatchObject({
+      svgImportMode: { validationMode: 'lenient', refreshImported: true },
+    });
   });
 
   it('reads idempotency only from the Idempotency-Key header', () => {

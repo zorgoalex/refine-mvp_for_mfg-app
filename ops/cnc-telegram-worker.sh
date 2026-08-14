@@ -21,6 +21,7 @@ Usage:
   repo_erp/ops/cnc-telegram-worker.sh up-glm
   repo_erp/ops/cnc-telegram-worker.sh login
   repo_erp/ops/cnc-telegram-worker.sh backfill [days]
+  repo_erp/ops/cnc-telegram-worker.sh svg-refresh-backfill [days] [--write] [--date YYYY-MM-DD]
   repo_erp/ops/cnc-telegram-worker.sh logs
   repo_erp/ops/cnc-telegram-worker.sh logs-glm
   repo_erp/ops/cnc-telegram-worker.sh ps
@@ -187,6 +188,16 @@ case "$cmd" in
     days="${1:-7}"
     compose run --rm cnc-telegram-worker once --days "$days"
     ;;
+  svg-refresh-backfill)
+    preflight_worker_role || exit 0
+    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+      days="$1"
+      shift
+    else
+      days="7"
+    fi
+    compose run --rm cnc-telegram-worker svg-refresh-backfill --days "$days" "$@"
+    ;;
   logs)
     compose logs -f cnc-telegram-worker
     ;;
@@ -205,6 +216,6 @@ case "$cmd" in
     usage
     ;;
   *)
-    die "unknown command '$cmd' (try: up, up-glm, login, backfill, logs, logs-glm, ps, ps-glm)"
+    die "unknown command '$cmd' (try: up, up-glm, login, backfill, svg-refresh-backfill, logs, logs-glm, ps, ps-glm)"
     ;;
 esac

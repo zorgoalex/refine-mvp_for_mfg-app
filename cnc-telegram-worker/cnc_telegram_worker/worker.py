@@ -233,6 +233,106 @@ class CncTelegramWorker:
                 excluded_relative_dirs=frozenset({SHEET_PREVIEW_DIRECTORY}),
             )
 
+    async def run_svg_refresh_backfill(
+        self,
+        workday: date | None = None,
+        days: int | None = None,
+        *,
+        write: bool = False,
+    ) -> None:
+        if not self.config.enabled:
+            print(
+                f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
+                f"CNC_TELEGRAM_WORKER_ROLE={self.config.worker_role}",
+                flush=True,
+            )
+            return
+        self.config.require_worker_enabled()
+        self.config.require_telegram()
+        if write:
+            self.config.require_backend_auth()
+        days_to_scan = days or self.config.history_days
+        anchor = workday or datetime.now(self.config.business_timezone).date()
+        workdays = [anchor - timedelta(days=offset) for offset in reversed(range(days_to_scan))]
+        parsed_count = 0
+        posted_count = 0
+        skipped_count = 0
+        client: Any | None = None
+        try:
+            client = TelegramClient(
+                str(self.config.telegram_session_path),
+                self.config.telegram_api_id,
+                self.config.telegram_api_hash,
+            )
+            await client.connect()
+            if not await client.is_user_authorized():
+                raise RuntimeError("Telethon session is not authorized; run `cnc-telegram-worker login` first")
+            entity = await client.get_entity(parse_chat_ref(self.config.telegram_chat))
+            chat_id = peer_id(entity)
+            assert_allowed_chat(chat_id, self.config.telegram_allowed_chat_ids)
+            me = await client.get_me()
+            session_user_id = str(me.id) if getattr(me, "id", None) is not None else None
+            for day in workdays:
+                messages = await collect_day_messages(
+                    client,
+                    entity,
+                    day,
+                    self.config.business_timezone,
+                    self.config.max_messages_per_scan,
+                )
+                groups = group_svg_messages(messages)
+                groups = [replace(group, cutting_sequence_no=None) for group in groups]
+                groups = apply_known_cutting_sequence_state(groups, chat_id, self.state)
+                source_message_ids = {int(group.source_message.id) for group in groups}
+                known_sequence_index = {
+                    int(group.source_message.id): group.cutting_sequence_no
+                    for group in groups
+                    if group.cutting_sequence_no is not None
+                }
+                if source_message_ids:
+                    sequence_index = await collect_cutting_sequence_reply_search_index(
+                        client,
+                        entity,
+                        source_message_ids,
+                        session_user_id=session_user_id,
+                        workday=day,
+                        business_timezone=self.config.business_timezone,
+                        known_sequence_index=known_sequence_index,
+                    )
+                    groups = apply_cutting_sequence_reply_index(groups, sequence_index)
+                print(f"svg refresh {day.isoformat()}: {len(groups)} SVG group(s), write={write}", flush=True)
+                for group in groups:
+                    try:
+                        result = await self.process_group(
+                            client,
+                            entity,
+                            group,
+                            chat_id,
+                            day,
+                            refresh_imported=write,
+                            dry_run=not write,
+                        )
+                    except Exception as exc:
+                        skipped_count += 1
+                        print(f"SVG message {group.vector_message.id} refresh failed: {exc}", flush=True)
+                        continue
+                    if result == "posted":
+                        posted_count += 1
+                    elif result == "parsed":
+                        parsed_count += 1
+                    else:
+                        skipped_count += 1
+        finally:
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception as exc:
+                    print(f"Telegram disconnect failed: {exc}", flush=True)
+        print(
+            f"svg refresh done: parsed={parsed_count}, posted={posted_count}, skipped={skipped_count}, write={write}",
+            flush=True,
+        )
+
     async def process_media_restore_requests(self, client: Any, entity: Any, chat_id: str) -> None:
         claim = await self.erp.claim_media_restores()
         if claim.get("capability") != "cnc_telegram_media_restore_v1":
@@ -529,7 +629,9 @@ class CncTelegramWorker:
         workday: date,
         audit: ScanAudit | None = None,
         cutting_sequence_rejection: str | None = None,
-    ) -> None:
+        refresh_imported: bool = False,
+        dry_run: bool = False,
+    ) -> str:
         source_message = group.source_message
         external_key = external_packet_key(chat_id, int(source_message.id))
         audit_operation = audit.begin_operation(
@@ -555,6 +657,7 @@ class CncTelegramWorker:
                 self.state.mark_cutting_sequence_replied(external_key)
             pending_sequence_reply = (
                 self.config.can_write_chat
+                and not refresh_imported
                 and self.state.cutting_sequence_number(external_key) is not None
                 and not self.state.cutting_sequence_replied(external_key)
             )
@@ -569,6 +672,8 @@ class CncTelegramWorker:
             )
             if (
                 not self.config.resend_unchanged
+                and not refresh_imported
+                and not dry_run
                 and not pending_sequence_reply
                 and self.state.source_unchanged(external_key, source_fingerprint)
             ):
@@ -577,7 +682,7 @@ class CncTelegramWorker:
                     with audit.spool.transaction():
                         mark_ignored_group_attachments(audit, group, "SVG не обрабатывался: источник не изменился")
                         audit.finish_operation(audit_operation, group.vector_message, "skipped", "source_unchanged", "Источник не изменился")
-                return
+                return "skipped"
 
             run_dir.mkdir(parents=True, exist_ok=True)
             try:
@@ -598,8 +703,9 @@ class CncTelegramWorker:
                     with audit.spool.transaction():
                         mark_ignored_group_attachments(audit, group, "SVG не обработан: Telegram не вернул файл")
                         audit.finish_operation(audit_operation, group.vector_message, "failed", "svg_download_failed", "Telegram не вернул файл SVG")
-                return
-            parsed_layout = parse_svg_cut_layout(vector_path)
+                return "skipped"
+            svg_validation_mode = getattr(self.config, "svg_validation_mode", "lenient")
+            parsed_layout = parse_svg_cut_layout(vector_path, mode=svg_validation_mode)
             cut_layout = layout_to_dict(parsed_layout)
             if cut_layout["status"] != "valid":
                 reasons = "; ".join(cut_layout.get("reasons") or ["invalid SVG layout"])
@@ -608,7 +714,7 @@ class CncTelegramWorker:
                     with audit.spool.transaction():
                         mark_ignored_group_attachments(audit, group, "SVG не обработан: некорректный макет")
                         audit.finish_operation(audit_operation, group.vector_message, "skipped", "svg_invalid_layout", reasons)
-                return
+                return "skipped"
             vector_items = cut_layout["items"]
 
             thumbs_up = group_has_thumbs_up(group)
@@ -699,11 +805,24 @@ class CncTelegramWorker:
                 ocr_engine=self.config.ocr_engine,
                 parser_version=self.config.parser_version,
             )
+            packet["svgImportMode"] = {
+                "validationMode": svg_validation_mode,
+                "refreshImported": refresh_imported,
+            }
             payload_hash = canonical_payload_hash(packet)
             version = self.state.next_version(packet["externalPacketKey"], payload_hash)
+            if dry_run:
+                print(
+                    f"dry-run SVG {group.vector_message.id}: items={len(vector_items)} "
+                    f"sourceSvg={sum(1 for item in vector_items if item.get('sourceSvg'))} "
+                    f"sequence={cutting_sequence_no}",
+                    flush=True,
+                )
+                return "parsed"
             if (
                 not version.changed
                 and not self.config.resend_unchanged
+                and not refresh_imported
                 and not sequence_from_telegram
                 and not pending_sequence_reply
             ):
@@ -721,12 +840,16 @@ class CncTelegramWorker:
                     source_fingerprint,
                 )
                 print(f"skip unchanged {packet['externalPacketKey']} v{version.source_version}", flush=True)
-                return
+                return "skipped"
             if audit:
                 with audit.spool.transaction():
                     mark_used_group_attachments(audit, group)
             packet = apply_source_version(packet, version.source_version)
-            idem = idempotency_key(packet["externalPacketKey"], version.source_version)
+            idem = (
+                svg_refresh_idempotency_key(packet["externalPacketKey"], version.source_version, payload_hash)
+                if refresh_imported
+                else idempotency_key(packet["externalPacketKey"], version.source_version)
+            )
             if audit and audit_operation:
                 audit.prepare_processing_attempt(
                     audit_operation, group.vector_message, packet, idem, payload_hash, source_fingerprint,
@@ -783,6 +906,7 @@ class CncTelegramWorker:
                 self.state.assign_cutting_sequence_number(external_key, existing_number=response_sequence_no)
                 if (
                     self.config.can_write_chat
+                    and not refresh_imported
                     and cutting_sequence_no is None
                     and not self.state.cutting_sequence_replied(external_key)
                 ):
@@ -836,6 +960,7 @@ class CncTelegramWorker:
             )
             applied = response.get("applied")
             print(f"posted {packet['externalPacketKey']} v{version.source_version} applied={applied}", flush=True)
+            return "posted"
         except Exception as exc:
             if (
                 audit and audit_operation
@@ -1081,6 +1206,11 @@ def group_source_fingerprint(
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def svg_refresh_idempotency_key(external_key: str, source_version: int, payload_hash: str) -> str:
+    digest = hashlib.sha256(f"{external_key}:v{source_version}:svg-refresh:{payload_hash}".encode("utf-8")).hexdigest()[:24]
+    return f"cnc-tg-svg-refresh-{digest}"
 
 
 def mark_ignored_group_attachments(audit: ScanAudit, group: SvgGroup, reason_message: str) -> None:
