@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import io
+import asyncio
 import base64
 import hashlib
+import mimetypes
 import os
 import sys
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -20,6 +23,7 @@ telethon_stub.utils = types.SimpleNamespace(get_peer_id=lambda entity: entity)
 sys.modules.setdefault("telethon", telethon_stub)
 
 from cnc_telegram_worker.cleanup import cleanup_temp_dir
+from cnc_telegram_worker.audit import AuditSpool
 from cnc_telegram_worker.worker import (
     CncTelegramWorker,
     SHEET_PREVIEW_DIRECTORY,
@@ -65,11 +69,23 @@ class ManualSvgSendClient:
             "caption": caption,
             "forceDocument": force_document,
         })
-        return SimpleNamespace(id=8000 + len(self.calls))
+        path = Path(file_list[0])
+        return SimpleNamespace(
+            id=8000 + len(self.calls),
+            date=datetime(2026, 8, 14, 5, len(self.calls), tzinfo=timezone.utc),
+            file=SimpleNamespace(name=path.name, mime_type=mimetypes.guess_type(path.name)[0]),
+            photo=None if force_document else object(),
+            out=True,
+        )
 
     async def send_message(self, _entity: object, message: str):
         self.messages.append(message)
-        return SimpleNamespace(id=9000 + len(self.messages))
+        return SimpleNamespace(
+            id=9000 + len(self.messages),
+            date=datetime(2026, 8, 14, 6, len(self.messages), tzinfo=timezone.utc),
+            raw_text=message,
+            out=True,
+        )
 
 
 class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
@@ -258,6 +274,83 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
             ])
             self.assertEqual(client.messages, ["Черновой"])
 
+    async def test_worker_records_manual_svg_outgoing_messages_in_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(
+                temp_dir=Path(root, "tmp"),
+                media_dir=Path(root, "media"),
+                parser_version="cnc-telegram-worker-v14",
+                can_write_chat=False,
+                business_timezone=timezone.utc,
+            )
+            events: list[str] = []
+
+            async def complete_manual_svg_telegram_send(_request_id: str, _payload: dict[str, object]) -> dict[str, object]:
+                events.append("complete")
+                return {}
+
+            async def audit_batch(batch: dict[str, object]) -> dict[str, object]:
+                messages = batch.get("messages")
+                if isinstance(messages, list) and any(
+                    isinstance(message, dict) and message.get("reasonCode") == "reply_send_succeeded"
+                    for message in messages
+                ):
+                    events.append("audit_sent")
+                else:
+                    events.append("audit")
+                return {}
+
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000006",
+                        "packetId": "00000000-0000-4000-8000-000000000011",
+                        "messageText": "ХДФ!!!\nФрезы для ХДФ: 8",
+                        "files": [
+                            manual_svg_send_file("gcode", "CNC#2_2769-HDF.nc", b"G01 X1"),
+                            manual_svg_send_file("svg", "CNC#2_2769-HDF.svg", b"<svg></svg>"),
+                            manual_svg_send_file("screenshot", "CNC#2_2769-HDF.jpg", png_bytes()),
+                        ],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=AsyncMock(side_effect=complete_manual_svg_telegram_send),
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+                audit_batch=AsyncMock(side_effect=audit_batch),
+            )
+            audit_spool = AuditSpool(Path(root, "audit.sqlite3"), allow_unsafe_path=True)
+            try:
+                client = ManualSvgSendClient()
+
+                await worker.process_manual_svg_telegram_send_requests(
+                    client,
+                    object(),
+                    "-100",
+                    audit_spool=audit_spool,
+                    session_user_id="777",
+                )
+
+                worker.erp.audit_batch.assert_awaited()
+                batches = [call.args[0] for call in worker.erp.audit_batch.await_args_list]
+                messages = [message for batch in batches for message in batch.get("messages", [])]
+                used_messages = [message for message in messages if message.get("reasonCode") == "reply_send_succeeded"]
+                self.assertEqual([message["sourceMessageId"] for message in used_messages], ["8001", "8002", "8003", "9001"])
+                self.assertEqual([message["messageType"] for message in used_messages], ["gcode", "svg", "image", "text"])
+                self.assertTrue(all(message["outgoing"] for message in used_messages))
+                self.assertTrue(all(message["status"] == "used" for message in used_messages))
+                self.assertTrue(all(message["packetId"] == "00000000-0000-4000-8000-000000000011" for message in used_messages))
+                self.assertIn("ХДФ!!!", used_messages[-1]["messageText"])
+                self.assertTrue(any(
+                    "скрин раскроя CNC#2_2769-HDF.jpg отправлен" in message["reasonMessage"]
+                    for message in used_messages
+                ))
+                self.assertIn("audit_sent", events)
+                self.assertIn("complete", events)
+                self.assertLess(events.index("audit_sent"), events.index("complete"))
+            finally:
+                audit_spool.close()
+
     async def test_worker_rejects_manual_svg_file_hash_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as root:
             payload = manual_svg_send_file("svg", "bad.svg", b"<svg></svg>")
@@ -284,6 +377,25 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
             worker.erp.fail_manual_svg_telegram_send.assert_awaited_once()
             self.assertEqual(client.sent_files, [])
             self.assertIn("SHA-256 mismatch", worker.erp.fail_manual_svg_telegram_send.await_args.args[1])
+
+    async def test_manual_svg_poll_loop_checks_queue_until_stopped(self) -> None:
+        worker = object.__new__(CncTelegramWorker)
+        worker.config = SimpleNamespace(manual_svg_send_poll_interval_seconds=0.01)
+        stop_event = asyncio.Event()
+        calls: list[str] = []
+
+        async def process(_client: object, _entity: object, chat_id: str, **_kwargs: object) -> None:
+            calls.append(chat_id)
+            stop_event.set()
+
+        worker.process_manual_svg_telegram_send_requests = AsyncMock(side_effect=process)
+
+        await asyncio.wait_for(
+            worker.poll_manual_svg_telegram_send_requests(object(), object(), "-100", stop_event),
+            timeout=1,
+        )
+
+        self.assertEqual(calls, ["-100"])
 
 
 def png_bytes() -> bytes:

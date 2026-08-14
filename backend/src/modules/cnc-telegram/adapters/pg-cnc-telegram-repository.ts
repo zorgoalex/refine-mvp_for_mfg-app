@@ -78,6 +78,7 @@ const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
 const MANUAL_SVG_EVENT = 'cnc.manual_svg_upload.created';
 const MANUAL_SVG_COMPLETED_EVENT = 'cnc.manual_svg_upload.mdf_card_created';
 const MANUAL_SVG_FILE_UPLOADED_EVENT = 'cnc.manual_svg_upload.file_uploaded';
+const MANUAL_SVG_TELEGRAM_SEND_REQUESTED_EVENT = 'cnc.manual_svg_upload.telegram_send_requested';
 const MANUAL_SVG_PRESET_COMMAND_NAME = 'cnc.manual_svg_comment_preset.create';
 const MANUAL_SVG_PRESET_CREATE_EVENT = 'cnc.manual_svg_comment_preset.created';
 const CNC_AUTO_CUT_STATUS_CONFIGURE_COMMAND = 'cnc.telegram_packet.auto_cut_status.configure';
@@ -2028,18 +2029,36 @@ async function enqueueManualSvgTelegramSendRequest(
     [input.packet.packetId],
   );
   if (active.rows[0]) {
+    if (active.rows[0].status === 'pending') {
+      await refreshPendingManualSvgTelegramSendRequest(tx, active.rows[0].request_id, input);
+      await replaceManualSvgTelegramSendRequestFiles(tx, active.rows[0].request_id, input.files);
+      await writeManualSvgTelegramSendRequestedAudit(tx, {
+        ...input,
+        telegramSendRequestId: active.rows[0].request_id,
+        requestAction: 'updated_pending',
+      });
+    }
     return { requestId: active.rows[0].request_id, status: active.rows[0].status };
   }
 
   const sendKey = `cnc-manual-svg-telegram:${input.packet.packetId}:${input.command.dto.idempotencyKey}`;
-  const inserted = await tx.query<{ request_id: string; status: ManualSvgFilePersistenceResult['telegramSendStatus'] }>(
-    `INSERT INTO cnc_manual_svg_telegram_send_requests (
-       packet_id, send_idempotency_key, requested_by, message_text
+  const inserted = await tx.query<{ request_id: string; status: ManualSvgFilePersistenceResult['telegramSendStatus']; inserted: boolean }>(
+    `WITH inserted AS (
+       INSERT INTO cnc_manual_svg_telegram_send_requests (
+         packet_id, send_idempotency_key, requested_by, message_text
+       )
+       VALUES ($1::uuid, $2, $3::bigint, $4)
+       ON CONFLICT (send_idempotency_key) DO NOTHING
+       RETURNING request_id, status, true AS inserted
+     ), existing AS (
+       SELECT request_id, status, false AS inserted
+       FROM cnc_manual_svg_telegram_send_requests
+       WHERE send_idempotency_key=$2
+         AND NOT EXISTS (SELECT 1 FROM inserted)
      )
-     VALUES ($1::uuid, $2, $3::bigint, $4)
-     ON CONFLICT (send_idempotency_key) DO UPDATE
-     SET updated_at=now()
-     RETURNING request_id, status`,
+     SELECT request_id, status, inserted FROM inserted
+     UNION ALL
+     SELECT request_id, status, inserted FROM existing`,
     [
       input.packet.packetId,
       sendKey,
@@ -2050,17 +2069,113 @@ async function enqueueManualSvgTelegramSendRequest(
   const row = inserted.rows[0];
   if (!row) throw new Error('manual SVG Telegram send request insert returned no row');
   if (row.status === 'pending') {
-    await tx.query('DELETE FROM cnc_manual_svg_telegram_send_request_files WHERE request_id=$1::uuid', [row.request_id]);
-    for (const file of input.files) {
-      await tx.query(
-        `INSERT INTO cnc_manual_svg_telegram_send_request_files (request_id, file_id, send_order)
-         VALUES ($1::uuid, $2::uuid, $3::integer)
-         ON CONFLICT DO NOTHING`,
-        [row.request_id, file.fileId, manualSvgFileKindOrder(file.kind)],
-      );
-    }
+    await replaceManualSvgTelegramSendRequestFiles(tx, row.request_id, input.files);
+  }
+  if (row.inserted) {
+    await writeManualSvgTelegramSendRequestedAudit(tx, {
+      ...input,
+      telegramSendRequestId: row.request_id,
+      requestAction: 'created',
+    });
   }
   return { requestId: row.request_id, status: row.status };
+}
+
+async function refreshPendingManualSvgTelegramSendRequest(
+  tx: TransactionClient,
+  requestId: string,
+  input: {
+    command: ManualSvgUploadCommand;
+  },
+): Promise<void> {
+  await tx.query(
+    `UPDATE cnc_manual_svg_telegram_send_requests
+     SET message_text=$2,
+         requested_by=$3::bigint,
+         requested_at=now(),
+         updated_at=now()
+     WHERE request_id=$1::uuid
+       AND status='pending'`,
+    [
+      requestId,
+      manualSvgTelegramMessage(input.command.dto),
+      Number(input.command.currentUser.id),
+    ],
+  );
+}
+
+async function replaceManualSvgTelegramSendRequestFiles(
+  tx: TransactionClient,
+  requestId: string,
+  files: ManualSvgStoredFile[],
+): Promise<void> {
+  await tx.query('DELETE FROM cnc_manual_svg_telegram_send_request_files WHERE request_id=$1::uuid', [requestId]);
+  for (const file of files) {
+    await tx.query(
+      `INSERT INTO cnc_manual_svg_telegram_send_request_files (request_id, file_id, send_order)
+       VALUES ($1::uuid, $2::uuid, $3::integer)
+       ON CONFLICT DO NOTHING`,
+      [requestId, file.fileId, manualSvgFileKindOrder(file.kind)],
+    );
+  }
+}
+
+async function writeManualSvgTelegramSendRequestedAudit(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    packet: CncTelegramPacketDto;
+    requestId: string;
+    externalPacketKey: string;
+    files: ManualSvgStoredFile[];
+    telegramSendRequestId: string;
+    requestAction: 'created' | 'updated_pending';
+  },
+): Promise<string> {
+  const selectedOrderIds = input.command.dto.selectedOrderIds;
+  const files = input.files.map((file) => ({
+    fileId: file.fileId,
+    kind: file.kind,
+    fileName: file.fileName,
+    sizeBytes: file.sizeBytes,
+    sha256: file.sha256,
+    generated: file.generated,
+  }));
+  const message = manualSvgTelegramMessage(input.command.dto);
+  return auditService.record(tx, {
+    event: MANUAL_SVG_TELEGRAM_SEND_REQUESTED_EVENT,
+    entityType: 'cnc_manual_svg_telegram_send_request',
+    entityId: input.telegramSendRequestId,
+    actorUserId: input.command.currentUser.id,
+    actorUsername: input.command.currentUser.username ?? null,
+    actorRole: input.command.currentUser.role ?? null,
+    requestId: input.requestId,
+    source: MANUAL_SVG_SOURCE,
+    relatedOrderId: selectedOrderIds.length === 1 ? selectedOrderIds[0] : undefined,
+    before: input.requestAction === 'updated_pending' ? { status: 'pending' } : null,
+    after: { status: 'pending', message, fileCount: files.length, files },
+    diff: input.requestAction === 'updated_pending'
+      ? { pendingRequest: { from: 'previous_files_or_comment', to: 'latest_upload_files_and_comment' } }
+      : { status: { from: null, to: 'pending' } },
+    metadata: {
+      requestAction: input.requestAction,
+      packetId: input.packet.packetId,
+      externalPacketKey: input.externalPacketKey,
+      telegramSendRequestId: input.telegramSendRequestId,
+      message,
+      fileCount: files.length,
+      files,
+      selectedOrderIds,
+      cutJobId: input.packet.svgCutJobId ?? null,
+      cutJobDisplayNumber: input.packet.svgCutJobDisplayNumber ?? null,
+      cutResultId: input.packet.svgCutResultId ?? null,
+    },
+    relatedEntities: [
+      ...selectedOrderIds.map((orderId) => ({ entityType: 'order', entityId: orderId })),
+      ...(input.packet.svgCutJobId ? [{ entityType: 'cut_job', entityId: input.packet.svgCutJobId }] : []),
+      ...(input.packet.svgCutResultId ? [{ entityType: 'cut_result', entityId: input.packet.svgCutResultId }] : []),
+    ],
+  });
 }
 
 function manualSvgTelegramMessage(dto: CncTelegramManualSvgUploadDto): string {

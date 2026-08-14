@@ -88,6 +88,24 @@ class ManualSvgSendFile:
     path: Path
 
 
+@dataclass(frozen=True)
+class ManualSvgSentItem:
+    kind: str
+    file_name: str | None
+    message: Any
+
+
+async def flush_audit_spool(
+    audit_spool: AuditSpool,
+    sender: Any,
+    lock: asyncio.Lock | None = None,
+) -> int:
+    if lock is None:
+        return await audit_spool.flush(sender)
+    async with lock:
+        return await audit_spool.flush(sender)
+
+
 class CncTelegramWorker:
     def __init__(self, config: WorkerConfig) -> None:
         self.config = config
@@ -122,12 +140,15 @@ class CncTelegramWorker:
         workdays = [anchor - timedelta(days=offset) for offset in reversed(range(days_to_scan))]
 
         client: Any | None = None
+        audit_flush_lock = asyncio.Lock()
+        manual_svg_send_stop: asyncio.Event | None = None
+        manual_svg_send_task: asyncio.Task[None] | None = None
         try:
             await self.erp.audit_capabilities()
-            await audit_spool.flush(self.erp.audit_batch)
+            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
             await reconcile_pending_processing_attempts(audit_spool, self.erp, self.state)
             audit_spool.abandon_running_scans()
-            await audit_spool.flush(self.erp.audit_batch)
+            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
             client = TelegramClient(
                 str(self.config.telegram_session_path),
                 self.config.telegram_api_id,
@@ -139,11 +160,30 @@ class CncTelegramWorker:
             entity = await client.get_entity(parse_chat_ref(self.config.telegram_chat))
             chat_id = peer_id(entity)
             assert_allowed_chat(chat_id, self.config.telegram_allowed_chat_ids)
-            await self.process_media_restore_requests(client, entity, chat_id)
-            if self.config.can_send_manual_svg_uploads:
-                await self.process_manual_svg_telegram_send_requests(client, entity, chat_id)
             me = await client.get_me()
             session_user_id = str(me.id) if getattr(me, "id", None) is not None else None
+            await self.process_media_restore_requests(client, entity, chat_id)
+            if self.config.can_send_manual_svg_uploads:
+                await self.process_manual_svg_telegram_send_requests(
+                    client,
+                    entity,
+                    chat_id,
+                    audit_spool=audit_spool,
+                    session_user_id=session_user_id,
+                    audit_flush_lock=audit_flush_lock,
+                )
+                manual_svg_send_stop = asyncio.Event()
+                manual_svg_send_task = asyncio.create_task(
+                    self.poll_manual_svg_telegram_send_requests(
+                        client,
+                        entity,
+                        chat_id,
+                        manual_svg_send_stop,
+                        audit_spool=audit_spool,
+                        session_user_id=session_user_id,
+                        audit_flush_lock=audit_flush_lock,
+                    ),
+                )
             reconciled_replies = await reconcile_pending_replies(
                 audit_spool, client, entity, session_user_id,
             )
@@ -154,8 +194,23 @@ class CncTelegramWorker:
                     self.state.assign_cutting_sequence_number(key, existing_number=number)
                     self.state.mark_cutting_sequence_replied(key)
             for day in workdays:
-                await self.scan_workday(client, entity, chat_id, day, audit_spool, session_user_id)
+                await self.scan_workday(
+                    client,
+                    entity,
+                    chat_id,
+                    day,
+                    audit_spool,
+                    session_user_id,
+                    audit_flush_lock=audit_flush_lock,
+                )
         finally:
+            if manual_svg_send_stop is not None:
+                manual_svg_send_stop.set()
+            if manual_svg_send_task is not None:
+                try:
+                    await manual_svg_send_task
+                except Exception as exc:
+                    print(f"manual SVG send polling stopped with error: {exc}", flush=True)
             if client is not None:
                 try:
                     await client.disconnect()
@@ -163,7 +218,7 @@ class CncTelegramWorker:
                     print(f"Telegram disconnect failed: {exc}", flush=True)
             try:
                 try:
-                    await audit_spool.flush(self.erp.audit_batch)
+                    await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
                 except Exception as exc:
                     print(f"audit delivery deferred: {exc}", flush=True)
             finally:
@@ -217,7 +272,16 @@ class CncTelegramWorker:
                     print(f"restore {request_id} failure delivery deferred: {report_exc}", flush=True)
                 print(f"restore {request_id} failed: {error_message}", flush=True)
 
-    async def process_manual_svg_telegram_send_requests(self, client: Any, entity: Any, chat_id: str) -> None:
+    async def process_manual_svg_telegram_send_requests(
+        self,
+        client: Any,
+        entity: Any,
+        chat_id: str,
+        *,
+        audit_spool: AuditSpool | None = None,
+        session_user_id: str | None = None,
+        audit_flush_lock: asyncio.Lock | None = None,
+    ) -> None:
         claim = await self.erp.claim_manual_svg_telegram_sends()
         if claim.get("capability") != "cnc_manual_svg_telegram_send_v1":
             raise RuntimeError("backend does not expose cnc_manual_svg_telegram_send_v1")
@@ -236,10 +300,30 @@ class CncTelegramWorker:
                     send_files.append(ManualSvgSendFile(kind=kind, path=path))
                 message_text = sanitize_text(str(task.get("messageText") or ""), 4096) or None
                 sent = await send_manual_svg_upload_files(client, entity, send_files, message_text)
+                if audit_spool is not None:
+                    try:
+                        record_manual_svg_sent_messages(
+                            audit_spool,
+                            chat_id,
+                            session_user_id,
+                            self.config.parser_version,
+                            getattr(self.config, "can_send_manual_svg_uploads", getattr(self.config, "can_write_chat", False)),
+                            self.config.business_timezone,
+                            str(task.get("packetId") or "") or None,
+                            sent,
+                        )
+                        await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+                    except Exception as audit_exc:
+                        print(f"manual SVG send audit delivery deferred: {audit_exc}", flush=True)
                 await self.erp.complete_manual_svg_telegram_send(request_id, {
                     "sentChatId": chat_id,
                     "sentMessageIds": manual_svg_sent_message_ids(sent),
                 })
+                if audit_spool is not None:
+                    try:
+                        await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+                    except Exception as audit_exc:
+                        print(f"manual SVG send audit delivery deferred: {audit_exc}", flush=True)
             except Exception as exc:
                 error_message = sanitize_text(str(exc), 500) or "Manual SVG Telegram send failed"
                 try:
@@ -247,6 +331,39 @@ class CncTelegramWorker:
                 except Exception as report_exc:
                     print(f"manual SVG send {request_id} failure delivery deferred: {report_exc}", flush=True)
                 print(f"manual SVG send {request_id} failed: {error_message}", flush=True)
+
+    async def poll_manual_svg_telegram_send_requests(
+        self,
+        client: Any,
+        entity: Any,
+        chat_id: str,
+        stop_event: asyncio.Event,
+        *,
+        audit_spool: AuditSpool | None = None,
+        session_user_id: str | None = None,
+        audit_flush_lock: asyncio.Lock | None = None,
+    ) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=self.config.manual_svg_send_poll_interval_seconds,
+                )
+            except asyncio.TimeoutError:
+                pass
+            if stop_event.is_set():
+                break
+            try:
+                await self.process_manual_svg_telegram_send_requests(
+                    client,
+                    entity,
+                    chat_id,
+                    audit_spool=audit_spool,
+                    session_user_id=session_user_id,
+                    audit_flush_lock=audit_flush_lock,
+                )
+            except Exception as exc:
+                print(f"manual SVG send polling failed: {exc}", flush=True)
 
     async def run_daemon(self, days: int | None = None) -> None:
         if not self.config.enabled:
@@ -275,13 +392,14 @@ class CncTelegramWorker:
         workday: date,
         audit_spool: AuditSpool,
         session_user_id: str | None,
+        audit_flush_lock: asyncio.Lock | None = None,
     ) -> None:
         audit = ScanAudit.start(
             audit_spool, chat_id, workday, session_user_id,
             self.config.parser_version, self.config.can_write_chat,
             business_timezone=self.config.business_timezone,
         )
-        await audit_spool.flush(self.erp.audit_batch)
+        await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
         try:
             try:
                 messages = await collect_day_messages(
@@ -398,7 +516,7 @@ class CncTelegramWorker:
             raise
         finally:
             try:
-                await audit_spool.flush(self.erp.audit_batch)
+                await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
             except Exception as exc:
                 print(f"audit delivery deferred: {exc}", flush=True)
 
@@ -1143,8 +1261,13 @@ MANUAL_SVG_SEND_KIND_ORDER = {
 }
 
 
-async def send_manual_svg_upload_files(client: Any, entity: Any, files: list[ManualSvgSendFile], message_text: str | None) -> Any:
-    sent_messages: list[Any] = []
+async def send_manual_svg_upload_files(
+    client: Any,
+    entity: Any,
+    files: list[ManualSvgSendFile],
+    message_text: str | None,
+) -> list[ManualSvgSentItem]:
+    sent_messages: list[ManualSvgSentItem] = []
     ordered_files = sorted(
         enumerate(files),
         key=lambda item: (MANUAL_SVG_SEND_KIND_ORDER.get(item[1].kind, 99), item[0]),
@@ -1155,10 +1278,76 @@ async def send_manual_svg_upload_files(client: Any, entity: Any, files: list[Man
             str(file_item.path),
             force_document=file_item.kind != "screenshot",
         )
-        sent_messages.extend(sent if isinstance(sent, list) else [sent])
+        for sent_message in sent if isinstance(sent, list) else [sent]:
+            sent_messages.append(ManualSvgSentItem(
+                kind=file_item.kind,
+                file_name=file_item.path.name,
+                message=sent_message,
+            ))
     if message_text:
-        sent_messages.append(await client.send_message(entity, message_text))
+        sent_messages.append(ManualSvgSentItem(
+            kind="comment",
+            file_name=None,
+            message=await client.send_message(entity, message_text),
+        ))
     return sent_messages
+
+
+def record_manual_svg_sent_messages(
+    audit_spool: AuditSpool,
+    chat_id: str,
+    session_user_id: str | None,
+    parser_version: str,
+    can_write_chat: bool,
+    business_timezone: Any,
+    packet_id: str | None,
+    sent_items: list[ManualSvgSentItem],
+) -> None:
+    valid_items = [item for item in sent_items if manual_svg_sent_message_id(item.message) is not None]
+    if not valid_items:
+        return
+    audit = ScanAudit.start(
+        audit_spool,
+        chat_id,
+        datetime.now(business_timezone).date(),
+        session_user_id,
+        parser_version,
+        can_write_chat,
+        business_timezone=business_timezone,
+    )
+    for item in valid_items:
+        message_id = manual_svg_sent_message_id(item.message)
+        reason_message = manual_svg_send_reason_message(item)
+        key = audit.begin_operation(
+            item.message,
+            "telegram_reply",
+            packetId=packet_id,
+            replyText=message_text(item.message) or None,
+            sentTelegramMessageId=message_id,
+        )
+        audit.finish_operation(
+            key,
+            item.message,
+            "succeeded",
+            "reply_send_succeeded",
+            reason_message,
+            packetId=packet_id,
+            replyText=message_text(item.message) or None,
+            sentTelegramMessageId=message_id,
+        )
+    audit.complete()
+
+
+def manual_svg_send_reason_message(item: ManualSvgSentItem) -> str:
+    if item.kind == "comment":
+        return "Ручная SVG-загрузка: комментарий отправлен в Telegram"
+    kind_label = {
+        "gcode": "G-code",
+        "svg": "SVG-файл",
+        "screenshot": "скрин раскроя",
+    }.get(item.kind, "файл")
+    suffix = f" {item.file_name}" if item.file_name else ""
+    return f"Ручная SVG-загрузка: {kind_label}{suffix} отправлен в Telegram"
 
 
 def message_identity(message: Any, *, include_reactions: bool) -> dict[str, Any]:
@@ -1225,10 +1414,16 @@ def manual_svg_sent_message_ids(sent: Any) -> list[str]:
     values = sent if isinstance(sent, list) else [sent]
     result: list[str] = []
     for item in values:
-        message_id = getattr(item, "id", None)
-        if isinstance(message_id, int) and message_id > 0:
-            result.append(str(message_id))
+        message = item.message if isinstance(item, ManualSvgSentItem) else item
+        message_id = manual_svg_sent_message_id(message)
+        if message_id is not None:
+            result.append(message_id)
     return result
+
+
+def manual_svg_sent_message_id(message: Any) -> str | None:
+    message_id = getattr(message, "id", None)
+    return str(message_id) if isinstance(message_id, int) and message_id > 0 else None
 
 
 def persist_sheet_image(

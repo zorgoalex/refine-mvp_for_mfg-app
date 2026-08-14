@@ -35,6 +35,7 @@ class WorkerConfig:
     business_timezone_name: str
     history_days: int
     poll_interval_seconds: int
+    manual_svg_send_poll_interval_seconds: int
     temp_ttl_hours: int
     attachment_ttl_hours: int
     max_messages_per_scan: int
@@ -83,6 +84,7 @@ class WorkerConfig:
             business_timezone_name=env("CNC_BUSINESS_TIMEZONE", "Asia/Almaty"),
             history_days=positive_int_env("CNC_HISTORY_DAYS", 7),
             poll_interval_seconds=positive_int_env("CNC_POLL_INTERVAL_SECONDS", 60),
+            manual_svg_send_poll_interval_seconds=positive_int_env("CNC_MANUAL_SVG_SEND_POLL_INTERVAL_SECONDS", 5),
             temp_ttl_hours=positive_int_env("CNC_TEMP_TTL_HOURS", 24),
             attachment_ttl_hours=positive_int_env("CNC_ATTACHMENT_TTL_HOURS", 24 * 30),
             max_messages_per_scan=positive_int_env("CNC_MAX_MESSAGES_PER_SCAN", 1000),

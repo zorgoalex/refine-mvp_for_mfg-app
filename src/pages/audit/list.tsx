@@ -25,8 +25,14 @@ import { TelegramWorkerAudit } from './TelegramWorkerAudit';
 const { Text } = Typography;
 
 const PAGE_SIZE_DEFAULT = 50;
-const MANUAL_SVG_FILE_UPLOADED_EVENT = 'cnc.manual_svg_upload.file_uploaded';
-const MANUAL_SVG_FILE_AUDIT_FILTERS: FilterValues = { event: MANUAL_SVG_FILE_UPLOADED_EVENT };
+const MANUAL_SVG_FILE_AUDIT_EVENTS = [
+  'cnc.manual_svg_upload.file_uploaded',
+  'cnc.manual_svg_upload.telegram_send_requested',
+  'cnc.manual_svg_upload.telegram_send_completed',
+  'cnc.manual_svg_upload.telegram_send_failed',
+  'cnc.manual_svg_upload.telegram_send_unknown',
+];
+const MANUAL_SVG_FILE_AUDIT_FILTERS: FilterValues = { events: MANUAL_SVG_FILE_AUDIT_EVENTS };
 
 type AuditViewMode = 'readable' | 'technical';
 type AuditTableMode = 'audit' | 'business-history';

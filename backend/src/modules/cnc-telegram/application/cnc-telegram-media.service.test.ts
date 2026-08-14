@@ -51,7 +51,15 @@ describe('CncTelegramMediaService', () => {
     await expect(service.claimRestores(user(['cut.manage'], 'cnc-worker'))).resolves.toMatchObject({
       capability: 'cnc_telegram_media_restore_v1',
     });
+    await expect(service.claimManualSvgTelegramSends(user(['cut.manage'], 'cnc-worker'), 'manual-claim-1')).resolves.toMatchObject({
+      capability: 'cnc_manual_svg_telegram_send_v1',
+    });
     expect(repository.claimRestores).toHaveBeenCalledWith(['-1001996415689'], 5);
+    expect(repository.claimManualSvgTelegramSends).toHaveBeenCalledWith({
+      currentUser: user(['cut.manage'], 'cnc-worker'),
+      limit: 5,
+      requestTraceId: 'manual-claim-1',
+    });
   });
 
   it('returns 410 before reading an expired original', async () => {
@@ -72,11 +80,16 @@ describe('CncTelegramMediaService', () => {
 function repositoryMock() {
   return {
     listOrderScreenshots: vi.fn().mockResolvedValue([]),
+    listOrderManualSvgFiles: vi.fn().mockResolvedValue([]),
     resolveOrderScreenshot: vi.fn(),
+    resolveOrderManualSvgFile: vi.fn(),
     requestRestore: vi.fn(),
     claimRestores: vi.fn().mockResolvedValue([]),
+    claimManualSvgTelegramSends: vi.fn().mockResolvedValue([]),
     completeRestore: vi.fn(),
     failRestore: vi.fn(),
+    completeManualSvgTelegramSend: vi.fn(),
+    failManualSvgTelegramSend: vi.fn(),
   };
 }
 

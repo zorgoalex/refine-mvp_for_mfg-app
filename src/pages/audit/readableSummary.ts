@@ -76,8 +76,10 @@ const EVENT_TITLES: Record<string, string> = {
   'org.direction_head_removed': 'Снят руководитель направления',
   'production.action_denied': 'Отказано в производственном действии',
   'cnc.manual_svg_upload.file_uploaded': 'Загружен файл раскроя',
+  'cnc.manual_svg_upload.telegram_send_requested': 'Файлы раскроя поставлены в очередь Telegram',
   'cnc.manual_svg_upload.telegram_send_completed': 'Файлы раскроя отправлены в Telegram',
   'cnc.manual_svg_upload.telegram_send_failed': 'Ошибка отправки файлов раскроя в Telegram',
+  'cnc.manual_svg_upload.telegram_send_unknown': 'Статус отправки файлов раскроя неизвестен',
 };
 
 const ENTITY_LABELS: Record<string, string> = {
