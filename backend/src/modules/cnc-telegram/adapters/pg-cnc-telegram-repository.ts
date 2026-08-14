@@ -3965,6 +3965,7 @@ function buildSvgSheetPlacements(
       width_mm: round3(item.placedWidthMm),
       height_mm: round3(item.placedHeightMm),
       rotated: item.rotated === true,
+      source_svg: sourceSvgPlacementFragment(item),
       label: {
         orderId: item.orderId,
         orderName: item.orderName,
@@ -3981,6 +3982,22 @@ function buildSvgSheetPlacements(
     sheet_width_mm: plan.sheetWidthMm,
     sheet_height_mm: plan.sheetHeightMm,
     pieces,
+  };
+}
+
+function sourceSvgPlacementFragment(
+  item: CncTelegramCutLayoutItemDto,
+): SheetPlacementsJson['pieces'][number]['source_svg'] | undefined {
+  const fragment = item.sourceSvg;
+  if (!fragment?.body.trim()) return undefined;
+  return {
+    viewBox: {
+      x_mm: round3(fragment.viewBox.xMm),
+      y_mm: round3(fragment.viewBox.yMm),
+      width_mm: round3(fragment.viewBox.widthMm),
+      height_mm: round3(fragment.viewBox.heightMm),
+    },
+    body: fragment.body,
   };
 }
 
@@ -6969,7 +6986,35 @@ function cutLayoutItemOrNull(value: unknown): CncTelegramCutLayoutItemDto | null
     placedWidthMm,
     placedHeightMm,
     rotated: raw.rotated === true,
+    sourceSvg: cutLayoutItemSourceSvgOrNull(raw.sourceSvg),
   };
+}
+
+function cutLayoutItemSourceSvgOrNull(value: unknown): CncTelegramCutLayoutItemDto['sourceSvg'] | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const rawViewBox = raw.viewBox;
+  if (!rawViewBox || typeof rawViewBox !== 'object') return null;
+  const viewBox = rawViewBox as Record<string, unknown>;
+  const sourceSvg = {
+    viewBox: {
+      xMm: toNumber(viewBox.xMm as string | number | null | undefined),
+      yMm: toNumber(viewBox.yMm as string | number | null | undefined),
+      widthMm: toNumber(viewBox.widthMm as string | number | null | undefined),
+      heightMm: toNumber(viewBox.heightMm as string | number | null | undefined),
+    },
+    body: typeof raw.body === 'string' ? raw.body : '',
+  };
+  if (
+    sourceSvg.viewBox.widthMm <= 0 ||
+    sourceSvg.viewBox.heightMm <= 0 ||
+    sourceSvg.body.trim().length === 0 ||
+    sourceSvg.body.length > 60_000 ||
+    /<\s*(?:script|foreignObject)\b|\bon[a-z]+\s*=|\b(?:href|xlink:href)\s*=|(?:javascript:|data:|https?:|file:)/i.test(sourceSvg.body)
+  ) {
+    return null;
+  }
+  return sourceSvg;
 }
 
 function toNumber(value: string | number | null | undefined): number {

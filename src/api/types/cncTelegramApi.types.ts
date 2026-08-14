@@ -46,6 +46,17 @@ export interface CncTelegramCutLayoutItem {
   placedWidthMm: number;
   placedHeightMm: number;
   rotated: boolean;
+  sourceSvg?: CncTelegramCutLayoutItemSourceSvg | null;
+}
+
+export interface CncTelegramCutLayoutItemSourceSvg {
+  viewBox: {
+    xMm: number;
+    yMm: number;
+    widthMm: number;
+    heightMm: number;
+  };
+  body: string;
 }
 
 export interface CncTelegramCutLayout {

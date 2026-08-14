@@ -82,6 +82,26 @@ const itemSchema = z.object({
   }
 });
 
+const MANUAL_SVG_SOURCE_FRAGMENT_UNSAFE_RE = /<\s*(?:script|foreignObject)\b|\bon[a-z]+\s*=|\b(?:href|xlink:href)\s*=|(?:javascript:|data:|https?:|file:)/i;
+
+const cutLayoutItemSourceSvgSchema = z.object({
+  viewBox: z.object({
+    xMm: z.number().min(-10000).max(10000),
+    yMm: z.number().min(-10000).max(10000),
+    widthMm: z.number().positive().max(10000),
+    heightMm: z.number().positive().max(10000),
+  }).strict(),
+  body: z.string().trim().min(1).max(60_000),
+}).strict().superRefine((fragment, context) => {
+  if (MANUAL_SVG_SOURCE_FRAGMENT_UNSAFE_RE.test(fragment.body)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['body'],
+      message: 'SVG-фрагмент детали содержит активный или внешний контент',
+    });
+  }
+});
+
 const cutLayoutItemSchema = z.object({
   orderName: z.string().trim().min(1).max(64),
   detailNumber: z.number().int().positive().max(100000),
@@ -95,6 +115,7 @@ const cutLayoutItemSchema = z.object({
   placedWidthMm: z.number().positive().max(10000),
   placedHeightMm: z.number().positive().max(10000),
   rotated: z.boolean(),
+  sourceSvg: cutLayoutItemSourceSvgSchema.nullable().optional(),
 }).strict();
 
 const cutLayoutSchema = z.object({

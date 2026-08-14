@@ -1,5 +1,6 @@
 import type {
   CncTelegramCutLayout,
+  CncTelegramCutLayoutItemSourceSvg,
   CncTelegramManualSvgUploadRequest,
 } from '../../api/types/cncTelegramApi.types';
 
@@ -11,9 +12,12 @@ const TRANSFORM_NUMBER_TOKEN_RE = /^\s*,?\s*(-?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?)
 const PATH_TOKEN_RE = /[MmLlHhVvCcSsQqTtAaZz]|-?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?/g;
 const TRANSFORM_RE = /([a-zA-Z]+)\(([^)]*)\)/g;
 const GEOMETRY_TAGS = new Set(['rect', 'polygon', 'polyline', 'path']);
+const SOURCE_SVG_FRAGMENT_TAGS = new Set(['rect', 'polygon', 'polyline', 'path', 'line', 'circle', 'ellipse']);
 const LAYOUT_BOUNDS_TOLERANCE_MM = 2;
 const DETAIL_SIZE_TOLERANCE_MM = 8;
 const SHEET_OUTLINE_TOLERANCE_MM = 3;
+const SOURCE_SVG_FRAGMENT_INTERSECTION_TOLERANCE_MM = 2;
+const SOURCE_SVG_FRAGMENT_MAX_BODY_LENGTH = 60_000;
 
 export type SvgMatrix = [number, number, number, number, number, number];
 export type SvgPoint = [number, number];
@@ -22,10 +26,12 @@ type Bbox = [number, number, number, number];
 
 export interface PartContourGeometry {
   elementId: string;
+  groupKey?: string | null;
   xMm: number;
   yMm: number;
   placedWidthMm: number;
   placedHeightMm: number;
+  sourceSvg?: CncTelegramCutLayoutItemSourceSvg | null;
 }
 
 interface VisualTextLine {
@@ -160,6 +166,7 @@ export function parseSvgCutUploadText(
     const placedHeightMm = Math.abs(bbox[3] - bbox[1]) / scaleY;
     const contour = {
       elementId: elementId || `${localName(element)}-${partContours.length + 1}`,
+      groupKey: isPartContour ? partContourGroupKey(element) : null,
       xMm,
       yMm,
       placedWidthMm,
@@ -185,8 +192,12 @@ export function parseSvgCutUploadText(
       continue;
     }
 
-    if (isPartContour) partContours.push(contour);
-    else genericContours.push(contour);
+    const contourWithSource = {
+      ...contour,
+      sourceSvg: buildSourceSvgFragmentForContour(element, contour, vbMinX, vbMinY, scaleX, scaleY),
+    };
+    if (isPartContour) partContours.push(contourWithSource);
+    else genericContours.push(contourWithSource);
   }
 
   const selectedContours = partContours.length > 0 || !allowGenericGeometry ? partContours : genericContours;
@@ -301,6 +312,7 @@ export function buildSvgUploadLayoutItemsFromContours(
       placedHeightMm: round2(contour.placedHeightMm),
       rotated: Math.round(contour.placedWidthMm) === Math.round(resolvedSize.heightMm) &&
         Math.round(contour.placedHeightMm) === Math.round(resolvedSize.widthMm),
+      sourceSvg: contour.sourceSvg ?? null,
     });
   }
 
@@ -421,6 +433,7 @@ function fallbackLayoutItemFromContour(
     placedWidthMm: round2(contour.placedWidthMm),
     placedHeightMm: round2(contour.placedHeightMm),
     rotated: false,
+    sourceSvg: contour.sourceSvg ?? null,
   };
 }
 
@@ -687,7 +700,46 @@ export function matchVisualLabelsToPartContours(
     usedLabels.add(match.label);
   }
 
+  propagateGroupVisualMatches(contours, matches);
+
   return matches;
+}
+
+function propagateGroupVisualMatches(
+  contours: PartContourGeometry[],
+  matches: Map<PartContourGeometry, VisualDetailLabel>,
+): void {
+  const contoursByGroup = new Map<string, PartContourGeometry[]>();
+  for (const contour of contours) {
+    const groupKey = contour.groupKey?.trim();
+    if (!groupKey) continue;
+    const group = contoursByGroup.get(groupKey) ?? [];
+    group.push(contour);
+    contoursByGroup.set(groupKey, group);
+  }
+
+  for (const group of contoursByGroup.values()) {
+    const matched = group.filter((contour) => matches.has(contour));
+    if (matched.length === 0) continue;
+    for (const contour of group) {
+      if (matches.has(contour)) continue;
+      const sibling = matched.find((candidate) => samePlacedContourSize(candidate, contour));
+      if (!sibling) continue;
+      const label = matches.get(sibling);
+      if (!label || !labelFitsContourSize(label, contour)) continue;
+      matches.set(contour, label);
+    }
+  }
+}
+
+function samePlacedContourSize(left: PartContourGeometry, right: PartContourGeometry): boolean {
+  return Math.abs(left.placedWidthMm - right.placedWidthMm) <= DETAIL_SIZE_TOLERANCE_MM &&
+    Math.abs(left.placedHeightMm - right.placedHeightMm) <= DETAIL_SIZE_TOLERANCE_MM;
+}
+
+function labelFitsContourSize(label: VisualDetailLabel, contour: PartContourGeometry): boolean {
+  if (!label.hasExplicitSize) return true;
+  return visualLabelContourSizeDelta(label, contour) <= Math.max(120, Math.min(contour.placedWidthMm, contour.placedHeightMm) * 0.5);
 }
 
 function visualLabelContourScore(label: VisualDetailLabel, contour: PartContourGeometry): number | null {
@@ -787,7 +839,189 @@ function elementPoints(element: Element): Point[] {
   if (tag === 'path') {
     return parseSvgPathPointsForUpload(element.getAttribute('d') ?? '');
   }
+  if (tag === 'line') {
+    const x1 = floatAttr(element, 'x1');
+    const y1 = floatAttr(element, 'y1');
+    const x2 = floatAttr(element, 'x2');
+    const y2 = floatAttr(element, 'y2');
+    return x1 === null || y1 === null || x2 === null || y2 === null ? [] : [[x1, y1], [x2, y2]];
+  }
+  if (tag === 'circle') {
+    const cx = floatAttr(element, 'cx');
+    const cy = floatAttr(element, 'cy');
+    const r = floatAttr(element, 'r');
+    if (cx === null || cy === null || !r || r <= 0) return [];
+    return [[cx - r, cy - r], [cx + r, cy + r]];
+  }
+  if (tag === 'ellipse') {
+    const cx = floatAttr(element, 'cx');
+    const cy = floatAttr(element, 'cy');
+    const rx = floatAttr(element, 'rx');
+    const ry = floatAttr(element, 'ry');
+    if (cx === null || cy === null || !rx || !ry || rx <= 0 || ry <= 0) return [];
+    return [[cx - rx, cy - ry], [cx + rx, cy + ry]];
+  }
   return [];
+}
+
+function partContourGroupKey(element: Element): string | null {
+  let node = element.parentElement;
+  while (node && localName(node) !== 'svg') {
+    const id = node.getAttribute('id')?.trim();
+    if (localName(node) === 'g' && id && /(?:^|[_-])(?:part|x007e).*part/i.test(id)) return id;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function partContourSourceGroup(element: Element): Element {
+  const groupKey = partContourGroupKey(element);
+  if (!groupKey) return element;
+  let node = element.parentElement;
+  while (node && localName(node) !== 'svg') {
+    if (localName(node) === 'g' && node.getAttribute('id')?.trim() === groupKey) return node;
+    node = node.parentElement;
+  }
+  return element;
+}
+
+function buildSourceSvgFragmentForContour(
+  element: Element,
+  contour: PartContourGeometry,
+  vbMinX: number,
+  vbMinY: number,
+  scaleX: number,
+  scaleY: number,
+): CncTelegramCutLayoutItemSourceSvg | null {
+  const group = partContourSourceGroup(element);
+  const fragments: string[] = [];
+  const initial = ancestorMatrix(group);
+  for (const { element: child, matrix, transformError } of traverse(group, initial.matrix, initial.error)) {
+    if (transformError || !SOURCE_SVG_FRAGMENT_TAGS.has(localName(child))) continue;
+    const childPoints = elementPoints(child).map((point) => applyMatrix(point, matrix));
+    const childBbox = pointsBbox(childPoints);
+    if (!childBbox) continue;
+    const childMm = bboxToMm(childBbox, vbMinX, vbMinY, scaleX, scaleY);
+    if (!bboxesIntersectMm(childMm, contour, SOURCE_SVG_FRAGMENT_INTERSECTION_TOLERANCE_MM)) continue;
+    const sanitized = sanitizeSourceSvgGeometryElement(child);
+    if (!sanitized) continue;
+    const transform = sourceSvgElementMatrix(matrix, vbMinX, vbMinY, scaleX, scaleY, contour);
+    fragments.push(`<g transform="${transform}">${sanitized}</g>`);
+    if (fragments.join('').length > SOURCE_SVG_FRAGMENT_MAX_BODY_LENGTH) break;
+  }
+  const body = fragments.join('');
+  if (!body || body.length > SOURCE_SVG_FRAGMENT_MAX_BODY_LENGTH) return null;
+  return {
+    viewBox: {
+      xMm: round2(contour.xMm),
+      yMm: round2(contour.yMm),
+      widthMm: round2(contour.placedWidthMm),
+      heightMm: round2(contour.placedHeightMm),
+    },
+    body,
+  };
+}
+
+function ancestorMatrix(element: Element): { matrix: SvgMatrix; error: string | null } {
+  const ancestors: Element[] = [];
+  let node = element.parentElement;
+  while (node && localName(node) !== 'svg') {
+    ancestors.unshift(node);
+    node = node.parentElement;
+  }
+  let matrix = identityMatrix();
+  for (const ancestor of ancestors) {
+    const transform = parseSvgTransformList(ancestor.getAttribute('transform'));
+    if (transform.error) return { matrix, error: transform.error };
+    matrix = composeMatrix(matrix, transform.matrix);
+  }
+  return { matrix, error: null };
+}
+
+function bboxToMm(
+  bbox: Bbox,
+  vbMinX: number,
+  vbMinY: number,
+  scaleX: number,
+  scaleY: number,
+): Bbox {
+  return [
+    (bbox[0] - vbMinX) / scaleX,
+    (bbox[1] - vbMinY) / scaleY,
+    (bbox[2] - vbMinX) / scaleX,
+    (bbox[3] - vbMinY) / scaleY,
+  ];
+}
+
+function bboxesIntersectMm(
+  bbox: Bbox,
+  contour: PartContourGeometry,
+  toleranceMm: number,
+): boolean {
+  const [left, top, right, bottom] = bbox;
+  return right >= contour.xMm - toleranceMm &&
+    bottom >= contour.yMm - toleranceMm &&
+    left <= contour.xMm + contour.placedWidthMm + toleranceMm &&
+    top <= contour.yMm + contour.placedHeightMm + toleranceMm;
+}
+
+function sourceSvgElementMatrix(
+  matrix: SvgMatrix,
+  vbMinX: number,
+  vbMinY: number,
+  scaleX: number,
+  scaleY: number,
+  contour: PartContourGeometry,
+): string {
+  const [a, b, c, d, e, f] = matrix;
+  return `matrix(${[
+    a / scaleX,
+    b / scaleY,
+    c / scaleX,
+    d / scaleY,
+    (e - vbMinX) / scaleX - contour.xMm,
+    (f - vbMinY) / scaleY - contour.yMm,
+  ].map(svgNumber).join(' ')})`;
+}
+
+function sanitizeSourceSvgGeometryElement(element: Element): string | null {
+  const tag = localName(element);
+  if (!SOURCE_SVG_FRAGMENT_TAGS.has(tag)) return null;
+  const attrs = sourceSvgGeometryAttrs(element, tag);
+  if (attrs.length === 0) return null;
+  return `<${tag} ${attrs.join(' ')} fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>`;
+}
+
+function sourceSvgGeometryAttrs(element: Element, tag: string): string[] {
+  const namesByTag: Record<string, string[]> = {
+    rect: ['x', 'y', 'width', 'height', 'rx', 'ry'],
+    polygon: ['points'],
+    polyline: ['points'],
+    path: ['d', 'fill-rule', 'clip-rule'],
+    line: ['x1', 'y1', 'x2', 'y2'],
+    circle: ['cx', 'cy', 'r'],
+    ellipse: ['cx', 'cy', 'rx', 'ry'],
+  };
+  return (namesByTag[tag] ?? [])
+    .map((name) => {
+      const value = element.getAttribute(name);
+      return value === null || !sourceSvgAttrValueSafe(value) ? null : `${name}="${escapeSvgAttr(value)}"`;
+    })
+    .filter((attr): attr is string => attr !== null);
+}
+
+function sourceSvgAttrValueSafe(value: string): boolean {
+  return !/[<>"'`]/.test(value) && !/(?:javascript:|data:|https?:|file:)/i.test(value);
+}
+
+function escapeSvgAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;');
+}
+
+function svgNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(6)));
 }
 
 function pointsBbox(points: Point[]): Bbox | null {
