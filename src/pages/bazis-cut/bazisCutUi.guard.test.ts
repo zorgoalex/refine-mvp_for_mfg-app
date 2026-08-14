@@ -69,6 +69,11 @@ describe('Basis-cut UI integration guards', () => {
 
   it('supports field filtering, filtered header selection, and selected bulk delete inside a Basis-cut set', () => {
     expect(card).toContain('DETAIL_FILTERS');
+    expect(card).toContain('setDetailFiltersOpen((open) => !open)');
+    expect(card).toContain('aria-controls="bazis-cut-detail-filters"');
+    expect(card).toContain('detailFiltersOpen && <Space id="bazis-cut-detail-filters" wrap>');
+    expect(card).toContain('onClick={() => setDetailFiltersOpen((open) => !open)}>Фильтры</Button>');
+    expect(card).toContain('<Card title="Детали набора" extra={<Space wrap>');
     expect(card).toContain('matchesDetailFilters(detail, detailFilters)');
     expect(card).toContain('dataSource={filteredDetails}');
     expect(card).toContain('rowSelection={rowSelection}');

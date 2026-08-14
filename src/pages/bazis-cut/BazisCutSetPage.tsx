@@ -2,7 +2,7 @@ import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Space, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, DownloadOutlined, EditOutlined, SaveOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, EditOutlined, FilterOutlined, SaveOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
 import {
   bazisCutApi, type BazisCutDetailFields, type BazisCutSetCardDto, type BazisCutSetDetailDto,
@@ -96,6 +96,7 @@ export const BazisCutSetPage: React.FC = () => {
   const [exportTemplateId, setExportTemplateId] = useState<number>();
   const [exportTemplatesReady, setExportTemplatesReady] = useState(false);
   const [detailFilters, setDetailFilters] = useState<DetailFilters>(() => createEmptyDetailFilters());
+  const [detailFiltersOpen, setDetailFiltersOpen] = useState(false);
   const [selectedDetailIds, setSelectedDetailIds] = useState<number[]>([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [nameForm] = Form.useForm<{ name: string }>(); const [detailForm] = Form.useForm<BazisCutDetailFields>();
@@ -263,16 +264,22 @@ export const BazisCutSetPage: React.FC = () => {
       <Descriptions.Item label="Базис-проекты"><SourceRefs refs={set.bazisProjects} href={(refId) => `/bazis/projects/${refId}`} /></Descriptions.Item>
       <Descriptions.Item label="Базис-заказы"><SourceRefs refs={set.bazisOrders} /></Descriptions.Item>
     </Descriptions>}</Card>
-    <Card title="Детали набора" extra={canManage && <Button danger icon={<DeleteOutlined />}
-      disabled={selectedDetailIds.length === 0 || bulkDeleting}
-      loading={bulkDeleting}
-      onClick={confirmRemoveSelectedDetails}>Удалить выделенные</Button>}><Space direction="vertical" size="small" style={{ width: '100%' }}>
-      <Space wrap>
-        {DETAIL_FILTERS.map((filter) => <Input key={filter.key} allowClear value={detailFilters[filter.key]}
-          onChange={(event) => setDetailFilter(filter.key, event.target.value)}
-          placeholder={filter.label} aria-label={`Фильтр деталей: ${filter.label}`} style={{ width: filter.width }} />)}
-        <Button disabled={!detailFiltersActive} onClick={() => setDetailFilters(createEmptyDetailFilters())}>Сбросить</Button>
+    <Card title="Детали набора" extra={<Space wrap>
+      <Button icon={<FilterOutlined />} type={detailFiltersOpen || detailFiltersActive ? 'primary' : 'default'}
+        aria-expanded={detailFiltersOpen} aria-controls="bazis-cut-detail-filters"
+        onClick={() => setDetailFiltersOpen((open) => !open)}>Фильтры</Button>
+      {canManage && <Button danger icon={<DeleteOutlined />}
+        disabled={selectedDetailIds.length === 0 || bulkDeleting}
+        loading={bulkDeleting}
+        onClick={confirmRemoveSelectedDetails}>Удалить выделенные</Button>}
+    </Space>}><Space direction="vertical" size="small" style={{ width: '100%' }}>
+      {detailFiltersOpen && <Space id="bazis-cut-detail-filters" wrap>
+          {DETAIL_FILTERS.map((filter) => <Input key={filter.key} allowClear value={detailFilters[filter.key]}
+            onChange={(event) => setDetailFilter(filter.key, event.target.value)}
+            placeholder={filter.label} aria-label={`Фильтр деталей: ${filter.label}`} style={{ width: filter.width }} />)}
+          <Button disabled={!detailFiltersActive} onClick={() => setDetailFilters(createEmptyDetailFilters())}>Сбросить</Button>
       </Space>
+      }
       <Space wrap size="small">
         <Text type="secondary">Показано: {filteredDetails.length} из {details.length}</Text>
         {selectedDetailIds.length > 0 && <Text type="secondary">Выбрано: {selectedDetailIds.length}</Text>}
