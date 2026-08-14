@@ -5,10 +5,12 @@ import {
   Alert,
   Button,
   Card,
+  Col,
   Divider,
   Input,
   Modal,
   Radio,
+  Row,
   Space,
   Switch,
   Typography,
@@ -200,45 +202,51 @@ export const WorkosAdminLinksCard: React.FC<WorkosAdminLinksCardProps> = ({ user
           Список ниже — точный набор внешних аккаунтов, которыми разрешён вход этому
           пользователю.
         </Typography.Text>
-        <Radio.Group
-          value={settings?.loginPolicy}
-          disabled={!settings || loading || busy}
-          onChange={(event) =>
-            setSettings((current) =>
-              current ? { ...current, loginPolicy: event.target.value } : current,
-            )
-          }
-        >
-          <Radio.Button value="both">Пароль и SSO</Radio.Button>
-          <Radio.Button value="external">Только SSO</Radio.Button>
-          <Radio.Button value="local">Только пароль</Radio.Button>
-        </Radio.Group>
-        <Space direction="vertical">
-          <Space>
-            <Switch
-              checked={settings?.selfLinkEnabled ?? false}
+        <Row gutter={[16, 16]} align="middle">
+          <Col xs={24} xl={12} xxl={8}>
+            <Radio.Group
+              value={settings?.loginPolicy}
               disabled={!settings || loading || busy}
-              onChange={(checked) =>
+              onChange={(event) =>
                 setSettings((current) =>
-                  current ? { ...current, selfLinkEnabled: checked } : current,
+                  current ? { ...current, loginPolicy: event.target.value } : current,
                 )
               }
-            />
-            <Typography.Text>Пользователь может сам привязывать новые SSO-входы</Typography.Text>
-          </Space>
-          <Space>
-            <Switch
-              checked={settings?.selfUnlinkEnabled ?? false}
-              disabled={!settings || loading || busy}
-              onChange={(checked) =>
-                setSettings((current) =>
-                  current ? { ...current, selfUnlinkEnabled: checked } : current,
-                )
-              }
-            />
-            <Typography.Text>Пользователь может сам отвязывать SSO-входы</Typography.Text>
-          </Space>
-        </Space>
+            >
+              <Radio.Button value="both">Пароль и SSO</Radio.Button>
+              <Radio.Button value="external">Только SSO</Radio.Button>
+              <Radio.Button value="local">Только пароль</Radio.Button>
+            </Radio.Group>
+          </Col>
+          <Col xs={24} md={12} xl={6} xxl={8}>
+            <Space align="start">
+              <Switch
+                checked={settings?.selfLinkEnabled ?? false}
+                disabled={!settings || loading || busy}
+                onChange={(checked) =>
+                  setSettings((current) =>
+                    current ? { ...current, selfLinkEnabled: checked } : current,
+                  )
+                }
+              />
+              <Typography.Text>Пользователь может сам привязывать новые SSO-входы</Typography.Text>
+            </Space>
+          </Col>
+          <Col xs={24} md={12} xl={6} xxl={8}>
+            <Space align="start">
+              <Switch
+                checked={settings?.selfUnlinkEnabled ?? false}
+                disabled={!settings || loading || busy}
+                onChange={(checked) =>
+                  setSettings((current) =>
+                    current ? { ...current, selfUnlinkEnabled: checked } : current,
+                  )
+                }
+              />
+              <Typography.Text>Пользователь может сам отвязывать SSO-входы</Typography.Text>
+            </Space>
+          </Col>
+        </Row>
         <Space wrap>
           <Button
             type="primary"

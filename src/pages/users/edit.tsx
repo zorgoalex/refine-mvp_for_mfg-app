@@ -1,6 +1,17 @@
 import { Edit, useForm } from "@refinedev/antd";
 import { IResourceComponentsProps, useGetIdentity } from "@refinedev/core";
-import { Form, Input, Select, Checkbox, Button, Divider, message, Card } from "antd";
+import {
+  Button,
+  Card,
+  Checkbox,
+  Col,
+  Divider,
+  Form,
+  Input,
+  message,
+  Row,
+  Select,
+} from "antd";
 import { authStorage } from "../../utils/auth";
 import { useState } from "react";
 import { usersApi } from "../../api/usersApi";
@@ -106,51 +117,63 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   return (
     <Edit saveButtonProps={saveButtonProps}>
       <Form {...formProps} layout="vertical" onFinish={handleFinish}>
-        <Form.Item
-          label="Логин"
-          name="username"
-          rules={[
-            { required: true, message: 'Пожалуйста, введите логин' },
-            { min: 2, message: 'Логин должен содержать минимум 2 символа' },
-          ]}
-        >
-          <Input placeholder="ivanov" disabled />
-        </Form.Item>
+        <Row gutter={[16, 0]}>
+          <Col xs={24} md={12}>
+            <Form.Item
+              label="Логин"
+              name="username"
+              rules={[
+                { required: true, message: 'Пожалуйста, введите логин' },
+                { min: 2, message: 'Логин должен содержать минимум 2 символа' },
+              ]}
+            >
+              <Input placeholder="ivanov" disabled />
+            </Form.Item>
+          </Col>
 
-        <Form.Item
-          label="Email"
-          name="email"
-          rules={[
-            { required: true, message: 'Пожалуйста, введите email' },
-            { type: 'email', message: 'Введите корректный email' },
-          ]}
-        >
-          <Input placeholder="ivanov@mebelkz.local" />
-        </Form.Item>
+          <Col xs={24} md={12}>
+            <Form.Item
+              label="Email"
+              name="email"
+              rules={[
+                { required: true, message: 'Пожалуйста, введите email' },
+                { type: 'email', message: 'Введите корректный email' },
+              ]}
+            >
+              <Input placeholder="ivanov@mebelkz.local" />
+            </Form.Item>
+          </Col>
 
-        <Form.Item
-          label="Роль"
-          name="role"
-          rules={[{ required: true, message: 'Пожалуйста, выберите роль' }]}
-        >
-          <Select placeholder="Выберите роль пользователя">
-            <Select.Option value="admin">Администратор (admin)</Select.Option>
-            <Select.Option value="manager">Менеджер (manager)</Select.Option>
-            <Select.Option value="operator">Оператор (operator)</Select.Option>
-            <Select.Option value="top_manager">Топ-менеджер (top_manager)</Select.Option>
-            <Select.Option value="worker">Работник (worker)</Select.Option>
-            <Select.Option value="packer">Упаковщик (packer)</Select.Option>
-            <Select.Option value="viewer">Наблюдатель (viewer)</Select.Option>
-          </Select>
-        </Form.Item>
+          <Col xs={24} md={12}>
+            <Form.Item label="Полное имя" name="full_name">
+              <Input placeholder="Иванов Иван Иванович" />
+            </Form.Item>
+          </Col>
 
-        <Form.Item label="Полное имя" name="full_name">
-          <Input placeholder="Иванов Иван Иванович" />
-        </Form.Item>
+          <Col xs={24} sm={12} md={8}>
+            <Form.Item
+              label="Роль"
+              name="role"
+              rules={[{ required: true, message: 'Пожалуйста, выберите роль' }]}
+            >
+              <Select placeholder="Выберите роль пользователя">
+                <Select.Option value="admin">Администратор (admin)</Select.Option>
+                <Select.Option value="manager">Менеджер (manager)</Select.Option>
+                <Select.Option value="operator">Оператор (operator)</Select.Option>
+                <Select.Option value="top_manager">Топ-менеджер (top_manager)</Select.Option>
+                <Select.Option value="worker">Работник (worker)</Select.Option>
+                <Select.Option value="packer">Упаковщик (packer)</Select.Option>
+                <Select.Option value="viewer">Наблюдатель (viewer)</Select.Option>
+              </Select>
+            </Form.Item>
+          </Col>
 
-        <Form.Item label="Активен" name="is_active" valuePropName="checked">
-          <Checkbox />
-        </Form.Item>
+          <Col xs={24} sm={12} md={4}>
+            <Form.Item label="Статус" name="is_active" valuePropName="checked">
+              <Checkbox>Активен</Checkbox>
+            </Form.Item>
+          </Col>
+        </Row>
       </Form>
 
       <Divider />
@@ -161,22 +184,28 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
           layout="vertical"
           onFinish={handlePasswordChange}
         >
-          <Form.Item
-            label="Новый пароль"
-            name="new_password"
-            rules={[
-            { required: true, message: 'Пожалуйста, введите новый пароль' },
-              { min: 8, message: 'Пароль должен содержать минимум 8 символов' },
-            ]}
-          >
-            <Input.Password placeholder="Минимум 8 символов" />
-          </Form.Item>
+          <Row gutter={[16, 0]} align="bottom">
+            <Col xs={24} md={16} xl={8}>
+              <Form.Item
+                label="Новый пароль"
+                name="new_password"
+                rules={[
+                  { required: true, message: 'Пожалуйста, введите новый пароль' },
+                  { min: 8, message: 'Пароль должен содержать минимум 8 символов' },
+                ]}
+              >
+                <Input.Password placeholder="Минимум 8 символов" />
+              </Form.Item>
+            </Col>
 
-          <Form.Item>
-            <Button type="primary" htmlType="submit" loading={passwordLoading}>
-              Изменить пароль
-            </Button>
-          </Form.Item>
+            <Col xs={24} md={8} xl={4}>
+              <Form.Item>
+                <Button type="primary" htmlType="submit" loading={passwordLoading}>
+                  Изменить пароль
+                </Button>
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Card>
 
