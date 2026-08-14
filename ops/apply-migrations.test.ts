@@ -227,7 +227,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       'idx_cnc_telegram_media_restore_packet_history',
     ]) expect(migration111Probe).toContain(marker);
   });
-  it('pins migrations 112/113 cut-job orientation and 115 vacuum numbering end states', () => {
+  it('pins migrations 112/113 cut-job orientation and 115 CNC/vacuum end states', () => {
     const migration112Probe = probeFn.slice(
       probeFn.indexOf('112_cut_job_rotation_allowed*'),
       probeFn.indexOf('113_cut_job_texture_direction*'),
@@ -253,6 +253,19 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "LIKE '%horizontal%'",
       "LIKE '%none%'",
     ]) expect(migration113Probe).toContain(marker);
+
+    const migration115MdfProbe = probeFn.slice(
+      probeFn.indexOf('115_cnc_telegram_packet_mdf_board_hidden*'),
+      probeFn.indexOf('115_vacuum_cut_numbering*'),
+    );
+    for (const marker of [
+      'q_col cnc_telegram_packets mdf_board_hidden_at',
+      'q_col cnc_telegram_packets mdf_board_hidden_by',
+      'q_col cnc_telegram_packets mdf_board_hidden_reason',
+      'q_col cnc_telegram_packets mdf_board_hidden_cut_job_id',
+      'q_idx idx_cnc_telegram_packets_mdf_visible_workday',
+      'q_idx idx_cnc_telegram_packets_mdf_hidden_cut_job',
+    ]) expect(migration115MdfProbe).toContain(marker);
 
     const migration115Probe = probeFn.slice(
       probeFn.indexOf('115_vacuum_cut_numbering*'),

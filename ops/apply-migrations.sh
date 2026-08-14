@@ -1152,6 +1152,13 @@ probe_file() {
     114_production_status_always_from_details*) probe_all \
                      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='recalc_order_production_status' AND prosrc LIKE '%erp.order_status_to_details_sync%' AND prosrc NOT LIKE '%v_enabled%');" \
                      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='trg_orders_sync_details_status' AND prosrc LIKE '%erp.detail_status_to_order_recalc%' AND prosrc NOT LIKE '%NEW.production_status_from_details_enabled%');" ;;
+    115_cnc_telegram_packet_mdf_board_hidden*) probe_all \
+                     "$(q_col cnc_telegram_packets mdf_board_hidden_at)" \
+                     "$(q_col cnc_telegram_packets mdf_board_hidden_by)" \
+                     "$(q_col cnc_telegram_packets mdf_board_hidden_reason)" \
+                     "$(q_col cnc_telegram_packets mdf_board_hidden_cut_job_id)" \
+                     "$(q_idx idx_cnc_telegram_packets_mdf_visible_workday)" \
+                     "$(q_idx idx_cnc_telegram_packets_mdf_hidden_cut_job)" ;;
     115_vacuum_cut_numbering*) probe_all \
                      "$(q_col bazis_cut_set_details source_bath_cut_number)" \
                      "SELECT col_description(
