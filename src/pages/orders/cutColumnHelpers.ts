@@ -36,6 +36,14 @@ export function cutJobDeepLink(
   return `/cut?${params.toString()}`;
 }
 
+/** User-facing current/acting cut result number for order detail columns. */
+export function cutJobVersionLabel(
+  ref: Pick<CutDetailLastReadyJobRef, 'cutJobId' | 'resultNo' | 'cutNumber'>,
+): string {
+  const cutNumber = ref.cutNumber.trim();
+  return cutNumber || `${ref.cutJobId}-${ref.resultNo}`;
+}
+
 /** Human-readable cut profile label for order-facing cut job refs. */
 export function cutJobProfileLabel(job: Pick<CutJobRef, 'paramProfileId' | 'profileName' | 'profileIsActive'>): string {
   const profileName = job.profileName?.trim();

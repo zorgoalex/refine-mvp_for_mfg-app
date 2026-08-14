@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 // Source-text guards: the order show page exposes the detail-level cut picker,
 // gated by useBackendCut + cut.manage, and passes chosen detailIds to AddToCutModal.
 const source = readFileSync(fileURLToPath(new URL('./show.tsx', import.meta.url)), 'utf8');
+const versionLinesSource = readFileSync(fileURLToPath(new URL('./CutJobVersionLines.tsx', import.meta.url)), 'utf8');
 
 describe('OrderShow cut detail-picker guards', () => {
   it('gates the cut picker behind useBackendCut and cut.manage', () => {
@@ -25,7 +26,12 @@ describe('OrderShow cut detail-picker guards', () => {
     expect(source).toContain("title: 'Расчет ванны'");
     expect(source).toContain("key: 'bath_cut_job'");
     expect(source).toContain('cutJobDeepLink(j)');
+    expect(source).toContain('<CutJobVersionLines job={ref} />');
+    expect(source).toContain('<CutJobVersionLines job={j}');
     expect(source).toContain('Профиль: {cutJobProfileLabel(j)}');
+    expect(versionLinesSource).toContain('cutJobVersionLabel(job)');
+    expect(versionLinesSource).toContain("fontVariantNumeric: 'tabular-nums'");
+    expect(versionLinesSource).toContain("overflowWrap: 'anywhere'");
   });
 
   it('renders embedded cut screen as a top order info tab', () => {
