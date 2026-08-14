@@ -182,6 +182,7 @@ const manualSvgUploadSchema = z.object({
   selectedOrderIds: z.array(z.number().int().positive()).min(1).max(100),
   createMdfMachineFileCard: z.boolean(),
   matchMode: z.enum(['order_details', 'informational']).optional().default('order_details'),
+  validationMode: z.enum(['strict', 'lenient']).optional().default('strict'),
   requestedCutJobId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   svgContentHash: z.string().trim().regex(SHA256_RE),
   workday: z.string().regex(DATE_ONLY).refine(isValidDateOnly).optional(),
@@ -232,6 +233,20 @@ const manualSvgUploadSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['telegramSend'],
       message: 'Для отправки в Telegram нужен исходный SVG-файл',
+    });
+  }
+  if (value.cutLayout.items.length === 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['cutLayout', 'items'],
+      message: 'В SVG нет распознанных деталей',
+    });
+  }
+  if (value.validationMode !== 'lenient' && value.cutLayout.status !== 'valid') {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['cutLayout', 'status'],
+      message: 'Невалидный SVG можно загрузить только в нестрогом режиме',
     });
   }
 });
@@ -514,7 +529,7 @@ export function parseManualSvgUpload(
       })),
     });
   }
-  if (parsed.data.cutLayout.status !== 'valid') {
+  if (parsed.data.validationMode !== 'lenient' && parsed.data.cutLayout.status !== 'valid') {
     throw new ApiError(422, 'MANUAL_SVG_INVALID_LAYOUT', 'Manual SVG upload requires a valid parsed layout', {
       reasons: parsed.data.cutLayout.reasons,
     });

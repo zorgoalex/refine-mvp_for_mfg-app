@@ -295,6 +295,7 @@ function manualSvgDto() {
     selectedOrderIds: [42],
     createMdfMachineFileCard: true,
     matchMode: 'order_details' as const,
+    validationMode: 'strict' as const,
     svgContentHash: 'a'.repeat(64),
     cutLayout: {
       status: 'valid' as const,

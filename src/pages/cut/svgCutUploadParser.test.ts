@@ -199,6 +199,72 @@ describe('svgCutUploadParser visual labels', () => {
     ]));
   });
 
+  it('keeps label-only details for lenient upload when the visual label has explicit size', () => {
+    const result = buildSvgUploadLayoutItemsFromContours(
+      [],
+      [
+        visualLabel({
+          key: '2790:1:720:600',
+          orderName: '2790',
+          detailNumber: 1,
+          widthMm: 720,
+          heightMm: 600,
+          hasExplicitSize: true,
+          cxMm: 460,
+          cyMm: 640,
+          rawLines: ['2790', '# 1', '720*600'],
+        }),
+      ],
+      {
+        includeVisualLabelOnlyItems: true,
+        sheetWidthMm: 2070,
+        sheetHeightMm: 2800,
+      },
+    );
+
+    expect(result.layoutItems).toEqual([
+      expect.objectContaining({
+        orderName: '2790',
+        detailNumber: 1,
+        widthMm: 720,
+        heightMm: 600,
+        xMm: 100,
+        yMm: 340,
+      }),
+    ]);
+    expect(result.rejected.join('; ')).toContain('деталь создана по подписи');
+  });
+
+  it('does not create MDF details from unlabeled geometry unless informational fallback is enabled', () => {
+    const genericPiece = contour({
+      elementId: 'rect-raw-geometry',
+      xMm: 100,
+      yMm: 200,
+      placedWidthMm: 300,
+      placedHeightMm: 400,
+    });
+
+    const strictLike = buildSvgUploadLayoutItemsFromContours([genericPiece], [], {
+      includeVisualLabelOnlyItems: true,
+      fallbackOrderName: '2777',
+    });
+    const informational = buildSvgUploadLayoutItemsFromContours([genericPiece], [], {
+      allowGeometryFallbackItems: true,
+      includeVisualLabelOnlyItems: true,
+      fallbackOrderName: '2777',
+    });
+
+    expect(strictLike.layoutItems).toHaveLength(0);
+    expect(informational.layoutItems).toEqual([
+      expect.objectContaining({
+        orderName: '2777',
+        detailNumber: 1,
+        widthMm: 300,
+        heightMm: 400,
+      }),
+    ]);
+  });
+
   it('matches visual labels by position when contour bbox size is slightly noisy', () => {
     const target = contour({
       elementId: '_2756_PartContour',

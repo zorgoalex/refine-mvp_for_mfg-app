@@ -65,8 +65,15 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('replaceSvgPreview(null)');
     expect(modal).toContain('uploadMatchMode');
     expect(modal).toContain("matchMode: uploadMatchMode");
+    expect(modal).toContain('validationMode');
+    expect(modal).toContain('lenientValidation');
+    expect(modal).toContain('Нестрогий режим');
+    expect(modal).toContain('appendCommentLineBreak');
+    expect(modal).toContain('Перенос строки');
+    expect(modal).toContain('<Input.TextArea');
     expect(modal).toContain('svgUploadMaterialIsInformational');
     expect(modal).toContain('allowGeometryFallbackItems: parseAsInformational');
+    expect(modal).not.toContain('allowGeometryFallbackItems: parseAsInformational || lenientValidation');
     expect(modal).toContain('без сверки ERP-деталей');
     expect(modal).toContain('Задание будет связано с выбранными заказами без привязки к деталям заказа');
     expect(modal).toContain('manual-svg-preset:${asciiHash(commentText)}');
