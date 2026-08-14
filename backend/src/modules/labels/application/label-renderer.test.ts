@@ -124,6 +124,53 @@ describe('label renderer', () => {
     expect(svg).toContain('x="120" y="80" width="200" height="50" fill="#000000" stroke="#000000"');
   });
 
+  it('renders imported cut-result SVGs after stripping auxiliary nested source SVGs', () => {
+    const base = cutMapTemplate();
+    const mapped: LabelRow = {
+      ...row({}),
+      cutMap: {
+        cutResultPlacementId: 4240,
+        cutResultSheetMapId: 424,
+        cutResultId: 103,
+        cutJobId: 79,
+        cutNumber: '78-1',
+        cutJobName: 'CNC#1_2723-18MM.svg',
+        variant: 'telegram-svg',
+        sheetIndex: 0,
+        sheetNumber: 1,
+        sheetWidthMm: 2070.2,
+        sheetHeightMm: 2800.2,
+        xMm: 1049.6,
+        yMm: 90.1,
+        widthMm: 458,
+        heightMm: 201,
+      },
+    };
+    const svg = renderSvgPages(base, [mapped], new Map([['cut_result:424', {
+      svg: [
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2070.2 2800.2">',
+        '<rect x="0" y="0" width="2070.2" height="2800.2" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>',
+        '<g class="cut-sheet-piece" data-item-id="det-62667" data-piece-instance="1" data-piece-cx="1278.6" data-piece-cy="190.6" data-detail-id="62667">',
+        '<rect x="1049.6" y="90.1" width="458" height="201" fill="#d7e9ff" stroke="#1f2d3d" stroke-width="2"/>',
+        '<svg class="cut-sheet-piece-source-svg" x="1049.6" y="90.1" width="458" height="201" viewBox="0 0 458 201" preserveAspectRatio="none" overflow="hidden">',
+        '<g transform="matrix(0.01 0 0 0.01 -1049.6 -90.099953)">',
+        '<polygon points="107454.81,263497.27 149252.79,199500.36 151752.67,263497.27" fill="none" stroke="#111827" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>',
+        '</g>',
+        '</svg>',
+        '</g>',
+        '</svg>',
+      ].join(''),
+      isVacuum: false,
+    }]])).pages[0];
+
+    expect(svg).toContain('data-label-element-kind="cut_map"');
+    expect(svg).toContain('viewBox="0 0 2800.2 2070.2"');
+    expect(svg).toContain('fill="#d7e9ff" stroke="#1f2d3d" stroke-width="4"');
+    expect(svg).toContain('x="1049.6" y="90.1" width="458" height="201" fill="#000000" stroke="#000000"');
+    expect(svg).not.toContain('cut-sheet-piece-source-svg');
+    expect(svg).not.toContain('<polygon');
+  });
+
   it('renders Telegram screenshot fallback without a selected-detail overlay', () => {
     const base = cutMapTemplate();
     const mapped: LabelRow = {
