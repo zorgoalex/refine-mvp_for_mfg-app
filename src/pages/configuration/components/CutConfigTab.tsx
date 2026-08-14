@@ -574,13 +574,15 @@ function RenderStyleSummaryCard({ profile }: { profile: CutRenderStyleProfile })
             Контуры деталей: {profile.piece.stroke}, {profile.piece.strokeWidthMm} мм
           </Text>
           <Text type="secondary">
-            Фрезеровка из SVG: минимум {profile.sourceSvg.minStrokePx ?? 'исходная'} px
+            Фрезеровка из SVG: {profile.sourceSvg.strokeColorMode}, минимум{' '}
+            {profile.sourceSvg.minStrokePx ?? 'исходная'} px, opacity {profile.sourceSvg.strokeOpacity}
           </Text>
           <Text type="secondary">
             Raw screenshot: минимум {profile.rawSvgScreenshot.minStrokePx} px
           </Text>
           <Text type="secondary">
-            Подписи: {profile.label.fillStrategy === 'contrast' ? 'контрастные' : 'фиксированный цвет'}
+            Подписи: {profile.label.fillStrategy === 'contrast' ? 'контрастные' : 'фиксированный цвет'}, жирность{' '}
+            {profile.label.fontWeight}
           </Text>
         </Space>
         <div>

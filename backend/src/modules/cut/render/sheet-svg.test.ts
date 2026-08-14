@@ -215,12 +215,13 @@ describe('buildSheetSvg multi-line labels', () => {
     const svg = buildSheetSvg({
       sheet: sourceSheet,
       labelFor: () => ['2723', 'поз. 1', '100X80'],
-      fillFor: () => '#111827',
+      fillFor: () => '#d7e9ff',
       renderStyle: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
     });
 
-    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW));
-    expect(svg).toContain('fill="#ffffff" stroke="#111827"');
+    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#d7e9ff'));
+    expect(svg).toContain('fill="#111827" stroke="#ffffff"');
+    expect(svg).toContain('font-weight="800"');
     expect(svg).toContain('paint-order="stroke"');
   });
 
@@ -243,6 +244,7 @@ describe('buildSheetSvg multi-line labels', () => {
             lightTextStrokeWidthRatio: 0.05,
           },
           sourceSvg: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
             minStrokePx: 3.5,
             nonScalingStroke: false,
           },
@@ -276,7 +278,7 @@ describe('buildSheetSvg multi-line labels', () => {
     });
 
     expect(svg).toContain('stroke="#654321" stroke-width="4"');
-    expect(svg).toContain(cutRenderSourceSvgCss(customStyle));
+    expect(svg).toContain(cutRenderSourceSvgCss(customStyle, '#111827'));
     expect(svg).not.toContain('vector-effect:non-scaling-stroke!important');
     expect(svg).toContain('fill="#fefefe" stroke="#222222"');
   });

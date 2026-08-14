@@ -1,5 +1,6 @@
 import {
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+  cutRenderLabelFontWeight,
   cutRenderLabelFillForBackground,
   cutRenderLabelStrokeForBackground,
   cutRenderOrderFillPalette,
@@ -27,7 +28,6 @@ export function buildStyledSvgUploadPreview(
   const palette = cutRenderOrderFillPalette(style);
   const orderIndexByName = new Map<string, number>();
   const fontMm = Math.max(24, Math.round(Math.min(sheet.widthMm, sheet.heightMm) / 40));
-  const sourceCss = cutRenderSourceSvgCss(style);
   const pieces = parsed.cutLayout.items.map((item) => {
     const fill = fillForOrderName(item.orderName, orderIndexByName, palette, style.piece.defaultFill);
     const cx = item.xMm + item.placedWidthMm / 2;
@@ -35,7 +35,14 @@ export function buildStyledSvgUploadPreview(
     const rect = `<rect x="${num(item.xMm)}" y="${num(item.yMm)}" width="${num(item.placedWidthMm)}" height="${num(
       item.placedHeightMm,
     )}" fill="${escapeXml(fill)}" stroke="${style.piece.stroke}" stroke-width="${num(style.piece.strokeWidthMm)}"/>`;
-    const sourceSvg = renderSourceSvg(item.sourceSvg, item.xMm, item.yMm, item.placedWidthMm, item.placedHeightMm, sourceCss);
+    const sourceSvg = renderSourceSvg(
+      item.sourceSvg,
+      item.xMm,
+      item.yMm,
+      item.placedWidthMm,
+      item.placedHeightMm,
+      cutRenderSourceSvgCss(style, fill),
+    );
     const lines = [
       item.orderName,
       `поз. ${item.detailNumber}`,
@@ -52,7 +59,7 @@ export function buildStyledSvgUploadPreview(
     }).join('');
     const text = `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, Arial, sans-serif" font-size="${num(
       fontMm,
-    )}" fill="${labelFill}"${labelStrokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
+    )}" font-weight="${num(cutRenderLabelFontWeight(style))}" fill="${labelFill}"${labelStrokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
     return `<g>${rect}${sourceSvg}${text}</g>`;
   }).join('');
   return [

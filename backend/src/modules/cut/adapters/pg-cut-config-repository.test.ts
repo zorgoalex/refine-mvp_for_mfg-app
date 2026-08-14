@@ -119,7 +119,11 @@ describe('PgCutConfigRepository', () => {
                   ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.piece,
                   stroke: '#123456',
                 },
-                sourceSvg: { minStrokePx: 3, nonScalingStroke: true },
+                sourceSvg: {
+                  ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
+                  minStrokePx: 3,
+                  nonScalingStroke: true,
+                },
               },
             },
           },
@@ -135,7 +139,7 @@ describe('PgCutConfigRepository', () => {
 
   it('falls back to the built-in render style when render.styles is absent or invalid', async () => {
     const absent = new PgCutConfigRepository(fakeDatabase({}));
-    expect((await absent.getRenderStyleRule(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW)).sourceSvg.minStrokePx).toBe(2.75);
+    expect((await absent.getRenderStyleRule(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW)).sourceSvg.minStrokePx).toBe(1.6);
 
     const invalid = new PgCutConfigRepository(
       fakeDatabase({ ['WHERE key = $1 LIMIT 1']: [{ value: { version: 1, profiles: { mdf_board_preview: { piece: { stroke: 'red' } } } } }] }),

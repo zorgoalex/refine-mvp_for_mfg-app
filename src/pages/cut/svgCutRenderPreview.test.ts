@@ -16,7 +16,9 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(svg).not.toBeNull();
     expect(rendered).toContain('fill="#d7e9ff"');
     expect(rendered).toContain('fill="#dff3d7"');
-    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW));
+    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#d7e9ff'));
+    expect(rendered).toContain('fill="#111827" stroke="#ffffff"');
+    expect(rendered).toContain('font-weight="800"');
     expect(rendered).toContain('>2723</tspan>');
     expect(rendered).toContain('>2724</tspan>');
     expect(rendered.indexOf('cut-sheet-piece-source-svg')).toBeLessThan(rendered.indexOf('>2723</tspan>'));
@@ -41,6 +43,7 @@ describe('buildStyledSvgUploadPreview', () => {
             lightTextStroke: '#222222',
           },
           sourceSvg: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
             minStrokePx: 3.5,
             nonScalingStroke: false,
           },
@@ -52,7 +55,7 @@ describe('buildStyledSvgUploadPreview', () => {
 
     expect(rendered).toContain('fill="#111827"');
     expect(rendered).toContain('stroke="#654321" stroke-width="4"');
-    expect(rendered).toContain(cutRenderSourceSvgCss(style));
+    expect(rendered).toContain(cutRenderSourceSvgCss(style, '#111827'));
     expect(rendered).not.toContain('vector-effect:non-scaling-stroke!important');
     expect(rendered).toContain('fill="#fefefe" stroke="#222222"');
   });

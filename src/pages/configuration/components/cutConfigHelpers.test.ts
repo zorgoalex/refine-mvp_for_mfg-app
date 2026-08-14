@@ -47,7 +47,11 @@ describe('cutConfigHelpers', () => {
           ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
           mdf_board_preview: {
             ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview,
-            sourceSvg: { minStrokePx: 3, nonScalingStroke: true },
+            sourceSvg: {
+              ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
+              minStrokePx: 3,
+              nonScalingStroke: true,
+            },
           },
         },
       },

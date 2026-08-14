@@ -11,6 +11,7 @@ import {
 } from '../../../shared/cut-geometry';
 import {
   CUT_RENDER_STYLE_DEFAULT,
+  cutRenderLabelFontWeight,
   cutRenderLabelFillForBackground,
   cutRenderLabelStrokeForBackground,
   cutRenderOrderFillPalette,
@@ -376,7 +377,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
       )}" fill="${escapeXml(fill)}" stroke="${renderStyle.piece.stroke}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
-      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect, renderStyle);
+      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect, renderStyle, fill);
       if (!showLabels) {
         return renderPieceGroup(piece, cx, cy, [rectEl, sourceSvgEl].join(''));
       }
@@ -401,7 +402,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
         sourceSvgEl,
         `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
           fontMm,
-        )}" fill="${labelFill}"${labelStrokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
+        )}" font-weight="${num(cutRenderLabelFontWeight(renderStyle))}" fill="${labelFill}"${labelStrokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
       ].join(''));
     })
     .join('');
@@ -428,6 +429,7 @@ function renderPieceSourceSvgFragment(
   piece: FreecutPlacement,
   rect: { x: number; y: number; w: number; h: number },
   renderStyle: CutRenderStyleRef = CUT_RENDER_STYLE_DEFAULT,
+  pieceFill?: string | null,
 ): string {
   const source = (piece as {
     source_svg?: {
@@ -453,7 +455,7 @@ function renderPieceSourceSvgFragment(
   ) {
     return '';
   }
-  const css = cutRenderSourceSvgCss(renderStyle);
+  const css = cutRenderSourceSvgCss(renderStyle, pieceFill);
   return [
     `<svg class="cut-sheet-piece-source-svg" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
     css ? `<style>${css}</style>` : '',

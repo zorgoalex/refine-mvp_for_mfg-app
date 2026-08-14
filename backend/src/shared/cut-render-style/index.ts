@@ -16,13 +16,21 @@ export interface CutRenderStyleProfile {
   label: {
     fillStrategy: 'fixed' | 'contrast';
     darkFill: string;
+    darkTextStroke: string;
+    darkTextStrokeWidthRatio: number;
     lightFill: string;
     lightTextStroke: string;
     lightTextStrokeWidthRatio: number;
+    fontWeight: number;
   };
   sourceSvg: {
     minStrokePx: number | null;
     nonScalingStroke: boolean;
+    strokeColorMode: 'preserve' | 'piece-pastel' | 'fixed';
+    fixedStroke: string;
+    strokeOpacity: number;
+    pastelSaturationPercent: number;
+    pastelLightnessPercent: number;
   };
   rawSvgScreenshot: {
     minStrokePx: number;
@@ -77,13 +85,21 @@ const CUT_RENDER_STYLE_PROFILES = {
     label: {
       fillStrategy: 'fixed',
       darkFill: '#1f2d3d',
+      darkTextStroke: '#ffffff',
+      darkTextStrokeWidthRatio: 0,
       lightFill: '#ffffff',
       lightTextStroke: '#111827',
       lightTextStrokeWidthRatio: 0,
+      fontWeight: 500,
     },
     sourceSvg: {
       minStrokePx: null,
       nonScalingStroke: false,
+      strokeColorMode: 'preserve',
+      fixedStroke: '#111827',
+      strokeOpacity: 1,
+      pastelSaturationPercent: 55,
+      pastelLightnessPercent: 58,
     },
     rawSvgScreenshot: {
       minStrokePx: 2.4,
@@ -93,22 +109,30 @@ const CUT_RENDER_STYLE_PROFILES = {
     piece: {
       defaultFill: '#eef3f8',
       stroke: '#1f2d3d',
-      strokeWidthMm: 2,
+      strokeWidthMm: 1.6,
       orderPalette: ORDER_FILL_PALETTE,
     },
     label: {
       fillStrategy: 'contrast',
       darkFill: '#111827',
+      darkTextStroke: '#ffffff',
+      darkTextStrokeWidthRatio: 0.08,
       lightFill: '#ffffff',
       lightTextStroke: '#111827',
-      lightTextStrokeWidthRatio: 0.035,
+      lightTextStrokeWidthRatio: 0.08,
+      fontWeight: 800,
     },
     sourceSvg: {
-      minStrokePx: 2.75,
+      minStrokePx: 1.6,
       nonScalingStroke: true,
+      strokeColorMode: 'piece-pastel',
+      fixedStroke: '#6ea7c8',
+      strokeOpacity: 0.72,
+      pastelSaturationPercent: 56,
+      pastelLightnessPercent: 56,
     },
     rawSvgScreenshot: {
-      minStrokePx: 2.75,
+      minStrokePx: 2,
     },
   },
 } as const satisfies Record<CutRenderStyleName, CutRenderStyleProfile>;
@@ -204,13 +228,21 @@ export function cutRenderStyleProfileJson(rule: CutRenderStyleRule | CutRenderSt
     label: {
       fillStrategy: rule.label.fillStrategy,
       darkFill: rule.label.darkFill,
+      darkTextStroke: rule.label.darkTextStroke,
+      darkTextStrokeWidthRatio: rule.label.darkTextStrokeWidthRatio,
       lightFill: rule.label.lightFill,
       lightTextStroke: rule.label.lightTextStroke,
       lightTextStrokeWidthRatio: rule.label.lightTextStrokeWidthRatio,
+      fontWeight: rule.label.fontWeight,
     },
     sourceSvg: {
       minStrokePx: rule.sourceSvg.minStrokePx,
       nonScalingStroke: rule.sourceSvg.nonScalingStroke,
+      strokeColorMode: rule.sourceSvg.strokeColorMode,
+      fixedStroke: rule.sourceSvg.fixedStroke,
+      strokeOpacity: rule.sourceSvg.strokeOpacity,
+      pastelSaturationPercent: rule.sourceSvg.pastelSaturationPercent,
+      pastelLightnessPercent: rule.sourceSvg.pastelLightnessPercent,
     },
     rawSvgScreenshot: {
       minStrokePx: rule.rawSvgScreenshot.minStrokePx,
@@ -240,25 +272,66 @@ export function cutRenderLabelStrokeForBackground(
 ): { stroke: string; strokeWidthMm: number } | null {
   const style = resolveCutRenderStyle(value);
   const fill = cutRenderLabelFillForBackground(backgroundFill, style);
-  if (fill !== style.label.lightFill || style.label.lightTextStrokeWidthRatio <= 0) return null;
+  const stroke = fill === style.label.lightFill ? style.label.lightTextStroke : style.label.darkTextStroke;
+  const ratio = fill === style.label.lightFill
+    ? style.label.lightTextStrokeWidthRatio
+    : style.label.darkTextStrokeWidthRatio;
+  if (ratio <= 0) return null;
   return {
-    stroke: style.label.lightTextStroke,
-    strokeWidthMm: fontMm * style.label.lightTextStrokeWidthRatio,
+    stroke,
+    strokeWidthMm: fontMm * ratio,
   };
 }
 
-export function cutRenderSourceSvgCss(value: CutRenderStyleRef): string {
+export function cutRenderLabelFontWeight(value: CutRenderStyleRef): number {
+  return resolveCutRenderStyle(value).label.fontWeight;
+}
+
+export function cutRenderSourceSvgCss(value: CutRenderStyleRef, pieceFill?: string | null): string {
   const style = resolveCutRenderStyle(value);
   const minStrokePx = style.sourceSvg.minStrokePx;
-  if (minStrokePx === null) return '';
+  const declarations: string[] = [];
+  if (minStrokePx !== null) declarations.push(`stroke-width:${formatNumber(minStrokePx)}px!important`);
+  const sourceStroke = cutRenderSourceSvgStroke(style, pieceFill);
+  if (sourceStroke) {
+    declarations.push(`stroke:${sourceStroke}!important`);
+    declarations.push('fill:none!important');
+  }
+  if (style.sourceSvg.strokeOpacity < 1) {
+    declarations.push(`stroke-opacity:${formatNumber(style.sourceSvg.strokeOpacity)}!important`);
+  }
   const vectorEffect = style.sourceSvg.nonScalingStroke
-    ? 'vector-effect:non-scaling-stroke!important;'
+    ? 'vector-effect:non-scaling-stroke!important'
     : '';
-  return `*{stroke-width:${formatNumber(minStrokePx)}px!important;${vectorEffect}}`;
+  if (vectorEffect) declarations.push(vectorEffect);
+  if (declarations.length === 0) return '';
+  return `*{${declarations.join(';')};}`;
 }
 
 export function cutRenderRawSvgScreenshotMinStrokePx(value: CutRenderStyleRef): number {
   return resolveCutRenderStyle(value).rawSvgScreenshot.minStrokePx;
+}
+
+function cutRenderSourceSvgStroke(style: CutRenderStyleRule, pieceFill: string | null | undefined): string | null {
+  if (style.sourceSvg.strokeColorMode === 'preserve') return null;
+  if (style.sourceSvg.strokeColorMode === 'fixed') return style.sourceSvg.fixedStroke;
+  return sourceSvgPastelStrokeForPieceFill(pieceFill, style) ?? style.sourceSvg.fixedStroke;
+}
+
+function sourceSvgPastelStrokeForPieceFill(
+  pieceFill: string | null | undefined,
+  style: CutRenderStyleRule,
+): string | null {
+  if (!pieceFill) return null;
+  const rgb = parseHexColor(pieceFill);
+  if (!rgb) return null;
+  const hsl = rgbToHsl(rgb);
+  if (hsl.s < 0.03) return null;
+  return hslToHex({
+    h: hsl.h,
+    s: style.sourceSvg.pastelSaturationPercent / 100,
+    l: style.sourceSvg.pastelLightnessPercent / 100,
+  });
 }
 
 function parseCutRenderStyleProfile(
@@ -287,6 +360,18 @@ function parseCutRenderStyleProfile(
     label: {
       fillStrategy: parseFillStrategy(label.fillStrategy, fallback.label.fillStrategy, `${path}.label.fillStrategy`),
       darkFill: parseHexColorField(label.darkFill, fallback.label.darkFill, `${path}.label.darkFill`),
+      darkTextStroke: parseHexColorField(
+        label.darkTextStroke,
+        fallback.label.darkTextStroke,
+        `${path}.label.darkTextStroke`,
+      ),
+      darkTextStrokeWidthRatio: parseNumberField(
+        label.darkTextStrokeWidthRatio,
+        fallback.label.darkTextStrokeWidthRatio,
+        `${path}.label.darkTextStrokeWidthRatio`,
+        0,
+        0.25,
+      ),
       lightFill: parseHexColorField(label.lightFill, fallback.label.lightFill, `${path}.label.lightFill`),
       lightTextStroke: parseHexColorField(
         label.lightTextStroke,
@@ -300,6 +385,7 @@ function parseCutRenderStyleProfile(
         0,
         0.25,
       ),
+      fontWeight: parseIntegerField(label.fontWeight, fallback.label.fontWeight, `${path}.label.fontWeight`, 100, 1000),
     },
     sourceSvg: {
       minStrokePx: parseNullableNumberField(
@@ -313,6 +399,37 @@ function parseCutRenderStyleProfile(
         sourceSvg.nonScalingStroke,
         fallback.sourceSvg.nonScalingStroke,
         `${path}.sourceSvg.nonScalingStroke`,
+      ),
+      strokeColorMode: parseSourceSvgStrokeColorMode(
+        sourceSvg.strokeColorMode,
+        fallback.sourceSvg.strokeColorMode,
+        `${path}.sourceSvg.strokeColorMode`,
+      ),
+      fixedStroke: parseHexColorField(
+        sourceSvg.fixedStroke,
+        fallback.sourceSvg.fixedStroke,
+        `${path}.sourceSvg.fixedStroke`,
+      ),
+      strokeOpacity: parseNumberField(
+        sourceSvg.strokeOpacity,
+        fallback.sourceSvg.strokeOpacity,
+        `${path}.sourceSvg.strokeOpacity`,
+        0.05,
+        1,
+      ),
+      pastelSaturationPercent: parseNumberField(
+        sourceSvg.pastelSaturationPercent,
+        fallback.sourceSvg.pastelSaturationPercent,
+        `${path}.sourceSvg.pastelSaturationPercent`,
+        0,
+        100,
+      ),
+      pastelLightnessPercent: parseNumberField(
+        sourceSvg.pastelLightnessPercent,
+        fallback.sourceSvg.pastelLightnessPercent,
+        `${path}.sourceSvg.pastelLightnessPercent`,
+        0,
+        100,
       ),
     },
     rawSvgScreenshot: {
@@ -390,6 +507,18 @@ function parseFillStrategy(
   return value;
 }
 
+function parseSourceSvgStrokeColorMode(
+  value: unknown,
+  fallback: CutRenderStyleProfile['sourceSvg']['strokeColorMode'],
+  field: string,
+): CutRenderStyleProfile['sourceSvg']['strokeColorMode'] {
+  if (value === undefined) return fallback;
+  if (value !== 'preserve' && value !== 'piece-pastel' && value !== 'fixed') {
+    throw new CutRenderStyleValidationError(field, `${field} должен быть preserve, piece-pastel или fixed`);
+  }
+  return value;
+}
+
 function parseNumberField(
   value: unknown,
   fallback: number,
@@ -402,6 +531,20 @@ function parseNumberField(
     throw new CutRenderStyleValidationError(field, `${field} должен быть числом ${min}..${max}`);
   }
   return Number(value.toFixed(3));
+}
+
+function parseIntegerField(
+  value: unknown,
+  fallback: number,
+  field: string,
+  min: number,
+  max: number,
+): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    throw new CutRenderStyleValidationError(field, `${field} должен быть целым числом ${min}..${max}`);
+  }
+  return value;
 }
 
 function parseNullableNumberField(
@@ -464,6 +607,48 @@ function normalizeHexColor(value: string): string {
     ? trimmed.slice(1).split('').map((char) => `${char}${char}`).join('')
     : trimmed.slice(1);
   return `#${hex.toLowerCase()}`;
+}
+
+function rgbToHsl(rgb: [number, number, number]): { h: number; s: number; l: number } {
+  const [rawR, rawG, rawB] = rgb;
+  const r = rawR / 255;
+  const g = rawG / 255;
+  const b = rawB / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return { h: h / 6, s, l };
+}
+
+function hslToHex(hsl: { h: number; s: number; l: number }): string {
+  const hueToRgb = (p: number, q: number, rawT: number): number => {
+    let t = rawT;
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = hsl.l < 0.5
+    ? hsl.l * (1 + hsl.s)
+    : hsl.l + hsl.s - hsl.l * hsl.s;
+  const p = 2 * hsl.l - q;
+  const rgb: [number, number, number] = hsl.s === 0
+    ? [hsl.l, hsl.l, hsl.l]
+    : [
+        hueToRgb(p, q, hsl.h + 1 / 3),
+        hueToRgb(p, q, hsl.h),
+        hueToRgb(p, q, hsl.h - 1 / 3),
+      ];
+  return `#${rgb.map((channel) => Math.round(channel * 255).toString(16).padStart(2, '0')).join('')}`;
 }
 
 function formatNumber(value: number): string {
