@@ -16,7 +16,7 @@ import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { useSelect } from '@refinedev/antd';
-import { OrderDetail } from '../../../../types/orders';
+import type { OrderDetail, OrderHdfDetail } from '../../../../types/orders';
 import { TableTopScroll } from '../../../../components/TableTopScroll';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../../../hooks/usePageSizePreference';
 import { formatNumber } from '../../../../utils/numberFormat';
@@ -215,7 +215,7 @@ const ORDER_DETAIL_COLUMN_WIDTHS = {
   quantity: 54,
   area: 90,
   millingType: 119,
-  hdfParameter: 82,
+  hdfParameter: 106,
   edgeType: 73,
   sheetMaterial: 126,
   millingCostPerSqm: 78,
@@ -225,6 +225,130 @@ const ORDER_DETAIL_COLUMN_WIDTHS = {
 const ORDER_DETAIL_TABLE_MAX_SCROLL_Y = 560;
 const ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT = 39;
 const ORDER_DETAIL_TABLE_SCROLL_SAFETY_ROWS = 1;
+
+type OrderDetailHdfDisplay = {
+  heightMm: number | null;
+  widthMm: number | null;
+  quantity: number | null;
+  areaM2: number;
+  status: string;
+  isStale: boolean;
+};
+
+const ORDER_DETAIL_HDF_STATUS_LABELS: Record<string, string> = {
+  ok: 'ХДФ',
+  too_narrow: 'узко',
+  config_missing: 'нет настр.',
+  source_changed: 'деталь изм.',
+};
+
+function buildOrderDetailHdfDisplayBySourceDetailId(
+  hdfDetails: readonly OrderHdfDetail[],
+): Map<number, OrderDetailHdfDisplay> {
+  const bySourceDetailId = new Map<number, OrderDetailHdfDisplay>();
+  hdfDetails.forEach((detail) => {
+    const sourceDetailId = positiveSafeInteger(
+      detail.source_order_detail_id ?? detail.source_order_detail_id_snapshot,
+    );
+    if (!sourceDetailId) return;
+    const display: OrderDetailHdfDisplay = {
+      heightMm: nullableFiniteNumber(detail.hdf_height_mm),
+      widthMm: nullableFiniteNumber(detail.hdf_width_mm),
+      quantity: nullableFiniteNumber(detail.quantity),
+      areaM2: finiteNumber(detail.area_m2),
+      status: detail.status,
+      isStale: detail.is_stale === true,
+    };
+    const current = bySourceDetailId.get(sourceDetailId);
+    if (!current || hdfDisplayRank(display) > hdfDisplayRank(current)) {
+      bySourceDetailId.set(sourceDetailId, display);
+    }
+  });
+  return bySourceDetailId;
+}
+
+function getOrderDetailHdfDisplay(
+  bySourceDetailId: ReadonlyMap<number, OrderDetailHdfDisplay>,
+  detail: OrderDetail,
+): OrderDetailHdfDisplay | null {
+  const detailId = positiveSafeInteger(detail.detail_id);
+  return detailId ? bySourceDetailId.get(detailId) ?? null : null;
+}
+
+function orderDetailHdfSortValue(
+  bySourceDetailId: ReadonlyMap<number, OrderDetailHdfDisplay>,
+  detail: OrderDetail,
+): number {
+  const display = getOrderDetailHdfDisplay(bySourceDetailId, detail);
+  if (display?.status === 'ok' && !display.isStale) return display.areaM2;
+  return nullableFiniteNumber(detail.hdf_parameter_override_mm) ?? 0;
+}
+
+function hdfDisplayRank(display: OrderDetailHdfDisplay): number {
+  if (display.status === 'ok' && !display.isStale) return 4;
+  if (!display.isStale && display.status === 'too_narrow') return 3;
+  if (!display.isStale && display.status === 'config_missing') return 2;
+  if (!display.isStale) return 1;
+  return 0;
+}
+
+function positiveSafeInteger(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function finiteNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function nullableFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatOrderDetailHdfDimension(value: number | null): string {
+  if (value === null) return '—';
+  return formatNumber(value, value % 1 === 0 ? 0 : 1);
+}
+
+function formatOrderDetailHdfQuantity(value: number | null): string {
+  if (value === null) return '—';
+  return formatNumber(value, value % 1 === 0 ? 0 : 1);
+}
+
+function OrderDetailHdfDisplayCell({
+  display,
+  parameterMm,
+}: {
+  display: OrderDetailHdfDisplay | null;
+  parameterMm: unknown;
+}) {
+  if (display?.status === 'ok' && !display.isStale && display.heightMm !== null && display.widthMm !== null) {
+    const dimensions = `${formatOrderDetailHdfDimension(display.heightMm)}×${formatOrderDetailHdfDimension(display.widthMm)}`;
+    const quantity = formatOrderDetailHdfQuantity(display.quantity);
+    return (
+      <span className="order-detail-hdf-cell" title={`${dimensions}, ${quantity} шт., ${formatNumber(display.areaM2, 2)} м²`}>
+        <span className="order-detail-hdf-cell__size">{dimensions}</span>
+        <span className="order-detail-hdf-cell__qty">{quantity} шт.</span>
+      </span>
+    );
+  }
+  if (display) {
+    const label = display.isStale ? 'устар.' : ORDER_DETAIL_HDF_STATUS_LABELS[display.status] ?? display.status;
+    return <span className="order-detail-hdf-cell order-detail-hdf-cell--status" title={label}>{label}</span>;
+  }
+  const parameter = nullableFiniteNumber(parameterMm);
+  if (parameter !== null) {
+    return (
+      <span className="order-detail-hdf-cell order-detail-hdf-cell--parameter" title={`Параметр ХДФ: ${formatNumber(parameter, 2)} мм`}>
+        {formatNumber(parameter, parameter % 1 === 0 ? 0 : 2)} мм
+      </span>
+    );
+  }
+  return <span className="order-detail-hdf-cell order-detail-hdf-cell--empty">—</span>;
+}
 
 const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
   'height',
@@ -588,7 +712,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   groupingControls,
   toolbarActions,
 }, ref) => {
-  const { header, details, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
+  const { header, details, hdfDetails, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
   const saveValidation = useContext(OrderSaveValidationContext);
   const [inlineInvalidDetailKey, setInlineInvalidDetailKey] = useState<string | null>(null);
   const [validationScrollTargetKey, setValidationScrollTargetKey] = useState<React.Key | null>(null);
@@ -631,6 +755,23 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const sortedDetails = useMemo(
     () => [...details].sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0)),
     [details]
+  );
+  const hdfDisplayBySourceDetailId = useMemo(
+    () => buildOrderDetailHdfDisplayBySourceDetailId(hdfDetails),
+    [hdfDetails],
+  );
+  const hdfSummaryVersion = useMemo(
+    () => hdfDetails.map((detail) => [
+      detail.order_hdf_detail_id,
+      detail.version,
+      detail.status,
+      detail.is_stale === true ? 1 : 0,
+      detail.hdf_height_mm ?? '',
+      detail.hdf_width_mm ?? '',
+      detail.quantity ?? '',
+      detail.area_m2 ?? '',
+    ].join(':')).join('|'),
+    [hdfDetails],
   );
 
   // Drag selection hook
@@ -1555,12 +1696,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       },
     },
     {
-      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>ХДФ мм</div>,
+      title: (
+        <div style={{ lineHeight: '1.1', textAlign: 'center' }}>
+          <span style={{ fontSize: '75%' }}>ХДФ</span>
+          <br />
+          <span style={{ fontSize: '70%', fontWeight: 'normal' }}>мм/шт</span>
+        </div>
+      ),
       dataIndex: 'hdf_parameter_override_mm',
       key: 'hdf_parameter_override_mm',
       width: ORDER_DETAIL_COLUMN_WIDTHS.hdfParameter,
       align: 'center',
-      sorter: (a: OrderDetail, b: OrderDetail) => (a.hdf_parameter_override_mm || 0) - (b.hdf_parameter_override_mm || 0),
+      sorter: (a: OrderDetail, b: OrderDetail) =>
+        orderDetailHdfSortValue(hdfDisplayBySourceDetailId, a) - orderDetailHdfSortValue(hdfDisplayBySourceDetailId, b),
       onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
       render: (_: any, row: any) => {
         const d = asDetail(row);
@@ -1576,9 +1724,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             />
           </Form.Item>
         ) : (
-          getDisplayedField(d, 'hdf_parameter_override_mm') == null
-            ? '—'
-            : formatNumber(getDisplayedField(d, 'hdf_parameter_override_mm'), 2)
+          <OrderDetailHdfDisplayCell
+            display={getOrderDetailHdfDisplay(hdfDisplayBySourceDetailId, d)}
+            parameterMm={getDisplayedField(d, 'hdf_parameter_override_mm')}
+          />
         );
       },
     },
@@ -3269,6 +3418,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     inlineInvalidDetailKey ?? '',
     [...invalidDetailKeys].map(String).sort().join(','),
     validationScrollTargetKey ?? '',
+    hdfSummaryVersion,
   ].join('|');
   const [tableRowsReady, setTableRowsReady] = useState(false);
   useEffect(() => {

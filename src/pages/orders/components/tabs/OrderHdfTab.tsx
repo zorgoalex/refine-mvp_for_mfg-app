@@ -24,6 +24,27 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   source_changed: { label: 'Исходная деталь изменилась', color: 'volcano' },
 };
 
+function hdfHeader(primary: string, secondary?: string) {
+  return (
+    <span className="order-hdf-table__header">
+      <span>{primary}</span>
+      {secondary ? <span>{secondary}</span> : null}
+    </span>
+  );
+}
+
+function hdfCompactText(value: React.ReactNode, title?: string | null) {
+  return (
+    <span className="order-hdf-table__text" title={title ?? (typeof value === 'string' ? value : undefined)}>
+      {value}
+    </span>
+  );
+}
+
+function hdfNumber(value: unknown, digits: number) {
+  return <span className="order-hdf-table__number">{formatNullableNumber(value, digits)}</span>;
+}
+
 export function OrderHdfTab() {
   const {
     header,
@@ -90,78 +111,107 @@ export function OrderHdfTab() {
 
   const columns: ColumnsType<OrderHdfDetail> = [
     {
-      title: 'Позиция',
+      title: hdfHeader('Позиция'),
       key: 'source',
-      width: 220,
+      width: 130,
       render: (_, row) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{row.source_detail_number ?? row.source_order_detail_id_snapshot}</Text>
-          <Text type="secondary">{row.source_detail_name || '—'}</Text>
-        </Space>
+        <span className="order-hdf-table__source">
+          <Text strong className="order-hdf-table__source-number">
+            {row.source_detail_number ?? row.source_order_detail_id_snapshot}
+          </Text>
+          {hdfCompactText(row.source_detail_name || '—', row.source_detail_name)}
+        </span>
       ),
     },
     {
-      title: 'Фрезеровка',
+      title: hdfHeader('Фрезеровка'),
       key: 'milling',
-      width: 160,
-      render: (_, row) => row.milling_type_name || (row.milling_type_id ? `ID: ${row.milling_type_id}` : '—'),
+      width: 96,
+      render: (_, row) => {
+        const value = row.milling_type_name || (row.milling_type_id ? `ID: ${row.milling_type_id}` : '—');
+        return hdfCompactText(value, value);
+      },
     },
     {
-      title: 'Ребро, мм',
+      title: hdfHeader('Исх.', 'выс.'),
+      dataIndex: 'source_height_mm',
+      key: 'source_height_mm',
+      width: 54,
+      align: 'right',
+      render: (value) => hdfNumber(value, 1),
+    },
+    {
+      title: hdfHeader('Исх.', 'шир.'),
+      dataIndex: 'source_width_mm',
+      key: 'source_width_mm',
+      width: 54,
+      align: 'right',
+      render: (value) => hdfNumber(value, 1),
+    },
+    {
+      title: hdfHeader('Исх.', 'кол.'),
+      dataIndex: 'source_quantity',
+      key: 'source_quantity',
+      width: 48,
+      align: 'right',
+      render: (value) => hdfNumber(value, 0),
+    },
+    {
+      title: hdfHeader('Парам.', 'мм'),
       dataIndex: 'edge_mm',
       key: 'edge_mm',
-      width: 110,
+      width: 54,
       align: 'right',
-      render: (value) => formatNullableNumber(value, 1),
+      render: (value) => hdfNumber(value, 1),
     },
     {
-      title: 'ХДФ-высота',
+      title: hdfHeader('ХДФ', 'выс.'),
       dataIndex: 'hdf_height_mm',
       key: 'hdf_height_mm',
-      width: 120,
+      width: 54,
       align: 'right',
-      render: (value) => formatNullableNumber(value, 1),
+      render: (value) => hdfNumber(value, 1),
     },
     {
-      title: 'ХДФ-ширина',
+      title: hdfHeader('ХДФ', 'шир.'),
       dataIndex: 'hdf_width_mm',
       key: 'hdf_width_mm',
-      width: 120,
+      width: 54,
       align: 'right',
-      render: (value) => formatNullableNumber(value, 1),
+      render: (value) => hdfNumber(value, 1),
     },
     {
-      title: 'Кол-во',
+      title: hdfHeader('ХДФ', 'кол.'),
       dataIndex: 'quantity',
       key: 'quantity',
-      width: 90,
+      width: 48,
       align: 'right',
-      render: (value) => formatNullableNumber(value, 0),
+      render: (value) => hdfNumber(value, 0),
     },
     {
-      title: 'Площадь, м²',
+      title: hdfHeader('Площ.', 'м²'),
       dataIndex: 'area_m2',
       key: 'area_m2',
-      width: 120,
+      width: 60,
       align: 'right',
-      render: (value) => formatNumber(finiteNumber(value), 2),
+      render: (value) => <span className="order-hdf-table__number">{formatNumber(finiteNumber(value), 2)}</span>,
     },
     {
-      title: 'Расчёт',
+      title: hdfHeader('Расчёт'),
       key: 'status',
-      width: 180,
+      width: 108,
       render: (_, row) => {
         const rowConfigErrors = describeHdfConfigErrors(row.config_errors);
         return (
-          <Space direction="vertical" size={2}>
-            <Space size={4} wrap>
-              <Tag color={STATUS_LABELS[row.status]?.color ?? 'default'}>
+          <Space direction="vertical" size={0} className="order-hdf-table__status">
+            <Space size={2} wrap>
+              <Tag color={STATUS_LABELS[row.status]?.color ?? 'default'} className="order-hdf-table__tag">
                 {STATUS_LABELS[row.status]?.label ?? row.status}
               </Tag>
-              {row.is_stale ? <Tag color="orange">Устарело</Tag> : null}
+              {row.is_stale ? <Tag color="orange" className="order-hdf-table__tag">Устарело</Tag> : null}
             </Space>
             {row.status === 'config_missing' && rowConfigErrors.length > 0 ? (
-              <Text type="secondary" style={{ fontSize: 12 }}>
+              <Text type="secondary" className="order-hdf-table__status-note" title={rowConfigErrors.join(', ')}>
                 {rowConfigErrors.join(', ')}
               </Text>
             ) : null}
@@ -170,9 +220,9 @@ export function OrderHdfTab() {
       },
     },
     {
-      title: 'Производственный статус',
+      title: hdfHeader('Произв.', 'статус'),
       key: 'production_status_id',
-      width: 220,
+      width: 132,
       render: (_, row) => (
         <Select
           allowClear
@@ -190,15 +240,16 @@ export function OrderHdfTab() {
       ),
     },
     {
-      title: 'Использование',
+      title: hdfHeader('Использ.'),
       key: 'links',
-      width: 220,
+      width: 106,
       render: (_, row) => {
         const links = [
           row.cut_job ? `Задание: ${row.cut_job.name}` : null,
           ...(row.bazis_cut_sets ?? []).map((set) => `Базис: ${set.name}`),
         ].filter(Boolean);
-        return links.length > 0 ? links.join(', ') : '—';
+        const value = links.length > 0 ? links.join(', ') : '—';
+        return hdfCompactText(value, value);
       },
     },
   ];
@@ -260,13 +311,14 @@ export function OrderHdfTab() {
         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="ХДФ в заказе не рассчитан" />
       ) : (
         <Table<OrderHdfDetail>
+          className="order-hdf-table"
           rowKey="order_hdf_detail_id"
           dataSource={hdfDetails}
           columns={columns}
           pagination={false}
           size="small"
           bordered
-          scroll={{ x: 1450 }}
+          tableLayout="fixed"
         />
       )}
     </Space>

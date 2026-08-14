@@ -93,6 +93,19 @@ describe('OrderShow sticky detail header guards', () => {
     expect(editHeaderSource).not.toContain('basisProjects.length > 0 ? `Базис:');
   });
 
+  it('keeps calculated HDF in the material summary line instead of separate metrics', () => {
+    expect(headerSource).toContain('buildOrderHeaderMaterialSummaryItems(resolvedMaterialNames, hdfDetails)');
+    expect(editHeaderSource).toContain('buildOrderHeaderMaterialSummaryItems(resolvedMaterialNames, hdfDetails || [])');
+    expect(headerSource).toContain('materialSummaryItems.map((item) => item.label).join');
+    expect(editHeaderSource).toContain('materialSummaryItems.map((item) => item.label).join');
+    expect(headerSource).toContain('materialSummaryItems.map((item, index) =>');
+    expect(editHeaderSource).toContain('materialSummaryItems.map((item, index) =>');
+    expect(headerSource).not.toContain('const hdfSummary');
+    expect(editHeaderSource).not.toContain('const hdfSummary');
+    expect(headerSource).not.toContain('ХДФ: <Text strong>{formatNumber(hdfAreaM2');
+    expect(editHeaderSource).not.toContain('ХДФ: <Text strong>{formatNumber(hdfAreaM2');
+  });
+
   it('pins the stack below workspace tabs and keeps table headers below the sticky toolbar', () => {
     const stickyStackStart = showSource.indexOf('ref={orderShowSummaryTabsRef}');
     const toolbarRender = showSource.indexOf('{orderShowDetailsToolbar}', stickyStackStart);

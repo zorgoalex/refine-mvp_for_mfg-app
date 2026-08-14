@@ -1,5 +1,6 @@
 import type { OrderDetail, OrderHdfDetail } from '../../types/orders';
 import { calculateOrderTotalArea } from '../../utils/orderArea';
+import { formatNumber } from '../../utils/numberFormat';
 import type { OrderBathFilmUsageRow } from '../cut/cutFilmUsage';
 
 export interface OrderFilmMaterialRow {
@@ -19,6 +20,21 @@ export interface OrderSheetMaterialRow {
   name: string;
   totalArea: number;
   detailsCount: number;
+}
+
+export interface OrderHdfMaterialSummaryRow {
+  key: string;
+  sheetMaterialTypeId: number | null;
+  name: string;
+  totalArea: number;
+  detailsCount: number;
+}
+
+export interface OrderHeaderMaterialSummaryItem {
+  key: string;
+  label: string;
+  colorName: string;
+  source: 'detail' | 'hdf';
 }
 
 interface FilmAccumulator {
@@ -46,6 +62,67 @@ export function buildUsableHdfAreaM2(hdfDetails: ReadonlyArray<OrderHdfDetail>):
     if (!isUsableHdfDetail(detail)) return sum;
     return sum + finiteNumber(detail.area_m2);
   }, 0));
+}
+
+export function buildOrderHdfMaterialSummaryRows(
+  hdfDetails: ReadonlyArray<OrderHdfDetail>,
+): OrderHdfMaterialSummaryRow[] {
+  const rows = new Map<string, OrderHdfMaterialSummaryRow>();
+
+  for (const detail of hdfDetails) {
+    if (!isUsableHdfDetail(detail)) continue;
+    const sheetMaterialTypeId = positiveId(detail.hdf_sheet_material_type_id);
+    const name = cleanName(detail.hdf_sheet_material_name) ?? 'ХДФ';
+    const key = sheetMaterialTypeId !== null ? `hdf-sheet:${sheetMaterialTypeId}` : `hdf-name:${name}`;
+    const row = rows.get(key) ?? {
+      key,
+      sheetMaterialTypeId,
+      name,
+      totalArea: 0,
+      detailsCount: 0,
+    };
+    row.totalArea = roundTo2(row.totalArea + finiteNumber(detail.area_m2));
+    row.detailsCount += Math.max(0, Math.trunc(finiteNumber(detail.quantity)));
+    rows.set(key, row);
+  }
+
+  return [...rows.values()]
+    .map((row) => ({
+      ...row,
+      totalArea: roundTo2(row.totalArea),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru') || (a.sheetMaterialTypeId ?? 0) - (b.sheetMaterialTypeId ?? 0));
+}
+
+export function buildOrderHeaderMaterialSummaryItems(
+  materialNames: ReadonlyArray<string>,
+  hdfDetails: ReadonlyArray<OrderHdfDetail>,
+): OrderHeaderMaterialSummaryItem[] {
+  const items: OrderHeaderMaterialSummaryItem[] = [];
+  const seenMaterialNames = new Set<string>();
+
+  for (const materialName of materialNames) {
+    const name = cleanName(materialName);
+    if (!name || seenMaterialNames.has(name)) continue;
+    seenMaterialNames.add(name);
+    items.push({
+      key: `detail:${name}`,
+      label: name,
+      colorName: name,
+      source: 'detail',
+    });
+  }
+
+  for (const row of buildOrderHdfMaterialSummaryRows(hdfDetails)) {
+    items.push({
+      key: row.key,
+      label: `${row.name}: ${formatNumber(row.totalArea, 2)} м²`,
+      colorName: row.name,
+      source: 'hdf',
+    });
+  }
+
+  return items;
 }
 
 export function buildOrderFilmMaterialRows(
