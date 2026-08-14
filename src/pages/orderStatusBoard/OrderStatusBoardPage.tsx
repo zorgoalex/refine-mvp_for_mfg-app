@@ -40,7 +40,6 @@ import { createPortal } from 'react-dom';
 import { DndProvider, useDrag, useDragLayer, useDrop } from 'react-dnd';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style';
 import { isApiError } from '../../api/apiError';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
@@ -159,6 +158,7 @@ import {
   loadCncDetailedMachineSvgPreview,
   type CncDetailedMachineSvgPreview,
 } from './cncDetailedMachinePreview';
+import { fetchCncMdfBoardSheetSvg } from './cncMdfSheetPreview';
 
 const BOARD_DRAG_TYPE = 'ORDER_STATUS_BOARD_CARD';
 const CNC_BOARD_DRAG_TYPE = 'CNC_STATUS_BOARD_CARD';
@@ -5213,19 +5213,16 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
       ? cncTelegramApi.downloadSheetImage(imageUrl).then(({ blob }) => ({ blob, source: 'screenshot' as const }))
       : Promise.reject(new Error('Нет связанного превью раскроя'));
     const loadSvgPreview = () => cutJobId && labelSheet
-      ? cutApi.fetchSheetSvg(
+      ? fetchCncMdfBoardSheetSvg({
           cutJobId,
-          labelSheet.cutGroupId,
-          labelSheet.sheetIndex,
-          false,
-          labelSheet.variant,
-          undefined,
-          true,
-          'top-left',
-          cutResultNo ?? undefined,
-          true,
-          CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
-        ).then((blob) => ({ blob, source: 'svg' as const }))
+          cutGroupId: labelSheet.cutGroupId,
+          sheetIndex: labelSheet.sheetIndex,
+          variant: labelSheet.variant,
+          originTopLeft: true,
+          axisOrigin: 'top-left',
+          resultNo: cutResultNo ?? undefined,
+          pieceMetadata: true,
+        }).then((blob) => ({ blob, source: 'svg' as const }))
       : Promise.reject(new Error('Нет связанного SVG-раскроя'));
     const loadPreview = cutJobId && labelSheet
       ? loadSvgPreview().catch((svgError: unknown) => (imageUrl ? loadScreenshotPreview() : Promise.reject(svgError)))
@@ -5658,18 +5655,17 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
           sheet.sheetHeightMm,
           detailed ? false : true,
         );
-        const blob = await cutApi.fetchSheetSvg(
-          bath.cutJobId,
-          sheet.cutGroupId,
-          sheet.sheetIndex,
-          rotate90,
-          sheet.variant,
-          undefined,
-          false,
-          'bottom-left',
-          bath.resultNo,
-          detailed,
-        );
+        const blob = await fetchCncMdfBoardSheetSvg({
+          cutJobId: bath.cutJobId,
+          cutGroupId: sheet.cutGroupId,
+          sheetIndex: sheet.sheetIndex,
+          landscape: rotate90,
+          variant: sheet.variant,
+          originTopLeft: false,
+          axisOrigin: 'bottom-left',
+          resultNo: bath.resultNo,
+          pieceMetadata: detailed,
+        });
         const svgText = detailed
           ? decorateCncBathSheetSvg(
               await blob.text(),

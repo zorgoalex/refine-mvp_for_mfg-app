@@ -37,6 +37,10 @@ const detailedMachine = readFileSync(
   'src/pages/orderStatusBoard/cncDetailedMachine.ts',
   'utf8',
 );
+const mdfSheetPreview = readFileSync(
+  'src/pages/orderStatusBoard/cncMdfSheetPreview.ts',
+  'utf8',
+);
 const imagePrintPreview = readFileSync(
   'src/components/ImagePrintPreviewModal.tsx',
   'utf8',
@@ -628,7 +632,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 
   it('keeps bath cards printable with SVG and PDF previews', () => {
-    expect(page).toContain('cutApi.fetchSheetSvg');
+    expect(page).toContain('fetchCncMdfBoardSheetSvg');
+    expect(page).not.toContain('cutApi.fetchSheetSvg(');
+    expect(mdfSheetPreview).toContain('cutApi.fetchSheetSvg(');
+    expect(mdfSheetPreview).toContain('CUT_RENDER_STYLE_MDF_BOARD_PREVIEW');
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain('CutSheetLabelGenerateAction');
     expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
