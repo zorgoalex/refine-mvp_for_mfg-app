@@ -66,7 +66,10 @@ export class WorkosApiClient {
       url.searchParams.set('max_age', '0');
     }
     if (authorizeOptions.selectAccount) {
-      url.searchParams.set('prompt', 'select_account');
+      // `prompt` at the AuthKit level does not force the upstream social
+      // provider to switch accounts. WorkOS forwards provider-specific
+      // parameters only through provider_query_params bracket notation.
+      url.searchParams.set('provider_query_params[prompt]', 'select_account');
     }
     return url.toString();
   }
