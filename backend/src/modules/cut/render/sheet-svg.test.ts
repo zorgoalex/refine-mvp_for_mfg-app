@@ -220,6 +220,8 @@ describe('buildSheetSvg multi-line labels', () => {
     });
 
     expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#d7e9ff'));
+    expect(svg).toContain('<style>.cut-sheet-piece-source-svg *{');
+    expect(svg).not.toContain('<style>*{');
     expect(svg).toContain('fill="#111827" stroke="#ffffff"');
     expect(svg).toContain('font-weight="800"');
     expect(svg).toContain('paint-order="stroke"');

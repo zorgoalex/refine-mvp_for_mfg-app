@@ -17,6 +17,8 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).toContain('fill="#d7e9ff"');
     expect(rendered).toContain('fill="#dff3d7"');
     expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#d7e9ff'));
+    expect(rendered).toContain('<style>.cut-sheet-piece-source-svg *{');
+    expect(rendered).not.toContain('<style>*{');
     expect(rendered).toContain('fill="#111827" stroke="#ffffff"');
     expect(rendered).toContain('font-weight="800"');
     expect(rendered).toContain('>2723</tspan>');

@@ -305,7 +305,7 @@ export function cutRenderSourceSvgCss(value: CutRenderStyleRef, pieceFill?: stri
     : '';
   if (vectorEffect) declarations.push(vectorEffect);
   if (declarations.length === 0) return '';
-  return `*{${declarations.join(';')};}`;
+  return `.cut-sheet-piece-source-svg *{${declarations.join(';')};}`;
 }
 
 export function cutRenderRawSvgScreenshotMinStrokePx(value: CutRenderStyleRef): number {
