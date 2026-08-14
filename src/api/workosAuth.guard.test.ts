@@ -123,6 +123,13 @@ describe('workos callback helpers contract', () => {
     expect(callbackSource).toContain('searchParams.get("state")');
   });
 
+  it('offers a forced account-selection retry only after an unlinked SSO identity', () => {
+    expect(callbackSource).toContain('exchangeError.code === "IDENTITY_NOT_LINKED"');
+    expect(callbackSource).toContain('canSelectAnotherAccount');
+    expect(callbackSource).toContain('workosAuthorizeUrl({ selectAccount: true })');
+    expect(callbackSource).toContain('Войти другим SSO-аккаунтом');
+  });
+
   it('keeps invitation callback single-use and bound to the exact state', () => {
     const invitationCallback =
       authApiSource.split('async workosInvitationCallback')[1]?.split('async ')[0] ?? '';
