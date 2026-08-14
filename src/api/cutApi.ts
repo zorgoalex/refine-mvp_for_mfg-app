@@ -162,6 +162,7 @@ export const cutApi = {
     resultNo?: number,
     pieceMetadata = false,
     showLabels = false,
+    renderStyle?: string,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetPng(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
@@ -179,6 +180,7 @@ export const cutApi = {
     params.append('axisOrigin', axisOrigin);
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);
+    if (renderStyle) params.append('renderStyle', renderStyle);
     const { blob } = await httpClient.download(`${path}?${params.toString()}`);
     return blob;
   },
@@ -194,6 +196,7 @@ export const cutApi = {
     axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     resultNo?: number,
     pieceMetadata = false,
+    renderStyle?: string,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetSvg(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
@@ -205,6 +208,7 @@ export const cutApi = {
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);
     if (pieceMetadata) params.append('pieceMetadata', 'on');
+    if (renderStyle) params.append('renderStyle', renderStyle);
     const qs = params.toString();
     const { blob } = await httpClient.download(qs ? `${path}?${qs}` : path);
     return blob;

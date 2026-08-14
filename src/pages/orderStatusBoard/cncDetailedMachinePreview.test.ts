@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style';
 import { cutApi } from '../../api/cutApi';
 import type { CutResultDto } from '../../api/types/cutApi.types';
 import type { CncDetailedMachineSource } from './cncDetailedMachine';
@@ -38,6 +39,7 @@ describe('CNC detailed machine preview cache', () => {
       'top-left',
       3,
       true,
+      CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
     );
   });
 

@@ -1,5 +1,6 @@
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { CutAxisOrigin } from '../../../shared/cut-geometry';
+import type { CutRenderStyleName } from '../../../shared/cut-render-style';
 import type {
   AddCutItemsRequestDto,
   CreateCutJobRequestDto,
@@ -164,6 +165,8 @@ export interface RenderSheetPngQuery {
    * Defaults to true. SVG download and PDF print are unaffected (always true).
    */
   showLabels?: boolean;
+  /** Optional named visual profile for screen/Telegram-specific renders. */
+  renderStyle?: CutRenderStyleName;
   requestId?: string;
 }
 
@@ -182,6 +185,8 @@ export interface RenderSheetSvgQuery {
   variant?: 'auto' | 'manual' | 'active';
   /** Re-render old frozen SVG views from stored placements when they lack piece data-* metadata. */
   pieceMetadata?: boolean;
+  /** Optional named visual profile for screen/Telegram-specific renders. */
+  renderStyle?: CutRenderStyleName;
   requestId?: string;
 }
 

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+  DEFAULT_CUT_RENDER_STYLES_SETTING,
+  cutRenderSourceSvgCss,
+  resolveCutRenderStyleFromSetting,
+} from '../../../shared/cut-render-style';
+import {
   addBathMeterGuidesToSvg,
   buildBathProfileSheetSvg,
   buildSheetSvg,
@@ -184,6 +190,95 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(svg).toContain('class="cut-sheet-piece-source-svg"');
     expect(svg).toContain('<line x1="2" y1="2" x2="38" y2="28"');
     expect(svg.indexOf('cut-sheet-piece-source-svg')).toBeLessThan(svg.indexOf('<text x="30" y="35"'));
+  });
+
+  it('applies the MDF board preview render profile to source strokes and labels', () => {
+    const sourceSheet: SheetPlacementsJson = {
+      trim_mm: { left: 0, top: 0, right: 0, bottom: 0 },
+      sheet_width_mm: 100,
+      sheet_height_mm: 80,
+      pieces: [{
+        item_id: 'det-1',
+        instance: 1,
+        x_mm: 0,
+        y_mm: 0,
+        width_mm: 100,
+        height_mm: 80,
+        rotated: false,
+        source_svg: {
+          viewBox: { x_mm: 0, y_mm: 0, width_mm: 100, height_mm: 80 },
+          body: '<line x1="5" y1="5" x2="95" y2="75" stroke="#626769" stroke-width="0.5"/>',
+        },
+      }],
+    };
+
+    const svg = buildSheetSvg({
+      sheet: sourceSheet,
+      labelFor: () => ['2723', 'поз. 1', '100X80'],
+      fillFor: () => '#111827',
+      renderStyle: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+    });
+
+    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW));
+    expect(svg).toContain('fill="#ffffff" stroke="#111827"');
+    expect(svg).toContain('paint-order="stroke"');
+  });
+
+  it('honors a custom render style rule from render.styles config', () => {
+    const customStyle = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, {
+      ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      profiles: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+        mdf_board_preview: {
+          ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview,
+          piece: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.piece,
+            stroke: '#654321',
+            strokeWidthMm: 4,
+          },
+          label: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label,
+            lightFill: '#fefefe',
+            lightTextStroke: '#222222',
+            lightTextStrokeWidthRatio: 0.05,
+          },
+          sourceSvg: {
+            minStrokePx: 3.5,
+            nonScalingStroke: false,
+          },
+        },
+      },
+    });
+    const sourceSheet: SheetPlacementsJson = {
+      trim_mm: { left: 0, top: 0, right: 0, bottom: 0 },
+      sheet_width_mm: 100,
+      sheet_height_mm: 80,
+      pieces: [{
+        item_id: 'det-1',
+        instance: 1,
+        x_mm: 0,
+        y_mm: 0,
+        width_mm: 100,
+        height_mm: 80,
+        rotated: false,
+        source_svg: {
+          viewBox: { x_mm: 0, y_mm: 0, width_mm: 100, height_mm: 80 },
+          body: '<line x1="5" y1="5" x2="95" y2="75" stroke="#626769" stroke-width="0.5"/>',
+        },
+      }],
+    };
+
+    const svg = buildSheetSvg({
+      sheet: sourceSheet,
+      labelFor: () => ['2723', 'поз. 1', '100X80'],
+      fillFor: () => '#111827',
+      renderStyle: customStyle,
+    });
+
+    expect(svg).toContain('stroke="#654321" stroke-width="4"');
+    expect(svg).toContain(cutRenderSourceSvgCss(customStyle));
+    expect(svg).not.toContain('vector-effect:non-scaling-stroke!important');
+    expect(svg).toContain('fill="#fefefe" stroke="#222222"');
   });
 
   it('uses deterministic per-order fills when provided', () => {

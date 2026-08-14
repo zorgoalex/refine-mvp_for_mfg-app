@@ -2,6 +2,11 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import { PNG } from 'pngjs';
+import {
+  CUT_RENDER_STYLE_DEFAULT,
+  cutRenderRawSvgScreenshotMinStrokePx,
+  type CutRenderStyleRef,
+} from '../../../shared/cut-render-style';
 
 /**
  * Per-sheet PNG rasterization (plan §7). resvg-js (pure-rust prebuilt binary, no
@@ -22,7 +27,7 @@ export const RENDER_PRESETS = {
 export const RAW_SVG_SCREENSHOT_CONTRAST_DEFAULT = 1.45;
 export const RAW_SVG_SCREENSHOT_CONTRAST_MIN = 1;
 export const RAW_SVG_SCREENSHOT_CONTRAST_MAX = 6;
-export const RAW_SVG_SCREENSHOT_MIN_STROKE_PX = 2.4;
+export const RAW_SVG_SCREENSHOT_MIN_STROKE_PX = cutRenderRawSvgScreenshotMinStrokePx(CUT_RENDER_STYLE_DEFAULT);
 
 export type RenderPreset = keyof typeof RENDER_PRESETS;
 
@@ -97,6 +102,7 @@ export interface RenderRawSvgPngInput {
   sheetWidthMm?: number | null;
   sheetHeightMm?: number | null;
   contrast?: number | null;
+  renderStyle?: CutRenderStyleRef;
 }
 
 export function renderRawSvgPng(input: RenderRawSvgPngInput): Buffer {
@@ -106,7 +112,7 @@ export function renderRawSvgPng(input: RenderRawSvgPngInput): Buffer {
     ? ({ mode: 'height', value: input.targetPx } as const)
     : ({ mode: 'width', value: input.targetPx } as const);
 
-  const resvg = new Resvg(prepareRawSvgForScreenshot(input.svg, input.targetPx), {
+  const resvg = new Resvg(prepareRawSvgForScreenshot(input.svg, input.targetPx, input.renderStyle), {
     fitTo,
     font: {
       fontFiles: [requireFontPath()],
@@ -117,8 +123,12 @@ export function renderRawSvgPng(input: RenderRawSvgPngInput): Buffer {
   return enhanceRawSvgScreenshotContrast(Buffer.from(resvg.render().asPng()), input.contrast);
 }
 
-export function prepareRawSvgForScreenshot(svg: string, targetPx: number): string {
-  const minStrokeWidth = rawSvgMinStrokeWidthUserUnits(svg, targetPx);
+export function prepareRawSvgForScreenshot(
+  svg: string,
+  targetPx: number,
+  renderStyle: CutRenderStyleRef = CUT_RENDER_STYLE_DEFAULT,
+): string {
+  const minStrokeWidth = rawSvgMinStrokeWidthUserUnits(svg, targetPx, renderStyle);
   if (minStrokeWidth === null) return svg;
   return widenRawSvgScreenshotStrokes(svg, minStrokeWidth);
 }
@@ -162,11 +172,15 @@ function darkenAgainstWhite(value: number, factor: number): number {
   return Math.max(0, Math.min(255, Math.round(255 - (255 - value) * factor)));
 }
 
-function rawSvgMinStrokeWidthUserUnits(svg: string, targetPx: number): number | null {
+function rawSvgMinStrokeWidthUserUnits(
+  svg: string,
+  targetPx: number,
+  renderStyle: CutRenderStyleRef,
+): number | null {
   if (!Number.isFinite(targetPx) || targetPx <= 0) return null;
   const longSide = rawSvgLongSideUserUnits(svg);
   if (longSide === null) return null;
-  const minStrokeWidth = longSide / targetPx * RAW_SVG_SCREENSHOT_MIN_STROKE_PX;
+  const minStrokeWidth = longSide / targetPx * cutRenderRawSvgScreenshotMinStrokePx(renderStyle);
   return Number.isFinite(minStrokeWidth) && minStrokeWidth > 0 ? minStrokeWidth : null;
 }
 

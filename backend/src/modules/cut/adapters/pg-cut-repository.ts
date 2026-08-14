@@ -18,6 +18,10 @@ import {
   validateSheetPlacements,
   validateSheetGroupInvariant,
 } from '../../../shared/cut-geometry';
+import {
+  CUT_RENDER_STYLE_DEFAULT,
+  type CutRenderStyleName,
+} from '../../../shared/cut-render-style';
 import { buildCutAuditEvent, buildCutDeniedEvent, CUT_AUDIT_EVENTS, type CutAuditActor } from '../application/cut-audit';
 import {
   cutJobSnapshotUsesVacuumTable,
@@ -2002,6 +2006,7 @@ export class PgCutRepository implements CutRepositoryPort {
     axisOrigin?: import('../../../shared/cut-geometry').CutAxisOrigin;
     showLabels?: boolean;
     pieceMetadata?: boolean;
+    renderStyle?: CutRenderStyleName;
     refreshPdfDynamicFields?: boolean;
   }): Promise<{
     job: CutJobDto;
@@ -2028,8 +2033,11 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new ApiError(409, 'CUT_MANUAL_LAYOUT_UNAVAILABLE', 'Ручной вариант раскроя недоступен');
     }
     const sourceSheets = useManual ? manual!.sheets : group.sheets;
-    const rebuildFrozenPieceMetadata = args.pieceMetadata === true || args.refreshPdfDynamicFields === true;
-    const rebuildSvgWithPieceMetadata = args.pieceMetadata === true;
+    const renderStyleName = args.renderStyle ?? CUT_RENDER_STYLE_DEFAULT;
+    const renderStyle = await this.config.getRenderStyleRule(renderStyleName);
+    const rebuildForRenderStyle = renderStyleName !== CUT_RENDER_STYLE_DEFAULT;
+    const rebuildFrozenPieceMetadata = args.pieceMetadata === true || args.refreshPdfDynamicFields === true || rebuildForRenderStyle;
+    const rebuildSvgWithPieceMetadata = args.pieceMetadata === true || rebuildForRenderStyle;
     const rebuildBathSvgWithCurrentRenderer = args.refreshPdfDynamicFields === true;
     const frozenQuantities = rebuildFrozenPieceMetadata
       ? computeGroupItemQuantities(sourceSheets.map((sheet) => ({
@@ -2041,7 +2049,7 @@ export class PgCutRepository implements CutRepositoryPort {
       ? new Map(frozen.job.items.map((item) => [freecutItemId(item.orderDetailId), item]))
       : new Map<string, CutJobItemDto>();
     const frozenFillByOrder = rebuildFrozenPieceMetadata
-      ? createOrderFillResolver(frozen.job.items.map((item) => item.orderId))
+      ? createOrderFillResolver(frozen.job.items.map((item) => item.orderId), renderStyle)
       : (() => '#eef3f8');
     const bathGuideMeta = await this.database.query<{
       last_calc_params: FreecutParams | null;
@@ -2077,7 +2085,7 @@ export class PgCutRepository implements CutRepositoryPort {
       if (!renderSnapshot || renderSnapshot.contractVersion !== 'cut_sheet_render_v1' || !view) {
         throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', `Нет frozen render листа ${sheet.sheetIndex}`);
       }
-      const baseSvg = rebuildSvgWithPieceMetadata && !view.svg.includes('data-detail-id=')
+      const baseSvg = rebuildSvgWithPieceMetadata && (rebuildForRenderStyle || !view.svg.includes('data-detail-id='))
         ? buildSheetSvg({
             sheet: placements,
             labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities),
@@ -2090,6 +2098,7 @@ export class PgCutRepository implements CutRepositoryPort {
             originTopLeft: args.originTopLeft,
             axisOrigin: args.axisOrigin,
             showLabels: args.showLabels,
+            renderStyle,
           })
         : view.svg;
       const svg = showBathMeterGuides
@@ -2983,8 +2992,20 @@ export class PgCutRepository implements CutRepositoryPort {
           originTopLeft: query.originTopLeft,
           axisOrigin: query.axisOrigin,
           showLabels,
+          renderStyle: query.renderStyle,
         })
-      : await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId, showLabels);
+      : await this.loadGroupRenderContext(
+          query.cutGroupId,
+          query.rotate90,
+          query.originTopLeft,
+          query.axisOrigin,
+          variant,
+          query.cutJobId,
+          showLabels,
+          undefined,
+          false,
+          query.renderStyle,
+        );
     // Rule 8: blank sheets are index-stable and never 404 for PNG/SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
@@ -3014,8 +3035,20 @@ export class PgCutRepository implements CutRepositoryPort {
           originTopLeft: query.originTopLeft,
           axisOrigin: query.axisOrigin,
           pieceMetadata: query.pieceMetadata,
+          renderStyle: query.renderStyle,
         })
-      : await this.loadGroupRenderContext(query.cutGroupId, query.rotate90, query.originTopLeft, query.axisOrigin, variant, query.cutJobId);
+      : await this.loadGroupRenderContext(
+          query.cutGroupId,
+          query.rotate90,
+          query.originTopLeft,
+          query.axisOrigin,
+          variant,
+          query.cutJobId,
+          true,
+          undefined,
+          false,
+          query.renderStyle,
+        );
     // Rule 8: blank sheets are index-stable and never 404 for SVG.
     const sheet = sheets.find((s) => s.sheetIndex === query.sheetIndex);
     if (!sheet) {
@@ -3514,6 +3547,7 @@ export class PgCutRepository implements CutRepositoryPort {
     showLabels = true,
     client: DatabaseClient = this.database,
     allowStaleManual = false,
+    renderStyle: CutRenderStyleName = CUT_RENDER_STYLE_DEFAULT,
   ): Promise<{ sheets: RenderedSheetContext[] }> {
     // Rule 6: load group metadata + assert job ownership when cutJobId provided.
     const groupRes = await client.query<{
@@ -3598,13 +3632,17 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new ApiError(500, 'CUT_LAYOUT_INCONSISTENT', `Несовместимые листы в группе: ${groupInvariantError}`);
     }
 
+    const renderStyleRule = await this.config.getRenderStyleRule(renderStyle);
     const quantities = computeGroupItemQuantities(
       rawSheets.map((s) => ({ sheetIndex: s.sheetIndex, placements: s.placements })),
     );
 
     // Rule 7: build live detail lookup for LEGACY rows (pre-Task 4) that lack
     // a frozen label snapshot. New rows written by calculate always have piece.label.
-    const { detailById, fillByOrder, orderNameForOrderId } = await this.loadRenderDetailsForGroup(cutGroupId, client);
+    const { detailById, fillByOrder: baseFillByOrder, orderNameForOrderId } = await this.loadRenderDetailsForGroup(cutGroupId, client);
+    const fillByOrder = renderStyle === CUT_RENDER_STYLE_DEFAULT
+      ? baseFillByOrder
+      : createOrderFillResolver([...detailById.values()].map((detail) => detail.orderId), renderStyleRule);
 
     // Resolve a piece's sheet-material name (live join; the frozen snapshot has no
     // material). Blank/unknown → null so no material line is added. Material is read
@@ -3708,6 +3746,7 @@ export class PgCutRepository implements CutRepositoryPort {
             axisOrigin,
             showLabels,
             showBathMeterGuides,
+            renderStyle: renderStyleRule,
           }),
           bathSvg: buildBathProfileSheetSvg({
             sheet: s.placements,

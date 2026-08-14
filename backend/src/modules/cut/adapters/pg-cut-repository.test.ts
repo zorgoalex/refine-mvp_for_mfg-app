@@ -153,6 +153,7 @@ function stubConfig(overrides: Partial<CutConfigPort> = {}): CutConfigPort {
     getDefaultParams: base.getDefaultParams.bind(base),
     getGrainRules: base.getGrainRules.bind(base),
     getRenderPresetPx: base.getRenderPresetPx.bind(base),
+    getRenderStyleRule: base.getRenderStyleRule.bind(base),
     getParamsByProfileId: base.getParamsByProfileId.bind(base),
     ...overrides,
   };

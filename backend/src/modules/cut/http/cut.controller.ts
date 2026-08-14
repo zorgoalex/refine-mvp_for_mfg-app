@@ -20,6 +20,10 @@ import type {
 import type { CutSheetTypeOption, ManualMove, SheetViewTransform } from '../application/cut-command.types';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import { CutRuntimeConfigService } from './cut-runtime-config.service';
+import {
+  normalizeCutRenderStyleName,
+  type CutRenderStyleName,
+} from '../../../shared/cut-render-style';
 
 const idArray = z.array(z.number().int().positive()).max(5000);
 
@@ -386,6 +390,7 @@ export class CutController {
       axisOrigin,
       variant: parseVariant(query.variant),
       showLabels: query.labels !== 'off',
+      renderStyle: parseRenderStyle(query.renderStyle),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/png');
@@ -417,6 +422,7 @@ export class CutController {
       axisOrigin,
       variant: parseVariant(query.variant),
       pieceMetadata: query.pieceMetadata === 'on',
+      renderStyle: parseRenderStyle(query.renderStyle),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -787,6 +793,7 @@ export class CutController {
       axisOrigin,
       variant: parseVariant(query.variant),
       showLabels: query.labels !== 'off',
+      renderStyle: parseRenderStyle(query.renderStyle),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/png');
@@ -817,6 +824,7 @@ export class CutController {
       axisOrigin,
       variant: parseVariant(query.variant),
       pieceMetadata: query.pieceMetadata === 'on',
+      renderStyle: parseRenderStyle(query.renderStyle),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -1015,6 +1023,10 @@ export function parseVariant(value: string | undefined): 'auto' | 'manual' | 'ac
   if (v === 'manual') return 'manual';
   if (v === 'active') return 'active';
   return 'auto';
+}
+
+export function parseRenderStyle(value: string | undefined): CutRenderStyleName {
+  return normalizeCutRenderStyleName(value);
 }
 
 export function parsePdfTemplate(value: string | undefined): string {

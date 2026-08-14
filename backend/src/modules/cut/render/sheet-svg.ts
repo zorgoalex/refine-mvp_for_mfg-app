@@ -10,6 +10,15 @@ import {
   type CutAxisOrigin,
 } from '../../../shared/cut-geometry';
 import {
+  CUT_RENDER_STYLE_DEFAULT,
+  cutRenderLabelFillForBackground,
+  cutRenderLabelStrokeForBackground,
+  cutRenderOrderFillPalette,
+  cutRenderSourceSvgCss,
+  resolveCutRenderStyle,
+  type CutRenderStyleRef,
+} from '../../../shared/cut-render-style';
+import {
   parseFreecutItemId,
   type BackMappedSheet,
   type FreecutPlacement,
@@ -118,19 +127,7 @@ export function computeGroupItemQuantities(sheets: readonly BackMappedSheet[]): 
   return counts;
 }
 
-const DEFAULT_PIECE_FILL = '#eef3f8';
-const ORDER_FILL_PALETTE = [
-  '#d7e9ff',
-  '#dff3d7',
-  '#ffe6b8',
-  '#f7d5e8',
-  '#d9f0ef',
-  '#eadcff',
-  '#ffe0d2',
-  '#e8edc9',
-  '#d5e5f2',
-  '#f2ddd5',
-] as const;
+const DEFAULT_PIECE_FILL = resolveCutRenderStyle(CUT_RENDER_STYLE_DEFAULT).piece.defaultFill;
 const BATH_ORDER_LABEL_COLOR = '#7f1d1d';
 const BATH_POSITION_LABEL_COLOR = '#14532d';
 const BATH_DIMENSION_FONT_ENLARGE_MIN_SIDE_MM = 150;
@@ -155,25 +152,31 @@ export function orderFillColor(orderId: number | null | undefined): string {
   if (typeof orderId !== 'number' || !Number.isFinite(orderId)) {
     return DEFAULT_PIECE_FILL;
   }
-  const index = Math.abs(Math.trunc(orderId)) % ORDER_FILL_PALETTE.length;
-  return ORDER_FILL_PALETTE[index];
+  const palette = cutRenderOrderFillPalette(CUT_RENDER_STYLE_DEFAULT);
+  const index = Math.abs(Math.trunc(orderId)) % palette.length;
+  return palette[index] ?? DEFAULT_PIECE_FILL;
 }
 
 /** Build a per-render color resolver from the orders present in one cut group.
  * Different source orders get different palette slots by first appearance, so
  * IDs like 11372 and 11292 do not collapse to the same `orderId % palette` color. */
-export function createOrderFillResolver(orderIds: readonly number[]): (orderId: number | null | undefined) => string {
+export function createOrderFillResolver(
+  orderIds: readonly number[],
+  renderStyle: CutRenderStyleRef = CUT_RENDER_STYLE_DEFAULT,
+): (orderId: number | null | undefined) => string {
   const indexByOrder = new Map<number, number>();
+  const style = resolveCutRenderStyle(renderStyle);
+  const palette = style.piece.orderPalette;
   for (const orderId of orderIds) {
     if (!Number.isFinite(orderId) || indexByOrder.has(orderId)) continue;
     indexByOrder.set(orderId, indexByOrder.size);
   }
   return (orderId) => {
     if (typeof orderId !== 'number' || !Number.isFinite(orderId)) {
-      return DEFAULT_PIECE_FILL;
+      return style.piece.defaultFill;
     }
     const index = indexByOrder.get(orderId);
-    return index === undefined ? DEFAULT_PIECE_FILL : ORDER_FILL_PALETTE[index % ORDER_FILL_PALETTE.length];
+    return index === undefined ? style.piece.defaultFill : palette[index % palette.length] ?? style.piece.defaultFill;
   };
 }
 
@@ -219,6 +222,8 @@ export interface BuildSheetSvgInput {
   showLabels?: boolean;
   /** Overlay 800/1800 mm film-length references for a resolved vacuum bath. */
   showBathMeterGuides?: boolean;
+  /** Named visual rule for screen/Telegram-oriented renders. Defaults to print-safe legacy style. */
+  renderStyle?: CutRenderStyleRef;
 }
 
 function escapeXml(value: string): string {
@@ -346,6 +351,7 @@ export function addBathMeterGuidesToSvg(
 
 export function buildSheetSvg(input: BuildSheetSvgInput): string {
   const { sheet, labelFor, fillFor, rotate90 = false, showLabels = true, axisOrigin = 'top-left' } = input;
+  const renderStyle = resolveCutRenderStyle(input.renderStyle);
   const originTopLeft = sheet.coordinate_contract === 'native_portrait_v1' ? false : (input.originTopLeft ?? false);
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
@@ -366,16 +372,21 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const rect = applyAxisOrigin(orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90, originTopLeft), axisOrigin, rotate90);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
-      const fill = fillFor?.(piece) ?? DEFAULT_PIECE_FILL;
+      const fill = fillFor?.(piece) ?? renderStyle.piece.defaultFill;
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
-      )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`;
-      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect);
+      )}" fill="${escapeXml(fill)}" stroke="${renderStyle.piece.stroke}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
+      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect, renderStyle);
       if (!showLabels) {
         return renderPieceGroup(piece, cx, cy, [rectEl, sourceSvgEl].join(''));
       }
       const resolved = labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
+      const labelFill = cutRenderLabelFillForBackground(fill, renderStyle);
+      const labelStroke = cutRenderLabelStrokeForBackground(fill, fontMm, renderStyle);
+      const labelStrokeAttrs = labelStroke
+        ? ` stroke="${labelStroke.stroke}" stroke-width="${num(labelStroke.strokeWidthMm)}" paint-order="stroke"`
+        : '';
       // Vertically centre N lines around cy: the first tspan lifts by
       // (N-1)/2 line-heights, each subsequent line drops one line-height. em
       // units keep the spacing proportional to font-size at any raster scale.
@@ -390,7 +401,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
         sourceSvgEl,
         `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
           fontMm,
-        )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
+        )}" fill="${labelFill}"${labelStrokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
       ].join(''));
     })
     .join('');
@@ -416,6 +427,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
 function renderPieceSourceSvgFragment(
   piece: FreecutPlacement,
   rect: { x: number; y: number; w: number; h: number },
+  renderStyle: CutRenderStyleRef = CUT_RENDER_STYLE_DEFAULT,
 ): string {
   const source = (piece as {
     source_svg?: {
@@ -441,8 +453,10 @@ function renderPieceSourceSvgFragment(
   ) {
     return '';
   }
+  const css = cutRenderSourceSvgCss(renderStyle);
   return [
     `<svg class="cut-sheet-piece-source-svg" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
+    css ? `<style>${css}</style>` : '',
     body,
     '</svg>',
   ].join('');

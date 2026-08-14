@@ -1,4 +1,9 @@
 import { ApiError } from '../../../common/errors/api-error';
+import {
+  CUT_RENDER_STYLES_SETTING_KEY,
+  CutRenderStyleValidationError,
+  parseCutRenderStylesSetting,
+} from '../../../shared/cut-render-style';
 import { validateGrainRule } from './cut-freecut-mapping';
 import type {
   CutParamProfileInput,
@@ -6,7 +11,13 @@ import type {
 } from './cut-config-admin.types';
 
 /** Editable cut_settings keys (bounded allowlist — rules-as-data, not arbitrary). */
-export const CUT_SETTING_KEYS = ['eligibility.statuses', 'grain.rules', 'defaults', 'auto_trigger'] as const;
+export const CUT_SETTING_KEYS = [
+  'eligibility.statuses',
+  'grain.rules',
+  'defaults',
+  'auto_trigger',
+  CUT_RENDER_STYLES_SETTING_KEY,
+] as const;
 export type CutSettingKey = (typeof CUT_SETTING_KEYS)[number];
 
 function invalid(field: string, message: string): never {
@@ -70,6 +81,17 @@ export function validateSettingValue(key: string, value: unknown): Record<string
       invalid('enabled', 'auto_trigger.enabled должен быть boolean');
     }
     return v;
+  }
+
+  if (key === CUT_RENDER_STYLES_SETTING_KEY) {
+    try {
+      return parseCutRenderStylesSetting(v) as unknown as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof CutRenderStyleValidationError) {
+        invalid(error.field, error.message);
+      }
+      throw error;
+    }
   }
 
   return v;

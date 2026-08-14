@@ -22,6 +22,14 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/Пресеты рендера/);
   });
 
+  it('exposes editable render style settings in a dedicated tab', () => {
+    expect(tabSrc).toMatch(/Настройки рендера/);
+    expect(tabSrc).toMatch(/CUT_RENDER_STYLES_SETTING_KEY/);
+    expect(tabSrc).toMatch(/parseCutRenderStylesSetting/);
+    expect(tabSrc).toMatch(/cutConfigApi\.updateSetting\(CUT_RENDER_STYLES_SETTING_KEY/);
+    expect(tabSrc).toMatch(/Профиль MDF-превью/);
+  });
+
   it('eligibility statuses use a multiselect from the production-statuses reference (no free text)', () => {
     expect(tabSrc).toMatch(/resource: 'production_statuses'/);
     expect(tabSrc).toMatch(/mode="multiple"/);

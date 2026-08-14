@@ -1,5 +1,12 @@
 import type { DatabaseService } from '../../../database/database.service';
 import {
+  CUT_RENDER_STYLES_SETTING_KEY,
+  resolveCutRenderStyle,
+  resolveCutRenderStyleFromSetting,
+  type CutRenderStyleName,
+  type CutRenderStyleRule,
+} from '../../../shared/cut-render-style';
+import {
   type CutConfigPort,
   type CutGrainRules,
   DEFAULT_FREECUT_PARAMS,
@@ -107,6 +114,18 @@ export class PgCutConfigRepository implements CutConfigPort {
     }
     // Fallback to the built-in preset map, then 'screen'.
     return RENDER_PRESETS[name as keyof typeof RENDER_PRESETS] ?? RENDER_PRESETS[DEFAULT_RENDER_PRESET as keyof typeof RENDER_PRESETS];
+  }
+
+  async getRenderStyleRule(name: CutRenderStyleName): Promise<CutRenderStyleRule> {
+    try {
+      const result = await this.database.query<{ value: unknown | null }>(
+        `SELECT value FROM cut_settings WHERE key = $1 LIMIT 1`,
+        [CUT_RENDER_STYLES_SETTING_KEY],
+      );
+      return resolveCutRenderStyleFromSetting(name, result.rows[0]?.value ?? null);
+    } catch {
+      return resolveCutRenderStyle(name);
+    }
   }
 
   async getGrainRules(): Promise<CutGrainRules> {

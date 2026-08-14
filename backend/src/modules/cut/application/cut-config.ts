@@ -1,4 +1,9 @@
 import type { FreecutParams, GrainRule } from './cut-freecut-mapping';
+import {
+  resolveCutRenderStyle,
+  type CutRenderStyleName,
+  type CutRenderStyleRule,
+} from '../../../shared/cut-render-style';
 import { RENDER_PRESETS } from '../render/sheet-png';
 
 /**
@@ -58,6 +63,8 @@ export interface CutConfigPort {
   getGrainRules(): Promise<CutGrainRules>;
   /** Longest-side px for a render preset name, sourced from cut_render_presets. */
   getRenderPresetPx(name: string): Promise<number>;
+  /** Visual rule for SVG/PNG render styles, sourced from cut_settings.render.styles. */
+  getRenderStyleRule(name: CutRenderStyleName): Promise<CutRenderStyleRule>;
   /** Resolve params for a specific active profile id (deep-merged with in-code
    *  defaults exactly like getDefaultParams). Returns null when the profile does
    *  not exist or is inactive. */
@@ -77,6 +84,9 @@ export class StaticCutConfig implements CutConfigPort {
   }
   getRenderPresetPx(name: string): Promise<number> {
     return Promise.resolve(RENDER_PRESETS[name as keyof typeof RENDER_PRESETS] ?? RENDER_PRESETS[DEFAULT_RENDER_PRESET]);
+  }
+  getRenderStyleRule(name: CutRenderStyleName): Promise<CutRenderStyleRule> {
+    return Promise.resolve(resolveCutRenderStyle(name));
   }
   getParamsByProfileId(): Promise<FreecutParams | null> {
     return Promise.resolve(null); // no profile catalog in static config → unresolved

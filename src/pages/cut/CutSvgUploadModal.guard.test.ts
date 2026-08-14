@@ -38,6 +38,10 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('Формировать всё равно');
     expect(modal).toContain('Это предупреждение не запрещает новый раскрой');
     expect(modal).toContain('SvgUploadPreview');
+    expect(modal).toContain('cutConfigApi.get');
+    expect(modal).toContain('CUT_RENDER_STYLES_SETTING_KEY');
+    expect(modal).toContain('parseCutRenderStylesSetting');
+    expect(modal).toContain('createStyledSvgPreview(result, renderStylesSetting)');
     expect(modal).toContain('FloatingSvgPreview');
     expect(modal).toContain("import { createPortal } from 'react-dom'");
     expect(modal).toContain('maskClosable={false}');

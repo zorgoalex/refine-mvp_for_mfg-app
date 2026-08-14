@@ -40,6 +40,7 @@ import { createPortal } from 'react-dom';
 import { DndProvider, useDrag, useDragLayer, useDrop } from 'react-dnd';
 import { TouchBackend } from 'react-dnd-touch-backend';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style';
 import { isApiError } from '../../api/apiError';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
@@ -5065,7 +5066,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               aria-pressed={activeAuxView === 'sheet'}
               onClick={() => setActiveAuxView((current) => current === 'sheet' ? null : 'sheet')}
             >
-              {hasSheetImage ? 'Скрин' : 'SVG'}
+              {hasSvgSheetPreview ? 'SVG' : hasSheetImage ? 'Скрин' : 'SVG'}
             </Button>
           </div>
 
@@ -5187,12 +5188,14 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   cutMapFallbackImage,
 }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [previewSource, setPreviewSource] = useState<'svg' | 'screenshot' | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
 
   useEffect(() => {
     setObjectUrl(null);
+    setPreviewSource(null);
     setError(null);
     setPrintPreviewOpen(false);
   }, [imageUrl, cutJobId, cutResultNo, labelSheet?.cutGroupId, labelSheet?.sheetIndex, labelSheet?.variant]);
@@ -5206,28 +5209,32 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const loadPreview = imageUrl
-      ? cncTelegramApi.downloadSheetImage(imageUrl).then(({ blob }) => blob)
-      : cutJobId && labelSheet
-        ? cutApi.fetchSheetPng(
-            cutJobId,
-            labelSheet.cutGroupId,
-            labelSheet.sheetIndex,
-            'thumb',
-            false,
-            labelSheet.variant,
-            undefined,
-            true,
-            'top-left',
-            cutResultNo ?? undefined,
-            false,
-            true,
-          )
-        : Promise.reject(new Error('Нет связанного превью раскроя'));
+    const loadScreenshotPreview = () => imageUrl
+      ? cncTelegramApi.downloadSheetImage(imageUrl).then(({ blob }) => ({ blob, source: 'screenshot' as const }))
+      : Promise.reject(new Error('Нет связанного превью раскроя'));
+    const loadSvgPreview = () => cutJobId && labelSheet
+      ? cutApi.fetchSheetSvg(
+          cutJobId,
+          labelSheet.cutGroupId,
+          labelSheet.sheetIndex,
+          false,
+          labelSheet.variant,
+          undefined,
+          true,
+          'top-left',
+          cutResultNo ?? undefined,
+          true,
+          CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+        ).then((blob) => ({ blob, source: 'svg' as const }))
+      : Promise.reject(new Error('Нет связанного SVG-раскроя'));
+    const loadPreview = cutJobId && labelSheet
+      ? loadSvgPreview().catch((svgError: unknown) => (imageUrl ? loadScreenshotPreview() : Promise.reject(svgError)))
+      : loadScreenshotPreview();
     loadPreview
-      .then((blob) => {
+      .then(({ blob, source }) => {
         if (cancelled) return;
         setObjectUrl(URL.createObjectURL(blob));
+        setPreviewSource(source);
       })
       .catch((downloadError: unknown) => {
         if (cancelled) return;
@@ -5250,7 +5257,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
 
   if (!open) return null;
   const hasCutSheetScope = Boolean(cutJobId && labelSheet);
-  const generatedSvgPreview = !imageUrl && hasCutSheetScope;
+  const generatedSvgPreview = previewSource === 'svg' || (previewSource === null && hasCutSheetScope);
   const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null);
   const disabledLabelReason = labelDetailInstances.length === 0
     ? 'Нет сопоставленных деталей для бирок'

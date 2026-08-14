@@ -1,6 +1,7 @@
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
 import type { CutResultDto } from '../../api/types/cutApi.types';
+import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style';
 import {
   selectCncMachineResultSheets,
   type CncDetailedMachineSource,
@@ -94,6 +95,7 @@ const defaultDependencies: CncDetailedMachinePreviewDependencies = {
       NON_VACUUM_SHEET_AXIS_ORIGIN,
       resultNo,
       true,
+      CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
     )
   ),
   fetchScreenshot: async (imageUrl) => (await cncTelegramApi.downloadSheetImage(imageUrl)).blob,
