@@ -3,6 +3,7 @@ import { PNG } from 'pngjs';
 import {
   RENDER_PRESETS,
   assertFontAvailable,
+  prepareRawSvgForScreenshot,
   renderRawSvgPng,
   renderSheetPng,
   resolveFontPath,
@@ -72,6 +73,31 @@ describe('renderSheetPng (resvg)', () => {
 });
 
 describe('renderRawSvgPng generated screenshot contrast', () => {
+  it('widens sub-pixel Corel stroke widths before rasterization', () => {
+    const svg = [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="100mm" viewBox="0 0 10000 10000">',
+      '<defs><style><![CDATA[',
+      '.str1 {stroke:#626769;stroke-width:10;stroke-miterlimit:22.9256}',
+      '.fil0 {fill:none}',
+      ']]></style></defs>',
+      '<rect width="10000" height="10000" fill="#fff"/>',
+      '<line class="fil0 str1" x1="5000" y1="1000" x2="5000" y2="9000"/>',
+      '</svg>',
+    ].join('');
+
+    expect(prepareRawSvgForScreenshot(svg, 100)).toContain('stroke-width:240');
+
+    const rendered = PNG.sync.read(renderRawSvgPng({
+      svg,
+      targetPx: 100,
+      sheetWidthMm: 100,
+      sheetHeightMm: 100,
+      contrast: 1,
+    }));
+
+    expect(countDarkPixelsInRow(rendered, 50)).toBeGreaterThanOrEqual(2);
+  });
+
   it('darkens pale SVG geometry against a white sheet', () => {
     const svg = [
       '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">',
@@ -132,4 +158,19 @@ describe('renderRawSvgPng generated screenshot contrast', () => {
 
 function pngChannel(image: PNG, index: number): number {
   return image.data[index] ?? 255;
+}
+
+function countDarkPixelsInRow(image: PNG, row: number): number {
+  let count = 0;
+  for (let x = 0; x < image.width; x += 1) {
+    const index = (row * image.width + x) * 4;
+    if (
+      pngChannel(image, index) < 200 &&
+      pngChannel(image, index + 1) < 200 &&
+      pngChannel(image, index + 2) < 200
+    ) {
+      count += 1;
+    }
+  }
+  return count;
 }
