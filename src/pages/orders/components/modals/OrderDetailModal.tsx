@@ -123,6 +123,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         form.setFieldsValue({
           priority: 100,
           milling_type_id: 1, // Модерн
+          hdf_parameter_override_mm: null,
           edge_type_id: 1, // р-1
         });
         setCalculatedArea(0);
@@ -372,7 +373,7 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
         </Row>
 
         <Row gutter={16}>
-          <Col span={12}>
+          <Col span={10}>
             <Form.Item
               label="Тип фрезеровки"
               name="milling_type_id"
@@ -399,7 +400,21 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
               />
             </Form.Item>
           </Col>
-          <Col span={12}>
+          <Col span={6}>
+            <Form.Item
+              label="ХДФ мм"
+              name="hdf_parameter_override_mm"
+              rules={[{ type: 'number', min: 0.01, message: 'Больше 0' }]}
+            >
+              <InputNumber
+                style={{ width: '100%' }}
+                min={0.01}
+                precision={2}
+                parser={numberParser}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
             <Form.Item
               label="Тип обката"
               name="edge_type_id"

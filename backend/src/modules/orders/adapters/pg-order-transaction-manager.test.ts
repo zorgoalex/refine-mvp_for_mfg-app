@@ -390,6 +390,42 @@ describe('PgOrderTransactionManager', () => {
     expect(normalizeSql(configQuery!.text)).toContain('value_json::text');
   });
 
+  it('uses the per-detail HDF parameter override before the milling default', async () => {
+    const database = createDatabase({
+      hdfSourceRows: [{
+        detail_id: 200,
+        detail_number: 1,
+        detail_name: 'Facade',
+        height: 1000,
+        width: 500,
+        quantity: 2,
+        sheet_material_type_id: 5,
+        sheet_material_name: 'MDF',
+        milling_type_id: 7,
+        milling_type_name: 'выборка',
+        hdf_enabled: true,
+        hdf_edge_mm: 60,
+        hdf_parameter_override_mm: 42,
+        production_status_id: 3,
+      }],
+    });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await manager.runInTransaction((uow) =>
+      uow.reconcileHdfDetails({
+        orderId: 100,
+        currentUser: currentUser(),
+        requestId: 'req-hdf-override',
+      }),
+    );
+
+    const insert = database.queries.find((query) =>
+      normalizeSql(query.text).startsWith('INSERT INTO order_hdf_details'),
+    );
+    expect(insert).toBeDefined();
+    expect(insert!.params[13]).toBe(42);
+  });
+
   it('auto-creates a project root when create-order omits projectId', async () => {
     const database = createDatabase();
     const manager = new PgOrderTransactionManager(database.service);
@@ -1358,6 +1394,7 @@ function createDatabase(
     duplicateNameRow?: { order_id: number; order_name: string } | null;
     suggestedNextName?: string | null;
     throwOnJsonbMax?: boolean;
+    hdfSourceRows?: Array<Record<string, unknown>>;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -1493,6 +1530,12 @@ function createDatabase(
       }
 
       if (normalized.startsWith('SELECT od.detail_id')) {
+        if (normalized.includes('mt.hdf_enabled')) {
+          return {
+            rows: options.hdfSourceRows ?? [],
+            rowCount: options.hdfSourceRows?.length ?? 0,
+          };
+        }
         return {
           rows: [
             {
@@ -1543,6 +1586,26 @@ function createDatabase(
 
       if (text.includes('RETURNING order_id')) {
         return { rows: [{ order_id: 100 }], rowCount: 1 };
+      }
+
+      if (normalized.includes('FROM app_settings')) {
+        return {
+          rows: [{
+            threshold_mm: 15,
+            hdf_sheet_material_type_id: 9,
+            hdf_sheet_material_name: 'ХДФ',
+            config_revision: 1,
+          }],
+          rowCount: 1,
+        };
+      }
+
+      if (normalized.startsWith('SELECT h.order_hdf_detail_id')) {
+        return { rows: [], rowCount: 0 };
+      }
+
+      if (normalized.startsWith('INSERT INTO order_hdf_details')) {
+        return { rows: [{ order_hdf_detail_id: 901 }], rowCount: 1 };
       }
 
       if (normalized.startsWith('INSERT INTO order_details')) {

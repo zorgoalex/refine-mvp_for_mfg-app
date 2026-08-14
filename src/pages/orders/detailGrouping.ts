@@ -6,6 +6,7 @@ export type GroupField =
   | 'detail_number'
   | 'area'
   | 'milling'
+  | 'hdf_parameter'
   | 'edge'
   | 'material'
   | 'note'
@@ -28,6 +29,7 @@ export const GROUP_FIELDS: GroupFieldDef[] = [
   { field: 'detail_number', label: 'по №' },
   { field: 'area', label: 'по площади' },
   { field: 'milling', label: 'по фрезеровке' },
+  { field: 'hdf_parameter', label: 'по ХДФ параметру' },
   { field: 'edge', label: 'по обкату' },
   { field: 'material', label: 'по материалам' },
   { field: 'note', label: 'по примечанию' },
@@ -127,6 +129,7 @@ export function extractGroupValue(detail: OrderDetail, field: GroupField): strin
     case 'detail_number': return positiveNumberValue(detail.detail_number);
     case 'area': return numberValue(detail.area);
     case 'milling': return idValue(detail.milling_type_id);
+    case 'hdf_parameter': return numberValue(detail.hdf_parameter_override_mm);
     case 'edge': return idValue(detail.edge_type_id);
     case 'material': return idValue(detail.sheet_material_type_id);
     case 'film': return idValue(detail.film_id);

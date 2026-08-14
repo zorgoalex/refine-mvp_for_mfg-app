@@ -201,6 +201,7 @@ const ORDER_DETAIL_SHOW_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'quantity', label: 'Кол-во' },
   { key: 'area', label: 'м²' },
   { key: 'milling_type', label: 'Фрезеровка' },
+  { key: 'hdf_parameter_override_mm', label: 'ХДФ параметр', defaultAfter: 'milling_type' },
   { key: 'edge_type', label: 'Обкат' },
   { key: 'material', label: 'Материал' },
   { key: 'note', label: 'Пр-е' },
@@ -1374,6 +1375,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       case 'detail_number': return orderShowNumberGroupLabel(sample.detail_number);
       case 'area': return `${orderShowNumberGroupLabel(sample.area, 2)} м²`;
       case 'milling': return millingTypesMap.get(sample.milling_type_id) || '—';
+      case 'hdf_parameter': return orderShowNumberGroupLabel(sample.hdf_parameter_override_mm, 2);
       case 'edge': return edgeTypesMap.get(sample.edge_type_id) || '—';
       case 'material': return resolveDetailMaterialName(sample, resolvedNameByDetailId, materialsMap) || '—';
       case 'note': return (sample.note || '').trim() || '—';
@@ -1926,6 +1928,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       width: 128,
       sorter: true,
       render: (_, detail) => millingTypesMap.get(detail.milling_type_id) || '—',
+    },
+    {
+      title: 'ХДФ мм',
+      dataIndex: 'hdf_parameter_override_mm',
+      key: 'hdf_parameter_override_mm',
+      width: 74,
+      align: 'center',
+      sorter: true,
+      render: (value) => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric > 0 ? numeric.toFixed(2) : '—';
+      },
     },
     {
       title: 'Обкат',

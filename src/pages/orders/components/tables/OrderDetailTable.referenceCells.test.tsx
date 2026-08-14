@@ -27,7 +27,7 @@ describe('OrderDetailTable reference cells', () => {
       "key: 'milling_cost_per_sqm',\n      width: ORDER_DETAIL_COLUMN_WIDTHS.millingCostPerSqm",
     );
     expect(source).toContain("fontSize: 11, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums'");
-    expect(source).toContain('scroll={{ x: tableScrollWidth, y: 500 }}');
+    expect(source).toContain('scroll={{ x: tableScrollWidth, y: tableBodyScrollY }}');
   });
 
   it('uses integer-first editors for every editable numeric detail cell', () => {

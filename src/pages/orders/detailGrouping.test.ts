@@ -17,6 +17,7 @@ describe('GROUP_FIELDS', () => {
         'detail_number',
         'area',
         'milling',
+        'hdf_parameter',
         'edge',
         'material',
         'note',
@@ -35,6 +36,7 @@ describe('GROUP_FIELDS', () => {
     expect(byField.detail_number).toBe('по №');
     expect(byField.area).toBe('по площади');
     expect(byField.milling).toBe('по фрезеровке');
+    expect(byField.hdf_parameter).toBe('по ХДФ параметру');
     expect(byField.edge).toBe('по обкату');
     expect(byField.material).toBe('по материалам');
     expect(byField.note).toBe('по примечанию');
@@ -82,6 +84,7 @@ describe('extractGroupValue', () => {
     };
     expect(extractGroupValue(d({ detail_number: 7 }), 'detail_number')).toBe('7');
     expect(extractGroupValue(d({ area: 1.25 }), 'area')).toBe('1.25');
+    expect(extractGroupValue(d({ hdf_parameter_override_mm: 42 }), 'hdf_parameter')).toBe('42');
     expect(extractGroupValue(d({ detail_cost: 1250 }), 'detail_cost')).toBe('1250');
     expect(extractGroupValue(d({ production_status_id: 4 }), 'production_status')).toBe('4');
     expect(extractGroupValue(d({ cut_job: cutRef }), 'cut_job')).toBe('21:3');

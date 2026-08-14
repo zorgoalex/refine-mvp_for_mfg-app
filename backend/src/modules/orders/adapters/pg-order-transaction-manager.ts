@@ -152,6 +152,7 @@ interface HdfSourceRow {
   milling_type_name: string | null;
   hdf_enabled: boolean | null;
   hdf_edge_mm: string | number | null;
+  hdf_parameter_override_mm: string | number | null;
   production_status_id: string | number | null;
 }
 
@@ -934,8 +935,8 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
               production_status_id = $16, joint_order_id = $17, note = $18,
               link_cutting_file = $19, link_cutting_image_file = $20, link_cad_file = $21,
               link_pdf_file = $22, ref_key_1c = $23, sheet_material_type_id = $24,
-              basis_project = $25, basis_data = $26, basis_designation = $27,
-              basis_product = $28, doweling = $29
+              hdf_parameter_override_mm = $25, basis_project = $26, basis_data = $27,
+              basis_designation = $28, basis_product = $29, doweling = $30
           WHERE detail_id = $1 AND order_id = $2
           `,
           detailParams(effective.id, orderId, effective),
@@ -948,10 +949,10 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
             material_id, milling_type_id, edge_type_id, film_id, milling_cost_per_sqm,
             detail_cost, priority, production_status_id, joint_order_id, note,
             link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file, ref_key_1c,
-            sheet_material_type_id, basis_project, basis_data, basis_designation, basis_product,
-            doweling
+            sheet_material_type_id, hdf_parameter_override_mm, basis_project, basis_data,
+            basis_designation, basis_product, doweling
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
           RETURNING detail_id
           `,
           detailParamsForInsert(orderId, effective),
@@ -1107,11 +1108,12 @@ class PgOrderWriteUnitOfWork implements OrderWriteUnitOfWork {
           sheetMaterialName: source.sheet_material_name,
           millingTypeId: toNullableNumber(source.milling_type_id),
           millingTypeName: source.milling_type_name,
+          hdfParameterOverrideMm: toNullableNumber(source.hdf_parameter_override_mm),
           productionStatusId: toNullableNumber(source.production_status_id),
         },
         {
           hdfEnabled: source.hdf_enabled === true,
-          hdfEdgeMm: toNullableNumber(source.hdf_edge_mm),
+          hdfEdgeMm: toNullableNumber(source.hdf_parameter_override_mm) ?? toNullableNumber(source.hdf_edge_mm),
         },
         config,
       );
@@ -2390,6 +2392,7 @@ async function loadHdfSourceRows(tx: TransactionClient, orderId: number): Promis
     SELECT od.detail_id, od.detail_number, od.detail_name, od.height, od.width,
            od.quantity, od.sheet_material_type_id, smt.name AS sheet_material_name,
            od.milling_type_id, mt.milling_type_name, mt.hdf_enabled, mt.hdf_edge_mm,
+           od.hdf_parameter_override_mm,
            od.production_status_id
     FROM order_details od
     LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
@@ -2631,6 +2634,7 @@ function detailParamsForInsertValues(detail: CalculatedOrderDetailDto) {
     detail.linkPdfFile,
     detail.refKey1c,
     detail.sheetMaterialTypeId ?? null,
+    detail.hdfParameterOverrideMm ?? null,
     detail.basisProject,
     detail.basisData,
     detail.basisDesignation,

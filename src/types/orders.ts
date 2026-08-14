@@ -147,6 +147,7 @@ export interface OrderDetail {
   // name) from order_details_view. Edit workspace reads this, not a materials map.
   material_name_resolved?: string | null;
   milling_type_id: number;
+  hdf_parameter_override_mm?: number | null;
   edge_type_id: number;
   film_id?: number | null;
 

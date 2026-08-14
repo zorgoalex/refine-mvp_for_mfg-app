@@ -65,6 +65,7 @@ export interface SaveOrderDetailDto {
   materialId: number | null;
   sheetMaterialTypeId?: number | null;
   millingTypeId: number;
+  hdfParameterOverrideMm?: number | null;
   edgeTypeId: number;
   filmId?: number | null;
   area?: number | null;
@@ -204,6 +205,7 @@ export type NormalizedSaveOrderDetailDto = Omit<
   | 'materialId'
   | 'detailName'
   | 'filmId'
+  | 'hdfParameterOverrideMm'
   | 'millingCostPerSqm'
   | 'detailCost'
   | 'priority'
@@ -225,6 +227,7 @@ export type NormalizedSaveOrderDetailDto = Omit<
   materialId: number | null;
   detailName: string | null;
   filmId: number | null;
+  hdfParameterOverrideMm?: number | null;
   millingCostPerSqm: number | null;
   detailCost: number | null;
   priority: number;

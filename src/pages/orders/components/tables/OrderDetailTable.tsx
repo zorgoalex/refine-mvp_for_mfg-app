@@ -185,6 +185,7 @@ const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
   { key: 'quantity', label: 'Кол-во' },
   { key: 'area', label: 'Площадь' },
   { key: 'milling_type_id', label: 'Фрезеровка' },
+  { key: 'hdf_parameter_override_mm', label: 'ХДФ параметр', defaultAfter: 'milling_type_id' },
   { key: 'edge_type_id', label: 'Обкат' },
   { key: 'sheet_material_type_id', label: 'Материал' },
   { key: 'note', label: 'Примечание' },
@@ -214,6 +215,7 @@ const ORDER_DETAIL_COLUMN_WIDTHS = {
   quantity: 54,
   area: 90,
   millingType: 119,
+  hdfParameter: 82,
   edgeType: 73,
   sheetMaterial: 126,
   millingCostPerSqm: 78,
@@ -229,6 +231,7 @@ const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
   'width',
   'quantity',
   'milling_type_id',
+  'hdf_parameter_override_mm',
   'edge_type_id',
   'sheet_material_type_id',
   'note',
@@ -791,6 +794,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if (!(Number(values.width) > 0)) errors.push('Укажите ширину детали');
     if (!(Number(values.quantity) >= 1)) errors.push('Укажите количество деталей');
     if (!(Number(values.milling_type_id) > 0)) errors.push('Укажите тип фрезеровки');
+    if (
+      values.hdf_parameter_override_mm !== null
+      && values.hdf_parameter_override_mm !== undefined
+      && values.hdf_parameter_override_mm !== ''
+      && !(Number(values.hdf_parameter_override_mm) > 0)
+    ) {
+      errors.push('Параметр ХДФ должен быть больше 0');
+    }
     if (!(Number(values.edge_type_id) > 0)) errors.push('Укажите тип кромки');
     if (!(Number(values.sheet_material_type_id) > 0)) errors.push('Укажите материал');
     if (!(Number(values.milling_cost_per_sqm) > 0)) errors.push('Укажите цену за кв.м.');
@@ -1076,6 +1087,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       area: record.area,
       sheet_material_type_id: record.sheet_material_type_id ?? null,
       milling_type_id: record.milling_type_id,
+      hdf_parameter_override_mm: record.hdf_parameter_override_mm ?? null,
       edge_type_id: record.edge_type_id,
       film_id: record.film_id ?? null,
       milling_cost_per_sqm: record.milling_cost_per_sqm ?? null,
@@ -1539,6 +1551,34 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             namesById={millingNameById}
             loading={referencesLoading}
           />
+        );
+      },
+    },
+    {
+      title: <div style={{ textAlign: 'center', fontSize: '75%' }}>ХДФ мм</div>,
+      dataIndex: 'hdf_parameter_override_mm',
+      key: 'hdf_parameter_override_mm',
+      width: ORDER_DETAIL_COLUMN_WIDTHS.hdfParameter,
+      align: 'center',
+      sorter: (a: OrderDetail, b: OrderDetail) => (a.hdf_parameter_override_mm || 0) - (b.hdf_parameter_override_mm || 0),
+      onCell: (row: any) => row?.kind === 'separator' ? { colSpan: 0 } : {},
+      render: (_: any, row: any) => {
+        const d = asDetail(row);
+        if (!d) return null;
+        return isEditingField(d, 'hdf_parameter_override_mm') ? (
+          <Form.Item name="hdf_parameter_override_mm" style={{ margin: 0, padding: '0 4px' }}>
+            <InputNumber
+              keyboard={false}
+              min={0.01}
+              precision={2}
+              style={{ width: '100%' }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); } }}
+            />
+          </Form.Item>
+        ) : (
+          getDisplayedField(d, 'hdf_parameter_override_mm') == null
+            ? '—'
+            : formatNumber(getDisplayedField(d, 'hdf_parameter_override_mm'), 2)
         );
       },
     },
@@ -2393,6 +2433,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           return (left, right) => (left.area || 0) - (right.area || 0);
         case 'milling_type_id':
           return (left, right) => (left.milling_type_id || 0) - (right.milling_type_id || 0);
+        case 'hdf_parameter_override_mm':
+          return (left, right) => (left.hdf_parameter_override_mm || 0) - (right.hdf_parameter_override_mm || 0);
         case 'sheet_material_type_id':
           return (left, right) => {
             const leftName = activeSheetMaterialNames?.get(left.sheet_material_type_id ?? 0)?.label ?? '';
@@ -2753,6 +2795,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       case 'detail_number': return tableNumberGroupLabel(getDisplayedField(sample, 'detail_number'));
       case 'area': return `${tableNumberGroupLabel(getDisplayedField(sample, 'area'), 2)} м²`;
       case 'milling': return millingNameById.get(getDisplayedField(sample, 'milling_type_id')) || '—';
+      case 'hdf_parameter': return tableNumberGroupLabel(getDisplayedField(sample, 'hdf_parameter_override_mm'), 2);
       case 'edge': return edgeNameById.get(getDisplayedField(sample, 'edge_type_id')) || '—';
       case 'material': return sheetNameById.get(getDisplayedField(sample, 'sheet_material_type_id') ?? 0) || sample.material_name_resolved || '—';
       case 'note': return String(getDisplayedField(sample, 'note') || '').trim() || '—';

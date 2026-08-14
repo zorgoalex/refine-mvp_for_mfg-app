@@ -133,6 +133,7 @@ export const saveOrderDetailSwaggerSchema = {
     materialId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: must be null/absent; sheet_material_type_id is authoritative. Sending a non-null value is rejected with 422.' },
     sheetMaterialTypeId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: required for sheet details; authoritative reference to sheet_material_types. materialId must be null/absent.' },
     millingTypeId: { type: 'integer' },
+    hdfParameterOverrideMm: { ...nullableNumberSwaggerSchema, description: 'Optional per-detail HDF calculation parameter override in millimeters. Null uses the milling resource/default.' },
     edgeTypeId: { type: 'integer' },
     filmId: nullableIntegerSwaggerSchema,
     area: nullableNumberSwaggerSchema,
@@ -275,6 +276,7 @@ export const orderDetailResponseSwaggerSchema = {
     // Variant B: materialId is nullable (NULL post-034); NOT in required.
     'sheetMaterialTypeId',
     'millingTypeId',
+    'hdfParameterOverrideMm',
     'edgeTypeId',
     'filmId',
     'area',
@@ -311,6 +313,7 @@ export const orderDetailResponseSwaggerSchema = {
     materialId: { ...nullableIntegerSwaggerSchema, description: 'Variant B: always null post-migration 034; sheet_material_type_id is authoritative.' },
     sheetMaterialTypeId: { type: 'integer', description: 'Variant B: required; authoritative sheet material type reference.' },
     millingTypeId: { type: 'integer' },
+    hdfParameterOverrideMm: nullableNumberSwaggerSchema,
     edgeTypeId: { type: 'integer' },
     filmId: nullableIntegerSwaggerSchema,
     area: { type: 'number' },

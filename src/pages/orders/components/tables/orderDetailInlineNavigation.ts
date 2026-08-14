@@ -3,6 +3,7 @@ export const ORDER_DETAIL_INLINE_TAB_FIELD_KEYS = [
   'width',
   'quantity',
   'milling_type_id',
+  'hdf_parameter_override_mm',
   'edge_type_id',
   'sheet_material_type_id',
   'note',

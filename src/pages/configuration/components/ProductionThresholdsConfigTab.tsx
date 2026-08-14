@@ -60,7 +60,7 @@ const RESOURCE_KIND_OPTIONS = [
   { label: 'Другое', value: 'other' },
 ];
 
-const DEFAULT_HDF_PARAMETER_NAME = 'Отступ от края';
+const DEFAULT_HDF_PARAMETER_NAME = 'Параметр';
 const DEFAULT_HDF_ACCOUNTING_METHOD = 'Автоматический расчет ХДФ-детали';
 
 export function ProductionThresholdsConfigTab() {

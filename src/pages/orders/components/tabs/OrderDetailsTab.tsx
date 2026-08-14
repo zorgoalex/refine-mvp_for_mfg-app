@@ -252,6 +252,8 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
           return `${groupNumberLabel(sample.area, 2)} м²`;
         case 'milling':
           return orderFormData.references.millingTypeNameById.get(sample.milling_type_id) || '—';
+        case 'hdf_parameter':
+          return groupNumberLabel(sample.hdf_parameter_override_mm, 2);
         case 'edge':
           return orderFormData.references.edgeTypeNameById.get(sample.edge_type_id) || '—';
         case 'material':
