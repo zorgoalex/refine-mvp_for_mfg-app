@@ -112,6 +112,15 @@ interface ManualSvgTelegramSendRow extends QueryResultRow {
   last_error: string | null;
 }
 
+interface ManualSvgTelegramSendUnknownRow extends QueryResultRow {
+  request_id: string;
+  packet_id: string;
+  previous_status: 'pending' | 'processing';
+  state_at: string | Date | null;
+  attempt_count: string | number;
+  last_error: string | null;
+}
+
 export interface OrderScreenshotMediaDescriptor {
   packetId: string;
   sourceMessageId: number;
@@ -319,9 +328,13 @@ export class PgCncTelegramMediaRepository {
     }));
   }
 
-  async claimManualSvgTelegramSends(limit: number): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto['tasks']> {
+  async claimManualSvgTelegramSends(input: {
+    currentUser: CurrentUser;
+    limit: number;
+    requestTraceId: string;
+  }): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto['tasks']> {
     const result = await this.database.transaction(async (tx) => {
-      await markStaleManualSvgTelegramSendsUnknown(tx);
+      await markStaleManualSvgTelegramSendsUnknown(tx, input);
       return tx.query<ManualSvgTelegramSendTaskRow>(
         `WITH candidates AS (
            SELECT request.request_id
@@ -371,7 +384,7 @@ export class PgCncTelegramMediaRepository {
           AND file.expires_at > now()
          GROUP BY claimed.request_id, claimed.packet_id, claimed.message_text, claimed.attempt_count
          ORDER BY claimed.request_id`,
-        [limit],
+        [input.limit],
       );
     });
     return result.rows.map(mapManualSvgTelegramSendTaskRow).filter((task) => task.files.length > 0);
@@ -614,16 +627,79 @@ function manualSvgOrderFilesSql(extraWhere: string, extraSelect = ''): string {
   `;
 }
 
-async function markStaleManualSvgTelegramSendsUnknown(tx: TransactionClient): Promise<void> {
-  await tx.query(
+async function markStaleManualSvgTelegramSendsUnknown(
+  tx: TransactionClient,
+  input: {
+    currentUser: CurrentUser;
+    requestTraceId: string;
+  },
+): Promise<void> {
+  const staleProcessing = await tx.query<ManualSvgTelegramSendUnknownRow>(
     `UPDATE cnc_manual_svg_telegram_send_requests
      SET status='unknown',
          finished_at=now(),
          last_error='Статус отправки неизвестен: воркер не завершил запрос после отправки/начала отправки',
          updated_at=now()
      WHERE status='processing'
-       AND claimed_at < now() - ${MANUAL_SVG_SEND_UNKNOWN_AFTER_SQL}`,
+       AND claimed_at < now() - ${MANUAL_SVG_SEND_UNKNOWN_AFTER_SQL}
+     RETURNING request_id, packet_id, 'processing'::text AS previous_status, claimed_at AS state_at, attempt_count, last_error`,
   );
+  await writeManualSvgTelegramSendUnknownAudits(tx, input, staleProcessing.rows);
+
+  const stalePendingWithoutFiles = await tx.query<ManualSvgTelegramSendUnknownRow>(
+    `UPDATE cnc_manual_svg_telegram_send_requests request
+     SET status='unknown',
+         claimed_at=COALESCE(claimed_at, now()),
+         attempt_count=GREATEST(attempt_count, 1),
+         finished_at=now(),
+         sent_chat_id=NULL,
+         sent_message_ids_json='[]'::jsonb,
+         last_error='Статус отправки неизвестен: в заявке нет доступных файлов для отправки в Telegram',
+         updated_at=now()
+     WHERE request.status='pending'
+       AND request.requested_at < now() - ${MANUAL_SVG_SEND_UNKNOWN_AFTER_SQL}
+       AND NOT EXISTS (
+         SELECT 1
+         FROM cnc_manual_svg_telegram_send_request_files request_file
+         JOIN cnc_manual_svg_upload_files file ON file.file_id=request_file.file_id
+         WHERE request_file.request_id=request.request_id
+           AND file.expires_at > now()
+       )
+     RETURNING request_id, packet_id, 'pending'::text AS previous_status, requested_at AS state_at, attempt_count, last_error`,
+  );
+  await writeManualSvgTelegramSendUnknownAudits(tx, input, stalePendingWithoutFiles.rows);
+}
+
+async function writeManualSvgTelegramSendUnknownAudits(
+  tx: TransactionClient,
+  input: {
+    currentUser: CurrentUser;
+    requestTraceId: string;
+  },
+  rows: ManualSvgTelegramSendUnknownRow[],
+): Promise<void> {
+  for (const row of rows) {
+    await auditService.record(tx, {
+      event: 'cnc.manual_svg_upload.telegram_send_unknown',
+      entityType: 'cnc_manual_svg_telegram_send_request',
+      entityId: row.request_id,
+      actorUserId: input.currentUser.id,
+      actorUsername: input.currentUser.username ?? null,
+      actorRole: input.currentUser.role ?? null,
+      requestId: input.requestTraceId,
+      source: SOURCE,
+      before: { status: row.previous_status },
+      after: { status: 'unknown' },
+      diff: { status: { from: row.previous_status, to: 'unknown' } },
+      metadata: {
+        packetId: row.packet_id,
+        previousStatus: row.previous_status,
+        stateAt: row.state_at ? toIso(row.state_at) : null,
+        attemptCount: Number(row.attempt_count),
+        error: row.last_error,
+      },
+    });
+  }
 }
 
 async function lockManualSvgTelegramSend(

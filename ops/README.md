@@ -360,6 +360,9 @@ sudo ops/setup-vps.sh --yes
 - `deploy-stack.sh` - creates missing templates and starts/rebuilds the stack.
 - `smoke-vps.sh` - checks HTTPS health endpoints, Hasura CORS preflight, and
   deadline live-schema drift when deadlines are enabled.
+- `backup-prod-packet.sh` - default production/stage backup helper. It creates a
+  restore-ready packet with main DB, globals without passwords, Hasura metadata,
+  runtime evidence, optional CNC media, and checksums.
 - `restore-prod-backup.sh` - destructive DB restore helper for a fresh backup.
 - `reset-test-vps.sh` - separate opt-in destructive reset for a dedicated test
   VPS: stops the stack/tests, cleans Docker state, reclones the repo, and
@@ -647,6 +650,34 @@ cd ..
 docker compose --env-file .env -f docker-compose.yml up -d --force-recreate hasura backend
 repo_erp/ops/smoke-vps.sh --project-dir . --env-file .env --compose-file docker-compose.yml
 ```
+
+## Creating A Production Backup Packet
+
+Use `backup-prod-packet.sh` as the default backup flow before migrations,
+restore rehearsals, or prod-to-stage refreshes. It resolves the Compose project
+name automatically: `--compose-project-name`, caller `COMPOSE_PROJECT_NAME`,
+`.env`, running Docker labels, then Compose config name.
+
+```bash
+cd ~/projects/erp_dev/repo_erp
+ops/backup-prod-packet.sh \
+  --project-dir ~/projects/erp_dev \
+  --env-file ~/projects/erp_dev/.env \
+  --compose-file ~/projects/erp_dev/docker-compose.yml \
+  --backup-root ~/projects/erp_dev/backups/prod-packets \
+  --include-cnc-media
+```
+
+Verify the latest packet:
+
+```bash
+PACKET_DIR="$(ls -td ~/projects/erp_dev/backups/prod-packets/erp-backup-packet-* | head -n1)"
+(cd "$PACKET_DIR" && sha256sum -c SHA256SUMS)
+sha256sum -c "$PACKET_DIR.tar.gz.sha256"
+```
+
+Do not add `--include-cnc-worker-data` by default: worker `/data` can contain
+Telegram session material. Use it only for an explicit full worker-state backup.
 
 ## Restoring A Production Backup
 

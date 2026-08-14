@@ -93,11 +93,18 @@ export class CncTelegramMediaService {
     };
   }
 
-  async claimManualSvgTelegramSends(currentUser: CurrentUser): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto> {
+  async claimManualSvgTelegramSends(
+    currentUser: CurrentUser,
+    requestTraceId?: string,
+  ): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto> {
     this.assertWorker(currentUser);
     return {
       capability: 'cnc_manual_svg_telegram_send_v1',
-      tasks: await this.repository.claimManualSvgTelegramSends(5),
+      tasks: await this.repository.claimManualSvgTelegramSends({
+        currentUser,
+        limit: 5,
+        requestTraceId: requestTraceId || 'cnc-manual-svg-telegram-send-claim',
+      }),
     };
   }
 

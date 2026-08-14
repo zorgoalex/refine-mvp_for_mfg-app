@@ -533,6 +533,15 @@ export function validateFreecutResponseContract(
  */
 export type SheetPlacementPieceJson = FreecutPlacement & {
   label?: PieceLabelSnapshot;
+  source_svg?: {
+    viewBox: {
+      x_mm: number;
+      y_mm: number;
+      width_mm: number;
+      height_mm: number;
+    };
+    body: string;
+  };
   /** Frozen request rule. Absent on legacy layouts. */
   rotation_forbidden?: boolean;
   /** Directional vacuum profile fallback. Absent when requested orientation was used. */

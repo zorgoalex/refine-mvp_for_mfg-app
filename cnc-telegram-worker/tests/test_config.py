@@ -15,6 +15,7 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertEqual(config.stack_env, "test")
         self.assertEqual(config.worker_role, "disabled")
         self.assertEqual(config.poll_interval_seconds, 60)
+        self.assertEqual(config.manual_svg_send_poll_interval_seconds, 5)
         self.assertFalse(config.enable_glm_ocr)
         self.assertEqual(config.ocr_command_timeout_seconds, 180)
         self.assertEqual(config.glm_ocr_client_timeout_seconds, 660)
@@ -81,12 +82,14 @@ class WorkerConfigTest(unittest.TestCase):
             "ERP_STACK_ENV": "test",
             "CNC_TELEGRAM_WORKER_ROLE": "reader",
             "CNC_TELEGRAM_ENABLE_MANUAL_UPLOAD_SENDS": "true",
+            "CNC_MANUAL_SVG_SEND_POLL_INTERVAL_SECONDS": "7",
         }, clear=True):
             config = WorkerConfig.from_env()
 
         self.assertTrue(config.enabled)
         self.assertFalse(config.can_write_chat)
         self.assertTrue(config.can_send_manual_svg_uploads)
+        self.assertEqual(config.manual_svg_send_poll_interval_seconds, 7)
         config.require_worker_enabled()
 
     def test_writer_runs_on_prod_stack(self) -> None:

@@ -174,7 +174,7 @@ export class CncTelegramMediaController {
     @Req() request: RequestWithCurrentUser,
   ): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto> {
     this.assertEnabled();
-    return this.media.claimManualSvgTelegramSends(this.requireCurrentUser(request));
+    return this.media.claimManualSvgTelegramSends(this.requireCurrentUser(request), request.requestId);
   }
 
   @ApiOperation({ operationId: 'completeManualSvgTelegramSend', summary: 'Complete one manual SVG Telegram send request' })

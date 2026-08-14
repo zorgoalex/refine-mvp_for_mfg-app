@@ -58,6 +58,14 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('lockActiveManualSvgTelegramSend');
   });
 
+  it('refreshes a pending manual SVG Telegram send before relinking files', () => {
+    expect(repositorySource).toContain('refreshPendingManualSvgTelegramSendRequest');
+    expect(repositorySource).toContain('SET message_text=$2');
+    expect(repositorySource).toContain('requested_by=$3::bigint');
+    expect(repositorySource).toContain('requested_at=now()');
+    expect(repositorySource).toContain("requestAction: 'updated_pending'");
+  });
+
   it('supports forced manual SVG cut-job display number without reusing the identity id', () => {
     expect(repositorySource).toContain('requestedCutJobId: command.dto.requestedCutJobId ?? null');
     expect(repositorySource).toContain('CUT_JOB_NUMBER_CONFLICT');

@@ -147,6 +147,7 @@ const BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO = 1.1;
 const BATH_CENTER_BASELINE_DISTANCE_SCALE = 0.8;
 const BATH_ORDER_LABEL_WEIGHT = 900;
 const BATH_ORDER_LABEL_STROKE_RATIO = 0.04;
+const SOURCE_SVG_FRAGMENT_UNSAFE_RE = /<\s*(?:script|foreignObject)\b|\bon[a-z]+\s*=|\b(?:href|xlink:href)\s*=|(?:javascript:|data:|https?:|file:)/i;
 
 /** Deterministic, light fill color for a source order. Unknown order keeps the
  * legacy neutral fill so old/partial data remains readable. */
@@ -369,8 +370,9 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
       )}" fill="${escapeXml(fill)}" stroke="#1f2d3d" stroke-width="2"/>`;
+      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect);
       if (!showLabels) {
-        return renderPieceGroup(piece, cx, cy, rectEl);
+        return renderPieceGroup(piece, cx, cy, [rectEl, sourceSvgEl].join(''));
       }
       const resolved = labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
@@ -385,6 +387,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
         .join('');
       return renderPieceGroup(piece, cx, cy, [
         rectEl,
+        sourceSvgEl,
         `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
           fontMm,
         )}" fill="#1f2d3d" text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
@@ -407,6 +410,41 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     pieces,
     bathMeterGuides,
     `</svg>`,
+  ].join('');
+}
+
+function renderPieceSourceSvgFragment(
+  piece: FreecutPlacement,
+  rect: { x: number; y: number; w: number; h: number },
+): string {
+  const source = (piece as {
+    source_svg?: {
+      viewBox?: {
+        width_mm?: number | null;
+        height_mm?: number | null;
+      } | null;
+      body?: string | null;
+    } | null;
+  }).source_svg;
+  const width = source?.viewBox?.width_mm;
+  const height = source?.viewBox?.height_mm;
+  const body = source?.body?.trim();
+  if (
+    !body ||
+    SOURCE_SVG_FRAGMENT_UNSAFE_RE.test(body) ||
+    typeof width !== 'number' ||
+    typeof height !== 'number' ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return '';
+  }
+  return [
+    `<svg class="cut-sheet-piece-source-svg" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
+    body,
+    '</svg>',
   ].join('');
 }
 

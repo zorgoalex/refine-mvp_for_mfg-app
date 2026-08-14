@@ -157,6 +157,24 @@ describe('PgCncTelegramMediaRepository', () => {
     const tx = {
       query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
         queries.push({ text, params });
+        if (text.includes('UPDATE cnc_manual_svg_telegram_send_requests') && text.includes("WHERE status='processing'")) {
+          return { rows: [{
+            request_id: manualSvgSendRequestId(),
+            packet_id: packetId(),
+            previous_status: 'processing',
+            state_at: '2026-08-14T04:00:00.000Z',
+            attempt_count: 1,
+            last_error: 'Статус отправки неизвестен: воркер не завершил запрос после отправки/начала отправки',
+          }] };
+        }
+        if (
+          text.includes('UPDATE cnc_manual_svg_telegram_send_requests request') &&
+          text.includes("request.status='pending'") &&
+          text.includes('NOT EXISTS')
+        ) {
+          return { rows: [] };
+        }
+        if (text.includes('INSERT INTO audit_log')) return { rows: [{ audit_id: 'audit-1' }] };
         if (text.includes('WITH candidates AS')) {
           return { rows: [{
             request_id: manualSvgSendRequestId(),
@@ -172,7 +190,11 @@ describe('PgCncTelegramMediaRepository', () => {
     const database = { transaction: vi.fn((handler) => handler(tx)) };
     const repository = new PgCncTelegramMediaRepository(database as never);
 
-    await expect(repository.claimManualSvgTelegramSends(5)).resolves.toEqual([{
+    await expect(repository.claimManualSvgTelegramSends({
+      currentUser: user(),
+      limit: 5,
+      requestTraceId: 'claim-request-1',
+    })).resolves.toEqual([{
       requestId: manualSvgSendRequestId(),
       packetId: packetId(),
       messageText: 'Фрезы для ХДФ: 8',
@@ -181,10 +203,18 @@ describe('PgCncTelegramMediaRepository', () => {
     }]);
     expect(queries[0]?.text).toContain("SET status='unknown'");
     expect(queries[0]?.text).toContain("WHERE status='processing'");
-    expect(queries[1]?.params).toEqual([5]);
-    expect(queries[1]?.text).toContain("WHERE request.status='pending'");
-    expect(queries[1]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
-    expect(queries[1]?.text).toContain("encode(file.content_bytes, 'base64')");
+    expect(queries[1]?.text).toContain('INSERT INTO audit_log');
+    expect(queries[1]?.params).toContain('cnc.manual_svg_upload.telegram_send_unknown');
+    expect(queries[1]?.params).toContain('claim-request-1');
+    expect(queries[2]?.text).toContain("request.status='pending'");
+    expect(queries[2]?.text).toContain('NOT EXISTS');
+    expect(queries[2]?.text).toContain('claimed_at=COALESCE(claimed_at, now())');
+    expect(queries[2]?.text).toContain('attempt_count=GREATEST(attempt_count, 1)');
+    expect(queries[2]?.text).toContain("sent_message_ids_json='[]'::jsonb");
+    expect(queries[3]?.params).toEqual([5]);
+    expect(queries[3]?.text).toContain("WHERE request.status='pending'");
+    expect(queries[3]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
+    expect(queries[3]?.text).toContain("encode(file.content_bytes, 'base64')");
   });
 });
 
@@ -246,4 +276,8 @@ function manualSvgClaimFile() {
     sha256: 'b'.repeat(64),
     base64Content: 'PHN2Zz48L3N2Zz4=',
   };
+}
+
+function user() {
+  return { id: '42', username: 'cnc-worker', role: 'operator', roleId: 11, permissions: ['cut.manage'] };
 }

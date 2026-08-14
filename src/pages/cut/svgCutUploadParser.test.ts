@@ -235,6 +235,12 @@ describe('svgCutUploadParser visual labels', () => {
     expect(result.rejected.join('; ')).toContain('деталь создана по подписи');
   });
 
+  it('passes parsed SVG sheet dimensions into label-only item creation', () => {
+    expect(parserSource).toContain('sheetWidthMm: sheetWidth');
+    expect(parserSource).toContain('sheetHeightMm: sheetHeight');
+    expect(parserSource).not.toContain('sheetWidthMm,\n    sheetHeightMm,');
+  });
+
   it('does not create MDF details from unlabeled geometry unless informational fallback is enabled', () => {
     const genericPiece = contour({
       elementId: 'rect-raw-geometry',
@@ -322,5 +328,78 @@ describe('svgCutUploadParser visual labels', () => {
 
     expect(matches.get(small)?.orderName).toBe('2776');
     expect(matches.get(small)?.detailNumber).toBe(5);
+  });
+
+  it('reuses one visual label for same-size PartContour siblings in one SVG part group', () => {
+    const groupKey = '_2792_x007e__x007e_Part';
+    const left = contour({
+      elementId: '_2792_PartContour',
+      groupKey,
+      xMm: 923.55,
+      yMm: 589.11,
+      placedWidthMm: 446.98,
+      placedHeightMm: 2197.89,
+    });
+    const right = contour({
+      elementId: '_2792_PartContour_0',
+      groupKey,
+      xMm: 1377.03,
+      yMm: 589.11,
+      placedWidthMm: 446.98,
+      placedHeightMm: 2197.89,
+    });
+    const label = visualLabel({
+      key: '2792:1:2198:447',
+      orderName: '2792',
+      detailNumber: 1,
+      widthMm: 2198,
+      heightMm: 447,
+      cxMm: 1600,
+      cyMm: 1688,
+      linePointsMm: [[1588, 1660], [1600, 1688], [1590, 1720]],
+      rawLines: ['2792', '# 1', '2198*447'],
+    });
+
+    const matches = matchVisualLabelsToPartContours([left, right], [label]);
+
+    expect(matches.get(left)).toBe(label);
+    expect(matches.get(right)).toBe(label);
+  });
+
+  it('keeps sanitized source SVG geometry on parsed layout items for cut previews', () => {
+    const sourceSvg = {
+      viewBox: { xMm: 10, yMm: 20, widthMm: 40, heightMm: 30 },
+      body: '<line x1="2" y1="2" x2="38" y2="28" fill="none" stroke="#111827" stroke-width="1.5"/>',
+    };
+    const result = buildSvgUploadLayoutItemsFromContours(
+      [
+        contour({
+          elementId: '_2777_PartContour',
+          xMm: 10,
+          yMm: 20,
+          placedWidthMm: 40,
+          placedHeightMm: 30,
+          sourceSvg,
+        }),
+      ],
+      [
+        visualLabel({
+          key: '2777:3:40:30',
+          orderName: '2777',
+          detailNumber: 3,
+          widthMm: 40,
+          heightMm: 30,
+          cxMm: 30,
+          cyMm: 35,
+          linePointsMm: [[30, 31], [30, 39], [30, 47]],
+          rawLines: ['2777', '# 3', '40*30'],
+        }),
+      ],
+    );
+
+    expect(result.layoutItems).toHaveLength(1);
+    expect(result.layoutItems[0]?.sourceSvg).toEqual(sourceSvg);
+    expect(parserSource).toContain('buildSourceSvgFragmentForContour');
+    expect(parserSource).toContain('SOURCE_SVG_FRAGMENT_TAGS');
   });
 });

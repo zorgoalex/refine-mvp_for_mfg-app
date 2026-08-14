@@ -159,6 +159,33 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(svg).toContain('data-piece-cy="215"');
   });
 
+  it('renders sanitized source SVG geometry inside manual SVG pieces', () => {
+    const sourceSheet: SheetPlacementsJson = {
+      trim_mm: { left: 0, top: 0, right: 0, bottom: 0 },
+      sheet_width_mm: 100,
+      sheet_height_mm: 100,
+      pieces: [{
+        item_id: 'svg-2777-3',
+        instance: 1,
+        x_mm: 10,
+        y_mm: 20,
+        width_mm: 40,
+        height_mm: 30,
+        rotated: false,
+        source_svg: {
+          viewBox: { x_mm: 10, y_mm: 20, width_mm: 40, height_mm: 30 },
+          body: '<line x1="2" y1="2" x2="38" y2="28" fill="none" stroke="#111827" stroke-width="1.5"/>',
+        },
+      }],
+    };
+
+    const svg = buildSheetSvg({ sheet: sourceSheet, labelFor: () => ['2777', 'поз. 3', '40X30'] });
+
+    expect(svg).toContain('class="cut-sheet-piece-source-svg"');
+    expect(svg).toContain('<line x1="2" y1="2" x2="38" y2="28"');
+    expect(svg.indexOf('cut-sheet-piece-source-svg')).toBeLessThan(svg.indexOf('<text x="30" y="35"'));
+  });
+
   it('uses deterministic per-order fills when provided', () => {
     const svg = buildSheetSvg({
       sheet,
