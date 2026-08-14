@@ -133,6 +133,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
   const svgPreviewUrlRef = useRef<string | null>(null);
   const [parsing, setParsing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [lenientValidation, setLenientValidation] = useState(true);
   const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>(defaultOrderIds);
   const [orderOptions, setOrderOptions] = useState<OrderOption[]>(defaultOrderOptions);
   const [orderSearchLoading, setOrderSearchLoading] = useState(false);
@@ -302,7 +303,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setPresetSaving(true);
     try {
       const preset = await cncTelegramApi.createManualSvgCommentPreset({
-        label: comment.slice(0, 80),
+        label: comment.split('\n').find(Boolean)?.slice(0, 80) ?? comment.slice(0, 80),
         commentText: comment,
         category: rework ? 'rework' : 'custom',
       }, createPresetIdempotencyKey(comment));
@@ -324,6 +325,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     setGcodeSourceFile(null);
     setScreenshotSourceFile(null);
     setGeneratedScreenshotContrast(MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT);
+    setLenientValidation(true);
     setMaterialName('');
     setMachineName('');
     setRequestedCutJobId(null);
@@ -366,7 +368,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       message.warning('Загрузите SVG-файл');
       return;
     }
-    if (parsed.cutLayout.status !== 'valid') {
+    if (parsed.cutLayout.items.length === 0 || parsed.items.length === 0) {
+      message.error('SVG не содержит распознанных деталей для формирования раскроя');
+      return;
+    }
+    if (!lenientValidation && parsed.cutLayout.status !== 'valid') {
       message.error(`SVG не прошел валидацию: ${parsed.cutLayout.reasons.join('; ') || 'нет деталей для раскроя'}`);
       return;
     }
@@ -374,11 +380,11 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       message.warning('Укажите заказы для раскроя');
       return;
     }
-    if (!informationalUpload && eligibleLoading) {
+    if (!lenientValidation && !informationalUpload && eligibleLoading) {
       message.warning('Дождитесь проверки деталей выбранных заказов');
       return;
     }
-    if (!informationalUpload && blockingMatchProblems.length > 0) {
+    if (!lenientValidation && !informationalUpload && blockingMatchProblems.length > 0) {
       showSvgMatchProblems(blockingMatchProblems);
       return;
     }
@@ -388,7 +394,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         : 'Дождитесь проверки номера задания');
       return;
     }
-    if (!informationalUpload && warningMatchProblems.length > 0 && !await confirmSvgMatchWarnings(warningMatchProblems)) {
+    if (!lenientValidation && !informationalUpload && warningMatchProblems.length > 0 && !await confirmSvgMatchWarnings(warningMatchProblems)) {
       return;
     }
 
@@ -405,6 +411,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       manualSvgUploadFilesFingerprint(sourceFiles),
       manualSvgGeneratedScreenshotContrastKey(generatedScreenshotContrast, Boolean(screenshotSourceFile)),
       sendToTelegram ? telegramMessageText : 'telegram-off',
+      lenientValidation ? 'lenient' : 'strict',
     ].join(':'));
     setSubmitting(true);
     try {
@@ -412,6 +419,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         selectedOrderIds,
         createMdfMachineFileCard: false,
         matchMode: uploadMatchMode,
+        validationMode: lenientValidation ? 'lenient' : 'strict',
         requestedCutJobId,
         svgContentHash: parsed.svgContentHash,
         machine: machineName.trim() || null,
@@ -439,12 +447,19 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       const cutJobDisplayLabel = formatCutJobDisplayLabel(cutJobDisplayNumber, cutJobId);
       let mdfCardCreated = false;
       if (cutJobId && await askCreateMdfMachineFileCard()) {
+        const mdfCardIdempotencyKey = createIdempotencyKey([
+          parsed.svgContentHash,
+          requestedCutJobId ?? 'auto-number',
+          cutJobId,
+          lenientValidation ? 'lenient' : 'strict',
+          'mdf-card',
+        ].join(':'));
         const mdfResponse = await cncTelegramApi.manualSvgUpload({
           ...uploadBody,
           createMdfMachineFileCard: true,
           sourceFiles: [],
           telegramSend: { enabled: false, message: null },
-        }, createIdempotencyKey(`${parsed.svgContentHash}:mdf-card`));
+        }, mdfCardIdempotencyKey);
         mdfCardCreated = mdfResponse.createdMdfMachineFileCard;
       }
       const openCutJob = cutJobPath
@@ -515,6 +530,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     gcodeSourceFile,
     screenshotSourceFile,
     generatedScreenshotContrast,
+    lenientValidation,
     machineName,
     materialName,
     matchSummary,
@@ -555,6 +571,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       );
       const result = await parseSvgCutUploadFile(file, {
         allowGeometryFallbackItems: parseAsInformational,
+        includeVisualLabelOnlyItems: true,
         fallbackOrderName: fileNameHints.orderNames.join('+') || defaultOrderNames[0] || null,
       });
       setParsed(result);
@@ -611,6 +628,9 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
 
   const cutJobNumberSubmitBlocked = requestedCutJobId !== null && cutJobNumberCheck.status !== 'available';
   const orderDetailMatchLoading = !informationalUpload && eligibleLoading;
+  const strictSvgValidationBlocked = !lenientValidation && parsed !== null && parsed.cutLayout.status !== 'valid';
+  const noRecognizedSvgItems = parsed !== null && (parsed.cutLayout.items.length === 0 || parsed.items.length === 0);
+  const orderDetailMatchSubmitBlocked = !lenientValidation && orderDetailMatchLoading;
   const floatingPreview = svgPreview && svgPreviewExpanded ? (
     <FloatingSvgPreview
       preview={svgPreview}
@@ -661,7 +681,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         onOk={() => void submit()}
         confirmLoading={submitting}
         okButtonProps={{
-          disabled: !parsed || parsed.cutLayout.status !== 'valid' || selectedOrderIds.length === 0 || orderDetailMatchLoading || cutJobNumberSubmitBlocked,
+          disabled: !parsed || strictSvgValidationBlocked || noRecognizedSvgItems || selectedOrderIds.length === 0 || orderDetailMatchSubmitBlocked || cutJobNumberSubmitBlocked,
           icon: <FileAddOutlined />,
         }}
       >
@@ -692,12 +712,22 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
               parsed={parsed}
               eligibleLoading={orderDetailMatchLoading}
               matchMode={uploadMatchMode}
+              lenientValidation={lenientValidation}
               matchSummary={matchSummary}
               matchProblems={matchProblems}
             />
           )}
 
           <Form layout="vertical">
+            <Form.Item>
+              <Checkbox
+                checked={lenientValidation}
+                onChange={(event) => setLenientValidation(event.target.checked)}
+              >
+                Нестрогий режим
+              </Checkbox>
+            </Form.Item>
+
             <Form.Item label="Заказы в раскрое" required>
               <Select
                 mode="multiple"
@@ -763,14 +793,21 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
                     {preset.label}
                   </Button>
                 ))}
+                <Button
+                  size="small"
+                  onClick={() => setCommentText((current) => appendCommentLineBreak(current))}
+                >
+                  Перенос строки
+                </Button>
               </Space>
             </Form.Item>
 
             <Form.Item label="Комментарий">
-              <Input
+              <Input.TextArea
                 value={commentText}
                 onChange={(event) => setCommentText(normalizeManualSvgCommentInput(event.target.value))}
                 placeholder="весь заказ, фрезы, материал, переделка"
+                autoSize={{ minRows: 2, maxRows: 5 }}
               />
             </Form.Item>
             <Form.Item label="Telegram и файлы">
@@ -781,11 +818,12 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
                 >
                   Отправить файлы в Telegram-чат
                 </Checkbox>
-                <Input
+                <Input.TextArea
                   value={telegramMessage}
                   onChange={(event) => setTelegramMessage(normalizeManualSvgCommentInput(event.target.value))}
                   placeholder="Сообщение в Telegram; если пусто, будет использован комментарий"
                   disabled={!sendToTelegram}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
                 />
                 <Space wrap>
                   <Upload
@@ -1420,12 +1458,14 @@ function SvgValidationSummary({
   parsed,
   eligibleLoading,
   matchMode,
+  lenientValidation,
   matchSummary,
   matchProblems,
 }: {
   parsed: ParsedSvgUpload;
   eligibleLoading: boolean;
   matchMode: SvgUploadMatchMode;
+  lenientValidation: boolean;
   matchSummary: { matched: number; total: number; unmatched: number } | null;
   matchProblems: SvgMatchProblem[];
 }) {
@@ -1442,7 +1482,9 @@ function SvgValidationSummary({
         ? informational
           ? 'SVG прошел проверку для информативного раскроя'
           : 'SVG прошел базовую проверку'
-        : 'SVG не прошел проверку'}
+        : lenientValidation
+          ? 'SVG не прошел проверку, но будет принят в нестрогом режиме'
+          : 'SVG не прошел проверку'}
       description={(
         <Space direction="vertical" size={6}>
           <Space wrap>
@@ -1450,6 +1492,7 @@ function SvgValidationSummary({
             {layout.sheet && <Tag>{layout.sheet.widthMm} x {layout.sheet.heightMm} мм</Tag>}
             <Tag>{layout.acceptedItemCount ?? layout.items.length} деталей</Tag>
             <Tag>{layout.partContourCount ?? 0} контуров</Tag>
+            {lenientValidation && <Tag color="gold">нестрогий режим</Tag>}
             {informational && <Tag color="blue">без сверки ERP-деталей</Tag>}
             {matchSummary && (
               <Tag color={matchSummary.unmatched ? 'orange' : 'green'}>
@@ -1460,6 +1503,11 @@ function SvgValidationSummary({
           {informational && valid && (
             <Typography.Text type="secondary">
               Размеры и список деталей берутся из SVG. Задание будет связано с выбранными заказами без привязки к деталям заказа.
+            </Typography.Text>
+          )}
+          {lenientValidation && !informational && (
+            <Typography.Text type="secondary">
+              Ошибки и несовпадения показаны как предупреждения; список деталей будет взят из SVG.
             </Typography.Text>
           )}
           {layout.reasons.length > 0 && (
@@ -1967,9 +2015,15 @@ function dedupeCommentPresets(presets: SvgCommentPresetOption[]): SvgCommentPres
 }
 
 function appendCommentPreset(current: string, preset: string): string {
-  const base = normalizeManualSvgCommentInput(current).trimEnd();
+  const base = normalizeManualSvgCommentInput(current).replace(/[ \t]+$/u, '');
   const segment = preset.trimStart();
-  return base ? `${base} ${segment}` : segment;
+  if (!base) return segment;
+  return base.endsWith('\n') ? `${base}${segment}` : `${base} ${segment}`;
+}
+
+function appendCommentLineBreak(current: string): string {
+  const base = normalizeManualSvgCommentInput(current).replace(/[ \t]+$/u, '');
+  return base && !base.endsWith('\n') ? `${base}\n` : base;
 }
 
 function normalizeCommentPresetSegment(value: string): string {
@@ -1980,11 +2034,22 @@ function normalizeCommentPresetSegment(value: string): string {
 }
 
 function normalizeManualSvgCommentInput(value: string): string {
-  return value.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trimStart();
+  return value
+    .replace(/\r\n?/g, '\n')
+    .replace(/\t/g, ' ')
+    .split('\n')
+    .map((line) => line.replace(/ {2,}/g, ' ').trimStart())
+    .join('\n')
+    .replace(/\n{4,}/g, '\n\n\n');
 }
 
 function normalizeManualSvgCommentForSubmit(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+  return normalizeManualSvgCommentInput(value)
+    .split('\n')
+    .map((line) => line.trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function manualSvgUploadSourceFiles(files: Array<ManualSvgUploadFileState | null>): CncTelegramManualSvgUploadFile[] {

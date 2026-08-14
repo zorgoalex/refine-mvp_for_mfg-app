@@ -2339,8 +2339,8 @@ async function loadHdfConfig(tx: TransactionClient, orderId: number): Promise<Or
     `
     WITH settings AS (
       SELECT
-        MAX(CASE WHEN setting_key = 'production.hdf.min_side_threshold_mm' THEN value_json END) AS threshold_json,
-        MAX(CASE WHEN setting_key = 'production.hdf.sheet_material_type_id' THEN value_json END) AS material_json
+        MAX(CASE WHEN setting_key = 'production.hdf.min_side_threshold_mm' THEN value_json::text END)::jsonb AS threshold_json,
+        MAX(CASE WHEN setting_key = 'production.hdf.sheet_material_type_id' THEN value_json::text END)::jsonb AS material_json
       FROM app_settings
       WHERE setting_key IN ('production.hdf.min_side_threshold_mm', 'production.hdf.sheet_material_type_id')
         AND is_active = true

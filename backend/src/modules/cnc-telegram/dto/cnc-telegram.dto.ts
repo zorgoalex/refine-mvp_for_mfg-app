@@ -273,6 +273,7 @@ export interface CncTelegramManualSvgUploadDto {
   selectedOrderIds: number[];
   createMdfMachineFileCard: boolean;
   matchMode: 'order_details' | 'informational';
+  validationMode: 'strict' | 'lenient';
   requestedCutJobId?: number | null;
   svgContentHash: string;
   workday?: string;

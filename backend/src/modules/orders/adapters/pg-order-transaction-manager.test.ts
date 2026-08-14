@@ -331,10 +331,11 @@ describe('PgOrderTransactionManager', () => {
     // Flag must NOT appear in the SQL
     expect(normalizeSql(updateQuery!.text)).not.toContain('production_status_from_details_enabled');
     expect(normalizeSql(updateQuery!.text)).not.toContain('production_status_id =');
-    // Params: $1=orderId + 24 SET fields = 25 total; highest placeholder is $25.
-    expect(updateQuery!.params).toHaveLength(25);
+    // Params: $1=orderId + 25 SET fields = 26 total; highest placeholder is $26.
+    expect(updateQuery!.params).toHaveLength(26);
     expect(normalizeSql(updateQuery!.text)).toContain('ref_key_1c = $24');
     expect(normalizeSql(updateQuery!.text)).toContain('sheet_material_type_id = $25');
+    expect(normalizeSql(updateQuery!.text)).toContain('hdf_min_threshold_mm = $26');
     // Flag value (false) must not appear in bind params (boolean false could be ambiguous, check no flag column)
   });
 
@@ -361,6 +362,32 @@ describe('PgOrderTransactionManager', () => {
     expect(normalizeSql(insertQuery!.text)).toContain('project_id');
     // Flag is at $9 in the INSERT, bind index 8
     expect(insertQuery!.params[8]).toBe(true);
+  });
+
+  it('reconciles HDF details without using unsupported max(jsonb)', async () => {
+    const database = createDatabase({ throwOnJsonbMax: true });
+    const manager = new PgOrderTransactionManager(database.service);
+
+    await expect(
+      manager.runInTransaction((uow) =>
+        uow.reconcileHdfDetails({
+          orderId: 100,
+          currentUser: currentUser(),
+          requestId: 'req-hdf-reconcile',
+        }),
+      ),
+    ).resolves.toMatchObject({
+      createdHdfDetailIds: [],
+      updatedHdfDetailIds: [],
+      deactivatedHdfDetailIds: [],
+      sourceChangedHdfDetailIds: [],
+    });
+
+    const configQuery = database.queries.find((query) =>
+      normalizeSql(query.text).includes('FROM app_settings'),
+    );
+    expect(configQuery).toBeDefined();
+    expect(normalizeSql(configQuery!.text)).toContain('value_json::text');
   });
 
   it('auto-creates a project root when create-order omits projectId', async () => {
@@ -1330,6 +1357,7 @@ function createDatabase(
     restoreOrderErrorCode?: string;
     duplicateNameRow?: { order_id: number; order_name: string } | null;
     suggestedNextName?: string | null;
+    throwOnJsonbMax?: boolean;
   } = {},
 ) {
   const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -1338,6 +1366,14 @@ function createDatabase(
     async query(text: string, params: readonly unknown[] = []) {
       queries.push({ text, params });
       const normalized = normalizeSql(text);
+
+      if (
+        options.throwOnJsonbMax &&
+        normalized.includes('MAX(CASE WHEN setting_key') &&
+        normalized.includes('THEN value_json END')
+      ) {
+        throw Object.assign(new Error('function max(jsonb) does not exist'), { code: '42883' });
+      }
 
       if (normalized.includes('pg_advisory_xact_lock')) {
         return { rows: [], rowCount: 1 };

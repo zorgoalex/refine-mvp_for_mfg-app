@@ -138,6 +138,7 @@ describe('CncTelegramController parsing', () => {
       selectedOrderIds: [7, 42],
       createMdfMachineFileCard: true,
       matchMode: 'order_details',
+      validationMode: 'strict',
       requestedCutJobId: 777,
       svgContentHash: 'a'.repeat(64),
     });
@@ -145,8 +146,10 @@ describe('CncTelegramController parsing', () => {
     expect(parseManualSvgUpload({
       ...manualSvgUploadPayload(),
       matchMode: 'informational',
+      validationMode: 'lenient',
     }, 'manual-svg:test:2')).toMatchObject({
       matchMode: 'informational',
+      validationMode: 'lenient',
     });
   });
 
@@ -223,6 +226,26 @@ describe('CncTelegramController parsing', () => {
         },
       }, 'manual-svg:test:1'),
     ).toThrow(ApiError);
+  });
+
+  it('accepts invalid manual SVG layout in lenient mode when recognized details are present', () => {
+    const parsed = parseManualSvgUpload({
+      ...manualSvgUploadPayload(),
+      validationMode: 'lenient',
+      cutLayout: {
+        ...manualSvgUploadPayload().cutLayout,
+        status: 'invalid',
+        reasons: ['Для верхней подписи 2790 #1 не найден контур детали; деталь создана по подписи'],
+      },
+    }, 'manual-svg:test:lenient-invalid');
+
+    expect(parsed).toMatchObject({
+      validationMode: 'lenient',
+      cutLayout: {
+        status: 'invalid',
+        items: [expect.objectContaining({ orderName: '2689', detailNumber: 31 })],
+      },
+    });
   });
 
   it('accepts manual SVG comment presets and rejects extra fields', () => {

@@ -1954,6 +1954,138 @@ describe('PgCncTelegramRepository', () => {
     expect(commandComplete?.params).toEqual([700, commandInsert?.params[1], 704]);
   });
 
+  it('keeps ERP detail matches when manual SVG upload uses lenient validation', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/WHERE p\.packet_id = \$1::uuid/i.test(text) && /LEFT JOIN cnc_telegram_packet_items/i.test(text)) {
+          return { rows: [packetRow({ svg_cut_job_id: 700, svg_cut_result_id: 704, svg_cut_import_status: 'imported' })] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/SELECT\s+lower\(trim\(o\.order_name\)\) AS order_key/i.test(text)) {
+          return {
+            rows: [{
+              order_key: '2689',
+              order_id: 2689,
+              detail_id: 3101,
+              detail_number: 31,
+              width: 497,
+              height: 477,
+            }],
+          };
+        }
+        if (/SELECT\s+order_id,\s+order_name\s+FROM orders\s+WHERE order_id = ANY/i.test(text)) {
+          return { rows: [{ order_id: 2689, order_name: '2689' }] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 91 }] };
+        }
+        if (/SELECT od\.detail_id, od\.order_id/i.test(text)) {
+          return {
+            rows: [{
+              detail_id: 3101,
+              order_id: 2689,
+              order_name: '2689',
+              order_delete_flag: false,
+              detail_number: 31,
+              detail_name: 'Detail 31',
+              height: 477,
+              width: 497,
+              order_quantity: 4,
+              area: 0.237,
+              material_id: 10,
+              sheet_material_type_id: 77,
+              sheet_material_width_mm: 2070,
+              sheet_material_height_mm: 2800,
+              material_name: 'MDF 18',
+              doweling: false,
+              milling_type_id: null,
+              milling_type_name: null,
+              edge_type_id: null,
+              edge_type_name: null,
+              film_id: 88,
+              film_name: 'White',
+              priority: null,
+              production_status_id: null,
+              production_status_name: null,
+              joint_order_id: null,
+              note: null,
+              link_cutting_file: null,
+              link_cutting_image_file: null,
+              link_cad_file: null,
+              link_pdf_file: null,
+            }],
+          };
+        }
+        if (/SELECT existing_job\.cut_job_id/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cut_job\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_id: 700, created_at: '2026-08-12T08:00:00.000Z' }] };
+        }
+        if (/INSERT INTO cut_group\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_id: 701 }] };
+        }
+        if (/INSERT INTO cut_job_item\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_item_id: 702 }] };
+        }
+        if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_sheet_id: 703 }] };
+        }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) {
+          return { rows: [{ cut_result_id: 704 }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text) && /p\.workday/i.test(text)) {
+          return { rows: [packetRow({ svg_cut_job_id: 700, svg_cut_result_id: 704, svg_cut_import_status: 'imported' })] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository({
+      transaction: vi.fn((handler) => handler(tx)),
+    } as never);
+    const dto = {
+      ...manualSvgUploadDto(false, 'cnc:test:manual-svg:lenient-match'),
+      validationMode: 'lenient' as const,
+      cutLayout: {
+        ...manualSvgValidCutLayout(),
+        status: 'invalid' as const,
+        reasons: ['Размер листа отличается от материала'],
+      },
+    };
+
+    await repo.manualSvgUpload({
+      currentUser: user(),
+      dto,
+      requestId: 'request-manual-svg-lenient-match',
+    });
+
+    const packetItemInsert = queries.find((query) => /INSERT INTO cnc_telegram_packet_items/i.test(query.text));
+    const cutJobItemInsert = queries.find((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text));
+    const resultInsert = queries.find((query) => /INSERT INTO cut_result\s*\(/i.test(query.text));
+    const snapshot = JSON.parse(String(resultInsert?.params[4]));
+
+    expect(packetItemInsert?.params[9]).toBe(2689);
+    expect(packetItemInsert?.params[10]).toBe(3101);
+    expect(packetItemInsert?.params[11]).toBe('matched');
+    expect(cutJobItemInsert?.params[2]).toBe(3101);
+    expect(cutJobItemInsert?.params[3]).toBe(2689);
+    expect(snapshot.groups[0].sheets[0].placements.pieces[0].label.detailId).toBe(3101);
+    expect(snapshot.groups[0].sheets[0].placements.pieces[0].label.orderName).toBe('2689');
+  });
+
   it('does not consult ERP resolver before same-version payload conflict checks', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
@@ -2825,6 +2957,7 @@ function manualSvgUploadDto(
     selectedOrderIds: [2689],
     createMdfMachineFileCard,
     matchMode: 'order_details' as const,
+    validationMode: 'strict' as const,
     requestedCutJobId,
     svgContentHash: 'a'.repeat(64),
     workday: '2026-08-12',
@@ -2917,6 +3050,7 @@ function manualSvgExternalPacketKeyForTest(dto: ReturnType<typeof manualSvgUploa
   const identityHash = sha256JsonForTest({
     kind: 'erp-manual-svg-upload-v1',
     matchMode: dto.matchMode,
+    validationMode: dto.validationMode,
     selectedOrderIds: [...dto.selectedOrderIds].sort((a, b) => a - b),
     requestedCutJobId: dto.requestedCutJobId ?? null,
     svgContentHash: dto.svgContentHash.toLowerCase(),
