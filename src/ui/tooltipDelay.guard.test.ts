@@ -48,7 +48,7 @@ describe('delayed tooltip defaults', () => {
   });
 
   it('applies a minimum hover delay to regular, popover, and table sorter tooltips', () => {
-    expect(wrapperSource).toContain('APP_TOOLTIP_MOUSE_ENTER_DELAY_SECONDS = 0.9');
+    expect(wrapperSource).toContain('APP_TOOLTIP_MOUSE_ENTER_DELAY_SECONDS = 2.0');
     expect(wrapperSource).toContain('Math.max(delay ?? APP_TOOLTIP_MOUSE_ENTER_DELAY_SECONDS');
     expect(wrapperSource).toContain('React.forwardRef<unknown, AntdTooltipProps>');
     expect(wrapperSource).toContain('React.forwardRef<unknown, AntdPopoverProps>');
@@ -57,7 +57,7 @@ describe('delayed tooltip defaults', () => {
   });
 
   it('delays AntD tooltip and popover motion overlays that bypass app wrappers', () => {
-    expect(appStyles).toContain('--app-tooltip-enter-delay: 0.9s');
+    expect(appStyles).toContain('--app-tooltip-enter-delay: 2.0s');
     expect(appStyles).toContain('.ant-tooltip.ant-zoom-big-fast-enter');
     expect(appStyles).toContain('.ant-popover.ant-zoom-big-enter');
     expect(appStyles).toContain('animation-delay: var(--app-tooltip-enter-delay) !important;');
