@@ -1,5 +1,6 @@
 import { Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Alert, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Slider, Space, Tag, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import {
@@ -94,7 +95,7 @@ const FLOATING_SVG_PREVIEW_DEFAULT_HEIGHT = 620;
 const MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 const MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT = 1.45;
 const MANUAL_SVG_SCREENSHOT_CONTRAST_MIN = 1;
-const MANUAL_SVG_SCREENSHOT_CONTRAST_MAX = 3;
+const MANUAL_SVG_SCREENSHOT_CONTRAST_MAX = 6;
 const MANUAL_SVG_SCREENSHOT_CONTRAST_STEP = 0.05;
 
 const DEFAULT_COMMENT_PRESETS: SvgCommentPresetOption[] = [
@@ -677,6 +678,8 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         )}
         width={1040}
         onCancel={resetAndClose}
+        maskClosable={false}
+        keyboard={false}
         okText="Сформировать раскрой"
         onOk={() => void submit()}
         confirmLoading={submitting}
@@ -1130,16 +1133,9 @@ function FloatingSvgPreview({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    event.stopPropagation();
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -1196,13 +1192,16 @@ function FloatingSvgPreview({
     if (resizeRef.current?.pointerId === event.pointerId) resizeRef.current = null;
   }, []);
 
-  return (
+  const previewNode = (
     <div
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
       style={{
         position: 'fixed',
         left: rect.left,
         top: rect.top,
-        zIndex: 1100,
+        zIndex: 2000,
         width: rect.width,
         height: rect.height,
         borderRadius: 8,
@@ -1303,6 +1302,9 @@ function FloatingSvgPreview({
       ))}
     </div>
   );
+
+  if (typeof document === 'undefined') return previewNode;
+  return createPortal(previewNode, document.body);
 }
 
 function stopFloatingSvgPreviewActionPointerDown(event: React.PointerEvent): void {

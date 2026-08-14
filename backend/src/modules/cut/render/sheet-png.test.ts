@@ -100,6 +100,34 @@ describe('renderRawSvgPng generated screenshot contrast', () => {
     expect(pngChannel(enhanced, enhancedIndex + 1)).toBeLessThan(pngChannel(baseline, baselineIndex + 1));
     expect(pngChannel(enhanced, enhancedIndex + 2)).toBeLessThan(pngChannel(baseline, baselineIndex + 2));
   });
+
+  it('honors 600% contrast for generated screenshots', () => {
+    const svg = [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">',
+      '<rect width="20" height="20" fill="#fff"/>',
+      '<rect x="4" y="4" width="12" height="12" fill="#eeeeee"/>',
+      '</svg>',
+    ].join('');
+    const contrast300 = PNG.sync.read(renderRawSvgPng({
+      svg,
+      targetPx: 100,
+      sheetWidthMm: 20,
+      sheetHeightMm: 20,
+      contrast: 3,
+    }));
+    const contrast600 = PNG.sync.read(renderRawSvgPng({
+      svg,
+      targetPx: 100,
+      sheetWidthMm: 20,
+      sheetHeightMm: 20,
+      contrast: 6,
+    }));
+    const index = (50 * contrast300.width + 50) * 4;
+
+    expect(pngChannel(contrast600, index)).toBeLessThan(pngChannel(contrast300, index));
+    expect(pngChannel(contrast600, index + 1)).toBeLessThan(pngChannel(contrast300, index + 1));
+    expect(pngChannel(contrast600, index + 2)).toBeLessThan(pngChannel(contrast300, index + 2));
+  });
 });
 
 function pngChannel(image: PNG, index: number): number {

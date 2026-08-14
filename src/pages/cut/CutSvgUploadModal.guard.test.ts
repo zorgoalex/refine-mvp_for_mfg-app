@@ -39,6 +39,11 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('Это предупреждение не запрещает новый раскрой');
     expect(modal).toContain('SvgUploadPreview');
     expect(modal).toContain('FloatingSvgPreview');
+    expect(modal).toContain("import { createPortal } from 'react-dom'");
+    expect(modal).toContain('maskClosable={false}');
+    expect(modal).toContain('keyboard={false}');
+    expect(modal).toContain('createPortal(previewNode, document.body)');
+    expect(modal).toContain('zIndex: 2000');
     expect(modal).toContain('Превью SVG');
     expect(modal).toContain('Контраст скрина');
     expect(modal).toContain('MANUAL_SVG_SCREENSHOT_CONTRAST_DEFAULT');

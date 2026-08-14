@@ -21,7 +21,7 @@ export const RENDER_PRESETS = {
 
 export const RAW_SVG_SCREENSHOT_CONTRAST_DEFAULT = 1.45;
 export const RAW_SVG_SCREENSHOT_CONTRAST_MIN = 1;
-export const RAW_SVG_SCREENSHOT_CONTRAST_MAX = 3;
+export const RAW_SVG_SCREENSHOT_CONTRAST_MAX = 6;
 
 export type RenderPreset = keyof typeof RENDER_PRESETS;
 
