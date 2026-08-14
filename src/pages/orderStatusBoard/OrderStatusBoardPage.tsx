@@ -216,6 +216,42 @@ const DND_BACKEND_OPTIONS = {
   delayTouchStart: 420,
   touchSlop: 12,
 };
+const CNC_PINCH_ZOOM_MIN_SCALE = 1;
+const CNC_PINCH_ZOOM_MAX_SCALE = 4;
+const CNC_PINCH_ZOOM_RESET_THRESHOLD = 1.03;
+const CNC_PINCH_ZOOM_RESET_TRANSFORM: CncPinchZoomTransform = {
+  scale: CNC_PINCH_ZOOM_MIN_SCALE,
+  x: 0,
+  y: 0,
+};
+
+interface CncPinchZoomPoint {
+  x: number;
+  y: number;
+}
+
+interface CncPinchZoomTransform extends CncPinchZoomPoint {
+  scale: number;
+}
+
+type CncPinchZoomGesture =
+  | {
+    mode: 'pinch';
+    startDistance: number;
+    startScale: number;
+    startX: number;
+    startY: number;
+    centerX: number;
+    centerY: number;
+  }
+  | {
+    mode: 'pan';
+    startScale: number;
+    startX: number;
+    startY: number;
+    pointerX: number;
+    pointerY: number;
+  };
 
 function isKeyboardMoveMenuTrigger(event: React.KeyboardEvent<HTMLElement>): boolean {
   return (
@@ -3885,13 +3921,217 @@ const CncDetailedMachineScreenshot: React.FC<CncDetailedMachineScreenshotProps> 
     );
   }
   return (
-    <img
+    <CncPinchZoomImage
+      viewportClassName="cnc-pinch-zoom--detailed-machine"
       className="cnc-detailed-machine-map__screenshot"
       src={objectUrl}
       alt={`Скрин раскроя ${title}`}
     />
   );
 };
+
+interface CncPinchZoomImageProps {
+  src: string;
+  alt: string;
+  className: string;
+  viewportClassName?: string;
+}
+
+const CncPinchZoomImage: React.FC<CncPinchZoomImageProps> = ({
+  src,
+  alt,
+  className,
+  viewportClassName,
+}) => {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const gestureRef = useRef<CncPinchZoomGesture | null>(null);
+  const [transform, setTransform] = useState<CncPinchZoomTransform>(CNC_PINCH_ZOOM_RESET_TRANSFORM);
+  const [gestureActive, setGestureActive] = useState(false);
+  const zoomed = transform.scale > CNC_PINCH_ZOOM_MIN_SCALE;
+
+  const clampTransform = useCallback((next: CncPinchZoomTransform): CncPinchZoomTransform => (
+    clampCncPinchZoomTransform(next, viewportRef.current, imageRef.current)
+  ), []);
+
+  const resetZoom = useCallback(() => {
+    gestureRef.current = null;
+    setGestureActive(false);
+    setTransform(CNC_PINCH_ZOOM_RESET_TRANSFORM);
+  }, []);
+
+  useEffect(() => {
+    resetZoom();
+  }, [resetZoom, src]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    const preventNativeScroll = (event: TouchEvent) => {
+      if (!gestureRef.current && transform.scale <= CNC_PINCH_ZOOM_MIN_SCALE) return;
+      if (event.cancelable) event.preventDefault();
+    };
+    viewport.addEventListener('touchmove', preventNativeScroll, { passive: false });
+    return () => viewport.removeEventListener('touchmove', preventNativeScroll);
+  }, [transform.scale]);
+
+  const startPinch = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const first = cncTouchPoint(event.touches[0]);
+    const second = cncTouchPoint(event.touches[1]);
+    const center = cncTouchCenterRelativeToViewport(viewportRef.current, first, second);
+    gestureRef.current = {
+      mode: 'pinch',
+      startDistance: Math.max(1, cncPointDistance(first, second)),
+      startScale: transform.scale,
+      startX: transform.x,
+      startY: transform.y,
+      centerX: center.x,
+      centerY: center.y,
+    };
+    setGestureActive(true);
+  }, [transform]);
+
+  const startPan = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const point = cncTouchPoint(event.touches[0]);
+    gestureRef.current = {
+      mode: 'pan',
+      startScale: transform.scale,
+      startX: transform.x,
+      startY: transform.y,
+      pointerX: point.x,
+      pointerY: point.y,
+    };
+    setGestureActive(true);
+  }, [transform]);
+
+  const handleTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    stopCncCardNestedInteraction(event);
+    if (event.touches.length >= 2) {
+      if (event.cancelable) event.preventDefault();
+      startPinch(event);
+      return;
+    }
+    if (event.touches.length === 1 && transform.scale > CNC_PINCH_ZOOM_MIN_SCALE) {
+      if (event.cancelable) event.preventDefault();
+      startPan(event);
+    }
+  }, [startPan, startPinch, transform.scale]);
+
+  const handleTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    stopCncCardNestedInteraction(event);
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+    if (gesture.mode === 'pinch' && event.touches.length >= 2) {
+      if (event.cancelable) event.preventDefault();
+      const first = cncTouchPoint(event.touches[0]);
+      const second = cncTouchPoint(event.touches[1]);
+      const nextScale = clampCncPinchZoomScale(
+        gesture.startScale * (cncPointDistance(first, second) / gesture.startDistance),
+      );
+      const ratio = nextScale / gesture.startScale;
+      setTransform(clampTransform({
+        scale: nextScale,
+        x: gesture.centerX - ((gesture.centerX - gesture.startX) * ratio),
+        y: gesture.centerY - ((gesture.centerY - gesture.startY) * ratio),
+      }));
+      return;
+    }
+    if (gesture.mode === 'pan' && event.touches.length === 1) {
+      if (event.cancelable) event.preventDefault();
+      const point = cncTouchPoint(event.touches[0]);
+      setTransform(clampTransform({
+        scale: gesture.startScale,
+        x: gesture.startX + point.x - gesture.pointerX,
+        y: gesture.startY + point.y - gesture.pointerY,
+      }));
+    }
+  }, [clampTransform]);
+
+  const finishGesture = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    stopCncCardNestedInteraction(event);
+    if (event.touches.length === 1 && transform.scale > CNC_PINCH_ZOOM_MIN_SCALE) {
+      startPan(event);
+      return;
+    }
+    gestureRef.current = null;
+    setGestureActive(false);
+    setTransform((current) => {
+      if (current.scale < CNC_PINCH_ZOOM_RESET_THRESHOLD) return CNC_PINCH_ZOOM_RESET_TRANSFORM;
+      return clampTransform(current);
+    });
+  }, [clampTransform, startPan, transform.scale]);
+
+  return (
+    <div
+      ref={viewportRef}
+      className={['cnc-pinch-zoom', viewportClassName ?? ''].filter(Boolean).join(' ')}
+      data-cnc-manual-drag-ignore="true"
+      data-gesture-active={gestureActive ? 'true' : 'false'}
+      data-zoomed={zoomed ? 'true' : 'false'}
+      onPointerDown={stopCncCardNestedInteraction}
+      onMouseDown={stopCncCardNestedInteraction}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={finishGesture}
+      onTouchCancel={finishGesture}
+      onDoubleClick={resetZoom}
+    >
+      <img
+        ref={imageRef}
+        className={className}
+        src={src}
+        alt={alt}
+        draggable={false}
+        style={{
+          transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`,
+        }}
+      />
+    </div>
+  );
+};
+
+function cncTouchPoint(touch: Touch): CncPinchZoomPoint {
+  return { x: touch.clientX, y: touch.clientY };
+}
+
+function cncPointDistance(first: CncPinchZoomPoint, second: CncPinchZoomPoint): number {
+  return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function cncTouchCenterRelativeToViewport(
+  viewport: HTMLElement | null,
+  first: CncPinchZoomPoint,
+  second: CncPinchZoomPoint,
+): CncPinchZoomPoint {
+  if (!viewport) return { x: 0, y: 0 };
+  const rect = viewport.getBoundingClientRect();
+  return {
+    x: ((first.x + second.x) / 2) - rect.left - (rect.width / 2),
+    y: ((first.y + second.y) / 2) - rect.top - (rect.height / 2),
+  };
+}
+
+function clampCncPinchZoomScale(value: number): number {
+  return Math.min(CNC_PINCH_ZOOM_MAX_SCALE, Math.max(CNC_PINCH_ZOOM_MIN_SCALE, Number(value.toFixed(3))));
+}
+
+function clampCncPinchZoomTransform(
+  transform: CncPinchZoomTransform,
+  viewport: HTMLElement | null,
+  image: HTMLImageElement | null,
+): CncPinchZoomTransform {
+  const scale = clampCncPinchZoomScale(transform.scale);
+  if (!viewport || !image || scale <= CNC_PINCH_ZOOM_MIN_SCALE) {
+    return { scale, x: 0, y: 0 };
+  }
+  const maxX = Math.max(0, ((image.offsetWidth * scale) - viewport.clientWidth) / 2);
+  const maxY = Math.max(0, ((image.offsetHeight * scale) - viewport.clientHeight) / 2);
+  return {
+    scale,
+    x: Math.min(maxX, Math.max(-maxX, transform.x)),
+    y: Math.min(maxY, Math.max(-maxY, transform.y)),
+  };
+}
 
 interface CncOrderSummaryLineProps {
   summary: CncOrderSummary;
@@ -5062,7 +5302,8 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
           )}
           {error && <Alert type="warning" showIcon message={error} />}
           {objectUrl && (
-            <img
+            <CncPinchZoomImage
+              viewportClassName="cnc-pinch-zoom--packet-sheet"
               className="cnc-packet-card__sheet-image"
               src={objectUrl}
               alt={`Скрин листа ${title}`}

@@ -2541,6 +2541,48 @@
   background: #fff;
 }
 
+.cnc-pinch-zoom {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 6px;
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+}
+
+.cnc-pinch-zoom[data-gesture-active="true"],
+.cnc-pinch-zoom[data-zoomed="true"] {
+  cursor: grab;
+  touch-action: none;
+}
+
+.cnc-pinch-zoom[data-gesture-active="true"] {
+  cursor: grabbing;
+}
+
+.cnc-pinch-zoom img {
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+  transition-property: transform;
+  transition-duration: 120ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.cnc-pinch-zoom[data-gesture-active="true"] img {
+  transition-duration: 0ms;
+}
+
+.cnc-pinch-zoom--packet-sheet {
+  width: 100%;
+}
+
+.cnc-pinch-zoom--detailed-machine {
+  justify-self: center;
+}
+
 .cnc-bath-card--detailed {
   width: calc(200% + var(--status-board-cnc-column-gap));
   max-width: calc(200% + var(--status-board-cnc-column-gap));
