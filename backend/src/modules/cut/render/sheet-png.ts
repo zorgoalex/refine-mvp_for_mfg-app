@@ -22,6 +22,7 @@ export const RENDER_PRESETS = {
 export const RAW_SVG_SCREENSHOT_CONTRAST_DEFAULT = 1.45;
 export const RAW_SVG_SCREENSHOT_CONTRAST_MIN = 1;
 export const RAW_SVG_SCREENSHOT_CONTRAST_MAX = 6;
+export const RAW_SVG_SCREENSHOT_MIN_STROKE_PX = 2.4;
 
 export type RenderPreset = keyof typeof RENDER_PRESETS;
 
@@ -105,7 +106,7 @@ export function renderRawSvgPng(input: RenderRawSvgPngInput): Buffer {
     ? ({ mode: 'height', value: input.targetPx } as const)
     : ({ mode: 'width', value: input.targetPx } as const);
 
-  const resvg = new Resvg(input.svg, {
+  const resvg = new Resvg(prepareRawSvgForScreenshot(input.svg, input.targetPx), {
     fitTo,
     font: {
       fontFiles: [requireFontPath()],
@@ -114,6 +115,12 @@ export function renderRawSvgPng(input: RenderRawSvgPngInput): Buffer {
     },
   });
   return enhanceRawSvgScreenshotContrast(Buffer.from(resvg.render().asPng()), input.contrast);
+}
+
+export function prepareRawSvgForScreenshot(svg: string, targetPx: number): string {
+  const minStrokeWidth = rawSvgMinStrokeWidthUserUnits(svg, targetPx);
+  if (minStrokeWidth === null) return svg;
+  return widenRawSvgScreenshotStrokes(svg, minStrokeWidth);
 }
 
 export function normalizeRawSvgScreenshotContrast(value: number | null | undefined): number {
@@ -153,4 +160,72 @@ export function enhanceRawSvgScreenshotContrast(png: Buffer, contrast: number | 
 
 function darkenAgainstWhite(value: number, factor: number): number {
   return Math.max(0, Math.min(255, Math.round(255 - (255 - value) * factor)));
+}
+
+function rawSvgMinStrokeWidthUserUnits(svg: string, targetPx: number): number | null {
+  if (!Number.isFinite(targetPx) || targetPx <= 0) return null;
+  const longSide = rawSvgLongSideUserUnits(svg);
+  if (longSide === null) return null;
+  const minStrokeWidth = longSide / targetPx * RAW_SVG_SCREENSHOT_MIN_STROKE_PX;
+  return Number.isFinite(minStrokeWidth) && minStrokeWidth > 0 ? minStrokeWidth : null;
+}
+
+function rawSvgLongSideUserUnits(svg: string): number | null {
+  const viewBoxMatch = svg.match(/\bviewBox\s*=\s*(["'])([^"']+)\1/i);
+  if (viewBoxMatch?.[2]) {
+    const values = viewBoxMatch[2]
+      .trim()
+      .split(/[\s,]+/)
+      .map((value) => Number(value));
+    const width = values[2] ?? 0;
+    const height = values[3] ?? 0;
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      return Math.max(width, height);
+    }
+  }
+
+  const width = rawSvgRootLength(svg, 'width');
+  const height = rawSvgRootLength(svg, 'height');
+  if (width === null || height === null) return null;
+  return Math.max(width, height);
+}
+
+function rawSvgRootLength(svg: string, attr: 'width' | 'height'): number | null {
+  const svgOpenMatch = svg.match(/<svg\b[^>]*>/i);
+  const attrMatch = svgOpenMatch?.[0].match(new RegExp(`\\b${attr}\\s*=\\s*(["'])([^"']+)\\1`, 'i'));
+  if (!attrMatch?.[2]) return null;
+  const lengthMatch = attrMatch[2].trim().match(/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/);
+  if (!lengthMatch?.[0]) return null;
+  const value = Number(lengthMatch[0]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function widenRawSvgScreenshotStrokes(svg: string, minStrokeWidth: number): string {
+  const minStrokeWidthText = formatSvgNumber(minStrokeWidth);
+  const svgNumber = '[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?';
+  const cssStrokeWidth = new RegExp(`(\\bstroke-width\\s*:\\s*)(${svgNumber})(?!\\s*[a-zA-Z%])`, 'gi');
+  const attrStrokeWidth = new RegExp(`(\\bstroke-width\\s*=\\s*)(["'])(${svgNumber})(?!\\s*[a-zA-Z%])\\2`, 'gi');
+
+  return svg
+    .replace(cssStrokeWidth, (match, prefix: string, rawWidth: string) =>
+      rawSvgStrokeWidthReplacement(match, prefix, '', rawWidth, minStrokeWidth, minStrokeWidthText))
+    .replace(attrStrokeWidth, (match, prefix: string, quote: string, rawWidth: string) =>
+      rawSvgStrokeWidthReplacement(match, prefix, quote, rawWidth, minStrokeWidth, minStrokeWidthText));
+}
+
+function rawSvgStrokeWidthReplacement(
+  match: string,
+  prefix: string,
+  quote: string,
+  rawWidth: string,
+  minStrokeWidth: number,
+  minStrokeWidthText: string,
+): string {
+  const width = Number(rawWidth);
+  if (!Number.isFinite(width) || width <= 0 || width >= minStrokeWidth) return match;
+  return quote ? `${prefix}${quote}${minStrokeWidthText}${quote}` : `${prefix}${minStrokeWidthText}`;
+}
+
+function formatSvgNumber(value: number): string {
+  return Number(value.toFixed(3)).toString();
 }
