@@ -162,6 +162,9 @@ export const apiRoutes = {
   },
   productionTechSettings: {
     hdf: backendApiPath('/production-tech-settings/hdf'),
+    extraResources: backendApiPath('/production-tech-settings/hdf/extra-resources'),
+    extraResource: (extraResourceId: number) =>
+      backendApiPath(`/production-tech-settings/hdf/extra-resources/${extraResourceId}`),
     hdfMillingType: (millingTypeId: number) =>
       backendApiPath(`/production-tech-settings/hdf/milling-types/${millingTypeId}`),
   },

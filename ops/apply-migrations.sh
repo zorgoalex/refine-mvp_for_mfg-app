@@ -1152,6 +1152,13 @@ probe_file() {
     114_production_status_always_from_details*) probe_all \
                      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='recalc_order_production_status' AND prosrc LIKE '%erp.order_status_to_details_sync%' AND prosrc NOT LIKE '%v_enabled%');" \
                      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='trg_orders_sync_details_status' AND prosrc LIKE '%erp.detail_status_to_order_recalc%' AND prosrc NOT LIKE '%NEW.production_status_from_details_enabled%');" ;;
+    115_cnc_telegram_packet_mdf_board_hidden*) probe_all \
+                     "$(q_col cnc_telegram_packets mdf_board_hidden_at)" \
+                     "$(q_col cnc_telegram_packets mdf_board_hidden_by)" \
+                     "$(q_col cnc_telegram_packets mdf_board_hidden_reason)" \
+                     "$(q_col cnc_telegram_packets mdf_board_hidden_cut_job_id)" \
+                     "$(q_idx idx_cnc_telegram_packets_mdf_visible_workday)" \
+                     "$(q_idx idx_cnc_telegram_packets_mdf_hidden_cut_job)" ;;
     115_vacuum_cut_numbering*) probe_all \
                      "$(q_col bazis_cut_set_details source_bath_cut_number)" \
                      "SELECT col_description(
@@ -1436,6 +1443,21 @@ probe_file() {
     128_order_detail_hdf_parameter_override*) probe_all \
                      "$(q_col order_details hdf_parameter_override_mm)" \
                      "$(q_con_on order_details chk_order_details_hdf_parameter_override_mm)" ;;
+    129_extra_resources_directory*) probe_all \
+                     "$(q_tbl extra_resources)" \
+                     "$(q_col extra_resources extra_resource_id)" \
+                     "$(q_col extra_resources resource_kind)" \
+                     "$(q_col extra_resources resource_name)" \
+                     "$(q_col extra_resources unit_id)" \
+                     "$(q_col extra_resources accounting_method)" \
+                     "$(q_col extra_resources default_parameter_name)" \
+                     "$(q_col extra_resources default_parameter_mm)" \
+                     "$(q_col extra_resources hdf_auto_default)" \
+                     "$(q_col extra_resources is_active)" \
+                     "$(q_col extra_resources version)" \
+                     "$(q_col milling_type_extra_resources extra_resource_id)" \
+                     "$(q_idx uq_extra_resources_active_kind_name)" \
+                     "$(q_idx idx_milling_type_extra_resources_extra_resource)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1447,7 +1469,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

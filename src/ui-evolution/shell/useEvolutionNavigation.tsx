@@ -62,7 +62,7 @@ export const EVOLUTION_CATEGORY_MAP: Record<string, (typeof EVOLUTION_CATEGORY_O
   materials: 'Данные',
   sheet_material_types: 'Данные',
   milling_types: 'Данные',
-  milling_type_extra_resources: 'Данные',
+  extra_resources: 'Данные',
   edge_types: 'Данные',
   film_types: 'Данные',
   material_types: 'Данные',

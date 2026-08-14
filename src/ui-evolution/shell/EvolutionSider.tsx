@@ -44,7 +44,7 @@ export const EvolutionSider: React.FC<EvolutionSiderProps> = ({ collapsed, onCol
       .find((route): route is string => Boolean(route)) ?? fallback
   );
   const isActive = (keys: readonly string[]) => keys.includes(sider.selectedKey);
-  const materialKeys = ['materials', 'sheet_material_types', 'films', 'film_types', 'edge_types', 'milling_types', 'milling_type_extra_resources'];
+  const materialKeys = ['materials', 'sheet_material_types', 'films', 'film_types', 'edge_types', 'milling_types', 'extra_resources'];
   const financeKeys = ['payments', 'payments_view', 'payment_types', 'payment_statuses'];
   const analyticsKeys = ['clients_analytics_view', 'payments_analytics'];
   const journalKeys = ['audit'];
