@@ -15,6 +15,7 @@ describe('cut audit contract (§11)', () => {
       itemRemoved: 'cut_job.item_removed',
       calculated: 'cut_job.calculated',
       archived: 'cut_job.archived',
+      deleted: 'cut_job.deleted',
       resultArchived: 'cut_job.result_archived',
       resultUnarchived: 'cut_job.result_unarchived',
       currentResultChanged: 'cut_job.current_result_changed',

@@ -19,6 +19,19 @@ describe('cutApi', () => {
     expect(buildEligibleQuery({})).toBe('');
   });
 
+  it('reads deleted jobs and previews delete impact', async () => {
+    const fetchMock = mockFetch(
+      [jobDto({ status: 'archived' })],
+      { linkedMdfPackets: [], orderIds: [9], orderDetailIds: [100] },
+    );
+
+    await cutApi.list({ includeArchived: true });
+    await cutApi.getDeleteImpact(42);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs?includeArchived=true');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/cut-jobs/42/delete-impact');
+  });
+
   it('drives the cut-jobs backend command/read endpoints', async () => {
     const job = jobDto();
     const fetchMock = mockFetch(

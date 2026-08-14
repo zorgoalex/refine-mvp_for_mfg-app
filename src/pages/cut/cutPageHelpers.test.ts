@@ -96,7 +96,7 @@ describe('cutPageHelpers', () => {
   it('maps cut job status codes to Russian labels, passing unknown through', () => {
     expect(cutJobStatusLabel('draft')).toBe('Черновик');
     expect(cutJobStatusLabel('ready')).toBe('Готов');
-    expect(cutJobStatusLabel('archived')).toBe('Архив');
+    expect(cutJobStatusLabel('archived')).toBe('Удалено');
     expect(cutJobStatusLabel('weird')).toBe('weird');
   });
 
@@ -134,7 +134,7 @@ describe('cutPageHelpers', () => {
       formatPlacementsMessage({ jobs: [{ cutJobId: 1, name: 'Раскрой A' }, { cutJobId: 5, name: 'B' }], hasArchived: false }),
     ).toMatch(/#1 Раскрой A.*#5 B/);
     const archived = formatPlacementsMessage({ jobs: [], hasArchived: true });
-    expect(archived).toMatch(/архивных заданиях/);
+    expect(archived).toMatch(/удалённых заданиях/);
     expect(formatPlacementsMessage({ jobs: [], hasArchived: false })).toBeNull();
     expect(
       formatPlacementsMessage({ jobs: [{ cutJobId: 1, name: 'A' }], hasArchived: false }),

@@ -985,12 +985,12 @@ describeIntegration('PgCutRepository (integration)', () => {
     expect(Number(sheetRows[0].entity_id)).toBe(1);
   });
 
-  it('archive audit writes sheet_material_type related-entity rows for all released detail sheet types', async () => {
+  it('delete audit writes sheet_material_type related-entity rows for all released detail sheet types', async () => {
     // details 1 (smt 1) and 4 (smt 2) -> two distinct sheet types.
     const repo = new PgCutRepository(database, stubFreecut(() => Promise.resolve(happyResponse)));
     const job = await repo.createJob({ currentUser: currentUser(), dto: { name: 'Аудит архив', detailIds: [1, 4] }, requestId: 'aw-c' });
     await repo.archive({ currentUser: currentUser(), cutJobId: job.cutJobId, version: job.version, requestId: 'aw-a' });
-    const audit = await pool.query(`SELECT audit_id FROM audit_log WHERE event = 'cut_job.archived'`);
+    const audit = await pool.query(`SELECT audit_id FROM audit_log WHERE event = 'cut_job.deleted'`);
     expect(audit.rows).toHaveLength(1);
     const bridge = await pool.query(
       `SELECT entity_type, entity_id FROM audit_log_related_entity WHERE audit_id = $1`,

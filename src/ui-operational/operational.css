@@ -1416,6 +1416,13 @@
   font-size: 9px;
 }
 
+.cut-delete-impact-list {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 120px;
+  overflow: auto;
+}
+
 :root:where([data-ui-variant="line"], [data-ui-variant="air"]) .cut-page-modern--list .cut-page-modern__jobs .cut-jobs-table-container {
   max-height: calc(100vh - 426px) !important;
   padding: 0 12px 10px;

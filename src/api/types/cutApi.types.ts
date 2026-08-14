@@ -233,6 +233,21 @@ export interface CutJobDto {
   cutResults?: CutResultSummary[];
 }
 
+export interface CutJobLinkedMdfPacket {
+  packetId: string;
+  externalPacketKey: string;
+  workday: string;
+  machine: string | null;
+  programName: string | null;
+  itemCount: number;
+}
+
+export interface CutJobDeleteImpact {
+  linkedMdfPackets: CutJobLinkedMdfPacket[];
+  orderIds: number[];
+  orderDetailIds: number[];
+}
+
 export type CutResultKind = 'auto' | 'manual' | 'legacy';
 
 export interface CutResultSummary {

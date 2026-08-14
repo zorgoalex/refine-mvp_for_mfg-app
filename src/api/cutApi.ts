@@ -6,6 +6,7 @@ import type {
   CutFilmOption,
   CutDetailLastReadyResponse,
   CutDetailPlacements,
+  CutJobDeleteImpact,
   CutJobDto,
   CutResultDto,
   CutResultSummary,
@@ -21,8 +22,11 @@ import type {
  * Hasura. Auth token is auto-attached by httpClient.
  */
 export const cutApi = {
-  list(): Promise<CutJobDto[]> {
-    return httpClient.get<CutJobDto[]>(apiRoutes.cutJobs.list);
+  list(params: { includeArchived?: boolean } = {}): Promise<CutJobDto[]> {
+    const query = new URLSearchParams();
+    if (params.includeArchived === true) query.set('includeArchived', 'true');
+    const qs = query.toString();
+    return httpClient.get<CutJobDto[]>(qs ? `${apiRoutes.cutJobs.list}?${qs}` : apiRoutes.cutJobs.list);
   },
 
   async get(cutJobId: number): Promise<CutJobDto> {
@@ -81,9 +85,13 @@ export const cutApi = {
     });
   },
 
-  async archive(cutJobId: number, version: number): Promise<CutJobDto> {
+  async getDeleteImpact(cutJobId: number): Promise<CutJobDeleteImpact> {
+    return httpClient.get<CutJobDeleteImpact>(apiRoutes.cutJobs.deleteImpact(validateCutJobId(cutJobId)));
+  },
+
+  async archive(cutJobId: number, version: number, options: { deleteLinkedMdfPackets?: boolean } = {}): Promise<CutJobDto> {
     return httpClient.delete<CutJobDto>(apiRoutes.cutJobs.byId(validateCutJobId(cutJobId)), {
-      body: JSON.stringify({ version }),
+      body: JSON.stringify({ version, deleteLinkedMdfPackets: options.deleteLinkedMdfPackets === true }),
       headers: { 'Content-Type': 'application/json' },
     });
   },
