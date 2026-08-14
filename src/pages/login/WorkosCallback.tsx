@@ -1,5 +1,6 @@
 import React from "react";
-import { Card, Spin, Typography } from "antd";
+import { SwapOutlined } from "@ant-design/icons";
+import { Button, Card, Spin, Typography } from "antd";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { authApi } from "../../api/authApi";
 import { ApiError } from "../../api/httpClient";
@@ -12,6 +13,11 @@ import { ApiError } from "../../api/httpClient";
 const consumedCodes = new Map<string, "pending" | "settled">();
 
 const LINK_INTENT_KEY = "erp_workos_link_intent";
+
+type WorkosCallbackError = {
+  message: string;
+  canSelectAnotherAccount: boolean;
+};
 
 // Backend errors raised BEFORE the state/code were consumed (throttle, origin
 // check, feature off, validation, expired bearer on the link path): the code
@@ -44,14 +50,31 @@ export function markWorkosLinkIntent(state: string): void {
 export const WorkosCallbackPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const [error, setError] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<WorkosCallbackError | null>(null);
+  const [selectingAccount, setSelectingAccount] = React.useState(false);
+  const [accountSelectionError, setAccountSelectionError] = React.useState<string | null>(null);
+
+  const selectAnotherAccount = async () => {
+    setSelectingAccount(true);
+    setAccountSelectionError(null);
+    try {
+      const url = await authApi.workosAuthorizeUrl({ selectAccount: true });
+      window.location.assign(url);
+    } catch {
+      setAccountSelectionError("Не удалось открыть выбор SSO-аккаунта. Попробуйте ещё раз.");
+      setSelectingAccount(false);
+    }
+  };
 
   React.useEffect(() => {
     const code = searchParams.get("code");
     const state = searchParams.get("state");
 
     if (!code || !state) {
-      setError("Не получены параметры от провайдера входа");
+      setError({
+        message: "Не получены параметры от провайдера входа",
+        canSelectAnotherAccount: false,
+      });
       return;
     }
     const consumed = consumedCodes.get(code);
@@ -60,7 +83,10 @@ export const WorkosCallbackPage: React.FC = () => {
       return;
     }
     if (consumed === "settled") {
-      setError("Ссылка входа уже использована. Войдите заново.");
+      setError({
+        message: "Ссылка входа уже использована. Войдите заново.",
+        canSelectAnotherAccount: false,
+      });
       return;
     }
     consumedCodes.set(code, "pending");
@@ -128,7 +154,17 @@ export const WorkosCallbackPage: React.FC = () => {
         // Pre-exchange failure (link-mode refresh): the code was never sent.
         consumedCodes.delete(code);
       }
-      setError(describeError(exchangeError));
+      // A failed external retry may restore this page from browser history
+      // with the previous button state. Never leave the account-switch action
+      // spinning after the backend has already returned a definitive error.
+      setSelectingAccount(false);
+      setError({
+        message: describeError(exchangeError),
+        canSelectAnotherAccount:
+          !isLink &&
+          exchangeError instanceof ApiError &&
+          exchangeError.code === "IDENTITY_NOT_LINKED",
+      });
     });
   }, [searchParams, navigate]);
 
@@ -145,9 +181,26 @@ export const WorkosCallbackPage: React.FC = () => {
         {error ? (
           <>
             <Typography.Title level={4}>Ошибка входа через SSO</Typography.Title>
-            <Typography.Text type="danger">{error}</Typography.Text>
-            <div style={{ marginTop: 16 }}>
-              <a href="/login">Вернуться на страницу входа</a>
+            <Typography.Text type="danger">{error.message}</Typography.Text>
+            <div style={{ display: "grid", gap: 8, marginTop: 20 }}>
+              {error.canSelectAnotherAccount && (
+                <Button
+                  type="primary"
+                  block
+                  icon={<SwapOutlined />}
+                  loading={selectingAccount}
+                  onClick={selectAnotherAccount}
+                  style={{ height: 40 }}
+                >
+                  Войти другим SSO-аккаунтом
+                </Button>
+              )}
+              {accountSelectionError && (
+                <Typography.Text type="danger">{accountSelectionError}</Typography.Text>
+              )}
+              <Button type="link" href="/login" style={{ minHeight: 40 }}>
+                Вернуться на страницу входа
+              </Button>
             </div>
           </>
         ) : (

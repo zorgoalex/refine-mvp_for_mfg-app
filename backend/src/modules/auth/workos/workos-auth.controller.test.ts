@@ -17,22 +17,26 @@ describe('WorkosAuthController.linkStart', () => {
     expect(harness.serviceCalls).toEqual([]);
   });
 
-  it('forces fresh provider authentication for linking, but not for ordinary SSO login', async () => {
+  it('offers an account chooser on explicit retry and link flows, but keeps ordinary login seamless', async () => {
     const harness = createHarness({});
     const response = { cookie: () => undefined } as never;
 
     await harness.controller.authorize(createRequest(), response);
+    await harness.controller.authorize(createRequest(), response, '1');
     await harness.controller.linkStart(createRequest(), response);
 
     const authorizeCalls = harness.serviceCalls.filter(
       (call) => call.method === 'buildAuthorizeUrl',
     );
-    expect(authorizeCalls).toHaveLength(2);
+    expect(authorizeCalls).toHaveLength(3);
     expect(authorizeCalls[0]?.input).toMatchObject({
-      options: { forceFreshAuthentication: false },
+      options: { forceFreshAuthentication: false, selectAccount: false },
     });
     expect(authorizeCalls[1]?.input).toMatchObject({
-      options: { forceFreshAuthentication: true },
+      options: { forceFreshAuthentication: true, selectAccount: true },
+    });
+    expect(authorizeCalls[2]?.input).toMatchObject({
+      options: { forceFreshAuthentication: true, selectAccount: true },
     });
   });
 });

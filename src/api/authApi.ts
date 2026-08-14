@@ -51,8 +51,11 @@ export const authApi = {
   // skipAuthRefresh: true — the httpClient otherwise refreshes on 401 and
   // replays the request, which burns the single-use authorization code and
   // turns meaningful 401s into a false invalid_grant.
-  async workosAuthorizeUrl(): Promise<string> {
-    const response = await httpClient.get<{ url: string }>(apiRoutes.auth.workosAuthorize, {
+  async workosAuthorizeUrl(options: { selectAccount?: boolean } = {}): Promise<string> {
+    const endpoint = options.selectAccount
+      ? `${apiRoutes.auth.workosAuthorize}?select_account=1`
+      : apiRoutes.auth.workosAuthorize;
+    const response = await httpClient.get<{ url: string }>(endpoint, {
       skipAuthRefresh: true,
     });
     return response.url;
