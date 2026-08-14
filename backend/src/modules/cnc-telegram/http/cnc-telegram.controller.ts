@@ -171,7 +171,7 @@ const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=
 const MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 const MANUAL_SVG_UPLOAD_MAX_TOTAL_FILE_SIZE_BYTES = 36 * 1024 * 1024;
 const MANUAL_SVG_SCREENSHOT_CONTRAST_MIN = 1;
-const MANUAL_SVG_SCREENSHOT_CONTRAST_MAX = 3;
+const MANUAL_SVG_SCREENSHOT_CONTRAST_MAX = 6;
 
 const manualSvgUploadFileSchema = z.object({
   kind: z.enum(['svg', 'gcode', 'screenshot']),

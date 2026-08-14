@@ -192,8 +192,13 @@ describe('CncTelegramController parsing', () => {
 
     expect(() => parseManualSvgUpload({
       ...manualSvgUploadPayload(),
-      generatedScreenshot: { contrast: 3.1 },
+      generatedScreenshot: { contrast: 6.1 },
     }, 'manual-svg:test:bad-contrast')).toThrow(ApiError);
+
+    expect(parseManualSvgUpload({
+      ...manualSvgUploadPayload(),
+      generatedScreenshot: { contrast: 6 },
+    }, 'manual-svg:test:max-contrast').generatedScreenshot).toEqual({ contrast: 6 });
   });
 
   it('rejects manual SVG upload without selected orders or valid layout', () => {
