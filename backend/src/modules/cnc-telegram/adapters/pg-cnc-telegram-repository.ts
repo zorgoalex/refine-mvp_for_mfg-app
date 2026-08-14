@@ -416,6 +416,7 @@ export class PgCncTelegramRepository
     const rows = await this.database.query<PacketJoinedRow>(
       packetSelectSql(`
         p.workday BETWEEN $1::date AND $2::date
+        AND p.mdf_board_hidden_at IS NULL
         AND (
           p.source_chat_id IS DISTINCT FROM $3
           OR EXISTS (
@@ -6053,6 +6054,7 @@ async function loadBathCards(
       FROM cnc_telegram_packets p
       JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
       WHERE p.workday BETWEEN $1::date AND $2::date
+        AND p.mdf_board_hidden_at IS NULL
     ),
     matched_target_details AS (
       SELECT
@@ -6091,6 +6093,7 @@ async function loadBathCards(
         'g'
       ) AS order_match(match)
       WHERE p.workday BETWEEN $1::date AND $2::date
+        AND p.mdf_board_hidden_at IS NULL
         AND (p.completion_status = 'completed' OR p.thumbs_up = true)
         AND lower(packet_comment.comment_text) LIKE '%весь%'
         AND NOT EXISTS (

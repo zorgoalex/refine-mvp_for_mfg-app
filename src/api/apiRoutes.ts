@@ -111,6 +111,7 @@ export const apiRoutes = {
     filmOptions: backendApiPath('/cut-jobs/film-options'),
     eligibleDetailsPreview: backendApiPath('/cut-jobs/eligible-details'),
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
+    deleteImpact: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/delete-impact`),
     results: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/results`),
     result: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}`),
     resultCurrent: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}/current`),

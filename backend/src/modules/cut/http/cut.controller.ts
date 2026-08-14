@@ -9,6 +9,7 @@ import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutFilmOptionDto,
+  CutJobDeleteImpactDto,
   CutJobDto,
   CutTextureDirection,
   CutResultDto,
@@ -50,6 +51,10 @@ const addItemsRequestSchema = z
   .strict();
 
 const versionBodySchema = z.object({ version: z.number().int().min(0) }).strict();
+const deleteCutJobBodySchema = z.object({
+  version: z.number().int().min(0),
+  deleteLinkedMdfPackets: z.boolean().optional().default(false),
+}).strict();
 const calculateBodySchema = z.object({
   version: z.number().int().min(0),
   commandId: z.string().uuid(),
@@ -159,7 +164,7 @@ export class CutController {
     });
   }
 
-  @ApiOperation({ operationId: 'listCutJobs', summary: 'List active cut jobs' })
+  @ApiOperation({ operationId: 'listCutJobs', summary: 'List cut jobs' })
   @Get()
   async list(
     @Req() request: RequestWithCurrentUser,
@@ -263,6 +268,23 @@ export class CutController {
   ): Promise<CutJobDto> {
     const currentUser = this.requireRead(request);
     return this.cut.getJob({ currentUser, cutJobId: parseCutJobId(cutJobId), requestId: request.requestId });
+  }
+
+  @ApiOperation({
+    operationId: 'getCutJobDeleteImpact',
+    summary: 'Preview linked records affected by deleting a cut job',
+  })
+  @Get(':cutJobId/delete-impact')
+  async deleteImpact(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+  ): Promise<CutJobDeleteImpactDto> {
+    const currentUser = this.requireMutation(request);
+    return this.cut.getDeleteImpact({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      requestId: request.requestId,
+    });
   }
 
   @ApiOperation({ operationId: 'listCutResults', summary: 'List immutable completed results for a cut job' })
@@ -534,7 +556,7 @@ export class CutController {
     return job;
   }
 
-  @ApiOperation({ operationId: 'archiveCutJob', summary: 'Archive a cut job (release reservations)' })
+  @ApiOperation({ operationId: 'deleteCutJob', summary: 'Delete a cut job (release reservations)' })
   @Delete(':cutJobId')
   async archive(
     @Req() request: RequestWithCurrentUser,
@@ -542,10 +564,12 @@ export class CutController {
     @Body() body: unknown,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
+    const parsed = parseDeleteCutJobBody(body);
     return this.cut.archive({
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
-      version: parseVersionBody(body),
+      version: parsed.version,
+      deleteLinkedMdfPackets: parsed.deleteLinkedMdfPackets,
       requestId: request.requestId,
     });
   }
@@ -1008,11 +1032,13 @@ export function parseCreateCutJobRequest(body: unknown) {
 export function parseListCutJobsQuery(query: Record<string, string | undefined>) {
   const orderSearch = parseOptionalSearch(query.orderSearch, 'orderSearch');
   const jobNumber = parseOptionalSearch(query.jobNumber, 'jobNumber');
+  const includeArchived = parseOptionalBoolean(query.includeArchived, 'includeArchived');
   return {
     ...(query.status ? { status: query.status.trim() } : {}),
     ...(query.createdBy && Number.isInteger(Number(query.createdBy)) && Number(query.createdBy) > 0
       ? { createdBy: Number(query.createdBy) }
       : {}),
+    ...(includeArchived === true ? { includeArchived } : {}),
     ...(orderSearch ? { orderSearch } : {}),
     ...(jobNumber ? { jobNumber } : {}),
     ...(parseOptionalDateOnly(query.createdFrom, 'createdFrom') ? { createdFrom: parseOptionalDateOnly(query.createdFrom, 'createdFrom') } : {}),
@@ -1026,6 +1052,10 @@ export function parseAddItemsRequest(body: unknown) {
 
 export function parseVersionBody(body: unknown): number {
   return parse(versionBodySchema, body).version;
+}
+
+export function parseDeleteCutJobBody(body: unknown): { version: number; deleteLinkedMdfPackets: boolean } {
+  return parse(deleteCutJobBodySchema, body);
 }
 
 export function parseCalculateBody(body: unknown): { version: number; commandId: string } {
@@ -1108,6 +1138,16 @@ function parseOptionalSearch(value: string | undefined, field: string): string |
     });
   }
   return text;
+}
+
+function parseOptionalBoolean(value: string | undefined, field: string): boolean | undefined {
+  if (value === undefined || value === '') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  throw new ApiError(422, 'VALIDATION_ERROR', 'Cut job query validation failed', {
+    errors: [{ field, message: `${field} must be boolean` }],
+  });
 }
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {

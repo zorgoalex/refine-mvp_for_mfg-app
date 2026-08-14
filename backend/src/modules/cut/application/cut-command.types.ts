@@ -6,6 +6,7 @@ import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutFilmOptionDto,
+  CutJobDeleteImpactDto,
   CutJobDto,
   CutTextureDirection,
   CutResultDto,
@@ -78,10 +79,17 @@ export interface ArchiveCutJobCommand {
   currentUser: CurrentUser;
   cutJobId: number;
   version: number;
+  deleteLinkedMdfPackets?: boolean;
   requestId?: string;
 }
 
 export interface GetCutJobQuery {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  requestId?: string;
+}
+
+export interface GetCutJobDeleteImpactQuery {
   currentUser: CurrentUser;
   cutJobId: number;
   requestId?: string;
@@ -109,6 +117,7 @@ export interface ListCutJobsQuery {
   filters?: {
     status?: string;
     createdBy?: number;
+    includeArchived?: boolean;
     /** Match order id or orders.order_name before the list LIMIT is applied. */
     orderSearch?: string;
     /** Match operator-facing job number before the list LIMIT is applied. */
@@ -366,6 +375,7 @@ export interface CutRepositoryPort {
   removeItem(command: RemoveCutItemCommand): Promise<CutJobDto>;
   calculate(command: CalculateCutJobCommand): Promise<CutJobDto>;
   archive(command: ArchiveCutJobCommand): Promise<CutJobDto>;
+  getDeleteImpact(query: GetCutJobDeleteImpactQuery): Promise<CutJobDeleteImpactDto>;
   setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto>;
   setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto>;
   setCombineFilms(command: SetCutJobCombineFilmsCommand): Promise<CutJobDto>;

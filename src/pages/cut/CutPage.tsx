@@ -67,6 +67,7 @@ import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
 import { CutJobVersionLines } from '../orders/CutJobVersionLines';
 import type {
   CutGroupDto,
+  CutJobDeleteImpact,
   CutJobDto,
   CutJobListFilters,
   CutJobItemDto,
@@ -827,7 +828,7 @@ function cutJobRefProfileLabel(job: { profileName: string | null; profileIsActiv
 
 function cutDetailExistingJobsText(detail: EligibleDetailDto): string {
   const active = (detail.activeJobs ?? []).map((job) => `${job.name} / ${cutJobRefProfileLabel(job)}`);
-  const archived = (detail.archivedJobs ?? []).map((job) => `${job.name} / ${cutJobRefProfileLabel(job)} (архив)`);
+  const archived = (detail.archivedJobs ?? []).map((job) => `${job.name} / ${cutJobRefProfileLabel(job)} (удалено)`);
   const jobs = [...active, ...archived];
   return jobs.length > 0 ? jobs.join(', ') : '—';
 }
@@ -1105,6 +1106,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
   const [profileFilter, setProfileFilter] = useState<CutJobProfileFilter>();
+  const [showDeletedJobs, setShowDeletedJobs] = useState(false);
   const [jobSearch, setJobSearch] = useState('');
   const [jobOrderSearch, setJobOrderSearch] = useState('');
   const [appliedJobOrderSearch, setAppliedJobOrderSearch] = useState('');
@@ -1386,7 +1388,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const loadJobs = useCallback(async (filtersOverride?: CutJobListFilters) => {
     setJobsLoading(true);
     try {
-      const filters = filtersOverride ?? (isEmbeddedOrder ? {} : listFiltersRef.current);
+      const baseFilters = filtersOverride ?? (isEmbeddedOrder ? {} : listFiltersRef.current);
+      const filters = {
+        ...baseFilters,
+        ...(showDeletedJobs && baseFilters.includeArchived !== false ? { includeArchived: true } : {}),
+      };
       const [nextJobs, placements] = await Promise.all([
         cutApi.list(filters),
         isEmbeddedOrder ? cutApi.listPlacements({ orderIds: [embeddedOrderId!] }) : Promise.resolve(null),
@@ -1402,7 +1408,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     embeddedOrderId,
     handleError,
     isEmbeddedOrder,
+    showDeletedJobs,
   ]);
+
+  useEffect(() => {
+    if (!showDeletedJobs && statusFilter === 'archived') {
+      setStatusFilter(CUT_JOB_STATUS_FILTER_ALL);
+    }
+  }, [showDeletedJobs, statusFilter]);
 
   useEffect(() => {
     if (!isEmbeddedOrder) return;
@@ -1910,14 +1923,62 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     void openJob(deepLinkJobId, deepLinkResultNo ?? undefined);
   }, [deepLinkJobId, deepLinkResultNo, openJob]);
 
-  const archiveJob = useCallback(
+  const confirmDeleteJob = useCallback((target: CutJobDto, impact: CutJobDeleteImpact) => new Promise<boolean>((resolve) => {
+    const linkedPackets = impact.linkedMdfPackets;
+    Modal.confirm({
+      title: linkedPackets.length > 0
+        ? 'Удалить задание и убрать файлы с MDF-доски?'
+        : 'Удалить задание?',
+      content: (
+        <Space direction="vertical" size={8}>
+          <Text>
+            {`Задание #${target.cutJobId} будет помечено как удалённое. Восстановления для удалённых заданий нет.`}
+          </Text>
+          {linkedPackets.length > 0 ? (
+            <>
+              <Text type="danger">
+                {`Есть связанные карточки файлов станка: ${linkedPackets.length}. Они будут скрыты с MDF-доски.`}
+              </Text>
+              <ul className="cut-delete-impact-list">
+                {linkedPackets.slice(0, 5).map((packet) => (
+                  <li key={packet.packetId}>
+                    {[
+                      packet.programName || packet.externalPacketKey,
+                      packet.machine,
+                      packet.workday,
+                      `${packet.itemCount} поз.`,
+                    ].filter(Boolean).join(' · ')}
+                  </li>
+                ))}
+              </ul>
+              {linkedPackets.length > 5 ? (
+                <Text type="secondary">{`И ещё ${linkedPackets.length - 5}`}</Text>
+              ) : null}
+            </>
+          ) : null}
+        </Space>
+      ),
+      okText: 'Удалить',
+      okButtonProps: { danger: true },
+      cancelText: 'Отмена',
+      onOk: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  }), []);
+
+  const deleteJob = useCallback(
     async (target: CutJobDto) => {
       setBusy(true);
       try {
         const fresh = await cutApi.get(target.cutJobId);
-        const archived = await cutApi.archive(fresh.cutJobId, fresh.version);
-        emitCutJobUpdate(archived, fresh);
-        message.success('Раскрой архивирован');
+        const impact = await cutApi.getDeleteImpact(fresh.cutJobId);
+        const confirmed = await confirmDeleteJob(fresh, impact);
+        if (!confirmed) return;
+        const deleted = await cutApi.archive(fresh.cutJobId, fresh.version, {
+          deleteLinkedMdfPackets: impact.linkedMdfPackets.length > 0,
+        });
+        emitCutJobUpdate(deleted, fresh);
+        message.success('Задание удалено');
         if (job?.cutJobId === target.cutJobId) {
           setJob(null);
           setEligible(null);
@@ -1926,12 +1987,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         }
         await loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось архивировать раскрой');
+        if (error instanceof ApiError && error.code === 'CUT_JOB_LINKED_MDF_PACKETS') {
+          message.error('Есть связанные карточки файлов станка. Повторите удаление с подтверждением.');
+        } else {
+          handleError(error, 'Не удалось удалить задание');
+        }
       } finally {
         setBusy(false);
       }
     },
-    [emitCutJobUpdate, job, loadJobs, handleError, resetSheetViews],
+    [confirmDeleteJob, emitCutJobUpdate, job, loadJobs, handleError, resetSheetViews],
   );
 
   const previewCreateJob = useCallback(async () => {
@@ -2521,8 +2586,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setOperationalSheetFilter(undefined);
     setOperationalFilmFilter(undefined);
     setProfileFilter(undefined);
+    setShowDeletedJobs(false);
     listFiltersRef.current = {};
-    void loadJobs({});
+    void loadJobs({ includeArchived: false });
   }, [loadJobs]);
 
   const cutJobListFiltersActive = Boolean(
@@ -2535,7 +2601,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     jobSearch.trim() ||
     operationalSheetFilter ||
     operationalFilmFilter ||
-    profileFilter,
+    profileFilter ||
+    showDeletedJobs,
   );
 
   const filteredJobs = useMemo(() => {
@@ -2850,8 +2917,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               Открыть
             </Button>
             {canManage && !isOperational ? (
-              <Button size="small" type="link" danger onClick={() => archiveJob(row)} disabled={busy}>
-                Архивировать
+              <Button size="small" type="link" danger onClick={() => deleteJob(row)} disabled={busy || row.status === 'archived'}>
+                Удалить
               </Button>
             ) : null}
             {isOperational ? (
@@ -2863,7 +2930,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ),
       },
     ],
-    [busy, canManage, openJob, archiveJob, profiles, cutSettings, isOperational, show],
+    [busy, canManage, openJob, deleteJob, profiles, cutSettings, isOperational, show],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
@@ -3715,6 +3782,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               onChange={setProfileFilter}
               style={{ width: 220 }}
             />
+            <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
+              Показывать удалённые
+            </Checkbox>
+            {canManage && (
+              <Button icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)}>
+                SVG
+              </Button>
+            )}
             <Button onClick={loadJobs} loading={jobsLoading}>
               Обновить
             </Button>
@@ -3744,12 +3819,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               </Button>
               <Button
                 type={statusFilter === 'archived' ? 'primary' : 'text'}
-                onClick={() => setStatusFilter('archived')}
+                onClick={() => {
+                  setShowDeletedJobs(true);
+                  setStatusFilter('archived');
+                }}
               >
-                Архив
+                Удалённые
               </Button>
             </div>
-            <Button className="cut-operational-chip" type="primary">Сегодня</Button>
+            <Checkbox checked={showDeletedJobs} onChange={(event) => setShowDeletedJobs(event.target.checked)}>
+              Показывать удалённые
+            </Checkbox>
+            <Button className="cut-operational-chip" type="primary" onClick={() => setCutListDateRange(defaultCutOrderDateRange())}>Сегодня</Button>
             <Button className="cut-operational-chip">Мои задания</Button>
             <span className="cut-operational-table-toolbar__grow" />
             <Typography.Text type="secondary">Найдено {filteredJobs.length}</Typography.Text>

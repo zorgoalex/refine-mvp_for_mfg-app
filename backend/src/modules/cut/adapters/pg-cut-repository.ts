@@ -66,6 +66,7 @@ import type {
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   ListFilmOptionsForCutQuery,
+  GetCutJobDeleteImpactQuery,
   GetCutJobQuery,
   GetCutResultQuery,
   GetRenderCacheTokenArgs,
@@ -96,6 +97,8 @@ import type {
   CutFilmUsageDto,
   CutEditorParamsDto,
   CutGroupDto,
+  CutJobDeleteImpactDto,
+  CutJobLinkedMdfPacketDto,
   CutJobItemDto,
   CutJobDto,
   CutJobRefDto,
@@ -264,6 +267,26 @@ interface CutResultRow extends QueryResultRow {
   is_current: boolean;
   archived_at: Date | string | null;
   archived_by: string | number | null;
+}
+
+interface ReleasedCutJobItemRow extends QueryResultRow {
+  order_id: string | number;
+  order_detail_id: string | number;
+  sheet_material_type_id: string | number | null;
+}
+
+interface DeleteImpactItemRow extends QueryResultRow {
+  order_id: string | number;
+  order_detail_id: string | number;
+}
+
+interface DeleteImpactPacketRow extends QueryResultRow {
+  packet_id: string;
+  external_packet_key: string;
+  workday: string | Date;
+  machine: string | null;
+  program_name: string | null;
+  item_count: string | number;
 }
 
 const CUT_RESULT_LEASE_MS = 15 * 60 * 1000;
@@ -1459,23 +1482,47 @@ export class PgCutRepository implements CutRepositoryPort {
     });
   }
 
+  async getDeleteImpact(query: GetCutJobDeleteImpactQuery): Promise<CutJobDeleteImpactDto> {
+    await loadJob(this.database, query.cutJobId, false);
+    return loadCutJobDeleteImpact(this.database, query.cutJobId);
+  }
+
   archive(command: ArchiveCutJobCommand): Promise<CutJobDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, command.version);
+      if (job.status === 'archived') {
+        throw new ApiError(409, 'CUT_JOB_ALREADY_DELETED', 'Задание уже удалено');
+      }
 
-      const released = await tx.query<{ order_id: string | number; sheet_material_type_id: string | number | null }>(
+      const impact = await loadCutJobDeleteImpact(tx, command.cutJobId);
+      if (impact.linkedMdfPackets.length > 0 && command.deleteLinkedMdfPackets !== true) {
+        throw new ApiError(
+          409,
+          'CUT_JOB_LINKED_MDF_PACKETS',
+          'Есть связанные карточки файлов станка на MDF-доске',
+          { cutJobId: command.cutJobId, linkedMdfPackets: impact.linkedMdfPackets },
+        );
+      }
+
+      const hiddenMdfPacketIds =
+        command.deleteLinkedMdfPackets === true
+          ? await hideLinkedMdfPacketsForCutJob(tx, command.cutJobId, command.currentUser.id)
+          : [];
+
+      const released = await tx.query<ReleasedCutJobItemRow>(
         `
         UPDATE cut_job_item cji
         SET is_active = false, updated_at = now()
         FROM order_details od
         WHERE cji.cut_job_id = $1 AND cji.is_active = true
           AND od.detail_id = cji.order_detail_id
-        RETURNING cji.order_id, od.sheet_material_type_id
+        RETURNING cji.order_id, cji.order_detail_id, od.sheet_material_type_id
         `,
         [command.cutJobId],
       );
+      const releasedRows = released.rows as ReleasedCutJobItemRow[];
       await tx.query(
         `UPDATE cut_job SET status = 'archived', version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
         [command.cutJobId],
@@ -1483,20 +1530,28 @@ export class PgCutRepository implements CutRepositoryPort {
 
       const archivedSheetTypeIds = [
         ...new Set(
-          released.rows
+          releasedRows
             .map((row) => (row.sheet_material_type_id === null ? null : toNum(row.sheet_material_type_id)))
             .filter((id): id is number => id !== null),
         ),
       ];
+      const releasedOrderIds = releasedRows.map((row) => toNum(row.order_id));
+      const releasedOrderDetailIds = releasedRows.map((row) => toNum(row.order_detail_id));
       await this.audit(tx, command.currentUser, {
-        event: CUT_AUDIT_EVENTS.archived,
+        event: CUT_AUDIT_EVENTS.deleted,
         cutJobId: command.cutJobId,
         requestId: command.requestId,
         related: {
-          orderIds: released.rows.map((row) => toNum(row.order_id)),
+          orderIds: releasedOrderIds,
           sheetMaterialTypeIds: archivedSheetTypeIds,
         },
-        metadata: { releasedCount: released.rowCount ?? 0 },
+        metadata: {
+          releasedCount: released.rowCount ?? 0,
+          releasedOrderDetailIds,
+          hiddenMdfPacketCount: hiddenMdfPacketIds.length,
+          hiddenMdfPacketIds,
+          deleteLinkedMdfPackets: command.deleteLinkedMdfPackets === true,
+        },
       });
 
       return loadJob(tx, command.cutJobId);
@@ -2478,7 +2533,7 @@ export class PgCutRepository implements CutRepositoryPort {
     if (query.filters?.status) {
       params.push(query.filters.status);
       conditions.push(`j.status = $${params.length}`);
-    } else if (!jobNumber) {
+    } else if (query.filters?.includeArchived !== true) {
       params.push('archived');
       conditions.push(`j.status <> $${params.length}`);
     }
@@ -2516,7 +2571,7 @@ export class PgCutRepository implements CutRepositoryPort {
       `);
     }
     const result = await this.database.query<{ cut_job_id: string | number }>(
-      `SELECT j.cut_job_id FROM cut_job j WHERE ${conditions.join(' AND ')} ORDER BY j.cut_job_id DESC LIMIT 200`,
+      `SELECT j.cut_job_id FROM cut_job j${conditions.length > 0 ? ` WHERE ${conditions.join(' AND ')}` : ''} ORDER BY j.cut_job_id DESC LIMIT 200`,
       params,
     );
     const ids = result.rows.map((row) => toNum(row.cut_job_id));
@@ -5975,6 +6030,106 @@ function normalizeCutJobNumberFilter(value: string | null | undefined): string |
 
 async function setSessionUser(tx: TransactionClient, userId: string | number): Promise<void> {
   await tx.query('SELECT set_session_user($1)', [String(userId)]);
+}
+
+async function hasMdfBoardHiddenColumns(client: DatabaseClient): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+    SELECT
+      to_regclass('cnc_telegram_packets') IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'cnc_telegram_packets'
+          AND column_name IN (
+            'mdf_board_hidden_at',
+            'mdf_board_hidden_by',
+            'mdf_board_hidden_reason',
+            'mdf_board_hidden_cut_job_id'
+          )
+        GROUP BY table_name
+        HAVING COUNT(DISTINCT column_name) = 4
+      ) AS exists
+    `,
+  );
+  return result.rows[0]?.exists === true;
+}
+
+async function loadCutJobDeleteImpact(client: DatabaseClient, cutJobId: number): Promise<CutJobDeleteImpactDto> {
+  const released = await client.query<DeleteImpactItemRow>(
+    `
+    SELECT DISTINCT cji.order_id, cji.order_detail_id
+    FROM cut_job_item cji
+    WHERE cji.cut_job_id = $1
+      AND cji.is_active = true
+    ORDER BY cji.order_id, cji.order_detail_id
+    `,
+    [cutJobId],
+  );
+  const releasedRows = released.rows as DeleteImpactItemRow[];
+
+  let linkedMdfPackets: CutJobLinkedMdfPacketDto[] = [];
+  if (await hasMdfBoardHiddenColumns(client)) {
+    const packets = await client.query<DeleteImpactPacketRow>(
+      `
+      SELECT
+        p.packet_id::text AS packet_id,
+        p.external_packet_key,
+        p.workday,
+        p.machine,
+        p.program_name,
+        COUNT(i.packet_item_id)::integer AS item_count
+      FROM cnc_telegram_packets p
+      LEFT JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
+      WHERE p.svg_cut_job_id = $1
+        AND p.mdf_board_hidden_at IS NULL
+      GROUP BY p.packet_id, p.external_packet_key, p.workday, p.machine, p.program_name, p.updated_at
+      ORDER BY p.workday DESC, p.updated_at DESC, p.external_packet_key
+      `,
+      [cutJobId],
+    );
+    const packetRows = packets.rows as DeleteImpactPacketRow[];
+    linkedMdfPackets = packetRows.map((row) => ({
+      packetId: row.packet_id,
+      externalPacketKey: row.external_packet_key,
+      workday: dateOnly(row.workday) ?? String(row.workday),
+      machine: row.machine,
+      programName: row.program_name,
+      itemCount: toNum(row.item_count),
+    }));
+  }
+
+  return {
+    linkedMdfPackets,
+    orderIds: [...new Set(releasedRows.map((row) => toNum(row.order_id)))],
+    orderDetailIds: [...new Set(releasedRows.map((row) => toNum(row.order_detail_id)))],
+  };
+}
+
+async function hideLinkedMdfPacketsForCutJob(
+  client: DatabaseClient,
+  cutJobId: number,
+  userId: string | number,
+): Promise<string[]> {
+  if (!(await hasMdfBoardHiddenColumns(client))) {
+    return [];
+  }
+  const result = await client.query<{ packet_id: string }>(
+    `
+    UPDATE cnc_telegram_packets
+    SET mdf_board_hidden_at = COALESCE(mdf_board_hidden_at, now()),
+        mdf_board_hidden_by = $2,
+        mdf_board_hidden_reason = 'cut_job_deleted',
+        mdf_board_hidden_cut_job_id = $1,
+        updated_at = now()
+    WHERE svg_cut_job_id = $1
+      AND mdf_board_hidden_at IS NULL
+    RETURNING packet_id::text AS packet_id
+    `,
+    [cutJobId, numOrNull(userId) ?? null],
+  );
+  const rows = result.rows as Array<{ packet_id: string }>;
+  return rows.map((row) => row.packet_id);
 }
 
 function cleanIds(values: Array<number | null> | undefined): number[] {

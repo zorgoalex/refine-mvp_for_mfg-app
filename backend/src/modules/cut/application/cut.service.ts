@@ -14,6 +14,7 @@ import type {
   DetailPlacementsQuery,
   EligibleDetailsQuery,
   GetCutJobQuery,
+  GetCutJobDeleteImpactQuery,
   GetCutResultQuery,
   ListFilmOptionsForCutQuery,
   ListCutJobsQuery,
@@ -104,6 +105,11 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
   async archive(command: ArchiveCutJobCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.archive(command);
+  }
+
+  async getDeleteImpact(query: GetCutJobDeleteImpactQuery) {
+    this.require(query.currentUser, 'cut.manage', { cutJobId: query.cutJobId, requestId: query.requestId });
+    return this.ports.cut.getDeleteImpact(query);
   }
 
   async getJob(query: GetCutJobQuery) {

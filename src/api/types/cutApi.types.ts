@@ -11,6 +11,7 @@ export interface CutSelectionCriteria {
 export interface CutJobListFilters {
   status?: string;
   createdBy?: number;
+  includeArchived?: boolean;
   orderSearch?: string;
   jobNumber?: string;
   createdFrom?: string;
@@ -288,6 +289,21 @@ export interface CutJobDto {
   renderToken?: string;
   currentCutResult?: CutResultSummary | null;
   cutResults?: CutResultSummary[];
+}
+
+export interface CutJobLinkedMdfPacket {
+  packetId: string;
+  externalPacketKey: string;
+  workday: string;
+  machine: string | null;
+  programName: string | null;
+  itemCount: number;
+}
+
+export interface CutJobDeleteImpact {
+  linkedMdfPackets: CutJobLinkedMdfPacket[];
+  orderIds: number[];
+  orderDetailIds: number[];
 }
 
 export type CutResultKind = 'auto' | 'manual' | 'legacy';
