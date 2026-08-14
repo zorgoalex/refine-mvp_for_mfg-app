@@ -4,7 +4,7 @@ import { Typography, Badge, Row, Col, Divider, Card } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
-import { MillingExtraResourcesEditor } from "./MillingExtraResourcesEditor";
+import { MillingTypeExtraResourceSelector } from "./MillingTypeExtraResourceSelector";
 
 const { Title } = Typography;
 
@@ -81,8 +81,8 @@ export const MillingTypeShow: React.FC<IResourceComponentsProps> = () => {
       {record?.milling_type_id ? (
         <>
           <Divider />
-          <Card size="small" title="Доп. ресурсы">
-            <MillingExtraResourcesEditor millingTypeId={Number(record.milling_type_id)} showMillingColumn={false} readOnly />
+          <Card size="small" title="Доп. ресурс">
+            <MillingTypeExtraResourceSelector millingTypeId={Number(record.milling_type_id)} readOnly />
           </Card>
         </>
       ) : null}

@@ -30,7 +30,7 @@ const MATERIAL_ROUTE_KEYS = [
   'film_types',
   'edge_types',
   'milling_types',
-  'milling_type_extra_resources',
+  'extra_resources',
   'material_types',
 ];
 

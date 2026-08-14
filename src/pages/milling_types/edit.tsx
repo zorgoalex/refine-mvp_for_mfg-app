@@ -3,7 +3,7 @@ import { IResourceComponentsProps } from "@refinedev/core";
 import { Form, Input, InputNumber, Checkbox, Card } from "antd";
 import { useParams } from "react-router-dom";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
-import { MillingExtraResourcesEditor } from "./MillingExtraResourcesEditor";
+import { MillingTypeExtraResourceSelector } from "./MillingTypeExtraResourceSelector";
 
 export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
   const { id } = useParams();
@@ -45,8 +45,8 @@ export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
         </Form.Item>
       </Form>
       {Number.isInteger(millingTypeId) && millingTypeId > 0 ? (
-        <Card size="small" title="Доп. ресурсы" style={{ marginTop: 16 }}>
-          <MillingExtraResourcesEditor millingTypeId={millingTypeId} showMillingColumn={false} />
+        <Card size="small" title="Доп. ресурс" style={{ marginTop: 16 }}>
+          <MillingTypeExtraResourceSelector millingTypeId={millingTypeId} />
         </Card>
       ) : null}
     </Edit>

@@ -17,6 +17,7 @@ export interface HdfSettingsDto {
   sheetMaterialName: string | null;
   sheetMaterialVersion: number | null;
   configRevision: number;
+  extraResources: ExtraResourceDto[];
   millingTypes: HdfMillingSettingsDto[];
 }
 
@@ -34,6 +35,7 @@ export interface HdfMillingSettingsDto {
 export interface MillingExtraResourceDto {
   id: number;
   millingTypeId: number;
+  extraResourceId: number | null;
   resourceKind: string;
   resourceRefType: string | null;
   resourceRefId: number | null;
@@ -43,6 +45,23 @@ export interface MillingExtraResourceDto {
   parameterName: string;
   parameterMm: number | null;
   hdfAutoEnabled: boolean;
+  comment: string;
+  isActive: boolean;
+  sortOrder: number;
+  version: number;
+}
+
+export interface ExtraResourceDto {
+  id: number;
+  resourceKind: string;
+  resourceRefType: string | null;
+  resourceRefId: number | null;
+  resourceName: string;
+  unitId: number | null;
+  accountingMethod: string;
+  defaultParameterName: string;
+  defaultParameterMm: number | null;
+  hdfAutoDefault: boolean;
   comment: string;
   isActive: boolean;
   sortOrder: number;
@@ -74,10 +93,11 @@ export interface UpdateHdfMillingCommand {
 export interface UpdateMillingExtraResourceCommand {
   id?: number;
   version?: number;
-  resourceKind: string;
+  extraResourceId?: number | null;
+  resourceKind?: string;
   resourceRefType?: string | null;
   resourceRefId?: number | null;
-  resourceName: string;
+  resourceName?: string;
   unitId?: number | null;
   accountingMethod?: string;
   parameterName?: string;
@@ -88,6 +108,26 @@ export interface UpdateMillingExtraResourceCommand {
   sortOrder?: number;
 }
 
+export interface UpsertExtraResourceCommand {
+  currentUser: CurrentUser;
+  id?: number;
+  version?: number;
+  resourceKind: string;
+  resourceRefType?: string | null;
+  resourceRefId?: number | null;
+  resourceName: string;
+  unitId?: number | null;
+  accountingMethod?: string;
+  defaultParameterName?: string;
+  defaultParameterMm?: number | null;
+  hdfAutoDefault?: boolean;
+  comment?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+  idempotencyKey: string;
+  requestId?: string;
+}
+
 export class OrderHdfSettingsService {
   private readonly permissions = new PermissionsService();
 
@@ -96,6 +136,90 @@ export class OrderHdfSettingsService {
   async get(currentUser: CurrentUser): Promise<HdfSettingsDto> {
     this.requireAny(currentUser, ['settings.view', 'settings.manage']);
     return readHdfSettings(this.database);
+  }
+
+  async getExtraResources(currentUser: CurrentUser): Promise<ExtraResourceDto[]> {
+    this.requireAny(currentUser, ['settings.view', 'settings.manage']);
+    return readExtraResources(this.database);
+  }
+
+  async createExtraResource(command: UpsertExtraResourceCommand): Promise<ExtraResourceDto> {
+    this.require(command.currentUser, 'settings.manage');
+    const resource = normalizeExtraResourceInput(command, false);
+    return this.database.transaction(async (tx) => {
+      await tx.query('SELECT set_session_user($1)', [command.currentUser.id]);
+      const replay = await reconcileIdempotency(tx, command.idempotencyKey, 'settings.extra_resource_create', {
+        actorUserId: command.currentUser.id,
+        resource,
+      }, command.currentUser.id);
+      if (replay.completedResponse) return parseExtraResourceResponse(replay.completedResponse);
+      const created = await insertExtraResource(tx, resource);
+      await bumpHdfRevision(tx);
+      await auditService.record(tx, {
+        event: 'settings.extra_resource_created',
+        entityType: 'extra_resource',
+        entityId: created.id,
+        actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId ?? 'extra-resource-create',
+        source: SOURCE,
+        before: null,
+        after: created as unknown as Record<string, unknown>,
+        diff: {},
+        metadata: { action: 'extra_resource_created' },
+        relatedEntities: [{ entityType: 'extra_resource', entityId: created.id }],
+      });
+      await completeIdempotency(tx, command.idempotencyKey, created);
+      return created;
+    });
+  }
+
+  async updateExtraResource(command: UpsertExtraResourceCommand): Promise<ExtraResourceDto> {
+    this.require(command.currentUser, 'settings.manage');
+    const id = normalizeOptionalPositiveInt(command.id, 'extraResourceId');
+    if (id === undefined) throw new ApiError(400, 'BAD_REQUEST', 'Invalid extra resource id');
+    const version = normalizeOptionalPositiveInt(command.version, 'version');
+    if (version === undefined) throw new ApiError(422, 'VALIDATION_ERROR', 'Extra resource version is required');
+    const resource = normalizeExtraResourceInput(command, true);
+    return this.database.transaction(async (tx) => {
+      await tx.query('SELECT set_session_user($1)', [command.currentUser.id]);
+      const replay = await reconcileIdempotency(tx, command.idempotencyKey, 'settings.extra_resource_update', {
+        actorUserId: command.currentUser.id,
+        id,
+        version,
+        resource,
+      }, command.currentUser.id);
+      if (replay.completedResponse) return parseExtraResourceResponse(replay.completedResponse);
+      const before = await readExtraResourceForUpdate(tx, id);
+      if (!before) throw new ApiError(404, 'EXTRA_RESOURCE_NOT_FOUND', 'Extra resource not found');
+      if (before.version !== version) {
+        throw new ApiError(409, 'EXTRA_RESOURCE_VERSION_CONFLICT', 'Extra resource changed', {
+          currentVersion: before.version,
+          expectedVersion: version,
+        });
+      }
+      const updated = await updateExtraResourceRow(tx, id, resource);
+      await refreshMillingLinksForExtraResource(tx, updated);
+      await bumpHdfRevision(tx);
+      await auditService.record(tx, {
+        event: 'settings.extra_resource_changed',
+        entityType: 'extra_resource',
+        entityId: id,
+        actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username,
+        actorRole: command.currentUser.role,
+        requestId: command.requestId ?? 'extra-resource-update',
+        source: SOURCE,
+        before: before as unknown as Record<string, unknown>,
+        after: updated as unknown as Record<string, unknown>,
+        diff: {},
+        metadata: { action: 'extra_resource_changed' },
+        relatedEntities: [{ entityType: 'extra_resource', entityId: id }],
+      });
+      await completeIdempotency(tx, command.idempotencyKey, updated);
+      return updated;
+    });
   }
 
   async update(command: UpdateHdfSettingsCommand): Promise<HdfSettingsDto> {
@@ -393,6 +517,7 @@ async function enqueueOutbox(
 interface MillingResourceRow {
   milling_type_extra_resource_id: string | number;
   milling_type_id: string | number;
+  extra_resource_id: string | number | null;
   resource_kind: string;
   resource_ref_type: string | null;
   resource_ref_id: string | number | null;
@@ -411,6 +536,7 @@ interface MillingResourceRow {
 interface NormalizedMillingResource {
   id?: number;
   version?: number;
+  extraResourceId: number | null;
   resourceKind: string;
   resourceRefType: string | null;
   resourceRefId: number | null;
@@ -425,6 +551,309 @@ interface NormalizedMillingResource {
   sortOrder: number;
 }
 
+interface ExtraResourceRow {
+  extra_resource_id: string | number;
+  resource_kind: string;
+  resource_ref_type: string | null;
+  resource_ref_id: string | number | null;
+  resource_name: string;
+  unit_id: string | number | null;
+  accounting_method: string;
+  default_parameter_name: string | null;
+  default_parameter_mm: string | number | null;
+  hdf_auto_default: boolean | null;
+  comment: string | null;
+  is_active: boolean | null;
+  sort_order: string | number | null;
+  version: string | number;
+}
+
+interface NormalizedExtraResource {
+  resourceKind: string;
+  resourceRefType: string | null;
+  resourceRefId: number | null;
+  resourceName: string;
+  unitId: number | null;
+  accountingMethod: string;
+  defaultParameterName: string;
+  defaultParameterMm: number | null;
+  hdfAutoDefault: boolean;
+  comment: string;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+async function readExtraResources(client: { query: TransactionClient['query'] }): Promise<ExtraResourceDto[]> {
+  const result = await client.query<ExtraResourceRow>(
+    `
+    SELECT extra_resource_id,
+           resource_kind,
+           resource_ref_type,
+           resource_ref_id,
+           resource_name,
+           unit_id,
+           accounting_method,
+           default_parameter_name,
+           default_parameter_mm,
+           hdf_auto_default,
+           comment,
+           is_active,
+           sort_order,
+           version
+    FROM extra_resources
+    ORDER BY is_active DESC, sort_order ASC, resource_name ASC, extra_resource_id ASC
+    `,
+  );
+  return result.rows.map(mapExtraResourceRow);
+}
+
+function mapExtraResourceRow(row: ExtraResourceRow): ExtraResourceDto {
+  return {
+    id: Number(row.extra_resource_id),
+    resourceKind: row.resource_kind,
+    resourceRefType: row.resource_ref_type ?? null,
+    resourceRefId: toNullableNumber(row.resource_ref_id),
+    resourceName: row.resource_name,
+    unitId: toNullableNumber(row.unit_id),
+    accountingMethod: row.accounting_method ?? '',
+    defaultParameterName: row.default_parameter_name ?? '',
+    defaultParameterMm: toNullableNumber(row.default_parameter_mm),
+    hdfAutoDefault: row.hdf_auto_default === true,
+    comment: row.comment ?? '',
+    isActive: row.is_active !== false,
+    sortOrder: Number(row.sort_order ?? 100),
+    version: Number(row.version),
+  };
+}
+
+function normalizeExtraResourceInput(command: UpsertExtraResourceCommand, update: boolean): NormalizedExtraResource {
+  const defaultParameterMm = toNullableNumber(command.defaultParameterMm);
+  if (defaultParameterMm !== null && defaultParameterMm <= 0) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Extra resource default parameter must be positive', {
+      field: 'defaultParameterMm',
+    });
+  }
+  return {
+    resourceKind: normalizeRequiredText(command.resourceKind, 'resourceKind', 50),
+    resourceRefType: normalizeOptionalText(command.resourceRefType, 50),
+    resourceRefId: normalizeOptionalPositiveInt(command.resourceRefId ?? undefined, 'resourceRefId') ?? null,
+    resourceName: normalizeRequiredText(command.resourceName, 'resourceName', 200),
+    unitId: normalizeOptionalPositiveInt(command.unitId ?? undefined, 'unitId') ?? null,
+    accountingMethod: normalizeOptionalText(command.accountingMethod, 500) ?? '',
+    defaultParameterName: normalizeOptionalText(command.defaultParameterName, 100) ?? '',
+    defaultParameterMm,
+    hdfAutoDefault: command.hdfAutoDefault === true,
+    comment: normalizeOptionalText(command.comment, 1000) ?? '',
+    isActive: update ? command.isActive !== false : command.isActive !== false,
+    sortOrder: normalizeSortOrder(command.sortOrder, 0),
+  };
+}
+
+async function insertExtraResource(tx: TransactionClient, resource: NormalizedExtraResource): Promise<ExtraResourceDto> {
+  const result = await tx.query<ExtraResourceRow>(
+    `
+    INSERT INTO extra_resources (
+      resource_kind,
+      resource_ref_type,
+      resource_ref_id,
+      resource_name,
+      unit_id,
+      accounting_method,
+      default_parameter_name,
+      default_parameter_mm,
+      hdf_auto_default,
+      comment,
+      is_active,
+      sort_order
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+    RETURNING extra_resource_id,
+              resource_kind,
+              resource_ref_type,
+              resource_ref_id,
+              resource_name,
+              unit_id,
+              accounting_method,
+              default_parameter_name,
+              default_parameter_mm,
+              hdf_auto_default,
+              comment,
+              is_active,
+              sort_order,
+              version
+    `,
+    [
+      resource.resourceKind,
+      resource.resourceRefType,
+      resource.resourceRefId,
+      resource.resourceName,
+      resource.unitId,
+      resource.accountingMethod,
+      resource.defaultParameterName,
+      resource.defaultParameterMm,
+      resource.hdfAutoDefault,
+      resource.comment,
+      resource.isActive,
+      resource.sortOrder,
+    ],
+  );
+  return mapExtraResourceRow(result.rows[0]);
+}
+
+async function updateExtraResourceRow(
+  tx: TransactionClient,
+  id: number,
+  resource: NormalizedExtraResource,
+): Promise<ExtraResourceDto> {
+  const result = await tx.query<ExtraResourceRow>(
+    `
+    UPDATE extra_resources
+    SET resource_kind = $2,
+        resource_ref_type = $3,
+        resource_ref_id = $4,
+        resource_name = $5,
+        unit_id = $6,
+        accounting_method = $7,
+        default_parameter_name = $8,
+        default_parameter_mm = $9,
+        hdf_auto_default = $10,
+        comment = $11,
+        is_active = $12,
+        sort_order = $13,
+        version = version + 1,
+        updated_at = now()
+    WHERE extra_resource_id = $1
+    RETURNING extra_resource_id,
+              resource_kind,
+              resource_ref_type,
+              resource_ref_id,
+              resource_name,
+              unit_id,
+              accounting_method,
+              default_parameter_name,
+              default_parameter_mm,
+              hdf_auto_default,
+              comment,
+              is_active,
+              sort_order,
+              version
+    `,
+    [
+      id,
+      resource.resourceKind,
+      resource.resourceRefType,
+      resource.resourceRefId,
+      resource.resourceName,
+      resource.unitId,
+      resource.accountingMethod,
+      resource.defaultParameterName,
+      resource.defaultParameterMm,
+      resource.hdfAutoDefault,
+      resource.comment,
+      resource.isActive,
+      resource.sortOrder,
+    ],
+  );
+  return mapExtraResourceRow(result.rows[0]);
+}
+
+async function readExtraResourceForUpdate(tx: TransactionClient, id: number): Promise<ExtraResourceDto | null> {
+  const result = await tx.query<ExtraResourceRow>(
+    `
+    SELECT extra_resource_id,
+           resource_kind,
+           resource_ref_type,
+           resource_ref_id,
+           resource_name,
+           unit_id,
+           accounting_method,
+           default_parameter_name,
+           default_parameter_mm,
+           hdf_auto_default,
+           comment,
+           is_active,
+           sort_order,
+           version
+    FROM extra_resources
+    WHERE extra_resource_id = $1
+    FOR UPDATE
+    `,
+    [id],
+  );
+  return result.rows[0] ? mapExtraResourceRow(result.rows[0]) : null;
+}
+
+async function readExtraResourceById(tx: TransactionClient, id: number): Promise<ExtraResourceDto | null> {
+  const result = await tx.query<ExtraResourceRow>(
+    `
+    SELECT extra_resource_id,
+           resource_kind,
+           resource_ref_type,
+           resource_ref_id,
+           resource_name,
+           unit_id,
+           accounting_method,
+           default_parameter_name,
+           default_parameter_mm,
+           hdf_auto_default,
+           comment,
+           is_active,
+           sort_order,
+           version
+    FROM extra_resources
+    WHERE extra_resource_id = $1
+    `,
+    [id],
+  );
+  return result.rows[0] ? mapExtraResourceRow(result.rows[0]) : null;
+}
+
+async function refreshMillingLinksForExtraResource(tx: TransactionClient, resource: ExtraResourceDto): Promise<void> {
+  await tx.query(
+    `
+    UPDATE milling_type_extra_resources
+    SET resource_kind = $2,
+        resource_ref_type = $3,
+        resource_ref_id = $4,
+        resource_name = $5,
+        unit_id = $6,
+        accounting_method = $7,
+        parameter_name = CASE WHEN btrim(parameter_name) = '' THEN $8 ELSE parameter_name END,
+        parameter_mm = COALESCE(parameter_mm, $9),
+        version = version + 1,
+        updated_at = now()
+    WHERE extra_resource_id = $1
+    `,
+    [
+      resource.id,
+      resource.resourceKind,
+      resource.resourceRefType,
+      resource.resourceRefId,
+      resource.resourceName,
+      resource.unitId,
+      resource.accountingMethod,
+      resource.defaultParameterName,
+      resource.defaultParameterMm,
+    ],
+  );
+}
+
+function extraResourceToMillingDefaults(resource: ExtraResourceDto): Pick<NormalizedMillingResource,
+  'resourceKind' | 'resourceRefType' | 'resourceRefId' | 'resourceName' | 'unitId' | 'accountingMethod' | 'parameterName' | 'parameterMm' | 'hdfAutoEnabled'
+> {
+  return {
+    resourceKind: resource.resourceKind,
+    resourceRefType: resource.resourceRefType,
+    resourceRefId: resource.resourceRefId,
+    resourceName: resource.resourceName,
+    unitId: resource.unitId,
+    accountingMethod: resource.accountingMethod,
+    parameterName: resource.defaultParameterName,
+    parameterMm: resource.defaultParameterMm,
+    hdfAutoEnabled: resource.hdfAutoDefault,
+  };
+}
+
 async function readMillingResources(
   client: { query: TransactionClient['query'] },
   millingTypeId?: number,
@@ -433,23 +862,25 @@ async function readMillingResources(
   const result = await client.query<MillingResourceRow>(
     `
     SELECT milling_type_extra_resource_id,
-           milling_type_id,
-           resource_kind,
-           resource_ref_type,
-           resource_ref_id,
-           resource_name,
-           unit_id,
-           accounting_method,
-           parameter_name,
-           parameter_mm,
-           hdf_auto_enabled,
-           comment,
-           is_active,
-           sort_order,
-           version
-    FROM milling_type_extra_resources
-    ${millingTypeId ? 'WHERE milling_type_id = $1' : ''}
-    ORDER BY milling_type_id ASC, sort_order ASC, milling_type_extra_resource_id ASC
+           link.milling_type_id,
+           link.extra_resource_id,
+           COALESCE(resource.resource_kind, link.resource_kind) AS resource_kind,
+           COALESCE(resource.resource_ref_type, link.resource_ref_type) AS resource_ref_type,
+           COALESCE(resource.resource_ref_id, link.resource_ref_id) AS resource_ref_id,
+           COALESCE(resource.resource_name, link.resource_name) AS resource_name,
+           COALESCE(resource.unit_id, link.unit_id) AS unit_id,
+           COALESCE(resource.accounting_method, link.accounting_method) AS accounting_method,
+           COALESCE(NULLIF(link.parameter_name, ''), resource.default_parameter_name, '') AS parameter_name,
+           COALESCE(link.parameter_mm, resource.default_parameter_mm) AS parameter_mm,
+           link.hdf_auto_enabled,
+           link.comment,
+           link.is_active,
+           link.sort_order,
+           link.version
+    FROM milling_type_extra_resources link
+    LEFT JOIN extra_resources resource ON resource.extra_resource_id = link.extra_resource_id
+    ${millingTypeId ? 'WHERE link.milling_type_id = $1' : ''}
+    ORDER BY link.milling_type_id ASC, link.sort_order ASC, link.milling_type_extra_resource_id ASC
     `,
     params,
   );
@@ -460,6 +891,7 @@ function mapMillingResourceRow(row: MillingResourceRow): MillingExtraResourceDto
   return {
     id: Number(row.milling_type_extra_resource_id),
     millingTypeId: Number(row.milling_type_id),
+    extraResourceId: toNullableNumber(row.extra_resource_id),
     resourceKind: row.resource_kind,
     resourceRefType: row.resource_ref_type ?? null,
     resourceRefId: toNullableNumber(row.resource_ref_id),
@@ -517,6 +949,7 @@ function normalizeLegacyMillingResources(
   const existingHdf = existingHdfIndex >= 0 ? next[existingHdfIndex] : null;
   const hdfResource: NormalizedMillingResource = {
     ...(existingHdf ?? {
+      extraResourceId: null,
       resourceKind: 'sheet_material',
       resourceRefType: null,
       resourceRefId: null,
@@ -543,6 +976,7 @@ function resourceToNormalized(resource: MillingExtraResourceDto): NormalizedMill
   return {
     id: resource.id,
     version: resource.version,
+    extraResourceId: resource.extraResourceId,
     resourceKind: resource.resourceKind,
     resourceRefType: resource.resourceRefType,
     resourceRefId: resource.resourceRefId,
@@ -577,6 +1011,14 @@ function normalizeMillingResourceInput(
   }
   const hdfAutoEnabled = resource.hdfAutoEnabled === true;
   const isActive = resource.isActive !== false;
+  const extraResourceId = normalizeOptionalPositiveInt(resource.extraResourceId ?? undefined, `extraResources.${index}.extraResourceId`) ?? null;
+  const resourceKind = normalizeOptionalText(resource.resourceKind, 50) ?? '';
+  const resourceName = normalizeOptionalText(resource.resourceName, 200) ?? '';
+  if (extraResourceId === null && (!resourceKind || !resourceName)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Milling extra resource must reference a directory item or include resource fields', {
+      field: `extraResources.${index}.extraResourceId`,
+    });
+  }
   if (isActive && hdfAutoEnabled && parameterMm === null) {
     throw new ApiError(422, 'VALIDATION_ERROR', 'Auto HDF resource must include a positive parameter', {
       field: `extraResources.${index}.parameterMm`,
@@ -585,10 +1027,11 @@ function normalizeMillingResourceInput(
   return {
     ...(id === undefined ? {} : { id }),
     ...(version === undefined ? {} : { version }),
-    resourceKind: normalizeRequiredText(resource.resourceKind, `extraResources.${index}.resourceKind`, 50),
+    extraResourceId,
+    resourceKind,
     resourceRefType: normalizeOptionalText(resource.resourceRefType, 50),
     resourceRefId: normalizeOptionalPositiveInt(resource.resourceRefId ?? undefined, `extraResources.${index}.resourceRefId`) ?? null,
-    resourceName: normalizeRequiredText(resource.resourceName, `extraResources.${index}.resourceName`, 200),
+    resourceName,
     unitId: normalizeOptionalPositiveInt(resource.unitId ?? undefined, `extraResources.${index}.unitId`) ?? null,
     accountingMethod: normalizeOptionalText(resource.accountingMethod, 500) ?? '',
     parameterName: normalizeOptionalText(resource.parameterName, 100) ?? '',
@@ -652,7 +1095,25 @@ async function syncMillingResources(
 ): Promise<void> {
   const existingById = new Map(existingResources.map((resource) => [resource.id, resource]));
   const incomingExistingIds = new Set<number>();
-  for (const resource of nextResources) {
+  for (const inputResource of nextResources) {
+    let resource = inputResource;
+    if (inputResource.extraResourceId !== null) {
+      const selected = await readExtraResourceById(tx, inputResource.extraResourceId);
+      if (!selected || selected.isActive === false) {
+        throw new ApiError(422, 'VALIDATION_ERROR', 'Selected extra resource is not available', {
+          field: 'extraResourceId',
+          extraResourceId: inputResource.extraResourceId,
+        });
+      }
+      const defaults = extraResourceToMillingDefaults(selected);
+      resource = {
+        ...inputResource,
+        ...defaults,
+        parameterName: inputResource.parameterName || defaults.parameterName,
+        parameterMm: inputResource.parameterMm ?? defaults.parameterMm,
+        hdfAutoEnabled: inputResource.hdfAutoEnabled,
+      };
+    }
     if (resource.id !== undefined) {
       incomingExistingIds.add(resource.id);
       const existing = existingById.get(resource.id);
@@ -672,18 +1133,19 @@ async function syncMillingResources(
       await tx.query(
         `
         UPDATE milling_type_extra_resources
-        SET resource_kind = $3,
-            resource_ref_type = $4,
-            resource_ref_id = $5,
-            resource_name = $6,
-            unit_id = $7,
-            accounting_method = $8,
-            parameter_name = $9,
-            parameter_mm = $10,
-            hdf_auto_enabled = $11,
-            comment = $12,
-            is_active = $13,
-            sort_order = $14,
+        SET extra_resource_id = $3,
+            resource_kind = $4,
+            resource_ref_type = $5,
+            resource_ref_id = $6,
+            resource_name = $7,
+            unit_id = $8,
+            accounting_method = $9,
+            parameter_name = $10,
+            parameter_mm = $11,
+            hdf_auto_enabled = $12,
+            comment = $13,
+            is_active = $14,
+            sort_order = $15,
             version = version + 1,
             updated_at = now()
         WHERE milling_type_extra_resource_id = $1
@@ -692,6 +1154,7 @@ async function syncMillingResources(
         [
           resource.id,
           millingTypeId,
+          resource.extraResourceId,
           resource.resourceKind,
           resource.resourceRefType,
           resource.resourceRefId,
@@ -712,6 +1175,7 @@ async function syncMillingResources(
       `
       INSERT INTO milling_type_extra_resources (
         milling_type_id,
+        extra_resource_id,
         resource_kind,
         resource_ref_type,
         resource_ref_id,
@@ -725,10 +1189,11 @@ async function syncMillingResources(
         is_active,
         sort_order
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       `,
       [
         millingTypeId,
+        resource.extraResourceId,
         resource.resourceKind,
         resource.resourceRefType,
         resource.resourceRefId,
@@ -764,6 +1229,7 @@ async function syncMillingResources(
 function resourceToAuditShape(resource: NormalizedMillingResource): Record<string, unknown> {
   return {
     id: resource.id ?? null,
+    extraResourceId: resource.extraResourceId,
     resourceKind: resource.resourceKind,
     resourceRefType: resource.resourceRefType,
     resourceRefId: resource.resourceRefId,
@@ -834,6 +1300,7 @@ async function readHdfSettings(client: { query: TransactionClient['query'] }): P
     `,
   );
   const resources = await readMillingResources(client);
+  const extraResourcesDirectory = await readExtraResources(client);
   const resourcesByMilling = new Map<number, MillingExtraResourceDto[]>();
   for (const resource of resources) {
     const list = resourcesByMilling.get(resource.millingTypeId) ?? [];
@@ -848,6 +1315,7 @@ async function readHdfSettings(client: { query: TransactionClient['query'] }): P
     sheetMaterialName: row?.material_name ?? null,
     sheetMaterialVersion: toNullableNumber(row?.material_version),
     configRevision: Number(row?.config_revision ?? 1),
+    extraResources: extraResourcesDirectory,
     millingTypes: millingResult.rows.map((milling) => {
       const millingTypeId = Number(milling.milling_type_id);
       const extraResources = resourcesByMilling.get(millingTypeId) ?? [];
@@ -878,6 +1346,7 @@ function parseHdfSettingsResponse(value: unknown): HdfSettingsDto {
       sheetMaterialName: typeof row.sheetMaterialName === 'string' ? row.sheetMaterialName : null,
       sheetMaterialVersion: toNullableNumber(row.sheetMaterialVersion),
       configRevision: Number(row.configRevision ?? 1),
+      extraResources: parseExtraResources(row.extraResources),
       millingTypes: Array.isArray(row.millingTypes)
         ? row.millingTypes.map((milling) => {
             const item = milling as Partial<HdfMillingSettingsDto>;
@@ -903,8 +1372,40 @@ function parseHdfSettingsResponse(value: unknown): HdfSettingsDto {
     sheetMaterialName: null,
     sheetMaterialVersion: null,
     configRevision: 1,
+    extraResources: [],
     millingTypes: [],
   };
+}
+
+function parseExtraResourceResponse(value: unknown): ExtraResourceDto {
+  const parsed = parseExtraResources([value])[0];
+  if (!parsed) {
+    throw new ApiError(500, 'INTERNAL_ERROR', 'Invalid extra resource response');
+  }
+  return parsed;
+}
+
+function parseExtraResources(value: unknown): ExtraResourceDto[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((resource) => {
+    const item = resource as Partial<ExtraResourceDto>;
+    return {
+      id: Number(item.id),
+      resourceKind: typeof item.resourceKind === 'string' && item.resourceKind.trim() ? item.resourceKind : 'other',
+      resourceRefType: typeof item.resourceRefType === 'string' && item.resourceRefType.trim() ? item.resourceRefType : null,
+      resourceRefId: toNullableNumber(item.resourceRefId),
+      resourceName: typeof item.resourceName === 'string' ? item.resourceName : '',
+      unitId: toNullableNumber(item.unitId),
+      accountingMethod: typeof item.accountingMethod === 'string' ? item.accountingMethod : '',
+      defaultParameterName: typeof item.defaultParameterName === 'string' ? item.defaultParameterName : '',
+      defaultParameterMm: toNullableNumber(item.defaultParameterMm),
+      hdfAutoDefault: item.hdfAutoDefault === true,
+      comment: typeof item.comment === 'string' ? item.comment : '',
+      isActive: item.isActive !== false,
+      sortOrder: Number(item.sortOrder ?? 100),
+      version: Number(item.version ?? 1),
+    };
+  }).filter((resource) => Number.isInteger(resource.id) && resource.id > 0);
 }
 
 function parseMillingExtraResources(value: unknown, fallbackMillingTypeId: number): MillingExtraResourceDto[] {
@@ -914,6 +1415,7 @@ function parseMillingExtraResources(value: unknown, fallbackMillingTypeId: numbe
     return {
       id: Number(item.id),
       millingTypeId: Number(item.millingTypeId ?? fallbackMillingTypeId),
+      extraResourceId: toNullableNumber(item.extraResourceId),
       resourceKind: typeof item.resourceKind === 'string' && item.resourceKind.trim() ? item.resourceKind : 'other',
       resourceRefType: typeof item.resourceRefType === 'string' && item.resourceRefType.trim() ? item.resourceRefType : null,
       resourceRefId: toNullableNumber(item.resourceRefId),

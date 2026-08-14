@@ -25,7 +25,7 @@ export const RESOURCE_PERMISSION_MAP: Record<string, PermissionName[]> = {
   clients: ['references.view'],
   materials: ['references.view'],
   milling_types: ['references.view'],
-  milling_type_extra_resources: ['settings.view', 'settings.manage'],
+  extra_resources: ['settings.view', 'settings.manage'],
   films: ['references.view'],
   edge_types: ['references.view'],
   vendors: ['references.view'],

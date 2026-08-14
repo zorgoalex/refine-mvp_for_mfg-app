@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Inject, Param, Put, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Inject, Param, Post, Put, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { ApiError } from '../../../common/errors/api-error';
@@ -15,15 +15,32 @@ const hdfSettingsBodySchema = z.object({
 const millingExtraResourceBodySchema = z.object({
   id: z.number().int().positive().optional(),
   version: z.number().int().positive().optional(),
+  extraResourceId: z.number().int().positive().nullable().optional(),
+  resourceKind: z.string().trim().min(1).max(50).optional(),
+  resourceRefType: z.string().trim().min(1).max(50).nullable().optional(),
+  resourceRefId: z.number().int().positive().nullable().optional(),
+  resourceName: z.string().trim().min(1).max(200).optional(),
+  unitId: z.number().int().positive().nullable().optional(),
+  accountingMethod: z.string().trim().max(500).optional(),
+  parameterName: z.string().trim().max(100).optional(),
+  parameterMm: z.number().positive().nullable().optional(),
+  hdfAutoEnabled: z.boolean().optional(),
+  comment: z.string().trim().max(1000).optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(32767).optional(),
+}).strict();
+
+const extraResourceBodySchema = z.object({
+  version: z.number().int().positive().optional(),
   resourceKind: z.string().trim().min(1).max(50),
   resourceRefType: z.string().trim().min(1).max(50).nullable().optional(),
   resourceRefId: z.number().int().positive().nullable().optional(),
   resourceName: z.string().trim().min(1).max(200),
   unitId: z.number().int().positive().nullable().optional(),
   accountingMethod: z.string().trim().max(500).optional(),
-  parameterName: z.string().trim().max(100).optional(),
-  parameterMm: z.number().positive().nullable().optional(),
-  hdfAutoEnabled: z.boolean().optional(),
+  defaultParameterName: z.string().trim().max(100).optional(),
+  defaultParameterMm: z.number().positive().nullable().optional(),
+  hdfAutoDefault: z.boolean().optional(),
   comment: z.string().trim().max(1000).optional(),
   isActive: z.boolean().optional(),
   sortOrder: z.number().int().min(0).max(32767).optional(),
@@ -49,6 +66,46 @@ export class OrderHdfSettingsController {
   @Get()
   async get(@Req() request: RequestWithCurrentUser): Promise<HdfSettingsDto> {
     return this.service.get(requireCurrentUser(request));
+  }
+
+  @ApiOperation({ operationId: 'listExtraResources', summary: 'List independent extra resources directory' })
+  @Get('extra-resources')
+  async listExtraResources(@Req() request: RequestWithCurrentUser) {
+    return this.service.getExtraResources(requireCurrentUser(request));
+  }
+
+  @ApiOperation({ operationId: 'createExtraResource', summary: 'Create independent extra resource directory item' })
+  @Post('extra-resources')
+  async createExtraResource(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
+    @Body() body: unknown,
+  ) {
+    const parsed = parse(extraResourceBodySchema, body);
+    return this.service.createExtraResource({
+      currentUser: requireCurrentUser(request),
+      ...parsed,
+      idempotencyKey: parseIdempotencyKey(idempotencyKeyHeader),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({ operationId: 'updateExtraResource', summary: 'Update independent extra resource directory item' })
+  @Put('extra-resources/:extraResourceId')
+  async updateExtraResource(
+    @Req() request: RequestWithCurrentUser,
+    @Param('extraResourceId') extraResourceIdParam: string,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
+    @Body() body: unknown,
+  ) {
+    const parsed = parse(extraResourceBodySchema, body);
+    return this.service.updateExtraResource({
+      currentUser: requireCurrentUser(request),
+      id: parseId(extraResourceIdParam),
+      ...parsed,
+      idempotencyKey: parseIdempotencyKey(idempotencyKeyHeader),
+      requestId: request.requestId,
+    });
   }
 
   @ApiOperation({ operationId: 'updateHdfProductionTechSettings', summary: 'Update HDF production tech settings' })

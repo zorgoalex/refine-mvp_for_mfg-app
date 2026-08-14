@@ -5,6 +5,7 @@ const sql = readFileSync(
   new URL('./115_cnc_telegram_packet_mdf_board_hidden.sql', import.meta.url),
   'utf8',
 );
+const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
 describe('115_cnc_telegram_packet_mdf_board_hidden migration', () => {
   it('adds MDF board hide metadata to CNC telegram packets', () => {
@@ -19,5 +20,11 @@ describe('115_cnc_telegram_packet_mdf_board_hidden migration', () => {
     expect(sql).toContain('WHERE mdf_board_hidden_at IS NULL');
     expect(sql).toContain('idx_cnc_telegram_packets_mdf_hidden_cut_job');
     expect(sql).toContain('WHERE mdf_board_hidden_at IS NOT NULL');
+  });
+
+  it('is covered by the migration runner probe map', () => {
+    expect(runner).toContain('115_cnc_telegram_packet_mdf_board_hidden*) probe_all');
+    expect(runner).toContain('q_col cnc_telegram_packets mdf_board_hidden_at');
+    expect(runner).toContain('q_idx idx_cnc_telegram_packets_mdf_visible_workday');
   });
 });

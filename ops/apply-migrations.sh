@@ -1447,6 +1447,21 @@ probe_file() {
                      "SELECT EXISTS (SELECT 1 FROM cut_settings WHERE key = 'render.styles'
                                       AND value->>'version' = '1'
                                       AND value->'profiles' ? 'mdf_board_preview');" ;;
+    129_extra_resources_directory*) probe_all \
+                     "$(q_tbl extra_resources)" \
+                     "$(q_col extra_resources extra_resource_id)" \
+                     "$(q_col extra_resources resource_kind)" \
+                     "$(q_col extra_resources resource_name)" \
+                     "$(q_col extra_resources unit_id)" \
+                     "$(q_col extra_resources accounting_method)" \
+                     "$(q_col extra_resources default_parameter_name)" \
+                     "$(q_col extra_resources default_parameter_mm)" \
+                     "$(q_col extra_resources hdf_auto_default)" \
+                     "$(q_col extra_resources is_active)" \
+                     "$(q_col extra_resources version)" \
+                     "$(q_col milling_type_extra_resources extra_resource_id)" \
+                     "$(q_idx uq_extra_resources_active_kind_name)" \
+                     "$(q_idx idx_milling_type_extra_resources_extra_resource)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
