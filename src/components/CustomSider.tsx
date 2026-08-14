@@ -88,6 +88,7 @@ const CATEGORY_MAP: Record<string, string> = {
   films: "Материалы",
   materials: "Материалы",
   sheet_material_types: "Материалы",
+  milling_type_extra_resources: "Материалы",
   employees: "Настройки",
   users: "Настройки",
   configuration: "Настройки",

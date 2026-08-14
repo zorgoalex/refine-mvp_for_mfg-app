@@ -1,9 +1,10 @@
 import { useShow, IResourceComponentsProps } from "@refinedev/core";
 import { Show, TextField, DateField } from "@refinedev/antd";
-import { Typography, Badge, Row, Col, Divider } from "antd";
+import { Typography, Badge, Row, Col, Divider, Card } from "antd";
 import { DISPLAY_DATE_TIME_SECONDS_FORMAT } from "../../utils/dateFormat";
 import { useCurrentRecordTabTitle } from "../../utils/recordTitle";
 import { ReferenceSortOrderShow } from "../../components/ReferenceSortOrder";
+import { MillingExtraResourcesEditor } from "./MillingExtraResourcesEditor";
 
 const { Title } = Typography;
 
@@ -77,7 +78,14 @@ export const MillingTypeShow: React.FC<IResourceComponentsProps> = () => {
         </Col>
       </Row>
       <ReferenceSortOrderShow value={record?.sort_order} />
+      {record?.milling_type_id ? (
+        <>
+          <Divider />
+          <Card size="small" title="Доп. ресурсы">
+            <MillingExtraResourcesEditor millingTypeId={Number(record.milling_type_id)} showMillingColumn={false} readOnly />
+          </Card>
+        </>
+      ) : null}
     </Show>
   );
 };
-

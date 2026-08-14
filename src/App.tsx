@@ -67,6 +67,7 @@ const MillingTypeList = lazy(async () => ({ default: (await import("./pages/mill
 const MillingTypeCreate = lazy(async () => ({ default: (await import("./pages/milling_types/create")).MillingTypeCreate }));
 const MillingTypeEdit = lazy(async () => ({ default: (await import("./pages/milling_types/edit")).MillingTypeEdit }));
 const MillingTypeShow = lazy(async () => ({ default: (await import("./pages/milling_types/show")).MillingTypeShow }));
+const MillingExtraResourcesList = lazy(async () => ({ default: (await import("./pages/milling_extra_resources/list")).MillingExtraResourcesList }));
 
 const FilmList = lazy(async () => ({ default: (await import("./pages/films/list")).FilmList }));
 const FilmCreate = lazy(async () => ({ default: (await import("./pages/films/create")).FilmCreate }));
@@ -410,6 +411,13 @@ const ThemedApp = () => {
                   meta: {
                     idColumnName: "milling_type_id",
                     label: "Типы фрезеровок",
+                  },
+                },
+                {
+                  name: "milling_type_extra_resources",
+                  list: "/milling-extra-resources",
+                  meta: {
+                    label: "Доп. ресурсы фрезеровок",
                   },
                 },
                 {
@@ -782,6 +790,9 @@ const ThemedApp = () => {
                     <Route path="create" element={<MillingTypeCreate />} />
                     <Route path="edit/:id" element={<MillingTypeEdit />} />
                     <Route path="show/:id" element={<MillingTypeShow />} />
+                  </Route>
+                  <Route path="/milling-extra-resources" >
+                    <Route index element={<MillingExtraResourcesList />} />
                   </Route>
                   <Route path="/films" >
                     <Route index element={<FilmList />} />
