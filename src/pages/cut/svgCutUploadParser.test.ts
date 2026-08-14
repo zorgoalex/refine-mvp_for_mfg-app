@@ -235,6 +235,12 @@ describe('svgCutUploadParser visual labels', () => {
     expect(result.rejected.join('; ')).toContain('деталь создана по подписи');
   });
 
+  it('passes parsed SVG sheet dimensions into label-only item creation', () => {
+    expect(parserSource).toContain('sheetWidthMm: sheetWidth');
+    expect(parserSource).toContain('sheetHeightMm: sheetHeight');
+    expect(parserSource).not.toContain('sheetWidthMm,\n    sheetHeightMm,');
+  });
+
   it('does not create MDF details from unlabeled geometry unless informational fallback is enabled', () => {
     const genericPiece = contour({
       elementId: 'rect-raw-geometry',

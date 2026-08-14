@@ -192,8 +192,8 @@ export function parseSvgCutUploadText(
   const selectedContours = partContours.length > 0 || !allowGenericGeometry ? partContours : genericContours;
   const builtLayout = buildSvgUploadLayoutItemsFromContours(selectedContours, visualLabels, {
     ...options,
-    sheetWidthMm,
-    sheetHeightMm,
+    sheetWidthMm: sheetWidth,
+    sheetHeightMm: sheetHeight,
   });
   const rejected = new Set<string>();
   if (!allowGenericGeometry || selectedContours.length === 0) {
