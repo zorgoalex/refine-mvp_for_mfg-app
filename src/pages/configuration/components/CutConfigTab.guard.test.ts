@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const tabSrc = readFileSync(new URL('./CutConfigTab.tsx', import.meta.url), 'utf8');
+const renderFormSrc = readFileSync(new URL('./CutRenderStylesForm.tsx', import.meta.url), 'utf8');
 const indexSrc = readFileSync(new URL('../index.tsx', import.meta.url), 'utf8');
 const apiSrc = readFileSync(new URL('../../../api/cutConfigApi.ts', import.meta.url), 'utf8');
 
@@ -24,10 +25,14 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
 
   it('exposes editable render style settings in a dedicated tab', () => {
     expect(tabSrc).toMatch(/Настройки рендера/);
-    expect(tabSrc).toMatch(/CUT_RENDER_STYLES_SETTING_KEY/);
-    expect(tabSrc).toMatch(/parseCutRenderStylesSetting/);
-    expect(tabSrc).toMatch(/cutConfigApi\.updateSetting\(CUT_RENDER_STYLES_SETTING_KEY/);
-    expect(tabSrc).toMatch(/Профиль MDF-превью/);
+    expect(tabSrc).toMatch(/CutRenderStylesForm/);
+    expect(renderFormSrc).toMatch(/CUT_RENDER_STYLES_SETTING_KEY/);
+    expect(renderFormSrc).toMatch(/parseCutRenderStylesSetting/);
+    expect(renderFormSrc).toMatch(/cutConfigApi\.updateSetting\(CUT_RENDER_STYLES_SETTING_KEY/);
+    expect(renderFormSrc).toMatch(/Шаблоны правил рендера/);
+    expect(renderFormSrc).toMatch(/Сохранить как копию/);
+    expect(renderFormSrc).toMatch(/type="color"/);
+    expect(renderFormSrc).toMatch(/Загрузить тестовый SVG/);
   });
 
   it('eligibility statuses use a multiselect from the production-statuses reference (no free text)', () => {
