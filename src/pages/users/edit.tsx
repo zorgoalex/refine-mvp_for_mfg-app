@@ -1,11 +1,14 @@
 import { Edit, useForm } from "@refinedev/antd";
-import { IResourceComponentsProps, useOne } from "@refinedev/core";
+import { IResourceComponentsProps, useGetIdentity } from "@refinedev/core";
 import { Form, Input, Select, Checkbox, Button, Divider, message, Card } from "antd";
 import { authStorage } from "../../utils/auth";
 import { useState } from "react";
 import { usersApi } from "../../api/usersApi";
 import { legacyApiRoutes } from "../../api/legacyApiRoutes";
 import { featureFlags } from "../../config/featureFlags";
+import type { UserIdentity } from "../../types/auth";
+import { can } from "../../utils/permissions";
+import { WorkosAdminLinksCard } from "./WorkosAdminLinksCard";
 import {
   mapBackendUpdateUserRequest,
   mapLegacyUserFormToHasuraPayload,
@@ -13,6 +16,7 @@ import {
 } from "./userFormMapping";
 
 export const UserEdit: React.FC<IResourceComponentsProps> = () => {
+  const { data: identity } = useGetIdentity<UserIdentity>();
   const { formProps, saveButtonProps, queryResult } = useForm({
     // Преобразуем данные при загрузке: role_id → role
     queryOptions: {
@@ -31,6 +35,7 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
   const [passwordForm] = Form.useForm();
 
   const userId = queryResult?.data?.data?.user_id ?? queryResult?.data?.data?.id;
+  const canManageSso = can("users.manage_sso", identity);
 
   const handlePasswordChange = async (values: { new_password: string }) => {
     setPasswordLoading(true);
@@ -174,6 +179,13 @@ export const UserEdit: React.FC<IResourceComponentsProps> = () => {
           </Form.Item>
         </Form>
       </Card>
+
+      {featureFlags.workosAuth && canManageSso && userId != null && (
+        <>
+          <Divider />
+          <WorkosAdminLinksCard userId={String(userId)} />
+        </>
+      )}
     </Edit>
   );
 };
