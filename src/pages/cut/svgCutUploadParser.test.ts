@@ -189,12 +189,14 @@ describe('svgCutUploadParser visual labels', () => {
         detailNumber: 1,
         widthMm: 281.99,
         heightMm: 213.99,
+        visualLabel: { rawLines: ['2723', '# 1'] },
       }),
       expect.objectContaining({
         orderName: '2777',
         detailNumber: 3,
         widthMm: 475.97,
         heightMm: 344.98,
+        visualLabel: { rawLines: ['2777', '# 3'] },
       }),
     ]));
   });
@@ -230,6 +232,7 @@ describe('svgCutUploadParser visual labels', () => {
         heightMm: 600,
         xMm: 100,
         yMm: 340,
+        visualLabel: { rawLines: ['2790', '# 1', '720*600'] },
       }),
     ]);
     expect(result.rejected.join('; ')).toContain('деталь создана по подписи');

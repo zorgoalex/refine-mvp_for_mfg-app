@@ -10,6 +10,8 @@ import {
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
   resolveCutRenderStyle,
   resolveCutRenderStyleFromSetting,
+  cutRenderNormalizeLabelLines,
+  cutRenderPieceSizeLine,
   type CutRenderStyleRule,
 } from '../../../shared/cut-render-style';
 import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
@@ -1971,6 +1973,7 @@ function buildManualSvgScreenshotSvg(
         widthMm: sourceItem?.widthMm ?? item.widthMm,
         heightMm: sourceItem?.heightMm ?? item.heightMm,
         materialName: dto.materialName ?? null,
+        visualLines: item.visualLabel?.rawLines ?? null,
       },
     };
   });
@@ -2000,8 +2003,15 @@ function buildManualSvgScreenshotSvg(
           widthMm?: number | null;
           heightMm?: number | null;
           materialName?: string | null;
+          visualLines?: string[] | null;
         };
       }).label;
+      const visualLines = manualSvgVisualLabelLines(
+        label?.visualLines ?? null,
+        label?.widthMm ?? null,
+        label?.heightMm ?? null,
+      );
+      if (visualLines.length > 0) return visualLines;
       return composePieceLabelLines({
         orderId: label?.orderId ?? null,
         orderName: label?.orderName ?? null,
@@ -2017,6 +2027,17 @@ function buildManualSvgScreenshotSvg(
     },
     renderStyle,
   });
+}
+
+function manualSvgVisualLabelLines(
+  rawLines: readonly string[] | null | undefined,
+  widthMm: number | null,
+  heightMm: number | null,
+): string[] {
+  const lines = cutRenderNormalizeLabelLines(rawLines ?? []);
+  if (lines.length === 0) return [];
+  if (lines.length >= 3) return lines;
+  return [...lines, cutRenderPieceSizeLine(widthMm, heightMm)];
 }
 
 async function loadManualSvgUploadRenderStyle(client: DatabaseClient): Promise<CutRenderStyleRule> {
@@ -7128,7 +7149,20 @@ function cutLayoutItemOrNull(value: unknown): CncTelegramCutLayoutItemDto | null
     placedHeightMm,
     rotated: raw.rotated === true,
     sourceSvg: cutLayoutItemSourceSvgOrNull(raw.sourceSvg),
+    visualLabel: cutLayoutItemVisualLabelOrNull(raw.visualLabel),
   };
+}
+
+function cutLayoutItemVisualLabelOrNull(value: unknown): CncTelegramCutLayoutItemDto['visualLabel'] | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.rawLines)) return null;
+  const rawLines = raw.rawLines
+    .filter((line): line is string => typeof line === 'string')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  return rawLines.length > 0 ? { rawLines } : null;
 }
 
 function cutLayoutItemSourceSvgOrNull(value: unknown): CncTelegramCutLayoutItemDto['sourceSvg'] | null {

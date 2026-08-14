@@ -128,6 +128,7 @@ describe('CncTelegramController parsing', () => {
           placedWidthMm: 497,
           placedHeightMm: 477,
           rotated: false,
+          visualLabel: { rawLines: ['2689', '# 31', '497*477'] },
         }],
       },
       items: [structuredPayload().items[0]],
@@ -141,6 +142,9 @@ describe('CncTelegramController parsing', () => {
       validationMode: 'strict',
       requestedCutJobId: 777,
       svgContentHash: 'a'.repeat(64),
+      cutLayout: {
+        items: [{ visualLabel: { rawLines: ['2689', '# 31', '497*477'] } }],
+      },
     });
 
     expect(parseManualSvgUpload({

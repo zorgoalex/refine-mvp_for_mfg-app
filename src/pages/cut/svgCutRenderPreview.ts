@@ -2,8 +2,12 @@ import {
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
   cutRenderLabelFontWeight,
   cutRenderLabelFillForBackground,
+  cutRenderLabelLineSpecs,
+  cutRenderNormalizeLabelLines,
+  cutRenderPieceSizeLine,
   cutRenderLabelStrokeForBackground,
   cutRenderOrderFillPalette,
+  cutRenderPositionLine,
   cutRenderSourceSvgCss,
   resolveCutRenderStyleFromSetting,
   type CutRenderStylesSetting,
@@ -43,23 +47,21 @@ export function buildStyledSvgUploadPreview(
       item.placedHeightMm,
       cutRenderSourceSvgCss(style, fill),
     );
-    const lines = [
-      item.orderName,
-      `поз. ${item.detailNumber}`,
-      `${formatDimension(item.widthMm)}X${formatDimension(item.heightMm)}`,
-    ];
+    const lines = itemLabelLines(item);
     const labelFill = cutRenderLabelFillForBackground(fill, style);
     const labelStroke = cutRenderLabelStrokeForBackground(fill, fontMm, style);
     const labelStrokeAttrs = labelStroke
       ? ` stroke="${labelStroke.stroke}" stroke-width="${num(labelStroke.strokeWidthMm)}" paint-order="stroke"`
       : '';
-    const tspans = lines.map((line, index) => {
-      const dy = index === 0 ? `${(-(lines.length - 1) / 2).toFixed(3)}em` : '1em';
-      return `<tspan x="${num(cx)}" dy="${dy}">${escapeXml(line)}</tspan>`;
-    }).join('');
-    const text = `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, Arial, sans-serif" font-size="${num(
+    const text = renderPieceLabelText({
+      lines,
+      cx,
+      cy,
       fontMm,
-    )}" font-weight="${num(cutRenderLabelFontWeight(style))}" fill="${labelFill}"${labelStrokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
+      fontWeight: cutRenderLabelFontWeight(style),
+      fill: labelFill,
+      strokeAttrs: labelStrokeAttrs,
+    });
     return `<g>${rect}${sourceSvg}${text}</g>`;
   }).join('');
   return [
@@ -68,6 +70,44 @@ export function buildStyledSvgUploadPreview(
     pieces,
     '</svg>',
   ].join('');
+}
+
+function itemLabelLines(item: ParsedSvgUpload['cutLayout']['items'][number]): string[] {
+  const rawLines = cutRenderNormalizeLabelLines(item.visualLabel?.rawLines ?? []);
+  if (rawLines.length >= 3) return rawLines;
+  if (rawLines.length > 0) return [...rawLines, cutRenderPieceSizeLine(item.widthMm, item.heightMm)];
+  return [
+    item.orderName,
+    cutRenderPositionLine(item.detailNumber),
+    cutRenderPieceSizeLine(item.widthMm, item.heightMm),
+  ];
+}
+
+function renderPieceLabelText(input: {
+  lines: readonly string[];
+  cx: number;
+  cy: number;
+  fontMm: number;
+  fontWeight: number;
+  fill: string;
+  strokeAttrs: string;
+}): string {
+  const specs = cutRenderLabelLineSpecs(input.lines);
+  if (specs.length === 0) return '';
+  const gapMm = input.fontMm * 0.035;
+  const lineHeights = specs.map((spec) => input.fontMm * spec.fontRatio * 0.82);
+  const totalHeight = lineHeights.reduce((sum, height) => sum + height, 0) + gapMm * Math.max(0, specs.length - 1);
+  let top = input.cy - totalHeight / 2;
+  const tspans = specs.map((spec, index) => {
+    const fontSize = input.fontMm * spec.fontRatio;
+    const lineHeight = lineHeights[index] ?? fontSize * 0.82;
+    const y = top + lineHeight / 2;
+    top += lineHeight + gapMm;
+    return `<tspan x="${num(input.cx)}" y="${num(y)}" font-size="${num(fontSize)}">${escapeXml(spec.text)}</tspan>`;
+  }).join('');
+  return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, Arial, sans-serif" font-size="${num(
+    input.fontMm,
+  )}" font-weight="${num(input.fontWeight)}" fill="${input.fill}"${input.strokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
 }
 
 function fillForOrderName(
@@ -103,10 +143,6 @@ function renderSourceSvg(
     sourceSvg.body,
     '</svg>',
   ].join('');
-}
-
-function formatDimension(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1)));
 }
 
 function escapeXml(value: string): string {

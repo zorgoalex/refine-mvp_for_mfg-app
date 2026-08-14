@@ -43,6 +43,7 @@ describe('cutConfigHelpers', () => {
       key: 'render.styles',
       value: {
         ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+        templates: undefined,
         profiles: {
           ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
           mdf_board_preview: {

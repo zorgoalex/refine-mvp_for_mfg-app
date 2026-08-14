@@ -1454,6 +1454,13 @@ probe_file() {
                                       AND (value #>> '{profiles,mdf_board_preview,piece,strokeWidthMm}')::numeric = 1.6
                                       AND value #>> '{profiles,mdf_board_preview,label,darkTextStroke}' = '#ffffff'
                                       AND (value #>> '{profiles,mdf_board_preview,label,fontWeight}')::int = 800);" ;;
+    131_cut_render_style_templates*) probe_all \
+                     "SELECT EXISTS (SELECT 1 FROM cut_settings WHERE key = 'render.styles'
+                                      AND value->>'defaultProfileId' = 'mdf_board_preview'
+                                      AND jsonb_typeof(value->'templates') = 'array'
+                                      AND jsonb_array_length(value->'templates') > 0
+                                      AND value->'templates'->0->>'id' = 'mdf_board_preview'
+                                      AND jsonb_typeof(value->'templates'->0->'profile') = 'object');" ;;
     129_extra_resources_directory*) probe_all \
                      "$(q_tbl extra_resources)" \
                      "$(q_col extra_resources extra_resource_id)" \
@@ -1480,7 +1487,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
