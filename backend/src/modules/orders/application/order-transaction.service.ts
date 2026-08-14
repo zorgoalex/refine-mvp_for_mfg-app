@@ -1,5 +1,7 @@
 import { ApiError } from '../../../common/errors/api-error';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import { PaymentAccessPolicy } from '../../../permissions/policies/payment-access.policy';
+import type { ScopedEntity } from '../../../permissions/policies/scope';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
@@ -138,6 +140,7 @@ export interface OrderTransactionServicePorts {
 export class OrderTransactionService {
   private readonly permissions: OrderPermissionCheckerPort;
   private readonly orderAccessPolicy = new OrderAccessPolicy();
+  private readonly paymentAccessPolicy = new PaymentAccessPolicy();
 
   constructor(private readonly ports: OrderTransactionServicePorts) {
     this.permissions = ports.permissions ?? new PermissionsService();
@@ -167,7 +170,12 @@ export class OrderTransactionService {
       const requestedProjectId = normalizeProjectIdInput(
         command.dto.header.projectId,
       );
-      this.requireFinancePermissionForPaymentMutations(command, prepared.order);
+      this.requireFinancePermissionForPaymentMutations(command, prepared.order, {
+        createdByUserId: command.currentUser.id,
+        managerUserId: prepared.order.header.managerId === undefined || prepared.order.header.managerId === null
+          ? null
+          : String(prepared.order.header.managerId),
+      });
 
       // Уникальность номера заказа среди живых заказов — жёсткий блок (409 с
       // предложенным следующим номером), обхода нет by design. Advisory-лок
@@ -398,7 +406,10 @@ export class OrderTransactionService {
         pathOrderId: command.orderId,
       });
 
-      this.requireFinancePermissionForPaymentMutations(command, prepared.order);
+      this.requireFinancePermissionForPaymentMutations(command, prepared.order, {
+        createdByUserId: lockedOrder.createdByUserId,
+        managerUserId: lockedOrder.managerUserId,
+      });
 
       // Переименование в занятый номер — блок; без смены имени проверка не
       // выполняется (легаси-дубли остаются редактируемыми).
@@ -901,6 +912,7 @@ export class OrderTransactionService {
   private requireFinancePermissionForPaymentMutations(
     command: Pick<CreateOrderCommand | UpdateOrderCommand, 'currentUser'>,
     order: NormalizedSaveOrderDto,
+    orderScopeSubject: ScopedEntity,
   ): void {
     const createsPayment = order.payments.some((payment) => payment.id === undefined);
     const updatesPayment = order.payments.some((payment) => payment.id !== undefined);
@@ -916,12 +928,35 @@ export class OrderTransactionService {
 
     if (createsPayment) {
       this.requirePermission(command, 'payments.create');
+      this.requirePaymentScope(command, 'payments.create', orderScopeSubject);
     }
     if (updatesPayment || updatesPaymentStatus) {
       this.requirePermission(command, 'payments.update');
+      this.requirePaymentScope(command, 'payments.update', orderScopeSubject);
     }
     if (deletesPayment) {
       this.requirePermission(command, 'payments.delete');
+      this.requirePaymentScope(command, 'payments.delete', orderScopeSubject);
+    }
+  }
+
+  private requirePaymentScope(
+    command: Pick<CreateOrderCommand | UpdateOrderCommand, 'currentUser'>,
+    permission: 'payments.create' | 'payments.update' | 'payments.delete',
+    order: ScopedEntity,
+  ): void {
+    const payment = { paymentId: 0, order };
+    const allowed =
+      permission === 'payments.create'
+        ? this.paymentAccessPolicy.canCreate(command.currentUser, payment)
+        : permission === 'payments.update'
+          ? this.paymentAccessPolicy.canUpdate(command.currentUser, payment)
+          : this.paymentAccessPolicy.canDelete(command.currentUser, payment);
+
+    if (!allowed) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: [permission],
+      });
     }
   }
 

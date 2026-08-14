@@ -1,7 +1,7 @@
 import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
-import { getPermissionsForRole, mapRoleIdToRole } from '../../../permissions/permissions';
+import { mapRoleIdToRole } from '../../../permissions/permissions';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import {
@@ -179,7 +179,7 @@ export class WorkosAuthService {
     }
     void this.ports.identities.touchLastLogin(link.identityId).catch(() => undefined);
 
-    const currentUser = this.toCurrentUser(user, session.sessionId, identity, link);
+    const currentUser = await this.toCurrentUser(user, session.sessionId, identity, link);
     const accessToken = await this.ports.tokens.issueAccessToken(currentUser, {
       notAfter: session.refreshTokenExpiresAt,
     });
@@ -583,12 +583,12 @@ export class WorkosAuthService {
     });
   }
 
-  private toCurrentUser(
+  private async toCurrentUser(
     user: AuthUserRecord,
     sessionId: string,
     identity: WorkosIdentity,
     link: UserIdentityRecord,
-  ): CurrentUser {
+  ): Promise<CurrentUser> {
     const role = mapRoleIdToRole(user.roleId);
 
     if (!role) {
@@ -604,12 +604,16 @@ export class WorkosAuthService {
       );
     }
 
+    const authorization = await this.ports.permissions.loadRoleAuthorization(user.roleId);
+
     return {
       id: user.id,
       username: user.username,
       role,
       roleId: user.roleId,
-      permissions: getPermissionsForRole(role),
+      permissions: authorization.permissions,
+      policyScopes: authorization.scopes,
+      permissionsVersion: authorization.version,
       sessionId,
     };
   }

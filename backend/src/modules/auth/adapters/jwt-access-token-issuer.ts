@@ -3,6 +3,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { BackendEnv } from '../../../config/env.validation';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName, UserRole } from '../../../permissions/permissions';
+import type { RolePolicy } from '../../../permissions/policies/role-policies';
 import type { AccessTokenIssuerPort, IssuedAccessToken } from '../auth.types';
 
 export interface AccessTokenPayload {
@@ -12,6 +13,8 @@ export interface AccessTokenPayload {
   role: UserRole;
   roleId: number;
   permissions: PermissionName[];
+  policyScopes?: RolePolicy;
+  permissionsVersion?: number;
   sessionId?: string;
   tokenType: 'access';
   'https://hasura.io/jwt/claims': {
@@ -51,6 +54,8 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
       role: user.role,
       roleId: user.roleId,
       permissions: [...user.permissions],
+      policyScopes: user.policyScopes,
+      permissionsVersion: user.permissionsVersion,
       sessionId: user.sessionId,
       tokenType: 'access',
       'https://hasura.io/jwt/claims': {
@@ -86,6 +91,8 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuerPort {
         role: payload.role,
         roleId: payload.roleId,
         permissions: payload.permissions,
+        policyScopes: payload.policyScopes,
+        permissionsVersion: payload.permissionsVersion,
         sessionId: payload.sessionId,
       };
     } catch (error) {

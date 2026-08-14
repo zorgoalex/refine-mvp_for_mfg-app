@@ -6040,17 +6040,6 @@
                             "comment": ""
                         },
                         {
-                            "role": "operator",
-                            "permission": {
-                                "check": {},
-                                "set": {
-                                    "created_by": "x-hasura-User-Id"
-                                },
-                                "columns": "*"
-                            },
-                            "comment": ""
-                        },
-                        {
                             "role": "superadmin",
                             "permission": {
                                 "check": {},
@@ -6076,15 +6065,6 @@
                     "select_permissions": [
                         {
                             "role": "manager",
-                            "permission": {
-                                "columns": "*",
-                                "filter": {},
-                                "allow_aggregations": true
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "operator",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -6123,18 +6103,6 @@
                     "update_permissions": [
                         {
                             "role": "manager",
-                            "permission": {
-                                "columns": "*",
-                                "filter": {},
-                                "check": {},
-                                "set": {
-                                    "edited_by": "x-hasura-User-Id"
-                                }
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "operator",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},
@@ -6192,15 +6160,6 @@
                     "select_permissions": [
                         {
                             "role": "manager",
-                            "permission": {
-                                "columns": "*",
-                                "filter": {},
-                                "allow_aggregations": true
-                            },
-                            "comment": ""
-                        },
-                        {
-                            "role": "operator",
                             "permission": {
                                 "columns": "*",
                                 "filter": {},

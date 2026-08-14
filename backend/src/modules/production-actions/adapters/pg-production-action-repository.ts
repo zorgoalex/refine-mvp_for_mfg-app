@@ -8,7 +8,7 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import type { PermissionName } from '../../../permissions/permissions';
 import type { StatusAutomationEvent } from '../../status-automation/application/status-automation.types';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
-import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
+import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type {
   ActivateProductionStageCommand,
   ActivateDetailProductionStageCommand,
@@ -1596,7 +1596,7 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
     // production status/stages. Order-level allow only; never broadens non-worker roles
     // (their productionTasks.update scope is 'all'/'none', not 'assigned').
     if (options.allowAssignedProductionWorker && options.tx) {
-      const productionTaskScope = ROLE_POLICIES[currentUser.role].productionTasks.update;
+      const productionTaskScope = rolePolicyForUser(currentUser).productionTasks.update;
       if (
         productionTaskScope === 'assigned' &&
         currentUser.permissions.includes('orders.change_production_status')

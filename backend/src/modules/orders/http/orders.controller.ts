@@ -28,8 +28,9 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { ROLE_POLICIES, type Scope } from '../../../permissions/policies/role-policies';
+import type { Scope } from '../../../permissions/policies/role-policies';
 import { allowsScope } from '../../../permissions/policies/scope';
+import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import { OrderQueryService } from '../application/order-query.service';
 import {
   ORDER_LIST_SORT_FIELDS,
@@ -1355,7 +1356,7 @@ export class OrdersController {
   }
 
   private getDeletedOrderScope(currentUser: CurrentUser): Scope | undefined {
-    return ROLE_POLICIES[currentUser.role]?.orders.delete;
+    return rolePolicyForUser(currentUser).orders.delete;
   }
 
   private throwTrashPermissionDenied(): never {

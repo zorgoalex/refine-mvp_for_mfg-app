@@ -23,6 +23,22 @@ describe('configuration tabs layout', () => {
     expect(source).toContain('<TableVisibilityByRoleTab />');
   });
 
+  it('registers the role permissions tab with an authorization-specific gate', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
+    const matrixSource = fs.readFileSync(
+      path.resolve(__dirname, 'components/RolesPermissionsMatrixTab.tsx'),
+      'utf8',
+    );
+
+    expect(source).toContain("key: 'roles-permissions'");
+    expect(source).toContain('Права ролей');
+    expect(source).toContain('<RolesPermissionsMatrixTab />');
+    expect(source).toContain('canViewRolesMatrixTab()');
+    expect(matrixSource).toContain("can('permissions.manage') || can('system.superadmin')");
+    expect(matrixSource).not.toContain("can('settings.manage')");
+    expect(matrixSource).not.toContain("can('deadlines.view')");
+  });
+
   it('embeds default schedules into production stages', () => {
     const source = fs.readFileSync(path.resolve(__dirname, 'index.tsx'), 'utf8');
     const productionSource = fs.readFileSync(

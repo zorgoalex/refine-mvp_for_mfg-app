@@ -30,6 +30,19 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-14",
+    title: "Настройки: матрица ролей и прав",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В конфигурации появилась вкладка «Права ролей»: администратор может включать и отключать права ролей, менять область действия прав и сохранять изменения с проверкой версии.",
+    ],
+    changed: [
+      "Права и области доступа ролей теперь применяются из базы при входе и обновлении токена, а операции с платежами закрыты от прямых Hasura-записей оператора.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-11",
     title: "Карточка заказа: добавление детали стрелкой вниз",
     services: ["ERP"],

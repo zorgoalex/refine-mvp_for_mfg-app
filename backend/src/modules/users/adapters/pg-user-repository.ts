@@ -12,6 +12,7 @@ import {
   mapRoleToRoleId,
 } from '../../../permissions/permissions';
 import type { PermissionName, UserRole } from '../../../permissions/permissions';
+import type { PermissionsService } from '../../../permissions/permissions.service';
 import type { UserDto, UserListResponseDto } from '../dto/user.dto';
 import { UserAlreadyExistsError } from '../errors/user.errors';
 import type {
@@ -53,7 +54,10 @@ type UserDatabase = DatabaseClient & {
 };
 
 export class PgUserRepository implements UserRepositoryPort {
-  constructor(private readonly database: UserDatabase | DatabaseService) {}
+  constructor(
+    private readonly database: UserDatabase | DatabaseService,
+    private readonly permissions?: Pick<PermissionsService, 'loadRoleAuthorization'>,
+  ) {}
 
   async listUsers(command: ListUsersCommand): Promise<UserListResponseDto> {
     const params: unknown[] = [];
@@ -85,7 +89,7 @@ export class PgUserRepository implements UserRepositoryPort {
     const total = toNumber(countResult.rows[0]?.total ?? 0);
 
     return {
-      data: usersResult.rows.map(mapUserRow),
+      data: await this.mapUserRows(usersResult.rows),
       pagination: {
         page: command.query.page,
         pageSize: command.query.pageSize,
@@ -129,7 +133,7 @@ export class PgUserRepository implements UserRepositoryPort {
             toNullableUserId(command.currentUser.id),
           ],
         );
-        const user = mapUserRow(created.rows[0]);
+        const user = await this.mapUserRow(created.rows[0]);
 
         await writeUserAudit(tx, {
           command,
@@ -192,7 +196,7 @@ export class PgUserRepository implements UserRepositoryPort {
           throw userNotFound(command.userId);
         }
 
-        const user = mapUserRow(updated.rows[0]);
+        const user = await this.mapUserRow(updated.rows[0]);
         await writeUserAudit(tx, {
           command,
           action: 'users.update',
@@ -275,7 +279,7 @@ export class PgUserRepository implements UserRepositoryPort {
       }
 
       const revokedSessions = isActive ? 0 : await revokeActiveSessions(tx, command.userId);
-      const user = mapUserRow(updated.rows[0]);
+      const user = await this.mapUserRow(updated.rows[0]);
 
       await writeUserAudit(tx, {
         command,
@@ -303,7 +307,32 @@ export class PgUserRepository implements UserRepositoryPort {
       [userId],
     );
 
-    return result.rows[0] ? mapUserRow(result.rows[0]) : null;
+    return result.rows[0] ? this.mapUserRow(result.rows[0]) : null;
+  }
+
+  private async mapUserRows(rows: readonly UserRow[]): Promise<UserDto[]> {
+    return Promise.all(rows.map((row) => this.mapUserRow(row)));
+  }
+
+  private async mapUserRow(row: UserRow): Promise<UserDto> {
+    const role = normalizeRole(row.role_id, row.role_code);
+    const roleId = toNumber(row.role_id);
+    const permissions = this.permissions
+      ? (await this.permissions.loadRoleAuthorization(roleId)).permissions
+      : getPermissionsForRole(role);
+
+    return {
+      id: toNumber(row.user_id),
+      username: row.username,
+      email: row.email,
+      fullName: row.full_name,
+      role,
+      permissions,
+      employeeId: toNullableNumber(row.employee_id),
+      isActive: row.is_active,
+      createdAt: toIsoString(row.created_at),
+      updatedAt: row.updated_at ? toIsoString(row.updated_at) : null,
+    };
   }
 }
 
@@ -326,23 +355,6 @@ function buildListWhere(command: ListUsersCommand, params: unknown[]): string {
   }
 
   return predicates.length ? `WHERE ${predicates.join(' AND ')}` : '';
-}
-
-function mapUserRow(row: UserRow): UserDto {
-  const role = normalizeRole(row.role_id, row.role_code);
-
-  return {
-    id: toNumber(row.user_id),
-    username: row.username,
-    email: row.email,
-    fullName: row.full_name,
-    role,
-    permissions: getPermissionsForRole(role),
-    employeeId: toNullableNumber(row.employee_id),
-    isActive: row.is_active,
-    createdAt: toIsoString(row.created_at),
-    updatedAt: row.updated_at ? toIsoString(row.updated_at) : null,
-  };
 }
 
 function normalizeRole(roleIdValue: string | number, roleCode: string | null): UserRole {

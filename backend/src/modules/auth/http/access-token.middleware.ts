@@ -1,8 +1,10 @@
 import { Inject, Injectable, NestMiddleware } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { NextFunction, Request, Response } from 'express';
+import { ApiError } from '../../../common/errors/api-error';
 import type { BackendEnv } from '../../../config/env.validation';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
+import { PermissionsService } from '../../../permissions/permissions.service';
 import { JwtAccessTokenIssuer } from '../adapters/jwt-access-token-issuer';
 
 type AuthenticatedRequest = Request & RequestWithCurrentUser;
@@ -25,14 +27,17 @@ function isCookieAuthenticatedPost(request: Request): boolean {
 export class AccessTokenMiddleware implements NestMiddleware {
   private readonly verifier: JwtAccessTokenIssuer | null;
 
-  constructor(@Inject(ConfigService) config: ConfigService<BackendEnv, true>) {
+  constructor(
+    @Inject(ConfigService) config: ConfigService<BackendEnv, true>,
+    @Inject(PermissionsService) private readonly permissions: Pick<PermissionsService, 'getAuthorizationVersion'>,
+  ) {
     const secret = config.get('JWT_ACCESS_SECRET', { infer: true });
     this.verifier = secret
       ? new JwtAccessTokenIssuer(secret, config.get('ACCESS_TOKEN_TTL_SECONDS', { infer: true }))
       : null;
   }
 
-  use(request: AuthenticatedRequest, _response: Response, next: NextFunction): void {
+  async use(request: AuthenticatedRequest, _response: Response, next: NextFunction): Promise<void> {
     const authorization = request.headers.authorization;
 
     if (!authorization) {
@@ -49,13 +54,29 @@ export class AccessTokenMiddleware implements NestMiddleware {
 
     try {
       request.user = this.verifier.verifyAccessToken(token);
+      await this.assertPermissionsVersionFresh(request);
     } catch (error) {
       if (isCookieAuthenticatedPost(request)) {
+        delete request.user;
         next();
         return;
       }
       throw error;
     }
     next();
+  }
+
+  private async assertPermissionsVersionFresh(request: AuthenticatedRequest): Promise<void> {
+    const tokenVersion = request.user?.permissionsVersion;
+    if (tokenVersion === undefined) {
+      return;
+    }
+    const currentVersion = await this.permissions.getAuthorizationVersion();
+    if (tokenVersion !== currentVersion) {
+      throw new ApiError(401, 'ACCESS_TOKEN_PERMISSIONS_STALE', 'Permissions changed; refresh session required', {
+        tokenVersion,
+        currentVersion,
+      });
+    }
   }
 }

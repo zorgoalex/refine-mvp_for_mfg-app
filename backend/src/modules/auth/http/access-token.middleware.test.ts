@@ -2,6 +2,7 @@ import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import type { BackendEnv } from '../../../config/env.validation';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import type { PermissionsService } from '../../../permissions/permissions.service';
 import { JwtAccessTokenIssuer } from '../adapters/jwt-access-token-issuer';
 import { AccessTokenMiddleware } from './access-token.middleware';
 
@@ -15,6 +16,7 @@ describe('AccessTokenMiddleware', () => {
       role: 'manager',
       roleId: 10,
       permissions: getPermissionsForRole('manager'),
+      permissionsVersion: 3,
       sessionId: 'session-1',
     });
     const request = {
@@ -24,7 +26,11 @@ describe('AccessTokenMiddleware', () => {
     };
     const next = vi.fn();
 
-    new AccessTokenMiddleware(createConfig(secret)).use(request as never, {} as never, next);
+    await new AccessTokenMiddleware(createConfig(secret), createPermissions(3)).use(
+      request as never,
+      {} as never,
+      next,
+    );
 
     expect(request).toMatchObject({
       user: {
@@ -37,11 +43,15 @@ describe('AccessTokenMiddleware', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
-  it('skips anonymous requests', () => {
+  it('skips anonymous requests', async () => {
     const request = { headers: {} };
     const next = vi.fn();
 
-    new AccessTokenMiddleware(createConfig()).use(request as never, {} as never, next);
+    await new AccessTokenMiddleware(createConfig(), createPermissions()).use(
+      request as never,
+      {} as never,
+      next,
+    );
 
     expect(request).not.toHaveProperty('user');
     expect(next).toHaveBeenCalledTimes(1);
@@ -55,6 +65,7 @@ describe('AccessTokenMiddleware', () => {
       role: 'manager',
       roleId: 10,
       permissions: getPermissionsForRole('manager'),
+      permissionsVersion: 3,
       sessionId: 'session-1',
     });
     const request = {
@@ -64,9 +75,41 @@ describe('AccessTokenMiddleware', () => {
     };
     const next = vi.fn();
 
-    expect(() =>
-      new AccessTokenMiddleware(createConfig(secret)).use(request as never, {} as never, next),
-    ).toThrowError(expect.objectContaining({ code: 'ACCESS_TOKEN_EXPIRED' }));
+    await expect(
+      new AccessTokenMiddleware(createConfig(secret), createPermissions(3)).use(
+        request as never,
+        {} as never,
+        next,
+      ),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'ACCESS_TOKEN_EXPIRED' }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('rejects a valid bearer when permissions version changed', async () => {
+    const secret = 'test-access-secret-with-at-least-32-chars';
+    const issued = await new JwtAccessTokenIssuer(secret, 900).issueAccessToken({
+      id: '42',
+      username: 'manager',
+      role: 'manager',
+      roleId: 10,
+      permissions: getPermissionsForRole('manager'),
+      permissionsVersion: 2,
+      sessionId: 'session-1',
+    });
+    const request = {
+      method: 'GET',
+      originalUrl: '/api/v1/orders',
+      headers: { authorization: `Bearer ${issued.accessToken}` },
+    };
+    const next = vi.fn();
+
+    await expect(
+      new AccessTokenMiddleware(createConfig(secret), createPermissions(3)).use(
+        request as never,
+        {} as never,
+        next,
+      ),
+    ).rejects.toThrowError(expect.objectContaining({ code: 'ACCESS_TOKEN_PERMISSIONS_STALE' }));
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -80,6 +123,7 @@ describe('AccessTokenMiddleware', () => {
         role: 'manager',
         roleId: 10,
         permissions: getPermissionsForRole('manager'),
+        permissionsVersion: 2,
         sessionId: 'session-1',
       });
       const request = {
@@ -89,7 +133,11 @@ describe('AccessTokenMiddleware', () => {
       };
       const next = vi.fn();
 
-      new AccessTokenMiddleware(createConfig(secret)).use(request as never, {} as never, next);
+      await new AccessTokenMiddleware(createConfig(secret), createPermissions(3)).use(
+        request as never,
+        {} as never,
+        next,
+      );
 
       expect(request).not.toHaveProperty('user');
       expect(next).toHaveBeenCalledTimes(1);
@@ -104,6 +152,7 @@ describe('AccessTokenMiddleware', () => {
       role: 'manager',
       roleId: 10,
       permissions: getPermissionsForRole('manager'),
+      permissionsVersion: 3,
       sessionId: 'session-1',
     });
     const request = {
@@ -113,7 +162,11 @@ describe('AccessTokenMiddleware', () => {
     };
     const next = vi.fn();
 
-    new AccessTokenMiddleware(createConfig(secret)).use(request as never, {} as never, next);
+    await new AccessTokenMiddleware(createConfig(secret), createPermissions(3)).use(
+      request as never,
+      {} as never,
+      next,
+    );
 
     expect(request).toMatchObject({ user: { id: '42' } });
     expect(next).toHaveBeenCalledTimes(1);
@@ -134,4 +187,12 @@ function createConfig(secret?: string): ConfigService<BackendEnv, true> {
       return undefined;
     },
   } as unknown as ConfigService<BackendEnv, true>;
+}
+
+function createPermissions(version = 0): Pick<PermissionsService, 'getAuthorizationVersion'> {
+  return {
+    async getAuthorizationVersion() {
+      return version;
+    },
+  };
 }
