@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+  DEFAULT_CUT_RENDER_STYLES_SETTING,
+} from '@shared/cut-render-style';
+import {
   DEFAULT_PARAM_FORM,
   buildProfileCopyName,
   detectEngineParamAnomalies,
   extractEligibilityCodes,
+  findCutRenderStylesSetting,
   findSetting,
+  readCutRenderStylesSetting,
   formToParams,
   paramsToForm,
   parseCodesCsv,
@@ -27,6 +33,30 @@ describe('cutConfigHelpers', () => {
   it('extracts eligibility codes from the settings', () => {
     expect(extractEligibilityCodes(settings)).toEqual(['new', 'drawn']);
     expect(extractEligibilityCodes([])).toEqual([]);
+  });
+
+  it('reads render.styles for the render settings tab', () => {
+    expect(findCutRenderStylesSetting(settings)).toBeNull();
+    expect(readCutRenderStylesSetting([]).profiles[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW].sourceSvg.minStrokePx)
+      .toBe(DEFAULT_CUT_RENDER_STYLES_SETTING.profiles[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW].sourceSvg.minStrokePx);
+    expect(readCutRenderStylesSetting([{
+      key: 'render.styles',
+      value: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+        profiles: {
+          ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+          mdf_board_preview: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview,
+            sourceSvg: {
+              ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
+              minStrokePx: 3,
+              nonScalingStroke: true,
+            },
+          },
+        },
+      },
+      version: 1,
+    }]).profiles[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW].sourceSvg.minStrokePx).toBe(3);
   });
 
   it('parses a CSV/space code list, dropping blanks', () => {

@@ -1,4 +1,10 @@
 import type { CutSettingRow } from '../../../api/cutConfigApi';
+import {
+  CUT_RENDER_STYLES_SETTING_KEY,
+  DEFAULT_CUT_RENDER_STYLES_SETTING,
+  parseCutRenderStylesSetting,
+  type CutRenderStylesSetting,
+} from '@shared/cut-render-style';
 
 /** Find a cut_settings row by key (returns null when absent). */
 export function findSetting(settings: CutSettingRow[], key: string): CutSettingRow | null {
@@ -10,6 +16,24 @@ export function extractEligibilityCodes(settings: CutSettingRow[]): string[] {
   const row = findSetting(settings, 'eligibility.statuses');
   const codes = (row?.value as { codes?: unknown } | undefined)?.codes;
   return Array.isArray(codes) ? codes.map((c) => String(c)) : [];
+}
+
+export function findCutRenderStylesSetting(settings: CutSettingRow[]): CutSettingRow | null {
+  return findSetting(settings, CUT_RENDER_STYLES_SETTING_KEY);
+}
+
+export function readCutRenderStylesSetting(settings: CutSettingRow[]): CutRenderStylesSetting {
+  const row = findCutRenderStylesSetting(settings);
+  if (!row) return DEFAULT_CUT_RENDER_STYLES_SETTING;
+  try {
+    return parseCutRenderStylesSetting(row.value);
+  } catch {
+    return DEFAULT_CUT_RENDER_STYLES_SETTING;
+  }
+}
+
+export function formatCutRenderStylesSettingJson(value: CutRenderStylesSetting): string {
+  return JSON.stringify(value, null, 2);
 }
 
 /** Parse a comma/space separated code list into trimmed non-empty codes. */

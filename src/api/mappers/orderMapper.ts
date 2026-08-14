@@ -441,6 +441,7 @@ function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
         : requiredNumber(detail.material_id, 'detail.material_id'),
       sheetMaterialTypeId: optionalNumber(detail.sheet_material_type_id),
       millingTypeId: requiredNumber(detail.milling_type_id, 'detail.milling_type_id'),
+      hdfParameterOverrideMm: optionalNumber(detail.hdf_parameter_override_mm),
       edgeTypeId: requiredNumber(detail.edge_type_id, 'detail.edge_type_id'),
       filmId: optionalNumber(detail.film_id),
 
@@ -571,6 +572,7 @@ function mapDetailsFromDto(details: OrderDetailDto[], orderId: number): OrderDet
     // surfaces (show/edit via __backendOrder) display the sheet name, not "—".
     material_name_resolved: detail.materialName ?? null,
     milling_type_id: detail.millingTypeId,
+    hdf_parameter_override_mm: detail.hdfParameterOverrideMm ?? null,
     edge_type_id: detail.edgeTypeId,
     film_id: detail.filmId ?? null,
     milling_cost_per_sqm: detail.millingCostPerSqm ?? null,

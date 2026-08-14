@@ -31,6 +31,15 @@ import {
 import { notifyCutPdfTemplatesChanged } from '../../../api/cutPdfTemplateEvents';
 import type { LabelCustomExpressionNode, LabelFieldCatalogItem } from '../../../api/types/labelsApi.types';
 import { ApiError } from '../../../api/httpClient';
+import {
+  CUT_RENDER_STYLES_SETTING_KEY,
+  CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+  CutRenderStyleValidationError,
+  DEFAULT_CUT_RENDER_STYLES_SETTING,
+  parseCutRenderStylesSetting,
+  type CutRenderStyleProfile,
+  type CutRenderStylesSetting,
+} from '@shared/cut-render-style';
 import { can } from '../../../utils/permissions';
 import {
   DEFAULT_PARAM_FORM,
@@ -44,9 +53,12 @@ import {
   buildProfileCopyName,
   detectEngineParamAnomalies,
   extractEligibilityCodes,
+  findCutRenderStylesSetting,
   findSetting,
+  formatCutRenderStylesSettingJson,
   formToParams,
   paramsToForm,
+  readCutRenderStylesSetting,
   summarizeParams,
 } from './cutConfigHelpers';
 import { CutDefaultSettingsCard } from './CutDefaultSettingsCard';
@@ -375,6 +387,11 @@ export const CutConfigTab: React.FC = () => {
             label: 'Редактирование шаблонов карт раскроя PDF',
             children: <PdfTemplateEditor templates={config.pdfTemplates} canManage={canManage} onTemplateSaved={updatePdfTemplateInConfig} />,
           },
+          {
+            key: 'render-style-settings',
+            label: 'Настройки рендера',
+            children: <RenderStylesSettingsPanel config={config} canManage={canManage} onSaved={reload} />,
+          },
         ]}
       />
 
@@ -408,6 +425,190 @@ export const CutConfigTab: React.FC = () => {
     </Space>
   );
 };
+
+interface RenderStylesSettingsPanelProps {
+  config: CutConfig;
+  canManage: boolean;
+  onSaved: () => Promise<void>;
+}
+
+const RenderStylesSettingsPanel: React.FC<RenderStylesSettingsPanelProps> = ({
+  config,
+  canManage,
+  onSaved,
+}) => {
+  const settingRow = useMemo(() => findCutRenderStylesSetting(config.settings), [config.settings]);
+  const resolvedSetting = useMemo(() => readCutRenderStylesSetting(config.settings), [config.settings]);
+  const [jsonText, setJsonText] = useState(() => formatCutRenderStylesSettingJson(resolvedSetting));
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setJsonText(formatCutRenderStylesSettingJson(resolvedSetting));
+    setJsonError(null);
+  }, [resolvedSetting]);
+
+  const parsedPreview = useMemo(() => parseRenderStylesJsonForPreview(jsonText), [jsonText]);
+  const previewSetting = parsedPreview.setting ?? resolvedSetting;
+  const mdfProfile = previewSetting.profiles[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW];
+
+  const save = useCallback(async () => {
+    if (!settingRow) {
+      message.error(`Настройка ${CUT_RENDER_STYLES_SETTING_KEY} не создана миграцией`);
+      return;
+    }
+    const parsed = parseRenderStylesJsonForPreview(jsonText);
+    if (!parsed.setting) {
+      setJsonError(parsed.error ?? 'JSON настройки рендера некорректен');
+      return;
+    }
+    setJsonError(null);
+    setSaving(true);
+    try {
+      await cutConfigApi.updateSetting(CUT_RENDER_STYLES_SETTING_KEY, parsed.setting, settingRow.version);
+      message.success('Настройки рендера сохранены');
+      await onSaved();
+    } catch (error) {
+      message.error(error instanceof ApiError ? error.message : 'Не удалось сохранить настройки рендера');
+    } finally {
+      setSaving(false);
+    }
+  }, [jsonText, onSaved, settingRow]);
+
+  return (
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      {!settingRow && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`В базе нет строки ${CUT_RENDER_STYLES_SETTING_KEY}`}
+          description="После применения миграций настройку можно будет сохранять. Сейчас показан встроенный fallback."
+        />
+      )}
+      <Alert
+        type="info"
+        showIcon
+        message="Эти правила используются для MDF-превью, карточек файлов станка и Telegram-скринов SVG-раскроя."
+      />
+      <Row gutter={16} align="top">
+        <Col xs={24} lg={15}>
+          <Card
+            size="small"
+            title={`JSON-схема ${CUT_RENDER_STYLES_SETTING_KEY}`}
+            extra={settingRow ? <Tag>version {settingRow.version}</Tag> : <Tag color="warning">fallback</Tag>}
+          >
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Input.TextArea
+                value={jsonText}
+                onChange={(event) => {
+                  setJsonText(event.target.value);
+                  setJsonError(null);
+                }}
+                disabled={!canManage}
+                spellCheck={false}
+                autoSize={{ minRows: 22, maxRows: 34 }}
+                style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}
+              />
+              {(jsonError || parsedPreview.error) && (
+                <Alert
+                  type="error"
+                  showIcon
+                  message={jsonError ?? parsedPreview.error}
+                />
+              )}
+              <Space wrap>
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  disabled={!canManage || !settingRow}
+                  loading={saving}
+                  onClick={() => void save()}
+                >
+                  Сохранить
+                </Button>
+                <Button
+                  disabled={!canManage}
+                  onClick={() => {
+                    setJsonText(formatCutRenderStylesSettingJson(DEFAULT_CUT_RENDER_STYLES_SETTING));
+                    setJsonError(null);
+                  }}
+                >
+                  Сбросить к встроенному профилю
+                </Button>
+              </Space>
+            </Space>
+          </Card>
+        </Col>
+        <Col xs={24} lg={9}>
+          <RenderStyleSummaryCard profile={mdfProfile} />
+        </Col>
+      </Row>
+    </Space>
+  );
+};
+
+function parseRenderStylesJsonForPreview(value: string): {
+  setting: CutRenderStylesSetting | null;
+  error: string | null;
+} {
+  try {
+    return { setting: parseCutRenderStylesSetting(JSON.parse(value)), error: null };
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return { setting: null, error: `JSON не читается: ${error.message}` };
+    }
+    if (error instanceof CutRenderStyleValidationError) {
+      return { setting: null, error: error.message };
+    }
+    return { setting: null, error: 'JSON настройки рендера некорректен' };
+  }
+}
+
+function RenderStyleSummaryCard({ profile }: { profile: CutRenderStyleProfile }) {
+  return (
+    <Card size="small" title="Профиль MDF-превью">
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Space direction="vertical" size={2}>
+          <Text strong>{CUT_RENDER_STYLE_MDF_BOARD_PREVIEW}</Text>
+          <Text type="secondary">
+            Контуры деталей: {profile.piece.stroke}, {profile.piece.strokeWidthMm} мм
+          </Text>
+          <Text type="secondary">
+            Фрезеровка из SVG: {profile.sourceSvg.strokeColorMode}, минимум{' '}
+            {profile.sourceSvg.minStrokePx ?? 'исходная'} px, opacity {profile.sourceSvg.strokeOpacity}
+          </Text>
+          <Text type="secondary">
+            Raw screenshot: минимум {profile.rawSvgScreenshot.minStrokePx} px
+          </Text>
+          <Text type="secondary">
+            Подписи: {profile.label.fillStrategy === 'contrast' ? 'контрастные' : 'фиксированный цвет'}, жирность{' '}
+            {profile.label.fontWeight}
+          </Text>
+        </Space>
+        <div>
+          <Text type="secondary">Палитра заказов</Text>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {profile.piece.orderPalette.map((color) => (
+              <Tooltip key={color} title={color}>
+                <span
+                  aria-label={`Цвет заказа ${color}`}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 6,
+                    background: color,
+                    boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.18)',
+                    display: 'inline-block',
+                  }}
+                />
+              </Tooltip>
+            ))}
+          </div>
+        </div>
+      </Space>
+    </Card>
+  );
+}
 
 type PdfTemplateElementType = 'text' | 'field' | 'custom' | 'qr' | 'line' | 'rect' | 'sheet_thumbnail' | 'detail_table' | 'machine_files_table';
 type PdfTextAlign = 'left' | 'center' | 'right';

@@ -8,6 +8,7 @@ const DETAIL_FIELDS_CLEARED_FOR_EMPTY_TAIL: Partial<Record<keyof OrderDetail, nu
   material_id: null,
   sheet_material_type_id: null,
   milling_type_id: null,
+  hdf_parameter_override_mm: null,
   edge_type_id: null,
   film_id: null,
   milling_cost_per_sqm: null,

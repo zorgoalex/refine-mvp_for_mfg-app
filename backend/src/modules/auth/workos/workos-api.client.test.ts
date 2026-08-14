@@ -28,12 +28,23 @@ describe('WorkosApiClient', () => {
     expect(url.searchParams.get('client_id')).toBe('client_x');
     expect(url.searchParams.get('state')).toBe('state-1');
     expect(url.searchParams.get('redirect_uri')).toBe(OPTIONS.redirectUri);
+    expect(url.searchParams.get('provider')).toBe('authkit');
     expect(url.searchParams.get('max_age')).toBeNull();
+    expect(url.searchParams.get('prompt')).toBeNull();
+    expect(url.searchParams.get('provider_query_params[prompt]')).toBeNull();
 
     const freshAuthenticationUrl = new URL(
-      client.buildAuthorizeUrl('state-2', { forceFreshAuthentication: true }),
+      client.buildAuthorizeUrl('state-2', {
+        forceFreshAuthentication: true,
+        selectAccount: true,
+      }),
     );
+    expect(freshAuthenticationUrl.searchParams.get('provider')).toBe('GoogleOAuth');
     expect(freshAuthenticationUrl.searchParams.get('max_age')).toBe('0');
+    expect(freshAuthenticationUrl.searchParams.get('prompt')).toBeNull();
+    expect(freshAuthenticationUrl.searchParams.get('provider_query_params[prompt]')).toBe(
+      'select_account',
+    );
 
     const logout = new URL(client.buildLogoutUrl('sid-9'));
     expect(logout.pathname).toBe('/user_management/sessions/logout');

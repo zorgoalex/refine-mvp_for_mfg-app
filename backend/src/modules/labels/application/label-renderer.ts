@@ -276,7 +276,7 @@ function isCutResultMap(value: LabelRowCutMapSnapshot): value is CutResultLabelR
 function extractSafeCutSheetBody(svg: string): string | null {
   const match = /^\s*<svg\b[^>]*>([\s\S]*)<\/svg>\s*$/.exec(svg);
   if (!match) return null;
-  const source = match[1];
+  const source = stripEmbeddedCutSheetPieceSourceSvgs(match[1]);
   const elements: string[] = [];
   const tagPattern = /<rect\b([^>]*)\/>|<line\b([^>]*)\/>|<g\b([^>]*)>|<\/g>|<text\b([^>]*)>([\s\S]*?)<\/text>/gi;
   let cursor = 0;
@@ -307,6 +307,14 @@ function extractSafeCutSheetBody(svg: string): string | null {
   }
   if (source.slice(cursor).trim()) return null;
   return elements.join('');
+}
+
+function stripEmbeddedCutSheetPieceSourceSvgs(source: string): string {
+  return source.replace(/<svg\b([^>]*)>[\s\S]*?<\/svg>/gi, (block, attributes: string) => {
+    const classMatch = /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(attributes);
+    const classes = (classMatch?.[1] ?? classMatch?.[2] ?? '').split(/\s+/).filter(Boolean);
+    return classes.includes('cut-sheet-piece-source-svg') ? '' : block;
+  });
 }
 
 function thickenCutSheetDetailStrokes(body: string): string {

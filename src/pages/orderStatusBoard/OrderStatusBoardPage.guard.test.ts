@@ -37,6 +37,10 @@ const detailedMachine = readFileSync(
   'src/pages/orderStatusBoard/cncDetailedMachine.ts',
   'utf8',
 );
+const mdfSheetPreview = readFileSync(
+  'src/pages/orderStatusBoard/cncMdfSheetPreview.ts',
+  'utf8',
+);
 const imagePrintPreview = readFileSync(
   'src/components/ImagePrintPreviewModal.tsx',
   'utf8',
@@ -250,6 +254,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(
       /\.status-board-page--cnc :where\([\s\S]*?\.status-board-viewport,[\s\S]*?\.cnc-board-card-shell,[\s\S]*?\.cnc-board-card-shell--draggable,[\s\S]*?\.status-board-card,[\s\S]*?\.cnc-bath-card[\s\S]*?\)\s*\{[^}]*touch-action: pan-x pan-y;/s,
     );
+    expect(page).toContain('const CncPinchZoomImage');
+    expect(page).toContain('data-cnc-manual-drag-ignore="true"');
+    expect(page).toContain('onTouchMove={handleTouchMove}');
+    expect(page).toContain('viewport.addEventListener(\'touchmove\', preventNativeScroll, { passive: false })');
+    expect(css).toMatch(/\.cnc-pinch-zoom\s*\{[^}]*touch-action: pan-x pan-y;/s);
+    expect(css).toMatch(/\.cnc-pinch-zoom\[data-gesture-active="true"\],[\s\S]*?\.cnc-pinch-zoom\[data-zoomed="true"\]\s*\{[^}]*touch-action: none;/s);
+    expect(css).toContain('transition-property: transform;');
     expect(tabletCss).toMatch(
       /\.status-board-page--cnc \.status-board-viewport\s*\{[^}]*overflow-x: auto;[^}]*overflow-y: auto;[^}]*touch-action: pan-x pan-y;/s,
     );
@@ -621,7 +632,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   });
 
   it('keeps bath cards printable with SVG and PDF previews', () => {
-    expect(page).toContain('cutApi.fetchSheetSvg');
+    expect(page).toContain('fetchCncMdfBoardSheetSvg');
+    expect(page).not.toContain('cutApi.fetchSheetSvg(');
+    expect(mdfSheetPreview).toContain('cutApi.fetchSheetSvg(');
+    expect(mdfSheetPreview).toContain('CUT_RENDER_STYLE_MDF_BOARD_PREVIEW');
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain('CutSheetLabelGenerateAction');
     expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
@@ -1413,6 +1427,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('if (!open) return null;');
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-panel"');
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-actions"');
+    expect(sheetPreview).toContain('<CncPinchZoomImage');
+    expect(sheetPreview).toContain('viewportClassName="cnc-pinch-zoom--packet-sheet"');
     expect(sheetPreview).toContain('const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null)');
     expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');

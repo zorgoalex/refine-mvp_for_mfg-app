@@ -9,6 +9,7 @@ export interface HdfProductionTechSettingsDto {
   sheetMaterialName: string | null;
   sheetMaterialVersion: number | null;
   configRevision: number;
+  extraResources: ExtraResourceDto[];
   millingTypes: HdfMillingSettingsDto[];
 }
 
@@ -17,8 +18,46 @@ export interface HdfMillingSettingsDto {
   name: string;
   hdfEnabled: boolean;
   hdfEdgeMm: number | null;
+  hdfParameterName: string | null;
+  extraResources: MillingExtraResourceDto[];
   version: number;
   isActive: boolean;
+}
+
+export interface MillingExtraResourceDto {
+  id: number;
+  millingTypeId: number;
+  extraResourceId: number | null;
+  resourceKind: string;
+  resourceRefType: string | null;
+  resourceRefId: number | null;
+  resourceName: string;
+  unitId: number | null;
+  accountingMethod: string;
+  parameterName: string;
+  parameterMm: number | null;
+  hdfAutoEnabled: boolean;
+  comment: string;
+  isActive: boolean;
+  sortOrder: number;
+  version: number;
+}
+
+export interface ExtraResourceDto {
+  id: number;
+  resourceKind: string;
+  resourceRefType: string | null;
+  resourceRefId: number | null;
+  resourceName: string;
+  unitId: number | null;
+  accountingMethod: string;
+  defaultParameterName: string;
+  defaultParameterMm: number | null;
+  hdfAutoDefault: boolean;
+  comment: string;
+  isActive: boolean;
+  sortOrder: number;
+  version: number;
 }
 
 export interface UpdateHdfProductionTechSettingsRequest {
@@ -29,14 +68,54 @@ export interface UpdateHdfProductionTechSettingsRequest {
 }
 
 export interface UpdateHdfMillingSettingsRequest {
-  hdfEnabled: boolean;
-  hdfEdgeMm: number | null;
+  hdfEnabled?: boolean;
+  hdfEdgeMm?: number | null;
+  hdfParameterName?: string | null;
+  extraResources?: UpdateMillingExtraResourceRequest[];
   expectedVersion: number;
+}
+
+export interface UpdateMillingExtraResourceRequest {
+  id?: number;
+  version?: number;
+  extraResourceId?: number | null;
+  resourceKind?: string;
+  resourceRefType?: string | null;
+  resourceRefId?: number | null;
+  resourceName?: string;
+  unitId?: number | null;
+  accountingMethod?: string;
+  parameterName?: string;
+  parameterMm?: number | null;
+  hdfAutoEnabled?: boolean;
+  comment?: string;
+  isActive?: boolean;
+  sortOrder?: number;
+}
+
+export interface UpsertExtraResourceRequest {
+  version?: number;
+  resourceKind: string;
+  resourceRefType?: string | null;
+  resourceRefId?: number | null;
+  resourceName: string;
+  unitId?: number | null;
+  accountingMethod?: string;
+  defaultParameterName?: string;
+  defaultParameterMm?: number | null;
+  hdfAutoDefault?: boolean;
+  comment?: string;
+  isActive?: boolean;
+  sortOrder?: number;
 }
 
 export const productionTechSettingsApi = {
   getHdf(): Promise<HdfProductionTechSettingsDto> {
     return httpClient.get<HdfProductionTechSettingsDto>(apiRoutes.productionTechSettings.hdf);
+  },
+
+  getExtraResources(): Promise<ExtraResourceDto[]> {
+    return httpClient.get<ExtraResourceDto[]>(apiRoutes.productionTechSettings.extraResources);
   },
 
   async updateHdf(
@@ -62,6 +141,36 @@ export const productionTechSettingsApi = {
     assertIdempotencyKey(idempotencyKey);
     const response = await httpClient.put<{ success: true }>(
       apiRoutes.productionTechSettings.hdfMillingType(millingTypeId),
+      body,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+    notifyOrderFormReferencesChanged('milling_types');
+    return response;
+  },
+
+  async createExtraResource(
+    body: UpsertExtraResourceRequest,
+    idempotencyKey = createProductionTechSettingsIdempotencyKey('extra-resource-create'),
+  ): Promise<ExtraResourceDto> {
+    assertIdempotencyKey(idempotencyKey);
+    const response = await httpClient.post<ExtraResourceDto>(
+      apiRoutes.productionTechSettings.extraResources,
+      body,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+    notifyOrderFormReferencesChanged('milling_types');
+    return response;
+  },
+
+  async updateExtraResource(
+    extraResourceId: number,
+    body: UpsertExtraResourceRequest,
+    idempotencyKey = createProductionTechSettingsIdempotencyKey('extra-resource-update'),
+  ): Promise<ExtraResourceDto> {
+    if (!Number.isInteger(extraResourceId) || extraResourceId <= 0) throw new Error('Invalid extraResourceId');
+    assertIdempotencyKey(idempotencyKey);
+    const response = await httpClient.put<ExtraResourceDto>(
+      apiRoutes.productionTechSettings.extraResource(extraResourceId),
       body,
       { headers: { 'Idempotency-Key': idempotencyKey } },
     );

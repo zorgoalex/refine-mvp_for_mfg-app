@@ -158,6 +158,7 @@ import {
   loadCncDetailedMachineSvgPreview,
   type CncDetailedMachineSvgPreview,
 } from './cncDetailedMachinePreview';
+import { fetchCncMdfBoardSheetSvg } from './cncMdfSheetPreview';
 
 const BOARD_DRAG_TYPE = 'ORDER_STATUS_BOARD_CARD';
 const CNC_BOARD_DRAG_TYPE = 'CNC_STATUS_BOARD_CARD';
@@ -216,6 +217,42 @@ const DND_BACKEND_OPTIONS = {
   delayTouchStart: 420,
   touchSlop: 12,
 };
+const CNC_PINCH_ZOOM_MIN_SCALE = 1;
+const CNC_PINCH_ZOOM_MAX_SCALE = 4;
+const CNC_PINCH_ZOOM_RESET_THRESHOLD = 1.03;
+const CNC_PINCH_ZOOM_RESET_TRANSFORM: CncPinchZoomTransform = {
+  scale: CNC_PINCH_ZOOM_MIN_SCALE,
+  x: 0,
+  y: 0,
+};
+
+interface CncPinchZoomPoint {
+  x: number;
+  y: number;
+}
+
+interface CncPinchZoomTransform extends CncPinchZoomPoint {
+  scale: number;
+}
+
+type CncPinchZoomGesture =
+  | {
+    mode: 'pinch';
+    startDistance: number;
+    startScale: number;
+    startX: number;
+    startY: number;
+    centerX: number;
+    centerY: number;
+  }
+  | {
+    mode: 'pan';
+    startScale: number;
+    startX: number;
+    startY: number;
+    pointerX: number;
+    pointerY: number;
+  };
 
 function isKeyboardMoveMenuTrigger(event: React.KeyboardEvent<HTMLElement>): boolean {
   return (
@@ -3885,13 +3922,217 @@ const CncDetailedMachineScreenshot: React.FC<CncDetailedMachineScreenshotProps> 
     );
   }
   return (
-    <img
+    <CncPinchZoomImage
+      viewportClassName="cnc-pinch-zoom--detailed-machine"
       className="cnc-detailed-machine-map__screenshot"
       src={objectUrl}
       alt={`Скрин раскроя ${title}`}
     />
   );
 };
+
+interface CncPinchZoomImageProps {
+  src: string;
+  alt: string;
+  className: string;
+  viewportClassName?: string;
+}
+
+const CncPinchZoomImage: React.FC<CncPinchZoomImageProps> = ({
+  src,
+  alt,
+  className,
+  viewportClassName,
+}) => {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const gestureRef = useRef<CncPinchZoomGesture | null>(null);
+  const [transform, setTransform] = useState<CncPinchZoomTransform>(CNC_PINCH_ZOOM_RESET_TRANSFORM);
+  const [gestureActive, setGestureActive] = useState(false);
+  const zoomed = transform.scale > CNC_PINCH_ZOOM_MIN_SCALE;
+
+  const clampTransform = useCallback((next: CncPinchZoomTransform): CncPinchZoomTransform => (
+    clampCncPinchZoomTransform(next, viewportRef.current, imageRef.current)
+  ), []);
+
+  const resetZoom = useCallback(() => {
+    gestureRef.current = null;
+    setGestureActive(false);
+    setTransform(CNC_PINCH_ZOOM_RESET_TRANSFORM);
+  }, []);
+
+  useEffect(() => {
+    resetZoom();
+  }, [resetZoom, src]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return undefined;
+    const preventNativeScroll = (event: TouchEvent) => {
+      if (!gestureRef.current && transform.scale <= CNC_PINCH_ZOOM_MIN_SCALE) return;
+      if (event.cancelable) event.preventDefault();
+    };
+    viewport.addEventListener('touchmove', preventNativeScroll, { passive: false });
+    return () => viewport.removeEventListener('touchmove', preventNativeScroll);
+  }, [transform.scale]);
+
+  const startPinch = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const first = cncTouchPoint(event.touches[0]);
+    const second = cncTouchPoint(event.touches[1]);
+    const center = cncTouchCenterRelativeToViewport(viewportRef.current, first, second);
+    gestureRef.current = {
+      mode: 'pinch',
+      startDistance: Math.max(1, cncPointDistance(first, second)),
+      startScale: transform.scale,
+      startX: transform.x,
+      startY: transform.y,
+      centerX: center.x,
+      centerY: center.y,
+    };
+    setGestureActive(true);
+  }, [transform]);
+
+  const startPan = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    const point = cncTouchPoint(event.touches[0]);
+    gestureRef.current = {
+      mode: 'pan',
+      startScale: transform.scale,
+      startX: transform.x,
+      startY: transform.y,
+      pointerX: point.x,
+      pointerY: point.y,
+    };
+    setGestureActive(true);
+  }, [transform]);
+
+  const handleTouchStart = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    stopCncCardNestedInteraction(event);
+    if (event.touches.length >= 2) {
+      if (event.cancelable) event.preventDefault();
+      startPinch(event);
+      return;
+    }
+    if (event.touches.length === 1 && transform.scale > CNC_PINCH_ZOOM_MIN_SCALE) {
+      if (event.cancelable) event.preventDefault();
+      startPan(event);
+    }
+  }, [startPan, startPinch, transform.scale]);
+
+  const handleTouchMove = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    stopCncCardNestedInteraction(event);
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+    if (gesture.mode === 'pinch' && event.touches.length >= 2) {
+      if (event.cancelable) event.preventDefault();
+      const first = cncTouchPoint(event.touches[0]);
+      const second = cncTouchPoint(event.touches[1]);
+      const nextScale = clampCncPinchZoomScale(
+        gesture.startScale * (cncPointDistance(first, second) / gesture.startDistance),
+      );
+      const ratio = nextScale / gesture.startScale;
+      setTransform(clampTransform({
+        scale: nextScale,
+        x: gesture.centerX - ((gesture.centerX - gesture.startX) * ratio),
+        y: gesture.centerY - ((gesture.centerY - gesture.startY) * ratio),
+      }));
+      return;
+    }
+    if (gesture.mode === 'pan' && event.touches.length === 1) {
+      if (event.cancelable) event.preventDefault();
+      const point = cncTouchPoint(event.touches[0]);
+      setTransform(clampTransform({
+        scale: gesture.startScale,
+        x: gesture.startX + point.x - gesture.pointerX,
+        y: gesture.startY + point.y - gesture.pointerY,
+      }));
+    }
+  }, [clampTransform]);
+
+  const finishGesture = useCallback((event: React.TouchEvent<HTMLDivElement>) => {
+    stopCncCardNestedInteraction(event);
+    if (event.touches.length === 1 && transform.scale > CNC_PINCH_ZOOM_MIN_SCALE) {
+      startPan(event);
+      return;
+    }
+    gestureRef.current = null;
+    setGestureActive(false);
+    setTransform((current) => {
+      if (current.scale < CNC_PINCH_ZOOM_RESET_THRESHOLD) return CNC_PINCH_ZOOM_RESET_TRANSFORM;
+      return clampTransform(current);
+    });
+  }, [clampTransform, startPan, transform.scale]);
+
+  return (
+    <div
+      ref={viewportRef}
+      className={['cnc-pinch-zoom', viewportClassName ?? ''].filter(Boolean).join(' ')}
+      data-cnc-manual-drag-ignore="true"
+      data-gesture-active={gestureActive ? 'true' : 'false'}
+      data-zoomed={zoomed ? 'true' : 'false'}
+      onPointerDown={stopCncCardNestedInteraction}
+      onMouseDown={stopCncCardNestedInteraction}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={finishGesture}
+      onTouchCancel={finishGesture}
+      onDoubleClick={resetZoom}
+    >
+      <img
+        ref={imageRef}
+        className={className}
+        src={src}
+        alt={alt}
+        draggable={false}
+        style={{
+          transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`,
+        }}
+      />
+    </div>
+  );
+};
+
+function cncTouchPoint(touch: Touch): CncPinchZoomPoint {
+  return { x: touch.clientX, y: touch.clientY };
+}
+
+function cncPointDistance(first: CncPinchZoomPoint, second: CncPinchZoomPoint): number {
+  return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function cncTouchCenterRelativeToViewport(
+  viewport: HTMLElement | null,
+  first: CncPinchZoomPoint,
+  second: CncPinchZoomPoint,
+): CncPinchZoomPoint {
+  if (!viewport) return { x: 0, y: 0 };
+  const rect = viewport.getBoundingClientRect();
+  return {
+    x: ((first.x + second.x) / 2) - rect.left - (rect.width / 2),
+    y: ((first.y + second.y) / 2) - rect.top - (rect.height / 2),
+  };
+}
+
+function clampCncPinchZoomScale(value: number): number {
+  return Math.min(CNC_PINCH_ZOOM_MAX_SCALE, Math.max(CNC_PINCH_ZOOM_MIN_SCALE, Number(value.toFixed(3))));
+}
+
+function clampCncPinchZoomTransform(
+  transform: CncPinchZoomTransform,
+  viewport: HTMLElement | null,
+  image: HTMLImageElement | null,
+): CncPinchZoomTransform {
+  const scale = clampCncPinchZoomScale(transform.scale);
+  if (!viewport || !image || scale <= CNC_PINCH_ZOOM_MIN_SCALE) {
+    return { scale, x: 0, y: 0 };
+  }
+  const maxX = Math.max(0, ((image.offsetWidth * scale) - viewport.clientWidth) / 2);
+  const maxY = Math.max(0, ((image.offsetHeight * scale) - viewport.clientHeight) / 2);
+  return {
+    scale,
+    x: Math.min(maxX, Math.max(-maxX, transform.x)),
+    y: Math.min(maxY, Math.max(-maxY, transform.y)),
+  };
+}
 
 interface CncOrderSummaryLineProps {
   summary: CncOrderSummary;
@@ -4825,7 +5066,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               aria-pressed={activeAuxView === 'sheet'}
               onClick={() => setActiveAuxView((current) => current === 'sheet' ? null : 'sheet')}
             >
-              {hasSheetImage ? 'Скрин' : 'SVG'}
+              {hasSvgSheetPreview ? 'SVG' : hasSheetImage ? 'Скрин' : 'SVG'}
             </Button>
           </div>
 
@@ -4947,12 +5188,14 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   cutMapFallbackImage,
 }) => {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [previewSource, setPreviewSource] = useState<'svg' | 'screenshot' | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
 
   useEffect(() => {
     setObjectUrl(null);
+    setPreviewSource(null);
     setError(null);
     setPrintPreviewOpen(false);
   }, [imageUrl, cutJobId, cutResultNo, labelSheet?.cutGroupId, labelSheet?.sheetIndex, labelSheet?.variant]);
@@ -4966,28 +5209,29 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     let cancelled = false;
     setLoading(true);
     setError(null);
-    const loadPreview = imageUrl
-      ? cncTelegramApi.downloadSheetImage(imageUrl).then(({ blob }) => blob)
-      : cutJobId && labelSheet
-        ? cutApi.fetchSheetPng(
-            cutJobId,
-            labelSheet.cutGroupId,
-            labelSheet.sheetIndex,
-            'thumb',
-            false,
-            labelSheet.variant,
-            undefined,
-            true,
-            'top-left',
-            cutResultNo ?? undefined,
-            false,
-            true,
-          )
-        : Promise.reject(new Error('Нет связанного превью раскроя'));
+    const loadScreenshotPreview = () => imageUrl
+      ? cncTelegramApi.downloadSheetImage(imageUrl).then(({ blob }) => ({ blob, source: 'screenshot' as const }))
+      : Promise.reject(new Error('Нет связанного превью раскроя'));
+    const loadSvgPreview = () => cutJobId && labelSheet
+      ? fetchCncMdfBoardSheetSvg({
+          cutJobId,
+          cutGroupId: labelSheet.cutGroupId,
+          sheetIndex: labelSheet.sheetIndex,
+          variant: labelSheet.variant,
+          originTopLeft: true,
+          axisOrigin: 'top-left',
+          resultNo: cutResultNo ?? undefined,
+          pieceMetadata: true,
+        }).then((blob) => ({ blob, source: 'svg' as const }))
+      : Promise.reject(new Error('Нет связанного SVG-раскроя'));
+    const loadPreview = cutJobId && labelSheet
+      ? loadSvgPreview().catch((svgError: unknown) => (imageUrl ? loadScreenshotPreview() : Promise.reject(svgError)))
+      : loadScreenshotPreview();
     loadPreview
-      .then((blob) => {
+      .then(({ blob, source }) => {
         if (cancelled) return;
         setObjectUrl(URL.createObjectURL(blob));
+        setPreviewSource(source);
       })
       .catch((downloadError: unknown) => {
         if (cancelled) return;
@@ -5010,7 +5254,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
 
   if (!open) return null;
   const hasCutSheetScope = Boolean(cutJobId && labelSheet);
-  const generatedSvgPreview = !imageUrl && hasCutSheetScope;
+  const generatedSvgPreview = previewSource === 'svg' || (previewSource === null && hasCutSheetScope);
   const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null);
   const disabledLabelReason = labelDetailInstances.length === 0
     ? 'Нет сопоставленных деталей для бирок'
@@ -5062,7 +5306,8 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
           )}
           {error && <Alert type="warning" showIcon message={error} />}
           {objectUrl && (
-            <img
+            <CncPinchZoomImage
+              viewportClassName="cnc-pinch-zoom--packet-sheet"
               className="cnc-packet-card__sheet-image"
               src={objectUrl}
               alt={`Скрин листа ${title}`}
@@ -5410,18 +5655,17 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
           sheet.sheetHeightMm,
           detailed ? false : true,
         );
-        const blob = await cutApi.fetchSheetSvg(
-          bath.cutJobId,
-          sheet.cutGroupId,
-          sheet.sheetIndex,
-          rotate90,
-          sheet.variant,
-          undefined,
-          false,
-          'bottom-left',
-          bath.resultNo,
-          detailed,
-        );
+        const blob = await fetchCncMdfBoardSheetSvg({
+          cutJobId: bath.cutJobId,
+          cutGroupId: sheet.cutGroupId,
+          sheetIndex: sheet.sheetIndex,
+          landscape: rotate90,
+          variant: sheet.variant,
+          originTopLeft: false,
+          axisOrigin: 'bottom-left',
+          resultNo: bath.resultNo,
+          pieceMetadata: detailed,
+        });
         const svgText = detailed
           ? decorateCncBathSheetSvg(
               await blob.text(),

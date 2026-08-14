@@ -268,6 +268,30 @@ describe('CutController', () => {
     expect(state.sent).toBe('<svg/>');
   });
 
+  it('passes renderStyle from sheet render routes to the cut service', async () => {
+    const pngCalls: Array<{ renderStyle?: string }> = [];
+    const svgCalls: Array<{ renderStyle?: string }> = [];
+    const renderSheetPng = vi.fn(async (query: { renderStyle?: string }) => {
+      pngCalls.push(query);
+      return Buffer.from('PNG');
+    });
+    const renderSheetSvg = vi.fn(async (query: { renderStyle?: string }) => {
+      svgCalls.push(query);
+      return '<svg/>';
+    });
+    const controller = createController({ service: { renderSheetPng, renderSheetSvg } });
+    const fakeRes = {
+      setHeader: () => undefined,
+      send: () => undefined,
+    };
+
+    await controller.renderPng({ user: currentUser() } as never, '42', '100', '0', { renderStyle: 'mdf_board_preview' }, fakeRes as never);
+    await controller.renderSvg({ user: currentUser() } as never, '42', '100', '0', { renderStyle: 'mdf_board_preview' }, fakeRes as never);
+
+    expect(pngCalls[0]?.renderStyle).toBe('mdf_board_preview');
+    expect(svgCalls[0]?.renderStyle).toBe('mdf_board_preview');
+  });
+
   it('passes a request-level PDF template to frozen group and whole-result exports', async () => {
     const pdf = Buffer.from('%PDF-result');
     const renderGroupPdf = vi.fn(async () => pdf);

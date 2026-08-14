@@ -183,7 +183,7 @@ export function buildCutAddWarning(
 /**
  * Informational note for the add-to-cut modal: where the chosen details are ALREADY
  * placed. Placement never blocks adding (multi-job allowed) — this only informs.
- * Active jobs are listed by #id + name; archived placements collapse to one note.
+ * Active jobs are listed by #id + name; deleted placements collapse to one note.
  * Returns null when the details are not in any job.
  */
 export function formatPlacementsMessage(
@@ -195,7 +195,7 @@ export function formatPlacementsMessage(
     segments.push(`Эти детали уже есть в заданиях: ${list}.`);
   }
   if (placements.hasArchived) {
-    segments.push('Часть деталей в архивных заданиях.');
+    segments.push('Часть деталей в удалённых заданиях.');
   }
   if (segments.length === 0) return null;
   segments.push('Добавление не ограничено — деталь может быть в нескольких заданиях.');
@@ -310,7 +310,7 @@ export const CUT_JOB_STATUS_LABELS: Record<string, string> = {
   calculating: 'Расчёт',
   ready: 'Готов',
   failed: 'Ошибка',
-  archived: 'Архив',
+  archived: 'Удалено',
 };
 
 /** Human label for a cut_job status; unknown codes are passed through verbatim. */
@@ -333,7 +333,7 @@ export function cutJobSourceLabel(source: string): string {
 /** Pseudo-status used by the list filter to mean "show everything". */
 export const CUT_JOB_STATUS_FILTER_ALL = 'all';
 
-/** Status filter options for the job list (the backend already excludes archived). */
+/** Status filter options for the job list. Deleted jobs are exposed by a separate checkbox. */
 export const CUT_JOB_STATUS_FILTER_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: CUT_JOB_STATUS_FILTER_ALL, label: 'Все статусы' },
   { value: 'draft', label: CUT_JOB_STATUS_LABELS.draft },

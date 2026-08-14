@@ -190,6 +190,7 @@ export const orderDetailSchema = z.object({
     .optional(),
   sheet_material_type_id: z.number().positive('Выберите листовой материал').nullable().optional(),
   milling_type_id: z.number().min(0, "Выберите тип фрезеровки"),
+  hdf_parameter_override_mm: z.number().positive("Параметр ХДФ должен быть больше 0").nullable().optional(),
   edge_type_id: z.number().min(0, "Выберите тип кромки"),
   film_id: z.number().nullable().optional(),
 

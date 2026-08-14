@@ -55,6 +55,7 @@ const CATEGORY_MAP: Record<string, string> = {
   films: "Материалы",
   materials: "Материалы",
   sheet_material_types: "Материалы",
+  extra_resources: "Материалы",
   employees: "Настройки",
   users: "Настройки",
   configuration: "Настройки",
@@ -73,6 +74,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   materials: "Материалы",
   configuration: "Конфигурация",
   sheet_material_types: "Листовые материалы",
+  extra_resources: "Доп. ресурсы",
   scan: "Сканер бирок",
 };
 

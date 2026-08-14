@@ -46,7 +46,8 @@ describe('OrderDetailTable interaction performance guards', () => {
 
   it('keeps table and active-cell geometry stable', () => {
     expect(source).toContain('tableLayout="fixed"');
-    expect(source).toContain('scroll={{ x: tableScrollWidth, y: 500 }}');
+    expect(source).toContain('scroll={{ x: tableScrollWidth, y: tableBodyScrollY }}');
+    expect(source).toContain('calculateOrderDetailTableBodyScrollY(filledDetailRowsCount, details.length)');
     expect(source).toContain("editing ? 'order-detail-row-editing dg-editing' : ''");
     expect(appStyles).toContain('td.order-detail-spreadsheet-cell:focus');
     expect(appStyles).toContain('inset 0 0 0 2px var(--order-detail-grid-accent)');

@@ -7,7 +7,7 @@ export type { PopoverProps } from 'antd/es/popover';
 export type { TablePaginationConfig, TableProps } from 'antd/es/table';
 export type { TooltipProps } from 'antd/es/tooltip';
 
-export const APP_TOOLTIP_MOUSE_ENTER_DELAY_SECONDS = 0.9;
+export const APP_TOOLTIP_MOUSE_ENTER_DELAY_SECONDS = 2.0;
 
 function withMinimumTooltipDelay(delay: number | undefined): number {
   return Math.max(delay ?? APP_TOOLTIP_MOUSE_ENTER_DELAY_SECONDS, APP_TOOLTIP_MOUSE_ENTER_DELAY_SECONDS);

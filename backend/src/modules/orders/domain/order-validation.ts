@@ -166,6 +166,11 @@ function validateDetails(
       errors.push({ field: `details[${index}].materialId`, message: 'material_id is not allowed; use sheet_material_type_id' });
     }
     requirePositiveInteger(detail.millingTypeId, `details[${index}].millingTypeId`, errors);
+    requirePositiveIfPresent(
+      detail.hdfParameterOverrideMm,
+      `details[${index}].hdfParameterOverrideMm`,
+      errors,
+    );
     requirePositiveInteger(detail.edgeTypeId, `details[${index}].edgeTypeId`, errors);
     requirePositiveIntegerIfPresent(detail.filmId, `details[${index}].filmId`, errors);
     requirePositiveIntegerIfPresent(

@@ -6,6 +6,7 @@ import type {
   CutFilmOption,
   CutDetailLastReadyResponse,
   CutDetailPlacements,
+  CutJobDeleteImpact,
   CutJobDto,
   CutJobListFilters,
   CutResultDto,
@@ -85,9 +86,13 @@ export const cutApi = {
     });
   },
 
-  async archive(cutJobId: number, version: number): Promise<CutJobDto> {
+  async getDeleteImpact(cutJobId: number): Promise<CutJobDeleteImpact> {
+    return httpClient.get<CutJobDeleteImpact>(apiRoutes.cutJobs.deleteImpact(validateCutJobId(cutJobId)));
+  },
+
+  async archive(cutJobId: number, version: number, options: { deleteLinkedMdfPackets?: boolean } = {}): Promise<CutJobDto> {
     return httpClient.delete<CutJobDto>(apiRoutes.cutJobs.byId(validateCutJobId(cutJobId)), {
-      body: JSON.stringify({ version }),
+      body: JSON.stringify({ version, deleteLinkedMdfPackets: options.deleteLinkedMdfPackets === true }),
       headers: { 'Content-Type': 'application/json' },
     });
   },
@@ -157,6 +162,7 @@ export const cutApi = {
     resultNo?: number,
     pieceMetadata = false,
     showLabels = false,
+    renderStyle?: string,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetPng(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
@@ -174,6 +180,7 @@ export const cutApi = {
     params.append('axisOrigin', axisOrigin);
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);
+    if (renderStyle) params.append('renderStyle', renderStyle);
     const { blob } = await httpClient.download(`${path}?${params.toString()}`);
     return blob;
   },
@@ -189,6 +196,7 @@ export const cutApi = {
     axisOrigin: 'top-left' | 'bottom-left' = 'top-left',
     resultNo?: number,
     pieceMetadata = false,
+    renderStyle?: string,
   ): Promise<Blob> {
     const path = resultNo === undefined
       ? apiRoutes.cutJobs.sheetSvg(validateCutJobId(cutJobId), validateCutJobId(groupId), sheetIndex)
@@ -200,6 +208,7 @@ export const cutApi = {
     if (variant) params.append('variant', variant);
     if (renderToken) params.append('renderVersion', renderToken);
     if (pieceMetadata) params.append('pieceMetadata', 'on');
+    if (renderStyle) params.append('renderStyle', renderStyle);
     const qs = params.toString();
     const { blob } = await httpClient.download(qs ? `${path}?${qs}` : path);
     return blob;
@@ -363,6 +372,9 @@ export function buildCutJobListQuery(filters: CutJobListFilters): string {
   appendText(params, 'status', filters.status);
   if (filters.createdBy && Number.isInteger(filters.createdBy) && filters.createdBy > 0) {
     params.append('createdBy', String(filters.createdBy));
+  }
+  if (filters.includeArchived === true) {
+    params.append('includeArchived', 'true');
   }
   appendText(params, 'orderSearch', filters.orderSearch);
   appendText(params, 'jobNumber', filters.jobNumber);

@@ -103,6 +103,7 @@ describe('normalizeSaveOrderDto', () => {
       workshopIds: [],
       requirementIds: [],
       dowelingLinkIds: [],
+      hdfDetailIds: [],
     });
   });
 

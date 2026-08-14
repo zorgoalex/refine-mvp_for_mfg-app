@@ -182,6 +182,7 @@ export async function bootstrap029(client: { query(text: string, values?: unknow
       area NUMERIC,
       material_id BIGINT,
       milling_type_id SMALLINT DEFAULT 1,
+      hdf_parameter_override_mm NUMERIC(10,2),
       edge_type_id SMALLINT DEFAULT 1,
       film_id SMALLINT,
       milling_cost_per_sqm NUMERIC,

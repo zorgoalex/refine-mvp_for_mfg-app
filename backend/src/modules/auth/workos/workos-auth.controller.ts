@@ -1,5 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Req, Res } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
@@ -74,11 +74,18 @@ export class WorkosAuthController {
 
   @ApiResponse({ status: 200, description: 'AuthKit authorize URL', schema: swaggerSchema(authorizeResponseSwaggerSchema) })
   @ApiResponse({ status: 503, description: 'WorkOS auth is disabled' })
+  @ApiQuery({
+    name: 'select_account',
+    required: false,
+    enum: ['1'],
+    description: 'Require a fresh AuthKit flow with an account chooser',
+  })
   @ApiOperation({ operationId: 'authWorkosAuthorize', summary: 'Get the hosted SSO login URL' })
   @Get('auth/workos/authorize')
   async authorize(
     @Req() request: WorkosRequest,
     @Res({ passthrough: true }) response: Response,
+    @Query('select_account') selectAccount?: string,
   ): Promise<{ url: string }> {
     const service = this.assertEnabled();
     await this.rateLimits.assertAllowed({
@@ -86,7 +93,11 @@ export class WorkosAuthController {
       subject: { route: 'auth/workos/authorize', ipAddress: request.ip },
     });
 
-    return { url: this.startFlow(service, response, 'login') };
+    return {
+      url: this.startFlow(service, response, 'login', {
+        selectAccount: selectAccount === '1',
+      }),
+    };
   }
 
   @ApiBearerAuth()
@@ -566,7 +577,7 @@ export class WorkosAuthController {
     service: WorkosAuthService,
     response: Response,
     mode: WorkosFlowMode,
-    context: { sessionId?: string; invitationId?: string } = {},
+    context: { sessionId?: string; invitationId?: string; selectAccount?: boolean } = {},
   ): string {
     const secret = this.config.get('JWT_ACCESS_SECRET', { infer: true }) ?? '';
     const { state, cookieValue } = createWorkosState(secret, mode, context);
@@ -579,8 +590,12 @@ export class WorkosAuthController {
     });
     response.cookie(cookie.name, cookie.value, cookie.options);
 
+    const selectAccount =
+      context.selectAccount === true || mode === 'link' || mode === 'invitation';
+
     return service.buildAuthorizeUrl(state, {
-      forceFreshAuthentication: mode === 'link' || mode === 'invitation',
+      forceFreshAuthentication: selectAccount,
+      selectAccount,
     });
   }
 

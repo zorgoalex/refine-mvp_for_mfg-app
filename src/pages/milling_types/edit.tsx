@@ -1,9 +1,13 @@
 import { Edit } from "@refinedev/antd";
 import { IResourceComponentsProps } from "@refinedev/core";
-import { Form, Input, InputNumber, Checkbox } from "antd";
+import { Form, Input, InputNumber, Checkbox, Card } from "antd";
+import { useParams } from "react-router-dom";
 import { useFormWithHighlight } from "../../hooks/useFormWithHighlight";
+import { MillingTypeExtraResourceSelector } from "./MillingTypeExtraResourceSelector";
 
 export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
+  const { id } = useParams();
+  const millingTypeId = Number(id);
   const { formProps, saveButtonProps } = useFormWithHighlight({
     resource: "milling_types",
     idField: "milling_type_id",
@@ -40,6 +44,11 @@ export const MillingTypeEdit: React.FC<IResourceComponentsProps> = () => {
           <Input />
         </Form.Item>
       </Form>
+      {Number.isInteger(millingTypeId) && millingTypeId > 0 ? (
+        <Card size="small" title="Доп. ресурс" style={{ marginTop: 16 }}>
+          <MillingTypeExtraResourceSelector millingTypeId={millingTypeId} />
+        </Card>
+      ) : null}
     </Edit>
   );
 };

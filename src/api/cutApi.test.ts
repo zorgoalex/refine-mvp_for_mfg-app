@@ -34,6 +34,19 @@ describe('cutApi', () => {
     );
   });
 
+  it('reads deleted jobs and previews delete impact', async () => {
+    const fetchMock = mockFetch(
+      [jobDto({ status: 'archived' })],
+      { linkedMdfPackets: [], orderIds: [9], orderDetailIds: [100] },
+    );
+
+    await cutApi.list({ includeArchived: true });
+    await cutApi.getDeleteImpact(42);
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/cut-jobs?includeArchived=true');
+    expect(fetchMock.mock.calls[1][0]).toBe('/api/v1/cut-jobs/42/delete-impact');
+  });
+
   it('drives the cut-jobs backend command/read endpoints', async () => {
     const job = jobDto();
     const fetchMock = mockFetch(
@@ -158,6 +171,19 @@ describe('cutApi', () => {
 
     expect(fetchMock.mock.calls[0][0] as string).not.toContain('pieceMetadata=on');
     expect(fetchMock.mock.calls[1][0] as string).toContain('pieceMetadata=on');
+  });
+
+  it('passes renderStyle to PNG and SVG sheet renders when requested', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('PNG', { status: 200, headers: { 'Content-Type': 'image/png' } }))
+      .mockResolvedValueOnce(new Response('<svg/>', { status: 200, headers: { 'Content-Type': 'image/svg+xml' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cutApi.fetchSheetPng(42, 100, 0, 'thumb', false, 'auto', undefined, true, 'top-left', 3, false, true, 'mdf_board_preview');
+    await cutApi.fetchSheetSvg(42, 100, 0, false, 'auto', undefined, true, 'top-left', 3, true, 'mdf_board_preview');
+
+    expect(fetchMock.mock.calls[0][0] as string).toContain('renderStyle=mdf_board_preview');
+    expect(fetchMock.mock.calls[1][0] as string).toContain('renderStyle=mdf_board_preview');
   });
 
   it('emits origin=raw on every render URL when originTopLeft is false (RAW half not dead)', async () => {

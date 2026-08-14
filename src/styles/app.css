@@ -25,7 +25,7 @@
     0 2px 4px 0 rgba(0, 0, 0, 0.06);
   --app-image-outline: rgba(0, 0, 0, 0.1);
   --app-workspace-gap: #f0f0f0;
-  --app-tooltip-enter-delay: 0.9s;
+  --app-tooltip-enter-delay: 2.0s;
   /* Detail visual-grouping: distinct LIGHT pastel hue per group (cycles). */
   --app-group-tint-0: #eef4fc;
   --app-group-tint-1: #eef8f0;

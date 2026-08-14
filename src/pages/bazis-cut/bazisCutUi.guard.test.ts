@@ -67,6 +67,35 @@ describe('Basis-cut UI integration guards', () => {
     expect(show).toContain('AddToBazisCutModal');
   });
 
+  it('supports field filtering, filtered header selection, and selected bulk delete inside a Basis-cut set', () => {
+    expect(card).toContain('DETAIL_FILTERS');
+    expect(card).toContain('<Select<string[]>');
+    expect(card).toContain('mode="multiple"');
+    expect(card).toContain('buildDetailFilterOptions(details)');
+    expect(card).toContain('options={detailFilterOptionsByKey[filter.key]}');
+    expect(card).toContain('selected.includes(detailFilterOptionValue(detailFilterLabel(detail, filter.key)))');
+    expect(card).toContain('Object.fromEntries(DETAIL_FILTERS.map((filter) => [filter.key, []]))');
+    expect(card).not.toContain("{ key: 'all', label: 'Все поля'");
+    expect(card).toContain('setDetailFiltersOpen((open) => !open)');
+    expect(card).toContain('aria-controls="bazis-cut-detail-filters"');
+    expect(card).toContain('detailFiltersOpen && <Space id="bazis-cut-detail-filters" wrap>');
+    expect(card).toContain('onClick={() => setDetailFiltersOpen((open) => !open)}>Фильтры</Button>');
+    expect(card).toContain('<Card title="Детали набора" extra={<Space wrap>');
+    expect(card).toContain('matchesDetailFilters(detail, detailFilters)');
+    expect(card).toContain('dataSource={filteredDetails}');
+    expect(card).toContain('rowSelection={rowSelection}');
+    expect(card).toContain('aria-label="Выделить все отфильтрованные детали набора"');
+    expect(card).toContain('columnWidth: DETAIL_SELECTION_COLUMN_WIDTH');
+    expect(card).toContain('fixed: true');
+    expect(card).toContain('setSelectedDetailIds(event.target.checked ? filteredDetailIds : [])');
+    expect(card).toContain('Удалить выделенные');
+    expect(card).toContain('removeSelectedDetails');
+    expect(card).toContain('Будет удалено строк деталей');
+    expect(card).toContain('expectedVersion: currentSet.version');
+    expect(card).toContain('Показано: {filteredDetails.length} из {details.length}');
+    expect(list).not.toContain('Удалить выделенные');
+  });
+
   it('keeps all 33 fields editable and uses native picker with fallback', () => {
     expect((card.match(/key: '[A-Za-z0-9]+'/g) ?? []).length).toBeGreaterThanOrEqual(33);
     expect(card).toContain("title: 'Базис-проект'");
@@ -112,10 +141,10 @@ describe('Basis-cut UI integration guards', () => {
     expect(columns.indexOf("title: 'Изделие'")).toBeLessThan(columns.indexOf("title: 'Позиция'"));
     expect(columns.indexOf("title: 'Ванна'")).toBeLessThan(columns.indexOf("title: 'Позиция'"));
     expect(columns).toContain("title: 'Наименование', dataIndex: 'partName', key: 'partName', width: 200");
-    expect(card).toContain("className={index === QR_CODE_COLUMN_INDEX ? QR_CODE_STICKY_CLASS : undefined}");
+    expect(card).toContain("className={index === qrCodeColumnIndex ? QR_CODE_STICKY_CLASS : undefined}");
     expect(styles).toContain('.bazis-cut-set-details-table.ant-table-wrapper .ant-table-cell.bazis-cut-sticky-qr');
     expect(styles).toContain('left: var(--bazis-cut-sticky-qr-left);');
-    expect(card).toContain('scroll={{ x: 5750, y: 480 }}');
+    expect(card).toContain('scroll={{ x: DETAIL_TABLE_SCROLL_X + (rowSelection ? DETAIL_SELECTION_COLUMN_WIDTH : 0), y: 480 }}');
     expect(card).toContain('<Table.Summary fixed="bottom">');
     expect(card).toContain('Итого позиций:');
     expect(card).toContain('formatBazisCutAreaM2(setTotals.totalAreaM2)');

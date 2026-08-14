@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import {
+  CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+  DEFAULT_CUT_RENDER_STYLES_SETTING,
+} from '../../../shared/cut-render-style';
+import {
   DEFAULT_FREECUT_PARAMS,
   DEFAULT_GRAIN_RULES,
   DEFAULT_READY_STATUS_CODES,
@@ -99,6 +103,48 @@ describe('PgCutConfigRepository', () => {
     const empty = new PgCutConfigRepository(fakeDatabase({}));
     expect(await empty.getRenderPresetPx('totally-unknown')).toBe(1400);
     expect(await empty.getRenderPresetPx('thumb')).toBe(360);
+  });
+
+  it('reads render style rules from cut_settings', async () => {
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({
+        ['WHERE key = $1 LIMIT 1']: [{
+          value: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+            profiles: {
+              ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+              mdf_board_preview: {
+                ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview,
+                piece: {
+                  ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.piece,
+                  stroke: '#123456',
+                },
+                sourceSvg: {
+                  ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
+                  minStrokePx: 3,
+                  nonScalingStroke: true,
+                },
+              },
+            },
+          },
+        }],
+      }),
+    );
+
+    const style = await repo.getRenderStyleRule(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW);
+
+    expect(style.piece.stroke).toBe('#123456');
+    expect(style.sourceSvg.minStrokePx).toBe(3);
+  });
+
+  it('falls back to the built-in render style when render.styles is absent or invalid', async () => {
+    const absent = new PgCutConfigRepository(fakeDatabase({}));
+    expect((await absent.getRenderStyleRule(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW)).sourceSvg.minStrokePx).toBe(1.6);
+
+    const invalid = new PgCutConfigRepository(
+      fakeDatabase({ ['WHERE key = $1 LIMIT 1']: [{ value: { version: 1, profiles: { mdf_board_preview: { piece: { stroke: 'red' } } } } }] }),
+    );
+    expect((await invalid.getRenderStyleRule(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW)).piece.stroke).toBe('#1f2d3d');
   });
 
   it('rejects an invalid stored grain rule rather than passing it to freecut', async () => {

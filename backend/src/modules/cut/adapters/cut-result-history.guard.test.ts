@@ -50,7 +50,7 @@ describe('cut result history implementation guards', () => {
       repository.indexOf('private async attachFrozenRenderSnapshots'),
     );
     expect(frozenLoader).toContain('renderSnapshot?.views');
-    expect(frozenLoader).toContain("const baseSvg = rebuildSvgWithPieceMetadata && !view.svg.includes('data-detail-id=')");
+    expect(frozenLoader).toContain("const baseSvg = rebuildSvgWithPieceMetadata && (rebuildForRenderStyle || !view.svg.includes('data-detail-id='))");
     expect(frozenLoader).toContain('? buildSheetSvg({');
     expect(frozenLoader).toContain(': view.svg;');
     expect(frozenLoader).toContain('const baseBathSvg = rebuildBathSvgWithCurrentRenderer');

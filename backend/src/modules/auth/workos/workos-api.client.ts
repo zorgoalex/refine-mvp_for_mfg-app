@@ -14,6 +14,12 @@ export interface WorkosAuthorizeOptions {
    * social account; ordinary login should keep seamless SSO.
    */
   forceFreshAuthentication?: boolean;
+  /**
+   * Ask AuthKit/the upstream provider to show an account chooser. This is
+   * used after an unlinked identity was returned from a still-active browser
+   * session, and for link flows where choosing the exact account matters.
+   */
+  selectAccount?: boolean;
 }
 
 export interface WorkosIdentity {
@@ -51,13 +57,22 @@ export class WorkosApiClient {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.options.clientId);
     url.searchParams.set('redirect_uri', this.options.redirectUri);
-    url.searchParams.set('provider', 'authkit');
+    // The hosted AuthKit provider may reuse its own active user before it
+    // reaches Google, even when Google-specific query parameters are present.
+    // A retry that explicitly switches accounts must enter Google directly.
+    url.searchParams.set('provider', authorizeOptions.selectAccount ? 'GoogleOAuth' : 'authkit');
     url.searchParams.set('state', state);
     if (authorizeOptions.forceFreshAuthentication) {
       // WorkOS documents max_age=0 as the supported way to require a fresh
       // AuthKit authentication. This prevents "Привязать ещё" from silently
       // returning the identity already active in the provider session.
       url.searchParams.set('max_age', '0');
+    }
+    if (authorizeOptions.selectAccount) {
+      // `prompt` at the AuthKit level does not force the upstream social
+      // provider to switch accounts. WorkOS forwards provider-specific
+      // parameters only through provider_query_params bracket notation.
+      url.searchParams.set('provider_query_params[prompt]', 'select_account');
     }
     return url.toString();
   }

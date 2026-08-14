@@ -7,6 +7,7 @@ import {
   type CncMachineResultSheet,
 } from './cncDetailedMachine';
 import { NON_VACUUM_SHEET_AXIS_ORIGIN } from '../cut/cutVacuumProfile';
+import { fetchCncMdfBoardSheetSvg } from './cncMdfSheetPreview';
 
 export const CNC_MACHINE_RESULT_CACHE_LIMIT = 32;
 export const CNC_MACHINE_SVG_CACHE_LIMIT = 128;
@@ -83,18 +84,16 @@ class LruCache<Key, Value> {
 const defaultDependencies: CncDetailedMachinePreviewDependencies = {
   getResult: (cutJobId, resultNo) => cutApi.getResult(cutJobId, resultNo),
   fetchSheetSvg: (cutJobId, groupId, sheetIndex, renderToken, resultNo) => (
-    cutApi.fetchSheetSvg(
+    fetchCncMdfBoardSheetSvg({
       cutJobId,
-      groupId,
+      cutGroupId: groupId,
       sheetIndex,
-      false,
-      undefined,
       renderToken,
-      false,
-      NON_VACUUM_SHEET_AXIS_ORIGIN,
+      originTopLeft: false,
+      axisOrigin: NON_VACUUM_SHEET_AXIS_ORIGIN,
       resultNo,
-      true,
-    )
+      pieceMetadata: true,
+    })
   ),
   fetchScreenshot: async (imageUrl) => (await cncTelegramApi.downloadSheetImage(imageUrl)).blob,
 };

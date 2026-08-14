@@ -29,6 +29,7 @@ describe('resolveTabLabel', () => {
     expect(resolveTabLabel('/sheet-material-types/show/3')).toBe('Листовые материалы · Просмотр #3');
     expect(resolveTabLabel('/sheet-material-types/edit/3')).toBe('Листовые материалы · Редактирование #3');
     expect(resolveTabLabel('/sheet-material-types/create')).toBe('Листовые материалы · Создание');
+    expect(resolveTabLabel('/extra-resources')).toBe('Доп. ресурсы');
   });
   it('normalizes kebab-case resource paths to known resource labels', () => {
     expect(resolveTabLabel('/material-types/edit/2')).toBe('Типы материалов · Редактирование #2');

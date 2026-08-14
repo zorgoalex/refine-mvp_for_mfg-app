@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUT_RENDER_STYLES_SETTING_KEY,
+  DEFAULT_CUT_RENDER_STYLES_SETTING,
+} from '../../../shared/cut-render-style';
+import {
   validateFreecutParams,
   validateParamProfileInput,
   validateRenderPresetInput,
@@ -41,6 +45,43 @@ describe('cut-config validation', () => {
 
   it('rejects an unknown setting key', () => {
     expect(() => validateSettingValue('totally.unknown', {})).toThrow();
+  });
+
+  it('validates editable render.styles JSON', () => {
+    const value = validateSettingValue(CUT_RENDER_STYLES_SETTING_KEY, {
+      ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      profiles: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+        mdf_board_preview: {
+          ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview,
+          sourceSvg: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
+            minStrokePx: 3,
+            nonScalingStroke: true,
+          },
+          rawSvgScreenshot: { minStrokePx: 3 },
+        },
+      },
+    });
+    expect(value).toMatchObject({
+      version: 1,
+      profiles: {
+        mdf_board_preview: {
+          sourceSvg: { minStrokePx: 3, nonScalingStroke: true },
+          rawSvgScreenshot: { minStrokePx: 3 },
+        },
+      },
+    });
+    expect(() =>
+      validateSettingValue(CUT_RENDER_STYLES_SETTING_KEY, {
+        version: 1,
+        profiles: {
+          mdf_board_preview: {
+            piece: { stroke: 'red' },
+          },
+        },
+      }),
+    ).toThrow(/HEX/);
   });
 
   it('validates render preset target px is positive', () => {

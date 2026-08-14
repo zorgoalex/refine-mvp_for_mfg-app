@@ -26,6 +26,7 @@ const DIRECT_TYPE_NUMBER_FIELDS = new Set([
   'height',
   'width',
   'quantity',
+  'hdf_parameter_override_mm',
   'milling_cost_per_sqm',
   'detail_cost',
   'priority',

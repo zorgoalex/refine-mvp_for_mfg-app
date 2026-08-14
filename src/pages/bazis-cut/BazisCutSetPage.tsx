@@ -1,8 +1,8 @@
 import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Space, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, DownloadOutlined, EditOutlined, SaveOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, EditOutlined, FilterOutlined, SaveOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
 import {
   bazisCutApi, type BazisCutDetailFields, type BazisCutSetCardDto, type BazisCutSetDetailDto,
@@ -64,10 +64,28 @@ const FIELD_GROUPS = ['Основное', 'Размеры', 'Кромки', 'Д�
 const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
   FIELDS.filter((field) => field.group === group && field.key !== 'position' && field.key !== 'partName'),
 );
+type DetailFilterKey = 'source' | 'sourceBazisProjectName' | 'sourceBazisOrderNo' | 'sourceBazisProductName'
+  | 'sourceBathCutNumber' | 'qrCode' | FieldKey;
+interface DetailFilterDefinition { key: DetailFilterKey; label: string; width: number; }
+interface DetailFilterOption { value: string; label: string; }
+type DetailFilters = Record<DetailFilterKey, string[]>;
+const DETAIL_FILTERS: DetailFilterDefinition[] = [
+  { key: 'source', label: 'Источник', width: 180 },
+  { key: 'sourceBazisProjectName', label: 'Базис-проект', width: 170 },
+  { key: 'sourceBazisOrderNo', label: 'Базис-заказ', width: 160 },
+  { key: 'sourceBazisProductName', label: 'Изделие', width: 160 },
+  { key: 'sourceBathCutNumber', label: 'Ванна', width: 140 },
+  { key: 'qrCode', label: 'QR-code', width: 190 },
+  ...FIELDS.map((field) => ({ key: field.key, label: field.label, width: field.kind === 'long' ? 220 : 150 })),
+];
 const LEADING_COLUMN_COUNT = 9;
 const QR_CODE_COLUMN_INDEX = 7;
 const QR_CODE_STICKY_CLASS = 'bazis-cut-sticky-qr';
 const QR_CODE_STICKY_LEFT_PX = 58 + 210 + 150 + 150;
+const DETAIL_SELECTION_COLUMN_WIDTH = 44;
+const DETAIL_TABLE_SCROLL_X = 5750;
+const EMPTY_DETAIL_FILTER_VALUE = '__bazis_cut_empty_filter__';
+const EMPTY_DETAIL_FILTER_LABEL = '—';
 const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
 const QUANTITY_COLUMN_INDEX = LEADING_COLUMN_COUNT
   + GROUPED_FIELDS.findIndex((field) => field.key === 'quantity');
@@ -79,6 +97,10 @@ export const BazisCutSetPage: React.FC = () => {
   const [exporting, setExporting] = useState(false); const [editing, setEditing] = useState<BazisCutSetDetailDto | null>(null);
   const [exportTemplateId, setExportTemplateId] = useState<number>();
   const [exportTemplatesReady, setExportTemplatesReady] = useState(false);
+  const [detailFilters, setDetailFilters] = useState<DetailFilters>(() => createEmptyDetailFilters());
+  const [detailFiltersOpen, setDetailFiltersOpen] = useState(false);
+  const [selectedDetailIds, setSelectedDetailIds] = useState<number[]>([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [nameForm] = Form.useForm<{ name: string }>(); const [detailForm] = Form.useForm<BazisCutDetailFields>();
   const canManage = can('cut.manage');
   const setTabTitle = useTabStore((state) => state.setTabTitle);
@@ -115,7 +137,7 @@ export const BazisCutSetPage: React.FC = () => {
 
   const remove = useCallback(async (detailId: number) => {
     if (!set) return;
-    try { const result = await bazisCutApi.removeDetail(setId, detailId, { expectedVersion: set.version }, { idempotencyKey: commandKey('bazis-cut-delete') }); setSet(result.set); message.success('Деталь удалена'); }
+    try { const result = await bazisCutApi.removeDetail(setId, detailId, { expectedVersion: set.version }, { idempotencyKey: commandKey('bazis-cut-delete') }); setSet(result.set); setSelectedDetailIds((current) => current.filter((id) => id !== detailId)); message.success('Деталь удалена'); }
     catch (error) { message.error(error instanceof Error ? error.message : 'Не удалось удалить деталь'); }
   }, [set, setId]);
 
@@ -134,8 +156,117 @@ export const BazisCutSetPage: React.FC = () => {
     finally { setExporting(false); }
   }, [exportTemplateId, set, setId]);
 
+  const details = useMemo(() => set?.details ?? [], [set?.details]);
+  const detailFilterOptionsByKey = useMemo(() => buildDetailFilterOptions(details), [details]);
+  const filteredDetails = useMemo(() => details.filter((detail) => matchesDetailFilters(detail, detailFilters)), [detailFilters, details]);
+  const filteredDetailIds = useMemo(() => filteredDetails.map((detail) => detail.bazisCutSetDetailId), [filteredDetails]);
+  const selectedDetailIdSet = useMemo(() => new Set(selectedDetailIds), [selectedDetailIds]);
+  const allFilteredSelected = filteredDetailIds.length > 0 && filteredDetailIds.every((id) => selectedDetailIdSet.has(id));
+  const someFilteredSelected = filteredDetailIds.some((id) => selectedDetailIdSet.has(id));
+  const detailsById = useMemo(() => new Map(details.map((detail) => [detail.bazisCutSetDetailId, detail])), [details]);
+  const selectedDetails = useMemo(() => selectedDetailIds
+    .map((id) => detailsById.get(id))
+    .filter((detail): detail is BazisCutSetDetailDto => Boolean(detail)), [detailsById, selectedDetailIds]);
+  const detailFiltersActive = useMemo(() => DETAIL_FILTERS.some((filter) => detailFilters[filter.key].length > 0), [detailFilters]);
+
+  useEffect(() => {
+    const availableValues = new Map(DETAIL_FILTERS.map((filter) => [
+      filter.key,
+      new Set(detailFilterOptionsByKey[filter.key].map((option) => option.value)),
+    ]));
+    setDetailFilters((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const filter of DETAIL_FILTERS) {
+        const allowed = availableValues.get(filter.key) ?? new Set<string>();
+        const kept = current[filter.key].filter((value) => allowed.has(value));
+        if (kept.length !== current[filter.key].length) {
+          next[filter.key] = kept;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [detailFilterOptionsByKey]);
+
+  useEffect(() => {
+    const visibleIds = new Set(filteredDetailIds);
+    setSelectedDetailIds((current) => {
+      const next = current.filter((id) => visibleIds.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [filteredDetailIds]);
+
+  const setDetailFilter = useCallback((key: DetailFilterKey, value: string[]) => {
+    setDetailFilters((current) => ({ ...current, [key]: value }));
+  }, []);
+
+  const removeSelectedDetails = useCallback(async (rows: BazisCutSetDetailDto[]) => {
+    if (!set || rows.length === 0) return;
+    setBulkDeleting(true);
+    let currentSet = set;
+    let deleted = 0;
+    const failures: string[] = [];
+    try {
+      for (const row of rows) {
+        try {
+          const result = await bazisCutApi.removeDetail(setId, row.bazisCutSetDetailId, { expectedVersion: currentSet.version }, {
+            idempotencyKey: commandKey(`bazis-cut-detail-bulk-delete-${row.bazisCutSetDetailId}`),
+          });
+          currentSet = result.set;
+          deleted += 1;
+        } catch (error) {
+          failures.push(`${buildBazisCutCardPosition(row) || row.partName}: ${errorMessage(error, 'не удалось удалить')}`);
+        }
+      }
+      setSet(currentSet);
+      setSelectedDetailIds((current) => current.filter((id) => !rows.some((row) => row.bazisCutSetDetailId === id)));
+      if (deleted > 0) message.success(`Удалено деталей: ${deleted}`);
+      if (failures.length > 0) {
+        Modal.error({
+          title: 'Не все детали удалены',
+          content: <Space direction="vertical" size={4}>
+            {failures.slice(0, 6).map((failure) => <Text key={failure}>{failure}</Text>)}
+            {failures.length > 6 && <Text type="secondary">Ещё ошибок: {failures.length - 6}</Text>}
+          </Space>,
+        });
+      }
+    } finally {
+      setBulkDeleting(false);
+    }
+  }, [set, setId]);
+
+  const confirmRemoveSelectedDetails = useCallback(() => {
+    if (selectedDetails.length === 0) return;
+    Modal.confirm({
+      title: 'Удалить выделенные детали?',
+      content: `Будет удалено строк деталей: ${selectedDetails.length}.`,
+      okText: 'Удалить',
+      cancelText: 'Отмена',
+      okButtonProps: { danger: true },
+      onOk: () => removeSelectedDetails(selectedDetails),
+    });
+  }, [removeSelectedDetails, selectedDetails]);
+
+  const rowSelection = useMemo(() => canManage ? {
+    selectedRowKeys: selectedDetailIds,
+    columnWidth: DETAIL_SELECTION_COLUMN_WIDTH,
+    fixed: true,
+    columnTitle: <Checkbox aria-label="Выделить все отфильтрованные детали набора"
+      checked={allFilteredSelected}
+      indeterminate={!allFilteredSelected && someFilteredSelected}
+      disabled={bulkDeleting || filteredDetailIds.length === 0}
+      onChange={(event) => setSelectedDetailIds(event.target.checked ? filteredDetailIds : [])} />,
+    getCheckboxProps: () => ({
+      disabled: bulkDeleting,
+      title: 'Выделить деталь',
+    }),
+    onChange: (keys: React.Key[]) => setSelectedDetailIds(keys.filter((key): key is number => typeof key === 'number')),
+  } : undefined, [allFilteredSelected, bulkDeleting, canManage, filteredDetailIds, selectedDetailIds, someFilteredSelected]);
+  const qrCodeStickyLeftPx = QR_CODE_STICKY_LEFT_PX + (rowSelection ? DETAIL_SELECTION_COLUMN_WIDTH : 0);
+
   const columns = useMemo<ColumnsType<BazisCutSetDetailDto>>(() => buildColumns(canManage, startEdit, remove), [canManage, remove, startEdit]);
-  const setTotals = useMemo(() => summarizeBazisCutDetails(set?.details ?? []), [set?.details]);
+  const setTotals = useMemo(() => summarizeBazisCutDetails(details), [details]);
   if (!valid) return <div className="bazis-cut-set-modern"><Alert type="error" showIcon message="Некорректный номер набора" /></div>;
   return <div className="bazis-cut-set-modern"><Space direction="vertical" size="middle" style={{ width: '100%' }}>
     <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}><Title level={3} style={{ margin: 0 }}>Базис-раскрой #{setId}</Title>
@@ -156,13 +287,39 @@ export const BazisCutSetPage: React.FC = () => {
       <Descriptions.Item label="Базис-проекты"><SourceRefs refs={set.bazisProjects} href={(refId) => `/bazis/projects/${refId}`} /></Descriptions.Item>
       <Descriptions.Item label="Базис-заказы"><SourceRefs refs={set.bazisOrders} /></Descriptions.Item>
     </Descriptions>}</Card>
-    <Card title="Детали набора"><Table className="bazis-cut-set-details-table"
-      style={{ '--bazis-cut-sticky-qr-left': `${QR_CODE_STICKY_LEFT_PX}px` } as React.CSSProperties}
-      rowKey="bazisCutSetDetailId" columns={columns} dataSource={set?.details ?? []}
-      loading={loading} pagination={false} scroll={{ x: 5750, y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
-      rowClassName={(row) => orderDeletedReferenceClassName(row.sourceOrderDeleted)}
-      summary={(details) => <DetailTableSummary details={details} canManage={canManage} />}
-      size="small" locale={{ emptyText: 'В наборе нет деталей' }} /></Card>
+    <Card title="Детали набора" extra={<Space wrap>
+      <Button icon={<FilterOutlined />} type={detailFiltersOpen || detailFiltersActive ? 'primary' : 'default'}
+        aria-expanded={detailFiltersOpen} aria-controls="bazis-cut-detail-filters"
+        onClick={() => setDetailFiltersOpen((open) => !open)}>Фильтры</Button>
+      {canManage && <Button danger icon={<DeleteOutlined />}
+        disabled={selectedDetailIds.length === 0 || bulkDeleting}
+        loading={bulkDeleting}
+        onClick={confirmRemoveSelectedDetails}>Удалить выделенные</Button>}
+    </Space>}><Space direction="vertical" size="small" style={{ width: '100%' }}>
+      {detailFiltersOpen && <Space id="bazis-cut-detail-filters" wrap>
+          {DETAIL_FILTERS.map((filter) => <Select<string[]> key={filter.key} mode="multiple" allowClear showSearch
+            maxTagCount="responsive" value={detailFilters[filter.key]}
+            onChange={(values) => setDetailFilter(filter.key, values)}
+            options={detailFilterOptionsByKey[filter.key]}
+            optionFilterProp="label" notFoundContent="Нет значений"
+            disabled={detailFilterOptionsByKey[filter.key].length === 0}
+            placeholder={filter.label} aria-label={`Фильтр деталей: ${filter.label}`} style={{ width: filter.width }} />)}
+          <Button disabled={!detailFiltersActive} onClick={() => setDetailFilters(createEmptyDetailFilters())}>Сбросить</Button>
+      </Space>
+      }
+      <Space wrap size="small">
+        <Text type="secondary">Показано: {filteredDetails.length} из {details.length}</Text>
+        {selectedDetailIds.length > 0 && <Text type="secondary">Выбрано: {selectedDetailIds.length}</Text>}
+      </Space>
+      <Table className="bazis-cut-set-details-table"
+        style={{ '--bazis-cut-sticky-qr-left': `${qrCodeStickyLeftPx}px` } as React.CSSProperties}
+        rowKey="bazisCutSetDetailId" columns={columns} dataSource={filteredDetails}
+        loading={loading} pagination={false} scroll={{ x: DETAIL_TABLE_SCROLL_X + (rowSelection ? DETAIL_SELECTION_COLUMN_WIDTH : 0), y: 480 }} sticky={{ offsetHeader: tableHeaderOffset }}
+        rowSelection={rowSelection}
+        rowClassName={(row) => orderDeletedReferenceClassName(row.sourceOrderDeleted)}
+        summary={(details) => <DetailTableSummary details={details} canManage={canManage} hasSelection={Boolean(rowSelection)} />}
+        size="small" locale={{ emptyText: detailFiltersActive ? 'Ничего не найдено' : 'В наборе нет деталей' }} />
+    </Space></Card>
   </Space>
   <Modal width={1000} title={`Редактирование позиции ${editing?.position ?? ''}`} open={editing !== null}
     onCancel={() => setEditing(null)} onOk={() => void saveDetail()} confirmLoading={saving} okText="Сохранить" cancelText="Отмена" destroyOnClose>
@@ -230,15 +387,20 @@ function buildColumns(canManage: boolean, edit: (detail: BazisCutSetDetailDto) =
 const DetailTableSummary: React.FC<{
   details: readonly BazisCutSetDetailDto[];
   canManage: boolean;
-}> = ({ details, canManage }) => {
+  hasSelection: boolean;
+}> = ({ details, canManage, hasSelection }) => {
   const totals = summarizeBazisCutDetails(details);
-  const columnCount = LEADING_COLUMN_COUNT + GROUPED_FIELDS.length + (canManage ? 1 : 0);
+  const selectionOffset = hasSelection ? 1 : 0;
+  const columnCount = selectionOffset + LEADING_COLUMN_COUNT + GROUPED_FIELDS.length + (canManage ? 1 : 0);
+  const qrCodeColumnIndex = selectionOffset + QR_CODE_COLUMN_INDEX;
+  const totalLabelColumnIndex = selectionOffset + TOTAL_LABEL_COLUMN_INDEX;
+  const quantityColumnIndex = selectionOffset + QUANTITY_COLUMN_INDEX;
   return <Table.Summary fixed="bottom"><Table.Summary.Row style={{ backgroundColor: 'var(--app-surface-muted)' }}>
     {Array.from({ length: columnCount }, (_, index) => <Table.Summary.Cell key={index} index={index}
-      className={index === QR_CODE_COLUMN_INDEX ? QR_CODE_STICKY_CLASS : undefined}>
-      {index === TOTAL_LABEL_COLUMN_INDEX
+      className={index === qrCodeColumnIndex ? QR_CODE_STICKY_CLASS : undefined}>
+      {index === totalLabelColumnIndex
         ? <div style={{ textAlign: 'right' }}><Text strong>Итого позиций: <span style={{ fontVariantNumeric: 'tabular-nums' }}>{totals.positionCount}</span></Text></div>
-        : index === QUANTITY_COLUMN_INDEX
+        : index === quantityColumnIndex
           ? <div style={{ textAlign: 'right' }}><Text strong style={{ fontVariantNumeric: 'tabular-nums' }}>{totals.quantity}</Text></div>
           : null}
     </Table.Summary.Cell>)}
@@ -246,6 +408,56 @@ const DetailTableSummary: React.FC<{
 };
 
 function fieldsOf(detail: BazisCutSetDetailDto): BazisCutDetailFields { return Object.fromEntries(FIELDS.map((field) => [field.key, detail[field.key]])) as unknown as BazisCutDetailFields; }
+function createEmptyDetailFilters(): DetailFilters {
+  return Object.fromEntries(DETAIL_FILTERS.map((filter) => [filter.key, []])) as DetailFilters;
+}
+function buildDetailFilterOptions(details: readonly BazisCutSetDetailDto[]): Record<DetailFilterKey, DetailFilterOption[]> {
+  return Object.fromEntries(DETAIL_FILTERS.map((filter) => [filter.key, buildDetailFilterOptionsForKey(details, filter.key)])) as Record<DetailFilterKey, DetailFilterOption[]>;
+}
+function buildDetailFilterOptionsForKey(details: readonly BazisCutSetDetailDto[], key: DetailFilterKey): DetailFilterOption[] {
+  const options = new Map<string, string>();
+  for (const detail of details) {
+    const label = detailFilterLabel(detail, key).trim();
+    const value = detailFilterOptionValue(label);
+    if (!options.has(value)) options.set(value, label === '' ? EMPTY_DETAIL_FILTER_LABEL : label);
+  }
+  return [...options.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((left, right) => left.label.localeCompare(right.label, 'ru-RU', { numeric: true, sensitivity: 'base' }));
+}
+function matchesDetailFilters(detail: BazisCutSetDetailDto, filters: DetailFilters): boolean {
+  return DETAIL_FILTERS.every((filter) => {
+    const selected = filters[filter.key];
+    return selected.length === 0 || selected.includes(detailFilterOptionValue(detailFilterLabel(detail, filter.key)));
+  });
+}
+function detailFilterLabel(detail: BazisCutSetDetailDto, key: DetailFilterKey): string {
+  if (key === 'source') return detail.sourceOrderId
+    ? detail.sourceOrderName || detail.sourceOrderFullNumber || detail.sourceProjectCode || `Заказ ${detail.sourceOrderId}`
+    : 'Снимок';
+  if (key === 'qrCode') return buildBazisCutQrCode(detail);
+  if (key === 'position') return buildBazisCutCardPosition(detail);
+  if (key === 'sourceBazisProjectName' || key === 'sourceBazisOrderNo' || key === 'sourceBazisProductName' || key === 'sourceBathCutNumber') {
+    return formatDetailFilterLabel(detail[key]);
+  }
+  return formatDetailFilterLabel(detail[key]);
+}
+function formatDetailFilterLabel(value: unknown): string {
+  if (value === true) return 'Да';
+  if (value === false) return 'Нет';
+  if (value == null) return '';
+  return String(value);
+}
+function detailFilterOptionValue(label: string): string {
+  const normalized = normalizeDetailFilterText(label);
+  return normalized === '' ? EMPTY_DETAIL_FILTER_VALUE : normalized;
+}
+function normalizeDetailFilterText(value: string): string {
+  return value.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
+}
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
 function commandKey(prefix: string): string { return `${prefix}-${typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`}`; }
 function useWorkspaceTabsHeight(): number {
   const [height, setHeight] = useState(0);

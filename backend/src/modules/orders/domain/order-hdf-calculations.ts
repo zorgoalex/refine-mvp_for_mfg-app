@@ -19,6 +19,7 @@ export interface OrderHdfSourceDetailInput {
   sheetMaterialName: string | null;
   millingTypeId: number | null;
   millingTypeName: string | null;
+  hdfParameterOverrideMm?: number | null;
   productionStatusId: number | null;
 }
 
@@ -152,6 +153,7 @@ function buildSourceSnapshot(
     sourceSheetMaterialName: source.sheetMaterialName,
     millingTypeId: source.millingTypeId,
     millingTypeName: source.millingTypeName,
+    hdfParameterOverrideMm: source.hdfParameterOverrideMm ?? null,
     hdfEnabled: milling.hdfEnabled,
     edgeMm: milling.hdfEdgeMm,
     thresholdMm: config.thresholdMm,

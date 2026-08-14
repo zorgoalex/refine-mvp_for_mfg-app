@@ -82,17 +82,18 @@ describe('workos callback helpers contract', () => {
     expect(adminConfirm).toContain('authApi.refresh()');
   });
 
-  it('profile card renders a link LIST and unlinks one, admin block is permission-gated', () => {
+  it('profile card renders a link LIST and admin controls live only on the edit page', () => {
     const card = readFileSync(new URL('../pages/profile/WorkosLinkCard.tsx', import.meta.url), 'utf8');
     expect(card).toContain('workosListLinks');
     expect(card).toContain('workosUnlinkOne');
     const showPage = readFileSync(new URL('../pages/users/show.tsx', import.meta.url), 'utf8');
-    expect(showPage).toContain('featureFlags.workosAuth');
+    const editPage = readFileSync(new URL('../pages/users/edit.tsx', import.meta.url), 'utf8');
+    expect(showPage).not.toContain('WorkosAdminLinksCard');
+    expect(editPage).toContain('featureFlags.workosAuth');
     // Real carrier-based check: can("users.manage_sso", identity) — assert the
     // permission literal, not an exact arg-less call shape.
-    expect(showPage).toContain("can(\"users.manage_sso\"");
-    // show.tsx renders the admin card; the admin API call lives inside the card.
-    expect(showPage).toContain('WorkosAdminLinksCard');
+    expect(editPage).toContain("can(\"users.manage_sso\"");
+    expect(editPage).toContain('WorkosAdminLinksCard');
     const adminCard = readFileSync(new URL('../pages/users/WorkosAdminLinksCard.tsx', import.meta.url), 'utf8');
     expect(adminCard).toContain('workosAdminListLinks');
   });
@@ -120,6 +121,14 @@ describe('workos callback helpers contract', () => {
     expect(authApiSource).toContain('workosCallback(code: string, state: string)');
     expect(authApiSource).toContain('workosLinkCallback(code: string, state: string)');
     expect(callbackSource).toContain('searchParams.get("state")');
+  });
+
+  it('offers a forced account-selection retry only after an unlinked SSO identity', () => {
+    expect(callbackSource).toContain('exchangeError.code === "IDENTITY_NOT_LINKED"');
+    expect(callbackSource).toContain('canSelectAnotherAccount');
+    expect(callbackSource).toContain('workosAuthorizeUrl({ selectAccount: true })');
+    expect(callbackSource).toContain('Войти другим SSO-аккаунтом');
+    expect(callbackSource).toContain('setSelectingAccount(false)');
   });
 
   it('keeps invitation callback single-use and bound to the exact state', () => {

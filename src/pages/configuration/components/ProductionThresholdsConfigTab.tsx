@@ -1,12 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Table } from '../../../ui/tooltipDelay';
-import { Alert, Button, Card, InputNumber, Select, Space, Switch, Tag, Typography, message } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
+import { Alert, Button, Card, InputNumber, Select, Space, Typography, message } from 'antd';
 import { useList } from '@refinedev/core';
 import { ApiError } from '../../../api/apiError';
 import {
   productionTechSettingsApi,
-  type HdfMillingSettingsDto,
   type HdfProductionTechSettingsDto,
 } from '../../../api/productionTechSettingsApi';
 import { can } from '../../../utils/permissions';
@@ -20,21 +17,14 @@ interface SheetMaterialOption {
   sort_order?: number | null;
 }
 
-interface MillingDraft {
-  hdfEnabled: boolean;
-  hdfEdgeMm: number | null;
-}
-
 export function ProductionThresholdsConfigTab() {
   const canManage = can('settings.manage');
   const canViewSheetMaterials = can('sheet_materials.view');
   const [settings, setSettings] = useState<HdfProductionTechSettingsDto | null>(null);
   const [thresholdDraft, setThresholdDraft] = useState<number | null>(null);
   const [materialDraft, setMaterialDraft] = useState<number | null>(null);
-  const [millingDrafts, setMillingDrafts] = useState<Record<number, MillingDraft>>({});
   const [loading, setLoading] = useState(true);
   const [savingGlobal, setSavingGlobal] = useState(false);
-  const [savingMillingId, setSavingMillingId] = useState<number | null>(null);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -43,10 +33,6 @@ export function ProductionThresholdsConfigTab() {
       setSettings(next);
       setThresholdDraft(next.minSideThresholdMm);
       setMaterialDraft(next.sheetMaterialTypeId);
-      setMillingDrafts(Object.fromEntries(next.millingTypes.map((milling) => [
-        milling.millingTypeId,
-        { hdfEnabled: milling.hdfEnabled, hdfEdgeMm: milling.hdfEdgeMm },
-      ])));
     } catch (error) {
       message.error(apiErrorMessage(error, 'Не удалось загрузить настройки ХДФ'));
     } finally {
@@ -119,107 +105,13 @@ export function ProductionThresholdsConfigTab() {
     }
   };
 
-  const handleSaveMilling = async (row: HdfMillingSettingsDto) => {
-    const draft = millingDrafts[row.millingTypeId];
-    if (!draft) return;
-    if (draft.hdfEnabled && (draft.hdfEdgeMm == null || draft.hdfEdgeMm <= 0)) {
-      message.error('Для включённой ХДФ укажите ребро больше 0');
-      return;
-    }
-    setSavingMillingId(row.millingTypeId);
-    try {
-      await productionTechSettingsApi.updateHdfMilling(row.millingTypeId, {
-        hdfEnabled: draft.hdfEnabled,
-        hdfEdgeMm: draft.hdfEnabled ? draft.hdfEdgeMm : null,
-        expectedVersion: row.version,
-      });
-      await loadSettings();
-      message.success('Фрезеровка сохранена');
-    } catch (error) {
-      message.error(apiErrorMessage(error, 'Не удалось сохранить фрезеровку'));
-    } finally {
-      setSavingMillingId(null);
-    }
-  };
-
-  const updateMillingDraft = (id: number, patch: Partial<MillingDraft>) => {
-    setMillingDrafts((current) => ({
-      ...current,
-      [id]: {
-        hdfEnabled: current[id]?.hdfEnabled ?? false,
-        hdfEdgeMm: current[id]?.hdfEdgeMm ?? null,
-        ...patch,
-      },
-    }));
-  };
-
-  const columns: ColumnsType<HdfMillingSettingsDto> = [
-    {
-      title: 'Фрезеровка',
-      dataIndex: 'name',
-      key: 'name',
-      render: (value: string, row: HdfMillingSettingsDto) => (
-        <Space size={8}>
-          <Text>{value}</Text>
-          {row.isActive ? null : <Tag>Неактивна</Tag>}
-        </Space>
-      ),
-    },
-    {
-      title: 'ХДФ',
-      dataIndex: 'hdfEnabled',
-      key: 'hdfEnabled',
-      width: 120,
-      render: (_: boolean, row: HdfMillingSettingsDto) => (
-        <Switch
-          checked={millingDrafts[row.millingTypeId]?.hdfEnabled ?? false}
-          disabled={!canManage}
-          onChange={(checked) => updateMillingDraft(row.millingTypeId, { hdfEnabled: checked })}
-        />
-      ),
-    },
-    {
-      title: 'Ребро, мм',
-      dataIndex: 'hdfEdgeMm',
-      key: 'hdfEdgeMm',
-      width: 180,
-      render: (_: number | null, row: HdfMillingSettingsDto) => (
-        <InputNumber
-          min={0.1}
-          step={0.5}
-          precision={1}
-          style={{ width: 120 }}
-          value={millingDrafts[row.millingTypeId]?.hdfEdgeMm ?? null}
-          disabled={!canManage || !(millingDrafts[row.millingTypeId]?.hdfEnabled ?? false)}
-          onChange={(value) => updateMillingDraft(row.millingTypeId, { hdfEdgeMm: value == null ? null : Number(value) })}
-        />
-      ),
-    },
-    {
-      title: '',
-      key: 'actions',
-      width: 120,
-      render: (_: unknown, row: HdfMillingSettingsDto) => (
-        <Button
-          size="small"
-          type="primary"
-          disabled={!canManage || !isMillingChanged(row, millingDrafts[row.millingTypeId])}
-          loading={savingMillingId === row.millingTypeId}
-          onClick={() => void handleSaveMilling(row)}
-        >
-          Сохранить
-        </Button>
-      ),
-    },
-  ];
-
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%', padding: '16px 0' }}>
       <Alert
         type="info"
         showIcon
         message="Пороги техпроцессов производства"
-        description="ХДФ рассчитывается автоматически для деталей с включённой фрезеровкой. В заказ попадут только свежие строки без ошибки минимального размера."
+        description="Общий порог ХДФ и материал ХДФ для автоматических расчетов заказа."
       />
 
       <Card size="small" title="ХДФ">
@@ -262,24 +154,8 @@ export function ProductionThresholdsConfigTab() {
           {settings ? <Text type="secondary">Ревизия: {settings.configRevision}</Text> : null}
         </Space>
       </Card>
-
-      <Card size="small" title="Фрезеровки, которые дают ХДФ">
-        <Table<HdfMillingSettingsDto>
-          rowKey="millingTypeId"
-          loading={loading}
-          dataSource={settings?.millingTypes ?? []}
-          columns={columns}
-          pagination={false}
-          size="small"
-        />
-      </Card>
     </Space>
   );
-}
-
-function isMillingChanged(row: HdfMillingSettingsDto, draft: MillingDraft | undefined): boolean {
-  if (!draft) return false;
-  return draft.hdfEnabled !== row.hdfEnabled || (draft.hdfEdgeMm ?? null) !== (row.hdfEdgeMm ?? null);
 }
 
 function apiErrorMessage(error: unknown, fallback: string): string {

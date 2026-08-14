@@ -67,6 +67,7 @@ export const SIDER_RESOURCE_ICONS: Record<string, React.ReactNode> = {
   material_types: <AppstoreOutlined />,
   edge_types: <BorderOutlined />,
   milling_types: <ToolOutlined />,
+  extra_resources: <ToolOutlined />,
   order_statuses: <CheckCircleOutlined />,
   payment_statuses: <DollarCircleOutlined />,
   production_statuses: <SyncOutlined />,

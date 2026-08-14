@@ -413,6 +413,7 @@ export interface SaveOrderDetailDto {
   materialId?: number | null;
   sheetMaterialTypeId?: number | null;
   millingTypeId: number;
+  hdfParameterOverrideMm?: number | null;
   edgeTypeId: number;
   filmId?: number | null;
 
@@ -598,6 +599,7 @@ export interface OrderDetailDto {
   /** SP3: server-resolved COALESCE(sheet name, material name) for per-detail display. */
   materialName?: string | null;
   millingTypeId: number;
+  hdfParameterOverrideMm?: number | null;
   edgeTypeId: number;
   filmId?: number | null;
   millingCostPerSqm?: number | null;

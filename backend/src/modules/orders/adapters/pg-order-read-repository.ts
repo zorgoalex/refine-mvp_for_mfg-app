@@ -140,6 +140,7 @@ interface OrderDetailRow extends QueryResultRow {
   sheet_material_type_id: string | number | null;
   material_name: string | null;
   milling_type_id: string | number;
+  hdf_parameter_override_mm: string | number | null;
   edge_type_id: string | number;
   film_id: string | number | null;
   milling_cost_per_sqm: string | number | null;
@@ -1605,6 +1606,7 @@ function mapDetail(row: OrderDetailRow) {
     sheetMaterialTypeId: toNullableNumber(row.sheet_material_type_id),
     materialName: row.material_name ?? null,
     millingTypeId: toNumber(row.milling_type_id),
+    hdfParameterOverrideMm: toNullableNumber(row.hdf_parameter_override_mm),
     edgeTypeId: toNumber(row.edge_type_id),
     filmId: toNullableNumber(row.film_id),
     millingCostPerSqm: toNullableNumber(row.milling_cost_per_sqm),

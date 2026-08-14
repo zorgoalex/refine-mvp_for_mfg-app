@@ -9,6 +9,7 @@ import type {
   CutDetailLastReadyResponseDto,
   CutDetailPlacementsResponseDto,
   CutFilmOptionDto,
+  CutJobDeleteImpactDto,
   CutJobDto,
   CutTextureDirection,
   CutResultDto,
@@ -19,6 +20,10 @@ import type {
 import type { CutSheetTypeOption, ManualMove, SheetViewTransform } from '../application/cut-command.types';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import { CutRuntimeConfigService } from './cut-runtime-config.service';
+import {
+  normalizeCutRenderStyleName,
+  type CutRenderStyleName,
+} from '../../../shared/cut-render-style';
 
 const idArray = z.array(z.number().int().positive()).max(5000);
 
@@ -50,6 +55,10 @@ const addItemsRequestSchema = z
   .strict();
 
 const versionBodySchema = z.object({ version: z.number().int().min(0) }).strict();
+const deleteCutJobBodySchema = z.object({
+  version: z.number().int().min(0),
+  deleteLinkedMdfPackets: z.boolean().optional().default(false),
+}).strict();
 const calculateBodySchema = z.object({
   version: z.number().int().min(0),
   commandId: z.string().uuid(),
@@ -159,7 +168,7 @@ export class CutController {
     });
   }
 
-  @ApiOperation({ operationId: 'listCutJobs', summary: 'List active cut jobs' })
+  @ApiOperation({ operationId: 'listCutJobs', summary: 'List cut jobs' })
   @Get()
   async list(
     @Req() request: RequestWithCurrentUser,
@@ -265,6 +274,23 @@ export class CutController {
     return this.cut.getJob({ currentUser, cutJobId: parseCutJobId(cutJobId), requestId: request.requestId });
   }
 
+  @ApiOperation({
+    operationId: 'getCutJobDeleteImpact',
+    summary: 'Preview linked records affected by deleting a cut job',
+  })
+  @Get(':cutJobId/delete-impact')
+  async deleteImpact(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+  ): Promise<CutJobDeleteImpactDto> {
+    const currentUser = this.requireMutation(request);
+    return this.cut.getDeleteImpact({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      requestId: request.requestId,
+    });
+  }
+
   @ApiOperation({ operationId: 'listCutResults', summary: 'List immutable completed results for a cut job' })
   @Get(':cutJobId/results')
   async listResults(
@@ -364,6 +390,7 @@ export class CutController {
       axisOrigin,
       variant: parseVariant(query.variant),
       showLabels: query.labels !== 'off',
+      renderStyle: parseRenderStyle(query.renderStyle),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/png');
@@ -395,6 +422,7 @@ export class CutController {
       axisOrigin,
       variant: parseVariant(query.variant),
       pieceMetadata: query.pieceMetadata === 'on',
+      renderStyle: parseRenderStyle(query.renderStyle),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -534,7 +562,7 @@ export class CutController {
     return job;
   }
 
-  @ApiOperation({ operationId: 'archiveCutJob', summary: 'Archive a cut job (release reservations)' })
+  @ApiOperation({ operationId: 'deleteCutJob', summary: 'Delete a cut job (release reservations)' })
   @Delete(':cutJobId')
   async archive(
     @Req() request: RequestWithCurrentUser,
@@ -542,10 +570,12 @@ export class CutController {
     @Body() body: unknown,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
+    const parsed = parseDeleteCutJobBody(body);
     return this.cut.archive({
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
-      version: parseVersionBody(body),
+      version: parsed.version,
+      deleteLinkedMdfPackets: parsed.deleteLinkedMdfPackets,
       requestId: request.requestId,
     });
   }
@@ -763,6 +793,7 @@ export class CutController {
       axisOrigin,
       variant: parseVariant(query.variant),
       showLabels: query.labels !== 'off',
+      renderStyle: parseRenderStyle(query.renderStyle),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/png');
@@ -793,6 +824,7 @@ export class CutController {
       axisOrigin,
       variant: parseVariant(query.variant),
       pieceMetadata: query.pieceMetadata === 'on',
+      renderStyle: parseRenderStyle(query.renderStyle),
       requestId: request.requestId,
     });
     response.setHeader('Content-Type', 'image/svg+xml');
@@ -993,6 +1025,10 @@ export function parseVariant(value: string | undefined): 'auto' | 'manual' | 'ac
   return 'auto';
 }
 
+export function parseRenderStyle(value: string | undefined): CutRenderStyleName {
+  return normalizeCutRenderStyleName(value);
+}
+
 export function parsePdfTemplate(value: string | undefined): string {
   const template = (value ?? 'standard').trim();
   if (template.length === 0 || template.length > 64 || !/^[A-Za-z0-9_-]+$/.test(template)) {
@@ -1008,11 +1044,13 @@ export function parseCreateCutJobRequest(body: unknown) {
 export function parseListCutJobsQuery(query: Record<string, string | undefined>) {
   const orderSearch = parseOptionalSearch(query.orderSearch, 'orderSearch');
   const jobNumber = parseOptionalSearch(query.jobNumber, 'jobNumber');
+  const includeArchived = parseOptionalBoolean(query.includeArchived, 'includeArchived');
   return {
     ...(query.status ? { status: query.status.trim() } : {}),
     ...(query.createdBy && Number.isInteger(Number(query.createdBy)) && Number(query.createdBy) > 0
       ? { createdBy: Number(query.createdBy) }
       : {}),
+    ...(includeArchived === true ? { includeArchived } : {}),
     ...(orderSearch ? { orderSearch } : {}),
     ...(jobNumber ? { jobNumber } : {}),
     ...(parseOptionalDateOnly(query.createdFrom, 'createdFrom') ? { createdFrom: parseOptionalDateOnly(query.createdFrom, 'createdFrom') } : {}),
@@ -1026,6 +1064,10 @@ export function parseAddItemsRequest(body: unknown) {
 
 export function parseVersionBody(body: unknown): number {
   return parse(versionBodySchema, body).version;
+}
+
+export function parseDeleteCutJobBody(body: unknown): { version: number; deleteLinkedMdfPackets: boolean } {
+  return parse(deleteCutJobBodySchema, body);
 }
 
 export function parseCalculateBody(body: unknown): { version: number; commandId: string } {
@@ -1108,6 +1150,16 @@ function parseOptionalSearch(value: string | undefined, field: string): string |
     });
   }
   return text;
+}
+
+function parseOptionalBoolean(value: string | undefined, field: string): boolean | undefined {
+  if (value === undefined || value === '') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  throw new ApiError(422, 'VALIDATION_ERROR', 'Cut job query validation failed', {
+    errors: [{ field, message: `${field} must be boolean` }],
+  });
 }
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
