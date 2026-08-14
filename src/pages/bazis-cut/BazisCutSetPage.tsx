@@ -1,6 +1,6 @@
 import { Table } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Space, Typography, message } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, DownloadOutlined, EditOutlined, FilterOutlined, SaveOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
@@ -64,12 +64,12 @@ const FIELD_GROUPS = ['Основное', 'Размеры', 'Кромки', 'Д�
 const GROUPED_FIELDS = FIELD_GROUPS.flatMap((group) =>
   FIELDS.filter((field) => field.group === group && field.key !== 'position' && field.key !== 'partName'),
 );
-type DetailFilterKey = 'all' | 'source' | 'sourceBazisProjectName' | 'sourceBazisOrderNo' | 'sourceBazisProductName'
+type DetailFilterKey = 'source' | 'sourceBazisProjectName' | 'sourceBazisOrderNo' | 'sourceBazisProductName'
   | 'sourceBathCutNumber' | 'qrCode' | FieldKey;
 interface DetailFilterDefinition { key: DetailFilterKey; label: string; width: number; }
-type DetailFilters = Record<DetailFilterKey, string>;
+interface DetailFilterOption { value: string; label: string; }
+type DetailFilters = Record<DetailFilterKey, string[]>;
 const DETAIL_FILTERS: DetailFilterDefinition[] = [
-  { key: 'all', label: 'Все поля', width: 240 },
   { key: 'source', label: 'Источник', width: 180 },
   { key: 'sourceBazisProjectName', label: 'Базис-проект', width: 170 },
   { key: 'sourceBazisOrderNo', label: 'Базис-заказ', width: 160 },
@@ -84,6 +84,8 @@ const QR_CODE_STICKY_CLASS = 'bazis-cut-sticky-qr';
 const QR_CODE_STICKY_LEFT_PX = 58 + 210 + 150 + 150;
 const DETAIL_SELECTION_COLUMN_WIDTH = 44;
 const DETAIL_TABLE_SCROLL_X = 5750;
+const EMPTY_DETAIL_FILTER_VALUE = '__bazis_cut_empty_filter__';
+const EMPTY_DETAIL_FILTER_LABEL = '—';
 const TOTAL_LABEL_COLUMN_INDEX = LEADING_COLUMN_COUNT - 1;
 const QUANTITY_COLUMN_INDEX = LEADING_COLUMN_COUNT
   + GROUPED_FIELDS.findIndex((field) => field.key === 'quantity');
@@ -155,6 +157,7 @@ export const BazisCutSetPage: React.FC = () => {
   }, [exportTemplateId, set, setId]);
 
   const details = useMemo(() => set?.details ?? [], [set?.details]);
+  const detailFilterOptionsByKey = useMemo(() => buildDetailFilterOptions(details), [details]);
   const filteredDetails = useMemo(() => details.filter((detail) => matchesDetailFilters(detail, detailFilters)), [detailFilters, details]);
   const filteredDetailIds = useMemo(() => filteredDetails.map((detail) => detail.bazisCutSetDetailId), [filteredDetails]);
   const selectedDetailIdSet = useMemo(() => new Set(selectedDetailIds), [selectedDetailIds]);
@@ -164,7 +167,27 @@ export const BazisCutSetPage: React.FC = () => {
   const selectedDetails = useMemo(() => selectedDetailIds
     .map((id) => detailsById.get(id))
     .filter((detail): detail is BazisCutSetDetailDto => Boolean(detail)), [detailsById, selectedDetailIds]);
-  const detailFiltersActive = useMemo(() => DETAIL_FILTERS.some((filter) => detailFilters[filter.key].trim() !== ''), [detailFilters]);
+  const detailFiltersActive = useMemo(() => DETAIL_FILTERS.some((filter) => detailFilters[filter.key].length > 0), [detailFilters]);
+
+  useEffect(() => {
+    const availableValues = new Map(DETAIL_FILTERS.map((filter) => [
+      filter.key,
+      new Set(detailFilterOptionsByKey[filter.key].map((option) => option.value)),
+    ]));
+    setDetailFilters((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const filter of DETAIL_FILTERS) {
+        const allowed = availableValues.get(filter.key) ?? new Set<string>();
+        const kept = current[filter.key].filter((value) => allowed.has(value));
+        if (kept.length !== current[filter.key].length) {
+          next[filter.key] = kept;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [detailFilterOptionsByKey]);
 
   useEffect(() => {
     const visibleIds = new Set(filteredDetailIds);
@@ -174,7 +197,7 @@ export const BazisCutSetPage: React.FC = () => {
     });
   }, [filteredDetailIds]);
 
-  const setDetailFilter = useCallback((key: DetailFilterKey, value: string) => {
+  const setDetailFilter = useCallback((key: DetailFilterKey, value: string[]) => {
     setDetailFilters((current) => ({ ...current, [key]: value }));
   }, []);
 
@@ -274,8 +297,12 @@ export const BazisCutSetPage: React.FC = () => {
         onClick={confirmRemoveSelectedDetails}>Удалить выделенные</Button>}
     </Space>}><Space direction="vertical" size="small" style={{ width: '100%' }}>
       {detailFiltersOpen && <Space id="bazis-cut-detail-filters" wrap>
-          {DETAIL_FILTERS.map((filter) => <Input key={filter.key} allowClear value={detailFilters[filter.key]}
-            onChange={(event) => setDetailFilter(filter.key, event.target.value)}
+          {DETAIL_FILTERS.map((filter) => <Select<string[]> key={filter.key} mode="multiple" allowClear showSearch
+            maxTagCount="responsive" value={detailFilters[filter.key]}
+            onChange={(values) => setDetailFilter(filter.key, values)}
+            options={detailFilterOptionsByKey[filter.key]}
+            optionFilterProp="label" notFoundContent="Нет значений"
+            disabled={detailFilterOptionsByKey[filter.key].length === 0}
             placeholder={filter.label} aria-label={`Фильтр деталей: ${filter.label}`} style={{ width: filter.width }} />)}
           <Button disabled={!detailFiltersActive} onClick={() => setDetailFilters(createEmptyDetailFilters())}>Сбросить</Button>
       </Space>
@@ -382,51 +409,50 @@ const DetailTableSummary: React.FC<{
 
 function fieldsOf(detail: BazisCutSetDetailDto): BazisCutDetailFields { return Object.fromEntries(FIELDS.map((field) => [field.key, detail[field.key]])) as unknown as BazisCutDetailFields; }
 function createEmptyDetailFilters(): DetailFilters {
-  return Object.fromEntries(DETAIL_FILTERS.map((filter) => [filter.key, ''])) as DetailFilters;
+  return Object.fromEntries(DETAIL_FILTERS.map((filter) => [filter.key, []])) as DetailFilters;
+}
+function buildDetailFilterOptions(details: readonly BazisCutSetDetailDto[]): Record<DetailFilterKey, DetailFilterOption[]> {
+  return Object.fromEntries(DETAIL_FILTERS.map((filter) => [filter.key, buildDetailFilterOptionsForKey(details, filter.key)])) as Record<DetailFilterKey, DetailFilterOption[]>;
+}
+function buildDetailFilterOptionsForKey(details: readonly BazisCutSetDetailDto[], key: DetailFilterKey): DetailFilterOption[] {
+  const options = new Map<string, string>();
+  for (const detail of details) {
+    const label = detailFilterLabel(detail, key).trim();
+    const value = detailFilterOptionValue(label);
+    if (!options.has(value)) options.set(value, label === '' ? EMPTY_DETAIL_FILTER_LABEL : label);
+  }
+  return [...options.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((left, right) => left.label.localeCompare(right.label, 'ru-RU', { numeric: true, sensitivity: 'base' }));
 }
 function matchesDetailFilters(detail: BazisCutSetDetailDto, filters: DetailFilters): boolean {
-  return DETAIL_FILTERS.every((filter) => matchesDetailText(detailFilterValue(detail, filter.key), filters[filter.key]));
+  return DETAIL_FILTERS.every((filter) => {
+    const selected = filters[filter.key];
+    return selected.length === 0 || selected.includes(detailFilterOptionValue(detailFilterLabel(detail, filter.key)));
+  });
 }
-function detailFilterValue(detail: BazisCutSetDetailDto, key: DetailFilterKey): string {
-  if (key === 'all') return [
-    detail.bazisCutSetDetailId,
-    detail.sortOrder,
-    detail.sourceOrderName,
-    detail.sourceOrderFullNumber,
-    detail.sourceProjectCode,
-    detail.sourceBazisProjectName,
-    detail.sourceBazisOrderNo,
-    detail.sourceBazisProductName,
-    detail.sourceBathCutNumber,
-    buildBazisCutCardPosition(detail),
-    buildBazisCutQrCode(detail),
-    ...FIELDS.map((field) => formatDetailFilterValue(detail[field.key])),
-  ].join(' ');
-  if (key === 'source') return [
-    detail.sourceOrderId,
-    detail.sourceOrderName,
-    detail.sourceOrderFullNumber,
-    detail.sourceProjectId,
-    detail.sourceProjectCode,
-    detail.sourceOrderDeleted ? 'удален удалён' : '',
-  ].join(' ');
+function detailFilterLabel(detail: BazisCutSetDetailDto, key: DetailFilterKey): string {
+  if (key === 'source') return detail.sourceOrderId
+    ? detail.sourceOrderName || detail.sourceOrderFullNumber || detail.sourceProjectCode || `Заказ ${detail.sourceOrderId}`
+    : 'Снимок';
   if (key === 'qrCode') return buildBazisCutQrCode(detail);
+  if (key === 'position') return buildBazisCutCardPosition(detail);
   if (key === 'sourceBazisProjectName' || key === 'sourceBazisOrderNo' || key === 'sourceBazisProductName' || key === 'sourceBathCutNumber') {
-    return formatDetailFilterValue(detail[key]);
+    return formatDetailFilterLabel(detail[key]);
   }
-  return formatDetailFilterValue(detail[key]);
+  return formatDetailFilterLabel(detail[key]);
 }
-function formatDetailFilterValue(value: unknown): string {
-  if (value === true) return 'Да true 1';
-  if (value === false) return 'Нет false 0';
+function formatDetailFilterLabel(value: unknown): string {
+  if (value === true) return 'Да';
+  if (value === false) return 'Нет';
   if (value == null) return '';
   return String(value);
 }
-function matchesDetailText(value: string, query: string): boolean {
-  const needle = normalizeDetailText(query);
-  return needle === '' || normalizeDetailText(value).includes(needle);
+function detailFilterOptionValue(label: string): string {
+  const normalized = normalizeDetailFilterText(label);
+  return normalized === '' ? EMPTY_DETAIL_FILTER_VALUE : normalized;
 }
-function normalizeDetailText(value: string): string {
+function normalizeDetailFilterText(value: string): string {
   return value.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е').replace(/\s+/g, ' ').trim();
 }
 function errorMessage(error: unknown, fallback: string): string {
