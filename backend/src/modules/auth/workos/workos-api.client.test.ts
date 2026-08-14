@@ -28,6 +28,7 @@ describe('WorkosApiClient', () => {
     expect(url.searchParams.get('client_id')).toBe('client_x');
     expect(url.searchParams.get('state')).toBe('state-1');
     expect(url.searchParams.get('redirect_uri')).toBe(OPTIONS.redirectUri);
+    expect(url.searchParams.get('provider')).toBe('authkit');
     expect(url.searchParams.get('max_age')).toBeNull();
     expect(url.searchParams.get('prompt')).toBeNull();
     expect(url.searchParams.get('provider_query_params[prompt]')).toBeNull();
@@ -38,6 +39,7 @@ describe('WorkosApiClient', () => {
         selectAccount: true,
       }),
     );
+    expect(freshAuthenticationUrl.searchParams.get('provider')).toBe('GoogleOAuth');
     expect(freshAuthenticationUrl.searchParams.get('max_age')).toBe('0');
     expect(freshAuthenticationUrl.searchParams.get('prompt')).toBeNull();
     expect(freshAuthenticationUrl.searchParams.get('provider_query_params[prompt]')).toBe(

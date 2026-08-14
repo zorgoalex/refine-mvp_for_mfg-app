@@ -128,6 +128,7 @@ describe('workos callback helpers contract', () => {
     expect(callbackSource).toContain('canSelectAnotherAccount');
     expect(callbackSource).toContain('workosAuthorizeUrl({ selectAccount: true })');
     expect(callbackSource).toContain('Войти другим SSO-аккаунтом');
+    expect(callbackSource).toContain('setSelectingAccount(false)');
   });
 
   it('keeps invitation callback single-use and bound to the exact state', () => {

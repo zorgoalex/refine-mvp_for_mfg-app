@@ -57,7 +57,10 @@ export class WorkosApiClient {
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('client_id', this.options.clientId);
     url.searchParams.set('redirect_uri', this.options.redirectUri);
-    url.searchParams.set('provider', 'authkit');
+    // The hosted AuthKit provider may reuse its own active user before it
+    // reaches Google, even when Google-specific query parameters are present.
+    // A retry that explicitly switches accounts must enter Google directly.
+    url.searchParams.set('provider', authorizeOptions.selectAccount ? 'GoogleOAuth' : 'authkit');
     url.searchParams.set('state', state);
     if (authorizeOptions.forceFreshAuthentication) {
       // WorkOS documents max_age=0 as the supported way to require a fresh

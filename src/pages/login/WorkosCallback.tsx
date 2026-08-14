@@ -172,6 +172,10 @@ export const WorkosCallbackPage: React.FC = () => {
         // Pre-exchange failure (link-mode refresh): the code was never sent.
         consumedCodes.delete(code);
       }
+      // A failed external retry may restore this page from browser history
+      // with the previous button state. Never leave the account-switch action
+      // spinning after the backend has already returned a definitive error.
+      setSelectingAccount(false);
       setError({
         message: describeError(exchangeError),
         canSelectAnotherAccount:
