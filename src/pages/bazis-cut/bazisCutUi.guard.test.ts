@@ -48,6 +48,27 @@ describe('Basis-cut UI integration guards', () => {
     expect(list).toContain('event.stopPropagation()');
   });
 
+  it('supports field filtering, filtered header selection, and selected bulk delete for empty sets', () => {
+    expect(list).toContain('LIST_FETCH_PAGE_SIZE = 100');
+    expect(list).toContain('matchesFieldFilters(row, fieldFilters)');
+    for (const placeholder of [
+      'Поиск по всем наборам',
+      'Название',
+      'Дата',
+      'ERP-заказ',
+      'Базис-проект',
+      'Базис-заказ',
+      'Кол-во / позиции',
+      'Площадь',
+    ]) expect(list).toContain(placeholder);
+    expect(list).toContain('selectableFilteredIds');
+    expect(list).toContain('aria-label="Выделить все отфильтрованные пустые наборы"');
+    expect(list).toContain('row.positionCount !== 0');
+    expect(list).toContain('Удалить выделенные');
+    expect(list).toContain('removeSelectedSets');
+    expect(list).toContain('Будет удалено пустых наборов');
+  });
+
   it('supports new/existing searchable set selection', () => {
     expect(modal).toContain('Новый набор');
     expect(modal).toContain('Существующий набор');

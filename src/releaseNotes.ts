@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-14",
+    title: "Базис-раскрой: фильтры и массовое удаление",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В списке наборов Базис-раскроя появились фильтры по полям, чекбоксы выбора строк и кнопка «Удалить выделенные» для пустых наборов.",
+      "Чекбокс в заголовке выделяет все отфильтрованные пустые наборы из загруженного списка, а не только текущую страницу.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-14",
     title: "Раскрой: нестрогая SVG-загрузка",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
