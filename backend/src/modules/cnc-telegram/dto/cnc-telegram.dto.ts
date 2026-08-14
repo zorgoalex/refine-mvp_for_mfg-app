@@ -47,6 +47,7 @@ export interface CncTelegramCutLayoutItemDto {
   placedHeightMm: number;
   rotated: boolean;
   sourceSvg?: CncTelegramCutLayoutItemSourceSvgDto | null;
+  visualLabel?: CncTelegramCutLayoutItemVisualLabelDto | null;
 }
 
 export interface CncTelegramCutLayoutItemSourceSvgDto {
@@ -57,6 +58,10 @@ export interface CncTelegramCutLayoutItemSourceSvgDto {
     heightMm: number;
   };
   body: string;
+}
+
+export interface CncTelegramCutLayoutItemVisualLabelDto {
+  rawLines: string[];
 }
 
 export interface CncTelegramCutLayoutDto {

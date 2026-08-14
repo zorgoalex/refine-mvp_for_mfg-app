@@ -313,6 +313,7 @@ export function buildSvgUploadLayoutItemsFromContours(
       rotated: Math.round(contour.placedWidthMm) === Math.round(resolvedSize.heightMm) &&
         Math.round(contour.placedHeightMm) === Math.round(resolvedSize.widthMm),
       sourceSvg: contour.sourceSvg ?? null,
+      visualLabel: visualLabelSnapshot(parsed),
     });
   }
 
@@ -370,6 +371,7 @@ function buildVisualLabelOnlyLayoutItems(
       placedWidthMm,
       placedHeightMm,
       rotated: false,
+      visualLabel: visualLabelSnapshot(label),
     });
     rejected.add(`Для верхней подписи ${label.orderName} #${label.detailNumber} не найден контур детали; деталь создана по подписи`);
   }
@@ -380,6 +382,12 @@ function labelOnlyCoordinate(value: number, sizeMm: number, sheetSizeMm: number 
   if (!Number.isFinite(value)) return 0;
   if (!sheetSizeMm || sheetSizeMm <= 0) return round2(Math.max(0, value));
   return round2(Math.min(Math.max(0, value), Math.max(0, sheetSizeMm - sizeMm)));
+}
+
+function visualLabelSnapshot(label: VisualDetailLabel): CncTelegramCutLayout['items'][number]['visualLabel'] {
+  return {
+    rawLines: label.rawLines.map((line) => line.trim()).filter(Boolean).slice(0, 4),
+  };
 }
 
 function sanitizeSourceElementId(value: string): string {

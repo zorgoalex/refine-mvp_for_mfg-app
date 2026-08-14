@@ -23,12 +23,18 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).toContain('font-weight="800"');
     expect(rendered).toContain('>2723</tspan>');
     expect(rendered).toContain('>2724</tspan>');
+    expect(rendered).toContain('># 01</tspan>');
+    expect(rendered).toContain('>300*200</tspan>');
+    expect(rendered).toContain('># 2</tspan>');
+    expect(rendered).not.toContain('поз.');
+    expect(rendered).not.toContain('300X200');
     expect(rendered.indexOf('cut-sheet-piece-source-svg')).toBeLessThan(rendered.indexOf('>2723</tspan>'));
   });
 
   it('uses custom render.styles values in the local upload preview', () => {
     const setting = {
       ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      templates: undefined,
       profiles: {
         ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
         mdf_board_preview: {
@@ -87,6 +93,7 @@ function parsedUpload(): ParsedSvgUpload {
             viewBox: { xMm: 0, yMm: 0, widthMm: 300, heightMm: 200 },
             body: '<line x1="0" y1="0" x2="300" y2="200" stroke="#626769" stroke-width="0.5"/>',
           },
+          visualLabel: { rawLines: ['2723', '# 01', '300*200'] },
         },
         {
           orderName: '2724',

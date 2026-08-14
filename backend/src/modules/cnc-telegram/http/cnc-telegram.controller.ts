@@ -102,6 +102,10 @@ const cutLayoutItemSourceSvgSchema = z.object({
   }
 });
 
+const cutLayoutItemVisualLabelSchema = z.object({
+  rawLines: z.array(z.string().trim().min(1).max(80)).min(1).max(4),
+}).strict();
+
 const cutLayoutItemSchema = z.object({
   orderName: z.string().trim().min(1).max(64),
   detailNumber: z.number().int().positive().max(100000),
@@ -116,6 +120,7 @@ const cutLayoutItemSchema = z.object({
   placedHeightMm: z.number().positive().max(10000),
   rotated: z.boolean(),
   sourceSvg: cutLayoutItemSourceSvgSchema.nullable().optional(),
+  visualLabel: cutLayoutItemVisualLabelSchema.nullable().optional(),
 }).strict();
 
 const cutLayoutSchema = z.object({

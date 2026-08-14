@@ -13,8 +13,12 @@ import {
   CUT_RENDER_STYLE_DEFAULT,
   cutRenderLabelFontWeight,
   cutRenderLabelFillForBackground,
+  cutRenderLabelLineSpecs,
+  cutRenderNormalizeLabelLines,
+  cutRenderPieceSizeLine,
   cutRenderLabelStrokeForBackground,
   cutRenderOrderFillPalette,
+  cutRenderPositionLine,
   cutRenderSourceSvgCss,
   resolveCutRenderStyle,
   type CutRenderStyleRef,
@@ -103,14 +107,11 @@ export function composePieceLabelLines(input: PieceLabelInput): string[] {
 }
 
 function formatPositionLine(position: number, instance: number, qty: number): string {
-  return qty > 1 ? `поз. ${position} - ${instance}/${qty}` : `поз. ${position}`;
+  return cutRenderPositionLine(position, instance, qty);
 }
 
 function formatPieceSize(widthMm: number | null | undefined, heightMm: number | null | undefined): string {
-  if (widthMm === null || widthMm === undefined || heightMm === null || heightMm === undefined) {
-    return 'размер —';
-  }
-  return `${formatDimension(widthMm)}X${formatDimension(heightMm)}`;
+  return cutRenderPieceSizeLine(widthMm, heightMm);
 }
 
 function formatDimension(value: number): string {
@@ -388,21 +389,18 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const labelStrokeAttrs = labelStroke
         ? ` stroke="${labelStroke.stroke}" stroke-width="${num(labelStroke.strokeWidthMm)}" paint-order="stroke"`
         : '';
-      // Vertically centre N lines around cy: the first tspan lifts by
-      // (N-1)/2 line-heights, each subsequent line drops one line-height. em
-      // units keep the spacing proportional to font-size at any raster scale.
-      const tspans = lines
-        .map((line, i) => {
-          const dy = i === 0 ? `${(-(lines.length - 1) / 2).toFixed(3)}em` : '1em';
-          return `<tspan x="${num(cx)}" dy="${dy}">${escapeXml(line)}</tspan>`;
-        })
-        .join('');
       return renderPieceGroup(piece, cx, cy, [
         rectEl,
         sourceSvgEl,
-        `<text x="${num(cx)}" y="${num(cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+        renderPieceLabelText({
+          lines,
+          cx,
+          cy,
           fontMm,
-        )}" font-weight="${num(cutRenderLabelFontWeight(renderStyle))}" fill="${labelFill}"${labelStrokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`,
+          fontWeight: cutRenderLabelFontWeight(renderStyle),
+          fill: labelFill,
+          strokeAttrs: labelStrokeAttrs,
+        }),
       ].join(''));
     })
     .join('');
@@ -423,6 +421,33 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     bathMeterGuides,
     `</svg>`,
   ].join('');
+}
+
+function renderPieceLabelText(input: {
+  lines: readonly string[];
+  cx: number;
+  cy: number;
+  fontMm: number;
+  fontWeight: number;
+  fill: string;
+  strokeAttrs: string;
+}): string {
+  const specs = cutRenderLabelLineSpecs(input.lines);
+  if (specs.length === 0) return '';
+  const gapMm = input.fontMm * 0.035;
+  const lineHeights = specs.map((spec) => input.fontMm * spec.fontRatio * 0.82);
+  const totalHeight = lineHeights.reduce((sum, height) => sum + height, 0) + gapMm * Math.max(0, specs.length - 1);
+  let top = input.cy - totalHeight / 2;
+  const tspans = specs.map((spec, index) => {
+    const fontSize = input.fontMm * spec.fontRatio;
+    const lineHeight = lineHeights[index] ?? fontSize * 0.82;
+    const y = top + lineHeight / 2;
+    top += lineHeight + gapMm;
+    return `<tspan x="${num(input.cx)}" y="${num(y)}" font-size="${num(fontSize)}">${escapeXml(spec.text)}</tspan>`;
+  }).join('');
+  return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
+    input.fontMm,
+  )}" font-weight="${num(input.fontWeight)}" fill="${input.fill}"${input.strokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
 }
 
 function renderPieceSourceSvgFragment(

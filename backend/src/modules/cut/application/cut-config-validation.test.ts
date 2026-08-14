@@ -50,6 +50,7 @@ describe('cut-config validation', () => {
   it('validates editable render.styles JSON', () => {
     const value = validateSettingValue(CUT_RENDER_STYLES_SETTING_KEY, {
       ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      templates: undefined,
       profiles: {
         ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
         mdf_board_preview: {

@@ -41,9 +41,23 @@ export interface CutRenderStyleRule extends CutRenderStyleProfile {
   id: CutRenderStyleName;
 }
 
+export interface CutRenderStyleTemplate {
+  id: string;
+  name: string;
+  active: boolean;
+  profile: CutRenderStyleProfile;
+}
+
+export interface CutRenderLabelLineSpec {
+  text: string;
+  fontRatio: number;
+}
+
 export interface CutRenderStylesSetting {
   version: 1;
+  defaultProfileId: string;
   profiles: Record<CutRenderStyleName, CutRenderStyleProfile>;
+  templates: CutRenderStyleTemplate[];
 }
 
 export class CutRenderStyleValidationError extends Error {
@@ -73,6 +87,7 @@ const CUT_RENDER_STYLE_NAMES = [
   CUT_RENDER_STYLE_DEFAULT,
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
 ] as const;
+const CUT_RENDER_STYLE_MDF_TEMPLATE_NAME = 'MDF-превью';
 
 const CUT_RENDER_STYLE_PROFILES = {
   [CUT_RENDER_STYLE_DEFAULT]: {
@@ -150,12 +165,21 @@ export const CUT_RENDER_STYLE_RULES: Record<CutRenderStyleName, CutRenderStyleRu
 
 export const DEFAULT_CUT_RENDER_STYLES_SETTING: CutRenderStylesSetting = {
   version: 1,
+  defaultProfileId: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
   profiles: {
     [CUT_RENDER_STYLE_DEFAULT]: cutRenderStyleProfileJson(CUT_RENDER_STYLE_RULES[CUT_RENDER_STYLE_DEFAULT]),
     [CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]: cutRenderStyleProfileJson(
       CUT_RENDER_STYLE_RULES[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW],
     ),
   },
+  templates: [
+    {
+      id: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+      name: CUT_RENDER_STYLE_MDF_TEMPLATE_NAME,
+      active: true,
+      profile: cutRenderStyleProfileJson(CUT_RENDER_STYLE_RULES[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]),
+    },
+  ],
 };
 
 export type CutRenderStyleRef = string | CutRenderStyleRule | null | undefined;
@@ -200,20 +224,36 @@ export function parseCutRenderStylesSetting(value: unknown): CutRenderStylesSett
     );
   }
 
+  const parsedProfiles = {
+    [CUT_RENDER_STYLE_DEFAULT]: parseCutRenderStyleProfile(
+      profilesRoot[CUT_RENDER_STYLE_DEFAULT],
+      CUT_RENDER_STYLE_RULES[CUT_RENDER_STYLE_DEFAULT],
+      `profiles.${CUT_RENDER_STYLE_DEFAULT}`,
+    ),
+    [CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]: parseCutRenderStyleProfile(
+      profilesRoot[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW],
+      CUT_RENDER_STYLE_RULES[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW],
+      `profiles.${CUT_RENDER_STYLE_MDF_BOARD_PREVIEW}`,
+    ),
+  };
+  const templates = parseCutRenderStyleTemplates(root.templates, parsedProfiles[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]);
+  const defaultProfileId = parseDefaultTemplateId(root.defaultProfileId, templates);
+  const defaultTemplate = templates.find((template) => template.id === defaultProfileId && template.active);
+  if (!defaultTemplate) {
+    throw new CutRenderStyleValidationError(
+      'defaultProfileId',
+      'render.styles.defaultProfileId должен указывать активный шаблон',
+    );
+  }
+
   return {
     version: 1,
     profiles: {
-      [CUT_RENDER_STYLE_DEFAULT]: parseCutRenderStyleProfile(
-        profilesRoot[CUT_RENDER_STYLE_DEFAULT],
-        CUT_RENDER_STYLE_RULES[CUT_RENDER_STYLE_DEFAULT],
-        `profiles.${CUT_RENDER_STYLE_DEFAULT}`,
-      ),
-      [CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]: parseCutRenderStyleProfile(
-        profilesRoot[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW],
-        CUT_RENDER_STYLE_RULES[CUT_RENDER_STYLE_MDF_BOARD_PREVIEW],
-        `profiles.${CUT_RENDER_STYLE_MDF_BOARD_PREVIEW}`,
-      ),
+      [CUT_RENDER_STYLE_DEFAULT]: parsedProfiles[CUT_RENDER_STYLE_DEFAULT],
+      [CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]: cutRenderStyleProfileJson(defaultTemplate.profile),
     },
+    defaultProfileId,
+    templates,
   };
 }
 
@@ -287,6 +327,43 @@ export function cutRenderLabelFontWeight(value: CutRenderStyleRef): number {
   return resolveCutRenderStyle(value).label.fontWeight;
 }
 
+export function cutRenderPositionLine(position: number, instance = 1, qty = 1): string {
+  return qty > 1 ? `# ${position} - ${instance}/${qty}` : `# ${position}`;
+}
+
+export function cutRenderPieceSizeLine(
+  widthMm: number | null | undefined,
+  heightMm: number | null | undefined,
+): string {
+  if (widthMm === null || widthMm === undefined || heightMm === null || heightMm === undefined) {
+    return 'размер -';
+  }
+  return `${cutRenderFormatDimension(widthMm)}*${cutRenderFormatDimension(heightMm)}`;
+}
+
+export function cutRenderFormatDimension(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1)));
+}
+
+export function cutRenderLabelLineSpecs(lines: readonly string[]): CutRenderLabelLineSpec[] {
+  return cutRenderNormalizeLabelLines(lines).map((text, index) => {
+    return {
+      text,
+      fontRatio: cutRenderLabelLineFontRatio(text, index),
+    };
+  });
+}
+
+export function cutRenderNormalizeLabelLines(lines: readonly string[]): string[] {
+  return lines
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((line) => line
+      .replace(/^поз\.?\s*/i, '# ')
+      .replace(/(\d(?:[.,]\d+)?)\s*[xхX×]\s*(\d(?:[.,]\d+)?)/g, '$1*$2'));
+}
+
 export function cutRenderSourceSvgCss(value: CutRenderStyleRef, pieceFill?: string | null): string {
   const style = resolveCutRenderStyle(value);
   const minStrokePx = style.sourceSvg.minStrokePx;
@@ -332,6 +409,13 @@ function sourceSvgPastelStrokeForPieceFill(
     s: style.sourceSvg.pastelSaturationPercent / 100,
     l: style.sourceSvg.pastelLightnessPercent / 100,
   });
+}
+
+function cutRenderLabelLineFontRatio(line: string, index: number): number {
+  if (index === 0) return 1;
+  if (/^#\s*\d+/.test(line)) return 0.46;
+  if (/^\d+(?:[.,]\d+)?\s*[*xхX×]\s*\d+(?:[.,]\d+)?$/i.test(line)) return 0.62;
+  return index === 1 ? 0.5 : 0.56;
 }
 
 function parseCutRenderStyleProfile(
@@ -442,6 +526,71 @@ function parseCutRenderStyleProfile(
       ),
     },
   };
+}
+
+function parseCutRenderStyleTemplates(
+  value: unknown,
+  fallbackProfile: CutRenderStyleProfile,
+): CutRenderStyleTemplate[] {
+  if (value === undefined) {
+    return [{
+      id: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+      name: CUT_RENDER_STYLE_MDF_TEMPLATE_NAME,
+      active: true,
+      profile: cutRenderStyleProfileJson(fallbackProfile),
+    }];
+  }
+  if (!Array.isArray(value) || value.length === 0 || value.length > 50) {
+    throw new CutRenderStyleValidationError('templates', 'render.styles.templates должен быть массивом 1..50 шаблонов');
+  }
+  const ids = new Set<string>();
+  const fallbackRule = cutRenderStyleRuleFromProfile(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, fallbackProfile);
+  const templates = value.map((item, index) => {
+    const path = `templates.${index}`;
+    const input = requireObject(item, path);
+    const id = parseTemplateId(input.id, `${path}.id`);
+    if (ids.has(id)) {
+      throw new CutRenderStyleValidationError(`${path}.id`, `Дублирующийся id шаблона рендера: ${id}`);
+    }
+    ids.add(id);
+    return {
+      id,
+      name: parseTemplateName(input.name, `${path}.name`),
+      active: parseBooleanField(input.active, true, `${path}.active`),
+      profile: parseCutRenderStyleProfile(input.profile, fallbackRule, `${path}.profile`),
+    };
+  });
+  if (!templates.some((template) => template.active)) {
+    throw new CutRenderStyleValidationError('templates', 'Хотя бы один шаблон рендера должен быть активным');
+  }
+  return templates;
+}
+
+function parseDefaultTemplateId(value: unknown, templates: CutRenderStyleTemplate[]): string {
+  const fallback = templates.find((template) => template.active)?.id ?? templates[0]?.id;
+  if (!fallback) {
+    throw new CutRenderStyleValidationError('templates', 'render.styles.templates пустой');
+  }
+  if (value === undefined || value === null || value === '') return fallback;
+  const id = parseTemplateId(value, 'defaultProfileId');
+  if (!templates.some((template) => template.id === id)) {
+    throw new CutRenderStyleValidationError('defaultProfileId', `Шаблон рендера ${id} не найден`);
+  }
+  return id;
+}
+
+function parseTemplateId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !/^[a-z0-9][a-z0-9_-]{1,63}$/.test(value)) {
+    throw new CutRenderStyleValidationError(field, `${field} должен быть slug 2..64 символа`);
+  }
+  return value;
+}
+
+function parseTemplateName(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0 || value.trim().length > 80) {
+    throw new CutRenderStyleValidationError(field, `${field} должен быть строкой 1..80 символов`);
+  }
+  return value.trim();
 }
 
 function cutRenderStyleRuleFromProfile(
