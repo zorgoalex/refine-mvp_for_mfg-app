@@ -59,6 +59,7 @@ export const apiRoutes = {
     statusBoardMdfManualMove: (cardKind: string, cardId: string) =>
       backendApiPath(`/orders/status-board/mdf-manual-moves/${encodeURIComponent(cardKind)}/${encodeURIComponent(cardId)}`),
     byId: (orderId: number) => backendApiPath(`/orders/${orderId}`),
+    recalculateHdf: (orderId: number) => backendApiPath(`/orders/${orderId}/recalculate-hdf`),
     refresh: (orderId: number) => backendApiPath(`/orders/${orderId}/refresh`),
     detailLiveState: (orderId: number) =>
       backendApiPath(`/orders/${orderId}/detail-live-state`),

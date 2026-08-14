@@ -11,6 +11,7 @@ import type {
   OrderDeadlineSyncPort,
   OrderDefaultSchedulePort,
   OrderChildReference,
+  RecalculateOrderHdfCommand,
   RestoreOrderCommand,
   OrderSaveAuditMetadata,
   OrderStatusAuditInfo,
@@ -742,6 +743,40 @@ export class OrderTransactionService {
     return order;
   }
 
+  async recalculateHdf(command: RecalculateOrderHdfCommand): Promise<OrderDto> {
+    const order = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
+      await unitOfWork.setSessionUser(command.currentUser.id);
+      this.requirePermission(command, 'orders.update');
+
+      const lockedOrder = await unitOfWork.loadOrderForUpdate(command.orderId);
+      if (!lockedOrder) {
+        throw new OrderNotFoundError(command.orderId);
+      }
+      this.requireUpdateScope(command, lockedOrder);
+
+      await unitOfWork.reconcileHdfDetails({
+        orderId: command.orderId,
+        currentUser: command.currentUser,
+        requestId: command.requestId,
+      });
+      await unitOfWork.recalcOrderProductionStatus(command.orderId);
+
+      return this.filterOrderForReadPermissions(
+        await unitOfWork.readOrder(command.orderId),
+        command,
+      );
+    });
+
+    await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
+      orderId: command.orderId,
+      currentUser: command.currentUser,
+      eventType: 'ORDER_UPDATED',
+      requestId: command.requestId,
+    });
+
+    return order;
+  }
+
   async delete(command: DeleteOrderCommand): Promise<DeleteOrderResponseDto> {
     return this.ports.transactions.runInTransaction(async (unitOfWork) => {
       await unitOfWork.setSessionUser(command.currentUser.id);
@@ -999,14 +1034,16 @@ export class OrderTransactionService {
       throw new ApiError(500, 'ORDER_SAVE_FAILED', 'Не удалось сохранить заказ');
     }
 
-    if (this.permissions.canUser(command.currentUser, 'payments.view')) {
-      return order;
-    }
+    return this.filterOrderForReadPermissions(order, command);
+  }
 
-    return {
-      ...order,
-      payments: [],
-    };
+  private filterOrderForReadPermissions(
+    order: OrderDto,
+    command: Pick<CreateOrderCommand | UpdateOrderCommand | RecalculateOrderHdfCommand, 'currentUser'>,
+  ): OrderDto {
+    return this.permissions.canUser(command.currentUser, 'payments.view')
+      ? order
+      : { ...order, payments: [] };
   }
 
   private async emitAutomationSourceEvent(

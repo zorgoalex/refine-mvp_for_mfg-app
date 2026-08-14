@@ -1274,6 +1274,32 @@ export class OrdersController {
     return { order };
   }
 
+  @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
+  @ApiResponse({ status: 200, description: 'Recalculated order HDF rows', schema: swaggerSchema(saveOrderResponseSwaggerSchema) })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
+  @ApiOperation({ operationId: 'recalculateOrderHdf', summary: 'Recalculate order HDF rows' })
+  @Post(':orderId/recalculate-hdf')
+  @HttpCode(200)
+  async recalculateHdf(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderIdParam: string,
+  ): Promise<SaveOrderResponseDto> {
+    this.assertOrdersWriteEnabled();
+
+    const currentUser = this.requireCurrentUser(request);
+    const orderId = parseOrderId(orderIdParam);
+    const order = await this.orders.recalculateHdf({
+      currentUser,
+      orderId,
+      requestId: request.requestId,
+    });
+
+    return { order };
+  }
+
   @ApiParam({ name: 'orderId', type: Number, description: 'Source order ID' })
   @ApiHeader({
     name: 'If-Match',

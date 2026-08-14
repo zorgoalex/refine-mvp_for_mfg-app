@@ -53,6 +53,12 @@ export interface UpdateOrderCommand {
   ) => Promise<void>;
 }
 
+export interface RecalculateOrderHdfCommand {
+  currentUser: CurrentUser;
+  orderId: number;
+  requestId?: string;
+}
+
 export interface DeleteOrderCommand {
   currentUser: CurrentUser;
   orderId: number;

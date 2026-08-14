@@ -1,11 +1,19 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Table } from '../../../../ui/tooltipDelay';
-import { Card, Empty, InputNumber, Select, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Empty, InputNumber, Select, Space, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { useNavigate } from 'react-router-dom';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import type { OrderHdfDetail } from '../../../../types/orders';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
+import { ordersApi } from '../../../../api/ordersApi';
+import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
+import {
+  collectHdfConfigErrorDescriptions,
+  describeHdfConfigErrors,
+  HDF_CONFIG_SETTINGS_LOCATION,
+} from './orderHdfStatusView';
 
 const { Text } = Typography;
 
@@ -17,10 +25,27 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 };
 
 export function OrderHdfTab() {
-  const { header, hdfDetails, updateHeaderField, updateHdfDetail } = useOrderFormStore();
+  const {
+    header,
+    hdfDetails,
+    isDirty,
+    loadOrder,
+    setDirty,
+    syncOriginals,
+    updateHeaderField,
+    updateHdfDetail,
+  } = useOrderFormStore();
   const orderFormData = useOrderFormData();
+  const navigate = useNavigate();
+  const [recalculating, setRecalculating] = useState(false);
   const productionStatusOptions = orderFormData.references.productionStatuses;
   const productionStatusNameById = orderFormData.references.productionStatusNameById;
+  const configErrorDescriptions = useMemo(
+    () => collectHdfConfigErrorDescriptions(hdfDetails),
+    [hdfDetails],
+  );
+  const hasStaleHdfDetails = hdfDetails.some((detail) => detail.is_stale === true);
+  const orderId = positiveId(header.order_id);
 
   const totals = useMemo(() => {
     return hdfDetails.reduce((acc, detail) => {
@@ -30,6 +55,38 @@ export function OrderHdfTab() {
       return acc;
     }, { area: 0, quantity: 0 });
   }, [hdfDetails]);
+
+  const openHdfSettings = () => {
+    try {
+      window.sessionStorage.setItem('configuration:activeTab', 'production-thresholds');
+    } catch {
+      // Navigation still works; user can choose the tab manually.
+    }
+    navigate('/configuration');
+  };
+
+  const recalculateHdf = async () => {
+    if (!orderId) {
+      message.warning('Сначала сохраните заказ');
+      return;
+    }
+    if (isDirty) {
+      message.warning('Сначала сохраните изменения заказа, затем пересчитайте ХДФ');
+      return;
+    }
+    setRecalculating(true);
+    try {
+      const response = await ordersApi.recalculateHdf(orderId);
+      loadOrder(mapOrderDtoToFormValues(response.order));
+      setDirty(false);
+      syncOriginals();
+      message.success('ХДФ пересчитан');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Не удалось пересчитать ХДФ');
+    } finally {
+      setRecalculating(false);
+    }
+  };
 
   const columns: ColumnsType<OrderHdfDetail> = [
     {
@@ -93,14 +150,24 @@ export function OrderHdfTab() {
       title: 'Расчёт',
       key: 'status',
       width: 180,
-      render: (_, row) => (
-        <Space size={4} wrap>
-          <Tag color={STATUS_LABELS[row.status]?.color ?? 'default'}>
-            {STATUS_LABELS[row.status]?.label ?? row.status}
-          </Tag>
-          {row.is_stale ? <Tag color="orange">Устарело</Tag> : null}
-        </Space>
-      ),
+      render: (_, row) => {
+        const rowConfigErrors = describeHdfConfigErrors(row.config_errors);
+        return (
+          <Space direction="vertical" size={2}>
+            <Space size={4} wrap>
+              <Tag color={STATUS_LABELS[row.status]?.color ?? 'default'}>
+                {STATUS_LABELS[row.status]?.label ?? row.status}
+              </Tag>
+              {row.is_stale ? <Tag color="orange">Устарело</Tag> : null}
+            </Space>
+            {row.status === 'config_missing' && rowConfigErrors.length > 0 ? (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {rowConfigErrors.join(', ')}
+              </Text>
+            ) : null}
+          </Space>
+        );
+      },
     },
     {
       title: 'Производственный статус',
@@ -138,6 +205,34 @@ export function OrderHdfTab() {
 
   return (
     <Space direction="vertical" size="middle" style={{ width: '100%', padding: '16px 0' }}>
+      {configErrorDescriptions.length > 0 || hasStaleHdfDetails ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={hasStaleHdfDetails ? 'ХДФ нужно пересчитать' : 'Не хватает настроек для расчёта ХДФ'}
+          description={[
+            hasStaleHdfDetails
+              ? 'Устарело = расчёт был сделан до изменения настроек ХДФ.'
+              : null,
+            configErrorDescriptions.length > 0
+              ? `${configErrorDescriptions.join(', ')}. Настройка: ${HDF_CONFIG_SETTINGS_LOCATION}.`
+              : null,
+          ].filter(Boolean).join(' ')}
+          action={(
+            <Space>
+              {configErrorDescriptions.length > 0 ? (
+                <Button size="small" onClick={openHdfSettings}>
+                  Открыть настройки
+                </Button>
+              ) : null}
+              <Button size="small" type="primary" loading={recalculating} onClick={() => void recalculateHdf()}>
+                Пересчитать ХДФ
+              </Button>
+            </Space>
+          )}
+        />
+      ) : null}
+
       <Card size="small">
         <Space wrap size="middle" align="end">
           <div>
@@ -155,6 +250,9 @@ export function OrderHdfTab() {
           <Text type="secondary">
             Итого ХДФ: {formatNumber(totals.area, 2)} м², деталей: {totals.quantity}
           </Text>
+          <Button loading={recalculating} onClick={() => void recalculateHdf()}>
+            Пересчитать ХДФ
+          </Button>
         </Space>
       </Card>
 
@@ -178,6 +276,11 @@ export function OrderHdfTab() {
 function finiteNumber(value: unknown): number {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function positiveId(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 function formatNullableNumber(value: unknown, digits: number): string {
