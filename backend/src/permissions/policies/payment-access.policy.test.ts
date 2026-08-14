@@ -41,6 +41,39 @@ describe('PaymentAccessPolicy', () => {
         order: { createdByUserId: 'user_2' },
       }),
     ).toBe(false);
+    expect(
+      policy.canDelete(user('manager'), {
+        paymentId: 1,
+        order: { createdByUserId: 'user_1' },
+      }),
+    ).toBe(true);
+    expect(
+      policy.canDelete(user('manager'), {
+        paymentId: 1,
+        order: { createdByUserId: 'user_2' },
+      }),
+    ).toBe(false);
+  });
+
+  it('limits top manager payment deletes to own orders', () => {
+    expect(
+      policy.canDelete(user('top_manager'), {
+        paymentId: 1,
+        order: { managerUserId: 'user_1' },
+      }),
+    ).toBe(true);
+    expect(
+      policy.canDelete(user('top_manager'), {
+        paymentId: 1,
+        order: { managerUserId: 'user_2' },
+      }),
+    ).toBe(false);
+    expect(
+      policy.canUpdate(user('top_manager'), {
+        paymentId: 1,
+        order: { managerUserId: 'user_2' },
+      }),
+    ).toBe(true);
   });
 
   it('denies operator payments until business decision is confirmed', () => {

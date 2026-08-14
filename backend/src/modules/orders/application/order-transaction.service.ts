@@ -1,5 +1,6 @@
 import { ApiError } from '../../../common/errors/api-error';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import { PaymentAccessPolicy } from '../../../permissions/policies/payment-access.policy';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
@@ -213,6 +214,7 @@ export interface OrderTransactionServicePorts {
 export class OrderTransactionService {
   private readonly permissions: OrderPermissionCheckerPort;
   private readonly orderAccessPolicy = new OrderAccessPolicy();
+  private readonly paymentAccessPolicy = new PaymentAccessPolicy();
 
   constructor(private readonly ports: OrderTransactionServicePorts) {
     this.permissions = ports.permissions ?? new PermissionsService();
@@ -513,7 +515,7 @@ export class OrderTransactionService {
         pathOrderId: command.orderId,
       });
 
-      this.requireFinancePermissionForPaymentMutations(command, prepared.order);
+      this.requireFinancePermissionForPaymentMutations(command, prepared.order, lockedOrder);
 
       // Переименование в занятый номер — блок; без смены имени проверка не
       // выполняется (легаси-дубли остаются редактируемыми).
@@ -1402,6 +1404,7 @@ export class OrderTransactionService {
   private requireFinancePermissionForPaymentMutations(
     command: Pick<CreateOrderCommand | UpdateOrderCommand, 'currentUser'>,
     order: NormalizedSaveOrderDto,
+    lockedOrder?: Pick<LockedOrderRow, 'createdByUserId' | 'managerUserId'>,
   ): void {
     const createsPayment = order.payments.some((payment) => payment.id === undefined);
     const updatesPayment = order.payments.some((payment) => payment.id !== undefined);
@@ -1422,7 +1425,20 @@ export class OrderTransactionService {
       this.requirePermission(command, 'payments.update');
     }
     if (deletesPayment) {
-      this.requirePermission(command, 'payments.delete');
+      if (
+        !lockedOrder ||
+        !this.paymentAccessPolicy.canDelete(command.currentUser, {
+          paymentId: 0,
+          order: {
+            createdByUserId: lockedOrder.createdByUserId,
+            managerUserId: lockedOrder.managerUserId,
+          },
+        })
+      ) {
+        throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+          requiredPermissions: ['payments.delete'],
+        });
+      }
     }
   }
 
