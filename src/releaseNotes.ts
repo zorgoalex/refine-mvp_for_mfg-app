@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-14",
+    title: "Платежи: удаление в своих заказах",
+    services: ["ERP", "CRM"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Роли «Менеджер» и «Топ-менеджер» могут удалять платежи только в своих заказах; удаление платежей из чужих заказов блокируется на backend.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-14",
     title: "Базис-раскрой: массовое удаление деталей",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

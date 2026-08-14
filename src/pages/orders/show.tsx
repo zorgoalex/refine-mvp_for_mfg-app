@@ -4,7 +4,7 @@ import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
@@ -96,6 +96,7 @@ import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
 import { BasisProjectLink } from "./components/BasisProjectLink";
+import type { OrderHdfDetail } from "../../types/orders";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -123,9 +124,118 @@ const ORDER_DETAIL_SHOW_NOTE_COLUMN_WIDTH = 96;
 const ORDER_DETAIL_SHOW_DETAIL_COST_COLUMN_WIDTH = 81.25;
 const ORDER_DETAIL_SHOW_BASIS_PROJECT_COLUMN_WIDTH = 96;
 const ORDER_DETAIL_SHOW_BAZIS_CUT_COLUMN_WIDTH = 104;
+const ORDER_DETAIL_SHOW_HDF_COLUMN_WIDTH = 86;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 const ORDER_DETAIL_STATUS_REFRESH_MS = 15_000;
 const ORDER_SHOW_SORT_COLLATOR = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' });
+
+type OrderShowHdfDisplay = {
+  heightMm: number | null;
+  widthMm: number | null;
+  quantity: number | null;
+  areaM2: number;
+  status: string;
+  isStale: boolean;
+};
+
+const ORDER_SHOW_HDF_STATUS_LABELS: Record<string, string> = {
+  ok: 'ХДФ',
+  too_narrow: 'узко',
+  config_missing: 'нет настр.',
+  source_changed: 'деталь изм.',
+};
+
+function buildOrderShowHdfDisplayBySourceDetailId(
+  hdfDetails: readonly OrderHdfDetail[],
+): Map<number, OrderShowHdfDisplay> {
+  const bySourceDetailId = new Map<number, OrderShowHdfDisplay>();
+  hdfDetails.forEach((detail) => {
+    const sourceDetailId = orderShowPositiveSafeInteger(
+      detail.source_order_detail_id ?? detail.source_order_detail_id_snapshot,
+    );
+    if (!sourceDetailId) return;
+    const display: OrderShowHdfDisplay = {
+      heightMm: orderShowNullableFiniteNumber(detail.hdf_height_mm),
+      widthMm: orderShowNullableFiniteNumber(detail.hdf_width_mm),
+      quantity: orderShowNullableFiniteNumber(detail.quantity),
+      areaM2: orderShowFiniteNumber(detail.area_m2),
+      status: detail.status,
+      isStale: detail.is_stale === true,
+    };
+    const current = bySourceDetailId.get(sourceDetailId);
+    if (!current || orderShowHdfRank(display) > orderShowHdfRank(current)) {
+      bySourceDetailId.set(sourceDetailId, display);
+    }
+  });
+  return bySourceDetailId;
+}
+
+function getOrderShowHdfDisplay(
+  bySourceDetailId: ReadonlyMap<number, OrderShowHdfDisplay>,
+  detail: any,
+): OrderShowHdfDisplay | null {
+  const detailId = orderShowPositiveSafeInteger(detail?.detail_id);
+  return detailId ? bySourceDetailId.get(detailId) ?? null : null;
+}
+
+function orderShowHdfRank(display: OrderShowHdfDisplay): number {
+  if (display.status === 'ok' && !display.isStale) return 4;
+  if (!display.isStale && display.status === 'too_narrow') return 3;
+  if (!display.isStale && display.status === 'config_missing') return 2;
+  if (!display.isStale) return 1;
+  return 0;
+}
+
+function orderShowPositiveSafeInteger(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function orderShowFiniteNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function orderShowNullableFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatOrderShowHdfDimension(value: number | null): string {
+  if (value === null) return '—';
+  return formatNumber(value, value % 1 === 0 ? 0 : 1);
+}
+
+function renderOrderShowHdfCell(
+  display: OrderShowHdfDisplay | null,
+  parameterMm: unknown,
+): ReactNode {
+  if (display?.status === 'ok' && !display.isStale && display.heightMm !== null && display.widthMm !== null) {
+    const dimensions = `${formatOrderShowHdfDimension(display.heightMm)}×${formatOrderShowHdfDimension(display.widthMm)}`;
+    const quantity = display.quantity === null
+      ? '—'
+      : formatNumber(display.quantity, display.quantity % 1 === 0 ? 0 : 1);
+    return (
+      <span className="order-detail-hdf-cell" title={`${dimensions}, ${quantity} шт., ${formatNumber(display.areaM2, 2)} м²`}>
+        <span className="order-detail-hdf-cell__size">{dimensions}</span>
+        <span className="order-detail-hdf-cell__qty">{quantity} шт.</span>
+      </span>
+    );
+  }
+  if (display) {
+    const label = display.isStale ? 'устар.' : ORDER_SHOW_HDF_STATUS_LABELS[display.status] ?? display.status;
+    return <span className="order-detail-hdf-cell order-detail-hdf-cell--status" title={label}>{label}</span>;
+  }
+  const parameter = orderShowNullableFiniteNumber(parameterMm);
+  return parameter === null ? (
+    <span className="order-detail-hdf-cell order-detail-hdf-cell--empty">—</span>
+  ) : (
+    <span className="order-detail-hdf-cell order-detail-hdf-cell--parameter" title={`Параметр ХДФ: ${formatNumber(parameter, 2)} мм`}>
+      {formatNumber(parameter, parameter % 1 === 0 ? 0 : 2)} мм
+    </span>
+  );
+}
 
 function cncOrderCuttingSequenceStatusLabel(status: CncTelegramOrderCuttingSequence['completionStatus']): string {
   return status === 'completed' ? 'распилено' : 'не распилено';
@@ -792,6 +902,10 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const hdfDetails = useMemo(
     () => (backendOrder ? mapOrderDtoToFormValues(backendOrder as OrderDto).hdfDetails ?? [] : []),
     [backendOrder],
+  );
+  const hdfDetailBySourceDetailId = useMemo(
+    () => buildOrderShowHdfDisplayBySourceDetailId(hdfDetails),
+    [hdfDetails],
   );
   const showLoading = shouldShowOrderLoading({
     orderLoading: isLoading,
@@ -1930,16 +2044,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       render: (_, detail) => millingTypesMap.get(detail.milling_type_id) || '—',
     },
     {
-      title: 'ХДФ мм',
+      title: 'ХДФ',
       dataIndex: 'hdf_parameter_override_mm',
       key: 'hdf_parameter_override_mm',
-      width: 74,
+      width: ORDER_DETAIL_SHOW_HDF_COLUMN_WIDTH,
       align: 'center',
       sorter: true,
-      render: (value) => {
-        const numeric = Number(value);
-        return Number.isFinite(numeric) && numeric > 0 ? numeric.toFixed(2) : '—';
-      },
+      render: (value, detail) => renderOrderShowHdfCell(
+        getOrderShowHdfDisplay(hdfDetailBySourceDetailId, detail),
+        value,
+      ),
     },
     {
       title: 'Обкат',

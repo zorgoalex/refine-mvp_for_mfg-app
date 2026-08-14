@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../../types/orders';
-import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows, buildUsableHdfAreaM2 } from './orderMaterialsSummary';
+import {
+  buildOrderFilmMaterialRows,
+  buildOrderHeaderMaterialSummaryItems,
+  buildOrderSheetMaterialRows,
+  buildUsableHdfAreaM2,
+} from './orderMaterialsSummary';
 
 const detail = (overrides: Partial<OrderDetail> = {}): OrderDetail => ({
   detail_id: 1,
@@ -119,5 +124,56 @@ describe('order material summary helpers', () => {
         version: 1,
       },
     ])).toBe(0);
+  });
+
+  it('adds calculated HDF materials to the order header material line', () => {
+    expect(buildOrderHeaderMaterialSummaryItems(['МДФ 16мм'], [
+      {
+        order_hdf_detail_id: 11,
+        source_order_detail_id_snapshot: 1,
+        hdf_sheet_material_type_id: 9,
+        hdf_sheet_material_name: 'ХДФ 3мм',
+        quantity: 2,
+        area_m2: 0.45,
+        status: 'ok',
+        is_stale: false,
+        version: 1,
+      },
+      {
+        order_hdf_detail_id: 12,
+        source_order_detail_id_snapshot: 2,
+        hdf_sheet_material_type_id: 9,
+        hdf_sheet_material_name: 'ХДФ 3мм',
+        quantity: 10,
+        area_m2: 9,
+        status: 'too_narrow',
+        is_stale: false,
+        version: 1,
+      },
+      {
+        order_hdf_detail_id: 13,
+        source_order_detail_id_snapshot: 3,
+        hdf_sheet_material_type_id: 9,
+        hdf_sheet_material_name: 'ХДФ 3мм',
+        quantity: 1,
+        area_m2: 0.1,
+        status: 'ok',
+        is_stale: true,
+        version: 1,
+      },
+    ])).toEqual([
+      {
+        key: 'detail:МДФ 16мм',
+        label: 'МДФ 16мм',
+        colorName: 'МДФ 16мм',
+        source: 'detail',
+      },
+      {
+        key: 'hdf-sheet:9',
+        label: 'ХДФ 3мм: 0,45 м²',
+        colorName: 'ХДФ 3мм',
+        source: 'hdf',
+      },
+    ]);
   });
 });

@@ -8,6 +8,7 @@ import type {
   CalculatedOrderDetailDto,
   NormalizedSaveOrderDowelingLinkDto,
   NormalizedSaveOrderHeaderDto,
+  NormalizedSaveOrderHdfDetailDto,
   NormalizedSaveOrderPaymentDto,
   NormalizedSaveOrderRequirementDto,
   NormalizedSaveOrderWorkshopDto,
@@ -32,6 +33,7 @@ import type {
   OrderDeleteAuditInput,
   OrderDeleteIdempotencyResult,
   OrderDeleteOutboxInput,
+  OrderHdfReconcileResult,
   OrderRestoreAuditInput,
   OrderRestoreIdempotencyResult,
   OrderRestoreOutboxInput,
@@ -567,6 +569,30 @@ class FakeUnitOfWork implements OrderWriteUnitOfWork {
     this.call('deleteDetails');
     const order = this.getOrder(orderId);
     order.details = order.details.filter((detail) => !ids.includes(detail.id as number));
+  }
+
+  async applyHdfStatusEdits(_input: {
+    orderId: number;
+    edits: readonly NormalizedSaveOrderHdfDetailDto[];
+    currentUser: CurrentUser;
+    requestId?: string;
+  }): Promise<void> {}
+
+  async deleteHdfDetails(_orderId: number, _ids: readonly number[]): Promise<void> {}
+
+  async reconcileHdfDetails(_input: {
+    orderId: number;
+    currentUser: CurrentUser;
+    requestId?: string;
+  }): Promise<OrderHdfReconcileResult> {
+    return {
+      createdHdfDetailIds: [],
+      updatedHdfDetailIds: [],
+      deactivatedHdfDetailIds: [],
+      sourceChangedHdfDetailIds: [],
+      configMissingHdfDetailIds: [],
+      hdfStatusCounts: {},
+    };
   }
 
   async recalcOrderProductionStatus(orderId: number): Promise<void> {
@@ -3660,7 +3686,7 @@ describe('OrderTransactionService', () => {
     expect(transactions.calls).toEqual(['begin', 'setSessionUser', 'rollback']);
   });
 
-  it('requires payments.delete for nested order-save payment deletion', async () => {
+  it('allows manager nested order-save payment deletion in own order', async () => {
     const transactions = new FakeOrderTransactions();
     transactions.seedOrder({
       orderId: 42,
@@ -3668,9 +3694,34 @@ describe('OrderTransactionService', () => {
       payments: [payment({ id: 21, amount: 1000 })],
     });
 
+    const result = await new OrderTransactionService({ transactions }).update({
+      currentUser: currentUser('manager'),
+      orderId: 42,
+      dto: createSaveDto({
+        payments: [],
+        deleted: { paymentIds: [21] },
+        version: 3,
+      }),
+    });
+
+    expect(result.payments).toHaveLength(0);
+    expect(transactions.state.orders.get(42)?.payments).toHaveLength(0);
+    expect(transactions.calls).toContain('deletePayments');
+  });
+
+  it('rejects top manager nested order-save payment deletion outside own order', async () => {
+    const transactions = new FakeOrderTransactions();
+    transactions.seedOrder({
+      orderId: 42,
+      version: 3,
+      createdByUserId: 'user_manager',
+      managerUserId: 'user_manager',
+      payments: [payment({ id: 21, amount: 1000 })],
+    });
+
     await expect(
       new OrderTransactionService({ transactions }).update({
-        currentUser: currentUser('manager'),
+        currentUser: currentUser('top_manager'),
         orderId: 42,
         dto: createSaveDto({
           payments: [],

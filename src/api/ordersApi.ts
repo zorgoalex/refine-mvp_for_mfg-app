@@ -69,6 +69,15 @@ export const ordersApi = {
     return response;
   },
 
+  async recalculateHdf(orderId: number): Promise<SaveOrderResponse> {
+    const response = await httpClient.post<SaveOrderResponse>(
+      apiRoutes.orders.recalculateHdf(validateOrderId(orderId)),
+      {},
+    );
+    emitOrderDataChanged(response.order.header.orderId);
+    return response;
+  },
+
   refresh(orderId: number, request: OrderRefreshRequest): Promise<OrderRefreshResponse> {
     const version = validateOrderVersion(request.version);
     return httpClient.request<OrderRefreshResponse>(

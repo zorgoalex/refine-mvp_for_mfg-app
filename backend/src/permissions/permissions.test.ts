@@ -193,11 +193,11 @@ describe('permissions foundation', () => {
     expect(can('packer', 'cut.view')).toBe(false);
   });
 
-  it('preserves existing manager and top manager finance permissions', () => {
+  it('grants manager and top manager scoped payment delete permission', () => {
     expect(can('manager', 'payments.view')).toBe(true);
     expect(can('manager', 'payments.create')).toBe(true);
     expect(can('manager', 'payments.update')).toBe(true);
-    expect(can('manager', 'payments.delete')).toBe(false);
+    expect(can('manager', 'payments.delete')).toBe(true);
     expect(can('manager', 'finance.view')).toBe(true);
     expect(can('manager', 'finance.analytics.view')).toBe(false);
     expect(can('manager', 'orders.view_financials')).toBe(true);
@@ -205,7 +205,7 @@ describe('permissions foundation', () => {
     expect(can('top_manager', 'payments.view')).toBe(true);
     expect(can('top_manager', 'payments.create')).toBe(true);
     expect(can('top_manager', 'payments.update')).toBe(true);
-    expect(can('top_manager', 'payments.delete')).toBe(false);
+    expect(can('top_manager', 'payments.delete')).toBe(true);
     expect(can('top_manager', 'finance.view')).toBe(true);
     expect(can('top_manager', 'finance.analytics.view')).toBe(true);
     expect(can('top_manager', 'orders.view_financials')).toBe(true);

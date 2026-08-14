@@ -23,7 +23,7 @@ import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitiv
 import { can } from '../../../../utils/permissions';
 import { featureFlags } from '../../../../config/featureFlags';
 import { collectOrderBasisProjects } from './orderBasisProjects';
-import { buildUsableHdfAreaM2 } from '../../orderMaterialsSummary';
+import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummary';
 import type { OrderHdfDetail } from '../../../../types/orders';
 
 const { Text } = Typography;
@@ -178,9 +178,14 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
       .filter(Boolean);
   }, [detailMaterialNames, headerMaterialName, record?.material_name, materialsData]);
 
+  const materialSummaryItems = useMemo(
+    () => buildOrderHeaderMaterialSummaryItems(resolvedMaterialNames, hdfDetails),
+    [resolvedMaterialNames, hdfDetails],
+  );
+
   // Create materials summary string
-  const materialsSummary = resolvedMaterialNames.length > 0
-    ? resolvedMaterialNames.join(', ')
+  const materialsSummary = materialSummaryItems.length > 0
+    ? materialSummaryItems.map((item) => item.label).join(', ')
     : '—';
   const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);
   // Load all production statuses for mapping
@@ -253,8 +258,6 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
     remainingAmount > 0 ? `ост. ${formatNumber(remainingAmount, 2)} ${CURRENCY_SYMBOL}` : null,
   ].filter(Boolean);
   const compactMaterialSummary = materialsSummary;
-  const hdfAreaM2 = useMemo(() => buildUsableHdfAreaM2(hdfDetails), [hdfDetails]);
-  const hdfSummary = hdfAreaM2 > 0 ? `ХДФ: ${formatNumber(hdfAreaM2, 2)} м²` : null;
 
   if (isOperational) {
     const deadlineAt = record?.planned_completion_date ? dayjs(record.planned_completion_date) : null;
@@ -314,7 +317,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         </div>
         <div className="order-show-operational-summary__metric">
           <strong>{materialsSummary}</strong>
-          <small>{`${totals.parts_count} деталей · ${formatNumber(totals.total_area, 2)} м²${hdfSummary ? ` · ${hdfSummary}` : ''}`}</small>
+          <small>{`${totals.parts_count} деталей · ${formatNumber(totals.total_area, 2)} м²`}</small>
         </div>
         {showFinancials && (
           <div className="order-show-operational-summary__money">
@@ -380,11 +383,6 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           <span className="order-show-header__compact-item order-show-header__compact-material" title={compactMaterialSummary}>
             <Text strong className="order-show-header__compact-text">{compactMaterialSummary}</Text>
           </span>
-          {hdfSummary ? (
-            <span className="order-show-header__compact-item order-show-header__compact-metrics">
-              {hdfSummary}
-            </span>
-          ) : null}
           <span className="order-show-header__compact-item order-show-header__compact-metrics">
             поз. <Text strong>{formatNumber(totals.positions_count, 0)}</Text>
             {' · '}
@@ -693,17 +691,17 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
         {/* Materials */}
         <div style={{ flex: 1 }}>
           <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>Материал: </Text>
-          {resolvedMaterialNames.length === 0 ? (
+          {materialSummaryItems.length === 0 ? (
             <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>—</Text>
           ) : (
-            resolvedMaterialNames.map((materialName, index) => {
-              const color = getMaterialColor(materialName);
+            materialSummaryItems.map((item, index) => {
+              const color = getMaterialColor(item.colorName);
 
               return (
-                <React.Fragment key={`${materialName}-${index}`}>
+                <React.Fragment key={item.key}>
                   {index > 0 && <Text style={{ fontSize: 12, color: 'var(--app-text-muted)' }}>, </Text>}
                   <Text strong style={{ fontSize: 12, color }}>
-                    {materialName}
+                    {item.label}
                   </Text>
                 </React.Fragment>
               );
@@ -725,11 +723,6 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
           <Text style={{ fontSize: 12, color: 'var(--app-text)' }}>
             Площадь: <Text strong>{formatNumber(totals.total_area, 2)} м²</Text>
           </Text>
-          {hdfSummary ? (
-            <Text style={{ fontSize: 12, color: 'var(--app-text)' }}>
-              ХДФ: <Text strong>{formatNumber(hdfAreaM2, 2)} м²</Text>
-            </Text>
-          ) : null}
         </Space>
       </div>
     </div>

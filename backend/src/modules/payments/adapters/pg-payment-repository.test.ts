@@ -108,6 +108,46 @@ describe('PgPaymentRepository', () => {
     expect(normalizedSql(database.queries)).not.toContain('UPDATE payments');
   });
 
+  it('allows manager payment deletes in own order scope', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 99,
+      orderManagerUserId: null,
+      orderTotals: { 15: { paidAmount: 0, paymentDate: null } },
+    });
+    const repository = new PgPaymentRepository(database.service);
+
+    const result = await repository.deletePayment({
+      currentUser: currentUser('manager', '99'),
+      paymentId: 30,
+      requestId: 'request-manager-delete',
+    });
+
+    expect(result.deleted).toBe(true);
+    expect(normalizedSql(database.queries)).toContain('DELETE FROM payments WHERE payment_id = $1');
+  });
+
+  it('rejects top manager payment deletes outside own order scope before mutation', async () => {
+    const database = createDatabase({
+      orderCreatedByUserId: 1,
+      orderManagerUserId: null,
+    });
+    const repository = new PgPaymentRepository(database.service);
+
+    await expect(
+      repository.deletePayment({
+        currentUser: currentUser('top_manager', '99'),
+        paymentId: 30,
+        requestId: 'request-top-manager-delete-denied',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['payments.delete'] },
+    });
+
+    expect(normalizedSql(database.queries)).not.toContain('DELETE FROM payments');
+  });
+
   it('createPayment writes a query-ready audit row with related_payment_id and event', async () => {
     const database = createDatabase();
     const repository = new PgPaymentRepository(database.service);

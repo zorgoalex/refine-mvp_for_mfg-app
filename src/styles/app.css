@@ -1227,6 +1227,147 @@ html {
   text-align: center;
 }
 
+.order-detail-hdf-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  letter-spacing: 0;
+}
+
+.order-detail-hdf-cell__size {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10.5px;
+  color: var(--app-text);
+}
+
+.order-detail-hdf-cell__qty {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 9px;
+  color: var(--app-text-muted);
+}
+
+.order-detail-hdf-cell--parameter,
+.order-detail-hdf-cell--status,
+.order-detail-hdf-cell--empty {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 18px;
+  align-items: center;
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  color: var(--app-text-muted);
+}
+
+.order-detail-hdf-cell--status {
+  color: #d46b08;
+}
+
+.order-hdf-table.ant-table-wrapper .ant-table {
+  table-layout: fixed;
+}
+
+.order-hdf-table .ant-table-thead > tr > th,
+.order-hdf-table .ant-table-tbody > tr > td {
+  padding: 2px 4px !important;
+  font-size: 12px;
+  line-height: 1.15;
+  vertical-align: middle;
+}
+
+.order-hdf-table .ant-table-thead > tr > th {
+  height: 34px;
+}
+
+.order-hdf-table__header {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  text-align: center;
+  line-height: 1.05;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.order-hdf-table__source {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.1;
+}
+
+.order-hdf-table__source-number {
+  display: block;
+  line-height: 1.1;
+}
+
+.order-hdf-table__text,
+.order-hdf-table__number {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.order-hdf-table__number {
+  font-variant-numeric: tabular-nums;
+}
+
+.order-hdf-table__status {
+  width: 100%;
+  min-width: 0;
+}
+
+.order-hdf-table__tag.ant-tag {
+  max-width: 100%;
+  margin-inline-end: 0;
+  padding-inline: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.order-hdf-table__status-note {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.order-hdf-table .ant-select-selector {
+  min-height: 24px !important;
+  padding-inline: 4px !important;
+}
+
+.order-hdf-table .ant-select-selection-item,
+.order-hdf-table .ant-select-selection-placeholder {
+  line-height: 22px !important;
+  font-size: 11px;
+}
+
 .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus,
 .order-details-table .ant-table-tbody > tr > td.order-detail-spreadsheet-cell:focus-within {
   z-index: 4;

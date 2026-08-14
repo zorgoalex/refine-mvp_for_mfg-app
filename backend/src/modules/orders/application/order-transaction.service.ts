@@ -1,5 +1,6 @@
 import { ApiError } from '../../../common/errors/api-error';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
+import { PaymentAccessPolicy } from '../../../permissions/policies/payment-access.policy';
 import type { PermissionName } from '../../../permissions/permissions';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
@@ -10,6 +11,7 @@ import type {
   OrderDeadlineSyncPort,
   OrderDefaultSchedulePort,
   OrderChildReference,
+  RecalculateOrderHdfCommand,
   RestoreOrderCommand,
   OrderSaveAuditMetadata,
   OrderStatusAuditInfo,
@@ -213,6 +215,7 @@ export interface OrderTransactionServicePorts {
 export class OrderTransactionService {
   private readonly permissions: OrderPermissionCheckerPort;
   private readonly orderAccessPolicy = new OrderAccessPolicy();
+  private readonly paymentAccessPolicy = new PaymentAccessPolicy();
 
   constructor(private readonly ports: OrderTransactionServicePorts) {
     this.permissions = ports.permissions ?? new PermissionsService();
@@ -513,7 +516,7 @@ export class OrderTransactionService {
         pathOrderId: command.orderId,
       });
 
-      this.requireFinancePermissionForPaymentMutations(command, prepared.order);
+      this.requireFinancePermissionForPaymentMutations(command, prepared.order, lockedOrder);
 
       // Переименование в занятый номер — блок; без смены имени проверка не
       // выполняется (легаси-дубли остаются редактируемыми).
@@ -728,6 +731,40 @@ export class OrderTransactionService {
       }
 
       return this.readAndAssertVersion(unitOfWork, command.orderId, version, command);
+    });
+
+    await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
+      orderId: command.orderId,
+      currentUser: command.currentUser,
+      eventType: 'ORDER_UPDATED',
+      requestId: command.requestId,
+    });
+
+    return order;
+  }
+
+  async recalculateHdf(command: RecalculateOrderHdfCommand): Promise<OrderDto> {
+    const order = await this.ports.transactions.runInTransaction(async (unitOfWork) => {
+      await unitOfWork.setSessionUser(command.currentUser.id);
+      this.requirePermission(command, 'orders.update');
+
+      const lockedOrder = await unitOfWork.loadOrderForUpdate(command.orderId);
+      if (!lockedOrder) {
+        throw new OrderNotFoundError(command.orderId);
+      }
+      this.requireUpdateScope(command, lockedOrder);
+
+      await unitOfWork.reconcileHdfDetails({
+        orderId: command.orderId,
+        currentUser: command.currentUser,
+        requestId: command.requestId,
+      });
+      await unitOfWork.recalcOrderProductionStatus(command.orderId);
+
+      return this.filterOrderForReadPermissions(
+        await unitOfWork.readOrder(command.orderId),
+        command,
+      );
     });
 
     await this.ports.deadlineSync?.syncOrderDeadlinesAfterSave({
@@ -997,14 +1034,16 @@ export class OrderTransactionService {
       throw new ApiError(500, 'ORDER_SAVE_FAILED', 'Не удалось сохранить заказ');
     }
 
-    if (this.permissions.canUser(command.currentUser, 'payments.view')) {
-      return order;
-    }
+    return this.filterOrderForReadPermissions(order, command);
+  }
 
-    return {
-      ...order,
-      payments: [],
-    };
+  private filterOrderForReadPermissions(
+    order: OrderDto,
+    command: Pick<CreateOrderCommand | UpdateOrderCommand | RecalculateOrderHdfCommand, 'currentUser'>,
+  ): OrderDto {
+    return this.permissions.canUser(command.currentUser, 'payments.view')
+      ? order
+      : { ...order, payments: [] };
   }
 
   private async emitAutomationSourceEvent(
@@ -1402,6 +1441,7 @@ export class OrderTransactionService {
   private requireFinancePermissionForPaymentMutations(
     command: Pick<CreateOrderCommand | UpdateOrderCommand, 'currentUser'>,
     order: NormalizedSaveOrderDto,
+    lockedOrder?: Pick<LockedOrderRow, 'createdByUserId' | 'managerUserId'>,
   ): void {
     const createsPayment = order.payments.some((payment) => payment.id === undefined);
     const updatesPayment = order.payments.some((payment) => payment.id !== undefined);
@@ -1422,7 +1462,20 @@ export class OrderTransactionService {
       this.requirePermission(command, 'payments.update');
     }
     if (deletesPayment) {
-      this.requirePermission(command, 'payments.delete');
+      if (
+        !lockedOrder ||
+        !this.paymentAccessPolicy.canDelete(command.currentUser, {
+          paymentId: 0,
+          order: {
+            createdByUserId: lockedOrder.createdByUserId,
+            managerUserId: lockedOrder.managerUserId,
+          },
+        })
+      ) {
+        throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+          requiredPermissions: ['payments.delete'],
+        });
+      }
     }
   }
 

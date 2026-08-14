@@ -212,6 +212,7 @@ export const ROLE_PERMISSIONS = {
     'payments.view',
     'payments.create',
     'payments.update',
+    'payments.delete',
     'finance.view',
     'finance.analytics.view',
 
@@ -298,6 +299,7 @@ export const ROLE_PERMISSIONS = {
     'payments.view',
     'payments.create',
     'payments.update',
+    'payments.delete',
     'finance.view',
 
     'clients.view',
