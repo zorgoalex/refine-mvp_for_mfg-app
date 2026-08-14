@@ -340,6 +340,30 @@ describe('authApi', () => {
     expect(authSession.getUser()).toMatchObject({ username: 'manager' });
   });
 
+  it('requests an SSO account chooser only for an explicit account-switch retry', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ url: 'https://api.workos.test/authorize' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authApi.workosAuthorizeUrl();
+    await authApi.workosAuthorizeUrl({ selectAccount: true });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/api/v1/auth/workos/authorize',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/v1/auth/workos/authorize?select_account=1',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+  });
+
   it('never refreshes and replays the destructive invitation-revoke DELETE', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

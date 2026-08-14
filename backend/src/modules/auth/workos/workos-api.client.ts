@@ -14,6 +14,12 @@ export interface WorkosAuthorizeOptions {
    * social account; ordinary login should keep seamless SSO.
    */
   forceFreshAuthentication?: boolean;
+  /**
+   * Ask AuthKit/the upstream provider to show an account chooser. This is
+   * used after an unlinked identity was returned from a still-active browser
+   * session, and for link flows where choosing the exact account matters.
+   */
+  selectAccount?: boolean;
 }
 
 export interface WorkosIdentity {
@@ -58,6 +64,9 @@ export class WorkosApiClient {
       // AuthKit authentication. This prevents "Привязать ещё" from silently
       // returning the identity already active in the provider session.
       url.searchParams.set('max_age', '0');
+    }
+    if (authorizeOptions.selectAccount) {
+      url.searchParams.set('prompt', 'select_account');
     }
     return url.toString();
   }

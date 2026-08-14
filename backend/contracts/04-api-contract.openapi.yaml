@@ -288,8 +288,17 @@ paths:
       description: |
         Выдаёт authorize URL hosted-провайдера и выставляет одноразовый
         HMAC-подписанный state в HttpOnly cookie (mode=login). Доступен только
-        при включённом BACKEND_ENABLE_WORKOS_AUTH, иначе 503.
+        при включённом BACKEND_ENABLE_WORKOS_AUTH, иначе 503. Параметр
+        select_account=1 требует свежую аутентификацию с выбором аккаунта.
       x-rate-limit: auth_workos_authorize
+      parameters:
+        - name: select_account
+          in: query
+          required: false
+          description: Показать выбор SSO-аккаунта вместо повторного использования активной сессии
+          schema:
+            type: string
+            enum: ['1']
       responses:
         '200':
           description: AuthKit authorize URL
