@@ -28,6 +28,7 @@ import { getModernUiTheme } from "./ui-evolution/theme/evolutionTheme";
 import { can } from "./utils/permissions";
 import type { PermissionName } from "./api/types/authApi.types";
 import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility";
+import { PerformanceRumBridge } from "./performance/PerformanceRumBridge";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -249,6 +250,7 @@ const ThemedApp = () => {
   return (
     <ErrorBoundary>
       <BrowserRouter>
+        <PerformanceRumBridge />
         <RefineKbarProvider>
           <ConfigProvider
             locale={ruRU}

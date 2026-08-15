@@ -8,6 +8,7 @@ import {
   type OrderDetailLiveStateSnapshot,
 } from '../../api/orderRealtimeApi';
 import type { CutDetailLastReadyJobRef } from '../../api/types/cutApi.types';
+import { setPerformanceRumRealtimeMode } from '../../performance/PerformanceRumBridge';
 import { areCutJobLinkMapsEqual, buildCutJobLinkMaps } from './cutColumnHelpers';
 
 const INVALIDATION_COALESCE_MS = 40;
@@ -56,6 +57,7 @@ export function useOrderDetailLiveState({
 
   useEffect(() => {
     if (!enabled || !active || !visible || !scopeKey) return undefined;
+    setPerformanceRumRealtimeMode('initializing');
 
     let disposed = false;
     let terminal = false;
@@ -107,6 +109,7 @@ export function useOrderDetailLiveState({
 
     const failTerminal = () => {
       terminal = true;
+      setPerformanceRumRealtimeMode('terminal-no-transport');
       stopAll();
     };
 
@@ -142,6 +145,7 @@ export function useOrderDetailLiveState({
           etag = response.etag ?? etag;
           snapshotCursor = response.streamCursor || snapshotCursor;
           streamEnabled = response.streamEnabled;
+          if (!streamEnabled) setPerformanceRumRealtimeMode('compact-fallback');
           if (response.snapshot) applySnapshot(response.snapshot);
           return true;
         } catch (error) {
@@ -173,6 +177,9 @@ export function useOrderDetailLiveState({
           : DISCONNECTED_POLL_MS + jitter(1_000);
       periodicTimer = window.setTimeout(async () => {
         periodicTimer = null;
+        if (!connected && Date.now() - disconnectedAt >= DISCONNECTED_POLL_GRACE_MS) {
+          setPerformanceRumRealtimeMode('compact-fallback');
+        }
         const refreshed = await refreshSnapshot();
         if (refreshed && streamEnabled && !connected) scheduleReconnect(0);
         schedulePeriodic();
@@ -182,6 +189,7 @@ export function useOrderDetailLiveState({
     const markDisconnected = () => {
       if (connected) disconnectedAt = Date.now();
       connected = false;
+      setPerformanceRumRealtimeMode(streamEnabled ? 'reconnecting' : 'compact-fallback');
       schedulePeriodic();
     };
 
@@ -210,6 +218,7 @@ export function useOrderDetailLiveState({
       if (action === 'reset') queueInvalidationSnapshot(true);
       if (action === 'disabled') {
         streamEnabled = false;
+        setPerformanceRumRealtimeMode('compact-fallback');
         streamAbort?.abort();
       }
       if (action === 'protocol_error') {
@@ -287,6 +296,7 @@ export function useOrderDetailLiveState({
         if (disposed || controller.signal.aborted) return;
         if (response.status === 204) {
           streamEnabled = false;
+          setPerformanceRumRealtimeMode('compact-fallback');
           return;
         }
         if (response.status === 429) {
@@ -304,6 +314,7 @@ export function useOrderDetailLiveState({
 
         connected = true;
         connectedAt = Date.now();
+        setPerformanceRumRealtimeMode('connected');
         schedulePeriodic();
         scheduleAuthReconnect(controller, tokenAtOpen);
         await consumeStream(response, controller);

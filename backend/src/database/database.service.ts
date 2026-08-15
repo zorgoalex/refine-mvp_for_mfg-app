@@ -4,6 +4,7 @@ import { Pool, type PoolClient, type QueryResult, type QueryResultRow } from 'pg
 import { ApiError } from '../common/errors/api-error';
 import type { BackendEnv } from '../config/env.validation';
 import type { DatabaseClient, DatabaseQueryOptions, TransactionClient } from './database.types';
+import { PerformanceQueryTelemetryService } from '../performance/performance-query-telemetry.service';
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -25,6 +26,7 @@ class PgTransactionClient implements TransactionClient {
   constructor(
     readonly raw: PoolClient,
     private readonly defaultTimeoutMs: number,
+    private readonly telemetry: PerformanceQueryTelemetryService,
   ) {}
 
   query<T extends QueryResultRow = QueryResultRow>(
@@ -32,10 +34,12 @@ class PgTransactionClient implements TransactionClient {
     params: readonly unknown[] = [],
     options: DatabaseQueryOptions = {},
   ): Promise<QueryResult<T>> {
-    return withTimeout(
-      this.raw.query<T>(text, [...params]),
-      options.timeoutMs ?? this.defaultTimeoutMs,
-      'Database query',
+    return this.telemetry.measure(text, () =>
+      withTimeout(
+        this.raw.query<T>(text, [...params]),
+        options.timeoutMs ?? this.defaultTimeoutMs,
+        'Database query',
+      ),
     );
   }
 }
@@ -45,7 +49,10 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
   private readonly pool?: Pool;
   private readonly queryTimeoutMs: number;
 
-  constructor(@Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>) {
+  constructor(
+    @Inject(ConfigService) private readonly config: ConfigService<BackendEnv, true>,
+    private readonly telemetry: PerformanceQueryTelemetryService,
+  ) {
     this.queryTimeoutMs = this.config.get('DATABASE_QUERY_TIMEOUT_MS', { infer: true });
     const connectionString = this.config.get('DATABASE_URL', { infer: true });
 
@@ -80,17 +87,19 @@ export class DatabaseService implements OnModuleDestroy, DatabaseClient {
     options: DatabaseQueryOptions = {},
   ): Promise<QueryResult<T>> {
     const pool = this.requirePool();
-    return withTimeout(
-      pool.query<T>(text, [...params]),
-      options.timeoutMs ?? this.queryTimeoutMs,
-      'Database query',
+    return this.telemetry.measure(text, () =>
+      withTimeout(
+        pool.query<T>(text, [...params]),
+        options.timeoutMs ?? this.queryTimeoutMs,
+        'Database query',
+      ),
     );
   }
 
   async transaction<T>(handler: (client: TransactionClient) => Promise<T>): Promise<T> {
     const pool = this.requirePool();
     const rawClient = await withTimeout(pool.connect(), this.queryTimeoutMs, 'Database connect');
-    const client = new PgTransactionClient(rawClient, this.queryTimeoutMs);
+    const client = new PgTransactionClient(rawClient, this.queryTimeoutMs, this.telemetry);
 
     try {
       await client.query('BEGIN');

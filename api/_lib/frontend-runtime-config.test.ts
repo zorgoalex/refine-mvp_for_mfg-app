@@ -5,6 +5,7 @@ describe('frontend runtime config delivery', () => {
   it('fails closed when runtime env is absent', () => {
     expect(buildFrontendRuntimeConfig({})).toEqual({
       apiUrl: '',
+      build: { sha: '' },
       ui: {
         evolutionEnabled: false,
         forceLegacy: false,
@@ -35,6 +36,15 @@ describe('frontend runtime config delivery', () => {
         enableLegacyHasura: true,
         workosAuth: false,
       },
+      observability: { performanceRum: false },
+      rollouts: {
+        orderLifecycleV2: {
+          enabled: false,
+          percent: 0,
+          allocationSalt: '',
+          configVersion: '',
+        },
+      },
     });
   });
 
@@ -60,10 +70,17 @@ describe('frontend runtime config delivery', () => {
         RUNTIME_CONFIG_ORDER_REALTIME: 'true',
         RUNTIME_CONFIG_CNC_TELEGRAM: 'true',
         RUNTIME_CONFIG_ENABLE_LEGACY_HASURA: 'false',
+        RUNTIME_CONFIG_BUILD_SHA: 'abcdef123456',
+        RUNTIME_CONFIG_PERFORMANCE_RUM: 'true',
+        RUNTIME_CONFIG_ORDER_LIFECYCLE_ENABLED: 'true',
+        RUNTIME_CONFIG_ORDER_LIFECYCLE_PERCENT: '25',
+        RUNTIME_CONFIG_ORDER_LIFECYCLE_SALT: 'salt-v1',
+        RUNTIME_CONFIG_ORDER_LIFECYCLE_VERSION: 'lifecycle-v1',
         GAS_API_KEY: 'must-not-leak',
       }),
     ).toEqual({
       apiUrl: 'https://api.example.test',
+      build: { sha: 'abcdef123456' },
       ui: {
         evolutionEnabled: false,
         forceLegacy: false,
@@ -94,6 +111,29 @@ describe('frontend runtime config delivery', () => {
         enableLegacyHasura: false,
         workosAuth: false,
       },
+      observability: { performanceRum: true },
+      rollouts: {
+        orderLifecycleV2: {
+          enabled: true,
+          percent: 25,
+          allocationSalt: 'salt-v1',
+          configVersion: 'lifecycle-v1',
+        },
+      },
+    });
+  });
+
+  it('fails lifecycle rollout closed when required allocation fields are invalid', () => {
+    expect(buildFrontendRuntimeConfig({
+      RUNTIME_CONFIG_ORDER_LIFECYCLE_ENABLED: 'true',
+      RUNTIME_CONFIG_ORDER_LIFECYCLE_PERCENT: '101',
+      RUNTIME_CONFIG_ORDER_LIFECYCLE_SALT: 'contains spaces',
+      RUNTIME_CONFIG_ORDER_LIFECYCLE_VERSION: 'v1',
+    }).rollouts.orderLifecycleV2).toEqual({
+      enabled: false,
+      percent: 0,
+      allocationSalt: '',
+      configVersion: '',
     });
   });
 

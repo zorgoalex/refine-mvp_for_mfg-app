@@ -30,6 +30,8 @@ import { UsersModule } from './modules/users/users.module';
 import { VlmModule } from './modules/vlm/vlm.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { RateLimitModule } from './rate-limit/rate-limit.module';
+import { RequestContextModule } from './common/request-context/request-context.module';
+import { PerformanceModule } from './performance/performance.module';
 
 @Module({
   imports: [
@@ -37,7 +39,9 @@ import { RateLimitModule } from './rate-limit/rate-limit.module';
       isGlobal: true,
       validate: validateEnvForNest,
     }),
+    RequestContextModule,
     RateLimitModule,
+    PerformanceModule,
     DatabaseModule,
     AuditModule,
     AuthModule,

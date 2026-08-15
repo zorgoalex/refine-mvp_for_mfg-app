@@ -2,10 +2,12 @@ import type { UserIdentity } from '../types/auth';
 
 let accessToken: string | null = null;
 let accessTokenVersion = 0;
+let sessionGeneration = 0;
 let currentUser: UserIdentity | null = null;
 let expired = false;
 const listeners = new Set<() => void>();
 const expiredListeners = new Set<() => void>();
+const beforeClearListeners = new Set<() => void>();
 
 function notifyListeners(): void {
   listeners.forEach((listener) => listener());
@@ -28,12 +30,20 @@ export const authSession = {
     return accessTokenVersion;
   },
 
+  getSessionGeneration(): number {
+    return sessionGeneration;
+  },
+
   getUser(): UserIdentity | null {
     return currentUser;
   },
 
   setUser(user: UserIdentity | null): void {
     if (currentUser === user) return;
+    if (identityScopeKey(currentUser) !== identityScopeKey(user)) {
+      beforeClearListeners.forEach((listener) => listener());
+      sessionGeneration += 1;
+    }
     currentUser = user;
     notifyListeners();
   },
@@ -43,6 +53,8 @@ export const authSession = {
     // refresh, even when local state is already empty (cookie-only bootstrap).
     accessTokenVersion += 1;
     if (!accessToken && !currentUser) return;
+    beforeClearListeners.forEach((listener) => listener());
+    sessionGeneration += 1;
     accessToken = null;
     currentUser = null;
     notifyListeners();
@@ -68,4 +80,21 @@ export const authSession = {
       expiredListeners.delete(listener);
     };
   },
+
+  subscribeBeforeClear(listener: () => void): () => void {
+    beforeClearListeners.add(listener);
+    return () => {
+      beforeClearListeners.delete(listener);
+    };
+  },
 };
+
+function identityScopeKey(user: UserIdentity | null): string {
+  if (!user) return '';
+  return [
+    user.id,
+    user.role,
+    user.roleId ?? user.role_id ?? '',
+    [...(user.permissions ?? [])].sort().join(','),
+  ].join('|');
+}

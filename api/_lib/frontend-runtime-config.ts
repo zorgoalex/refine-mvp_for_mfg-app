@@ -1,5 +1,8 @@
 export interface FrontendRuntimeConfigResponse {
   apiUrl: string;
+  build: {
+    sha: string;
+  };
   ui: {
     evolutionEnabled: boolean;
     forceLegacy: boolean;
@@ -30,6 +33,17 @@ export interface FrontendRuntimeConfigResponse {
     enableLegacyHasura: boolean;
     workosAuth: boolean;
   };
+  observability: {
+    performanceRum: boolean;
+  };
+  rollouts: {
+    orderLifecycleV2: {
+      enabled: boolean;
+      percent: number;
+      allocationSalt: string;
+      configVersion: string;
+    };
+  };
 }
 
 type EnvSource = Record<string, string | undefined>;
@@ -52,6 +66,9 @@ export function buildFrontendRuntimeConfig(
 
   return {
     apiUrl: normalizeApiUrl(env.RUNTIME_CONFIG_API_URL),
+    build: {
+      sha: normalizeBuildSha(env.RUNTIME_CONFIG_BUILD_SHA ?? env.VERCEL_GIT_COMMIT_SHA),
+    },
     ui: {
       evolutionEnabled: readBooleanEnv(env.RUNTIME_CONFIG_UI_EVOLUTION, false),
       forceLegacy: readBooleanEnv(env.RUNTIME_CONFIG_UI_FORCE_LEGACY, false),
@@ -85,6 +102,12 @@ export function buildFrontendRuntimeConfig(
       enableLegacyHasura: readBooleanEnv(env.RUNTIME_CONFIG_ENABLE_LEGACY_HASURA, true),
       workosAuth: readBooleanEnv(env.RUNTIME_CONFIG_WORKOS_AUTH, false),
     },
+    observability: {
+      performanceRum: readBooleanEnv(env.RUNTIME_CONFIG_PERFORMANCE_RUM, false),
+    },
+    rollouts: {
+      orderLifecycleV2: buildOrderLifecycleRollout(env),
+    },
   };
 }
 
@@ -102,4 +125,33 @@ function normalizeApiUrl(value: string | undefined): string {
   if (value === undefined) return '';
 
   return value.trim().replace(/\/+$/, '');
+}
+
+function normalizeBuildSha(value: string | undefined): string {
+  const normalized = value?.trim() ?? '';
+  return /^[a-zA-Z0-9._-]{7,64}$/.test(normalized) ? normalized : '';
+}
+
+function buildOrderLifecycleRollout(env: EnvSource) {
+  const enabled = readBooleanEnv(env.RUNTIME_CONFIG_ORDER_LIFECYCLE_ENABLED, false);
+  const percent = readRolloutPercent(env.RUNTIME_CONFIG_ORDER_LIFECYCLE_PERCENT);
+  const allocationSalt = normalizeRolloutToken(env.RUNTIME_CONFIG_ORDER_LIFECYCLE_SALT);
+  const configVersion = normalizeRolloutToken(env.RUNTIME_CONFIG_ORDER_LIFECYCLE_VERSION);
+
+  if (!enabled || !allocationSalt || !configVersion) {
+    return { enabled: false, percent: 0, allocationSalt: '', configVersion: '' };
+  }
+
+  return { enabled: true, percent, allocationSalt, configVersion };
+}
+
+function readRolloutPercent(value: string | undefined): number {
+  if (value === undefined || value.trim() === '') return 0;
+  const percent = Number(value);
+  return Number.isInteger(percent) && percent >= 0 && percent <= 100 ? percent : 0;
+}
+
+function normalizeRolloutToken(value: string | undefined): string {
+  const normalized = value?.trim() ?? '';
+  return /^[a-zA-Z0-9._-]{1,64}$/.test(normalized) ? normalized : '';
 }

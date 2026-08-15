@@ -25,6 +25,12 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_ENABLE_LEGACY_HASURA',
   'RUNTIME_CONFIG_UI_EVOLUTION',
   'RUNTIME_CONFIG_UI_FORCE_LEGACY',
+  'RUNTIME_CONFIG_BUILD_SHA',
+  'RUNTIME_CONFIG_PERFORMANCE_RUM',
+  'RUNTIME_CONFIG_ORDER_LIFECYCLE_ENABLED',
+  'RUNTIME_CONFIG_ORDER_LIFECYCLE_PERCENT',
+  'RUNTIME_CONFIG_ORDER_LIFECYCLE_SALT',
+  'RUNTIME_CONFIG_ORDER_LIFECYCLE_VERSION',
 ];
 
 describe('runtime-config handler', () => {
@@ -48,6 +54,7 @@ describe('runtime-config handler', () => {
     expect(res.headers['Content-Type']).toBe('application/json; charset=utf-8');
     expect(res.body).toMatchObject({
       apiUrl: '',
+      build: { sha: '' },
       ui: {
         evolutionEnabled: false,
         forceLegacy: false,
@@ -72,6 +79,15 @@ describe('runtime-config handler', () => {
         orderRealtime: false,
         enableLegacyHasura: true,
       },
+      observability: { performanceRum: false },
+      rollouts: {
+        orderLifecycleV2: {
+          enabled: false,
+          percent: 0,
+          allocationSalt: '',
+          configVersion: '',
+        },
+      },
     });
   });
 
@@ -84,6 +100,12 @@ describe('runtime-config handler', () => {
     vi.stubEnv('RUNTIME_CONFIG_ORDER_REALTIME', 'true');
     vi.stubEnv('RUNTIME_CONFIG_ENABLE_LEGACY_HASURA', 'false');
     vi.stubEnv('RUNTIME_CONFIG_UI_EVOLUTION', 'true');
+    vi.stubEnv('RUNTIME_CONFIG_BUILD_SHA', 'abcdef123456');
+    vi.stubEnv('RUNTIME_CONFIG_PERFORMANCE_RUM', 'true');
+    vi.stubEnv('RUNTIME_CONFIG_ORDER_LIFECYCLE_ENABLED', 'true');
+    vi.stubEnv('RUNTIME_CONFIG_ORDER_LIFECYCLE_PERCENT', '5');
+    vi.stubEnv('RUNTIME_CONFIG_ORDER_LIFECYCLE_SALT', 'salt-v1');
+    vi.stubEnv('RUNTIME_CONFIG_ORDER_LIFECYCLE_VERSION', 'lifecycle-v1');
 
     const res = createResponse();
 
@@ -91,6 +113,7 @@ describe('runtime-config handler', () => {
 
     expect(res.body).toMatchObject({
       apiUrl: 'https://api.example.test',
+      build: { sha: 'abcdef123456' },
       ui: {
         evolutionEnabled: true,
         forceLegacy: false,
@@ -102,6 +125,15 @@ describe('runtime-config handler', () => {
         cncTelegram: true,
         orderRealtime: true,
         enableLegacyHasura: false,
+      },
+      observability: { performanceRum: true },
+      rollouts: {
+        orderLifecycleV2: {
+          enabled: true,
+          percent: 5,
+          allocationSalt: 'salt-v1',
+          configVersion: 'lifecycle-v1',
+        },
       },
     });
   });

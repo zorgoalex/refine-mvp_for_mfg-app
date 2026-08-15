@@ -15,6 +15,10 @@ const httpClientMock = vi.hoisted(() => ({
   refreshAuthSession: vi.fn(),
 }));
 
+const performanceRumMock = vi.hoisted(() => ({
+  setPerformanceRumRealtimeMode: vi.fn(),
+}));
+
 const reactHarness = vi.hoisted(() => {
   type EffectSlot = { deps: unknown[] | undefined; cleanup?: void | (() => void) };
   type MemoSlot = { deps: unknown[] | undefined; value: unknown };
@@ -94,6 +98,7 @@ const reactHarness = vi.hoisted(() => {
 vi.mock('react', () => reactHarness.module);
 vi.mock('../../api/authSession', () => ({ authSession: authSessionMock }));
 vi.mock('../../api/httpClient', () => httpClientMock);
+vi.mock('../../performance/PerformanceRumBridge', () => performanceRumMock);
 vi.mock('../../api/orderRealtimeApi', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../api/orderRealtimeApi')>();
   return { ...original, orderRealtimeApi: realtimeApiMock };
@@ -128,6 +133,7 @@ describe('useOrderDetailLiveState lifecycle', () => {
     authSessionMock.getAccessToken.mockReset().mockReturnValue(null);
     httpClientMock.getJwtExpirationTime.mockReset().mockReturnValue(null);
     httpClientMock.refreshAuthSession.mockReset();
+    performanceRumMock.setPerformanceRumRealtimeMode.mockReset();
     authHandler = undefined;
     authSessionMock.subscribe.mockReset().mockImplementation((handler: () => void) => {
       authHandler = handler;
@@ -214,6 +220,9 @@ describe('useOrderDetailLiveState lifecycle', () => {
 
     expect(signal.aborted).toBe(true);
     expect(timers.some((timer) => timer.delay === 0)).toBe(false);
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenLastCalledWith(
+      'terminal-no-transport',
+    );
   });
 
   it('does not reconnect after proactive refresh expires the auth session', async () => {
@@ -269,6 +278,48 @@ describe('useOrderDetailLiveState lifecycle', () => {
 
     expect(realtimeApiMock.getDetailLiveState).toHaveBeenCalledTimes(2);
     expect(realtimeApiMock.getDetailLiveState.mock.calls[1]?.[1]).toMatchObject({ etag: null });
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('reconnecting');
+  });
+
+  it('reports compact fallback when the backend disables streaming', async () => {
+    realtimeApiMock.getDetailLiveState.mockResolvedValue({
+      status: 200,
+      etag: '"state-1"',
+      streamCursor: 'v1;s=1',
+      streamEnabled: false,
+      snapshot: {
+        orderId: 42,
+        streamEnabled: false,
+        streamCursor: 'v1;s=1',
+        cutRefsAccess: 'denied',
+        details: [],
+      },
+    });
+
+    renderHook(true);
+    await flushPromises();
+
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('initializing');
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenLastCalledWith(
+      'compact-fallback',
+    );
+    expect(realtimeApiMock.openLiveEvents).not.toHaveBeenCalled();
+  });
+
+  it('reports a connected stream before entering reconnect mode', async () => {
+    realtimeApiMock.openLiveEvents.mockResolvedValue(new Response('', {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    renderHook(true);
+    await flushPromises();
+    const reconnect = timers.find((timer) => timer.delay === 0);
+    timers = timers.filter((timer) => timer.id !== reconnect?.id);
+    reconnect?.handler();
+    await flushPromises();
+
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('connected');
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('reconnecting');
   });
 });
 
