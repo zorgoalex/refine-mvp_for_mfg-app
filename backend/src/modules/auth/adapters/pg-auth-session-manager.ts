@@ -5,6 +5,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole, mapRoleIdToRole } from '../../../permissions/permissions';
 import type { PermissionsService } from '../../../permissions/permissions.service';
+import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import { LoginMethodNotAllowedError, UserInactiveError } from '../auth.errors';
 import type {
   AuthResponse,
@@ -706,6 +707,8 @@ export class PgAuthSessionManager implements SessionManagerPort, AuthSessionHttp
         role: user.role,
         roleId: user.roleId,
         permissions: user.permissions,
+        permissionsVersion: user.permissionsVersion ?? 0,
+        policyScopes: rolePolicyForUser(user),
       },
     };
   }

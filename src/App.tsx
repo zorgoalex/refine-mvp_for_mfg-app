@@ -29,6 +29,7 @@ import { can } from "./utils/permissions";
 import type { PermissionName } from "./api/types/authApi.types";
 import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility";
 import { PerformanceRumBridge } from "./performance/PerformanceRumBridge";
+import { appRefineReactQueryOptions } from "./query/appQueryClient";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -679,6 +680,8 @@ const ThemedApp = () => {
                 // (single beforeunload + close-confirm). Disable Refine's per-form prompt.
                 warnWhenUnsavedChanges: false,
                 disableTelemetry: true,
+                useNewQueryKeys: true,
+                reactQuery: appRefineReactQueryOptions,
               }}
             >
               <Routes>

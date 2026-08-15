@@ -252,6 +252,12 @@ function userWithPermissions(permissions: string[]): BackendUserIdentity {
     username: 'admin',
     role: 'admin',
     permissions,
+    permissionsVersion: 1,
+    policyScopes: {
+      orders: { view: 'all', update: 'all', export: 'all', delete: 'all' },
+      payments: { view: 'all', create: 'all', update: 'all', delete: 'all' },
+      productionTasks: { view: 'all', update: 'all' },
+    },
   };
 }
 

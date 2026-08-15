@@ -1,3 +1,5 @@
+import type { AuthorizationPolicyScopes } from '../../types/auth';
+
 export type UserRole =
   | 'superadmin'
   | 'admin'
@@ -55,6 +57,8 @@ export interface BackendUserIdentity {
   role: UserRole;
   roleId?: number;
   permissions: PermissionName[];
+  permissionsVersion: number;
+  policyScopes: AuthorizationPolicyScopes;
 }
 
 export interface LoginRequest {

@@ -1,4 +1,5 @@
 import type { UserIdentity } from '../types/auth';
+import { getUserAuthorizationScopeKey } from './authScopeIdentity';
 
 let accessToken: string | null = null;
 let accessTokenVersion = 0;
@@ -91,10 +92,5 @@ export const authSession = {
 
 function identityScopeKey(user: UserIdentity | null): string {
   if (!user) return '';
-  return [
-    user.id,
-    user.role,
-    user.roleId ?? user.role_id ?? '',
-    [...(user.permissions ?? [])].sort().join(','),
-  ].join('|');
+  return [user.id, getUserAuthorizationScopeKey(user)].join('|');
 }

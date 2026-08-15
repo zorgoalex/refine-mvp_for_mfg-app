@@ -97,6 +97,11 @@ import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./order
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
 import { BasisProjectLink } from "./components/BasisProjectLink";
 import type { OrderHdfDetail } from "../../types/orders";
+import { useAuthCacheNamespace } from "../../query/authCacheNamespace";
+import {
+  createOrderShowPrimaryIdentity,
+  getOrderShowBackendMode,
+} from "../../query/orderPrimaryResource";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -630,53 +635,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [moveCreateNew, setMoveCreateNew] = useState(false);
   const [deletedOrder, setDeletedOrder] = useState<OrderDto | null>(null);
   const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(null);
+  const orderShowBackendMode = getOrderShowBackendMode(featureFlags.useBackendOrdersRead);
+  const authCacheNamespace = useAuthCacheNamespace(orderShowBackendMode);
+  const orderShowPrimaryIdentity = useMemo(
+    () => createOrderShowPrimaryIdentity({
+      orderId: currentOrderId ?? '',
+      projectsEnabled: featureFlags.projects,
+      authCacheNamespace,
+    }),
+    [authCacheNamespace, currentOrderId],
+  );
 
   const { queryResult } = useShow({
-    meta: {
-      idColumnName: "order_id",
-      fields: [
-        "order_id",
-        "order_name",
-        "client_id",
-        "client_name",
-        "order_date",
-        "planned_completion_date",
-        "completion_date",
-        "issue_date",
-        "payment_date",
-        "total_amount",
-        "final_amount",
-        "discount",
-        "paid_amount",
-        "priority",
-        "order_status_name",
-        "payment_status_name",
-        "production_status_id",
-        "production_status_name",
-        "manager_id",
-        "material_name",
-        "milling_type_name",
-        "edge_type_name",
-        "film_name",
-        "notes",
-        "parts_count",
-        "total_area",
-        "link_cutting_file",
-        "link_cutting_image_file",
-        "link_cad_file",
-        "link_pdf_file",
-        "doweling_order_id",
-        "doweling_order_name",
-        "ref_key_1c",
-        "version",
-        "delete_flag",
-        "created_at",
-        "updated_at",
-        "created_by",
-        "edited_by",
-        ...(featureFlags.projects ? ["project_id", "project_code", "order_full_number"] : []),
-      ],
-    },
+    resource: orderShowPrimaryIdentity.resource,
+    id: orderShowPrimaryIdentity.orderId,
+    meta: orderShowPrimaryIdentity.meta,
   });
   const { data, isLoading } = queryResult;
 

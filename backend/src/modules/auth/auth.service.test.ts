@@ -106,6 +106,10 @@ describe('AuthService login contract', () => {
       },
     });
     expect(result.response.user.permissions).toContain('system.superadmin');
+    expect(result.response.user).toMatchObject({
+      permissionsVersion: 11,
+      policyScopes: ROLE_POLICIES.superadmin,
+    });
     expect(result.response).not.toHaveProperty('refreshToken');
     expect(result.refreshToken).toBe('refresh_secret');
     expect(tokenIssueCalls).toEqual([
