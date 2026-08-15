@@ -107,6 +107,10 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { resolveOrderListBasisProjectValues } from "./orderListBasisProjects";
 import { normalizeOrderListProductionNumbers } from "./orderListProductionNumbers";
+import { useAuthCacheNamespace } from "../../query/authCacheNamespace";
+import { getOrdersReadBackendMode } from "../../query/orderPrimaryResource";
+import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from "../../query/orderPrimaryFetchPolicy";
+import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortStore";
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -283,6 +287,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       getCurrentUserRoleKey(navigationUser),
       roleVisibilityMatrix,
     );
+  const ordersReadBackendMode = getOrdersReadBackendMode(useBackendOrdersRead);
+  const authCacheNamespace = useAuthCacheNamespace(ordersReadBackendMode);
+  const orderLifecycleCohort = useOrderLifecycleCohort();
 
   const { tableProps, tableQueryResult, current, pageSize, setCurrent, setPageSize, sorters, setSorters, filters, setFilters } = useTable({
     syncWithLocation: true,
@@ -296,7 +303,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       mode: "server",
       pageSize: 20,
     },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    meta: { authCacheNamespace },
+    queryOptions: {
+      enabled: isActive,
+      refetchOnWindowFocus: false,
+      staleTime: orderLifecycleCohort === 'treatment'
+        ? ORDER_PRIMARY_HARD_STALE_TIME_MS
+        : undefined,
+    },
   });
 
   const invalidate = useInvalidate();

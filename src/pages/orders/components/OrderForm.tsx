@@ -6,7 +6,7 @@ import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
-import { useOne, useList, useNavigation } from '@refinedev/core';
+import { useOne, useList, useNavigation, useParsed } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
 import type { BazisOrderDraftResponse } from '../../../api/types/bazisApi.types';
 import {
@@ -43,6 +43,14 @@ import {
   shouldApplyComputedPlannedCompletion,
 } from '../../configuration/components/deadlineDefaultScheduleView';
 import dayjs from 'dayjs';
+import { useAuthCacheNamespace } from '../../../query/authCacheNamespace';
+import { createOrderEditLegacyPrimaryIdentity } from '../../../query/orderEditPrimaryResource';
+import { additionalRouteParams } from '../../../query/orderListPrimaryResource';
+import { getOrdersReadBackendMode } from '../../../query/orderPrimaryResource';
+import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from '../../../query/orderPrimaryFetchPolicy';
+import {
+  useOrderLifecycleCohort,
+} from '../../../performance/orderLifecycleCohortStore';
 
 // Sections
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
@@ -354,6 +362,19 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const [activeTab, setActiveTab] = useState(activeTabFromUrl);
   const [backendOrderLoading, setBackendOrderLoading] = useState(false);
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
+  const ordersReadBackendMode = getOrdersReadBackendMode(useBackendOrderRead);
+  const authCacheNamespace = useAuthCacheNamespace(ordersReadBackendMode);
+  const orderLifecycleCohort = useOrderLifecycleCohort();
+  const { params: parsedRouteParams } = useParsed();
+  const orderEditLegacyPrimaryIdentity = useMemo(
+    () => createOrderEditLegacyPrimaryIdentity({
+      orderId: orderId ?? '',
+      projectsEnabled: featureFlags.projects,
+      authCacheNamespace,
+      additionalParams: additionalRouteParams(parsedRouteParams ?? {}),
+    }),
+    [authCacheNamespace, orderId, parsedRouteParams],
+  );
   const labelsEnabled = featureFlags.labels && can('labels.view');
   const cutTabEnabled = featureFlags.useBackendCut && can('cut.view');
   const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
@@ -499,70 +520,15 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Use relationship to load doweling links via order_doweling_links (many-to-many)
   const shouldLoadOrder = mode === 'edit' && !!orderId && !useBackendOrderRead;
   const { data: orderData, isLoading: orderLoading } = useOne({
-    resource: 'orders',
-    id: orderId,
+    resource: orderEditLegacyPrimaryIdentity.resource,
+    id: orderEditLegacyPrimaryIdentity.orderId,
     queryOptions: {
       enabled: shouldLoadOrder,
+      staleTime: orderLifecycleCohort === 'treatment'
+        ? ORDER_PRIMARY_HARD_STALE_TIME_MS
+        : undefined,
     },
-    meta: {
-      fields: [
-        'order_id',
-        'order_name',
-        'client_id',
-        'order_date',
-        'priority',
-        'completion_date',
-        'planned_completion_date',
-        'issue_date',
-        'order_status_id',
-        'payment_status_id',
-        'production_status_id',
-        'production_status_from_details_enabled',
-        'total_amount',
-        'final_amount',
-        'discount',
-        'surcharge',
-        'paid_amount',
-        'payment_date',
-        'parts_count',
-        'total_area',
-        'milling_type_id',
-        'edge_type_id',
-        'film_id',
-        'material_id',
-        // SP3: header sheet material + durable SP3-era eligibility marker
-        'sheet_material_type_id',
-        'sheet_eligible',
-        'link_cutting_file',
-        'link_cutting_image_file',
-        'link_cad_file',
-        'link_pdf_file',
-        'notes',
-        'manager_id',
-        'delete_flag',
-        'version',
-        'ref_key_1c',
-        'created_by',
-        'edited_by',
-        'created_at',
-        'updated_at',
-        ...(featureFlags.projects ? ['project_id'] : []),
-        {
-          order_doweling_links: [
-            'order_doweling_link_id',
-            'order_id',
-            'doweling_order_id',
-            {
-              doweling_order: [
-                'doweling_order_id',
-                'doweling_order_name',
-                'design_engineer_id',
-              ],
-            },
-          ],
-        },
-      ],
-    },
+    meta: orderEditLegacyPrimaryIdentity.meta,
   });
 
   // Load order details in edit mode (only if orderId is valid number)

@@ -38,10 +38,13 @@ export const ordersApi = {
     return httpClient.get<OrderResourceDemandResponse>(withQuery(apiRoutes.orders.resourceDemands, params));
   },
 
-  async getById(orderId: number, opts?: { includeDeleted?: boolean }): Promise<OrderDto> {
+  async getById(
+    orderId: number,
+    opts?: { includeDeleted?: boolean; signal?: AbortSignal },
+  ): Promise<OrderDto> {
     const basePath = apiRoutes.orders.byId(validateOrderId(orderId));
     const path = opts?.includeDeleted ? withQuery(basePath, { includeDeleted: 'true' }) : basePath;
-    const response = await httpClient.get<OrderResponse>(path);
+    const response = await httpClient.get<OrderResponse>(path, { signal: opts?.signal });
     return response.order;
   },
 

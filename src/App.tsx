@@ -30,6 +30,10 @@ import type { PermissionName } from "./api/types/authApi.types";
 import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility";
 import { PerformanceRumBridge } from "./performance/PerformanceRumBridge";
 import { appRefineReactQueryOptions } from "./query/appQueryClient";
+import {
+  OrderPrimaryRouteGate,
+  OrderPrimaryRouteLoader,
+} from "./query/OrderPrimaryRouteLoader";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -684,6 +688,7 @@ const ThemedApp = () => {
                 reactQuery: appRefineReactQueryOptions,
               }}
             >
+              <OrderPrimaryRouteLoader />
               <Routes>
                 <Route
                   element={
@@ -700,7 +705,14 @@ const ThemedApp = () => {
                     element={<NavigateToResource resource="orders_view" />}
                   />
                   <Route path="/orders" >
-                    <Route index element={<OrderList />} />
+                    <Route
+                      index
+                      element={(
+                        <OrderPrimaryRouteGate>
+                          <OrderList />
+                        </OrderPrimaryRouteGate>
+                      )}
+                    />
                     <Route
                       path="create"
                       element={(
@@ -713,7 +725,9 @@ const ThemedApp = () => {
                       path="edit/:id"
                       element={(
                         <PermissionRoute permission="orders.update">
-                          <OrderEdit />
+                          <OrderPrimaryRouteGate>
+                            <OrderEdit />
+                          </OrderPrimaryRouteGate>
                         </PermissionRoute>
                       )}
                     />
@@ -725,7 +739,14 @@ const ThemedApp = () => {
                         </PermissionRoute>
                       )}
                     />
-                    <Route path="show/:id" element={<OrderShow />} />
+                    <Route
+                      path="show/:id"
+                      element={(
+                        <OrderPrimaryRouteGate>
+                          <OrderShow />
+                        </OrderPrimaryRouteGate>
+                      )}
+                    />
                   </Route>
                   <Route path="/calendar" >
                     <Route index element={<CalendarList />} />

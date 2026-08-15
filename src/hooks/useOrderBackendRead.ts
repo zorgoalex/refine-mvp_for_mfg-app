@@ -7,6 +7,14 @@ import type {
   OrderListResponse,
 } from '../api/types/orderApi.types';
 import { featureFlags, type FrontendFeatureFlags } from '../config/featureFlags';
+import { getAuthCacheNamespace } from '../query/authCacheNamespace';
+import {
+  createOrderEditBackendPrimaryIdentity,
+  fetchOrderEditBackendPrimary,
+} from '../query/orderEditPrimaryResource';
+import { getOrdersReadBackendMode } from '../query/orderPrimaryResource';
+import { getCurrentOrderLifecycleCohort } from '../performance/orderLifecycleCohortStore';
+import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from '../query/orderPrimaryFetchPolicy';
 import { useOrderFormStore } from '../stores/orderFormStore';
 import type { OrderFormValues } from '../types/orders';
 
@@ -80,7 +88,19 @@ function resolveLoadDependencies(
 ): LoadOrderViaBackendDependencies {
   return {
     flags: dependencies.flags ?? featureFlags,
-    getOrderById: dependencies.getOrderById ?? ordersApi.getById,
+    getOrderById: dependencies.getOrderById ?? ((orderId) => fetchOrderEditBackendPrimary(
+      createOrderEditBackendPrimaryIdentity({
+        orderId,
+        authCacheNamespace: getAuthCacheNamespace(
+          getOrdersReadBackendMode(featureFlags.useBackendOrdersRead),
+        ),
+      }),
+      {
+        staleTime: getCurrentOrderLifecycleCohort() === 'treatment'
+          ? ORDER_PRIMARY_HARD_STALE_TIME_MS
+          : 0,
+      },
+    )),
     toFormValues: dependencies.toFormValues ?? mapOrderDtoToFormValues,
     getOrderStore: dependencies.getOrderStore ?? (() => useOrderFormStore.getState()),
   };

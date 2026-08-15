@@ -1,5 +1,5 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
-import { useShow, useList, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
+import { useShow, useList, useOne, useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
 import { Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
@@ -102,6 +102,9 @@ import {
   createOrderShowPrimaryIdentity,
   getOrderShowBackendMode,
 } from "../../query/orderPrimaryResource";
+import { additionalRouteParams } from "../../query/orderListPrimaryResource";
+import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from "../../query/orderPrimaryFetchPolicy";
+import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortStore";
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -637,19 +640,27 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(null);
   const orderShowBackendMode = getOrderShowBackendMode(featureFlags.useBackendOrdersRead);
   const authCacheNamespace = useAuthCacheNamespace(orderShowBackendMode);
+  const orderLifecycleCohort = useOrderLifecycleCohort();
+  const { params: parsedRouteParams } = useParsed();
   const orderShowPrimaryIdentity = useMemo(
     () => createOrderShowPrimaryIdentity({
       orderId: currentOrderId ?? '',
       projectsEnabled: featureFlags.projects,
       authCacheNamespace,
+      additionalParams: additionalRouteParams(parsedRouteParams ?? {}),
     }),
-    [authCacheNamespace, currentOrderId],
+    [authCacheNamespace, currentOrderId, parsedRouteParams],
   );
 
   const { queryResult } = useShow({
     resource: orderShowPrimaryIdentity.resource,
     id: orderShowPrimaryIdentity.orderId,
     meta: orderShowPrimaryIdentity.meta,
+    queryOptions: {
+      staleTime: orderLifecycleCohort === 'treatment'
+        ? ORDER_PRIMARY_HARD_STALE_TIME_MS
+        : undefined,
+    },
   });
   const { data, isLoading } = queryResult;
 

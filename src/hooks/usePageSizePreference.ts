@@ -76,6 +76,15 @@ export function normalizePageSizePreferences(value: unknown): PageSizePreference
   return normalized;
 }
 
+export function getPageSizePreferenceSnapshot(
+  userId: string | null,
+  listKey: string,
+  defaultPageSize = DEFAULT_PAGE_SIZE,
+): number {
+  const fallback = normalizePageSize(defaultPageSize) ?? DEFAULT_PAGE_SIZE;
+  return getPageSize(userId, listKey, fallback);
+}
+
 export function pageSizeStorageKey(userId: string): string {
   return `erp.pageSizes.${userId}`;
 }

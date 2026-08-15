@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { authSession } from '../api/authSession';
 import { ordersApi } from '../api/ordersApi';
 import { subscribeOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
@@ -61,6 +62,10 @@ let cachedFormData: OrderFormDataResponse | null = null;
 let pendingFormDataRequest: Promise<OrderFormDataResponse> | null = null;
 let formDataCacheGeneration = 0;
 let formDataCacheStale = false;
+
+authSession.subscribeBeforeClear(() => {
+  invalidateOrderFormDataCache();
+});
 
 export function useOrderFormData(enabled = featureFlags.useBackendReferences): UseOrderFormDataResult {
   const [data, setData] = useState<OrderFormDataResponse | null>(() =>
@@ -218,6 +223,10 @@ export function invalidateOrderFormDataCache(): void {
   formDataCacheGeneration += 1;
   pendingFormDataRequest = null;
   formDataCacheStale = true;
+}
+
+export function prefetchOrderFormData(): Promise<OrderFormDataResponse> {
+  return loadOrderFormData();
 }
 
 async function loadOrderFormData(): Promise<OrderFormDataResponse> {

@@ -58,6 +58,10 @@ export function createOrderShowPrimaryMeta(input: {
 }
 
 export function getOrderShowBackendMode(backendOrdersRead: boolean): string {
+  return getOrdersReadBackendMode(backendOrdersRead);
+}
+
+export function getOrdersReadBackendMode(backendOrdersRead: boolean): string {
   return backendOrdersRead ? 'backend-orders-read' : 'hasura-orders-read';
 }
 
@@ -65,10 +69,14 @@ export function createOrderShowPrimaryIdentity(input: {
   orderId: string | number;
   projectsEnabled: boolean;
   authCacheNamespace: string;
+  additionalParams?: Record<string, unknown>;
 }) {
   return {
     resource: ORDER_SHOW_PRIMARY_RESOURCE,
     orderId: input.orderId,
-    meta: createOrderShowPrimaryMeta(input),
+    meta: {
+      ...(input.additionalParams ?? {}),
+      ...createOrderShowPrimaryMeta(input),
+    },
   } as const;
 }
