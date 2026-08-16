@@ -21,7 +21,7 @@ import {
   type CutRenderStyleTemplate,
   type CutRenderStylesSetting,
 } from '@shared/cut-render-style';
-import { cutConfigApi, type CutConfig } from '../../../api/cutConfigApi';
+import { cutConfigApi, type CutConfig, type CutSettingRow } from '../../../api/cutConfigApi';
 import { ApiError } from '../../../api/httpClient';
 import { buildStyledSvgUploadPreview } from '../../cut/svgCutRenderPreview';
 import { parseSvgCutUploadFile, type ParsedSvgUpload } from '../../cut/svgCutUploadParser';
@@ -35,7 +35,7 @@ const { Text, Title } = Typography;
 interface CutRenderStylesFormProps {
   config: CutConfig;
   canManage: boolean;
-  onSaved: () => Promise<void>;
+  onSaved: (setting: CutSettingRow) => Promise<void> | void;
 }
 
 interface TemplateDraft {
@@ -88,7 +88,7 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
 
   const previewSetting = useMemo(() => {
     try {
-      return buildSettingWithDraft(resolvedSetting, draft, selectedTemplateId, resolvedSetting.defaultProfileId);
+      return buildSettingWithDraft(resolvedSetting, draft, selectedTemplateId, selectedTemplateId);
     } catch {
       return resolvedSetting;
     }
@@ -107,10 +107,10 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
     }
     setSaving(true);
     try {
-      await cutConfigApi.updateSetting(CUT_RENDER_STYLES_SETTING_KEY, nextSetting, settingRow.version);
+      const savedSetting = await cutConfigApi.updateSetting(CUT_RENDER_STYLES_SETTING_KEY, nextSetting, settingRow.version);
+      await onSaved(savedSetting);
       setSelectedTemplateId(nextSelectedId);
       message.success('Настройки рендера сохранены');
-      await onSaved();
     } catch (error) {
       message.error(error instanceof ApiError ? error.message : 'Не удалось сохранить настройки рендера');
     } finally {
