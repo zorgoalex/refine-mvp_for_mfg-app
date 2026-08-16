@@ -51,6 +51,8 @@ export interface PerformanceRumBatch {
 type MetricListener = (measurement: { name: PerformanceRumMetricName; value: number }) => void;
 const listeners = new Set<MetricListener>();
 const STICKY_SAFETY_METRICS = new Set<PerformanceRumMetricName>([
+  'checkpoint_capture_failure_count',
+  'unsnapshotted_surface_count',
   'operation_eviction_pin_count',
 ]);
 const pendingSafetyMetrics = new Map<PerformanceRumMetricName, number>();

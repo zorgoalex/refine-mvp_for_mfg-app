@@ -18,12 +18,21 @@ export interface WorkspaceCheckpointCounters {
   unsnapshottedTransientSurfaces: number;
 }
 
+export interface WorkspaceCheckpointDiagnostics extends WorkspaceCheckpointCounters {
+  circuitOpen: boolean;
+  lastFailure: {
+    kind: 'missing-adapter' | 'adapter-refused' | 'capture-error';
+    adapterKey: string | null;
+  } | null;
+}
+
 const adaptersByNamespace = new Map<
   string,
   Map<string, Map<string, WorkspaceCheckpointAdapter>>
 >();
 let counters: WorkspaceCheckpointCounters = zeroCounters();
 let circuitBreaker = false;
+let lastFailure: WorkspaceCheckpointDiagnostics['lastFailure'] = null;
 
 export function registerWorkspaceCheckpointAdapter(
   workspaceKey: string,
@@ -44,14 +53,16 @@ export function captureWorkspaceCheckpoint(
   namespace = getWorkspaceStateNamespace(),
 ): boolean {
   const adapters = adaptersByNamespace.get(namespace)?.get(workspaceKey);
-  if (!adapters || adapters.size === 0) return recordMissingAdapter();
+  if (!adapters || adapters.size === 0) return recordMissingAdapter(null);
 
   const captured: Record<string, Record<string, unknown>> = {};
+  let activeAdapterKey: string | null = null;
   try {
     for (const [adapterKey, adapter] of [...adapters.entries()].sort(([left], [right]) => (
       left.localeCompare(right)
     ))) {
-      if (adapter.canCapture?.() === false) return recordMissingAdapter();
+      activeAdapterKey = adapterKey;
+      if (adapter.canCapture?.() === false) return recordMissingAdapter(adapterKey);
       const state = adapter.capture();
       if (isPromiseLike(state)) throw new Error('WORKSPACE_CHECKPOINT_CAPTURE_MUST_BE_SYNCHRONOUS');
       captured[adapterKey] = state;
@@ -67,6 +78,7 @@ export function captureWorkspaceCheckpoint(
       checkpointCaptureFailures: counters.checkpointCaptureFailures + 1,
     };
     circuitBreaker = true;
+    lastFailure = { kind: 'capture-error', adapterKey: activeAdapterKey };
     recordOrderLifecycleMetric(
       'checkpoint_capture_failure_count',
       counters.checkpointCaptureFailures,
@@ -149,19 +161,28 @@ export function getWorkspaceCheckpointCounters(): WorkspaceCheckpointCounters {
   return { ...counters };
 }
 
+export function getWorkspaceCheckpointDiagnostics(): WorkspaceCheckpointDiagnostics {
+  return { ...counters, circuitOpen: circuitBreaker, lastFailure };
+}
+
 export function clearWorkspaceCheckpointRegistry(namespace?: string): void {
   if (namespace) adaptersByNamespace.delete(namespace);
   else adaptersByNamespace.clear();
   circuitBreaker = false;
   counters = zeroCounters();
+  lastFailure = null;
 }
 
-function recordMissingAdapter(): false {
+function recordMissingAdapter(adapterKey: string | null): false {
   counters = {
     ...counters,
     unsnapshottedTransientSurfaces: counters.unsnapshottedTransientSurfaces + 1,
   };
   circuitBreaker = true;
+  lastFailure = {
+    kind: adapterKey === null ? 'missing-adapter' : 'adapter-refused',
+    adapterKey,
+  };
   recordOrderLifecycleMetric(
     'unsnapshotted_surface_count',
     counters.unsnapshottedTransientSurfaces,

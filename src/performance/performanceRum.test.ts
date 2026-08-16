@@ -85,4 +85,19 @@ describe('performance RUM client', () => {
     expect(getPendingPerformanceRumSafetyMetric('operation_eviction_pin_count')).toBe(0);
     unsubscribe();
   });
+
+  it('keeps checkpoint safety incidents sticky across cleanup boundaries', () => {
+    recordOrderLifecycleMetric('checkpoint_capture_failure_count', 1);
+    recordOrderLifecycleMetric('unsnapshotted_surface_count', 1);
+    recordOrderLifecycleMetric('unsnapshotted_surface_count', 2);
+
+    expect(getPendingPerformanceRumSafetyMetric('checkpoint_capture_failure_count')).toBe(1);
+    expect(getPendingPerformanceRumSafetyMetric('unsnapshotted_surface_count')).toBe(2);
+    acknowledgePerformanceRumSafetyMetrics([
+      { name: 'checkpoint_capture_failure_count', value: 1 },
+      { name: 'unsnapshotted_surface_count', value: 2 },
+    ]);
+    expect(getPendingPerformanceRumSafetyMetric('checkpoint_capture_failure_count')).toBe(0);
+    expect(getPendingPerformanceRumSafetyMetric('unsnapshotted_surface_count')).toBe(0);
+  });
 });

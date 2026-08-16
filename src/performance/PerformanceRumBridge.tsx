@@ -18,6 +18,7 @@ import {
   type PerformanceRumBatch,
   type PerformanceRumRoute,
 } from './performanceRum';
+import { getWorkspaceKeepAliveDiagnostics } from '../workspace/workspaceKeepAliveDiagnostics';
 
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -220,6 +221,10 @@ function createInitialSafetyMeasurements(): ActiveRumSession['measurements'] {
   for (const name of ZERO_SAFETY_METRICS) {
     measurements.set(name, { name, value: 0 });
   }
+  measurements.set('heavy_dom_count', {
+    name: 'heavy_dom_count',
+    value: getWorkspaceKeepAliveDiagnostics().peakMountedHeavyViewCount,
+  });
   seedPendingSafetyMeasurements(measurements);
   return measurements;
 }
@@ -227,10 +232,17 @@ function createInitialSafetyMeasurements(): ActiveRumSession['measurements'] {
 function seedPendingSafetyMeasurements(
   measurements: ActiveRumSession['measurements'],
 ): void {
-  measurements.set('operation_eviction_pin_count', {
-    name: 'operation_eviction_pin_count',
-    value: getPendingPerformanceRumSafetyMetric('operation_eviction_pin_count'),
-  });
+  const stickySafetyMetrics = [
+    'checkpoint_capture_failure_count',
+    'unsnapshotted_surface_count',
+    'operation_eviction_pin_count',
+  ] as const;
+  for (const name of stickySafetyMetrics) {
+    measurements.set(name, {
+      name,
+      value: getPendingPerformanceRumSafetyMetric(name),
+    });
+  }
 }
 
 export function resolvePerformanceRumRoute(pathname: string): PerformanceRumRoute | null {

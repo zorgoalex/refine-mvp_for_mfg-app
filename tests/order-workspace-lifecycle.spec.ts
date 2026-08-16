@@ -1,17 +1,20 @@
 import { expect, test, type Page, type Request, type Route } from '@playwright/test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 import { createWorkflowMockDb, setupWorkflowMockApi } from './helpers/mockWorkflowApi';
 
 test.describe('order workspace lifecycle', () => {
-    test('keeps ten hidden edit workspaces silent through three focus cycles', async ({ page }) => {
-        test.setTimeout(300_000);
+    test('bounds ten edit workspaces, restores evicted draft and keeps hidden reads silent', async ({ page }, testInfo) => {
+        test.setTimeout(900_000);
+        const orderCount = Math.max(4, Number(process.env.ORDER_WORKSPACE_TAB_COUNT ?? 10));
         const db = createWorkflowMockDb();
         let releaseFirstTelegramPreview!: () => void;
         const firstTelegramPreviewGate = new Promise<void>((resolve) => {
             releaseFirstTelegramPreview = resolve;
         });
         let telegramPreviewRequests = 0;
-        for (let orderId = 1; orderId <= 10; orderId += 1) {
+        for (let orderId = 1; orderId <= orderCount; orderId += 1) {
             db.orders.push(createOrderRow(orderId));
             db.order_details.push(createOrderDetailRow(orderId));
         }
@@ -126,14 +129,27 @@ test.describe('order workspace lifecycle', () => {
             timeout: 90_000,
         });
 
-        for (let orderId = 1; orderId <= 10; orderId += 1) {
+        for (let orderId = 1; orderId <= orderCount; orderId += 1) {
             await navigateSpa(page, `/orders/edit/${orderId}`);
             await expect(page.locator(`[data-workspace-key="/orders/edit/${orderId}"]`))
                 .toHaveCount(1, { timeout: 90_000 });
+            const checkpointDiagnostics = await readCheckpointDiagnostics(page);
+            if (checkpointDiagnostics.circuitOpen) {
+                await testInfo.attach(`checkpoint-circuit-order-${orderId}.json`, {
+                    body: Buffer.from(JSON.stringify(checkpointDiagnostics, null, 2)),
+                    contentType: 'application/json',
+                });
+                throw new Error(`Checkpoint circuit opened at order ${orderId}: ${JSON.stringify(checkpointDiagnostics)}`);
+            }
             if (orderId === 1) {
                 const detailsTab = page.getByRole('tab', { name: /^(Детали заказа|Состав)$/ });
                 const basicTab = page.getByRole('tab', { name: /^(Основная информация|Обзор)$/ });
                 await expect(detailsTab).toBeVisible({ timeout: 90_000 });
+                await basicTab.click();
+                await expect(basicTab).toHaveAttribute('aria-selected', 'true');
+                const orderNameInput = page.getByPlaceholder('Введите название заказа');
+                await expect(orderNameInput).toBeVisible({ timeout: 30_000 });
+                await orderNameInput.fill('Lifecycle 1 unsaved draft');
                 if (await detailsTab.getAttribute('aria-selected') !== 'true') {
                     await detailsTab.click();
                     await expect(detailsTab).toHaveAttribute('aria-selected', 'true');
@@ -176,15 +192,38 @@ test.describe('order workspace lifecycle', () => {
                 }
                 page.off('request', countInactiveSurfaceRead);
                 expect(inactiveSurfaceReads).toBe(0);
+                await detailsTab.click();
+                await expect(detailsTab).toHaveAttribute('aria-selected', 'true');
             }
         }
         await navigateSpa(page, '/orders');
-        await expect(page.locator('[data-workspace-key="/orders"]'))
-            .toHaveCount(1, { timeout: 90_000 });
-        await page.waitForTimeout(750);
+        await expect(page.locator('[data-workspace-key="/orders"]:not([hidden])'))
+            .toBeVisible({ timeout: 90_000 });
+        const listTransitionDiagnostics = await readCheckpointDiagnostics(page);
+        await testInfo.attach('checkpoint-diagnostics-after-list-transition.json', {
+            body: Buffer.from(JSON.stringify(listTransitionDiagnostics, null, 2)),
+            contentType: 'application/json',
+        });
+        if (listTransitionDiagnostics.circuitOpen) {
+            throw new Error(`Checkpoint circuit opened on list transition: ${JSON.stringify(listTransitionDiagnostics)}`);
+        }
 
-        await expect.poll(async () => page.locator('[data-workspace-key][hidden]').count())
-            .toBeGreaterThanOrEqual(10);
+        const mountedHeavy = page.locator('[data-workspace-key^="/orders/edit/"]');
+        try {
+            await expect.poll(async () => mountedHeavy.count(), { timeout: 30_000 }).toBe(2);
+        } catch {
+            const failedDiagnostics = {
+                domMountedHeavyViewCount: await mountedHeavy.count(),
+                ...await readCheckpointDiagnostics(page),
+            };
+            throw new Error(`Bounded keep-alive mismatch: ${JSON.stringify(failedDiagnostics)}`);
+        }
+        await expect(page.locator(`[data-workspace-key="/orders/edit/${orderCount - 1}"]`)).toHaveCount(1);
+        await expect(page.locator(`[data-workspace-key="/orders/edit/${orderCount}"]`)).toHaveCount(1);
+        for (let evictedOrderId = 1; evictedOrderId <= orderCount - 2; evictedOrderId += 1) {
+            await expect(page.locator(`[data-workspace-key="/orders/edit/${evictedOrderId}"]`))
+                .toHaveCount(0);
+        }
 
         let inventoryReads = 0;
         const countInventoryRead = (request: Request) => {
@@ -202,6 +241,53 @@ test.describe('order workspace lifecycle', () => {
 
         page.off('request', countInventoryRead);
         expect(inventoryReads).toBe(0);
+
+        const steadyStateEvidence = await collectBoundedKeepAliveEvidence(page);
+        expect(steadyStateEvidence.heavyWorkspaceKeys).toEqual([
+            `/orders/edit/${orderCount}`,
+            `/orders/edit/${orderCount - 1}`,
+        ].sort());
+
+        await navigateSpa(page, '/orders/edit/1');
+        const restoredWorkspace = page.locator(
+            '[data-workspace-key="/orders/edit/1"]:not([hidden])',
+        );
+        await expect(restoredWorkspace).toBeVisible({ timeout: 90_000 });
+        const restoredDetailsTab = restoredWorkspace.getByRole('tab', {
+            name: /^(Детали заказа|Состав)$/,
+        });
+        await expect(restoredDetailsTab).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });
+        await expect(restoredWorkspace.getByText('Lifecycle 1 unsaved draft', { exact: true }).first())
+            .toBeVisible({ timeout: 30_000 });
+        const restoredEvidence = await collectBoundedKeepAliveEvidence(page);
+        expect(restoredEvidence.heavyWorkspaceKeys).toEqual([
+            '/orders/edit/1',
+            `/orders/edit/${orderCount}`,
+            `/orders/edit/${orderCount - 1}`,
+        ].sort());
+
+        const evidence = {
+            schemaVersion: 1,
+            scenario: `${orderCount}-order-edit-tabs-treatment`,
+            listTransitionDiagnostics,
+            steadyState: steadyStateEvidence,
+            restored: restoredEvidence,
+            restoredDiagnostics: await readCheckpointDiagnostics(page),
+            hiddenInventoryReadsAcrossThreeFocusCycles: inventoryReads,
+            restoredOrderId: 1,
+            restoredActiveSubtab: 'details',
+            restoredUnsavedOrderName: true,
+        };
+        const evidenceBody = JSON.stringify(evidence, null, 2);
+        await testInfo.attach('bounded-keep-alive-10-tab-evidence.json', {
+            body: Buffer.from(evidenceBody),
+            contentType: 'application/json',
+        });
+        const evidencePath = process.env.ORDER_WORKSPACE_EVIDENCE_PATH;
+        if (evidencePath) {
+            await mkdir(dirname(evidencePath), { recursive: true });
+            await writeFile(evidencePath, `${evidenceBody}\n`, 'utf8');
+        }
 
     });
 
@@ -264,7 +350,13 @@ test.describe('order workspace lifecycle', () => {
         await navigateSpa(page, '/orders/edit/1');
         await expect(page.locator('[data-workspace-key="/orders/edit/1"]'))
             .toHaveCount(1, { timeout: 90_000 });
+        const actorAWorkspace = page.locator('[data-workspace-key="/orders/edit/1"]:not([hidden])');
+        const basicTab = actorAWorkspace.getByRole('tab', { name: /^(Основная информация|Обзор)$/ });
         const additionalTab = page.getByRole('tab', { name: /^(Бирки|Дополнительно)$/ });
+        await basicTab.click();
+        const actorAOrderName = actorAWorkspace.getByPlaceholder('Введите название заказа');
+        await expect(actorAOrderName).toBeVisible({ timeout: 30_000 });
+        await actorAOrderName.fill('Actor A secret draft');
         await additionalTab.click();
         await expect(additionalTab).toHaveAttribute('aria-selected', 'true');
         await page.getByText('Ссылки на файлы', { exact: true }).click();
@@ -289,6 +381,14 @@ test.describe('order workspace lifecycle', () => {
                 permissions: ['orders.view', 'orders.update', 'labels.view'],
             });
         });
+        const actorBWorkspace = page.locator('[data-workspace-key="/orders/edit/1"]:not([hidden])');
+        await expect(actorBWorkspace).toHaveCount(1, { timeout: 30_000 });
+        const actorBBasicTab = actorBWorkspace.getByRole('tab', { name: /^(Основная информация|Обзор)$/ });
+        await actorBBasicTab.click();
+        const actorBOrderName = actorBWorkspace.getByPlaceholder('Введите название заказа');
+        await expect(actorBOrderName).toBeVisible({ timeout: 30_000 });
+        await expect(actorBOrderName).toHaveValue('');
+        await expect(actorBOrderName).not.toHaveValue('Actor A secret draft');
         releaseManualDownload();
         await page.waitForTimeout(500);
         page.off('download', countDownload);
@@ -488,6 +588,55 @@ async function navigateSpa(page: Page, path: string): Promise<void> {
         window.history.pushState({}, '', nextPath);
         window.dispatchEvent(new PopStateEvent('popstate'));
     }, path);
+}
+
+async function collectBoundedKeepAliveEvidence(page: Page): Promise<{
+    heavyWorkspaceKeys: string[];
+    hiddenWorkspaceCount: number;
+    usedJsHeapSize: number | null;
+    totalJsHeapSize: number | null;
+}> {
+    return page.evaluate(() => {
+        const heavyWorkspaceKeys = [...document.querySelectorAll<HTMLElement>(
+            '[data-workspace-key^="/orders/edit/"]',
+        )].map((element) => element.dataset.workspaceKey ?? '').filter(Boolean).sort();
+        const memory = (performance as Performance & {
+            memory?: { usedJSHeapSize?: number; totalJSHeapSize?: number };
+        }).memory;
+        return {
+            heavyWorkspaceKeys,
+            hiddenWorkspaceCount: document.querySelectorAll('[data-workspace-key][hidden]').length,
+            usedJsHeapSize: Number.isFinite(memory?.usedJSHeapSize)
+                ? Number(memory?.usedJSHeapSize)
+                : null,
+            totalJsHeapSize: Number.isFinite(memory?.totalJSHeapSize)
+                ? Number(memory?.totalJSHeapSize)
+                : null,
+        };
+    });
+}
+
+async function readCheckpointDiagnostics(page: Page): Promise<{
+    checkpointCaptureFailures: number;
+    unsnapshottedTransientSurfaces: number;
+    circuitOpen: boolean;
+    lastFailure: { kind: string; adapterKey: string | null } | null;
+    cohort: string;
+    mountedHeavyViewCount: number;
+    peakMountedHeavyViewCount: number;
+}> {
+    return page.evaluate(async () => {
+        const [registry, cohortStore, keepAliveDiagnostics] = await Promise.all([
+            import('/src/workspace/workspaceCheckpointRegistry.ts'),
+            import('/src/performance/orderLifecycleCohortStore.ts'),
+            import('/src/workspace/workspaceKeepAliveDiagnostics.ts'),
+        ]);
+        return {
+            ...registry.getWorkspaceCheckpointDiagnostics(),
+            cohort: cohortStore.getCurrentOrderLifecycleCohort(),
+            ...keepAliveDiagnostics.getWorkspaceKeepAliveDiagnostics(),
+        };
+    });
 }
 
 async function fulfillTreatmentRuntimeConfig(route: Route): Promise<void> {

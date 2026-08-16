@@ -13,6 +13,14 @@ import {
 } from '../workspace/workspaceOperationPins';
 import { installWorkspaceStateLifecycle } from '../workspace/workspaceStateLifecycle';
 import {
+  captureWorkspaceCheckpoint,
+  registerWorkspaceCheckpointAdapter,
+} from '../workspace/workspaceCheckpointRegistry';
+import {
+  clearWorkspaceKeepAliveDiagnostics,
+  recordMountedHeavyViewCount,
+} from '../workspace/workspaceKeepAliveDiagnostics';
+import {
   flushPerformanceRumSession,
   resolvePerformanceRumRoute,
   rotatePerformanceRumSession,
@@ -36,6 +44,7 @@ describe('PerformanceRumBridge route classification', () => {
     await flushPerformanceRumSession();
     authSession.clear();
     clearWorkspaceOperationPins();
+    clearWorkspaceKeepAliveDiagnostics();
     resetPerformanceRumSafetyMetricsForTests();
     vi.unstubAllGlobals();
   });
@@ -141,5 +150,55 @@ describe('PerformanceRumBridge route classification', () => {
     });
     expect(getPendingPerformanceRumSafetyMetric('operation_eviction_pin_count')).toBe(0);
     releaseSecond();
+  });
+
+  it('submits the auth-session heavy DOM high-water rather than the final lower count', async () => {
+    authSession.setAccessToken('access-token');
+    authSession.setUser({
+      id: '1', username: 'actor-1', role: 'manager', permissions: ['orders.view'],
+    });
+    recordMountedHeavyViewCount(5);
+    recordMountedHeavyViewCount(2);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    setActivePerformanceRumSessionForTests({ ...batch, measurements: [] });
+    expect(await flushPerformanceRumSession()).toBe(true);
+
+    const submitted = JSON.parse(fetchMock.mock.calls[0][1].body as string) as PerformanceRumBatch;
+    expect(submitted.measurements).toContainEqual({ name: 'heavy_dom_count', value: 5 });
+  });
+
+  it('retains pre-session checkpoint incidents after auth cleanup until successful ACK', async () => {
+    installWorkspaceStateLifecycle();
+    authSession.setAccessToken('access-token');
+    authSession.setUser({
+      id: '1', username: 'actor-1', role: 'manager', permissions: ['orders.update'],
+    });
+    expect(captureWorkspaceCheckpoint('/orders/edit/missing')).toBe(false);
+    registerWorkspaceCheckpointAdapter('/orders/edit/broken', 'broken', {
+      capture: () => { throw new Error('capture failed'); },
+    });
+    expect(captureWorkspaceCheckpoint('/orders/edit/broken')).toBe(false);
+
+    authSession.setUser({
+      id: '2', username: 'actor-2', role: 'manager', permissions: ['orders.update'],
+    });
+    expect(getPendingPerformanceRumSafetyMetric('unsnapshotted_surface_count')).toBe(1);
+    expect(getPendingPerformanceRumSafetyMetric('checkpoint_capture_failure_count')).toBe(1);
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 202 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    setActivePerformanceRumSessionForTests({ ...batch, measurements: [] });
+    expect(await flushPerformanceRumSession()).toBe(true);
+    const submitted = JSON.parse(fetchMock.mock.calls[0][1].body as string) as PerformanceRumBatch;
+    expect(submitted.measurements).toContainEqual({
+      name: 'unsnapshotted_surface_count', value: 1,
+    });
+    expect(submitted.measurements).toContainEqual({
+      name: 'checkpoint_capture_failure_count', value: 1,
+    });
+    expect(getPendingPerformanceRumSafetyMetric('unsnapshotted_surface_count')).toBe(0);
+    expect(getPendingPerformanceRumSafetyMetric('checkpoint_capture_failure_count')).toBe(0);
   });
 });

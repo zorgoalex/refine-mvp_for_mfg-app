@@ -206,6 +206,33 @@ describe('useOrderDetailLiveState lifecycle', () => {
     expect(signal.aborted).toBe(true);
   });
 
+  it('starts a fresh unconditional snapshot after A deactivates and reactivates', async () => {
+    realtimeApiMock.getDetailLiveState.mockResolvedValue({
+      status: 200,
+      etag: '"state-1"',
+      streamCursor: 'v1;s=1',
+      streamEnabled: false,
+      snapshot: {
+        orderId: 42,
+        streamEnabled: false,
+        streamCursor: 'v1;s=1',
+        cutRefsAccess: 'denied',
+        details: [],
+      },
+    });
+
+    renderHook(true);
+    await flushPromises();
+    renderHook(false);
+    renderHook(true);
+    await flushPromises();
+
+    expect(realtimeApiMock.getDetailLiveState).toHaveBeenCalledTimes(2);
+    expect(realtimeApiMock.getDetailLiveState.mock.calls[0]?.[1]).toMatchObject({ etag: null });
+    expect(realtimeApiMock.getDetailLiveState.mock.calls[1]?.[1]).toMatchObject({ etag: null });
+    expect(realtimeApiMock.openLiveEvents).not.toHaveBeenCalled();
+  });
+
   it('aborts the owned snapshot when the workspace deactivates without reporting an error', async () => {
     realtimeApiMock.getDetailLiveState.mockImplementation(
       (_orderId: number, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {

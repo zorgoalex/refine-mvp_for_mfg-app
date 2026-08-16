@@ -6,6 +6,7 @@ import {
   deleteWorkspaceCheckpointAdapterState,
   ensureWorkspaceCheckpoint,
   getWorkspaceCheckpointCounters,
+  getWorkspaceCheckpointDiagnostics,
   isWorkspaceCheckpointCircuitOpen,
   readWorkspaceCheckpointAdapterState,
   registerWorkspaceCheckpointAdapter,
@@ -74,6 +75,10 @@ describe('auth-scoped workspace checkpoint foundation', () => {
     expect(readWorkspaceCheckpointAdapterState('/orders/show/7', 'show')).toEqual({ scrollY: 120 });
     expect(isWorkspaceCheckpointCircuitOpen()).toBe(true);
     expect(getWorkspaceCheckpointCounters().unsnapshottedTransientSurfaces).toBe(1);
+    expect(getWorkspaceCheckpointDiagnostics().lastFailure).toEqual({
+      kind: 'adapter-refused',
+      adapterKey: 'show',
+    });
   });
 
   it('keeps the prior checkpoint when any adapter throws during all-or-nothing capture', () => {
@@ -92,6 +97,10 @@ describe('auth-scoped workspace checkpoint foundation', () => {
     expect(captureWorkspaceCheckpoint('/orders/edit/8')).toBe(false);
     expect(readWorkspaceCheckpointAdapterState('/orders/edit/8', 'form')).toEqual({ raw: 'first' });
     expect(getWorkspaceCheckpointCounters().checkpointCaptureFailures).toBe(1);
+    expect(getWorkspaceCheckpointDiagnostics().lastFailure).toEqual({
+      kind: 'capture-error',
+      adapterKey: 'broken',
+    });
   });
 
   it('deletes a cancelled modal adapter without erasing sibling workspace state', () => {
