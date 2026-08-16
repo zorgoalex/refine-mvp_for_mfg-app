@@ -98,6 +98,10 @@ import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/Op
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
+import {
+  isOrderDetailStatusRefreshDue,
+  mergeOrderDetailStatusFreshness,
+} from "./orderDetailStatusRefresh";
 import { BasisProjectLink } from "./components/BasisProjectLink";
 import type { OrderHdfDetail } from "../../types/orders";
 import { useAuthCacheNamespace } from "../../query/authCacheNamespace";
@@ -108,6 +112,10 @@ import {
 import { additionalRouteParams } from "../../query/orderListPrimaryResource";
 import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from "../../query/orderPrimaryFetchPolicy";
 import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortStore";
+import {
+  recordAppActivityRefreshTrigger,
+  useAppActivitySnapshot,
+} from "../../performance/appActivityCoordinator";
 import {
   OrderLifecycleReadSurface,
   useCancelInactiveOrderQueriesOnDeactivate,
@@ -639,6 +647,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const isMobile = useIsMobile();
   const { isActive: isWorkspaceTabActive } = useKeepAlive();
   const ordinaryReadActive = useOrderLifecycleReadActive();
+  const { activationRevision, documentVisible } = useAppActivitySnapshot();
   useCancelInactiveOrderQueriesOnDeactivate();
   const { id: currentOrderId } = useParams();
   const [searchParams] = useSearchParams();
@@ -906,7 +915,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   );
 
   // Загрузка деталей заказа
-  const { data: detailsData, isLoading: detailsLoading } = useList({
+  const {
+    data: detailsData,
+    dataUpdatedAt: detailsDataUpdatedAt,
+    isLoading: detailsLoading,
+  } = useList({
     resource: "order_details",
     filters: [
       {
@@ -1024,6 +1037,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     : EMPTY_DETAIL_PRODUCTION_STATUS_MAP;
   const liveDetailProductionStatusByIdRef = useRef(liveDetailProductionStatusById);
   const detailStatusPollInFlightRef = useRef(false);
+  const detailStatusLastSuccessfulAtRef = useRef(0);
+  const handledActivityRevisionRef = useRef(activationRevision);
   const detailProductionStatusBaseById = useMemo(() => {
     const map = new Map<number, number | null>();
     (details || []).forEach((detail: any) => {
@@ -1033,6 +1048,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     });
     return map;
   }, [details]);
+  const detailStatusBaselineUpdatedAt = useBackendOrdersRead
+    ? queryResult.dataUpdatedAt
+    : detailsDataUpdatedAt;
   const orderDetailLiveState = useOrderDetailLiveState({
     enabled: orderRealtimeEnabled,
     active: isWorkspaceTabActive,
@@ -1060,11 +1078,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   }, [detailProductionStatusBaseById]);
 
   useEffect(() => {
+    detailStatusLastSuccessfulAtRef.current = 0;
     setLiveDetailProductionStatusState({
       scopeKey: showAsyncReadScopeKey,
       value: new Map(),
     });
   }, [record?.order_id, showAsyncReadScopeKey]);
+
+  useEffect(() => {
+    if (detailProductionStatusBaseById.size === 0) return;
+    detailStatusLastSuccessfulAtRef.current = mergeOrderDetailStatusFreshness(
+      detailStatusLastSuccessfulAtRef.current,
+      detailStatusBaselineUpdatedAt,
+    );
+  }, [detailProductionStatusBaseById.size, detailStatusBaselineUpdatedAt, showAsyncReadScopeKey]);
 
   const refreshLiveDetailProductionStatuses = useCallback(async () => {
     if (!ordinaryReadActive || orderRealtimeEnabled) return;
@@ -1108,14 +1135,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         }
       });
 
-      if (
-        showAsyncReadGuard.isCurrent(token)
-        && !areDetailProductionStatusMapsEqual(liveDetailProductionStatusByIdRef.current, nextLiveStatuses)
-      ) {
-        setLiveDetailProductionStatusState({
-          scopeKey: showAsyncReadScopeKey,
-          value: nextLiveStatuses,
-        });
+      if (showAsyncReadGuard.isCurrent(token)) {
+        detailStatusLastSuccessfulAtRef.current = Date.now();
+        if (!areDetailProductionStatusMapsEqual(liveDetailProductionStatusByIdRef.current, nextLiveStatuses)) {
+          setLiveDetailProductionStatusState({
+            scopeKey: showAsyncReadScopeKey,
+            value: nextLiveStatuses,
+          });
+        }
       }
     } catch {
       // Keep the last visible statuses; the next poll/focus event can recover.
@@ -1139,30 +1166,35 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       || orderRealtimeEnabled
       || !record?.order_id
       || typeof window === 'undefined'
-      || typeof document === 'undefined'
+      || !documentVisible
     ) {
       return undefined;
     }
 
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'hidden') return;
+      if (detailStatusPollInFlightRef.current) return;
+      recordAppActivityRefreshTrigger();
       void refreshLiveDetailProductionStatuses();
     };
-    const refreshOnVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
-      void refreshLiveDetailProductionStatuses();
-    };
-
-    window.addEventListener('focus', refreshWhenVisible);
-    document.addEventListener('visibilitychange', refreshOnVisibilityChange);
     const intervalId = window.setInterval(refreshWhenVisible, ORDER_DETAIL_STATUS_REFRESH_MS);
 
     return () => {
-      window.removeEventListener('focus', refreshWhenVisible);
-      document.removeEventListener('visibilitychange', refreshOnVisibilityChange);
       window.clearInterval(intervalId);
     };
-  }, [orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
+  }, [documentVisible, orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
+
+  useEffect(() => {
+    if (handledActivityRevisionRef.current === activationRevision) return;
+    handledActivityRevisionRef.current = activationRevision;
+    if (!ordinaryReadActive || orderRealtimeEnabled || !record?.order_id) return;
+    if (!isOrderDetailStatusRefreshDue(
+      detailStatusLastSuccessfulAtRef.current,
+      ORDER_DETAIL_STATUS_REFRESH_MS,
+    )) return;
+    if (detailStatusPollInFlightRef.current) return;
+    recordAppActivityRefreshTrigger();
+    void refreshLiveDetailProductionStatuses();
+  }, [activationRevision, orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);

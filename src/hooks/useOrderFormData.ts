@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { authSession } from '../api/authSession';
 import { subscribeOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
@@ -10,8 +10,13 @@ import {
   invalidateOrderFormDataCache,
   isOrderFormDataCacheStale,
   prefetchOrderFormData,
+  prepareOrderFormDataActivationRefresh,
 } from '../query/orderFormDataCache';
 import { useOrderLifecycleReadActive } from '../query/orderLifecycleQueries';
+import {
+  recordAppActivityRefreshTrigger,
+  useAppActivitySnapshot,
+} from '../performance/appActivityCoordinator';
 
 export {
   invalidateOrderFormDataCache,
@@ -73,7 +78,8 @@ interface UseOrderFormDataResult {
 
 export function useOrderFormData(enabled = featureFlags.useBackendReferences): UseOrderFormDataResult {
   const lifecycleReadActive = useOrderLifecycleReadActive();
-  const readEnabled = enabled && lifecycleReadActive;
+  const { activationRevision, documentVisible } = useAppActivitySnapshot();
+  const readEnabled = enabled && lifecycleReadActive && documentVisible;
   const cacheGeneration = getOrderFormDataCacheGeneration();
   const [dataState, setDataState] = useState<{
     generation: number;
@@ -89,6 +95,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
   const [error, setError] = useState<Error | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [, setAuthRevision] = useState(0);
+  const handledActivationRevisionRef = useRef(activationRevision);
 
   useEffect(() => authSession.subscribe(() => {
     setAuthRevision((revision) => revision + 1);
@@ -103,19 +110,18 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     };
     const unsubscribe = subscribeOrderFormReferencesChanged(refresh);
 
-    // Covers reference changes made in another browser/session: returning to
-    // the order tab refreshes the aggregate without reloading the order page.
-    if (typeof window !== 'undefined') {
-      window.addEventListener('focus', refresh);
-    }
-
-    return () => {
-      unsubscribe();
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('focus', refresh);
-      }
-    };
+    return unsubscribe;
   }, [readEnabled]);
+
+  useEffect(() => {
+    if (handledActivationRevisionRef.current === activationRevision) return;
+    handledActivationRevisionRef.current = activationRevision;
+    if (!readEnabled) return;
+    const decision = prepareOrderFormDataActivationRefresh(activationRevision);
+    if (!decision.refreshRequired) return;
+    if (decision.ownsRefresh) recordAppActivityRefreshTrigger();
+    setRefreshVersion((version) => version + 1);
+  }, [activationRevision, readEnabled]);
 
   useEffect(() => {
     if (!enabled) {
@@ -124,7 +130,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
       setError(null);
       return;
     }
-    if (!lifecycleReadActive) {
+    if (!lifecycleReadActive || !documentVisible) {
       setIsLoading(false);
       return;
     }
@@ -133,7 +139,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     setError(null);
 
     const cachedFormData = getCachedOrderFormData();
-    if (cachedFormData && !isOrderFormDataCacheStale() && refreshVersion === 0) {
+    if (cachedFormData && !isOrderFormDataCacheStale()) {
       setDataState({ generation: cacheGeneration, data: cachedFormData });
       setIsLoading(false);
       return;
@@ -171,7 +177,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     return () => {
       cancelled = true;
     };
-  }, [cacheGeneration, enabled, lifecycleReadActive, refreshVersion]);
+  }, [cacheGeneration, documentVisible, enabled, lifecycleReadActive, refreshVersion]);
 
   const references = useMemo(() => mapOrderFormDataToReferences(data), [data]);
 

@@ -5,6 +5,10 @@ import { featureFlags } from '../config/featureFlags';
 import { getLoadedRuntimeConfig } from '../config/runtimeConfig';
 import { assignOrderLifecycleCohort } from './orderLifecycleRollout';
 import {
+  getAppActivityDiagnostics,
+  subscribeAppActivityDiagnostics,
+} from './appActivityCoordinator';
+import {
   createRumSessionNonce,
   submitPerformanceRumBatch,
   subscribeOrderLifecycleMetrics,
@@ -18,6 +22,7 @@ const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 interface ActiveRumSession {
   batch: Omit<PerformanceRumBatch, 'measurements'>;
   measurements: Map<string, PerformanceRumBatch['measurements'][number]>;
+  activityRefreshBaseline: number;
 }
 
 const ZERO_SAFETY_METRICS = [
@@ -74,6 +79,19 @@ export const PerformanceRumBridge = () => {
       for (const name of ZERO_SAFETY_METRICS) {
         measurements.set(name, { name, value: 0 });
       }
+      const activityDiagnostics = getAppActivityDiagnostics();
+      measurements.set('activity_coordinator_owner_count', {
+        name: 'activity_coordinator_owner_count',
+        value: activityDiagnostics.coordinatorOwnerCount,
+      });
+      measurements.set('activity_coordinator_listener_count', {
+        name: 'activity_coordinator_listener_count',
+        value: activityDiagnostics.domListenerCount,
+      });
+      measurements.set('activity_refresh_trigger_count', {
+        name: 'activity_refresh_trigger_count',
+        value: 0,
+      });
       activeSession = {
         batch: {
           schemaVersion: 1,
@@ -86,6 +104,7 @@ export const PerformanceRumBridge = () => {
           orderRealtimeMode: initialRealtimeMode(route),
         },
         measurements,
+        activityRefreshBaseline: activityDiagnostics.refreshTriggerCount,
       };
     };
 
@@ -99,6 +118,22 @@ export const PerformanceRumBridge = () => {
   useEffect(() => {
     const unsubscribeMetrics = subscribeOrderLifecycleMetrics((measurement) => {
       activeSession?.measurements.set(measurement.name, measurement);
+    });
+    const unsubscribeActivity = subscribeAppActivityDiagnostics((diagnostics) => {
+      const session = activeSession;
+      if (!session) return;
+      session.measurements.set('activity_coordinator_owner_count', {
+        name: 'activity_coordinator_owner_count',
+        value: diagnostics.coordinatorOwnerCount,
+      });
+      session.measurements.set('activity_coordinator_listener_count', {
+        name: 'activity_coordinator_listener_count',
+        value: diagnostics.domListenerCount,
+      });
+      session.measurements.set('activity_refresh_trigger_count', {
+        name: 'activity_refresh_trigger_count',
+        value: Math.max(0, diagnostics.refreshTriggerCount - session.activityRefreshBaseline),
+      });
     });
     const unsubscribeBeforeClear = authSession.subscribeBeforeClear(() => {
       void flushPerformanceRumSession(true);
@@ -121,6 +156,7 @@ export const PerformanceRumBridge = () => {
     window.addEventListener('keydown', resetInactivity);
     return () => {
       unsubscribeMetrics();
+      unsubscribeActivity();
       unsubscribeBeforeClear();
       window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('pointerdown', resetInactivity);
@@ -154,6 +190,7 @@ export function rotatePerformanceRumSession(
 }
 
 export function setActivePerformanceRumSessionForTests(batch: PerformanceRumBatch): void {
+  const activityDiagnostics = getAppActivityDiagnostics();
   activeSession = {
     batch: {
       schemaVersion: batch.schemaVersion,
@@ -166,6 +203,7 @@ export function setActivePerformanceRumSessionForTests(batch: PerformanceRumBatc
       orderRealtimeMode: batch.orderRealtimeMode,
     },
     measurements: new Map(batch.measurements.map((measurement) => [measurement.name, measurement])),
+    activityRefreshBaseline: activityDiagnostics.refreshTriggerCount,
   };
 }
 

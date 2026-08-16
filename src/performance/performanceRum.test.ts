@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { authSession } from '../api/authSession';
 import {
+  PERFORMANCE_RUM_METRICS,
   recordOrderLifecycleMetric,
   submitPerformanceRumBatch,
   subscribeOrderLifecycleMetrics,
@@ -46,5 +47,10 @@ describe('performance RUM client', () => {
     recordOrderLifecycleMetric('primary_request_start_ms', Number.NaN);
     unsubscribe();
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('names listener telemetry as coordinator-owned, not app-global', () => {
+    expect(PERFORMANCE_RUM_METRICS).toContain('activity_coordinator_listener_count');
+    expect(PERFORMANCE_RUM_METRICS).not.toContain('activity_dom_listener_count');
   });
 });

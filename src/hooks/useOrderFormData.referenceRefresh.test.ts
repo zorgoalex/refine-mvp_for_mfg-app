@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
 import { authSession } from '../api/authSession';
 
@@ -6,16 +6,24 @@ const ordersApiMock = vi.hoisted(() => ({
   getFormData: vi.fn(),
 }));
 const lifecycleHarness = vi.hoisted(() => ({ active: true }));
+const activityHarness = vi.hoisted(() => ({
+  activationRevision: 0,
+  documentVisible: true,
+  recordRefresh: vi.fn(),
+}));
+const clockHarness = vi.hoisted(() => ({ now: 1_000_000 }));
 
 const reactHarness = vi.hoisted(() => {
   type EffectSlot = { deps: unknown[] | undefined; cleanup?: void | (() => void) };
   type MemoSlot = { deps: unknown[] | undefined; value: unknown };
 
   let stateSlots: unknown[] = [];
+  let refSlots: Array<{ current: unknown }> = [];
   let effectSlots: EffectSlot[] = [];
   let memoSlots: MemoSlot[] = [];
   let pendingEffects: Array<{ index: number; effect: () => void | (() => void) }> = [];
   let stateCursor = 0;
+  let refCursor = 0;
   let effectCursor = 0;
   let memoCursor = 0;
 
@@ -27,6 +35,7 @@ const reactHarness = vi.hoisted(() => {
   return {
     beginRender() {
       stateCursor = 0;
+      refCursor = 0;
       effectCursor = 0;
       memoCursor = 0;
       pendingEffects = [];
@@ -42,10 +51,12 @@ const reactHarness = vi.hoisted(() => {
     reset() {
       for (const effectSlot of effectSlots) effectSlot.cleanup?.();
       stateSlots = [];
+      refSlots = [];
       effectSlots = [];
       memoSlots = [];
       pendingEffects = [];
       stateCursor = 0;
+      refCursor = 0;
       effectCursor = 0;
       memoCursor = 0;
     },
@@ -83,6 +94,11 @@ const reactHarness = vi.hoisted(() => {
         };
         return [stateSlots[index] as T, setState] as const;
       },
+      useRef<T>(initial: T) {
+        const index = refCursor++;
+        if (!(index in refSlots)) refSlots[index] = { current: initial };
+        return refSlots[index] as { current: T };
+      },
     },
   };
 });
@@ -95,6 +111,15 @@ vi.mock('../query/orderLifecycleQueries', () => ({
   useOrderLifecycleReadActive: () => lifecycleHarness.active,
 }));
 
+vi.mock('../performance/appActivityCoordinator', () => ({
+  useAppActivitySnapshot: () => ({
+    activationRevision: activityHarness.activationRevision,
+    documentVisible: activityHarness.documentVisible,
+    windowFocused: true,
+  }),
+  recordAppActivityRefreshTrigger: activityHarness.recordRefresh,
+}));
+
 vi.mock('react', () => reactHarness.module);
 
 import {
@@ -102,6 +127,7 @@ import {
   useOrderFormData,
 } from './useOrderFormData';
 import { notifyOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
+import { ORDER_FORM_DATA_STALE_TIME_MS } from '../query/orderFormDataCache';
 
 describe('useOrderFormData live reference refresh', () => {
   const windowListeners = new Map<string, EventListener>();
@@ -109,6 +135,11 @@ describe('useOrderFormData live reference refresh', () => {
   beforeEach(() => {
     ordersApiMock.getFormData.mockReset();
     lifecycleHarness.active = true;
+    activityHarness.activationRevision = 0;
+    activityHarness.documentVisible = true;
+    activityHarness.recordRefresh.mockReset();
+    clockHarness.now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clockHarness.now);
     reactHarness.reset();
     authSession.clear();
     resetOrderFormDataCacheForTests();
@@ -138,6 +169,10 @@ describe('useOrderFormData live reference refresh', () => {
         setItem: vi.fn(),
       },
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('refetches aggregate references when a reference mutation is announced', async () => {
@@ -178,7 +213,8 @@ describe('useOrderFormData live reference refresh', () => {
     await flushPromises();
     expect(renderHook().references.films.map((option) => option.label)).toEqual(['Белая']);
 
-    window.dispatchEvent(new Event('focus'));
+    clockHarness.now += ORDER_FORM_DATA_STALE_TIME_MS + 1;
+    activityHarness.activationRevision += 1;
     renderHook();
     const refreshing = renderHook();
 
@@ -211,7 +247,9 @@ describe('useOrderFormData live reference refresh', () => {
     await flushPromises();
     expect(renderHook().references.films.map((option) => option.label)).toEqual(['Белая']);
 
-    window.dispatchEvent(new Event('focus'));
+    clockHarness.now += ORDER_FORM_DATA_STALE_TIME_MS + 1;
+    activityHarness.activationRevision += 1;
+    renderHook();
     renderHook();
     await flushPromises();
     expect(renderHook().error?.message).toBe('temporary network failure');
@@ -239,13 +277,70 @@ describe('useOrderFormData live reference refresh', () => {
     expect(renderHook().references.films.map((option) => option.label)).toEqual(['Белая']);
 
     const hidden = renderHook(false);
-    window.dispatchEvent(new Event('focus'));
+    clockHarness.now += ORDER_FORM_DATA_STALE_TIME_MS + 1;
+    activityHarness.activationRevision += 1;
+    renderHook(false);
     await flushPromises();
 
     expect(hidden.enabled).toBe(true);
     expect(hidden.isLoading).toBe(false);
     expect(hidden.references.films.map((option) => option.label)).toEqual(['Белая']);
     expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refetch fresh references on activation', async () => {
+    ordersApiMock.getFormData.mockResolvedValue(
+      createFormDataResponse([{ id: 8, name: 'Белая' }]),
+    );
+
+    renderHook();
+    await flushPromises();
+    renderHook();
+
+    activityHarness.activationRevision += 1;
+    renderHook();
+    await flushPromises();
+
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(1);
+    expect(activityHarness.recordRefresh).not.toHaveBeenCalled();
+  });
+
+  it('does not start form-data reads while the document is hidden', async () => {
+    ordersApiMock.getFormData.mockResolvedValue(
+      createFormDataResponse([{ id: 8, name: 'Белая' }]),
+    );
+    activityHarness.documentVisible = false;
+
+    const hidden = renderHook();
+    await flushPromises();
+
+    expect(hidden.isLoading).toBe(false);
+    expect(ordersApiMock.getFormData).not.toHaveBeenCalled();
+
+    activityHarness.documentVisible = true;
+    activityHarness.activationRevision += 1;
+    renderHook();
+    await flushPromises();
+
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches a TTL-stale cache after remount without explicit invalidation', async () => {
+    ordersApiMock.getFormData
+      .mockResolvedValueOnce(createFormDataResponse([{ id: 8, name: 'Белая' }]))
+      .mockResolvedValueOnce(createFormDataResponse([{ id: 9, name: 'Чёрная' }]));
+
+    renderHook();
+    await flushPromises();
+    expect(renderHook().references.films[0]?.label).toBe('Белая');
+
+    clockHarness.now += ORDER_FORM_DATA_STALE_TIME_MS + 1;
+    reactHarness.reset();
+    renderHook();
+    await flushPromises();
+
+    expect(renderHook().references.films[0]?.label).toBe('Чёрная');
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(2);
   });
 
   it('never publishes an in-flight actor A response into actor B state', async () => {
@@ -311,7 +406,7 @@ function renderHook(active = true) {
 }
 
 async function flushPromises(): Promise<void> {
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 12; index += 1) {
     await Promise.resolve();
   }
 }

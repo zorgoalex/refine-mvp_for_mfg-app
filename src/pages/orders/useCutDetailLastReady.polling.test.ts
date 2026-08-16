@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CutDetailLastReadyResponse } from '../../api/types/cutApi.types';
 
 const cutApiMock = vi.hoisted(() => ({
@@ -12,6 +12,12 @@ const cutJobEventsMock = vi.hoisted(() => ({
 
 const lifecycleMock = vi.hoisted(() => ({ active: true }));
 const authNamespaceMock = vi.hoisted(() => ({ value: 'actor-a' }));
+const activityMock = vi.hoisted(() => ({
+  activationRevision: 0,
+  documentVisible: true,
+  recordRefresh: vi.fn(),
+}));
+const clockMock = vi.hoisted(() => ({ now: 1_000_000 }));
 
 const reactHarness = vi.hoisted(() => {
   type EffectSlot = { deps: unknown[] | undefined; cleanup?: void | (() => void) };
@@ -121,13 +127,20 @@ vi.mock('../../query/orderLifecycleQueries', () => ({
 vi.mock('../../query/authCacheNamespace', () => ({
   useAuthCacheNamespace: () => authNamespaceMock.value,
 }));
+vi.mock('../../performance/appActivityCoordinator', () => ({
+  useAppActivitySnapshot: () => ({
+    activationRevision: activityMock.activationRevision,
+    documentVisible: activityMock.documentVisible,
+    windowFocused: true,
+  }),
+  recordAppActivityRefreshTrigger: activityMock.recordRefresh,
+}));
 vi.mock('react', () => reactHarness.module);
 
 import { useCutDetailLastReady } from './useCutDetailLastReady';
 
 describe('useCutDetailLastReady polling', () => {
   let intervalHandler: (() => void) | undefined;
-  let focusHandler: (() => void) | undefined;
   let readyListener: ((payload: unknown) => void) | undefined;
 
   beforeEach(() => {
@@ -139,22 +152,27 @@ describe('useCutDetailLastReady polling', () => {
       return () => undefined;
     });
     intervalHandler = undefined;
-    focusHandler = undefined;
     readyListener = undefined;
     lifecycleMock.active = true;
     authNamespaceMock.value = 'actor-a';
-    vi.stubGlobal('document', { visibilityState: 'visible' });
+    activityMock.activationRevision = 0;
+    activityMock.documentVisible = true;
+    activityMock.recordRefresh.mockReset();
+    clockMock.now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clockMock.now);
     vi.stubGlobal('window', {
-      addEventListener: vi.fn((type: string, listener: () => void) => {
-        if (type === 'focus') focusHandler = listener;
-      }),
-      removeEventListener: vi.fn(),
       setInterval: vi.fn((handler: () => void) => {
         intervalHandler = handler;
         return 1;
       }),
-      clearInterval: vi.fn(),
+      clearInterval: vi.fn(() => {
+        intervalHandler = undefined;
+      }),
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('keeps state identity for unchanged snapshots and applies a new ready version', async () => {
@@ -188,8 +206,28 @@ describe('useCutDetailLastReady polling', () => {
     await flushPromises();
     renderHook();
 
-    vi.stubGlobal('document', { visibilityState: 'hidden' });
+    activityMock.documentVisible = false;
+    renderHook();
     intervalHandler?.();
+    await flushPromises();
+
+    expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start cut reads while mounted hidden', async () => {
+    cutApiMock.listDetailLastReady.mockResolvedValue(response(2));
+    activityMock.documentVisible = false;
+
+    const hidden = renderHook();
+    await flushPromises();
+
+    expect(hidden.loaded).toBe(false);
+    expect(cutApiMock.listDetailLastReady).not.toHaveBeenCalled();
+    expect(cutJobEventsMock.subscribeCutJobReady).not.toHaveBeenCalled();
+
+    activityMock.documentVisible = true;
+    activityMock.activationRevision += 1;
+    renderHook();
     await flushPromises();
 
     expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
@@ -274,7 +312,7 @@ describe('useCutDetailLastReady polling', () => {
     expect(failedNextScope.cutJobByDetailId.has(1)).toBe(false);
   });
 
-  it('deduplicates concurrent interval, focus, and ready-event refreshes', async () => {
+  it('deduplicates concurrent interval, activation, and ready-event refreshes', async () => {
     cutApiMock.listDetailLastReady.mockResolvedValueOnce(response(2));
     renderHook([2, 1]);
     await flushPromises();
@@ -285,7 +323,9 @@ describe('useCutDetailLastReady polling', () => {
     cutJobEventsMock.cutJobReadyAffects.mockReturnValue(true);
 
     intervalHandler?.();
-    focusHandler?.();
+    clockMock.now += 15_001;
+    activityMock.activationRevision += 1;
+    renderHook([1, 2]);
     readyListener?.({ cutJobId: 9, name: 'Раскрой', detailIds: [1], orderIds: [7] });
 
     expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(2);
@@ -303,7 +343,9 @@ describe('useCutDetailLastReady polling', () => {
 
     const hidden = renderHook([1], false);
     intervalHandler?.();
-    focusHandler?.();
+    clockMock.now += 15_001;
+    activityMock.activationRevision += 1;
+    renderHook([1], false);
     await flushPromises();
 
     expect(hidden).toBe(loaded);
@@ -316,7 +358,8 @@ describe('useCutDetailLastReady polling', () => {
     lifecycleMock.active = false;
 
     const hidden = renderHook([1], undefined);
-    focusHandler?.();
+    activityMock.activationRevision += 1;
+    renderHook([1], undefined);
     readyListener?.({ cutJobId: 9, name: 'Раскрой', detailIds: [1], orderIds: [7] });
     await flushPromises();
 
@@ -329,6 +372,35 @@ describe('useCutDetailLastReady polling', () => {
     await flushPromises();
 
     expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh a fresh snapshot on activation', async () => {
+    cutApiMock.listDetailLastReady.mockResolvedValue(response(2));
+    renderHook();
+    await flushPromises();
+    renderHook();
+
+    activityMock.activationRevision += 1;
+    renderHook();
+    await flushPromises();
+
+    expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
+    expect(activityMock.recordRefresh).not.toHaveBeenCalled();
+  });
+
+  it('refreshes one stale snapshot on activation', async () => {
+    cutApiMock.listDetailLastReady.mockResolvedValue(response(2));
+    renderHook();
+    await flushPromises();
+    renderHook();
+
+    clockMock.now += 15_001;
+    activityMock.activationRevision += 1;
+    renderHook();
+    await flushPromises();
+
+    expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(2);
+    expect(activityMock.recordRefresh).toHaveBeenCalledTimes(1);
   });
 });
 

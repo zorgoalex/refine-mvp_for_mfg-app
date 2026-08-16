@@ -9,6 +9,7 @@ import {
 } from '../../api/orderRealtimeApi';
 import type { CutDetailLastReadyJobRef } from '../../api/types/cutApi.types';
 import { setPerformanceRumRealtimeMode } from '../../performance/PerformanceRumBridge';
+import { useAppActivitySnapshot } from '../../performance/appActivityCoordinator';
 import { areCutJobLinkMapsEqual, buildCutJobLinkMaps } from './cutColumnHelpers';
 
 const INVALIDATION_COALESCE_MS = 40;
@@ -50,7 +51,7 @@ export function useOrderDetailLiveState({
   authScopeKey,
   orderId,
 }: UseOrderDetailLiveStateArgs): OrderDetailLiveStateMaps {
-  const visible = useDocumentVisible();
+  const { documentVisible: visible } = useAppActivitySnapshot();
   const normalizedOrderId = Number(orderId);
   const scopeKey = Number.isSafeInteger(normalizedOrderId) && normalizedOrderId > 0
     ? `${authScopeKey}|order:${normalizedOrderId}`
@@ -458,19 +459,6 @@ function isOrderRealtimeResetReason(value: unknown): boolean {
     || value === 'buffer_overflow'
     || value === 'schema_unsupported'
     || value === 'listener_recovered_with_gap';
-}
-
-function useDocumentVisible(): boolean {
-  const [visible, setVisible] = useState(() => (
-    typeof document === 'undefined' || document.visibilityState !== 'hidden'
-  ));
-  useEffect(() => {
-    if (typeof document === 'undefined') return undefined;
-    const update = () => setVisible(document.visibilityState !== 'hidden');
-    document.addEventListener('visibilitychange', update);
-    return () => document.removeEventListener('visibilitychange', update);
-  }, []);
-  return visible;
 }
 
 function areNumberMapsEqual(

@@ -6,6 +6,13 @@ let cachedFormData: OrderFormDataResponse | null = null;
 let pendingFormDataRequest: Promise<OrderFormDataResponse> | null = null;
 let formDataCacheGeneration = 0;
 let formDataCacheStale = false;
+let formDataFetchedAt = 0;
+let activationRefreshDecision: {
+  revision: number;
+  refreshRequired: boolean;
+} = { revision: -1, refreshRequired: false };
+
+export const ORDER_FORM_DATA_STALE_TIME_MS = 60_000;
 
 authSession.subscribeBeforeClear(() => {
   clearOrderFormDataCache();
@@ -16,7 +23,8 @@ export function getCachedOrderFormData(): OrderFormDataResponse | null {
 }
 
 export function isOrderFormDataCacheStale(): boolean {
-  return formDataCacheStale;
+  return formDataCacheStale
+    || (cachedFormData !== null && Date.now() - formDataFetchedAt >= ORDER_FORM_DATA_STALE_TIME_MS);
 }
 
 export function getOrderFormDataCacheGeneration(): number {
@@ -28,6 +36,25 @@ export function resetOrderFormDataCacheForTests(): void {
   cachedFormData = null;
   pendingFormDataRequest = null;
   formDataCacheStale = false;
+  formDataFetchedAt = 0;
+  activationRefreshDecision = { revision: -1, refreshRequired: false };
+}
+
+export function prepareOrderFormDataActivationRefresh(activationRevision: number): {
+  refreshRequired: boolean;
+  ownsRefresh: boolean;
+} {
+  if (activationRefreshDecision.revision === activationRevision) {
+    return {
+      refreshRequired: activationRefreshDecision.refreshRequired,
+      ownsRefresh: false,
+    };
+  }
+
+  const refreshRequired = pendingFormDataRequest === null && isOrderFormDataCacheStale();
+  activationRefreshDecision = { revision: activationRevision, refreshRequired };
+  if (refreshRequired) invalidateOrderFormDataCache();
+  return { refreshRequired, ownsRefresh: refreshRequired };
 }
 
 export function invalidateOrderFormDataCache(): void {
@@ -41,26 +68,27 @@ export function clearOrderFormDataCache(): void {
   cachedFormData = null;
   pendingFormDataRequest = null;
   formDataCacheStale = false;
+  formDataFetchedAt = 0;
+  activationRefreshDecision = { revision: -1, refreshRequired: false };
 }
 
 export function prefetchOrderFormData(): Promise<OrderFormDataResponse> {
   if (!pendingFormDataRequest) {
     const requestGeneration = formDataCacheGeneration;
-    pendingFormDataRequest = ordersApi
+    const request = ordersApi
       .getFormData()
       .then((response) => {
         if (requestGeneration === formDataCacheGeneration) {
           cachedFormData = response;
           formDataCacheStale = false;
+          formDataFetchedAt = Date.now();
         }
         return response;
       })
-      .catch((error) => {
-        if (requestGeneration === formDataCacheGeneration) {
-          pendingFormDataRequest = null;
-        }
-        throw error;
+      .finally(() => {
+        if (pendingFormDataRequest === request) pendingFormDataRequest = null;
       });
+    pendingFormDataRequest = request;
   }
 
   return pendingFormDataRequest;

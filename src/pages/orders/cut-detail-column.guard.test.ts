@@ -62,7 +62,12 @@ describe('cut detail column', () => {
     expect(show).toContain('areDetailProductionStatusMapsEqual');
     expect(show).toContain('setLiveDetailProductionStatusState({');
     expect(show).toContain('value: nextLiveStatuses');
-    expect(show).toContain("document.addEventListener('visibilitychange'");
+    expect(show).toContain('useAppActivitySnapshot');
+    expect(show).toContain('activationRevision');
+    expect(show).toContain('detailsDataUpdatedAt');
+    expect(show).toContain('queryResult.dataUpdatedAt');
+    expect(show).toContain('mergeOrderDetailStatusFreshness');
+    expect(show).not.toContain("document.addEventListener('visibilitychange'");
     expect(show).toContain("resource: \"production_statuses\"");
     expect(show).toContain('canViewProductionReferences');
     expect(show).not.toContain('refetch: refetchDetails');

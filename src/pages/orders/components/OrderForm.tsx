@@ -963,6 +963,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
   // Reset store and didInit when orderId changes (handles navigation between orders)
   const didInit = useRef(false);
+  const backendOrderLoadAttemptedRef = useRef(false);
   const prevOrderIdRef = useRef<number | undefined>(undefined);
   const prevAuthNamespaceRef = useRef(authCacheNamespace);
 
@@ -971,6 +972,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     // Actor/permission-scope changes must never preserve another auth owner's draft.
     reset();
     didInit.current = false;
+    backendOrderLoadAttemptedRef.current = false;
     prevAuthNamespaceRef.current = authCacheNamespace;
   }, [authCacheNamespace, reset]);
 
@@ -982,6 +984,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         reset();
       }
       didInit.current = false;
+      backendOrderLoadAttemptedRef.current = false;
       prevOrderIdRef.current = orderId;
     }
   }, [orderId, reset]);
@@ -999,13 +1002,17 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
     // A restored dirty draft (sessionStorage rehydration) is authoritative —
     // do not clobber it via a backend reload.
-    if (getOrderDraftStore(orderKey).getState().isDirty) {
+    if (
+      !backendOrderLoadAttemptedRef.current
+      && getOrderDraftStore(orderKey).getState().isDirty
+    ) {
       didInit.current = true;
       return;
     }
 
     const loadToken = backendOrderLoadGuard.capture();
     if (!loadToken) return;
+    backendOrderLoadAttemptedRef.current = true;
     let cancelled = false;
     setBackendOrderLoadingState({ scopeKey: backendOrderLoadScopeKey, value: true });
 
@@ -1013,7 +1020,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       // peek (non-creating): a load resolving after discard must not resurrect the slice.
       getOrderStore: () => peekOrderDraftStore(orderKey)?.getState() ?? null,
       canPublish: () => backendOrderLoadGuard.isCurrent(loadToken),
-    })
+      })
       .then((formValues) => {
         if (cancelled || !backendOrderLoadGuard.isCurrent(loadToken) || !formValues) return;
         didInit.current = true;
@@ -1039,6 +1046,9 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
     return () => {
       cancelled = true;
+      setBackendOrderLoadingState((current) => current?.scopeKey === backendOrderLoadScopeKey
+        ? { ...current, value: false }
+        : current);
     };
   }, [
     backendOrderLoadGuard.active,
@@ -1055,7 +1065,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
   // Load order data in edit mode (one-time per orderId)
   useEffect(() => {
-    if (didInit.current) return;
+    if (useBackendOrderRead || didInit.current) return;
     // A restored dirty draft is authoritative — do not clobber it via loadOrder().
     if (mode === 'edit' && getOrderDraftStore(orderKey).getState().isDirty) {
       didInit.current = true;
@@ -1138,6 +1148,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       }
     }
   }, [
+    useBackendOrderRead,
     mode,
     orderData,
     detailsData,

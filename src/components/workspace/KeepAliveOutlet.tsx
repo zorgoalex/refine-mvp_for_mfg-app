@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { useOutlet, useLocation } from 'react-router-dom';
 import { useTabStore } from '../../stores/tabStore';
 import { isKeepAliveEligible, nextKeepAliveCache } from './keepAlive';
 import { activateWorkspace, KeepAliveContext } from './KeepAliveContext';
+import { useAppActivitySnapshot } from '../../performance/appActivityCoordinator';
 
 export const KeepAliveOutlet: React.FC = () => {
   const outlet = useOutlet();
@@ -10,7 +11,7 @@ export const KeepAliveOutlet: React.FC = () => {
   const tabs = useTabStore((s) => s.tabs);
   const activeKey = location.pathname;
   const cacheRef = useRef<Map<string, React.ReactNode>>(new Map());
-  const documentVisible = useDocumentVisible();
+  const { documentVisible } = useAppActivitySnapshot();
   const activationTrackerRef = useRef({
     lastActiveKey: '',
     nextRevision: 0,
@@ -68,19 +69,3 @@ export const KeepAliveOutlet: React.FC = () => {
     </>
   );
 };
-
-function useDocumentVisible(): boolean {
-  const [visible, setVisible] = useState(
-    () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
-  );
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return undefined;
-    const update = () => setVisible(document.visibilityState !== 'hidden');
-    document.addEventListener('visibilitychange', update);
-    update();
-    return () => document.removeEventListener('visibilitychange', update);
-  }, []);
-
-  return visible;
-}

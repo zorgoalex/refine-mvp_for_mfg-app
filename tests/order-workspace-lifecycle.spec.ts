@@ -294,6 +294,122 @@ test.describe('order workspace lifecycle', () => {
         page.off('download', countDownload);
         expect(downloadEvents).toBe(0);
     });
+
+    test('coalesces flag-off show and edit focus refresh without realtime reads', async ({ page }) => {
+        test.setTimeout(180_000);
+        const db = createWorkflowMockDb();
+        db.orders.push(createOrderRow(1));
+        db.order_details.push(createOrderDetailRow(1));
+
+        await setupWorkflowMockApi(page, db, {
+            runtimeConfig: false,
+            authUser: {
+                id: '1',
+                user_id: 1,
+                username: 'admin',
+                role: 'admin',
+                role_id: 1,
+                permissions: ['orders.view', 'orders.update', 'cut.view'],
+            },
+        });
+        await page.route(/\/runtime-config\.json$/, fulfillTreatmentBackendReadRuntimeConfig);
+        let orderDtoResponses = 0;
+        await page.route(/\/api\/v1\/orders\/1$/, async (route) => {
+            orderDtoResponses += 1;
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ order: createLifecycleOrderDto(1) }),
+            });
+        });
+        await page.route(/\/api\/v1\/cut-jobs\/detail-last-ready(?:\?.*)?$/, async (route) => {
+            const ids = new URL(route.request().url()).searchParams.get('detailIds')
+                ?.split(',')
+                .map(Number)
+                .filter((id) => Number.isInteger(id) && id > 0) ?? [];
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    details: ids.map((detailId) => ({
+                        orderDetailId: detailId,
+                        cutJob: null,
+                        bathCutJob: null,
+                    })),
+                }),
+            });
+        });
+
+        let legacyStatusReads = 0;
+        let cutReads = 0;
+        let realtimeReads = 0;
+        const countRefreshRead = (request: Request) => {
+            if (isFlagOffDetailStatusRead(request)) legacyStatusReads += 1;
+            if (new URL(request.url()).pathname === '/api/v1/cut-jobs/detail-last-ready') {
+                cutReads += 1;
+            }
+            if (isOrderRealtimeRead(request)) realtimeReads += 1;
+        };
+        page.on('request', countRefreshRead);
+
+        await page.goto('/login', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('input[autocomplete="username"]')).toBeVisible({ timeout: 90_000 });
+        await installControllableDateNow(page);
+        await navigateSpa(page, '/orders/show/1');
+        await expect(page).toHaveURL(/\/orders\/show\/1$/, { timeout: 90_000 });
+        await expect(page.getByRole('heading', { name: 'Просмотр заказа' }))
+            .toBeVisible({ timeout: 90_000 });
+        await expect.poll(() => cutReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+        await page.waitForTimeout(500);
+
+        legacyStatusReads = 0;
+        cutReads = 0;
+        await dispatchFocusBurst(page);
+        await page.waitForTimeout(250);
+        expect(legacyStatusReads).toBe(0);
+        expect(cutReads).toBe(0);
+
+        await advanceBrowserClock(page, 16_000);
+        await dispatchFocusBurst(page);
+        await expect.poll(() => legacyStatusReads).toBe(1);
+        await expect.poll(() => cutReads).toBe(1);
+        await page.waitForTimeout(250);
+        expect(legacyStatusReads).toBe(1);
+        expect(cutReads).toBe(1);
+        expect(realtimeReads).toBe(0);
+
+        legacyStatusReads = 0;
+        cutReads = 0;
+        orderDtoResponses = 0;
+        await navigateSpa(page, '/orders/edit/1');
+        await expect(page).toHaveURL(/\/orders\/edit\/1$/, { timeout: 90_000 });
+        await expect.poll(() => orderDtoResponses, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+        const editDetailsTab = page.getByRole('tab', { name: /^(Детали заказа|Состав)$/ });
+        await expect(editDetailsTab).toBeVisible({ timeout: 30_000 });
+        if (await editDetailsTab.getAttribute('aria-selected') !== 'true') {
+            await editDetailsTab.click();
+            await expect(editDetailsTab).toHaveAttribute('aria-selected', 'true');
+        }
+        await expect.poll(() => cutReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
+        await page.waitForTimeout(500);
+        legacyStatusReads = 0;
+        cutReads = 0;
+
+        await dispatchFocusBurst(page);
+        await page.waitForTimeout(250);
+        expect(legacyStatusReads).toBe(0);
+        expect(cutReads).toBe(0);
+
+        await advanceBrowserClock(page, 16_000);
+        await dispatchFocusBurst(page);
+        await expect.poll(() => cutReads).toBe(1);
+        await page.waitForTimeout(250);
+        expect(legacyStatusReads).toBe(0);
+        expect(cutReads).toBe(1);
+        expect(realtimeReads).toBe(0);
+
+        page.off('request', countRefreshRead);
+    });
 });
 
 function isOrderInventoryRead(request: Request): boolean {
@@ -325,6 +441,48 @@ function isOrderManualSurfaceRead(request: Request): boolean {
         || /^\/api\/v1\/cut-jobs\/\d+\/groups\/\d+\/sheets\/\d+\/png$/.test(path);
 }
 
+function isFlagOffDetailStatusRead(request: Request): boolean {
+    return request.method() === 'GET'
+        && new URL(request.url()).pathname === '/api/v1/orders/1';
+}
+
+function isOrderRealtimeRead(request: Request): boolean {
+    const path = new URL(request.url()).pathname;
+    return /^\/api\/v1\/orders\/\d+\/(detail-live-state|live-events)$/.test(path);
+}
+
+async function installControllableDateNow(page: Page): Promise<void> {
+    await page.evaluate(() => {
+        const browserWindow = window as typeof window & {
+            __erpRealDateNow?: () => number;
+            __erpDateBaseMs?: number;
+            __erpDateOffsetMs?: number;
+        };
+        browserWindow.__erpRealDateNow ??= Date.now.bind(Date);
+        browserWindow.__erpDateBaseMs = browserWindow.__erpRealDateNow();
+        browserWindow.__erpDateOffsetMs = 0;
+        Date.now = () => (
+            browserWindow.__erpDateBaseMs ?? 0
+        ) + (browserWindow.__erpDateOffsetMs ?? 0);
+    });
+}
+
+async function advanceBrowserClock(page: Page, deltaMs: number): Promise<void> {
+    await page.evaluate((delta) => {
+        const browserWindow = window as typeof window & { __erpDateOffsetMs?: number };
+        browserWindow.__erpDateOffsetMs = (browserWindow.__erpDateOffsetMs ?? 0) + delta;
+    }, deltaMs);
+}
+
+async function dispatchFocusBurst(page: Page): Promise<void> {
+    await page.evaluate(() => {
+        window.dispatchEvent(new Event('blur'));
+        window.dispatchEvent(new Event('focus'));
+        window.dispatchEvent(new Event('focus'));
+        window.dispatchEvent(new Event('focus'));
+    });
+}
+
 async function navigateSpa(page: Page, path: string): Promise<void> {
     await page.evaluate((nextPath) => {
         window.history.pushState({}, '', nextPath);
@@ -354,6 +512,35 @@ async function fulfillTreatmentRuntimeConfig(route: Route): Promise<void> {
                     percent: 100,
                     allocationSalt: 'playwright-stage1-workspace',
                     configVersion: 'stage1-pr11-v1',
+                },
+            },
+        }),
+    });
+}
+
+async function fulfillTreatmentBackendReadRuntimeConfig(route: Route): Promise<void> {
+    await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+            apiUrl: '',
+            observability: { performanceRum: false },
+            features: {
+                backendAuth: false,
+                backendPermissions: false,
+                backendOrdersRead: true,
+                backendOrdersWrite: false,
+                backendReferences: false,
+                backendCut: true,
+                orderRealtime: false,
+                enableLegacyHasura: true,
+            },
+            rollouts: {
+                orderLifecycleV2: {
+                    enabled: true,
+                    percent: 100,
+                    allocationSalt: 'playwright-stage1-pr12',
+                    configVersion: 'stage1-pr12-v1',
                 },
             },
         }),
@@ -394,5 +581,56 @@ function createOrderDetailRow(orderId: number): Record<string, unknown> {
         film_id: 1,
         version: 1,
         delete_flag: false,
+    };
+}
+
+function createLifecycleOrderDto(orderId: number): Record<string, unknown> {
+    return {
+        header: {
+            orderId,
+            orderName: `Lifecycle ${orderId}`,
+            clientId: 1,
+            clientName: 'Базовый клиент',
+            orderDate: '2026-08-15',
+            orderStatusId: 1,
+            paymentStatusId: 1,
+            productionStatusId: 1,
+            priority: 100,
+            version: 1,
+        },
+        details: [{
+            id: orderId,
+            orderId,
+            detailNumber: 1,
+            detailName: `Деталь ${orderId}`,
+            height: 600,
+            width: 400,
+            quantity: 1,
+            area: 0.24,
+            materialId: 1,
+            millingTypeId: 1,
+            edgeTypeId: 1,
+            filmId: 1,
+            detailCost: 0,
+            bazisProjectId: null,
+            productionStatusId: 1,
+            priority: 100,
+            version: 1,
+        }],
+        payments: [],
+        workshops: [],
+        requirements: [],
+        dowelingLinks: [],
+        totals: {
+            totalAmount: 0,
+            discount: 0,
+            surcharge: 0,
+            finalAmount: 0,
+            paidAmount: 0,
+            debtAmount: 0,
+            partsCount: 1,
+            totalArea: 0.24,
+        },
+        version: 1,
     };
 }

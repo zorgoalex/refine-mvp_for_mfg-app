@@ -29,6 +29,7 @@ import { can } from "./utils/permissions";
 import type { PermissionName } from "./api/types/authApi.types";
 import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility";
 import { PerformanceRumBridge } from "./performance/PerformanceRumBridge";
+import { AppActivityCoordinatorBridge } from "./performance/appActivityCoordinator";
 import { appRefineReactQueryOptions } from "./query/appQueryClient";
 import {
   OrderPrimaryRouteGate,
@@ -255,6 +256,7 @@ const ThemedApp = () => {
   return (
     <ErrorBoundary>
       <BrowserRouter>
+        <AppActivityCoordinatorBridge />
         <PerformanceRumBridge />
         <RefineKbarProvider>
           <ConfigProvider

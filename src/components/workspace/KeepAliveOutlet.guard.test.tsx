@@ -21,7 +21,8 @@ describe('KeepAliveOutlet guards', () => {
     expect(outlet).toContain('workspaceActive: key === activeKey');
     expect(outlet).toContain('activationRevision:');
     expect(outlet).toContain('documentVisible');
-    expect(outlet).toContain("document.addEventListener('visibilitychange', update)");
+    expect(outlet).toContain('useAppActivitySnapshot');
+    expect(outlet).not.toContain("document.addEventListener('visibilitychange'");
   });
   it('keeps an already cached route node instead of replacing it on return', () => {
     expect(outlet).toContain('!cacheRef.current.has(activeKey)');

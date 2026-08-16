@@ -18,6 +18,7 @@ const httpClientMock = vi.hoisted(() => ({
 const performanceRumMock = vi.hoisted(() => ({
   setPerformanceRumRealtimeMode: vi.fn(),
 }));
+const activityMock = vi.hoisted(() => ({ documentVisible: true }));
 
 const reactHarness = vi.hoisted(() => {
   type EffectSlot = { deps: unknown[] | undefined; cleanup?: void | (() => void) };
@@ -99,6 +100,13 @@ vi.mock('react', () => reactHarness.module);
 vi.mock('../../api/authSession', () => ({ authSession: authSessionMock }));
 vi.mock('../../api/httpClient', () => httpClientMock);
 vi.mock('../../performance/PerformanceRumBridge', () => performanceRumMock);
+vi.mock('../../performance/appActivityCoordinator', () => ({
+  useAppActivitySnapshot: () => ({
+    activationRevision: 0,
+    documentVisible: activityMock.documentVisible,
+    windowFocused: true,
+  }),
+}));
 vi.mock('../../api/orderRealtimeApi', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../api/orderRealtimeApi')>();
   return { ...original, orderRealtimeApi: realtimeApiMock };
@@ -107,7 +115,6 @@ vi.mock('../../api/orderRealtimeApi', async (importOriginal) => {
 import { useOrderDetailLiveState } from './useOrderDetailLiveState';
 
 describe('useOrderDetailLiveState lifecycle', () => {
-  let visibilityHandler: (() => void) | undefined;
   let authHandler: (() => void) | undefined;
   let timers: Array<{ id: number; delay: number; handler: () => void }>;
   let nextTimerId: number;
@@ -139,16 +146,9 @@ describe('useOrderDetailLiveState lifecycle', () => {
       authHandler = handler;
       return () => undefined;
     });
-    visibilityHandler = undefined;
+    activityMock.documentVisible = true;
     timers = [];
     nextTimerId = 1;
-    vi.stubGlobal('document', {
-      visibilityState: 'visible',
-      addEventListener: vi.fn((type: string, handler: () => void) => {
-        if (type === 'visibilitychange') visibilityHandler = handler;
-      }),
-      removeEventListener: vi.fn(),
-    });
     vi.stubGlobal('window', {
       setTimeout: vi.fn((handler: () => void, delay: number) => {
         const id = nextTimerId++;
@@ -211,8 +211,7 @@ describe('useOrderDetailLiveState lifecycle', () => {
     await flushPromises();
     const signal = realtimeApiMock.openLiveEvents.mock.calls[0]?.[2] as AbortSignal;
 
-    (document as unknown as { visibilityState: string }).visibilityState = 'hidden';
-    visibilityHandler?.();
+    activityMock.documentVisible = false;
     renderHook(true);
 
     expect(signal.aborted).toBe(true);
