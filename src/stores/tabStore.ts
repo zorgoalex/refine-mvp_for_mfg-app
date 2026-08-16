@@ -4,6 +4,8 @@ import { authSession } from '../api/authSession';
 import { authStorage } from '../utils/auth';
 import { resolveTabLabel, shouldPreserveTabLabel } from '../utils/tabLabels';
 import { destroyOrderDraftStore } from './orderFormStore';
+import { removeWorkspaceCheckpoint } from '../workspace/workspaceCheckpointRegistry';
+import { releaseWorkspaceAttachments } from '../workspace/workspaceAttachmentRegistry';
 
 export const LEGACY_WORKSPACE_TABS_STORAGE_KEY = 'workspace-tabs';
 const INACTIVE_WORKSPACE_TABS_STORAGE_KEY = 'erp.workspaceTabs.anonymous';
@@ -141,6 +143,8 @@ export const useTabStore = create<TabState>()(
           return { tabs: [...state.tabs, { ...nextTab, dirty: false }] };
         }),
       closeTab: (key, opts) => {
+        removeWorkspaceCheckpoint(key);
+        releaseWorkspaceAttachments(key);
         if (opts?.discard) {
           const orderKey = orderKeyFromTab(key);
           if (orderKey) destroyOrderDraftStore(orderKey);

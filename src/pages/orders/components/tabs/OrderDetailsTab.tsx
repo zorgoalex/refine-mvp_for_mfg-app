@@ -2,7 +2,7 @@ import { Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
-import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
+import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo, useEffect } from 'react';
 import { Card, Button, Space, Modal, message, Alert } from 'antd';
 import {
   PlusOutlined,
@@ -56,6 +56,10 @@ import {
   OrderLifecycleReadSurface,
   useOrderAsyncReadGuard,
 } from '../../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import { useDeferredWorkspaceEntity } from '../../../../workspace/useDeferredWorkspaceEntity';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -115,6 +119,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     applyOrderRefresh,
   } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || `/orders/edit/${header?.order_id ?? 'new'}`;
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'order-details-tab'),
+  ).current;
   const refreshGuard = useOrderAsyncReadGuard(`order-details-refresh:${header?.order_id ?? 'new'}`);
   const refreshScopeKey = `${refreshGuard.authNamespace}|order:${header?.order_id ?? 'new'}`;
 
@@ -140,28 +149,59 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     [defaultSheetMaterialTypeId],
   );
 
-  const [modalOpen, setModalOpen] = useState(false);
+  const restoredModalOpen = restored?.detailModalOpen === true;
+  const restoredModalMode = restored?.detailModalMode === 'edit' ? 'edit' : 'create';
+  const restoredEditingDetailKey = readReactKey(restored?.editingDetailKey);
+  const restoreEditRequested = restoredModalOpen && restoredModalMode === 'edit';
+  const {
+    entity: editingDetail,
+    setEntity: setEditingDetail,
+    restoreReady: restoredEditReady,
+    restorePending: restoredEditPending,
+    cancelDeferredRestore: cancelDeferredDetailRestore,
+  } = useDeferredWorkspaceEntity({
+    restoreRequested: restoreEditRequested,
+    restoredKey: restoredEditingDetailKey,
+    entities: details,
+    getKey: (detail: OrderDetail) => detail.temp_id ?? detail.detail_id ?? null,
+  });
+  const [modalOpen, setModalOpen] = useState(
+    () => restoredModalOpen && (!restoreEditRequested || restoredEditReady),
+  );
   const [refreshState, setRefreshState] = useState<{
     scopeKey: string;
     inFlight: boolean;
   } | null>(null);
   const isRefreshing = refreshState?.scopeKey === refreshScopeKey
     && refreshState.inFlight;
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
-  const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
-  const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'create' | 'edit'>(
+    restoredModalMode,
+  );
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>(
+    () => readReactKeys(restored?.selectedRowKeys),
+  );
+  const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(
+    () => readReactKey(restored?.highlightedRowKey),
+  );
+  const [bulkEditModalOpen, setBulkEditModalOpen] = useState(
+    () => restored?.bulkEditModalOpen === true,
+  );
   const [dragSelectionState, setDragSelectionState] = useState<DragSelectionState | null>(null);
   const tableRef = useRef<OrderDetailTableRef>(null);
 
+  useEffect(() => {
+    if (restoreEditRequested && restoredEditReady && editingDetail) setModalOpen(true);
+  }, [editingDetail, restoreEditRequested, restoredEditReady]);
+
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
   const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view');
-  const [addToCutOpen, setAddToCutOpen] = useState(false);
+  const [addToCutOpen, setAddToCutOpen] = useState(() => restored?.addToCutOpen === true);
   const bazisCutVisible = featureFlags.bazisCut;
   const bazisCutManage = can('cut.manage');
   const canRefreshOrder = !featureFlags.useBackendPermissions || can('orders.update');
-  const [addToBazisCutOpen, setAddToBazisCutOpen] = useState(false);
+  const [addToBazisCutOpen, setAddToBazisCutOpen] = useState(
+    () => restored?.addToBazisCutOpen === true,
+  );
   const selectedPersistedDetailIds = useMemo(
     () => selectedDetailIds(details as any[], selectedRowKeys),
     [details, selectedRowKeys],
@@ -178,7 +218,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         .filter((detailId): detailId is number => Number.isInteger(detailId) && detailId > 0),
     [details],
   );
-  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(() => restored?.transferOpen === true);
   const transferDetailIds = selectedPersistedDetailIds;
   const canTransferDetails = can('orders.update') && can('orders.view_financials');
   const canCreateTransferTarget = can('orders.create');
@@ -210,6 +250,21 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const transferDisabledReason = getTransferRowsDisabledReason(selectedRowKeys);
   const transferDisabled = !!transferDisabledReason;
   const transferTooltip = transferDisabledReason ?? `Перенести детали (${transferDetailIds.length})`;
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'order-details-tab', {
+    canCapture: () => dragSelectionState === null && !restoredEditPending,
+    capture: () => ({
+      detailModalOpen: modalOpen,
+      detailModalMode: modalMode,
+      editingDetailKey: editingDetail?.temp_id ?? editingDetail?.detail_id ?? null,
+      selectedRowKeys: selectedRowKeys.filter(isSerializableReactKey),
+      highlightedRowKey: isSerializableReactKey(highlightedRowKey) ? highlightedRowKey : null,
+      bulkEditModalOpen,
+      addToCutOpen,
+      addToBazisCutOpen,
+      transferOpen,
+    }),
+  });
   const embeddedCutJobMaps = useMemo(() => buildCutJobLinkMapsFromDetails(details), [details]);
   const fetchedCutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
@@ -336,6 +391,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
 
   // Handle create new detail via modal
   const handleCreate = () => {
+    cancelDeferredDetailRestore();
     setModalMode('create');
     setEditingDetail(undefined);
     setModalOpen(true);
@@ -374,6 +430,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
 
   // Handle edit existing detail
   const handleEdit = (detail: OrderDetail) => {
+    cancelDeferredDetailRestore();
     setModalMode('edit');
     setEditingDetail(detail);
     setModalOpen(true);
@@ -976,6 +1033,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
             detail={editingDetail}
             onSave={handleSave}
             onCancel={() => {
+              cancelDeferredDetailRestore();
               setModalOpen(false);
               setEditingDetail(undefined);
             }}
@@ -1036,3 +1094,17 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     </Card>
   );
 });
+
+function isSerializableReactKey(value: React.Key | null | undefined): value is string | number {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
+}
+
+function readReactKey(value: unknown): React.Key | null {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))
+    ? value
+    : null;
+}
+
+function readReactKeys(value: unknown): React.Key[] {
+  return Array.isArray(value) ? value.map(readReactKey).filter(isSerializableReactKey) : [];
+}

@@ -1,17 +1,29 @@
 // Main Excel Import Modal with wizard steps
 
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { Modal, Steps, Button, Space, message } from 'antd';
 import { UploadOutlined, SelectOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
 import { useList } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { useExcelParser, useRangeSelection, useImportValidation } from './hooks';
 import { FileUploadStep, RangeSelectionStep, ValidationStep } from './steps';
-import type { ImportStep, FieldMapping, ImportableField, SelectionRange, ReferenceData } from './types/importTypes';
+import type { ImportStep, FieldMapping, ImportableField, SelectionRange, ReferenceData, ValidatedRow } from './types/importTypes';
+import type { WorkBook } from 'xlsx';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { calculateOrderDetailArea } from '../../../../utils/orderArea';
 import { sortOptionsByRecency, useRecentReferences } from '../../../../hooks/useRecentReferences';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import {
+  deleteWorkspaceCheckpointAdapterState,
+  readWorkspaceCheckpointAdapterState,
+} from '../../../../workspace/workspaceCheckpointRegistry';
+import {
+  readWorkspaceAttachment,
+  releaseWorkspaceAttachment,
+  retainWorkspaceAttachment,
+} from '../../../../workspace/workspaceAttachmentRegistry';
 
 interface ExcelImportModalProps {
   open: boolean;
@@ -37,9 +49,15 @@ const emptyMapping = (): FieldMapping => ({
 });
 
 export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClose }) => {
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'excel-import-wizard'),
+  ).current;
+  const restoreStartedRef = useRef(false);
   const [currentStep, setCurrentStep] = useState<ImportStep>('upload');
-  const [hasHeaders, setHasHeaders] = useState(false);
-  const [mapping, setMapping] = useState<FieldMapping>(emptyMapping());
+  const [hasHeaders, setHasHeaders] = useState(() => restored?.hasHeaders === true);
+  const [mapping, setMapping] = useState<FieldMapping>(() => readFieldMapping(restored?.mapping));
 
   const excelParser = useExcelParser();
   const rangeSelection = useRangeSelection();
@@ -48,6 +66,71 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   const addDetail = useOrderFormStore((state) => state.addDetail);
   const recalculateFinancials = useOrderFormStore((state) => state.recalculateFinancials);
   const materialRecency = useRecentReferences('sheet_material_types');
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'excel-import-wizard', {
+    canCapture: () => !excelParser.isLoading
+      && !rangeSelection.isSelecting
+      && (!excelParser.sheetData
+        || readWorkspaceAttachment<File>(workspaceKey, 'excel-file') !== null),
+    capture: () => ({
+      open,
+      currentStep,
+      hasHeaders,
+      mapping,
+      ranges: rangeSelection.ranges,
+      activeRangeId: rangeSelection.activeRangeId,
+      selectedSheet: excelParser.selectedSheet,
+      validatedRows: importValidation.validatedRows,
+    }),
+  });
+
+  useLayoutEffect(() => {
+    if (!open || restoreStartedRef.current || restored?.open !== true) return;
+    restoreStartedRef.current = true;
+    let cancelled = false;
+    const file = readWorkspaceAttachment<File>(workspaceKey, 'excel-file');
+    const workbook = readWorkspaceAttachment<WorkBook>(workspaceKey, 'excel-workbook');
+    if (!file || (!workbook && typeof file.arrayBuffer !== 'function')) {
+      setCurrentStep('upload');
+      return;
+    }
+    const restoreWizardState = () => {
+      if (cancelled) return;
+      rangeSelection.clearRanges();
+      const ranges = readSelectionRanges(restored.ranges);
+      ranges.forEach(rangeSelection.addRange);
+      const activeRangeId = typeof restored.activeRangeId === 'string'
+        ? restored.activeRangeId
+        : null;
+      rangeSelection.setActiveRange(
+        ranges.some((range) => range.id === activeRangeId) ? activeRangeId : ranges.at(-1)?.id ?? null,
+      );
+      importValidation.restoreValidatedRows(readValidatedRows(restored.validatedRows));
+      setCurrentStep(readExcelImportStep(restored.currentStep));
+    };
+    const selectedSheet = typeof restored.selectedSheet === 'string' ? restored.selectedSheet : null;
+    if (workbook && excelParser.restoreWorkbook(workbook, selectedSheet)) {
+      restoreWizardState();
+      return;
+    }
+    void excelParser.parseFile(file, selectedSheet).then(restoreWizardState);
+    return () => {
+      cancelled = true;
+    };
+  }, [excelParser, importValidation, open, rangeSelection, restored, workspaceKey]);
+
+  useEffect(() => {
+    if (!excelParser.workbook) return;
+    const file = readWorkspaceAttachment<File>(workspaceKey, 'excel-file');
+    if (!file) return;
+    retainWorkspaceAttachment({
+      workspaceKey,
+      attachmentKey: 'excel-workbook',
+      value: excelParser.workbook,
+      kind: 'parsed-workbook',
+      estimatedBytes: Math.min(64 * 1024 * 1024, Math.max(file.size, file.size * 4)),
+    });
+  }, [excelParser.workbook, workspaceKey]);
 
   // Load reference data
   const { data: edgeTypesData } = useList({
@@ -207,8 +290,27 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
     setCurrentStep('upload');
     setHasHeaders(false);
     setMapping(emptyMapping());
+    releaseWorkspaceAttachment(workspaceKey, 'excel-file');
+    releaseWorkspaceAttachment(workspaceKey, 'excel-workbook');
+    deleteWorkspaceCheckpointAdapterState(workspaceKey, 'excel-import-wizard');
     onClose();
-  }, [excelParser, rangeSelection, importValidation, onClose]);
+  }, [excelParser, rangeSelection, importValidation, onClose, workspaceKey]);
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    const retained = retainWorkspaceAttachment({
+      workspaceKey,
+      attachmentKey: 'excel-file',
+      value: file,
+      kind: 'file',
+    });
+    if (!retained) {
+      const error = new Error('Лимит памяти черновиков исчерпан. Закройте другой импорт и повторите.');
+      message.error(error.message);
+      throw error;
+    }
+    releaseWorkspaceAttachment(workspaceKey, 'excel-workbook');
+    await excelParser.parseFile(file);
+  }, [excelParser, workspaceKey]);
 
   const handleImport = useCallback(() => {
     const validRows = importValidation.getValidRows();
@@ -283,7 +385,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
             sheetData={excelParser.sheetData}
             isLoading={excelParser.isLoading}
             error={excelParser.error}
-            onFileUpload={excelParser.parseFile}
+            onFileUpload={handleFileUpload}
             onSheetSelect={excelParser.selectSheet}
           />
         );
@@ -332,7 +434,6 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   };
 
   return (
-    <DraggableModalWrapper open={open}>
       <Modal
         title="Импорт деталей из Excel"
         open={open}
@@ -380,6 +481,11 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
             </Space>
           </div>
         }
+        modalRender={(modal) => (
+          <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>
+            {modal}
+          </DraggableModalWrapper>
+        )}
       >
         <Steps
           current={currentStepIndex}
@@ -392,6 +498,52 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
           {renderStepContent()}
         </div>
       </Modal>
-    </DraggableModalWrapper>
   );
 };
+
+function readExcelImportStep(value: unknown): ImportStep {
+  return value === 'select' || value === 'validation' ? value : 'upload';
+}
+
+function readFieldMapping(value: unknown): FieldMapping {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return emptyMapping();
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(emptyMapping()).map((key) => [
+    key,
+    typeof source[key] === 'string' ? source[key] : null,
+  ])) as unknown as FieldMapping;
+}
+
+function readSelectionRanges(value: unknown): SelectionRange[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): SelectionRange[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const range = entry as Record<string, unknown>;
+    if (
+      typeof range.id !== 'string'
+      || !Number.isSafeInteger(range.startRow)
+      || !Number.isSafeInteger(range.endRow)
+      || !Number.isSafeInteger(range.startCol)
+      || !Number.isSafeInteger(range.endCol)
+    ) return [];
+    return [{
+      id: range.id,
+      startRow: Number(range.startRow),
+      endRow: Number(range.endRow),
+      startCol: Number(range.startCol),
+      endCol: Number(range.endCol),
+      ...(typeof range.color === 'string' ? { color: range.color } : {}),
+    }];
+  });
+}
+
+function readValidatedRows(value: unknown): ValidatedRow[] {
+  return Array.isArray(value)
+    ? value.filter((row): row is ValidatedRow => (
+        !!row && typeof row === 'object' && !Array.isArray(row)
+        && typeof row.isValid === 'boolean'
+        && Array.isArray(row.errors)
+        && Array.isArray(row.warnings)
+      ))
+    : [];
+}

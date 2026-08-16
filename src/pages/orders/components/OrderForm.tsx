@@ -61,6 +61,13 @@ import {
   useOrderAsyncReadGuard,
   useOrderLifecycleReadActive,
 } from '../../../query/orderLifecycleQueries';
+import { useWorkspaceCheckpointAdapter } from '../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../workspace/workspaceCheckpointRegistry';
+import {
+  restoreWorkspaceDomCheckpoint,
+} from '../../../workspace/workspaceDomCheckpoint';
+import { useWorkspaceDomCheckpointCapture } from '../../../workspace/workspaceDomCheckpointReact';
+import type { WorkspaceSerializableRecord } from '../../../workspace/workspaceUiStateStore';
 
 // Sections
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
@@ -195,6 +202,14 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
   const tabKey = useWorkspaceTabKey(location.pathname);
+  const restoredOrderFormCheckpoint = useMemo(
+    () => readWorkspaceCheckpointAdapterState(tabKey, 'order-form'),
+    [tabKey],
+  );
+  const captureOrderFormDomCheckpoint = useWorkspaceDomCheckpointCapture(
+    tabKey,
+    asWorkspaceRecord(restoredOrderFormCheckpoint?.dom),
+  );
   const bazisDraft = readBazisDraftFromLocationState(location.state);
 
   const {
@@ -369,7 +384,23 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Read sub-tab reactively from the URL (do NOT strip/replace it — the workspace
   // tab keeps its query so deep-links into an already-open tab still work).
   const activeTabFromUrl = new URLSearchParams(location.search).get('tab') || 'details';
-  const [activeTab, setActiveTab] = useState(activeTabFromUrl);
+  const [activeTab, setActiveTab] = useState(() => (
+    typeof restoredOrderFormCheckpoint?.activeTab === 'string'
+      ? restoredOrderFormCheckpoint.activeTab
+      : activeTabFromUrl
+  ));
+  useWorkspaceCheckpointAdapter(tabKey, 'order-form', {
+    capture: () => ({
+      activeTab,
+      dirty: getOrderDraftStore(orderKey).getState().isDirty,
+      draftVersion: getOrderDraftStore(orderKey).getState().version,
+      dom: captureOrderFormDomCheckpoint(),
+    }),
+  });
+  useLayoutEffect(() => restoreWorkspaceDomCheckpoint(
+    tabKey,
+    asWorkspaceRecord(restoredOrderFormCheckpoint?.dom),
+  ), [restoredOrderFormCheckpoint, tabKey]);
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
   const ordersReadBackendMode = getOrdersReadBackendMode(useBackendOrderRead);
   const authCacheNamespace = useAuthCacheNamespace(ordersReadBackendMode);
@@ -2036,4 +2067,10 @@ function readBazisDraftFromLocationState(state: unknown): BazisOrderDraftRespons
   }
 
   return draft;
+}
+
+function asWorkspaceRecord(value: unknown): WorkspaceSerializableRecord | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as WorkspaceSerializableRecord
+    : null;
 }

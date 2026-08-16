@@ -6,6 +6,9 @@ import { Dropdown, Button, Spin } from 'antd';
 import type { MenuProps } from 'antd';
 import { ImportOutlined, FileExcelOutlined, FilePdfOutlined, CameraOutlined, DownOutlined } from '@ant-design/icons';
 import { OrderToolbarLabel } from '../OrderDetailsToolbar';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
 
 const ExcelImportModal = lazy(async () => ({
   default: (await import('./ExcelImportModal')).ExcelImportModal,
@@ -24,9 +27,20 @@ interface ImportDropdownButtonProps {
 }
 
 export const ImportDropdownButton: React.FC<ImportDropdownButtonProps> = ({ disabled }) => {
-  const [excelModalOpen, setExcelModalOpen] = useState(false);
-  const [pdfModalOpen, setPdfModalOpen] = useState(false);
-  const [vlmModalOpen, setVlmModalOpen] = useState(false);
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = readWorkspaceCheckpointAdapterState(workspaceKey, 'order-import-surfaces');
+  const [excelModalOpen, setExcelModalOpen] = useState(() => restored?.excelOpen === true);
+  const [pdfModalOpen, setPdfModalOpen] = useState(() => restored?.pdfOpen === true);
+  const [vlmModalOpen, setVlmModalOpen] = useState(() => restored?.vlmOpen === true);
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'order-import-surfaces', {
+    capture: () => ({
+      excelOpen: excelModalOpen,
+      pdfOpen: pdfModalOpen,
+      vlmOpen: vlmModalOpen,
+    }),
+  });
 
   const handleExcelOpen = useCallback(() => {
     setExcelModalOpen(true);

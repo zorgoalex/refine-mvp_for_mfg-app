@@ -7,6 +7,7 @@ import { useCreate } from '@refinedev/core';
 import { PhoneOutlined, StarFilled } from '@ant-design/icons';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { PHONE_TYPE_LABELS } from '../../../../types/clients';
+import { useWorkspaceModalFormCheckpoint } from '../../../../workspace/workspaceModalFormCheckpoint';
 
 const PHONE_TYPE_OPTIONS = Object.entries(PHONE_TYPE_LABELS).map(([value, label]) => ({
   value,
@@ -25,6 +26,7 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
   onSuccess,
 }) => {
   const [form] = Form.useForm();
+  const workspaceKey = useWorkspaceModalFormCheckpoint('client-quick-create', open, form);
   const { mutateAsync: createClient, isLoading: isClientLoading } = useCreate();
   const { mutateAsync: createPhone } = useCreate();
 
@@ -98,7 +100,9 @@ export const ClientQuickCreate: React.FC<ClientQuickCreateProps> = ({
       okText="Создать"
       cancelText="Отмена"
       width={500}
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      modalRender={(modal) => (
+        <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>{modal}</DraggableModalWrapper>
+      )}
     >
       <Form
         form={form}

@@ -1,9 +1,13 @@
-import React, { useRef } from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import { useOutlet, useLocation } from 'react-router-dom';
 import { useTabStore } from '../../stores/tabStore';
 import { isKeepAliveEligible, nextKeepAliveCache } from './keepAlive';
 import { activateWorkspace, KeepAliveContext } from './KeepAliveContext';
 import { useAppActivitySnapshot } from '../../performance/appActivityCoordinator';
+import {
+  captureWorkspaceCheckpoint,
+  hasWorkspaceCheckpointAdapters,
+} from '../../workspace/workspaceCheckpointRegistry';
 
 export const KeepAliveOutlet: React.FC = () => {
   const outlet = useOutlet();
@@ -18,7 +22,16 @@ export const KeepAliveOutlet: React.FC = () => {
     revisionByKey: new Map<string, number>(),
   });
   const activationTracker = activationTrackerRef.current;
+  const previousActiveKeyRef = useRef(activeKey);
   activateWorkspace(activationTracker, activeKey);
+
+  useLayoutEffect(() => {
+    const previousActiveKey = previousActiveKeyRef.current;
+    previousActiveKeyRef.current = activeKey;
+    if (previousActiveKey !== activeKey && hasWorkspaceCheckpointAdapters(previousActiveKey)) {
+      captureWorkspaceCheckpoint(previousActiveKey);
+    }
+  }, [activeKey]);
 
   const activeTab = tabs.find((t) => t.key === activeKey);
   const activeDirty = activeTab?.dirty ?? false;

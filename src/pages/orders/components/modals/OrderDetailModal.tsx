@@ -1,7 +1,7 @@
 // Order Detail Modal
 // Modal for creating/editing order details with auto-calculation
 
-import React, { useEffect, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Modal, Form, Input, InputNumber, Row, Col, Select, Space, Button, Alert, Checkbox } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
@@ -21,6 +21,13 @@ import {
   validateSheetDimensions,
 } from '../../../../utils/materialDimensionValidation';
 import { calculateOrderDetailArea } from '../../../../utils/orderArea';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import {
+  captureAntFormCheckpoint,
+  restoreAntFormCheckpoint,
+} from '../../../../workspace/workspaceFormCheckpoint';
 
 interface OrderDetailModalProps {
   open: boolean;
@@ -38,6 +45,12 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   onCancel,
 }) => {
   const [form] = Form.useForm();
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'detail-modal'),
+  ).current;
+  const restorePendingRef = useRef(restored?.open === true);
   const [calculatedArea, setCalculatedArea] = useState<number>(0);
   const [calculatedCost, setCalculatedCost] = useState<number>(0);
   const [millingTypeModalOpen, setMillingTypeModalOpen] = useState(false);
@@ -112,26 +125,58 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
     : productionStatusSelectProps;
 
   // Initialize form when detail changes
-  useEffect(() => {
-    if (open) {
-      if (mode === 'edit' && detail) {
-        form.setFieldsValue(detail);
-        setCalculatedArea(detail.area || 0);
-        setCalculatedCost(detail.detail_cost || 0);
-      } else {
-        form.resetFields();
-        form.setFieldsValue({
-          priority: 100,
-          milling_type_id: 1, // Модерн
-          hdf_parameter_override_mm: null,
-          edge_type_id: 1, // р-1
-        });
-        setCalculatedArea(0);
-        setCalculatedCost(0);
-        setDimensionValidationError(null);
-      }
+  useWorkspaceCheckpointAdapter(workspaceKey, 'detail-modal', {
+    capture: () => ({
+      open,
+      mode,
+      detailKey: detailIdentity(detail),
+      calculatedArea,
+      calculatedCost,
+      millingTypeModalOpen,
+      edgeTypeModalOpen,
+      dimensionValidationError,
+      form: captureAntFormCheckpoint(form),
+    }),
+  });
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (
+      restorePendingRef.current
+      && restored?.mode === mode
+      && restored.detailKey === detailIdentity(detail)
+      && restoreAntFormCheckpoint(form, restored.form)
+    ) {
+      setCalculatedArea(readFiniteNumber(restored.calculatedArea) ?? 0);
+      setCalculatedCost(readFiniteNumber(restored.calculatedCost) ?? 0);
+      setMillingTypeModalOpen(restored.millingTypeModalOpen === true);
+      setEdgeTypeModalOpen(restored.edgeTypeModalOpen === true);
+      setDimensionValidationError(
+        typeof restored.dimensionValidationError === 'string'
+          ? restored.dimensionValidationError
+          : null,
+      );
+      restorePendingRef.current = false;
+      return;
     }
-  }, [open, mode, detail, form]);
+    restorePendingRef.current = false;
+    if (mode === 'edit' && detail) {
+      form.setFieldsValue(detail);
+      setCalculatedArea(detail.area || 0);
+      setCalculatedCost(detail.detail_cost || 0);
+    } else {
+      form.resetFields();
+      form.setFieldsValue({
+        priority: 100,
+        milling_type_id: 1, // Модерн
+        hdf_parameter_override_mm: null,
+        edge_type_id: 1, // р-1
+      });
+      setCalculatedArea(0);
+      setCalculatedCost(0);
+      setDimensionValidationError(null);
+    }
+  }, [open, mode, detail, form, restored]);
 
   // Validate dimensions against material limits
   const validateDimensions = () => {
@@ -248,7 +293,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
       width={800}
       okText="Сохранить"
       cancelText="Отмена"
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      modalRender={(modal) => (
+        <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>
+          {modal}
+        </DraggableModalWrapper>
+      )}
     >
       <Form form={form} layout="vertical">
         {/* Dimension validation error alert */}
@@ -536,3 +585,11 @@ export const OrderDetailModal: React.FC<OrderDetailModalProps> = ({
   </>
   );
 };
+
+function detailIdentity(detail: OrderDetail | undefined): string | number | null {
+  return detail?.temp_id ?? detail?.detail_id ?? null;
+}
+
+function readFiniteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}

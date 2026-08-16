@@ -1,10 +1,13 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Form, Input, Modal, Radio, Select, Space, message } from 'antd';
 import { cutApi } from '../../../api/cutApi';
 import { ApiError } from '../../../api/httpClient';
 import type { CutDetailPlacements, CutJobDto } from '../../../api/types/cutApi.types';
 import { emitCutJobReady } from '../../cut/cutJobEvents';
 import { buildCutAddWarning, formatPlacementsMessage, restrictDetailIds, selectableDetailIds } from '../../cut/cutPageHelpers';
+import { useKeepAlive } from '../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../workspace/workspaceCheckpointRegistry';
 
 interface AddToCutModalProps {
   open: boolean;
@@ -26,6 +29,12 @@ interface AddToCutModalProps {
  * details are resolved on the backend and reserved.
  */
 export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, orderNames, detailIds, nameSuffix, onClose, onDone }) => {
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'add-to-cut-modal'),
+  ).current;
+  const restorePendingRef = useRef(restored?.open === true);
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [name, setName] = useState('');
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -38,17 +47,41 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
   // a fall-through that adds the whole order's eligible details.
   const detailMode = Array.isArray(detailIds);
 
+  useWorkspaceCheckpointAdapter(workspaceKey, 'add-to-cut-modal', {
+    canCapture: () => !busy,
+    capture: () => ({
+      open,
+      orderIds,
+      detailIds: detailIds ?? null,
+      mode,
+      name,
+      targetJobId,
+    }),
+  });
+
   useEffect(() => {
     if (!open) return;
     const orderLabel = formatOrderLabelForCutName(orderIds, orderNames);
-    setName(
-      buildDefaultCutName(
-        detailMode
-          ? `Раскрой заказ ${orderLabel}`
-          : `Раскрой ${orderLabel}`,
-        nameSuffix,
-      ),
-    );
+    const canRestore = restorePendingRef.current
+      && equalPositiveIntegerArray(restored?.orderIds, orderIds)
+      && equalOptionalPositiveIntegerArray(restored?.detailIds, detailIds);
+    if (canRestore) {
+      setMode(restored?.mode === 'existing' ? 'existing' : 'new');
+      setName(typeof restored?.name === 'string' ? restored.name : '');
+      setTargetJobId(readPositiveInteger(restored?.targetJobId));
+    } else {
+      setMode('new');
+      setName(
+        buildDefaultCutName(
+          detailMode
+            ? `Раскрой заказ ${orderLabel}`
+            : `Раскрой ${orderLabel}`,
+          nameSuffix,
+        ),
+      );
+      setTargetJobId(null);
+    }
+    restorePendingRef.current = false;
     cutApi
       .list()
       .then((list) => setJobs(list.filter((j) => j.status === 'draft')))
@@ -115,6 +148,9 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
       okText="Добавить"
       cancelText="Отмена"
       okButtonProps={{ disabled: mode === 'existing' && targetJobId === null }}
+      modalRender={(modal) => (
+        <div data-workspace-portal-key={workspaceKey}>{modal}</div>
+      )}
     >
       <Space direction="vertical" style={{ width: '100%' }}>
         <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}>
@@ -127,7 +163,12 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
         {mode === 'new' ? (
           <Form layout="vertical">
             <Form.Item label="Название раскроя">
-              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} />
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={200}
+                data-workspace-field="cut-name"
+              />
             </Form.Item>
           </Form>
         ) : (
@@ -179,4 +220,25 @@ function formatOrderLabelForCutName(orderIds: number[], orderNames?: Array<strin
       return orderName || String(orderId);
     })
     .join(', ');
+}
+
+function readPositiveInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function equalPositiveIntegerArray(value: unknown, expected: readonly number[]): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && value.every((item, index) => item === expected[index]);
+}
+
+function equalOptionalPositiveIntegerArray(
+  value: unknown,
+  expected: readonly number[] | undefined,
+): boolean {
+  return expected === undefined
+    ? value === null
+    : equalPositiveIntegerArray(value, expected);
 }

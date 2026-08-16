@@ -6,6 +6,7 @@ import { Modal, Form, Input, InputNumber, notification, Collapse } from 'antd';
 import { useCreate } from '@refinedev/core';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { useWorkspaceModalFormCheckpoint } from '../../../../workspace/workspaceModalFormCheckpoint';
 
 interface MillingTypeQuickCreateProps {
   open: boolean;
@@ -19,6 +20,7 @@ export const MillingTypeQuickCreate: React.FC<MillingTypeQuickCreateProps> = ({
   onSuccess,
 }) => {
   const [form] = Form.useForm();
+  const workspaceKey = useWorkspaceModalFormCheckpoint('milling-quick-create', open, form);
   const { mutate: createMillingType, isLoading } = useCreate();
 
   const handleOk = async () => {
@@ -73,7 +75,9 @@ export const MillingTypeQuickCreate: React.FC<MillingTypeQuickCreateProps> = ({
       okText="Создать"
       cancelText="Отмена"
       width={500}
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      modalRender={(modal) => (
+        <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>{modal}</DraggableModalWrapper>
+      )}
     >
       <Form form={form} layout="vertical" initialValues={{ sort_order: 100 }}>
         <Form.Item

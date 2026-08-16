@@ -125,6 +125,13 @@ import {
   useOrderLifecycleReadActive,
   useShow,
 } from "../../query/orderLifecycleQueries";
+import { useWorkspaceCheckpointAdapter } from '../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../workspace/workspaceCheckpointRegistry';
+import {
+  restoreWorkspaceDomCheckpoint,
+} from '../../workspace/workspaceDomCheckpoint';
+import { useWorkspaceDomCheckpointCapture } from '../../workspace/workspaceDomCheckpointReact';
+import type { WorkspaceSerializableRecord } from '../../workspace/workspaceUiStateStore';
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -640,6 +647,33 @@ const modalConfirm = (content: string): Promise<boolean> =>
     });
   });
 
+function readOrderInfoPanelCheckpoint(value: unknown): OrderInfoPanelKey | null {
+  return typeof value === 'string' && orderInfoTabs.some((tab) => tab.key === value)
+    ? value as OrderInfoPanelKey
+    : null;
+}
+
+function readOrderShowSorterCheckpoint(value: unknown): OrderShowActiveSorter {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const sorter = value as { key?: unknown; order?: unknown };
+  return typeof sorter.key === 'string'
+    && (sorter.order === 'ascend' || sorter.order === 'descend')
+    ? { key: sorter.key, order: sorter.order }
+    : null;
+}
+
+function readPositiveIntegerArray(value: unknown): number[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map(Number).filter((item) => Number.isSafeInteger(item) && item > 0))]
+    : [];
+}
+
+function asWorkspaceRecord(value: unknown): WorkspaceSerializableRecord | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as WorkspaceSerializableRecord
+    : null;
+}
+
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const dataProvider = useDataProvider();
@@ -650,11 +684,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const { activationRevision, documentVisible } = useAppActivitySnapshot();
   useCancelInactiveOrderQueriesOnDeactivate();
   const { id: currentOrderId } = useParams();
+  const location = useLocation();
+  const tabKey = useWorkspaceTabKey(location.pathname);
+  const restoredShowCheckpoint = useMemo(
+    () => readWorkspaceCheckpointAdapterState(tabKey, 'order-show'),
+    [tabKey],
+  );
+  const captureOrderShowDomCheckpoint = useWorkspaceDomCheckpointCapture(
+    tabKey,
+    asWorkspaceRecord(restoredShowCheckpoint?.dom),
+  );
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
-  const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
-  const [activeOperationalTab, setActiveOperationalTab] = useState('overview');
-  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(() => (
+    readOrderInfoPanelCheckpoint(restoredShowCheckpoint?.activeInfoPanel)
+  ));
+  const [activeOperationalTab, setActiveOperationalTab] = useState(() => (
+    typeof restoredShowCheckpoint?.activeOperationalTab === 'string'
+      ? restoredShowCheckpoint.activeOperationalTab
+      : 'overview'
+  ));
+  const [moveModalOpen, setMoveModalOpen] = useState(
+    () => restoredShowCheckpoint?.moveModalOpen === true,
+  );
   const [moveCandidatesState, setMoveCandidatesState] = useState<{
     scopeKey: string;
     value: ProjectDto[];
@@ -669,7 +721,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     targetProjectId?: number;
     createNew: boolean;
   } | null>(null);
-  const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(null);
+  const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(() => (
+    readOrderShowSorterCheckpoint(restoredShowCheckpoint?.activeSorter)
+  ));
   const orderShowBackendMode = getOrderShowBackendMode(featureFlags.useBackendOrdersRead);
   const authCacheNamespace = useAuthCacheNamespace(orderShowBackendMode);
   const showAsyncReadGuard = useOrderAsyncReadGuard(`order-show:${currentOrderId ?? 'missing'}`);
@@ -806,8 +860,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   ]);
 
   // The workspace tab shows only the user-facing order name, never its database id.
-  const location = useLocation();
-  const tabKey = useWorkspaceTabKey(location.pathname);
   const setTabTitle = useTabStore((s) => s.setTabTitle);
   useEffect(() => {
     if (record?.order_name) {
@@ -850,11 +902,24 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const moveUi = moveUiState?.scopeKey === moveCandidatesScopeKey ? moveUiState : null;
   const moveTargetProjectId = moveUi?.targetProjectId;
   const moveCreateNew = moveUi?.createNew ?? false;
+  const restoredMoveAppliedRef = useRef(false);
 
   useLayoutEffect(() => {
+    if (!restoredMoveAppliedRef.current) {
+      restoredMoveAppliedRef.current = true;
+      const targetProjectId = Number(restoredShowCheckpoint?.moveTargetProjectId);
+      setMoveUiState({
+        scopeKey: moveCandidatesScopeKey,
+        ...(Number.isSafeInteger(targetProjectId) && targetProjectId > 0
+          ? { targetProjectId }
+          : {}),
+        createNew: restoredShowCheckpoint?.moveCreateNew === true,
+      });
+      return;
+    }
     setMoveModalOpen(false);
     setMoveUiState({ scopeKey: moveCandidatesScopeKey, createNew: false });
-  }, [moveCandidatesScopeKey]);
+  }, [moveCandidatesScopeKey, restoredShowCheckpoint]);
 
   useEffect(() => {
     if (!ordinaryReadActive || !featureFlags.projects || !moveModalOpen || !record?.client_id) {
@@ -1442,16 +1507,48 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const bazisCutLinkEnabled = bazisCutVisible && can('cut.view');
   const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
   const detailSelectionEnabled = cutEnabled || bazisCutVisible;
-  const [cutSelectMode, setCutSelectMode] = useState(false);
-  const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
-  const [cutModalOpen, setCutModalOpen] = useState(false);
-  const [bazisCutModalOpen, setBazisCutModalOpen] = useState(false);
+  const [cutSelectMode, setCutSelectMode] = useState(
+    () => restoredShowCheckpoint?.cutSelectMode === true,
+  );
+  const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>(() => (
+    readPositiveIntegerArray(restoredShowCheckpoint?.cutSelectedDetailIds)
+  ));
+  const [cutModalOpen, setCutModalOpen] = useState(
+    () => restoredShowCheckpoint?.cutModalOpen === true,
+  );
+  const [bazisCutModalOpen, setBazisCutModalOpen] = useState(
+    () => restoredShowCheckpoint?.bazisCutModalOpen === true,
+  );
+
+  useWorkspaceCheckpointAdapter(tabKey, 'order-show', {
+    capture: () => ({
+      activeInfoPanel,
+      activeOperationalTab,
+      activeSorter: orderShowActiveSorter,
+      moveModalOpen,
+      moveTargetProjectId: moveTargetProjectId ?? null,
+      moveCreateNew,
+      cutSelectMode,
+      cutSelectedDetailIds,
+      cutModalOpen,
+      bazisCutModalOpen,
+      dom: captureOrderShowDomCheckpoint(),
+    }),
+  });
+  useLayoutEffect(() => restoreWorkspaceDomCheckpoint(
+    tabKey,
+    asWorkspaceRecord(restoredShowCheckpoint?.dom),
+  ), [restoredShowCheckpoint, tabKey]);
 
   useEffect(() => {
     if (!cutSelectMode) setCutSelectedDetailIds([]);
   }, [cutSelectMode]);
 
+  const cutSelectionOrderIdRef = useRef(Number(currentOrderId) || null);
   useEffect(() => {
+    const nextOrderId = Number(record?.order_id) || null;
+    if (nextOrderId === null || cutSelectionOrderIdRef.current === nextOrderId) return;
+    cutSelectionOrderIdRef.current = nextOrderId;
     setCutSelectMode(false);
     setCutSelectedDetailIds([]);
   }, [record?.order_id]);

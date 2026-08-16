@@ -9,12 +9,15 @@ interface DraggableModalWrapperProps {
   open?: boolean;
   /** Optional inner padding for viewport bounds */
   boundaryPadding?: number;
+  /** Associates Ant's portal DOM with its owning workspace checkpoint. */
+  workspaceKey?: string;
 }
 
 export const DraggableModalWrapper: React.FC<DraggableModalWrapperProps> = ({
   children,
   open = true,
   boundaryPadding = 16,
+  workspaceKey,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const positionRef = useRef({ x: 0, y: 0 });
@@ -125,6 +128,7 @@ export const DraggableModalWrapper: React.FC<DraggableModalWrapperProps> = ({
   return (
     <div
       ref={containerRef}
+      data-workspace-portal-key={workspaceKey}
       style={{
         transform: `translate(${position.x}px, ${position.y}px)`,
         cursor: 'move',

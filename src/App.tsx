@@ -35,6 +35,9 @@ import {
   OrderPrimaryRouteGate,
   OrderPrimaryRouteLoader,
 } from "./query/OrderPrimaryRouteLoader";
+import { installWorkspaceStateLifecycle } from "./workspace/workspaceStateLifecycle";
+
+installWorkspaceStateLifecycle();
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));

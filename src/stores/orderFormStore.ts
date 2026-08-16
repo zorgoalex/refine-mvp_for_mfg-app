@@ -16,6 +16,7 @@ import {
   OrderTotals,
 } from '../types/orders';
 import { calculateOrderTotalArea } from '../utils/orderArea';
+import { getWorkspaceStateNamespace } from '../workspace/workspaceStateNamespace';
 
 // ============================================================================
 // UNIQUE ID GENERATOR
@@ -170,14 +171,21 @@ const generateTempId = (): number => {
 // ============================================================================
 
 const DRAFT_STORAGE_PREFIX = 'order-form-storage';
-const draftStorageKey = (orderKey: string) => `${DRAFT_STORAGE_PREFIX}:${orderKey}`;
+const draftStorageKey = (orderKey: string, namespace = getWorkspaceStateNamespace()) =>
+  `${DRAFT_STORAGE_PREFIX}:${namespace}:order:${orderKey}`;
+const draftRegistryKey = (orderKey: string, namespace = getWorkspaceStateNamespace()) =>
+  `${namespace}|order:${orderKey}`;
 
 type OrderDraftStore = UseBoundStore<StoreApi<OrderFormState>>;
 
-const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
-  create<OrderFormState>()(
-  devtools(
-    persist(
+const persistedDraftStorageKeys = new Set<string>();
+
+const createOrderDraftStore = (orderKey: string, namespace: string): OrderDraftStore => {
+  const storageKey = draftStorageKey(orderKey, namespace);
+  persistedDraftStorageKeys.add(storageKey);
+  return create<OrderFormState>()(
+    devtools(
+      persist(
       (set, get) => ({
         // ========== INITIAL STATE ==========
         ...initialState,
@@ -888,7 +896,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
           ),
       }),
       {
-        name: draftStorageKey(orderKey),
+        name: storageKey,
         storage: createJSONStorage(() => sessionStorage),
         version: 3, // Increment to force migration from old storage
         // Only persist essential data for draft recovery
@@ -929,11 +937,12 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
         }),
       }
     ),
-    {
-      name: `orderFormStore:${orderKey}`,
-    }
-  )
-);
+      {
+        name: `orderFormStore:${orderKey}`,
+      }
+    )
+  );
+};
 
 // ============================================================================
 // STORE REGISTRY
@@ -944,10 +953,12 @@ const orderDraftStores = new Map<string, OrderDraftStore>();
 export const NEW_ORDER_KEY = 'new';
 
 export const getOrderDraftStore = (orderKey: string): OrderDraftStore => {
-  let store = orderDraftStores.get(orderKey);
+  const namespace = getWorkspaceStateNamespace();
+  const registryKey = draftRegistryKey(orderKey, namespace);
+  let store = orderDraftStores.get(registryKey);
   if (!store) {
-    store = createOrderDraftStore(orderKey);
-    orderDraftStores.set(orderKey, store);
+    store = createOrderDraftStore(orderKey, namespace);
+    orderDraftStores.set(registryKey, store);
   }
   return store;
 };
@@ -958,19 +969,40 @@ export const getOrderDraftStore = (orderKey: string): OrderDraftStore => {
  * was discarded) so a stale write cannot recreate the Map entry + sessionStorage.
  */
 export const peekOrderDraftStore = (orderKey: string): OrderDraftStore | undefined =>
-  orderDraftStores.get(orderKey);
+  orderDraftStores.get(draftRegistryKey(orderKey));
 
 export const destroyOrderDraftStore = (orderKey: string): void => {
-  orderDraftStores.delete(orderKey);
+  const namespace = getWorkspaceStateNamespace();
+  const storageKey = draftStorageKey(orderKey, namespace);
+  orderDraftStores.delete(draftRegistryKey(orderKey, namespace));
+  persistedDraftStorageKeys.delete(storageKey);
   try {
-    sessionStorage.removeItem(draftStorageKey(orderKey));
+    sessionStorage.removeItem(storageKey);
   } catch {
     /* sessionStorage unavailable */
   }
 };
 
 export const orderDraftStoreExists = (orderKey: string): boolean =>
-  orderDraftStores.has(orderKey);
+  orderDraftStores.has(draftRegistryKey(orderKey));
+
+export const clearAllOrderDraftStores = (): void => {
+  for (const store of orderDraftStores.values()) store.getState().reset();
+  orderDraftStores.clear();
+  try {
+    const storageKeys = new Set(persistedDraftStorageKeys);
+    for (let index = 0; index < sessionStorage.length; index += 1) {
+      const key = sessionStorage.key(index);
+      if (key?.startsWith(`${DRAFT_STORAGE_PREFIX}:`)) storageKeys.add(key);
+    }
+    storageKeys.forEach((key) => sessionStorage.removeItem(key));
+  } catch {
+    /* sessionStorage unavailable */
+  }
+  persistedDraftStorageKeys.clear();
+};
+
+export const getOrderDraftStorageKey = (orderKey: string): string => draftStorageKey(orderKey);
 
 // Scoped hook: subscribe to a specific order's draft store.
 export function useOrderDraftStore(orderKey: string): OrderFormState;

@@ -6,6 +6,7 @@ import { Modal, Form, Input, Switch, Select, notification, Divider } from 'antd'
 import { useCreate } from '@refinedev/core';
 import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { useWorkspaceModalFormCheckpoint } from '../../../../workspace/workspaceModalFormCheckpoint';
 
 interface FilmQuickCreateProps {
   open: boolean;
@@ -19,6 +20,7 @@ export const FilmQuickCreate: React.FC<FilmQuickCreateProps> = ({
   onSuccess,
 }) => {
   const [form] = Form.useForm();
+  const workspaceKey = useWorkspaceModalFormCheckpoint('film-quick-create', open, form);
   const { mutate: createFilm, isLoading } = useCreate();
 
   const { selectProps: filmTypeSelectProps } = useSelect({
@@ -92,7 +94,9 @@ export const FilmQuickCreate: React.FC<FilmQuickCreateProps> = ({
       okText="Создать"
       cancelText="Отмена"
       width={500}
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      modalRender={(modal) => (
+        <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>{modal}</DraggableModalWrapper>
+      )}
     >
       <Form
         form={form}
