@@ -99,6 +99,12 @@ const reactHarness = vi.hoisted(() => {
         if (!(index in refSlots)) refSlots[index] = { current: initial };
         return refSlots[index] as { current: T };
       },
+      useSyncExternalStore<T>(
+        _subscribe: (listener: () => void) => () => void,
+        getSnapshot: () => T,
+      ): T {
+        return getSnapshot();
+      },
     },
   };
 });

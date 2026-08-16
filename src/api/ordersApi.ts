@@ -30,8 +30,10 @@ export const ordersApi = {
     return httpClient.get<OrderListResponse>(withQuery(apiRoutes.orders.list, params));
   },
 
-  getFormData(): Promise<OrderFormDataResponse> {
-    return httpClient.get<OrderFormDataResponse>(apiRoutes.orders.formData);
+  getFormData(opts?: { signal?: AbortSignal }): Promise<OrderFormDataResponse> {
+    return httpClient.get<OrderFormDataResponse>(apiRoutes.orders.formData, {
+      signal: opts?.signal,
+    });
   },
 
   listResourceDemands(params: OrderResourceDemandQuery = {}): Promise<OrderResourceDemandResponse> {
