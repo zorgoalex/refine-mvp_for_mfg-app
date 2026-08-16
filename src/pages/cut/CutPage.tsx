@@ -2737,12 +2737,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   );
 
   // Per-piece sheet-material and film NAMES for the editor's per-sheet header.
-  // Keyed by item_id "det-<orderDetailId>" (materialName is the sheet material,
+  // Keyed by backend item_id ("det-<orderDetailId>" or "hdf-<orderHdfDetailId>").
   // Variant-B sole order-material ref).
   const pieceSheetInfoByItemId = useMemo(() => {
     const m = new Map<string, { materialName: string | null; filmName: string | null }>();
     for (const it of job?.items ?? []) {
-      m.set(`det-${it.orderDetailId}`, {
+      m.set(it.itemId ?? `det-${it.orderDetailId}`, {
         materialName: it.detail?.materialName ?? null,
         filmName: it.detail?.filmName ?? null,
       });
@@ -2755,7 +2755,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const editorLabelInfoByItemId = useMemo(() => {
     const map = new Map<string, { orderName: string | null; orderId: number | null; detailNumber: number | null; qty: number | null }>();
     for (const item of job?.items ?? []) {
-      const key = `det-${item.orderDetailId}`;
+      const key = item.itemId ?? `det-${item.orderDetailId}`;
       if (!map.has(key)) {
         map.set(key, {
           orderName: item.orderName ?? null,

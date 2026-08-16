@@ -27,10 +27,12 @@ export interface CreateCutJobRequest {
   name: string;
   criteria?: CutSelectionCriteria;
   detailIds?: number[];
+  hdfDetailIds?: number[];
 }
 
 export interface AddCutItemsRequest {
-  detailIds: number[];
+  detailIds?: number[];
+  hdfDetailIds?: number[];
   version: number;
 }
 
@@ -73,7 +75,10 @@ export interface CutDetailInfoDto {
 
 export interface CutJobItemDto {
   cutJobItemId: number;
+  sourceType?: 'order_detail' | 'order_hdf_detail';
+  itemId?: string;
   orderDetailId: number;
+  orderHdfDetailId?: number | null;
   orderId: number;
   qty: number;
   cutGroupId: number | null;

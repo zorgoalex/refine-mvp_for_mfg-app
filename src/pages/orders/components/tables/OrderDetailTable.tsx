@@ -237,7 +237,7 @@ type OrderDetailHdfDisplay = {
 
 const ORDER_DETAIL_HDF_STATUS_LABELS: Record<string, string> = {
   ok: 'ХДФ',
-  too_narrow: 'узко',
+  too_narrow: 'Узкая деталь',
   config_missing: 'нет настр.',
   source_changed: 'деталь изм.',
 };

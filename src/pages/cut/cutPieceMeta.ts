@@ -9,6 +9,7 @@
  * cross-sheet move on override jobs («другой материал листа»).
  */
 export interface PieceMetaSourceItem {
+  itemId?: string;
   orderDetailId: number;
   detail?: {
     sheetMaterialTypeId?: number | null;
@@ -27,7 +28,7 @@ export function buildPieceMetaByItemId(
 ): Map<string, PieceMeta> {
   const m = new Map<string, PieceMeta>();
   for (const it of items) {
-    m.set(`det-${it.orderDetailId}`, {
+    m.set(it.itemId ?? `det-${it.orderDetailId}`, {
       materialTypeId: jobSheetMaterialTypeId ?? it.detail?.sheetMaterialTypeId ?? null,
       filmId: it.detail?.filmId ?? null,
     });

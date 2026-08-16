@@ -44,13 +44,24 @@ const createCutJobRequestSchema = z
     name: z.string().trim().min(1).max(200),
     criteria: criteriaSchema.optional(),
     detailIds: idArray.optional(),
+    hdfDetailIds: idArray.optional(),
   })
   .strict();
 
 const addItemsRequestSchema = z
   .object({
-    detailIds: idArray.min(1),
+    detailIds: idArray.optional(),
+    hdfDetailIds: idArray.optional(),
     version: z.number().int().min(0),
+  })
+  .superRefine((value, context) => {
+    if ((value.detailIds?.length ?? 0) === 0 && (value.hdfDetailIds?.length ?? 0) === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['detailIds'],
+        message: 'At least one detail id is required',
+      });
+    }
   })
   .strict();
 
@@ -515,7 +526,7 @@ export class CutController {
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
       version: parsed.version,
-      dto: { detailIds: parsed.detailIds },
+      dto: { detailIds: parsed.detailIds, hdfDetailIds: parsed.hdfDetailIds },
       requestId: request.requestId,
     });
   }

@@ -1,14 +1,18 @@
 import React, { useMemo, useState } from 'react';
 import { Table } from '../../../../ui/tooltipDelay';
 import { Alert, Button, Card, Empty, InputNumber, Select, Space, Tag, Typography, message } from 'antd';
+import { ScissorOutlined, TableOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import type { OrderHdfDetail } from '../../../../types/orders';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { ordersApi } from '../../../../api/ordersApi';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
+import { AddToCutModal } from '../AddToCutModal';
+import { AddToBazisCutModal } from '../../../bazis-cut/AddToBazisCutModal';
+import { cutJobDeepLink } from '../../cutColumnHelpers';
 import {
   collectHdfConfigErrorDescriptions,
   describeHdfConfigErrors,
@@ -59,6 +63,9 @@ export function OrderHdfTab() {
   const orderFormData = useOrderFormData();
   const navigate = useNavigate();
   const [recalculating, setRecalculating] = useState(false);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [cutModalOpen, setCutModalOpen] = useState(false);
+  const [bazisModalOpen, setBazisModalOpen] = useState(false);
   const productionStatusOptions = orderFormData.references.productionStatuses;
   const productionStatusNameById = orderFormData.references.productionStatusNameById;
   const configErrorDescriptions = useMemo(
@@ -67,6 +74,11 @@ export function OrderHdfTab() {
   );
   const hasStaleHdfDetails = hdfDetails.some((detail) => detail.is_stale === true);
   const orderId = positiveId(header.order_id);
+  const orderName = typeof header.order_name === 'string' ? header.order_name : null;
+  const selectedHdfDetailIds = useMemo(
+    () => selectedRowKeys.map((key) => Number(key)).filter((id) => Number.isSafeInteger(id) && id > 0),
+    [selectedRowKeys],
+  );
 
   const totals = useMemo(() => {
     return hdfDetails.reduce((acc, detail) => {
@@ -107,6 +119,47 @@ export function OrderHdfTab() {
     } finally {
       setRecalculating(false);
     }
+  };
+
+  const refreshOrder = async () => {
+    if (!orderId) return;
+    const order = await ordersApi.getById(orderId);
+    loadOrder(mapOrderDtoToFormValues(order));
+    setDirty(false);
+    syncOriginals();
+    setSelectedRowKeys([]);
+  };
+
+  const openAddToCut = () => {
+    if (!orderId) {
+      message.warning('Сначала сохраните заказ');
+      return;
+    }
+    if (isDirty) {
+      message.warning('Сначала сохраните изменения заказа');
+      return;
+    }
+    if (selectedHdfDetailIds.length === 0) {
+      message.warning('Выберите рассчитанные ХДФ-детали');
+      return;
+    }
+    setCutModalOpen(true);
+  };
+
+  const openAddToBazis = () => {
+    if (!orderId) {
+      message.warning('Сначала сохраните заказ');
+      return;
+    }
+    if (isDirty) {
+      message.warning('Сначала сохраните изменения заказа');
+      return;
+    }
+    if (selectedHdfDetailIds.length === 0) {
+      message.warning('Выберите рассчитанные ХДФ-детали');
+      return;
+    }
+    setBazisModalOpen(true);
   };
 
   const columns: ColumnsType<OrderHdfDetail> = [
@@ -215,6 +268,11 @@ export function OrderHdfTab() {
                 {rowConfigErrors.join(', ')}
               </Text>
             ) : null}
+            {row.status === 'ok' ? (
+              <Text type="secondary" className="order-hdf-table__status-note" title="Из размера детали вычитается параметр с двух сторон и явный припуск 0,5 мм с каждой стороны">
+                припуск 0,5 мм/стор.
+              </Text>
+            ) : null}
           </Space>
         );
       },
@@ -240,16 +298,35 @@ export function OrderHdfTab() {
       ),
     },
     {
-      title: hdfHeader('Использ.'),
-      key: 'links',
-      width: 106,
+      title: hdfHeader('Раскрой'),
+      key: 'cut_job',
+      width: 74,
       render: (_, row) => {
-        const links = [
-          row.cut_job ? `Задание: ${row.cut_job.name}` : null,
-          ...(row.bazis_cut_sets ?? []).map((set) => `Базис: ${set.name}`),
-        ].filter(Boolean);
-        const value = links.length > 0 ? links.join(', ') : '—';
-        return hdfCompactText(value, value);
+        const ref = row.cut_job;
+        if (!ref) return '—';
+        return (
+          <Link className="order-hdf-table__link" to={cutJobDeepLink(ref)} title={ref.name}>
+            {ref.cutNumber || `#${ref.cutJobId}`}
+          </Link>
+        );
+      },
+    },
+    {
+      title: hdfHeader('Базис', 'раскрой'),
+      key: 'bazis_cut_sets',
+      width: 78,
+      render: (_, row) => {
+        const sets = row.bazis_cut_sets ?? [];
+        if (sets.length === 0) return '—';
+        return (
+          <Space size={4} wrap className="order-hdf-table__link-list">
+            {sets.map((set) => (
+              <Link key={set.bazisCutSetId} className="order-hdf-table__link" to={`/bazis-cut/${set.bazisCutSetId}`} title={set.name}>
+                {`БР-${set.bazisCutSetId}`}
+              </Link>
+            ))}
+          </Space>
+        );
       },
     },
   ];
@@ -304,6 +381,12 @@ export function OrderHdfTab() {
           <Button loading={recalculating} onClick={() => void recalculateHdf()}>
             Пересчитать ХДФ
           </Button>
+          <Button icon={<ScissorOutlined />} disabled={selectedHdfDetailIds.length === 0} onClick={openAddToCut}>
+            В раскрой
+          </Button>
+          <Button icon={<TableOutlined />} disabled={selectedHdfDetailIds.length === 0} onClick={openAddToBazis}>
+            В Базис
+          </Button>
         </Space>
       </Card>
 
@@ -319,10 +402,47 @@ export function OrderHdfTab() {
           size="small"
           bordered
           tableLayout="fixed"
+          rowSelection={{
+            selectedRowKeys,
+            onChange: setSelectedRowKeys,
+            getCheckboxProps: (row) => ({
+              disabled: !isSelectableHdfDetail(row),
+              title: isSelectableHdfDetail(row) ? undefined : 'Можно выбрать только свежие рассчитанные ХДФ-детали',
+            }),
+          }}
         />
       )}
+      {orderId ? (
+        <>
+          <AddToCutModal
+            open={cutModalOpen}
+            orderIds={[orderId]}
+            orderNames={[orderName]}
+            hdfDetailIds={selectedHdfDetailIds}
+            nameSuffix="ХДФ"
+            onClose={() => setCutModalOpen(false)}
+            onDone={() => void refreshOrder()}
+          />
+          <AddToBazisCutModal
+            open={bazisModalOpen}
+            orderId={orderId}
+            hdfDetailIds={selectedHdfDetailIds}
+            onClose={() => setBazisModalOpen(false)}
+            onDone={() => void refreshOrder()}
+          />
+        </>
+      ) : null}
     </Space>
   );
+}
+
+function isSelectableHdfDetail(row: OrderHdfDetail): boolean {
+  return row.status === 'ok'
+    && row.is_stale !== true
+    && positiveId(row.order_hdf_detail_id) !== null
+    && finiteNumber(row.hdf_height_mm) > 0
+    && finiteNumber(row.hdf_width_mm) > 0
+    && finiteNumber(row.quantity) > 0;
 }
 
 function finiteNumber(value: unknown): number {

@@ -24,10 +24,13 @@ export interface CreateCutJobRequestDto {
   criteria?: CutSelectionCriteriaDto;
   /** explicit detail ids to seed the job with (reserved on create) */
   detailIds?: number[];
+  /** explicit calculated HDF detail ids to seed the job with */
+  hdfDetailIds?: number[];
 }
 
 export interface AddCutItemsRequestDto {
-  detailIds: number[];
+  detailIds?: number[];
+  hdfDetailIds?: number[];
 }
 
 /**
@@ -69,7 +72,10 @@ export interface CutDetailInfoDto {
 
 export interface CutJobItemDto {
   cutJobItemId: number;
+  sourceType?: 'order_detail' | 'order_hdf_detail';
+  itemId?: string;
   orderDetailId: number;
+  orderHdfDetailId?: number | null;
   orderId: number;
   qty: number;
   cutGroupId: number | null;

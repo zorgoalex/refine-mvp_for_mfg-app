@@ -9,7 +9,9 @@ import { createHash } from 'node:crypto';
  */
 /** Canonical per-detail fields that affect the cut RESULT (geometry + cuttable key). */
 export interface ResolvedHashItem {
-  detailId: number;
+  itemId?: string;
+  detailId: number | null;
+  hdfDetailId?: number | null;
   qty: number;
   widthMm: number;
   heightMm: number;
@@ -41,12 +43,14 @@ function canonicalize(value: unknown): unknown {
 }
 
 export function computeRequestHash(input: ComputeRequestHashInput): string {
-  // Sort items by detailId so the hash is order-independent. Geometry / material
+  // Sort items by stable source item id so the hash is order-independent. Geometry / material
   // / film / qty changes alter the hash even when the detail-id set is unchanged,
   // so a re-cut of changed details emits a fresh outbox row (not suppressed).
   const items = [...input.items]
     .map((item) => ({
+      itemId: item.itemId ?? fallbackItemId(item),
       detailId: item.detailId,
+      hdfDetailId: item.hdfDetailId ?? null,
       qty: item.qty,
       widthMm: item.widthMm,
       heightMm: item.heightMm,
@@ -54,7 +58,13 @@ export function computeRequestHash(input: ComputeRequestHashInput): string {
       filmId: item.filmId,
       filmTexture: item.filmTexture,
     }))
-    .sort((a, b) => a.detailId - b.detailId);
+    .sort((a, b) => a.itemId.localeCompare(b.itemId));
   const payload = canonicalize({ items, params: input.params });
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+}
+
+function fallbackItemId(item: ResolvedHashItem): string {
+  if (item.hdfDetailId !== null && item.hdfDetailId !== undefined) return `hdf-${item.hdfDetailId}`;
+  if (item.detailId !== null) return `det-${item.detailId}`;
+  return 'unknown';
 }

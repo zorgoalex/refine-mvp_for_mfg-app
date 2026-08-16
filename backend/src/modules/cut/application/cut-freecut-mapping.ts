@@ -608,7 +608,23 @@ export function freecutItemId(detailId: number): string {
   return `det-${detailId}`;
 }
 
+/** "hdf-<order_hdf_detail_id>" item id for calculated HDF rows. */
+export function hdfFreecutItemId(hdfDetailId: number): string {
+  return `hdf-${hdfDetailId}`;
+}
+
 export function parseFreecutItemId(itemId: string): number | null {
   const match = /^det-(\d+)$/.exec(itemId);
   return match ? Number(match[1]) : null;
+}
+
+export function cutSourceItemId(input: {
+  sourceType?: string | null;
+  orderDetailId?: number | null;
+  orderHdfDetailId?: number | null;
+}): string {
+  if (input.sourceType === 'order_hdf_detail') {
+    return hdfFreecutItemId(input.orderHdfDetailId ?? 0);
+  }
+  return freecutItemId(input.orderDetailId ?? 0);
 }

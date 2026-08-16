@@ -262,13 +262,37 @@ export function buildSheetPieceOverlays(
   axisOrigin: CutAxisOrigin = 'top-left',
 ): CutPieceOverlay[] {
   const itemByDetail = new Map(items.map((item) => [item.orderDetailId, item]));
+  const itemByItemId = new Map(items.map((item) => [item.itemId ?? `det-${item.orderDetailId}`, item]));
   const sheetW = placements.sheet_width_mm;
   const sheetH = placements.sheet_height_mm;
+
+  // A 4th "material" label line is added ONLY when this sheet mixes materials
+  // (splitByMaterial off). On a single-material sheet the material is redundant
+  // with the group/sheet header, so it is omitted. Mixing is keyed on the material
+  // IDENTITY (sheet-material-type id, else legacy material id, else name) so two
+  // catalog rows sharing a name still count as mixed — matches the backend render.
+  const distinctMaterials = new Set<string>();
+  for (const piece of placements.pieces) {
+    const detailId = parseCutPieceDetailId(piece.item_id);
+    const detail = (itemByItemId.get(piece.item_id) ?? (detailId === null ? undefined : itemByDetail.get(detailId)))?.detail;
+    const labelMaterial = detail ? null : piece.label?.materialName?.trim();
+    const nm = detail?.materialName?.trim() || labelMaterial;
+    const key =
+      detail?.sheetMaterialTypeId !== null && detail?.sheetMaterialTypeId !== undefined
+        ? `s${detail.sheetMaterialTypeId}`
+        : detail?.materialId !== null && detail?.materialId !== undefined
+          ? `m${detail.materialId}`
+          : nm
+            ? `n${nm}`
+            : null;
+    if (key) distinctMaterials.add(key);
+  }
+  const sheetMixesMaterials = distinctMaterials.size > 1;
 
   return placements.pieces
     .map((piece) => {
       const detailId = parseCutPieceDetailId(piece.item_id);
-      const item = detailId === null ? undefined : itemByDetail.get(detailId);
+      const item = itemByItemId.get(piece.item_id) ?? (detailId === null ? undefined : itemByDetail.get(detailId));
       const label = piece.label;
       if (!item && !pieceHasDisplayLabel(piece)) return null;
 
@@ -305,6 +329,8 @@ export function buildSheetPieceOverlays(
           qty: item?.qty ?? null,
           widthMm: piece.label?.widthMm ?? piece.width_mm,
           heightMm: piece.label?.heightMm ?? piece.height_mm,
+          // 4th line only on mixed-material sheets.
+          materialName: sheetMixesMaterials ? item?.detail?.materialName ?? label?.materialName ?? null : null,
         }),
       };
     })
@@ -321,11 +347,12 @@ export function buildSheetVacuumOrientationWarnings(
   items: readonly CutJobItemDto[],
 ): CutSheetVacuumOrientationWarningItem[] {
   const itemByDetail = new Map(items.map((item) => [item.orderDetailId, item]));
+  const itemByItemId = new Map(items.map((item) => [item.itemId ?? `det-${item.orderDetailId}`, item]));
   return placements.pieces
     .filter((piece) => piece.vacuum_orientation_warning)
     .map((piece) => {
       const detailId = parseCutPieceDetailId(piece.item_id);
-      const item = detailId === null ? undefined : itemByDetail.get(detailId);
+      const item = itemByItemId.get(piece.item_id) ?? (detailId === null ? undefined : itemByDetail.get(detailId));
       const orderText = item ? `заказ ${formatTooltipValue(item.orderId)}` : 'заказ —';
       const detailNumber = item?.detail?.detailNumber ?? detailId;
       const detailName = item?.detail?.detailName?.trim();

@@ -6,12 +6,13 @@ import { bazisCutApi, type BazisCutSetListItemDto } from '../../api/bazisCutApi'
 interface Props {
   open: boolean;
   orderId: number;
-  detailIds: number[];
+  detailIds?: number[];
+  hdfDetailIds?: number[];
   onClose: () => void;
   onDone?: () => void;
 }
 
-export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds, onClose, onDone }) => {
+export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds = [], hdfDetailIds = [], onClose, onDone }) => {
   const navigate = useNavigate();
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [search, setSearch] = useState('');
@@ -19,6 +20,7 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds, 
   const [setId, setSetId] = useState<number>();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const selectedCount = detailIds.length + hdfDetailIds.length;
 
   useEffect(() => {
     if (!open) return;
@@ -43,14 +45,14 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds, 
   })), [sets]);
 
   const submit = useCallback(async () => {
-    if (detailIds.length === 0) return;
+    if (selectedCount === 0) return;
     setSubmitting(true);
     try {
       const idempotencyKey = commandKey('bazis-cut-add');
       const result = mode === 'new'
-        ? await bazisCutApi.create({ orderId, detailIds }, { idempotencyKey })
-        : await addToExisting(setId, orderId, detailIds, idempotencyKey);
-      message.success(result.addedCount === 0 ? 'Эти детали уже есть в наборе' : `Добавлено деталей: ${result.addedCount ?? detailIds.length}`);
+        ? await bazisCutApi.create({ orderId, detailIds, hdfDetailIds }, { idempotencyKey })
+        : await addToExisting(setId, orderId, detailIds, hdfDetailIds, idempotencyKey);
+      message.success(result.addedCount === 0 ? 'Эти детали уже есть в наборе' : `Добавлено деталей: ${result.addedCount ?? selectedCount}`);
       onDone?.(); onClose();
       Modal.confirm({
         title: 'Набор обновлён', content: result.set.name,
@@ -60,13 +62,13 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds, 
     } catch (error) {
       message.error(error instanceof Error ? error.message : 'Не удалось добавить детали');
     } finally { setSubmitting(false); }
-  }, [detailIds, mode, onClose, onDone, orderId, navigate, setId]);
+  }, [detailIds, hdfDetailIds, mode, onClose, onDone, orderId, navigate, selectedCount, setId]);
 
   return (
-    <Modal title={`Добавить в Базис раскрой (${detailIds.length})`} open={open}
+    <Modal title={`Добавить в Базис раскрой (${selectedCount})`} open={open}
       onOk={() => void submit()} onCancel={onClose} confirmLoading={submitting}
       okText="Добавить" cancelText="Отмена"
-      okButtonProps={{ disabled: detailIds.length === 0 || (mode === 'existing' && !setId) }}>
+      okButtonProps={{ disabled: selectedCount === 0 || (mode === 'existing' && !setId) }}>
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Radio.Group value={mode} onChange={(event) => setMode(event.target.value)}>
           <Radio value="new">Новый набор</Radio>
@@ -85,10 +87,10 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds, 
   );
 };
 
-async function addToExisting(setId: number | undefined, orderId: number, detailIds: number[], idempotencyKey: string) {
+async function addToExisting(setId: number | undefined, orderId: number, detailIds: number[], hdfDetailIds: number[], idempotencyKey: string) {
   if (!setId) throw new Error('Выберите набор');
   const current = await bazisCutApi.get(setId);
-  return bazisCutApi.addDetails(setId, { orderId, detailIds, expectedVersion: current.version }, { idempotencyKey });
+  return bazisCutApi.addDetails(setId, { orderId, detailIds, hdfDetailIds, expectedVersion: current.version }, { idempotencyKey });
 }
 
 function commandKey(prefix: string): string {

@@ -29,6 +29,7 @@ describe('order HDF display guards', () => {
     expect(table).toContain('hdfSummaryVersion');
     expect(table).toContain('ХДФ');
     expect(table).toContain('мм/шт');
+    expect(table).toContain("too_narrow: 'Узкая деталь'");
   });
 
   it('renders calculated HDF rows in the order show details column', () => {
@@ -37,6 +38,7 @@ describe('order HDF display guards', () => {
     expect(show).toContain('renderOrderShowHdfCell(');
     expect(show).toContain('getOrderShowHdfDisplay(hdfDetailBySourceDetailId, detail)');
     expect(show).toContain('ORDER_DETAIL_SHOW_HDF_COLUMN_WIDTH');
+    expect(show).toContain("too_narrow: 'Узкая деталь'");
   });
 
   it('keeps the HDF tab compact and includes original source dimensions', () => {
@@ -49,9 +51,14 @@ describe('order HDF display guards', () => {
     expect(hdfTab).toContain("hdfHeader('Исх.', 'выс.')");
     expect(hdfTab).toContain("hdfHeader('Исх.', 'шир.')");
     expect(hdfTab).toContain("hdfHeader('Исх.', 'кол.')");
+    expect(hdfTab).toContain("hdfHeader('Раскрой')");
+    expect(hdfTab).toContain("hdfHeader('Базис', 'раскрой')");
+    expect(hdfTab).toContain('hdfDetailIds={selectedHdfDetailIds}');
+    expect(hdfTab).toContain('припуск 0,5 мм/стор.');
     expect(appStyles).toContain('.order-hdf-table__header');
     expect(appStyles).toContain('text-wrap: balance');
     expect(appStyles).toContain('.order-hdf-table__number');
+    expect(appStyles).toContain('.order-hdf-table__link');
     expect(appStyles).toContain('.order-detail-hdf-cell__size');
   });
 });

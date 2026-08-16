@@ -38,7 +38,9 @@ import {
   backMapSolutions,
   buildOptimizeRequest,
   buildOptimizeRequestWithWarnings,
+  cutSourceItemId,
   freecutItemId,
+  hdfFreecutItemId,
   NATIVE_PORTRAIT_COORDINATE_CONTRACT,
   parseFreecutItemId,
   type FreecutItem,
@@ -183,6 +185,8 @@ const PROFILE_EDITABLE_STATUSES = new Set(['draft', 'ready', 'failed']);
 interface RenderDetailInfo {
   orderId: number;
   orderDeleted: boolean;
+  orderDetailId: number | null;
+  orderHdfDetailId: number | null;
   detailNumber: number | null;
   widthMm: number | null;
   heightMm: number | null;
@@ -275,13 +279,14 @@ interface CutResultRow extends QueryResultRow {
 
 interface ReleasedCutJobItemRow extends QueryResultRow {
   order_id: string | number;
-  order_detail_id: string | number;
+  order_detail_id: string | number | null;
+  order_hdf_detail_id?: string | number | null;
   sheet_material_type_id: string | number | null;
 }
 
 interface DeleteImpactItemRow extends QueryResultRow {
   order_id: string | number;
-  order_detail_id: string | number;
+  order_detail_id: string | number | null;
 }
 
 interface DeleteImpactPacketRow extends QueryResultRow {
@@ -297,7 +302,10 @@ const CUT_RESULT_LEASE_MS = 15 * 60 * 1000;
 
 interface CalcItemRow extends QueryResultRow {
   cut_job_item_id: string | number;
-  order_detail_id: string | number;
+  source_type: string;
+  order_detail_id: string | number | null;
+  order_hdf_detail_id: string | number | null;
+  freecut_item_id: string | null;
   order_id: string | number;
   qty: string | number;
   width_mm: string | number;
@@ -336,7 +344,9 @@ export function logicalGroupKey(g: {
 }
 
 interface BasisInputItem {
-  orderDetailId: number;
+  itemId: string;
+  orderDetailId: number | null;
+  orderHdfDetailId: number | null;
   qty: number;
   widthMm: number;
   heightMm: number;
@@ -389,8 +399,8 @@ function basisOf(inputs: BasisInputs): string {
     ra: inputs.rotationAllowed,
     so: inputs.sheetOverride,
     items: [...inputs.items]
-      .sort((a, b) => a.orderDetailId - b.orderDetailId)
-      .map((i) => ({ id: i.orderDetailId, q: i.qty, w: i.widthMm, h: i.heightMm, smt: i.sheetMaterialTypeId, f: i.filmId, ft: i.filmTexture })),
+      .sort((a, b) => a.itemId.localeCompare(b.itemId))
+      .map((i) => ({ id: i.itemId, od: i.orderDetailId, hdf: i.orderHdfDetailId, q: i.qty, w: i.widthMm, h: i.heightMm, smt: i.sheetMaterialTypeId, f: i.filmId, ft: i.filmTexture })),
     smts: [...inputs.sheetTypes]
       .sort((a, b) => a.sheetMaterialTypeId - b.sheetMaterialTypeId)
       .map((s) => ({ id: s.sheetMaterialTypeId, w: s.widthMm, h: s.heightMm })),
@@ -748,13 +758,22 @@ export class PgCutRepository implements CutRepositoryPort {
           insertedCount += 1;
         }
       }
+      let insertedHdfCount = 0;
+      for (const hdfDetailId of command.dto.hdfDetailIds ?? []) {
+        const { orderId, sheetMaterialTypeId, inserted } = await this.reserveHdfDetail(tx, cutJobId, hdfDetailId, readyStatusIds);
+        if (inserted) {
+          reservedOrderIds.push(orderId);
+          if (sheetMaterialTypeId !== null) reservedSheetTypeIds.push(sheetMaterialTypeId);
+          insertedHdfCount += 1;
+        }
+      }
 
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.created,
         cutJobId,
         requestId: command.requestId,
         related: { orderIds: reservedOrderIds, sheetMaterialTypeIds: reservedSheetTypeIds },
-        metadata: { detailCount: insertedCount },
+        metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount },
       });
 
       return loadJob(tx, cutJobId);
@@ -772,7 +791,8 @@ export class PgCutRepository implements CutRepositoryPort {
       const reservedOrderIds: number[] = [];
       const reservedSheetTypeIds: number[] = [];
       const insertedDetailIds: number[] = [];
-      for (const detailId of command.dto.detailIds) {
+      const insertedHdfDetailIds: number[] = [];
+      for (const detailId of command.dto.detailIds ?? []) {
         const { orderId, sheetMaterialTypeId, inserted } = await this.reserveDetail(tx, command.cutJobId, detailId, readyStatusIds);
         if (inserted) {
           reservedOrderIds.push(orderId);
@@ -780,11 +800,19 @@ export class PgCutRepository implements CutRepositoryPort {
           insertedDetailIds.push(detailId);
         }
       }
+      for (const hdfDetailId of command.dto.hdfDetailIds ?? []) {
+        const { orderId, sheetMaterialTypeId, inserted } = await this.reserveHdfDetail(tx, command.cutJobId, hdfDetailId, readyStatusIds);
+        if (inserted) {
+          reservedOrderIds.push(orderId);
+          if (sheetMaterialTypeId !== null) reservedSheetTypeIds.push(sheetMaterialTypeId);
+          insertedHdfDetailIds.push(hdfDetailId);
+        }
+      }
 
       // No NEW rows (every requested detail was already in this job): no-op — skip the
       // version bump and the itemAdded audit so a same-job re-add neither churns the
       // optimistic version nor writes a misleading audit row (Critic AUDIT-DEBT).
-      if (insertedDetailIds.length === 0) {
+      if (insertedDetailIds.length === 0 && insertedHdfDetailIds.length === 0) {
         return loadJob(tx, command.cutJobId);
       }
 
@@ -795,7 +823,7 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId: command.cutJobId,
         requestId: command.requestId,
         related: { orderIds: reservedOrderIds, sheetMaterialTypeIds: reservedSheetTypeIds },
-        metadata: { detailIds: insertedDetailIds },
+        metadata: { detailIds: insertedDetailIds, hdfDetailIds: insertedHdfDetailIds },
       });
 
       return loadJob(tx, command.cutJobId);
@@ -809,14 +837,19 @@ export class PgCutRepository implements CutRepositoryPort {
       assertVersion(job, command.version);
       assertMutable(job);
 
-      const released = await tx.query<{ order_id: string | number; order_detail_id: string | number; sheet_material_type_id: string | number | null }>(
+      const released = await tx.query<ReleasedCutJobItemRow>(
         `
         UPDATE cut_job_item cji
         SET is_active = false, updated_at = now()
-        FROM order_details od
         WHERE cji.cut_job_item_id = $1 AND cji.cut_job_id = $2 AND cji.is_active = true
-          AND od.detail_id = cji.order_detail_id
-        RETURNING cji.order_id, cji.order_detail_id, od.sheet_material_type_id
+        RETURNING cji.order_id,
+                  cji.order_detail_id,
+                  cji.order_hdf_detail_id,
+                  CASE
+                    WHEN cji.source_type = 'order_hdf_detail'
+                      THEN (SELECT hdf.hdf_sheet_material_type_id FROM order_hdf_details hdf WHERE hdf.order_hdf_detail_id = cji.order_hdf_detail_id)
+                    ELSE (SELECT od.sheet_material_type_id FROM order_details od WHERE od.detail_id = cji.order_detail_id)
+                  END AS sheet_material_type_id
         `,
         [command.cutJobItemId, command.cutJobId],
       );
@@ -836,7 +869,11 @@ export class PgCutRepository implements CutRepositoryPort {
           orderIds: [toNum(removedRow.order_id)],
           sheetMaterialTypeIds: removedSheetTypeId !== null ? [removedSheetTypeId] : [],
         },
-        metadata: { cutJobItemId: command.cutJobItemId },
+        metadata: {
+          cutJobItemId: command.cutJobItemId,
+          orderDetailId: removedRow.order_detail_id === null ? null : toNum(removedRow.order_detail_id),
+          hdfDetailId: removedRow.order_hdf_detail_id === null || removedRow.order_hdf_detail_id === undefined ? null : toNum(removedRow.order_hdf_detail_id),
+        },
       });
 
       return loadJob(tx, command.cutJobId);
@@ -1015,7 +1052,7 @@ export class PgCutRepository implements CutRepositoryPort {
           throw new CutNoSheetSpecError(command.cutJobId);
         }
         const freecutItems: FreecutItem[] = group.items.map((item) => ({
-          id: freecutItemId(item.orderDetailId),
+          id: item.itemId,
           width_mm: item.widthMm,
           height_mm: item.heightMm,
           qty: item.qty,
@@ -1071,7 +1108,9 @@ export class PgCutRepository implements CutRepositoryPort {
       }
       const basisItems: BasisInputItem[] = groupPreps.flatMap(({ group }) =>
         group.items.map((item) => ({
+          itemId: item.itemId,
           orderDetailId: item.orderDetailId,
+          orderHdfDetailId: item.orderHdfDetailId,
           qty: item.qty,
           widthMm: item.widthMm,
           heightMm: item.heightMm,
@@ -1230,17 +1269,18 @@ export class PgCutRepository implements CutRepositoryPort {
         // Assign only THIS group's items to the new cut_group (scoped by detail).
         await tx.query(
           `UPDATE cut_job_item SET cut_group_id = $1, updated_at = now()
-           WHERE cut_job_id = $2 AND is_active = true AND order_detail_id = ANY($3::bigint[])`,
-          [cutGroupId, command.cutJobId, group.items.map((item) => item.orderDetailId)],
+           WHERE cut_job_id = $2 AND is_active = true AND freecut_item_id = ANY($3::text[])`,
+          [cutGroupId, command.cutJobId, group.items.map((item) => item.itemId)],
         );
 
         // Build a label lookup from the Phase-1 snapshot so render never re-reads
         // order_details (Codex R8/R10 BLOCKER #1).
         const labelByItemId = new Map<string, PieceLabelSnapshot>(
           group.items.map((item) => [
-            freecutItemId(item.orderDetailId),
+            item.itemId,
             {
               orderId: item.orderId,
+              detailId: item.orderDetailId,
               detailNumber: item.detailNumber,
               widthMm: item.widthMm,
               heightMm: item.heightMm,
@@ -1278,7 +1318,9 @@ export class PgCutRepository implements CutRepositoryPort {
       // while an identical re-cut stays one row.
       const allHashItems = prep.groupPreps.flatMap((p) =>
         p.group.items.map((item) => ({
+          itemId: item.itemId,
           detailId: item.orderDetailId,
+          hdfDetailId: item.orderHdfDetailId,
           qty: item.qty,
           widthMm: item.widthMm,
           heightMm: item.heightMm,
@@ -1519,10 +1561,15 @@ export class PgCutRepository implements CutRepositoryPort {
         `
         UPDATE cut_job_item cji
         SET is_active = false, updated_at = now()
-        FROM order_details od
         WHERE cji.cut_job_id = $1 AND cji.is_active = true
-          AND od.detail_id = cji.order_detail_id
-        RETURNING cji.order_id, cji.order_detail_id, od.sheet_material_type_id
+        RETURNING cji.order_id,
+                  cji.order_detail_id,
+                  cji.order_hdf_detail_id,
+                  CASE
+                    WHEN cji.source_type = 'order_hdf_detail'
+                      THEN (SELECT hdf.hdf_sheet_material_type_id FROM order_hdf_details hdf WHERE hdf.order_hdf_detail_id = cji.order_hdf_detail_id)
+                    ELSE (SELECT od.sheet_material_type_id FROM order_details od WHERE od.detail_id = cji.order_detail_id)
+                  END AS sheet_material_type_id
         `,
         [command.cutJobId],
       );
@@ -1540,7 +1587,12 @@ export class PgCutRepository implements CutRepositoryPort {
         ),
       ];
       const releasedOrderIds = releasedRows.map((row) => toNum(row.order_id));
-      const releasedOrderDetailIds = releasedRows.map((row) => toNum(row.order_detail_id));
+      const releasedOrderDetailIds = releasedRows
+        .map((row) => (row.order_detail_id === null ? null : toNum(row.order_detail_id)))
+        .filter((id): id is number => id !== null);
+      const releasedHdfDetailIds = releasedRows
+        .map((row) => (row.order_hdf_detail_id === null || row.order_hdf_detail_id === undefined ? null : toNum(row.order_hdf_detail_id)))
+        .filter((id): id is number => id !== null);
       await this.audit(tx, command.currentUser, {
         event: CUT_AUDIT_EVENTS.deleted,
         cutJobId: command.cutJobId,
@@ -1552,6 +1604,7 @@ export class PgCutRepository implements CutRepositoryPort {
         metadata: {
           releasedCount: released.rowCount ?? 0,
           releasedOrderDetailIds,
+          releasedHdfDetailIds,
           hiddenMdfPacketCount: hiddenMdfPacketIds.length,
           hiddenMdfPacketIds,
           deleteLinkedMdfPackets: command.deleteLinkedMdfPackets === true,
@@ -2046,7 +2099,7 @@ export class PgCutRepository implements CutRepositoryPort {
         })))
       : new Map<string, number>();
     const frozenItemByItemId = rebuildFrozenPieceMetadata
-      ? new Map(frozen.job.items.map((item) => [freecutItemId(item.orderDetailId), item]))
+      ? new Map(frozen.job.items.map((item) => [item.itemId ?? freecutItemId(item.orderDetailId), item]))
       : new Map<string, CutJobItemDto>();
     const frozenFillByOrder = rebuildFrozenPieceMetadata
       ? createOrderFillResolver(frozen.job.items.map((item) => item.orderId), renderStyle)
@@ -2522,7 +2575,9 @@ export class PgCutRepository implements CutRepositoryPort {
       .map(([id, dims]) => ({ sheetMaterialTypeId: id, widthMm: dims.widthMm, heightMm: dims.heightMm }));
     const basisItems: BasisInputItem[] = groups.flatMap((group) =>
       group.items.map((item) => ({
+        itemId: item.itemId,
         orderDetailId: item.orderDetailId,
+        orderHdfDetailId: item.orderHdfDetailId,
         qty: item.qty,
         widthMm: item.widthMm,
         heightMm: item.heightMm,
@@ -3361,6 +3416,7 @@ export class PgCutRepository implements CutRepositoryPort {
     client: DatabaseClient = this.database,
   ): Promise<{
     detailById: Map<number, RenderDetailInfo>;
+    detailByItemId: Map<string, RenderDetailInfo>;
     fillByOrder: (orderId: number | null) => string;
     orderNameForOrderId: (orderId: number | null) => string | null;
   }> {
@@ -3368,7 +3424,10 @@ export class PgCutRepository implements CutRepositoryPort {
     // render so volatile relations (especially CNC packet/card matches) do not
     // come from stale render snapshots or warmed PDF bytes.
     const items = await client.query<{
-      order_detail_id: string | number;
+      source_type: string | null;
+      freecut_item_id: string | null;
+      order_detail_id: string | number | null;
+      order_hdf_detail_id: string | number | null;
       order_id: string | number;
       detail_fields: Record<string, unknown> | null;
       detail_number: string | number | null;
@@ -3392,28 +3451,54 @@ export class PgCutRepository implements CutRepositoryPort {
       order_delete_flag: boolean | null;
     }>(
       // material_name = sheet-material name (COALESCE sheet_material_type, legacy
-      // material) for tooltips/PDF metadata. Piece labels intentionally stay
-      // three-line only: order, position, size.
-      `SELECT cji.order_detail_id, cji.order_id,
-              to_jsonb(od) AS detail_fields,
-              od.detail_number, od.width, od.height,
-              od.sheet_material_type_id, od.material_id,
-              od.doweling,
-              COALESCE(smt.name, m.material_name) AS material_name,
-              smt.thickness_mm, f.film_name,
-              mt.milling_type_name, et.edge_type_name, ps.production_status_name,
+      // material) for the 4th label line; the id columns give a stable material
+      // IDENTITY for mixed-material detection (two catalog rows can share a name).
+      // Matches the FE preview overlay and the ENRICHED_ITEMS_QUERY resolution.
+      `SELECT cji.source_type, cji.freecut_item_id,
+              cji.order_detail_id, cji.order_hdf_detail_id, cji.order_id,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN to_jsonb(hdf) ELSE to_jsonb(od) END AS detail_fields,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.source_detail_number ELSE od.detail_number END AS detail_number,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.hdf_width_mm ELSE od.width END AS width,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.hdf_height_mm ELSE od.height END AS height,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.hdf_sheet_material_type_id ELSE od.sheet_material_type_id END AS sheet_material_type_id,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN NULL ELSE od.material_id END AS material_id,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN false ELSE od.doweling END AS doweling,
+              CASE WHEN cji.source_type = 'order_hdf_detail'
+                THEN COALESCE(NULLIF(hdf.hdf_sheet_material_name, ''), smt.name)
+                ELSE COALESCE(smt.name, m.material_name)
+              END AS material_name,
+              smt.thickness_mm,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN NULL ELSE f.film_name END AS film_name,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.milling_type_name ELSE mt.milling_type_name END AS milling_type_name,
+              CASE WHEN cji.source_type = 'order_hdf_detail' THEN NULL ELSE et.edge_type_name END AS edge_type_name,
+              ps.production_status_name,
               cnc.machine_files,
               o.order_name, o.delete_flag AS order_delete_flag,
               o.order_date, o.completion_date, o.planned_completion_date,
               c.client_name
        FROM cut_job_item cji
-       LEFT JOIN order_details od ON od.detail_id = cji.order_detail_id AND od.delete_flag = false
+       LEFT JOIN order_details od
+         ON od.detail_id = cji.order_detail_id
+        AND cji.source_type = 'order_detail'
+        AND od.delete_flag = false
+       LEFT JOIN order_hdf_details hdf
+         ON hdf.order_hdf_detail_id = cji.order_hdf_detail_id
+        AND cji.source_type = 'order_hdf_detail'
+        AND hdf.delete_flag = false
        LEFT JOIN materials m ON m.material_id = od.material_id
-       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+       LEFT JOIN sheet_material_types smt
+         ON smt.sheet_material_type_id = CASE
+           WHEN cji.source_type = 'order_hdf_detail' THEN hdf.hdf_sheet_material_type_id
+           ELSE od.sheet_material_type_id
+         END
        LEFT JOIN films f ON f.film_id = od.film_id
        LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
        LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
-       LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+       LEFT JOIN production_statuses ps
+         ON ps.production_status_id = CASE
+           WHEN cji.source_type = 'order_hdf_detail' THEN hdf.production_status_id
+           ELSE od.production_status_id
+         END
        LEFT JOIN LATERAL (
          SELECT array_agg(machine_file ORDER BY machine_file) AS machine_files
          FROM (
@@ -3438,6 +3523,7 @@ export class PgCutRepository implements CutRepositoryPort {
       [cutGroupId],
     );
     const detailById = new Map<number, RenderDetailInfo>();
+    const detailByItemId = new Map<string, RenderDetailInfo>();
     for (const row of items.rows) {
       // Prefer the sheet-material-type id (Variant-B primary ref); fall back to the
       // legacy material id; else the trimmed name; else null (unknown → ignored).
@@ -3445,8 +3531,14 @@ export class PgCutRepository implements CutRepositoryPort {
       const matId = numOrNull(row.material_id);
       const nm = row.material_name?.trim();
       const materialKey = smtId !== null ? `s${smtId}` : matId !== null ? `m${matId}` : nm ? `n${nm}` : null;
-      detailById.set(toNum(row.order_detail_id), {
+      const sourceType = row.source_type === 'order_hdf_detail' ? 'order_hdf_detail' : 'order_detail';
+      const orderDetailId = row.order_detail_id === null ? null : toNum(row.order_detail_id);
+      const orderHdfDetailId = row.order_hdf_detail_id === null ? null : toNum(row.order_hdf_detail_id);
+      const itemId = row.freecut_item_id?.trim() || cutSourceItemId({ sourceType, orderDetailId, orderHdfDetailId });
+      const detailInfo: RenderDetailInfo = {
         orderId: toNum(row.order_id),
+        orderDetailId,
+        orderHdfDetailId,
         detailNumber: numOrNull(row.detail_number),
         widthMm: numOrNull(row.width),
         heightMm: numOrNull(row.height),
@@ -3465,7 +3557,11 @@ export class PgCutRepository implements CutRepositoryPort {
         readyDate: dateOnly(row.completion_date) ?? dateOnly(row.planned_completion_date),
         clientName: row.client_name ?? null,
         materialKey,
-      });
+      };
+      detailByItemId.set(itemId, detailInfo);
+      if (orderDetailId !== null) {
+        detailById.set(orderDetailId, detailInfo);
+      }
     }
     const fillByOrder = createOrderFillResolver(items.rows.map((row) => toNum(row.order_id)));
     const orderNameById = new Map<number, string>();
@@ -3475,7 +3571,7 @@ export class PgCutRepository implements CutRepositoryPort {
     }
     const orderNameForOrderId = (orderId: number | null): string | null =>
       orderId === null ? null : orderNameById.get(orderId) ?? null;
-    return { detailById, fillByOrder, orderNameForOrderId };
+    return { detailById, detailByItemId, fillByOrder, orderNameForOrderId };
   }
 
   private async refreshPdfDynamicFieldsForSheets(
@@ -3483,11 +3579,11 @@ export class PgCutRepository implements CutRepositoryPort {
     sheets: RenderedSheetContext[],
     client: DatabaseClient = this.database,
   ): Promise<RenderedSheetContext[]> {
-    const { detailById } = await this.loadRenderDetailsForGroup(cutGroupId, client);
+    const { detailById, detailByItemId } = await this.loadRenderDetailsForGroup(cutGroupId, client);
     return sheets.map((sheet) => ({
       ...sheet,
-      pdfMeta: buildPdfSheetMeta(sheet.placements, detailById),
-      pdfDetailRows: buildPdfDetailRows(sheet.placements, detailById),
+      pdfMeta: buildPdfSheetMeta(sheet.placements, detailById, detailByItemId),
+      pdfDetailRows: buildPdfDetailRows(sheet.placements, detailById, detailByItemId),
     }));
   }
 
@@ -3638,12 +3734,39 @@ export class PgCutRepository implements CutRepositoryPort {
 
     // Rule 7: build live detail lookup for LEGACY rows (pre-Task 4) that lack
     // a frozen label snapshot. New rows written by calculate always have piece.label.
-    const { detailById, fillByOrder: baseFillByOrder, orderNameForOrderId } = await this.loadRenderDetailsForGroup(cutGroupId, client);
+    const { detailById, detailByItemId, fillByOrder: baseFillByOrder, orderNameForOrderId } = await this.loadRenderDetailsForGroup(cutGroupId, client);
     const fillByOrder = renderStyle === CUT_RENDER_STYLE_DEFAULT
       ? baseFillByOrder
-      : createOrderFillResolver([...detailById.values()].map((detail) => detail.orderId), renderStyleRule);
+      : createOrderFillResolver([...detailByItemId.values()].map((detail) => detail.orderId), renderStyleRule);
 
-    const labelForPiece = (piece: FreecutPlacement): string[] => {
+    // Resolve a piece's sheet-material name (live join; the frozen snapshot has no
+    // material). Blank/unknown → null so no material line is added. Material is read
+    // live like the FE preview overlay (which also pairs frozen placement geometry
+    // with live names), so preview and print stay consistent; a material change
+    // marks the job stale and recalc-gates the PDF before any drift can print.
+    const materialNameForPiece = (piece: FreecutPlacement): string | null => {
+      const name = renderDetailForPiece(piece, detailById, detailByItemId)?.materialName ?? null;
+      const trimmed = name?.trim();
+      return trimmed ? trimmed : null;
+    };
+
+    // Whether a sheet mixes materials (splitByMaterial off → >1 distinct material
+    // among its pieces). Keyed on the material IDENTITY (id-based), not the display
+    // name, so two catalog rows that share a name still count as mixed. The 4th
+    // material label line is added only then.
+    const sheetMixesMaterials = (placements: SheetPlacementsJson): boolean => {
+      const distinct = new Set<string>();
+      for (const piece of placements.pieces) {
+        const key = renderDetailForPiece(piece, detailById, detailByItemId)?.materialKey ?? null;
+        if (key) distinct.add(key);
+      }
+      return distinct.size > 1;
+    };
+
+    // Sheet-scoped label builder: appends the material 4th line only when the sheet
+    // mixes materials. `includeMaterial` is fixed per sheet by the caller below.
+    const labelForPiece = (piece: FreecutPlacement, includeMaterial: boolean): string[] => {
+      const materialName = includeMaterial ? materialNameForPiece(piece) : null;
       // Rule 7: use the frozen label snapshot when present (calc persists it).
       // Fall back to the live order_details join ONLY for legacy pre-Task-4 rows
       // whose stored placements have no label field.
@@ -3659,11 +3782,12 @@ export class PgCutRepository implements CutRepositoryPort {
           itemId: piece.item_id,
           instance: piece.instance,
           qty: quantities.get(piece.item_id) ?? 1,
+          materialName: frozenLabel.materialName ?? materialName,
         });
       }
       // Legacy fallback: live join.
       const detailId = parseFreecutItemId(piece.item_id);
-      const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+      const detail = renderDetailForPiece(piece, detailById, detailByItemId);
       const orderId = detail?.orderId ?? null;
       return composePieceLabelLines({
         orderId,
@@ -3675,6 +3799,7 @@ export class PgCutRepository implements CutRepositoryPort {
         itemId: piece.item_id,
         instance: piece.instance,
         qty: quantities.get(piece.item_id) ?? 1,
+        materialName,
       });
     };
 
@@ -3683,14 +3808,11 @@ export class PgCutRepository implements CutRepositoryPort {
       const frozenLabel = (piece as { label?: PieceLabelSnapshot }).label;
       const orderId = frozenLabel?.orderId !== undefined
         ? frozenLabel.orderId
-        : (parseFreecutItemId(piece.item_id) === null
-          ? null
-          : detailById.get(parseFreecutItemId(piece.item_id)!)?.orderId ?? null);
+        : renderDetailForPiece(piece, detailById, detailByItemId)?.orderId ?? null;
       return fillByOrder(orderId);
     };
     const bathDetailInfoFor = (piece: FreecutPlacement) => {
-      const detailId = parseFreecutItemId(piece.item_id);
-      const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+      const detail = renderDetailForPiece(piece, detailById, detailByItemId);
       return {
         edgeTypeName: detail?.edgeTypeName ?? null,
         millingTypeName: detail?.millingTypeName ?? null,
@@ -3700,7 +3822,8 @@ export class PgCutRepository implements CutRepositoryPort {
 
     return {
       sheets: rawSheets.map((s) => {
-        const labelFor = (piece: FreecutPlacement): string[] => labelForPiece(piece);
+        const includeMaterial = sheetMixesMaterials(s.placements);
+        const labelFor = (piece: FreecutPlacement): string[] => labelForPiece(piece, includeMaterial);
         return {
           sheetIndex: s.sheetIndex,
           placements: s.placements,
@@ -3725,8 +3848,8 @@ export class PgCutRepository implements CutRepositoryPort {
             axisOrigin,
             showBathMeterGuides,
           }),
-          pdfMeta: buildPdfSheetMeta(s.placements, detailById),
-          pdfDetailRows: buildPdfDetailRows(s.placements, detailById),
+          pdfMeta: buildPdfSheetMeta(s.placements, detailById, detailByItemId),
+          pdfDetailRows: buildPdfDetailRows(s.placements, detailById, detailByItemId),
           filmRequirementLinearMeters: showBathMeterGuides
             ? calculateBathSheetFilmUsage(s.placements)?.linearMeters ?? null
             : null,
@@ -3879,6 +4002,82 @@ export class PgCutRepository implements CutRepositoryPort {
       RETURNING cut_job_item_id
       `,
       [cutJobId, detailId, orderId, quantity, freecutItemId(detailId)],
+    );
+    return { orderId, sheetMaterialTypeId, inserted: (insert.rowCount ?? 0) > 0 };
+  }
+
+  private async reserveHdfDetail(
+    tx: TransactionClient,
+    cutJobId: number,
+    hdfDetailId: number,
+    readyStatusIds: readonly number[],
+  ): Promise<{ orderId: number; sheetMaterialTypeId: number | null; inserted: boolean }> {
+    const detail = await tx.query<{
+      order_id: string | number;
+      quantity: string | number;
+      production_status_id: number | null;
+      delete_flag: boolean;
+      status: string;
+      config_revision: string | number;
+      current_revision: string | number;
+      hdf_sheet_material_type_id: string | number | null;
+      hdf_height_mm: string | number | null;
+      hdf_width_mm: string | number | null;
+      is_cuttable: boolean | null;
+    }>(
+      `SELECT hdf.order_id,
+              hdf.quantity,
+              hdf.production_status_id,
+              hdf.delete_flag,
+              hdf.status,
+              hdf.config_revision,
+              state.revision AS current_revision,
+              hdf.hdf_sheet_material_type_id,
+              hdf.hdf_height_mm,
+              hdf.hdf_width_mm,
+              smt.is_cuttable
+       FROM order_hdf_details hdf
+       JOIN hdf_calculation_config_state state ON state.id = 1
+       LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = hdf.hdf_sheet_material_type_id
+       WHERE hdf.order_hdf_detail_id = $1`,
+      [hdfDetailId],
+    );
+    if (detail.rowCount === 0) {
+      throw new CutOrderDetailNotFoundError(hdfDetailId);
+    }
+    const row = detail.rows[0];
+    const sheetMaterialTypeId = row.hdf_sheet_material_type_id === null ? null : toNum(row.hdf_sheet_material_type_id);
+    const eligibility = classifyDetailEligibility(
+      {
+        detailId: hdfDetailId,
+        deleteFlag: row.delete_flag
+          || row.status !== 'ok'
+          || toNum(row.config_revision) !== toNum(row.current_revision)
+          || !positiveNumber(row.hdf_height_mm)
+          || !positiveNumber(row.hdf_width_mm)
+          || !positiveNumber(row.quantity),
+        productionStatusId: row.production_status_id === null ? null : toNum(row.production_status_id),
+        sheetMaterialTypeId,
+        isCuttable: row.is_cuttable == null ? true : Boolean(row.is_cuttable),
+      },
+      { readyStatusIds },
+    );
+    if (!eligibility.eligible) {
+      throw new CutDetailNotEligibleError(hdfDetailId, eligibility.reason ?? 'ineligible');
+    }
+    const orderId = toNum(row.order_id);
+    const quantity = toNum(row.quantity);
+    const insert = await tx.query(
+      `
+      INSERT INTO cut_job_item (
+        cut_job_id, source_type, order_detail_id, order_hdf_detail_id,
+        order_id, qty, is_active, freecut_item_id
+      )
+      VALUES ($1, 'order_hdf_detail', NULL, $2, $3, $4, true, $5)
+      ON CONFLICT (cut_job_id, order_hdf_detail_id) WHERE is_active = true DO NOTHING
+      RETURNING cut_job_item_id
+      `,
+      [cutJobId, hdfDetailId, orderId, quantity, hdfFreecutItemId(hdfDetailId)],
     );
     return { orderId, sheetMaterialTypeId, inserted: (insert.rowCount ?? 0) > 0 };
   }
@@ -4866,7 +5065,17 @@ interface CuttableGroup {
   smtWidthMm: number | null;
   smtHeightMm: number | null;
   orderIds: number[];
-  items: Array<{ orderDetailId: number; orderId: number; qty: number; widthMm: number; heightMm: number; detailNumber: number | null; filmTexture: boolean | null }>;
+  items: Array<{
+    itemId: string;
+    orderDetailId: number | null;
+    orderHdfDetailId: number | null;
+    orderId: number;
+    qty: number;
+    widthMm: number;
+    heightMm: number;
+    detailNumber: number | null;
+    filmTexture: boolean | null;
+  }>;
 }
 
 /** Per-job sheet override (migration 040). When a job has a chosen sheet, every
@@ -4940,9 +5149,15 @@ export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false, sp
       group.smtHeightMm = row.smt_height_mm === null ? null : toNum(row.smt_height_mm);
     }
     const orderId = toNum(row.order_id);
+    const sourceType = row.source_type === 'order_hdf_detail' ? 'order_hdf_detail' : 'order_detail';
+    const orderDetailId = row.order_detail_id === null ? null : toNum(row.order_detail_id);
+    const orderHdfDetailId = row.order_hdf_detail_id === null ? null : toNum(row.order_hdf_detail_id);
+    const itemId = row.freecut_item_id?.trim() || cutSourceItemId({ sourceType, orderDetailId, orderHdfDetailId });
     group.orderIds.push(orderId);
     group.items.push({
-      orderDetailId: toNum(row.order_detail_id),
+      itemId,
+      orderDetailId,
+      orderHdfDetailId,
       orderId,
       qty: toNum(row.qty),
       widthMm: toNum(row.width_mm),
@@ -4957,15 +5172,45 @@ export function groupByCuttableKey(rows: CalcItemRow[], combineFilms = false, sp
 async function loadCalcItems(client: DatabaseClient, cutJobId: number): Promise<CalcItemRow[]> {
   const result = await client.query<CalcItemRow>(
     `
-    SELECT cji.cut_job_item_id, cji.order_detail_id, cji.order_id, cji.qty,
-           od.width AS width_mm, od.height AS height_mm, od.detail_number, od.material_id,
-           od.sheet_material_type_id, od.film_id, f.film_texture,
+    SELECT cji.cut_job_item_id,
+           cji.source_type,
+           cji.order_detail_id,
+           cji.order_hdf_detail_id,
+           cji.freecut_item_id,
+           cji.order_id,
+           cji.qty,
+           CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.hdf_width_mm ELSE od.width END AS width_mm,
+           CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.hdf_height_mm ELSE od.height END AS height_mm,
+           CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.source_detail_number ELSE od.detail_number END AS detail_number,
+           od.material_id,
+           CASE WHEN cji.source_type = 'order_hdf_detail' THEN hdf.hdf_sheet_material_type_id ELSE od.sheet_material_type_id END AS sheet_material_type_id,
+           CASE WHEN cji.source_type = 'order_hdf_detail' THEN NULL ELSE od.film_id END AS film_id,
+           CASE WHEN cji.source_type = 'order_hdf_detail' THEN NULL ELSE f.film_texture END AS film_texture,
            smt.width_mm AS smt_width_mm, smt.height_mm AS smt_height_mm
     FROM cut_job_item cji
-    JOIN order_details od ON od.detail_id = cji.order_detail_id
-    LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+    LEFT JOIN order_details od
+      ON od.detail_id = cji.order_detail_id
+     AND cji.source_type = 'order_detail'
+     AND od.delete_flag = false
+    LEFT JOIN order_hdf_details hdf
+      ON hdf.order_hdf_detail_id = cji.order_hdf_detail_id
+     AND cji.source_type = 'order_hdf_detail'
+     AND hdf.delete_flag = false
+     AND hdf.status = 'ok'
+    LEFT JOIN hdf_calculation_config_state hdf_state ON hdf_state.id = 1
+    LEFT JOIN sheet_material_types smt
+      ON smt.sheet_material_type_id = CASE
+        WHEN cji.source_type = 'order_hdf_detail' THEN hdf.hdf_sheet_material_type_id
+        ELSE od.sheet_material_type_id
+      END
     LEFT JOIN films f ON f.film_id = od.film_id
-    WHERE cji.cut_job_id = $1 AND cji.is_active = true
+    WHERE cji.cut_job_id = $1
+      AND cji.is_active = true
+      AND (
+        (cji.source_type = 'order_detail' AND od.detail_id IS NOT NULL)
+        OR
+        (cji.source_type = 'order_hdf_detail' AND hdf.order_hdf_detail_id IS NOT NULL AND hdf.config_revision = hdf_state.revision)
+      )
     ORDER BY cji.cut_job_item_id
     `,
     [cutJobId],
@@ -5060,6 +5305,7 @@ function cutParamsUseVacuumTable(params: unknown): boolean {
 function buildPdfSheetMeta(
   placements: SheetPlacementsJson,
   detailById: ReadonlyMap<number, RenderDetailInfo>,
+  detailByItemId: ReadonlyMap<string, RenderDetailInfo> = new Map(),
 ): PdfSheetMeta {
   const meta: {
     orders: string[];
@@ -5088,8 +5334,7 @@ function buildPdfSheetMeta(
     if (text && !list.includes(text)) list.push(text);
   };
   for (const piece of placements.pieces) {
-    const detailId = parseFreecutItemId(piece.item_id);
-    const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+    const detail = renderDetailForPiece(piece, detailById, detailByItemId);
     if (!detail) continue;
     add(meta.orders, detail.orderName ?? detail.orderId);
     add(meta.clients, detail.clientName);
@@ -5107,11 +5352,12 @@ function buildPdfSheetMeta(
 function buildPdfDetailRows(
   placements: SheetPlacementsJson,
   detailById: ReadonlyMap<number, RenderDetailInfo>,
+  detailByItemId: ReadonlyMap<string, RenderDetailInfo> = new Map(),
 ): PdfSheetDetailRow[] {
   const byKey = new Map<string, PdfSheetDetailRow>();
   for (const piece of placements.pieces) {
     const detailId = parseFreecutItemId(piece.item_id);
-    const detail = detailId === null ? null : detailById.get(detailId) ?? null;
+    const detail = renderDetailForPiece(piece, detailById, detailByItemId);
     const order = String(detail?.orderName ?? detail?.orderId ?? '-');
     const position = detail?.detailNumber ?? detailId ?? piece.item_id;
     const width = detail?.widthMm ?? piece.width_mm;
@@ -5178,6 +5424,17 @@ function buildPdfDetailRows(
     }
   }
   return [...byKey.values()].sort((a, b) => Number(a.position) - Number(b.position));
+}
+
+function renderDetailForPiece(
+  piece: FreecutPlacement,
+  detailById: ReadonlyMap<number, RenderDetailInfo>,
+  detailByItemId: ReadonlyMap<string, RenderDetailInfo>,
+): RenderDetailInfo | null {
+  const itemDetail = detailByItemId.get(piece.item_id);
+  if (itemDetail) return itemDetail;
+  const detailId = parseFreecutItemId(piece.item_id);
+  return detailId === null ? null : detailById.get(detailId) ?? null;
 }
 
 function buildPdfDetailRowFields(
@@ -5266,7 +5523,10 @@ function pdfDetailScalar(value: unknown): LabelCustomExpressionScalar {
 
 interface ItemRow extends QueryResultRow {
   cut_job_item_id: string | number;
-  order_detail_id: string | number;
+  source_type?: string | null;
+  freecut_item_id?: string | null;
+  order_detail_id: string | number | null;
+  order_hdf_detail_id?: string | number | null;
   order_id: string | number;
   qty: string | number;
   cut_group_id: string | number | null;
@@ -5313,18 +5573,28 @@ interface ItemRow extends QueryResultRow {
 // (detail fields null). Price columns (milling_cost_per_sqm, detail_cost) are
 // deliberately not selected — the cut surface is production-facing, not financial.
 const ENRICHED_ITEMS_QUERY = `
-  SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
-         od.detail_id AS joined_detail_id,
-         to_jsonb(od) AS detail_fields,
-         od.detail_number, od.detail_name, od.height, od.width,
-         od.quantity AS detail_quantity, od.area,
-         od.material_id, od.sheet_material_type_id,
-         COALESCE(smt.name, m.material_name) AS material_name,
-         od.doweling,
-         od.milling_type_id, mt.milling_type_name,
+  SELECT i.cut_job_item_id, i.source_type, i.freecut_item_id,
+         i.order_detail_id, i.order_hdf_detail_id, i.order_id, i.qty, i.cut_group_id,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.order_hdf_detail_id ELSE od.detail_id END AS joined_detail_id,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN to_jsonb(hdf) ELSE to_jsonb(od) END AS detail_fields,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.source_detail_number ELSE od.detail_number END AS detail_number,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN COALESCE(NULLIF(hdf.source_detail_name, ''), 'ХДФ') ELSE od.detail_name END AS detail_name,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.hdf_height_mm ELSE od.height END AS height,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.hdf_width_mm ELSE od.width END AS width,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.quantity ELSE od.quantity END AS detail_quantity,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.hdf_height_mm * hdf.hdf_width_mm / 1000000.0 ELSE od.area END AS area,
+         od.material_id,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.hdf_sheet_material_type_id ELSE od.sheet_material_type_id END AS sheet_material_type_id,
+         COALESCE(hdf_smt.name, smt.name, m.material_name) AS material_name,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN false ELSE od.doweling END AS doweling,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.milling_type_id ELSE od.milling_type_id END AS milling_type_id,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.milling_type_name ELSE mt.milling_type_name END AS milling_type_name,
          od.edge_type_id, et.edge_type_name,
-         od.film_id, f.film_name,
-         od.priority, od.production_status_id, ps.production_status_name,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN NULL ELSE od.film_id END AS film_id,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN NULL ELSE f.film_name END AS film_name,
+         od.priority,
+         CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.production_status_id ELSE od.production_status_id END AS production_status_id,
+         COALESCE(hdf_ps.production_status_name, ps.production_status_name) AS production_status_name,
          od.joint_order_id, od.note,
          od.link_cutting_file, od.link_cutting_image_file, od.link_cad_file, od.link_pdf_file,
          o.order_name AS order_name,
@@ -5334,12 +5604,15 @@ const ENRICHED_ITEMS_QUERY = `
   -- deleted must still return its item row, but with detail: null (canonical
   -- read-side semantics exclude deleted details — see order_details_view).
   LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND od.delete_flag = false
+  LEFT JOIN order_hdf_details hdf ON hdf.order_hdf_detail_id = i.order_hdf_detail_id AND hdf.delete_flag = false
   LEFT JOIN materials m ON m.material_id = od.material_id
   LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+  LEFT JOIN sheet_material_types hdf_smt ON hdf_smt.sheet_material_type_id = hdf.hdf_sheet_material_type_id
   LEFT JOIN milling_types mt ON mt.milling_type_id = od.milling_type_id
   LEFT JOIN edge_types et ON et.edge_type_id = od.edge_type_id
   LEFT JOIN films f ON f.film_id = od.film_id
   LEFT JOIN production_statuses ps ON ps.production_status_id = od.production_status_id
+  LEFT JOIN production_statuses hdf_ps ON hdf_ps.production_status_id = hdf.production_status_id
   LEFT JOIN orders o ON o.order_id = i.order_id
   WHERE i.cut_job_id = $1 AND i.is_active = true
   ORDER BY i.cut_job_item_id
@@ -5358,7 +5631,7 @@ const ENRICHED_FROZEN_ITEMS_QUERY = ENRICHED_ITEMS_QUERY.replace(
 );
 
 const LIGHT_ITEMS_QUERY = `
-  SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
+  SELECT i.cut_job_item_id, i.source_type, i.freecut_item_id, i.order_detail_id, i.order_hdf_detail_id, i.order_id, i.qty, i.cut_group_id,
          o.order_name AS order_name,
          o.delete_flag AS order_delete_flag
   FROM cut_job_item i
@@ -5366,7 +5639,7 @@ const LIGHT_ITEMS_QUERY = `
   WHERE i.cut_job_id = $1 AND i.is_active = true
   ORDER BY i.cut_job_item_id`;
 const LIGHT_FROZEN_ITEMS_QUERY = `
-  SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
+  SELECT i.cut_job_item_id, i.source_type, i.freecut_item_id, i.order_detail_id, i.order_hdf_detail_id, i.order_id, i.qty, i.cut_group_id,
          o.order_name AS order_name,
          o.delete_flag AS order_delete_flag
   FROM cut_job_item i
@@ -5713,25 +5986,37 @@ async function loadJob(
         [groupIds],
       )
     : { rows: [] as SheetRow[] };
-  const itemDtos = itemsResult.rows.map((row) => ({
-    cutJobItemId: toNum(row.cut_job_item_id),
-    orderDetailId: toNum(row.order_detail_id),
-    orderId: toNum(row.order_id),
-    qty: toNum(row.qty),
-    cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
-    detail: includeItemDetails ? mapItemDetail(row) : null,
-    // orderName/orderDeleted are present on both list and enriched paths so
-    // list/card order references can show names and stale deleted markers.
-    ...(row.order_name !== undefined || row.order_delete_flag !== undefined
-      ? { orderName: row.order_name ?? null, orderDeleted: row.order_delete_flag === true }
-      : {}),
-  }));
+  const itemDtos = itemsResult.rows.map((row) => {
+    const sourceType: NonNullable<CutJobItemDto['sourceType']> = row.source_type === 'order_hdf_detail'
+      ? 'order_hdf_detail'
+      : 'order_detail';
+    const orderDetailId = row.order_detail_id === null ? null : toNum(row.order_detail_id);
+    const orderHdfDetailId = row.order_hdf_detail_id === null || row.order_hdf_detail_id === undefined
+      ? null
+      : toNum(row.order_hdf_detail_id);
+    return {
+      cutJobItemId: toNum(row.cut_job_item_id),
+      sourceType,
+      itemId: row.freecut_item_id?.trim() || cutSourceItemId({ sourceType, orderDetailId, orderHdfDetailId }),
+      orderDetailId: orderDetailId ?? orderHdfDetailId ?? 0,
+      orderHdfDetailId,
+      orderId: toNum(row.order_id),
+      qty: toNum(row.qty),
+      cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
+      detail: includeItemDetails ? mapItemDetail(row) : null,
+      // orderName/orderDeleted are present on both list and enriched paths so
+      // list/card order references can show names and stale deleted markers.
+      ...(row.order_name !== undefined || row.order_delete_flag !== undefined
+        ? { orderName: row.order_name ?? null, orderDeleted: row.order_delete_flag === true }
+        : {}),
+    };
+  });
   const resolvedMaterialNames = materialNames ?? uniqueSorted(
     itemDtos.map((item) => item.detail?.materialName ?? null),
   );
   const detailInfoById = await loadFilmUsageDetailInfo(
     client,
-    itemDtos.map((item) => item.orderDetailId),
+    itemDtos.filter((item) => item.sourceType !== 'order_hdf_detail').map((item) => item.orderDetailId),
   );
 
   const groups: CutGroupDto[] = groupsResult.rows.map((row) => {
@@ -5862,7 +6147,7 @@ function validateFrozenJobSnapshot(snapshot: CutJobDto): void {
     throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_INCOMPLETE', 'Версия раскроя не содержит групп или деталей');
   }
   const expected = new Map(snapshot.items.map((item) => [
-    freecutItemId(item.orderDetailId),
+    item.itemId ?? freecutItemId(item.orderDetailId),
     { qty: item.qty, cutGroupId: item.cutGroupId },
   ]));
   const actual = new Map<string, Set<number>>();
@@ -5960,7 +6245,7 @@ function synthesizeLegacyUnplaced(snapshot: CutJobDto): CutJobDto {
     }
   }
   const unplaced = snapshot.items.flatMap((item) => {
-    const itemId = freecutItemId(item.orderDetailId);
+    const itemId = item.itemId ?? freecutItemId(item.orderDetailId);
     const present = placed.get(itemId) ?? new Set<number>();
     return Array.from({ length: item.qty }, (_, index) => index + 1)
       .filter((instance) => !present.has(instance))
@@ -6108,7 +6393,13 @@ async function loadCutJobDeleteImpact(client: DatabaseClient, cutJobId: number):
   return {
     linkedMdfPackets,
     orderIds: [...new Set(releasedRows.map((row) => toNum(row.order_id)))],
-    orderDetailIds: [...new Set(releasedRows.map((row) => toNum(row.order_detail_id)))],
+    orderDetailIds: [
+      ...new Set(
+        releasedRows
+          .map((row) => (row.order_detail_id === null ? null : toNum(row.order_detail_id)))
+          .filter((id): id is number => id !== null),
+      ),
+    ],
   };
 }
 
@@ -6151,6 +6442,11 @@ function numOrNull(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function positiveNumber(value: string | number | null | undefined): boolean {
+  const n = numOrNull(value);
+  return n !== null && n > 0;
 }
 
 function dateTimeIso(value: string | Date): string {

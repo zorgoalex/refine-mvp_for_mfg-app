@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateHdfAreaM2, calculateOrderHdfDetail } from './order-hdf-calculations';
+import { HDF_CLEARANCE_PER_SIDE_MM, HDF_TOTAL_CLEARANCE_MM, calculateHdfAreaM2, calculateOrderHdfDetail } from './order-hdf-calculations';
 
 const source = {
   detailId: 10,
@@ -16,7 +16,7 @@ const source = {
 };
 
 describe('calculateOrderHdfDetail', () => {
-  it('uses the Excel formula edge * 2 + 1', () => {
+  it('uses the Excel formula edge * 2 plus explicit 0.5 mm clearance per side', () => {
     const row = calculateOrderHdfDetail(
       source,
       { hdfEnabled: true, hdfEdgeMm: 60 },
@@ -28,6 +28,8 @@ describe('calculateOrderHdfDetail', () => {
     expect(row.hdfWidthMm).toBe(462);
     expect(row.quantity).toBe(2);
     expect(row.areaM2).toBe(calculateHdfAreaM2(2612, 462, 2));
+    expect(row.sourceSnapshotJson.clearancePerSideMm).toBe(HDF_CLEARANCE_PER_SIDE_MM);
+    expect(row.sourceSnapshotJson.totalClearanceMm).toBe(HDF_TOTAL_CLEARANCE_MM);
   });
 
   it('supports the 67 mm two-stage edge from DB settings', () => {

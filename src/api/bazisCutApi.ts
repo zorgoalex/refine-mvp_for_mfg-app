@@ -113,7 +113,8 @@ export interface BazisCutDeleteSetResultDto {
 
 export interface CreateBazisCutSetRequest {
   orderId: number;
-  detailIds: number[];
+  detailIds?: number[];
+  hdfDetailIds?: number[];
 }
 
 export interface BazisCutPickerCriteria {
@@ -207,7 +208,8 @@ export interface RenameBazisCutSetRequest {
 
 export interface AddBazisCutSetDetailsRequest {
   orderId: number;
-  detailIds: number[];
+  detailIds?: number[];
+  hdfDetailIds?: number[];
   expectedVersion: number;
 }
 
@@ -257,7 +259,7 @@ export const bazisCutApi = {
     request: CreateBazisCutSetRequest,
     options: BazisCutCommandOptions,
   ): Promise<BazisCutMutationResultDto> {
-    validateOrderAndDetailIds(request.orderId, request.detailIds);
+    validateOrderAndSourceIds(request.orderId, request.detailIds ?? [], request.hdfDetailIds ?? []);
     return httpClient.post<BazisCutMutationResultDto>(
       bazisCutSetRoutes.list,
       request,
@@ -335,7 +337,7 @@ export const bazisCutApi = {
     request: AddBazisCutSetDetailsRequest,
     options: BazisCutCommandOptions,
   ): Promise<BazisCutMutationResultDto> {
-    validateOrderAndDetailIds(request.orderId, request.detailIds);
+    validateOrderAndSourceIds(request.orderId, request.detailIds ?? [], request.hdfDetailIds ?? []);
     return httpClient.post<BazisCutMutationResultDto>(
       bazisCutSetRoutes.details(setId),
       request,
@@ -398,12 +400,16 @@ function commandOptions(options: BazisCutCommandOptions): RequestInit {
   return { headers: { 'Idempotency-Key': key } };
 }
 
-function validateOrderAndDetailIds(orderId: number, detailIds: number[]): void {
+function validateOrderAndSourceIds(orderId: number, detailIds: number[], hdfDetailIds: number[]): void {
   validateId(orderId, 'orderId');
-  if (!Array.isArray(detailIds) || detailIds.length < 1 || detailIds.length > 500) {
+  if (!Array.isArray(detailIds) || !Array.isArray(hdfDetailIds)
+    || detailIds.length + hdfDetailIds.length < 1
+    || detailIds.length > 500
+    || hdfDetailIds.length > 500) {
     throw new Error('Invalid detailIds');
   }
   detailIds.forEach((detailId) => validateId(detailId, 'detailId'));
+  hdfDetailIds.forEach((detailId) => validateId(detailId, 'hdfDetailId'));
 }
 
 function validatePickerCriteria(criteria: BazisCutPickerCriteria): void {

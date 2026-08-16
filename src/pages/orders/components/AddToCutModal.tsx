@@ -13,6 +13,8 @@ interface AddToCutModalProps {
   orderNames?: Array<string | null | undefined>;
   /** Detail-level mode: when non-empty, only these chosen details (∩ eligible) are added. */
   detailIds?: number[];
+  /** Calculated HDF detail mode: sent directly as HDF cut-job sources. */
+  hdfDetailIds?: number[];
   /** Optional selected group label appended to the auto-generated cut name. */
   nameSuffix?: string | null;
   onClose: () => void;
@@ -25,7 +27,7 @@ interface AddToCutModalProps {
  * an existing draft job or creates a new one; the selected orders' eligible
  * details are resolved on the backend and reserved.
  */
-export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, orderNames, detailIds, nameSuffix, onClose, onDone }) => {
+export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, orderNames, detailIds, hdfDetailIds, nameSuffix, onClose, onDone }) => {
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [name, setName] = useState('');
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -37,15 +39,18 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
   // selection must yield an empty intersection (warning, nothing added) — never
   // a fall-through that adds the whole order's eligible details.
   const detailMode = Array.isArray(detailIds);
+  const hdfMode = Array.isArray(hdfDetailIds);
 
   useEffect(() => {
     if (!open) return;
     const orderLabel = formatOrderLabelForCutName(orderIds, orderNames);
     setName(
       buildDefaultCutName(
-        detailMode
-          ? `Раскрой заказ ${orderLabel}`
-          : `Раскрой ${orderLabel}`,
+        hdfMode
+          ? `Раскрой ХДФ заказ ${orderLabel}`
+          : detailMode
+            ? `Раскрой заказ ${orderLabel}`
+            : `Раскрой ${orderLabel}`,
         nameSuffix,
       ),
     );
@@ -55,11 +60,13 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
       .catch(() => setJobs([]));
     // Informational only: show where the chosen details already live. Never blocks.
     setPlacements(null);
-    cutApi
-      .listPlacements(detailMode ? { detailIds: detailIds ?? [] } : { orderIds })
-      .then(setPlacements)
-      .catch(() => setPlacements(null));
-  }, [open, orderIds, orderNames, detailMode, detailIds, nameSuffix]);
+    if (!hdfMode) {
+      cutApi
+        .listPlacements(detailMode ? { detailIds: detailIds ?? [] } : { orderIds })
+        .then(setPlacements)
+        .catch(() => setPlacements(null));
+    }
+  }, [open, orderIds, orderNames, detailMode, hdfMode, detailIds, nameSuffix]);
 
   const submit = useCallback(async () => {
     if (orderIds.length === 0) return;
@@ -69,6 +76,21 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
         mode === 'new'
           ? await cutApi.create({ name: name.trim() || 'Раскрой', criteria: { orderIds } })
           : await resolveExistingJob(targetJobId);
+
+      if (hdfMode) {
+        const finalHdfIds = hdfDetailIds ?? [];
+        if (finalHdfIds.length === 0) {
+          if (mode === 'new') await cutApi.archive(job.cutJobId, job.version).catch(() => undefined);
+          message.warning('Выберите ХДФ-детали');
+          return;
+        }
+        const updated = await cutApi.addItems(job.cutJobId, { hdfDetailIds: finalHdfIds, version: job.version });
+        emitCutJobReady(updated, { detailIds: [], orderIds });
+        message.success(`Раскрой #${updated.cutJobId} обновлён`);
+        onDone?.(updated);
+        onClose();
+        return;
+      }
 
       const eligible = await cutApi.listEligibleDetails(job.cutJobId, { orderIds });
       const selectable = selectableDetailIds(eligible.details);
@@ -103,11 +125,11 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
     } finally {
       setBusy(false);
     }
-  }, [mode, name, orderIds, detailMode, detailIds, targetJobId, onClose, onDone]);
+  }, [mode, name, orderIds, detailMode, hdfMode, detailIds, hdfDetailIds, targetJobId, onClose, onDone]);
 
   return (
     <Modal
-      title={detailMode ? `Добавить детали в раскрой (${detailIds!.length})` : `Добавить в раскрой (${orderIds.length} заказ(ов))`}
+      title={hdfMode ? `Добавить ХДФ в раскрой (${hdfDetailIds!.length})` : detailMode ? `Добавить детали в раскрой (${detailIds!.length})` : `Добавить в раскрой (${orderIds.length} заказ(ов))`}
       open={open}
       onOk={submit}
       confirmLoading={busy}
@@ -148,9 +170,11 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
           type="info"
           showIcon
           message={
-            detailMode
-              ? 'Будут добавлены только выбранные детали, готовые к раскрою (с раскройной спецификацией материала).'
-              : 'Будут добавлены только детали выбранных заказов, готовые к раскрою (с раскройной спецификацией материала).'
+            hdfMode
+              ? 'Будут добавлены только выбранные рассчитанные ХДФ-детали.'
+              : detailMode
+                ? 'Будут добавлены только выбранные детали, готовые к раскрою (с раскройной спецификацией материала).'
+                : 'Будут добавлены только детали выбранных заказов, готовые к раскрою (с раскройной спецификацией материала).'
           }
         />
       </Space>
