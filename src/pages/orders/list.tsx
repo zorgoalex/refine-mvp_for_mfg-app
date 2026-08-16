@@ -99,6 +99,10 @@ import {
 } from "../../hooks/useDeviceTier";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { OrderCardList } from "./mobile/OrderCardList";
+import {
+  deriveOrderProgressiveLoadingState,
+  OrderListProgressiveSurface,
+} from './components/OrderProgressiveLoading';
 import { buildOrderCardStatusColorMap } from "./mobile/orderCardModel";
 import {
   ordersViewStorageKey,
@@ -884,6 +888,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     useOrderDetailColumnPreferences('orderList', orderListDefaultOrder, orderListColumnDefinitions);
   const snapshotImportBusy = snapshotImporting || snapshotReferenceMappingSubmitting;
   const snapshotImportBusyFileName = snapshotImportFileName ?? snapshotReferenceMapping?.file.name ?? null;
+  const hasOrderListData = tableQueryResult.data !== undefined;
+  const orderListLoading = deriveOrderProgressiveLoadingState({
+    hasPrimaryData: hasOrderListData,
+    primaryPending: tableQueryResult.isLoading,
+    primaryFetching: tableQueryResult.isFetching,
+  });
 
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
@@ -1875,11 +1885,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             </Form>
           </Card>
         )}
-        {(isMobile || isTablet) && ordersViewMode === 'cards' ? (
+        <OrderListProgressiveSurface
+          state={orderListLoading}
+          hasPrimaryData={hasOrderListData}
+          queryError={tableQueryResult.isError}
+          onRetry={() => { void tableQueryResult.refetch(); }}
+        >
+          {(isMobile || isTablet) && ordersViewMode === 'cards' ? (
           <div className={isTablet ? 'order-card-list--tablet' : 'order-card-list--mobile'}>
             <OrderCardList
               rows={tableProps.dataSource ?? []}
-              loading={!!tableProps.loading}
+              loading={false}
               pagination={tableProps.pagination ?? false}
               onPaginationChange={(nextPage, nextPageSize) => {
                 if (nextPageSize !== pageSize) {
@@ -1896,6 +1912,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         ) : (
           <Table
             {...tableProps}
+            loading={false}
             rowKey="order_id"
             sticky
             rowSelection={
@@ -1921,7 +1938,8 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             })}
             columns={visibleOrderListColumns}
           />
-        )}
+          )}
+        </OrderListProgressiveSurface>
       </List>
 
       <OrderLifecycleReadSurface active={createModalOpen}>

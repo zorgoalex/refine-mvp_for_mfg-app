@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { featureFlags } from '../config/featureFlags';
 import {
   getOrderFormDataResourceSnapshot,
@@ -41,6 +41,7 @@ interface UseOrderFormDataResult {
   references: OrderFormDataReferences;
   isLoading: boolean;
   error: Error | null;
+  retry: () => Promise<void>;
 }
 
 export function useOrderFormData(enabled = featureFlags.useBackendReferences): UseOrderFormDataResult {
@@ -54,6 +55,11 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
   );
   const readEnabled = enabled && lifecycleReadActive && documentVisible;
   const handledActivationRevisionRef = useRef(activationRevision);
+  const retry = useCallback(async () => {
+    if (!enabled) return;
+    invalidateOrderFormDataCache(namespace);
+    await prefetchOrderFormData(namespace);
+  }, [enabled, namespace]);
 
   useEffect(() => {
     if (!readEnabled) return undefined;
@@ -80,6 +86,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
       references: EMPTY_ORDER_FORM_DATA_REFERENCES,
       isLoading: false,
       error: null,
+      retry,
     };
   }
 
@@ -89,6 +96,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     references: snapshot.normalizedReferences,
     isLoading: readEnabled && snapshot.data === null && snapshot.inFlight,
     error: snapshot.error,
+    retry,
   };
 }
 

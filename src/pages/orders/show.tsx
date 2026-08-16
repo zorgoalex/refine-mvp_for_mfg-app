@@ -1,7 +1,7 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
+import { Alert, Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -22,6 +22,10 @@ import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
+import {
+  deriveOrderProgressiveLoadingState,
+  OrderShowProgressiveSurface,
+} from './components/OrderProgressiveLoading';
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
 import { featureFlags } from "../../config/featureFlags";
 import { isApiError } from "../../api/apiError";
@@ -715,6 +719,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     scopeKey: string;
     value: ProjectDto[];
     loading: boolean;
+    error: string | null;
   } | null>(null);
   const [moveSubmittingState, setMoveSubmittingState] = useState<{
     scopeKey: string;
@@ -901,6 +906,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     : [];
   const moveCandidatesLoading = moveCandidatesState?.scopeKey === moveCandidatesScopeKey
     && moveCandidatesState.loading;
+  const moveCandidatesError = moveCandidatesState?.scopeKey === moveCandidatesScopeKey
+    ? moveCandidatesState.error
+    : null;
   const moveSubmitting = moveSubmittingState?.scopeKey === moveCandidatesScopeKey
     && moveSubmittingState.inFlight;
   const moveUi = moveUiState?.scopeKey === moveCandidatesScopeKey ? moveUiState : null;
@@ -941,6 +949,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         scopeKey,
         value: current?.scopeKey === scopeKey ? current.value : [],
         loading: true,
+        error: null,
       }));
       try {
         const response = await projectsApi.list({ clientId });
@@ -949,11 +958,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             scopeKey,
             value: response.filter((candidate) => candidate.projectId !== projectId),
             loading: false,
+            error: null,
           });
         }
       } catch (error) {
         if (!cancelled && moveCandidatesReadGuard.isCurrent(token)) {
-          message.error(error instanceof Error ? error.message : 'Не удалось загрузить проекты');
+          setMoveCandidatesState((current) => ({
+            scopeKey,
+            value: current?.scopeKey === scopeKey ? current.value : [],
+            loading: false,
+            error: error instanceof Error ? error.message : 'Не удалось загрузить проекты',
+          }));
         }
       } finally {
         if (!cancelled && moveCandidatesReadGuard.isCurrent(token)) {
@@ -993,6 +1008,8 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     data: detailsData,
     dataUpdatedAt: detailsDataUpdatedAt,
     isLoading: detailsLoading,
+    isError: detailsError,
+    refetch: refetchDetails,
   } = useList({
     resource: "order_details",
     filters: [
@@ -1101,6 +1118,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     orderLoading: isLoading,
     detailsLoading,
     useBackendOrdersRead,
+  });
+  const hasOrderShowData = Boolean(record || deletedOrderModel);
+  const orderShowLoading = deriveOrderProgressiveLoadingState({
+    hasPrimaryData: hasOrderShowData,
+    primaryPending: showLoading,
+    primaryFetching: queryResult.isFetching,
+    sectionPending: !useBackendOrdersRead && detailsLoading,
   });
   const [liveDetailProductionStatusState, setLiveDetailProductionStatusState] = useState<{
     scopeKey: string;
@@ -2892,7 +2916,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <Show
-      isLoading={showLoading}
+      isLoading={false}
       title={isOperational ? ' ' : showTitle}
       breadcrumb={isOperational ? false : (
         <Breadcrumb>
@@ -3142,7 +3166,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         )
       )}
     >
-      {deletedOrderModel && deletedOrderRestoreHandler ? (
+      <OrderShowProgressiveSurface
+        state={orderShowLoading}
+        hasDeletedOrder={Boolean(deletedOrderModel)}
+        hasPrimaryData={hasOrderShowData}
+        queryError={queryResult.isError}
+        sectionError={!useBackendOrdersRead && detailsError}
+        onRetry={() => { void queryResult.refetch(); }}
+        onSectionRetry={() => { void refetchDetails(); }}
+      >
+        {deletedOrderModel && deletedOrderRestoreHandler ? (
         <DeletedOrderCard
           model={deletedOrderModel}
           onRestore={deletedOrderRestoreHandler}
@@ -4008,12 +4041,21 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                     options={moveProjectOptions}
                     optionFilterProp="label"
                   />
+                  {moveCandidatesError ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message="Не удалось загрузить проекты"
+                      description={moveCandidatesError}
+                    />
+                  ) : null}
                 </Space>
               </Modal>
             </OrderLifecycleReadSurface>
           )}
         </div>
-      )}
+        )}
+      </OrderShowProgressiveSurface>
     </Show>
   );
 };

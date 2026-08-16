@@ -79,6 +79,15 @@ const reactHarness = vi.hoisted(() => {
         }
         return previous.value as T;
       },
+      useCallback<T extends (...args: never[]) => unknown>(callback: T, deps?: unknown[]): T {
+        const index = memoCursor++;
+        const previous = memoSlots[index];
+        if (!previous || depsChanged(deps, previous.deps)) {
+          memoSlots[index] = { deps, value: callback };
+          return callback;
+        }
+        return previous.value as T;
+      },
       useState<T>(initial: T | (() => T)) {
         const index = stateCursor++;
         if (!(index in stateSlots)) {

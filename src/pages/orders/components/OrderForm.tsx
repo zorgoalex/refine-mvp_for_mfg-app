@@ -4,7 +4,7 @@ import { Tooltip } from '../../../ui/tooltipDelay';
 
 import React, { CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Popconfirm, message } from 'antd';
+import { Alert, Card, Tabs, Button, Empty, Space, notification, Modal, Form, Select, Tag, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useNavigation, useParsed } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
@@ -87,6 +87,10 @@ import { OrderTelegramScreenshots } from './sections/OrderTelegramScreenshots';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 import { OrderLabelDataEditor } from './labels/OrderLabelDataEditor';
 import { makeOrderDeleteHandler } from '../orderDeleteAction';
+import {
+  OrderFormProgressiveSurface,
+  OrderInitialSkeleton,
+} from './OrderProgressiveLoading';
 
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
@@ -178,7 +182,9 @@ function computeOrderSaveSignature(values: unknown): string {
 export const OrderForm: React.FC<OrderFormProps> = (props) => {
   useCancelInactiveOrderQueriesOnDeactivate();
   const { canViewFinancials, isLoading } = useOrderFinancialVisibility();
-  if (isLoading) return <Spin />;
+  if (isLoading) {
+    return <OrderInitialSkeleton variant="form" label="Проверяем доступ к форме заказа" />;
+  }
   if (!canViewFinancials) {
     return (
       <Alert
@@ -293,6 +299,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     defaultPaymentStatus,
     isLoading: statusesLoading,
     error: statusesError,
+    retry: retryStatuses,
   } =
     useDefaultStatuses();
   const [deadlineDefaultScheduleState, setDeadlineDefaultScheduleState] = useState<{
@@ -636,7 +643,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Load existing order data in edit mode
   // Use relationship to load doweling links via order_doweling_links (many-to-many)
   const shouldLoadOrder = mode === 'edit' && !!orderId && !useBackendOrderRead;
-  const { data: orderData, isLoading: orderLoading } = useOne({
+  const { data: orderData, isLoading: orderLoading, isFetching: orderFetching } = useOne({
     resource: orderEditLegacyPrimaryIdentity.resource,
     id: orderEditLegacyPrimaryIdentity.orderId,
     queryOptions: {
@@ -652,7 +659,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const canLoadOrderChildren = mode === 'edit' && typeof orderId === 'number' && orderId > 0;
   const shouldLoadDetails = canLoadOrderChildren && !useBackendOrderRead;
 
-  const { data: detailsData, isLoading: detailsLoading } = useList({
+  const { data: detailsData, isLoading: detailsLoading, isFetching: detailsFetching } = useList({
     resource: 'order_details',
     filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
     pagination: { pageSize: 1000 },
@@ -664,7 +671,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // SP3: server-resolved per-detail material name (COALESCE sheet/material) from
   // order_details_view, merged into the store as material_name_resolved so the edit
   // workspace shows the sheet name in mixed read mode without a shadow materials row.
-  const { data: detailNamesData, isLoading: detailNamesLoading } = useList({
+  const { data: detailNamesData, isLoading: detailNamesLoading, isFetching: detailNamesFetching } = useList({
     resource: 'order_details_view',
     filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
     pagination: { pageSize: 1000 },
@@ -675,7 +682,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   });
 
   // SP3: server-resolved header material name (COALESCE sheet/material) from orders_view.
-  const { data: headerNameData, isLoading: headerNameLoading } = useOne({
+  const { data: headerNameData, isLoading: headerNameLoading, isFetching: headerNameFetching } = useOne({
     resource: 'orders_view',
     id: orderId,
     meta: {
@@ -694,7 +701,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Load payments in edit mode (only if orderId is valid number)
   const shouldLoadPayments = canLoadOrderChildren && !useBackendOrderRead;
 
-  const { data: paymentsData, isLoading: paymentsLoading } = useList({
+  const { data: paymentsData, isLoading: paymentsLoading, isFetching: paymentsFetching } = useList({
     resource: 'payments',
     filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
     pagination: { pageSize: 1000 },
@@ -998,15 +1005,6 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     mode,
     updateHeaderField,
   ]);
-
-  useEffect(() => {
-    if (!statusesError) return;
-    notification.error({
-      message: 'Ошибка загрузки справочников формы',
-      description: statusesError.message,
-      duration: 0,
-    });
-  }, [statusesError]);
 
   // Reset store and didInit when orderId changes (handles navigation between orders)
   const didInit = useRef(false);
@@ -1888,28 +1886,56 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     (shouldLoadOrder && orderLoading) ||
     (shouldLoadDetails && detailsLoading) ||
     (shouldLoadPayments && paymentsLoading);
-
-
-  if (isLoadingEssential) {
-    return (
-      <OrderDraftStoreProvider orderKey={orderKey}>
-        <Card>
-          <div style={{ textAlign: 'center', padding: '50px' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: '16px' }}>
-              {backendOrderLoading || orderLoading ? 'Загрузка заказа...' : 'Загрузка формы...'}
-            </div>
-          </div>
-        </Card>
-      </OrderDraftStoreProvider>
-    );
-  }
+  const isInitialLoading = isLoadingEssential;
+  const isRefreshing = !isInitialLoading && (
+    orderFetching
+    || detailsFetching
+    || paymentsFetching
+    || detailNamesFetching
+    || headerNameFetching
+  );
+  const formProgressiveLoading = {
+    isInitialLoading,
+    isRefreshing,
+    isSectionLoading: false,
+  };
 
   const orderName = header.order_name?.trim();
   const cardTitle =
     mode === 'create'
       ? `Создание заказа${orderName ? ` «${orderName}»` : ''}`
       : `Редактирование заказа${orderName ? ` «${orderName}»` : ''}`;
+
+  if (isInitialLoading) {
+    return (
+      <OrderDraftStoreProvider orderKey={orderKey}>
+        {isOperational ? (
+          <div className="order-form-operational">
+            <OperationalPageHeader
+              breadcrumbs={<Space split={<span>›</span>} size={6}><Link to="/orders">Заказы</Link><span>Редактирование</span></Space>}
+              title={mode === 'create' ? 'Создание заказа' : 'Редактирование заказа'}
+              description="Основные данные появятся без перезагрузки рабочего пространства."
+            />
+            <div className="order-form-operational__workspace">
+              <OrderFormProgressiveSurface
+                state={formProgressiveLoading}
+                error={statusesError ?? null}
+                onRetry={() => { void retryStatuses(); }}
+              />
+            </div>
+          </div>
+        ) : (
+          <Card title={cardTitle}>
+            <OrderFormProgressiveSurface
+              state={formProgressiveLoading}
+              error={statusesError ?? null}
+              onRetry={() => { void retryStatuses(); }}
+            />
+          </Card>
+        )}
+      </OrderDraftStoreProvider>
+    );
+  }
 
   if (isOperational) {
     return (
@@ -1978,7 +2004,12 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               </>
             )}
           />
-          <div className="order-form-operational__workspace">
+          <OrderFormProgressiveSurface
+            state={formProgressiveLoading}
+            error={statusesError ?? null}
+            onRetry={() => { void retryStatuses(); }}
+          >
+            <div className="order-form-operational__workspace">
             <div className={orderFormPageClassName} style={orderFormStickyStyle}>
               <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
               <div
@@ -1993,7 +2024,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                 type="card"
               />
             </div>
-          </div>
+            </div>
+          </OrderFormProgressiveSurface>
         </div>
       </OrderDraftStoreProvider>
     );
@@ -2078,8 +2110,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         </Space>
       }
     >
-      {/* Read-only header with order summary (both create and edit modes) */}
-      <div className={orderFormPageClassName} style={orderFormStickyStyle}>
+      <OrderFormProgressiveSurface
+        state={formProgressiveLoading}
+        error={statusesError ?? null}
+        onRetry={() => { void retryStatuses(); }}
+      >
+        {/* Read-only header with order summary (both create and edit modes) */}
+        <div className={orderFormPageClassName} style={orderFormStickyStyle}>
         <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
         <div
           className={`order-show-summary-tabs-sticky${orderFormSummaryStuck ? ' order-show-summary-tabs-sticky--stuck' : ''}`}
@@ -2094,7 +2131,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           items={headerTabItems}
           type="card"
         />
-      </div>
+        </div>
+      </OrderFormProgressiveSurface>
     </Card>
     </OrderDraftStoreProvider>
   );

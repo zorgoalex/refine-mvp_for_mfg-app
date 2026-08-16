@@ -188,6 +188,38 @@ describe('useOrderFormData shared owner integration', () => {
       renderer!.unmount();
     });
   });
+
+  it('retries a failed form-data read immediately without waiting for activation', async () => {
+    ordersApiMock.getFormData
+      .mockRejectedValueOnce(new Error('references unavailable'))
+      .mockResolvedValueOnce(response('Recovered film'));
+    let latest!: ReturnType<typeof useOrderFormData>;
+    let renderer: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<RetryConsumer publish={(result) => { latest = result; }} />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await flushPromises();
+    });
+
+    expect(latest.error?.message).toBe('references unavailable');
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await latest.retry();
+      await flushPromises();
+    });
+
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(2);
+    expect(latest.error).toBeNull();
+    expect(latest.references.films[0]?.label).toBe('Recovered film');
+
+    await act(async () => {
+      renderer!.unmount();
+    });
+  });
 });
 
 function Consumer({
@@ -211,6 +243,15 @@ function DisabledConsumer({
 }) {
   useOrderFormData(false);
   renders.set(index, (renders.get(index) ?? 0) + 1);
+  return null;
+}
+
+function RetryConsumer({
+  publish,
+}: {
+  publish: (result: ReturnType<typeof useOrderFormData>) => void;
+}) {
+  publish(useOrderFormData(true));
   return null;
 }
 
