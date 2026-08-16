@@ -1249,15 +1249,6 @@ html {
   color: var(--app-text);
 }
 
-.order-detail-hdf-cell__qty {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 9px;
-  color: var(--app-text-muted);
-}
-
 .order-detail-hdf-cell--parameter,
 .order-detail-hdf-cell--status,
 .order-detail-hdf-cell--empty {

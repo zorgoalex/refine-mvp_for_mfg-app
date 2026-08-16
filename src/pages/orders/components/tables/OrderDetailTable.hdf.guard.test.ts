@@ -28,7 +28,9 @@ describe('order HDF display guards', () => {
     expect(table).toContain('display={getOrderDetailHdfDisplay(hdfDisplayBySourceDetailId, d)}');
     expect(table).toContain('hdfSummaryVersion');
     expect(table).toContain('ХДФ');
-    expect(table).toContain('мм/шт');
+    expect(table).toContain(">мм</span>");
+    expect(table).not.toContain('order-detail-hdf-cell__qty');
+    expect(table).not.toContain('шт.</span>');
     expect(table).toContain("too_narrow: 'Узкая деталь'");
   });
 
