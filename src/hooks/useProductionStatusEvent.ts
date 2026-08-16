@@ -1,7 +1,7 @@
 // Hook for managing production status events
 // Records events when production status is manually changed
 
-import { useDataProvider, useInvalidate, useList } from '@refinedev/core';
+import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { message } from 'antd';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -11,6 +11,7 @@ import {
 } from '../api/productionActionsApi';
 import type { ProductionActionResponse } from '../api/types/productionActionsApi.types';
 import { featureFlags } from '../config/featureFlags';
+import { useList } from '../query/orderLifecycleQueries';
 import { ProductionStatusEvent } from '../types/orders';
 
 interface ProductionStatusCommandOptions {

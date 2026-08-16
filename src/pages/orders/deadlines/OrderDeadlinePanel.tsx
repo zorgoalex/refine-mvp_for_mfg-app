@@ -32,6 +32,7 @@ import {
   canViewOrderDeadlineRules,
   loadOrderDeadlinePanelData,
 } from './orderDeadlineRulesView';
+import { useOrderAsyncReadGuard } from '../../../query/orderLifecycleQueries';
 
 const { Panel } = Collapse;
 const { Text } = Typography;
@@ -76,11 +77,31 @@ interface OverrideModalState {
 
 export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlinePanelProps) {
   const { data: identity } = useGetIdentity<UserIdentity>();
-  const [state, setState] = useState<DeadlinePanelState>(initialState);
+  const readGuard = useOrderAsyncReadGuard(`order-deadlines:${orderId ?? 'missing'}`);
+  const readScopeKey = `${readGuard.authNamespace}|order:${orderId ?? 'missing'}`;
+  const [stateEnvelope, setStateEnvelope] = useState<{
+    scopeKey: string;
+    value: DeadlinePanelState;
+  } | null>(null);
+  const state = stateEnvelope?.scopeKey === readScopeKey ? stateEnvelope.value : initialState;
   const [reloadKey, setReloadKey] = useState(0);
-  const [overrideModal, setOverrideModal] = useState<OverrideModalState | null>(null);
-  const [overrideReason, setOverrideReason] = useState('');
-  const [savingOverride, setSavingOverride] = useState(false);
+  const [overrideUiState, setOverrideUiState] = useState<{
+    scopeKey: string;
+    modal: OverrideModalState | null;
+    reason: string;
+  } | null>(null);
+  const overrideModal = overrideUiState?.scopeKey === readScopeKey
+    ? overrideUiState.modal
+    : null;
+  const overrideReason = overrideUiState?.scopeKey === readScopeKey
+    ? overrideUiState.reason
+    : '';
+  const [savingOverrideState, setSavingOverrideState] = useState<{
+    scopeKey: string;
+    value: boolean;
+  } | null>(null);
+  const savingOverride = savingOverrideState?.scopeKey === readScopeKey
+    && savingOverrideState.value;
   const enabled = featureFlags.useBackendDeadlines && !!orderId;
   const canViewRules = canViewOrderDeadlineRules(identity);
   const canEditOverrides = canEditOrderDeadlineOverrides(identity);
@@ -90,20 +111,19 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
 
     async function loadDeadlines() {
       if (!enabled || !orderId) {
-        setState(initialState);
+        setStateEnvelope({ scopeKey: readScopeKey, value: initialState });
         return;
       }
+      if (!readGuard.active) return;
+      const token = readGuard.capture();
+      if (!token) return;
 
-      setState({
-        loading: true,
-        summary: null,
-        deadlines: [],
-        events: [],
-        effectiveRules: null,
-        preview: null,
-        rulesError: null,
-        previewUnavailableReason: null,
-        error: null,
+      setStateEnvelope({
+        scopeKey: readScopeKey,
+        value: {
+          ...initialState,
+          loading: true,
+        },
       });
 
       try {
@@ -113,31 +133,30 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
           api: deadlinesApi,
         });
 
-        if (cancelled) return;
+        if (cancelled || !readGuard.isCurrent(token)) return;
 
-        setState({
-          loading: false,
-          summary: result.summary,
-          deadlines: result.deadlines,
-          events: result.events,
-          effectiveRules: result.effectiveRules,
-          preview: result.preview,
-          rulesError: result.rulesError,
-          previewUnavailableReason: result.previewUnavailableReason,
-          error: null,
+        setStateEnvelope({
+          scopeKey: readScopeKey,
+          value: {
+            loading: false,
+            summary: result.summary,
+            deadlines: result.deadlines,
+            events: result.events,
+            effectiveRules: result.effectiveRules,
+            preview: result.preview,
+            rulesError: result.rulesError,
+            previewUnavailableReason: result.previewUnavailableReason,
+            error: null,
+          },
         });
       } catch (error) {
-        if (cancelled) return;
-        setState({
-          loading: false,
-          summary: null,
-          deadlines: [],
-          events: [],
-          effectiveRules: null,
-          preview: null,
-          rulesError: null,
-          previewUnavailableReason: null,
-          error: error instanceof Error ? error.message : 'Не удалось загрузить дедлайны',
+        if (cancelled || !readGuard.isCurrent(token)) return;
+        setStateEnvelope({
+          scopeKey: readScopeKey,
+          value: {
+            ...initialState,
+            error: error instanceof Error ? error.message : 'Не удалось загрузить дедлайны',
+          },
         });
       }
     }
@@ -147,7 +166,16 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
     return () => {
       cancelled = true;
     };
-  }, [canViewRules, enabled, orderId, reloadKey]);
+  }, [
+    canViewRules,
+    enabled,
+    orderId,
+    readGuard.active,
+    readGuard.capture,
+    readGuard.isCurrent,
+    readScopeKey,
+    reloadKey,
+  ]);
 
   const deadlineRows = useMemo(() => buildDeadlineRows(state.deadlines), [state.deadlines]);
   const eventRows = useMemo(() => buildDeadlineEventRows(state.events), [state.events]);
@@ -180,8 +208,11 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
     targetId: string,
     title: string,
   ) => {
-    setOverrideReason('');
-    setOverrideModal({ mode: 'disable', targetType, targetId, title });
+    setOverrideUiState({
+      scopeKey: readScopeKey,
+      modal: { mode: 'disable', targetType, targetId, title },
+      reason: '',
+    });
   };
 
   const openRestoreModal = (
@@ -191,8 +222,11 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
     title: string,
   ) => {
     if (!overrideId) return;
-    setOverrideReason('');
-    setOverrideModal({ mode: 'restore', targetType, targetId, overrideId, title });
+    setOverrideUiState({
+      scopeKey: readScopeKey,
+      modal: { mode: 'restore', targetType, targetId, overrideId, title },
+      reason: '',
+    });
   };
 
   const submitOverrideChange = async () => {
@@ -202,7 +236,9 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
       return;
     }
 
-    setSavingOverride(true);
+    const writeToken = readGuard.capture();
+    if (!writeToken) return;
+    setSavingOverrideState({ scopeKey: readScopeKey, value: true });
     try {
       if (overrideModal.mode === 'disable') {
         await deadlinesApi.upsertOrderOverride(
@@ -212,14 +248,22 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
       } else if (overrideModal.overrideId) {
         await deadlinesApi.retireOrderOverride(orderId, overrideModal.overrideId, { reason });
       }
+      if (!readGuard.isSameResource(writeToken)) return;
       message.success('Настройка сохранена');
-      setOverrideModal(null);
-      setOverrideReason('');
+      setOverrideUiState({
+        scopeKey: readScopeKey,
+        modal: null,
+        reason: '',
+      });
       setReloadKey((value) => value + 1);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось сохранить настройку');
+      if (readGuard.isSameResource(writeToken)) {
+        message.error(error instanceof Error ? error.message : 'Не удалось сохранить настройку');
+      }
     } finally {
-      setSavingOverride(false);
+      if (readGuard.isSameResource(writeToken)) {
+        setSavingOverrideState({ scopeKey: readScopeKey, value: false });
+      }
     }
   };
 
@@ -512,7 +556,11 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
         title={overrideModal?.title}
         open={!!overrideModal}
         onOk={submitOverrideChange}
-        onCancel={() => setOverrideModal(null)}
+        onCancel={() => setOverrideUiState({
+          scopeKey: readScopeKey,
+          modal: null,
+          reason: '',
+        })}
         okButtonProps={{ disabled: !overrideReason.trim(), loading: savingOverride }}
         confirmLoading={savingOverride}
         okText="Сохранить"
@@ -523,7 +571,11 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
           <Text>Причина изменения обязательна для аудита.</Text>
           <TextArea
             value={overrideReason}
-            onChange={(event) => setOverrideReason(event.target.value)}
+            onChange={(event) => setOverrideUiState((current) => ({
+              scopeKey: readScopeKey,
+              modal: current?.scopeKey === readScopeKey ? current.modal : overrideModal,
+              reason: event.target.value,
+            }))}
             rows={3}
             maxLength={1000}
             showCount

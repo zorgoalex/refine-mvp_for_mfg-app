@@ -19,6 +19,7 @@ import type {
   CncTelegramOrderScreenshot,
   CncTelegramOrderScreenshotsResponse,
 } from '../../../../api/types/cncTelegramApi.types';
+import { useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
 
 const { Text } = Typography;
 const DEFAULT_SCALE = 0.25;
@@ -34,7 +35,13 @@ interface OrderTelegramScreenshotsProps {
 
 export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTelegramScreenshotsProps) {
   const validOrderId = Number.isSafeInteger(orderId) && Number(orderId) > 0 ? Number(orderId) : null;
-  const [response, setResponse] = useState<CncTelegramOrderScreenshotsResponse | null>(null);
+  const readGuard = useOrderAsyncReadGuard(`telegram-screenshots:${validOrderId ?? 'unsaved'}`);
+  const readScopeKey = `${readGuard.authNamespace}|order:${validOrderId ?? 'unsaved'}`;
+  const [responseState, setResponseState] = useState<{
+    scopeKey: string;
+    value: CncTelegramOrderScreenshotsResponse;
+  } | null>(null);
+  const response = responseState?.scopeKey === readScopeKey ? responseState.value : null;
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedPacketId, setSelectedPacketId] = useState<string | null>(null);
@@ -54,20 +61,24 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
   );
 
   const refresh = useCallback(async (silent = false) => {
-    if (!validOrderId) return null;
+    const token = readGuard.capture();
+    if (!validOrderId || !token) return null;
     if (!silent) setLoading(true);
     try {
       const next = await cncTelegramApi.orderScreenshots(validOrderId);
-      setResponse(next);
+      if (!readGuard.isCurrent(token)) return null;
+      setResponseState({ scopeKey: readScopeKey, value: next });
       setLoadError(null);
       return next;
     } catch (error) {
-      if (!silent) setLoadError(readError(error, 'Не удалось загрузить скрины Telegram'));
+      if (!silent && readGuard.isCurrent(token)) {
+        setLoadError(readError(error, 'Не удалось загрузить скрины Telegram'));
+      }
       return null;
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && readGuard.isCurrent(token)) setLoading(false);
     }
-  }, [validOrderId]);
+  }, [readGuard.capture, readGuard.isCurrent, readScopeKey, validOrderId]);
 
   const replaceOriginalUrl = useCallback((next: string | null) => {
     if (originalUrlRef.current) URL.revokeObjectURL(originalUrlRef.current);
@@ -78,7 +89,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
   useEffect(() => {
     viewerPacketIdRef.current = null;
     originalLoadingPacketRef.current = null;
-    setResponse(null);
+    setResponseState(null);
     setLoadError(null);
     setSelectedPacketId(null);
     setSelectedPreviewUrl(null);
@@ -86,31 +97,45 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
     setRestorePolling(false);
     setViewerError(null);
     replaceOriginalUrl(null);
-    if (validOrderId) void refresh();
-  }, [refresh, replaceOriginalUrl, validOrderId]);
+  }, [readScopeKey, replaceOriginalUrl]);
+
+  useEffect(() => {
+    if (!readGuard.active || !validOrderId) return;
+    void refresh();
+  }, [readGuard.active, readScopeKey, refresh, validOrderId]);
 
   useEffect(() => () => {
     if (originalUrlRef.current) URL.revokeObjectURL(originalUrlRef.current);
   }, []);
 
+  useEffect(() => {
+    if (readGuard.active) return;
+    originalLoadingPacketRef.current = null;
+    setOriginalLoading(false);
+  }, [readGuard.active]);
+
   const requestRestore = useCallback(async (item: CncTelegramOrderScreenshot) => {
     if (item.kind !== 'telegram') return;
     if (!validOrderId) return;
+    const token = readGuard.capture();
+    if (!token) return;
     setViewerError(null);
     setRestorePolling(true);
     try {
       await cncTelegramApi.restoreOrderScreenshot(validOrderId, item.packetId);
-      await refresh(true);
+      if (readGuard.isCurrent(token)) await refresh(true);
     } catch (error) {
-      if (viewerPacketIdRef.current === item.packetId) {
+      if (readGuard.isCurrent(token) && viewerPacketIdRef.current === item.packetId) {
         setRestorePolling(false);
         setViewerError(readError(error, 'Не удалось поставить скрин на восстановление'));
       }
     }
-  }, [refresh, validOrderId]);
+  }, [readGuard.capture, readGuard.isCurrent, refresh, validOrderId]);
 
   const loadOriginal = useCallback(async (item: CncTelegramOrderScreenshot) => {
     if (!validOrderId || originalLoadingPacketRef.current === item.packetId) return;
+    const token = readGuard.capture();
+    if (!token) return;
     originalLoadingPacketRef.current = item.packetId;
     setOriginalLoading(true);
     setViewerError(null);
@@ -118,15 +143,16 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
       const blob = item.kind === 'svg_cut'
         ? await fetchSvgCutScreenshotBlob(item, 'print')
         : (await cncTelegramApi.downloadOrderScreenshotImage(validOrderId, item.packetId)).blob;
+      if (!readGuard.isCurrent(token)) return;
       const nextUrl = URL.createObjectURL(blob);
-      if (viewerPacketIdRef.current === item.packetId) {
+      if (readGuard.isCurrent(token) && viewerPacketIdRef.current === item.packetId) {
         replaceOriginalUrl(nextUrl);
         setRestorePolling(false);
       } else {
         URL.revokeObjectURL(nextUrl);
       }
     } catch (error) {
-      if (viewerPacketIdRef.current !== item.packetId) return;
+      if (!readGuard.isCurrent(token) || viewerPacketIdRef.current !== item.packetId) return;
       if (item.kind === 'telegram' && isApiError(error) && (error.status === 404 || error.status === 410)) {
         await requestRestore(item);
       } else {
@@ -136,12 +162,14 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
       if (originalLoadingPacketRef.current === item.packetId) {
         originalLoadingPacketRef.current = null;
       }
-      if (viewerPacketIdRef.current === item.packetId) setOriginalLoading(false);
+      if (readGuard.isCurrent(token)) {
+        if (viewerPacketIdRef.current === item.packetId) setOriginalLoading(false);
+      }
     }
-  }, [replaceOriginalUrl, requestRestore, validOrderId]);
+  }, [readGuard.capture, readGuard.isCurrent, replaceOriginalUrl, requestRestore, validOrderId]);
 
   useEffect(() => {
-    if (!restorePolling || !selectedPacketId) return;
+    if (!readGuard.active || !restorePolling || !selectedPacketId) return;
     let cancelled = false;
     const poll = async () => {
       const next = await refresh(true);
@@ -167,7 +195,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [loadOriginal, refresh, restorePolling, selectedPacketId]);
+  }, [loadOriginal, readGuard.active, refresh, restorePolling, selectedPacketId]);
 
   const openViewer = useCallback((item: CncTelegramOrderScreenshot, previewUrl: string | null) => {
     viewerPacketIdRef.current = item.packetId;
@@ -333,30 +361,79 @@ function TelegramScreenshotThumbnail({
   item: CncTelegramOrderScreenshot;
   onOpen: (item: CncTelegramOrderScreenshot, previewUrl: string | null) => void;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const thumbnailGuard = useOrderAsyncReadGuard(
+    `telegram-thumbnail:${orderId}:${item.kind}:${item.packetId}`,
+  );
+  const thumbnailScopeKey = `${thumbnailGuard.authNamespace}|${orderId}|${item.kind}|${item.packetId}`;
+  const [thumbnailState, setThumbnailState] = useState<{
+    scopeKey: string;
+    url: string | null;
+    failed: boolean;
+  } | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+  const mountedRef = useRef(false);
+  const pendingScopeRef = useRef<string | null>(null);
+  const [retryRevision, setRetryRevision] = useState(0);
+  const url = thumbnailState?.scopeKey === thumbnailScopeKey ? thumbnailState.url : null;
+  const failed = thumbnailState?.scopeKey === thumbnailScopeKey && thumbnailState.failed;
 
   useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    setFailed(false);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!thumbnailGuard.active || url || pendingScopeRef.current === thumbnailScopeKey) return undefined;
+    const token = thumbnailGuard.capture();
+    if (!token) return undefined;
+    pendingScopeRef.current = thumbnailScopeKey;
+    setThumbnailState({ scopeKey: thumbnailScopeKey, url: null, failed: false });
     const load = item.kind === 'svg_cut'
       ? fetchSvgCutScreenshotBlob(item, 'thumb')
       : cncTelegramApi.downloadOrderScreenshotPreview(orderId, item.packetId).then((result) => result.blob);
     void load
       .then((blob) => {
-        objectUrl = URL.createObjectURL(blob);
-        if (cancelled) URL.revokeObjectURL(objectUrl);
-        else setUrl(objectUrl);
+        const requestObjectUrl = URL.createObjectURL(blob);
+        if (!mountedRef.current || !thumbnailGuard.isCurrent(token)) {
+          URL.revokeObjectURL(requestObjectUrl);
+          return;
+        }
+        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = requestObjectUrl;
+        setThumbnailState({ scopeKey: thumbnailScopeKey, url: requestObjectUrl, failed: false });
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (mountedRef.current && thumbnailGuard.isCurrent(token)) {
+          setThumbnailState({ scopeKey: thumbnailScopeKey, url: null, failed: true });
+        }
+      })
+      .finally(() => {
+        if (pendingScopeRef.current === thumbnailScopeKey) pendingScopeRef.current = null;
+        const currentToken = thumbnailGuard.capture();
+        if (mountedRef.current && currentToken && !thumbnailGuard.isCurrent(token)) {
+          setRetryRevision((current) => current + 1);
+        }
       });
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [item, orderId]);
+    return undefined;
+  }, [
+    item,
+    orderId,
+    thumbnailGuard.active,
+    thumbnailGuard.capture,
+    thumbnailGuard.isCurrent,
+    thumbnailScopeKey,
+    retryRevision,
+    url,
+  ]);
+
+  useEffect(() => () => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  }, [thumbnailScopeKey]);
 
   const restoreLabel = item.restore?.status === 'pending' || item.restore?.status === 'processing'
     ? 'Восстанавливается'
@@ -394,16 +471,30 @@ function ManualSvgOrderFileLink({
   orderId: number;
   file: CncTelegramManualSvgOrderFile;
 }) {
-  const [downloading, setDownloading] = useState(false);
+  const downloadGuard = useOrderAsyncReadGuard(`telegram-manual-file:${orderId}:${file.fileId}`);
+  const downloadScopeKey = `${downloadGuard.authNamespace}|order:${orderId}|file:${file.fileId}`;
+  const [downloadState, setDownloadState] = useState<{
+    scopeKey: string;
+    inFlight: boolean;
+  } | null>(null);
+  const downloading = downloadState?.scopeKey === downloadScopeKey
+    && downloadState.inFlight;
   const download = async () => {
-    setDownloading(true);
+    const downloadToken = downloadGuard.capture();
+    if (!downloadToken) return;
+    setDownloadState({ scopeKey: downloadScopeKey, inFlight: true });
     try {
       const result = await cncTelegramApi.downloadOrderManualSvgFile(orderId, file.fileId);
+      if (!downloadGuard.isSameResource(downloadToken)) return;
       saveBlob(result.blob, result.fileName || file.fileName);
     } catch (error) {
-      message.error(readError(error, 'Не удалось скачать файл раскроя'));
+      if (downloadGuard.isSameResource(downloadToken)) {
+        message.error(readError(error, 'Не удалось скачать файл раскроя'));
+      }
     } finally {
-      setDownloading(false);
+      if (downloadGuard.isSameResource(downloadToken)) {
+        setDownloadState({ scopeKey: downloadScopeKey, inFlight: false });
+      }
     }
   };
   return (

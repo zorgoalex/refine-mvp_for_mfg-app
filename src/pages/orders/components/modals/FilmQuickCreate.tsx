@@ -4,7 +4,7 @@
 import React from 'react';
 import { Modal, Form, Input, Switch, Select, notification, Divider } from 'antd';
 import { useCreate } from '@refinedev/core';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 
 interface FilmQuickCreateProps {

@@ -8,7 +8,7 @@ import { Table } from '../../../../ui/tooltipDelay';
 import React, { useCallback, useRef, useState } from 'react';
 import { Form, Input, DatePicker, InputNumber, Row, Col, Select, Button, Space, Popconfirm, notification } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
-import { useSelect } from '@refinedev/antd';
+import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
 import { useDataProvider, useInvalidate } from '@refinedev/core';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
@@ -638,29 +638,31 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
         }}
       />
 
-      <DowellingOrderQuickCreate
-        open={dowellingModalOpen}
-        onClose={() => setDowellingModalOpen(false)}
-        orderId={header.order_id}
-        orderDate={typeof header.order_date === 'string' ? header.order_date : undefined}
-        onSuccess={(dowellingOrderId, dowellingOrderName, designEngineerId, designEngineer, linkId) => {
-          addDowelingLink({
-            order_doweling_link_id: linkId,
-            order_id: header.order_id!,
-            doweling_order_id: dowellingOrderId,
-            doweling_order: {
+      <OrderLifecycleReadSurface active={dowellingModalOpen}>
+        <DowellingOrderQuickCreate
+          open={dowellingModalOpen}
+          onClose={() => setDowellingModalOpen(false)}
+          orderId={header.order_id}
+          orderDate={typeof header.order_date === 'string' ? header.order_date : undefined}
+          onSuccess={(dowellingOrderId, dowellingOrderName, designEngineerId, designEngineer, linkId) => {
+            addDowelingLink({
+              order_doweling_link_id: linkId,
+              order_id: header.order_id!,
               doweling_order_id: dowellingOrderId,
-              doweling_order_name: dowellingOrderName,
-              design_engineer_id: designEngineerId,
-              design_engineer: designEngineer,
-            },
-          });
-          updateHeaderField('doweling_order_id', dowellingOrderId);
-          updateHeaderField('doweling_order_name', dowellingOrderName);
-          updateHeaderField('design_engineer_id', designEngineerId);
-          updateHeaderField('design_engineer', designEngineer);
-        }}
-      />
+              doweling_order: {
+                doweling_order_id: dowellingOrderId,
+                doweling_order_name: dowellingOrderName,
+                design_engineer_id: designEngineerId,
+                design_engineer: designEngineer,
+              },
+            });
+            updateHeaderField('doweling_order_id', dowellingOrderId);
+            updateHeaderField('doweling_order_name', dowellingOrderName);
+            updateHeaderField('design_engineer_id', designEngineerId);
+            updateHeaderField('design_engineer', designEngineer);
+          }}
+        />
+      </OrderLifecycleReadSurface>
     </>
   );
 };

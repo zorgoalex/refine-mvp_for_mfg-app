@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Modal, Form, Input, InputNumber, Row, Col, Select, Checkbox, Alert, Divider, Typography } from 'antd';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { OrderDetail } from '../../../../types/orders';
 import { numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';

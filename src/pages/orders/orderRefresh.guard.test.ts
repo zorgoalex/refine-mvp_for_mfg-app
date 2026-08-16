@@ -33,4 +33,20 @@ describe('order refresh UI wiring', () => {
       edit.indexOf('mergeOrderRefreshDetails(currentDetails, serverDetails)'),
     );
   });
+
+  it('does not attach a completed refresh to a changed auth actor', () => {
+    const show = read('./show.tsx');
+    const edit = read('./components/tabs/OrderDetailsTab.tsx');
+    expect(edit).toContain('useOrderAsyncReadGuard(`order-details-refresh:');
+    expect(edit).toContain('const refreshToken = refreshGuard.capture()');
+    expect(edit).toContain('if (!refreshGuard.isSameResource(refreshToken)) return;');
+    expect(edit).toContain('refreshState?.scopeKey === refreshScopeKey');
+    expect(edit).toMatch(/catch \(error\)[\s\S]*refreshGuard\.isSameResource\(refreshToken\)/);
+    expect(edit).toMatch(/finally[\s\S]*refreshGuard\.isSameResource\(refreshToken\)/);
+    expect(show).toContain('const refreshToken = showAsyncReadGuard.capture()');
+    expect(show).toContain('refreshOrderState?.scopeKey === showAsyncReadScopeKey');
+    expect(show).toMatch(/ordersApi\.refresh\(orderId,[\s\S]*showAsyncReadGuard\.isSameResource\(refreshToken\)/);
+    expect(show).toMatch(/catch \(error\)[\s\S]*showAsyncReadGuard\.isSameResource\(refreshToken\)/);
+    expect(show).toMatch(/finally[\s\S]*showAsyncReadGuard\.isSameResource\(refreshToken\)/);
+  });
 });

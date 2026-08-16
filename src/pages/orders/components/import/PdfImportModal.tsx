@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Alert, Modal, Steps, Button, Space, message } from 'antd';
 import { FilePdfOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined, TableOutlined } from '@ant-design/icons';
-import { useList } from '@refinedev/core';
+import { useList } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { usePdfParser } from './hooks/usePdfParser';
 import { useImportValidation } from './hooks';

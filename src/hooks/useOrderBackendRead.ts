@@ -33,6 +33,8 @@ export interface LoadOrderViaBackendDependencies {
   toFormValues: typeof mapOrderDtoToFormValues;
   // May return null when the draft slice was discarded mid-load — writes are skipped.
   getOrderStore: () => OrderStoreSync | null;
+  // Checked after the async read and immediately before synchronous store publication.
+  canPublish: () => boolean;
 }
 
 export interface ListOrdersViaBackendDependencies {
@@ -53,6 +55,7 @@ export async function loadOrderViaBackend(
 
   const order = await deps.getOrderById(validateOrderId(orderId));
   const formValues = deps.toFormValues(order);
+  if (!deps.canPublish()) return null;
   // Skip store writes if the draft slice was discarded while the load was in flight.
   const store = deps.getOrderStore();
   if (store) {
@@ -103,6 +106,7 @@ function resolveLoadDependencies(
     )),
     toFormValues: dependencies.toFormValues ?? mapOrderDtoToFormValues,
     getOrderStore: dependencies.getOrderStore ?? (() => useOrderFormStore.getState()),
+    canPublish: dependencies.canPublish ?? (() => true),
   };
 }
 

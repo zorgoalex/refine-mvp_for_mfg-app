@@ -6,7 +6,8 @@ import React, { useEffect, useCallback, useMemo, useRef } from 'react';
 import { Menu, notification } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { useDataProvider, useList, useUpdate, useInvalidate } from '@refinedev/core';
+import { useDataProvider, useUpdate, useInvalidate } from '@refinedev/core';
+import { useList } from '../../../query/orderLifecycleQueries';
 import { useOrderFormStore, useOrderDraftStoreApi } from '../../../stores/orderFormStore';
 import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
 import {

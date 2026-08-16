@@ -17,6 +17,12 @@ describe('KeepAliveOutlet guards', () => {
     expect(outlet).toContain('tabKey: key');
     expect(outlet).toContain('tabKey: activeKey');
   });
+  it('publishes workspace activity, visibility and activation revision', () => {
+    expect(outlet).toContain('workspaceActive: key === activeKey');
+    expect(outlet).toContain('activationRevision:');
+    expect(outlet).toContain('documentVisible');
+    expect(outlet).toContain("document.addEventListener('visibilitychange', update)");
+  });
   it('keeps an already cached route node instead of replacing it on return', () => {
     expect(outlet).toContain('!cacheRef.current.has(activeKey)');
     expect(outlet).toContain('cacheRef.current.set(activeKey, outlet)');

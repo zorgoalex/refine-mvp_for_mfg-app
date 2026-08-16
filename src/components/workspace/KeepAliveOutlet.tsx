@@ -1,8 +1,8 @@
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useOutlet, useLocation } from 'react-router-dom';
 import { useTabStore } from '../../stores/tabStore';
 import { isKeepAliveEligible, nextKeepAliveCache } from './keepAlive';
-import { KeepAliveContext } from './KeepAliveContext';
+import { activateWorkspace, KeepAliveContext } from './KeepAliveContext';
 
 export const KeepAliveOutlet: React.FC = () => {
   const outlet = useOutlet();
@@ -10,6 +10,14 @@ export const KeepAliveOutlet: React.FC = () => {
   const tabs = useTabStore((s) => s.tabs);
   const activeKey = location.pathname;
   const cacheRef = useRef<Map<string, React.ReactNode>>(new Map());
+  const documentVisible = useDocumentVisible();
+  const activationTrackerRef = useRef({
+    lastActiveKey: '',
+    nextRevision: 0,
+    revisionByKey: new Map<string, number>(),
+  });
+  const activationTracker = activationTrackerRef.current;
+  activateWorkspace(activationTracker, activeKey);
 
   const activeTab = tabs.find((t) => t.key === activeKey);
   const activeDirty = activeTab?.dirty ?? false;
@@ -34,15 +42,45 @@ export const KeepAliveOutlet: React.FC = () => {
   return (
     <>
       {Array.from(cacheRef.current.entries()).map(([key, node]) => (
-        <KeepAliveContext.Provider key={key} value={{ isActive: key === activeKey, tabKey: key }}>
-          <div hidden={key !== activeKey}>{node}</div>
+        <KeepAliveContext.Provider key={key} value={{
+          isActive: key === activeKey,
+          tabKey: key,
+          workspaceActive: key === activeKey,
+          activationRevision: activationTracker.revisionByKey.get(key) ?? 0,
+          documentVisible,
+          surfaceActive: true,
+        }}>
+          <div hidden={key !== activeKey} data-workspace-key={key}>{node}</div>
         </KeepAliveContext.Provider>
       ))}
       {!eligible && (
-        <KeepAliveContext.Provider value={{ isActive: true, tabKey: activeKey }}>
+        <KeepAliveContext.Provider value={{
+          isActive: true,
+          tabKey: activeKey,
+          workspaceActive: true,
+          activationRevision: activationTracker.revisionByKey.get(activeKey) ?? 0,
+          documentVisible,
+          surfaceActive: true,
+        }}>
           {outlet}
         </KeepAliveContext.Provider>
       )}
     </>
   );
 };
+
+function useDocumentVisible(): boolean {
+  const [visible, setVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const update = () => setVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', update);
+    update();
+    return () => document.removeEventListener('visibilitychange', update);
+  }, []);
+
+  return visible;
+}

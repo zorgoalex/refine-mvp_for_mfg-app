@@ -52,6 +52,10 @@ import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 import type { TransferOrderDetailsResponse } from '../../../../api/types/orderApi.types';
 import { ordersApi } from '../../../../api/ordersApi';
 import { mergeOrderRefreshDetails } from '../../orderRefresh';
+import {
+  OrderLifecycleReadSurface,
+  useOrderAsyncReadGuard,
+} from '../../../../query/orderLifecycleQueries';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -111,6 +115,8 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     applyOrderRefresh,
   } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
+  const refreshGuard = useOrderAsyncReadGuard(`order-details-refresh:${header?.order_id ?? 'new'}`);
+  const refreshScopeKey = `${refreshGuard.authNamespace}|order:${header?.order_id ?? 'new'}`;
 
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
   const grouping = useDetailGrouping(groupingUserId, header?.order_id ?? 'new');
@@ -135,7 +141,12 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   );
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshState, setRefreshState] = useState<{
+    scopeKey: string;
+    inFlight: boolean;
+  } | null>(null);
+  const isRefreshing = refreshState?.scopeKey === refreshScopeKey
+    && refreshState.inFlight;
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -653,6 +664,8 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
       message.warning('Сначала сохраните заказ');
       return;
     }
+    const refreshToken = refreshGuard.capture();
+    if (!refreshToken) return;
 
     recalculateSums();
     const afterRecalculate = storeApi.getState();
@@ -661,10 +674,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
       afterRecalculate.version,
     );
 
-    setIsRefreshing(true);
+    setRefreshState({ scopeKey: refreshScopeKey, inFlight: true });
     try {
       const baseVersion = storeApi.getState().version;
       const response = await ordersApi.refresh(orderId, { version: baseVersion });
+      if (!refreshGuard.isSameResource(refreshToken)) return;
       if (response.order.version !== response.version) {
         message.error('Заказ изменён другим пользователем. Перезагрузите карточку перед сохранением.');
         return;
@@ -681,10 +695,14 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
           : 'Заказ и связи с документами обновлены',
       );
     } catch (error) {
-      console.error('Order refresh failed:', error);
-      message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+      if (refreshGuard.isSameResource(refreshToken)) {
+        console.error('Order refresh failed:', error);
+        message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+      }
     } finally {
-      setIsRefreshing(false);
+      if (refreshGuard.isSameResource(refreshToken)) {
+        setRefreshState({ scopeKey: refreshScopeKey, inFlight: false });
+      }
     }
   };
 
@@ -951,58 +969,68 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         />
 
         {/* Modal */}
-        <OrderDetailModal
-          open={modalOpen}
-          mode={modalMode}
-          detail={editingDetail}
-          onSave={handleSave}
-          onCancel={() => {
-            setModalOpen(false);
-            setEditingDetail(undefined);
-          }}
-        />
+        <OrderLifecycleReadSurface active={modalOpen}>
+          <OrderDetailModal
+            open={modalOpen}
+            mode={modalMode}
+            detail={editingDetail}
+            onSave={handleSave}
+            onCancel={() => {
+              setModalOpen(false);
+              setEditingDetail(undefined);
+            }}
+          />
+        </OrderLifecycleReadSurface>
 
         {/* Bulk Edit Modal */}
-        <BulkEditModal
-          open={bulkEditModalOpen}
-          selectedCount={selectedRowKeys.length}
-          totalCount={details.length}
-          onApply={handleBulkEditApply}
-          onCancel={() => setBulkEditModalOpen(false)}
-        />
+        <OrderLifecycleReadSurface active={bulkEditModalOpen}>
+          <BulkEditModal
+            open={bulkEditModalOpen}
+            selectedCount={selectedRowKeys.length}
+            totalCount={details.length}
+            onApply={handleBulkEditApply}
+            onCancel={() => setBulkEditModalOpen(false)}
+          />
+        </OrderLifecycleReadSurface>
 
         {/* Add to Cut Modal */}
         {cutEnabled && header?.order_id != null && (
-          <AddToCutModal
-            open={addToCutOpen}
-            orderIds={[header.order_id]}
-            orderNames={[header.order_name]}
-            detailIds={eligibleCutDetailIds}
-            nameSuffix={cutSelectedGroupName}
-            onClose={() => setAddToCutOpen(false)}
-            onDone={() => { setAddToCutOpen(false); handleSelectChange([]); }}
-          />
+          <OrderLifecycleReadSurface active={addToCutOpen}>
+            <AddToCutModal
+              open={addToCutOpen}
+              orderIds={[header.order_id]}
+              orderNames={[header.order_name]}
+              detailIds={eligibleCutDetailIds}
+              nameSuffix={cutSelectedGroupName}
+              onClose={() => setAddToCutOpen(false)}
+              onDone={() => { setAddToCutOpen(false); handleSelectChange([]); }}
+            />
+          </OrderLifecycleReadSurface>
         )}
         {bazisCutVisible && header?.order_id != null && (
-          <AddToBazisCutModal
-            open={addToBazisCutOpen}
-            orderId={header.order_id}
-            detailIds={bazisCutDetailIds}
-            onClose={() => setAddToBazisCutOpen(false)}
-            onDone={() => handleSelectChange([])}
-          />
+          <OrderLifecycleReadSurface active={addToBazisCutOpen}>
+            <AddToBazisCutModal
+              open={addToBazisCutOpen}
+              orderId={header.order_id}
+              detailIds={bazisCutDetailIds}
+              onClose={() => setAddToBazisCutOpen(false)}
+              onDone={() => handleSelectChange([])}
+            />
+          </OrderLifecycleReadSurface>
         )}
         {header?.order_id != null && (
-          <OrderDetailTransferModal
-            open={transferOpen}
-            sourceOrderId={header.order_id}
-            sourceOrderName={header.order_name || ''}
-            sourceVersion={sourceVersion}
-            detailIds={transferDetailIds}
-            canCreateTarget={canCreateTransferTarget}
-            onClose={() => setTransferOpen(false)}
-            onDone={handleTransferDone}
-          />
+          <OrderLifecycleReadSurface active={transferOpen}>
+            <OrderDetailTransferModal
+              open={transferOpen}
+              sourceOrderId={header.order_id}
+              sourceOrderName={header.order_name || ''}
+              sourceVersion={sourceVersion}
+              detailIds={transferDetailIds}
+              canCreateTarget={canCreateTransferTarget}
+              onClose={() => setTransferOpen(false)}
+              onDone={handleTransferDone}
+            />
+          </OrderLifecycleReadSurface>
         )}
       </Space>
     </Card>

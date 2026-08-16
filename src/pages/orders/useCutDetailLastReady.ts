@@ -5,10 +5,13 @@ import {
   cutJobReadyAffects,
   subscribeCutJobReady,
 } from '../cut/cutJobEvents';
+import { useOrderLifecycleReadActive } from '../../query/orderLifecycleQueries';
+import { useAuthCacheNamespace } from '../../query/authCacheNamespace';
 import { areCutJobLinkMapsEqual, buildCutJobLinkMaps } from './cutColumnHelpers';
 
 interface UseCutDetailLastReadyArgs {
   enabled: boolean;
+  active?: boolean;
   detailIds: readonly unknown[];
   orderId?: number | null;
   pollIntervalMs?: number | null;
@@ -37,26 +40,36 @@ const LOADED_EMPTY_CUT_DETAIL_LAST_READY_MAPS: CutDetailLastReadyMaps = {
 
 export function useCutDetailLastReady({
   enabled,
+  active = true,
   detailIds,
   orderId,
   pollIntervalMs,
 }: UseCutDetailLastReadyArgs): CutDetailLastReadyMaps {
+  const lifecycleReadActive = useOrderLifecycleReadActive();
+  const authNamespace = useAuthCacheNamespace('cut-detail-last-ready');
+  const effectiveActive = active && lifecycleReadActive;
   const [cutJobMaps, setCutJobMaps] = useState<CutDetailLastReadyMaps>(
     () => EMPTY_CUT_DETAIL_LAST_READY_MAPS,
   );
   const normalizedDetailIds = useMemo(() => normalizeCutDetailIds(detailIds), [detailIds]);
   const detailIdsKey = normalizedDetailIds.join(',');
+  const readScopeKey = `${authNamespace}|details:${detailIdsKey}`;
   const detailIdsRef = useRef<number[]>(normalizedDetailIds);
+  const readScopeKeyRef = useRef(readScopeKey);
   const orderIdRef = useRef<number | null | undefined>(orderId);
   const enabledRef = useRef(enabled);
+  const activeRef = useRef(effectiveActive);
   const requestsByDetailIdsRef = useRef(new Map<string, Promise<void>>());
 
   detailIdsRef.current = normalizedDetailIds;
+  readScopeKeyRef.current = readScopeKey;
   orderIdRef.current = orderId;
   enabledRef.current = enabled;
+  activeRef.current = effectiveActive;
 
   const refresh = useCallback(async (ids: readonly number[] = detailIdsRef.current) => {
-    const requestKey = ids.join(',');
+    const detailKey = ids.join(',');
+    const requestKey = readScopeKeyRef.current;
     if (!enabledRef.current || ids.length === 0) {
       const nextMaps = {
         ...LOADED_EMPTY_CUT_DETAIL_LAST_READY_MAPS,
@@ -71,6 +84,7 @@ export function useCutDetailLastReady({
       ));
       return;
     }
+    if (!activeRef.current) return;
     const pendingRequest = requestsByDetailIdsRef.current.get(requestKey);
     if (pendingRequest) return pendingRequest;
 
@@ -78,7 +92,12 @@ export function useCutDetailLastReady({
     request = (async () => {
       try {
         const res = await cutApi.listDetailLastReady([...ids]);
-        if (!enabledRef.current || detailIdsRef.current.join(',') !== requestKey) return;
+        if (
+          !enabledRef.current
+          || !activeRef.current
+          || detailIdsRef.current.join(',') !== detailKey
+          || readScopeKeyRef.current !== requestKey
+        ) return;
         const nextMaps = {
           ...buildCutJobLinkMaps(res.details),
           loaded: true,
@@ -105,10 +124,10 @@ export function useCutDetailLastReady({
 
   useEffect(() => {
     void refresh(detailIdsRef.current);
-  }, [detailIdsKey, enabled, refresh]);
+  }, [effectiveActive, enabled, readScopeKey, refresh]);
 
   useEffect(() => {
-    if (!enabled || typeof window === 'undefined') return undefined;
+    if (!enabled || !effectiveActive || typeof window === 'undefined') return undefined;
     const unsubscribe = subscribeCutJobReady((payload) => {
       if (!cutJobReadyAffects(payload, { detailIds: detailIdsRef.current, orderId: orderIdRef.current })) return;
       void refresh(detailIdsRef.current);
@@ -122,11 +141,12 @@ export function useCutDetailLastReady({
       unsubscribe();
       window.removeEventListener('focus', refreshOnFocus);
     };
-  }, [enabled, refresh]);
+  }, [effectiveActive, enabled, refresh]);
 
   useEffect(() => {
     if (
       !enabled
+      || !effectiveActive
       || typeof pollIntervalMs !== 'number'
       || !Number.isFinite(pollIntervalMs)
       || pollIntervalMs < 1_000
@@ -144,9 +164,9 @@ export function useCutDetailLastReady({
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [enabled, pollIntervalMs, refresh]);
+  }, [effectiveActive, enabled, pollIntervalMs, refresh]);
 
-  return cutJobMaps.scopeKey === detailIdsKey
+  return cutJobMaps.scopeKey === readScopeKey
     ? cutJobMaps
     : EMPTY_CUT_DETAIL_LAST_READY_MAPS;
 }

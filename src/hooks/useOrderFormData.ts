@@ -1,10 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import { authSession } from '../api/authSession';
-import { ordersApi } from '../api/ordersApi';
 import { subscribeOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
 import { featureFlags } from '../config/featureFlags';
 import { resolveDefaultNewOrderStatusId } from '../domain/orderStatusDefaults';
+import {
+  getCachedOrderFormData,
+  getOrderFormDataCacheGeneration,
+  invalidateOrderFormDataCache,
+  isOrderFormDataCacheStale,
+  prefetchOrderFormData,
+} from '../query/orderFormDataCache';
+import { useOrderLifecycleReadActive } from '../query/orderLifecycleQueries';
+
+export {
+  invalidateOrderFormDataCache,
+  prefetchOrderFormData,
+  resetOrderFormDataCacheForTests,
+} from '../query/orderFormDataCache';
 
 export interface ReferenceOption {
   label: string;
@@ -58,25 +71,31 @@ interface UseOrderFormDataResult {
   error: Error | null;
 }
 
-let cachedFormData: OrderFormDataResponse | null = null;
-let pendingFormDataRequest: Promise<OrderFormDataResponse> | null = null;
-let formDataCacheGeneration = 0;
-let formDataCacheStale = false;
-
-authSession.subscribeBeforeClear(() => {
-  invalidateOrderFormDataCache();
-});
-
 export function useOrderFormData(enabled = featureFlags.useBackendReferences): UseOrderFormDataResult {
-  const [data, setData] = useState<OrderFormDataResponse | null>(() =>
-    enabled ? cachedFormData : null,
-  );
-  const [isLoading, setIsLoading] = useState(() => enabled && !cachedFormData);
+  const lifecycleReadActive = useOrderLifecycleReadActive();
+  const readEnabled = enabled && lifecycleReadActive;
+  const cacheGeneration = getOrderFormDataCacheGeneration();
+  const [dataState, setDataState] = useState<{
+    generation: number;
+    data: OrderFormDataResponse | null;
+  }>(() => ({
+    generation: cacheGeneration,
+    data: enabled ? getCachedOrderFormData() : null,
+  }));
+  const data = dataState.generation === cacheGeneration
+    ? dataState.data
+    : (enabled ? getCachedOrderFormData() : null);
+  const [isLoading, setIsLoading] = useState(() => readEnabled && !getCachedOrderFormData());
   const [error, setError] = useState<Error | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [, setAuthRevision] = useState(0);
+
+  useEffect(() => authSession.subscribe(() => {
+    setAuthRevision((revision) => revision + 1);
+  }), []);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!readEnabled) return;
 
     const refresh = () => {
       invalidateOrderFormDataCache();
@@ -96,21 +115,26 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
         window.removeEventListener('focus', refresh);
       }
     };
-  }, [enabled]);
+  }, [readEnabled]);
 
   useEffect(() => {
     if (!enabled) {
-      setData(null);
+      setDataState({ generation: cacheGeneration, data: null });
       setIsLoading(false);
       setError(null);
+      return;
+    }
+    if (!lifecycleReadActive) {
+      setIsLoading(false);
       return;
     }
 
     let cancelled = false;
     setError(null);
 
-    if (cachedFormData && !formDataCacheStale && refreshVersion === 0) {
-      setData(cachedFormData);
+    const cachedFormData = getCachedOrderFormData();
+    if (cachedFormData && !isOrderFormDataCacheStale() && refreshVersion === 0) {
+      setDataState({ generation: cacheGeneration, data: cachedFormData });
       setIsLoading(false);
       return;
     }
@@ -119,17 +143,27 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     if (!isBackgroundRefresh) {
       setIsLoading(true);
     }
-    loadOrderFormData()
+    const requestGeneration = cacheGeneration;
+    prefetchOrderFormData()
       .then((response) => {
-        if (cancelled) return;
-        setData(response);
+        if (
+          cancelled
+          || requestGeneration !== getOrderFormDataCacheGeneration()
+        ) return;
+        setDataState({ generation: requestGeneration, data: response });
       })
       .catch((unknownError) => {
-        if (cancelled) return;
+        if (
+          cancelled
+          || requestGeneration !== getOrderFormDataCacheGeneration()
+        ) return;
         setError(toError(unknownError));
       })
       .finally(() => {
-        if (!cancelled) {
+        if (
+          !cancelled
+          && requestGeneration === getOrderFormDataCacheGeneration()
+        ) {
           setIsLoading(false);
         }
       });
@@ -137,7 +171,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     return () => {
       cancelled = true;
     };
-  }, [enabled, refreshVersion]);
+  }, [cacheGeneration, enabled, lifecycleReadActive, refreshVersion]);
 
   const references = useMemo(() => mapOrderFormDataToReferences(data), [data]);
 
@@ -210,46 +244,6 @@ export function createBackendSelectProps(options: ReferenceOption[], isLoading =
     options,
     loading: isLoading,
   };
-}
-
-export function resetOrderFormDataCacheForTests(): void {
-  formDataCacheGeneration += 1;
-  cachedFormData = null;
-  pendingFormDataRequest = null;
-  formDataCacheStale = false;
-}
-
-export function invalidateOrderFormDataCache(): void {
-  formDataCacheGeneration += 1;
-  pendingFormDataRequest = null;
-  formDataCacheStale = true;
-}
-
-export function prefetchOrderFormData(): Promise<OrderFormDataResponse> {
-  return loadOrderFormData();
-}
-
-async function loadOrderFormData(): Promise<OrderFormDataResponse> {
-  if (!pendingFormDataRequest) {
-    const requestGeneration = formDataCacheGeneration;
-    pendingFormDataRequest = ordersApi
-      .getFormData()
-      .then((response) => {
-        if (requestGeneration === formDataCacheGeneration) {
-          cachedFormData = response;
-          formDataCacheStale = false;
-        }
-        return response;
-      })
-      .catch((error) => {
-        if (requestGeneration === formDataCacheGeneration) {
-          pendingFormDataRequest = null;
-        }
-        throw error;
-      });
-  }
-
-  return pendingFormDataRequest;
 }
 
 function toOptions<T extends { id: number }>(

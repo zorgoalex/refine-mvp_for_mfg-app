@@ -21,9 +21,26 @@ describe('cut detail column', () => {
 
     const hook = readFileSync('src/pages/orders/useCutDetailLastReady.ts', 'utf8');
     expect(hook).toContain('window.setInterval(refreshWhenVisible, pollIntervalMs)');
+    expect(hook).toContain("useAuthCacheNamespace('cut-detail-last-ready')");
+    expect(hook).toContain('readScopeKeyRef.current !== requestKey');
+    expect(hook).toContain('cutJobMaps.scopeKey === readScopeKey');
     expect(hook).toContain('current.scopeKey === requestKey');
     expect(hook).toContain('areCutJobLinkMapsEqual(current, nextMaps)');
     expect(hook).toContain('Keep last ready versions visible; focus/event/poll can recover.');
+  });
+
+  it('auth-scopes show cut and CNC automatic reads', () => {
+    const show = readFileSync('src/pages/orders/show.tsx', 'utf8');
+    expect(show).toContain('useOrderAsyncReadGuard(`order-show:');
+    expect(show).toContain('useOrderAsyncReadGuard(\n    `order-show-bath-jobs:');
+    expect(show).toContain('bathCutJobsState?.scopeKey === bathCutJobsScopeKey');
+    expect(show).toContain('bathCutJobsReadGuard.isCurrent(token)');
+    expect(show).toContain('cutOrderJobsState?.scopeKey === showAsyncReadScopeKey');
+    expect(show).toContain('cncOrderCuttingSequencesState?.scopeKey === showAsyncReadScopeKey');
+    expect(show).toMatch(/cutApi\.listPlacements[\s\S]*showAsyncReadGuard\.isCurrent\(token\)/);
+    expect(show).toMatch(/cncTelegramApi\.orderCuttingSequences[\s\S]*showAsyncReadGuard\.isCurrent\(token\)/);
+    expect(show).toContain('legacyBazisMembershipState?.scopeKey === showAsyncReadScopeKey');
+    expect(show).toMatch(/bazisCutApi\.orderMemberships[\s\S]*showAsyncReadGuard\.isCurrent\(token\)/);
   });
 
   it('details table is horizontally scrollable with a synced top scrollbar', () => {
@@ -43,7 +60,8 @@ describe('cut detail column', () => {
     expect(show).toContain('ORDER_DETAIL_STATUS_REFRESH_MS');
     expect(show).toContain('refreshLiveDetailProductionStatuses');
     expect(show).toContain('areDetailProductionStatusMapsEqual');
-    expect(show).toContain('setLiveDetailProductionStatusById(nextLiveStatuses)');
+    expect(show).toContain('setLiveDetailProductionStatusState({');
+    expect(show).toContain('value: nextLiveStatuses');
     expect(show).toContain("document.addEventListener('visibilitychange'");
     expect(show).toContain("resource: \"production_statuses\"");
     expect(show).toContain('canViewProductionReferences');

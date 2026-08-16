@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
+import { authSession } from '../api/authSession';
 
 const ordersApiMock = vi.hoisted(() => ({
   getFormData: vi.fn(),
 }));
+const lifecycleHarness = vi.hoisted(() => ({ active: true }));
 
 const reactHarness = vi.hoisted(() => {
   type EffectSlot = { deps: unknown[] | undefined; cleanup?: void | (() => void) };
@@ -89,6 +91,10 @@ vi.mock('../api/ordersApi', () => ({
   ordersApi: ordersApiMock,
 }));
 
+vi.mock('../query/orderLifecycleQueries', () => ({
+  useOrderLifecycleReadActive: () => lifecycleHarness.active,
+}));
+
 vi.mock('react', () => reactHarness.module);
 
 import {
@@ -102,8 +108,10 @@ describe('useOrderFormData live reference refresh', () => {
 
   beforeEach(() => {
     ordersApiMock.getFormData.mockReset();
-    resetOrderFormDataCacheForTests();
+    lifecycleHarness.active = true;
     reactHarness.reset();
+    authSession.clear();
+    resetOrderFormDataCacheForTests();
     windowListeners.clear();
     vi.stubGlobal('BroadcastChannel', undefined);
     vi.stubGlobal('CustomEvent', class {
@@ -220,9 +228,82 @@ describe('useOrderFormData live reference refresh', () => {
     ]);
     expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(3);
   });
+
+  it('preserves last-good references without reads while lifecycle is inactive', async () => {
+    ordersApiMock.getFormData.mockResolvedValue(
+      createFormDataResponse([{ id: 8, name: 'Белая' }]),
+    );
+
+    renderHook();
+    await flushPromises();
+    expect(renderHook().references.films.map((option) => option.label)).toEqual(['Белая']);
+
+    const hidden = renderHook(false);
+    window.dispatchEvent(new Event('focus'));
+    await flushPromises();
+
+    expect(hidden.enabled).toBe(true);
+    expect(hidden.isLoading).toBe(false);
+    expect(hidden.references.films.map((option) => option.label)).toEqual(['Белая']);
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(1);
+  });
+
+  it('never publishes an in-flight actor A response into actor B state', async () => {
+    let resolveActorA!: (response: OrderFormDataResponse) => void;
+    let resolveActorB!: (response: OrderFormDataResponse) => void;
+    ordersApiMock.getFormData
+      .mockReturnValueOnce(new Promise<OrderFormDataResponse>((resolve) => {
+        resolveActorA = resolve;
+      }))
+      .mockReturnValueOnce(new Promise<OrderFormDataResponse>((resolve) => {
+        resolveActorB = resolve;
+      }));
+    authSession.setAccessToken('actor-a-token');
+    authSession.setUser({ id: 'actor-a', username: 'actor-a', role: 'admin' });
+
+    renderHook();
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(1);
+
+    authSession.setUser({ id: 'actor-b', username: 'actor-b', role: 'admin' });
+    renderHook();
+    expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(2);
+
+    resolveActorA(createFormDataResponse([{ id: 8, name: 'Actor A film' }]));
+    await flushPromises();
+    expect(renderHook().references.films).toEqual([]);
+
+    resolveActorB(createFormDataResponse([{ id: 9, name: 'Actor B film' }]));
+    await flushPromises();
+    expect(renderHook().references.films.map((option) => option.label)).toEqual([
+      'Actor B film',
+    ]);
+  });
+
+  it('removes cached actor A references before actor B can render', async () => {
+    ordersApiMock.getFormData
+      .mockResolvedValueOnce(createFormDataResponse([{ id: 8, name: 'Actor A film' }]))
+      .mockResolvedValueOnce(createFormDataResponse([{ id: 9, name: 'Actor B film' }]));
+    authSession.setAccessToken('actor-a-token');
+    authSession.setUser({ id: 'actor-a', username: 'actor-a', role: 'admin' });
+
+    renderHook();
+    await flushPromises();
+    expect(renderHook().references.films.map((option) => option.label)).toEqual([
+      'Actor A film',
+    ]);
+
+    authSession.setUser({ id: 'actor-b', username: 'actor-b', role: 'admin' });
+    expect(renderHook().references.films).toEqual([]);
+
+    await flushPromises();
+    expect(renderHook().references.films.map((option) => option.label)).toEqual([
+      'Actor B film',
+    ]);
+  });
 });
 
-function renderHook() {
+function renderHook(active = true) {
+  lifecycleHarness.active = active;
   reactHarness.beginRender();
   const state = useOrderFormData(true);
   reactHarness.flushEffects();

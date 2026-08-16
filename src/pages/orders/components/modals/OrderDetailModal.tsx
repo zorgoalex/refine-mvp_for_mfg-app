@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { Modal, Form, Input, InputNumber, Row, Col, Select, Space, Button, Alert, Checkbox } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { OrderDetail } from '../../../../types/orders';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';

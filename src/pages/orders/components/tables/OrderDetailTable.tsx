@@ -15,7 +15,7 @@ import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
-import { useSelect } from '@refinedev/antd';
+import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
 import type { OrderDetail, OrderHdfDetail } from '../../../../types/orders';
 import { TableTopScroll } from '../../../../components/TableTopScroll';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../../../hooks/usePageSizePreference';
@@ -3680,11 +3680,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         </Dropdown>
       </div>
     </Form>
-    <FilmQuickCreate
-      open={filmQuickCreateOpen}
-      onClose={() => setFilmQuickCreateOpen(false)}
-      onSuccess={handleFilmCreated}
-    />
+    <OrderLifecycleReadSurface active={filmQuickCreateOpen}>
+      <FilmQuickCreate
+        open={filmQuickCreateOpen}
+        onClose={() => setFilmQuickCreateOpen(false)}
+        onSuccess={handleFilmCreated}
+      />
+    </OrderLifecycleReadSurface>
     </>
   );
 });

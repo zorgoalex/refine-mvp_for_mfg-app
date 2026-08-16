@@ -4,17 +4,22 @@ import type { Dayjs } from "dayjs";
 import {
   IResourceComponentsProps,
   useInvalidate,
-  useMany,
   useNavigation,
-  useList,
 } from "@refinedev/core";
 import {
   List,
   ShowButton,
   EditButton,
   CreateButton,
-  useSelect,
 } from "@refinedev/antd";
+import {
+  OrderLifecycleReadSurface,
+  useCancelInactiveOrderQueriesOnDeactivate,
+  useList,
+  useMany,
+  useOrderLifecycleReadActive,
+  useSelect,
+} from "../../query/orderLifecycleQueries";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Button, Input, message, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge, Segmented } from "antd";
 import {
@@ -84,7 +89,9 @@ import {
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
-import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
+import {
+  useKeepAlive,
+} from "../../components/workspace/KeepAliveContext";
 import {
   isTabletTier,
   SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY,
@@ -263,7 +270,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
   // hook is disabled so the cached list stops reacting to invalidateQueries.
   const { isActive } = useKeepAlive();
-  const { getSetting, isLoading: appSettingsLoading } = useAppSettings({ enabled: isActive });
+  const ordinaryReadActive = useOrderLifecycleReadActive();
+  useCancelInactiveOrderQueriesOnDeactivate();
+  const { getSetting, isLoading: appSettingsLoading } = useAppSettings({
+    enabled: isActive && ordinaryReadActive,
+  });
   const navigationUser = featureFlags.useBackendPermissions
     ? authSession.getUser()
     : currentUser;
@@ -305,7 +316,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     },
     meta: { authCacheNamespace },
     queryOptions: {
-      enabled: isActive,
+      enabled: isActive && ordinaryReadActive,
       refetchOnWindowFocus: false,
       staleTime: orderLifecycleCohort === 'treatment'
         ? ORDER_PRIMARY_HARD_STALE_TIME_MS
@@ -1913,18 +1924,22 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         )}
       </List>
 
-      <OrderCreateModal
-        open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-      />
+      <OrderLifecycleReadSurface active={createModalOpen}>
+        <OrderCreateModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+        />
+      </OrderLifecycleReadSurface>
 
       {useBackendCut && (
-        <AddToCutModal
-          open={addToCutOpen}
-          orderIds={selectedCutOrderIds}
-          onClose={() => setAddToCutOpen(false)}
-          onDone={() => setSelectedCutOrderIds([])}
-        />
+        <OrderLifecycleReadSurface active={addToCutOpen}>
+          <AddToCutModal
+            open={addToCutOpen}
+            orderIds={selectedCutOrderIds}
+            onClose={() => setAddToCutOpen(false)}
+            onDone={() => setSelectedCutOrderIds([])}
+          />
+        </OrderLifecycleReadSurface>
       )}
 
     </>

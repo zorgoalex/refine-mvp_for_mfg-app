@@ -10,6 +10,9 @@ const cutJobEventsMock = vi.hoisted(() => ({
   subscribeCutJobReady: vi.fn(),
 }));
 
+const lifecycleMock = vi.hoisted(() => ({ active: true }));
+const authNamespaceMock = vi.hoisted(() => ({ value: 'actor-a' }));
+
 const reactHarness = vi.hoisted(() => {
   type EffectSlot = { deps: unknown[] | undefined; cleanup?: void | (() => void) };
   type ValueSlot = { deps: unknown[] | undefined; value: unknown };
@@ -112,6 +115,12 @@ vi.mock('../cut/cutJobEvents', () => ({
   cutJobReadyAffects: cutJobEventsMock.cutJobReadyAffects,
   subscribeCutJobReady: cutJobEventsMock.subscribeCutJobReady,
 }));
+vi.mock('../../query/orderLifecycleQueries', () => ({
+  useOrderLifecycleReadActive: () => lifecycleMock.active,
+}));
+vi.mock('../../query/authCacheNamespace', () => ({
+  useAuthCacheNamespace: () => authNamespaceMock.value,
+}));
 vi.mock('react', () => reactHarness.module);
 
 import { useCutDetailLastReady } from './useCutDetailLastReady';
@@ -132,6 +141,8 @@ describe('useCutDetailLastReady polling', () => {
     intervalHandler = undefined;
     focusHandler = undefined;
     readyListener = undefined;
+    lifecycleMock.active = true;
+    authNamespaceMock.value = 'actor-a';
     vi.stubGlobal('document', { visibilityState: 'visible' });
     vi.stubGlobal('window', {
       addEventListener: vi.fn((type: string, listener: () => void) => {
@@ -220,6 +231,28 @@ describe('useCutDetailLastReady polling', () => {
     expect(current.cutJobByDetailId.get(2)?.resultNo).toBe(4);
   });
 
+  it('masks actor-A maps and rejects its late response after A to B', async () => {
+    const actorA = deferred<CutDetailLastReadyResponse>();
+    const actorB = deferred<CutDetailLastReadyResponse>();
+    cutApiMock.listDetailLastReady
+      .mockReturnValueOnce(actorA.promise)
+      .mockReturnValueOnce(actorB.promise);
+
+    renderHook([1]);
+    authNamespaceMock.value = 'actor-b';
+    const masked = renderHook([1]);
+    expect(masked.loaded).toBe(false);
+    expect(masked.cutJobByDetailId.size).toBe(0);
+
+    actorB.resolve(response(4));
+    await flushPromises();
+    expect(renderHook([1]).cutJobByDetailId.get(1)?.resultNo).toBe(4);
+
+    actorA.resolve(response(2));
+    await flushPromises();
+    expect(renderHook([1]).cutJobByDetailId.get(1)?.resultNo).toBe(4);
+  });
+
   it('does not expose a loaded snapshot from the previous detail scope', async () => {
     cutApiMock.listDetailLastReady.mockResolvedValueOnce(response(2, 1));
     renderHook([1]);
@@ -261,12 +294,49 @@ describe('useCutDetailLastReady polling', () => {
     pending.resolve(response(4));
     await flushPromises();
   });
+
+  it('preserves last-good maps without reads while lifecycle is inactive', async () => {
+    cutApiMock.listDetailLastReady.mockResolvedValue(response(2));
+    renderHook();
+    await flushPromises();
+    const loaded = renderHook();
+
+    const hidden = renderHook([1], false);
+    intervalHandler?.();
+    focusHandler?.();
+    await flushPromises();
+
+    expect(hidden).toBe(loaded);
+    expect(hidden.cutJobByDetailId.get(1)?.resultNo).toBe(2);
+    expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the order lifecycle gate when the caller omits active', async () => {
+    cutApiMock.listDetailLastReady.mockResolvedValue(response(2));
+    lifecycleMock.active = false;
+
+    const hidden = renderHook([1], undefined);
+    focusHandler?.();
+    readyListener?.({ cutJobId: 9, name: 'Раскрой', detailIds: [1], orderIds: [7] });
+    await flushPromises();
+
+    expect(hidden.loaded).toBe(false);
+    expect(cutApiMock.listDetailLastReady).not.toHaveBeenCalled();
+    expect(cutJobEventsMock.subscribeCutJobReady).not.toHaveBeenCalled();
+
+    lifecycleMock.active = true;
+    renderHook([1], undefined);
+    await flushPromises();
+
+    expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
+  });
 });
 
-function renderHook(detailIds: number[] = [1]) {
+function renderHook(detailIds: number[] = [1], active: boolean | undefined = true) {
   reactHarness.beginRender();
   const state = useCutDetailLastReady({
     enabled: true,
+    ...(active === undefined ? {} : { active }),
     detailIds,
     orderId: 7,
     pollIntervalMs: 15_000,

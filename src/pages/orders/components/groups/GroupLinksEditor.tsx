@@ -7,6 +7,10 @@ import { featureFlags } from '../../../../config/featureFlags';
 import { can } from '../../../../utils/permissions';
 import { GroupSelect } from './GroupSelect';
 import { GroupHistoryTable } from './GroupHistoryTable';
+import {
+  OrderLifecycleReadSurface,
+  useOrderAsyncReadGuard,
+} from '../../../../query/orderLifecycleQueries';
 
 const { Text } = Typography;
 
@@ -21,34 +25,46 @@ export const GroupLinksEditor: React.FC<GroupLinksEditorProps> = ({
   version,
   initialGroups = [],
 }) => {
-  const [groups, setGroups] = useState<EntityGroupLink[]>(initialGroups);
-  const [linkVersion, setLinkVersion] = useState(version);
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const readGuard = useOrderAsyncReadGuard(`order-groups:${orderId}`);
+  const readScopeKey = `${readGuard.authNamespace}|order:${orderId}`;
+  const [groupState, setGroupState] = useState<{
+    scopeKey: string;
+    groups: EntityGroupLink[];
+    version: number;
+  } | null>(() => ({ scopeKey: readScopeKey, groups: initialGroups, version }));
+  const groups = groupState?.scopeKey === readScopeKey ? groupState.groups : [];
+  const linkVersion = groupState?.scopeKey === readScopeKey ? groupState.version : 0;
+  const [openState, setOpenState] = useState<{
+    scopeKey: string;
+    value: boolean;
+  } | null>(null);
+  const open = openState?.scopeKey === readScopeKey && openState.value;
+  const [savingState, setSavingState] = useState<{
+    scopeKey: string;
+    value: boolean;
+  } | null>(null);
+  const saving = savingState?.scopeKey === readScopeKey && savingState.value;
   const [form] = Form.useForm<{ groupIds: string[]; primaryGroupId?: string | null }>();
   const canManage = featureFlags.useBackendGroups && can('groups.manage_links');
 
   useEffect(() => {
-    setGroups(initialGroups);
-  }, [initialGroups]);
+    setGroupState({ scopeKey: readScopeKey, groups: initialGroups, version });
+  }, [initialGroups, version]);
 
   useEffect(() => {
-    setLinkVersion(version);
-  }, [version]);
-
-  useEffect(() => {
-    if (!featureFlags.useBackendGroups || !orderId) return;
-    let cancelled = false;
+    if (!featureFlags.useBackendGroups || !orderId || !readGuard.active) return;
+    const token = readGuard.capture();
+    if (!token) return;
     void groupsApi.getOrderGroups(orderId).then((response) => {
-      if (!cancelled) {
-        setGroups(response.groups);
-        setLinkVersion(response.version);
+      if (readGuard.isCurrent(token)) {
+        setGroupState({
+          scopeKey: readScopeKey,
+          groups: response.groups,
+          version: response.version,
+        });
       }
     }).catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [orderId]);
+  }, [orderId, readGuard.active, readGuard.capture, readGuard.isCurrent, readScopeKey]);
 
   const primaryGroup = groups.find((group) => group.isPrimary) ?? null;
   const groupIds = useMemo(() => groups.map((group) => group.id), [groups]);
@@ -58,7 +74,7 @@ export const GroupLinksEditor: React.FC<GroupLinksEditorProps> = ({
       groupIds,
       primaryGroupId: primaryGroup?.id ?? null,
     });
-    setOpen(true);
+    setOpenState({ scopeKey: readScopeKey, value: true });
   };
 
   const save = async () => {
@@ -68,7 +84,9 @@ export const GroupLinksEditor: React.FC<GroupLinksEditorProps> = ({
       message.error('Главная группа должна быть выбрана в списке групп');
       return;
     }
-    setSaving(true);
+    const writeToken = readGuard.capture();
+    if (!writeToken) return;
+    setSavingState({ scopeKey: readScopeKey, value: true });
     try {
       const response = await groupsApi.replaceOrderGroups(orderId, {
         idempotencyKey: createIdempotencyKey(orderId),
@@ -84,12 +102,22 @@ export const GroupLinksEditor: React.FC<GroupLinksEditorProps> = ({
         }),
         reason: 'frontend-order-group-links-editor',
       });
-      setGroups(response.groups);
-      setLinkVersion(response.version);
-      setOpen(false);
+      if (!readGuard.isSameResource(writeToken)) return;
+      setGroupState({
+        scopeKey: readScopeKey,
+        groups: response.groups,
+        version: response.version,
+      });
+      setOpenState({ scopeKey: readScopeKey, value: false });
       message.success('Группы заказа обновлены');
+    } catch (error) {
+      if (readGuard.isSameResource(writeToken)) {
+        message.error(error instanceof Error ? error.message : 'Не удалось сохранить группы заказа');
+      }
     } finally {
-      setSaving(false);
+      if (readGuard.isSameResource(writeToken)) {
+        setSavingState({ scopeKey: readScopeKey, value: false });
+      }
     }
   };
 
@@ -111,25 +139,27 @@ export const GroupLinksEditor: React.FC<GroupLinksEditorProps> = ({
         )}
       </Space>
 
-      <Modal
-        title="Группы заказа"
-        open={open}
-        onCancel={() => setOpen(false)}
-        onOk={save}
-        confirmLoading={saving}
-        okText="Сохранить"
-        cancelText="Отмена"
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item name="groupIds" label="Группы">
-            <GroupSelect mode="multiple" selectedGroups={groups} />
-          </Form.Item>
-          <Form.Item name="primaryGroupId" label="Главная группа">
-            <GroupSelect selectedGroups={groups} />
-          </Form.Item>
-        </Form>
-        <GroupHistoryTable links={groups} />
-      </Modal>
+      <OrderLifecycleReadSurface active={open}>
+        <Modal
+          title="Группы заказа"
+          open={open}
+          onCancel={() => setOpenState({ scopeKey: readScopeKey, value: false })}
+          onOk={save}
+          confirmLoading={saving}
+          okText="Сохранить"
+          cancelText="Отмена"
+        >
+          <Form form={form} layout="vertical">
+            <Form.Item name="groupIds" label="Группы">
+              <GroupSelect mode="multiple" selectedGroups={groups} />
+            </Form.Item>
+            <Form.Item name="primaryGroupId" label="Главная группа">
+              <GroupSelect selectedGroups={groups} />
+            </Form.Item>
+          </Form>
+          <GroupHistoryTable links={groups} />
+        </Modal>
+      </OrderLifecycleReadSurface>
     </div>
   );
 };

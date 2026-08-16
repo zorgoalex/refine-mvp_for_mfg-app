@@ -9,12 +9,10 @@ describe('orders list keep-alive gating', () => {
     expect(src).toContain('useKeepAlive()');
     expect(src).toContain('const { isActive }');
   });
-  it('every query hook is gated on isActive', () => {
-    const hookCalls = (src.match(/use(Table|List|Many|Select)\(/g) || []).length;
-    const gated = (src.match(/enabled:\s*isActive/g) || []).length;
-    // useAppSettings is gated via its own arg; count it separately
-    expect(src).toContain('useAppSettings({ enabled: isActive })');
-    expect(gated).toBeGreaterThanOrEqual(hookCalls);
+  it('routes Refine reads through the treatment-aware lifecycle wrappers', () => {
+    expect(src).toContain('from "../../query/orderLifecycleQueries"');
+    expect(src).toContain('useCancelInactiveOrderQueriesOnDeactivate()');
+    expect(src).toContain('enabled: isActive && ordinaryReadActive');
   });
   it('disables refetchOnWindowFocus on the main table', () => {
     expect(src).toContain('refetchOnWindowFocus: false');

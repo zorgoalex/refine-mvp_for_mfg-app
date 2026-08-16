@@ -19,7 +19,6 @@ import { ordersApi } from '../api/ordersApi';
 import { featureFlags } from '../config/featureFlags';
 import { getLoadedRuntimeConfig } from '../config/runtimeConfig';
 import { getPageSizePreferenceSnapshot } from '../hooks/usePageSizePreference';
-import { prefetchOrderFormData } from '../hooks/useOrderFormData';
 import {
   useOrderLifecycleCohort,
   useOrderLifecycleCohortResolved,
@@ -28,6 +27,7 @@ import { isUsableOrderLifecycleConfig } from '../performance/orderLifecycleRollo
 import { recordOrderLifecycleMetric } from '../performance/performanceRum';
 import { appQueryClient } from './appQueryClient';
 import { getAuthCacheNamespace, useAuthCacheNamespace } from './authCacheNamespace';
+import { prefetchOrderFormData } from './orderFormDataCache';
 import {
   createOrderEditBackendPrimaryIdentity,
   createOrderEditLegacyPrimaryIdentity,

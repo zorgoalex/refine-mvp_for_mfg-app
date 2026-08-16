@@ -1,9 +1,9 @@
 // Hook for loading default statuses from database
 // Loads business defaults for new orders and related form state.
 
-import { useList } from '@refinedev/core';
 import { featureFlags } from '../config/featureFlags';
 import { resolveDefaultNewOrderStatusId } from '../domain/orderStatusDefaults';
+import { useList } from '../query/orderLifecycleQueries';
 import { useOrderFormData } from './useOrderFormData';
 
 interface DefaultStatuses {

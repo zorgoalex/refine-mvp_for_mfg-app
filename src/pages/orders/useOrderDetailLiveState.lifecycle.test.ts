@@ -169,6 +169,26 @@ describe('useOrderDetailLiveState lifecycle', () => {
     expect(realtimeApiMock.openLiveEvents).not.toHaveBeenCalled();
   });
 
+  it('rejects an actor-A snapshot after the auth scope changes to actor B', async () => {
+    const actorA = deferred<Awaited<ReturnType<typeof realtimeApiMock.getDetailLiveState>>>();
+    const actorB = deferred<Awaited<ReturnType<typeof realtimeApiMock.getDetailLiveState>>>();
+    realtimeApiMock.getDetailLiveState
+      .mockReturnValueOnce(actorA.promise)
+      .mockReturnValueOnce(actorB.promise);
+
+    renderHook(true, 'actor-a');
+    const masked = renderHook(true, 'actor-b');
+    expect(masked.loaded).toBe(false);
+
+    actorB.resolve(snapshotResponse(4));
+    await flushPromises();
+    expect(renderHook(true, 'actor-b').statusByDetailId.get(7)).toBe(4);
+
+    actorA.resolve(snapshotResponse(2));
+    await flushPromises();
+    expect(renderHook(true, 'actor-b').statusByDetailId.get(7)).toBe(4);
+  });
+
   it('aborts the stream when the workspace tab becomes inactive', async () => {
     renderHook(true);
     await flushPromises();
@@ -323,13 +343,39 @@ describe('useOrderDetailLiveState lifecycle', () => {
   });
 });
 
-function renderHook(active: boolean) {
+function renderHook(active: boolean, authScopeKey = 'actor-a') {
   reactHarness.beginRender();
-  const state = useOrderDetailLiveState({ enabled: true, active, orderId: 42 });
+  const state = useOrderDetailLiveState({ enabled: true, active, authScopeKey, orderId: 42 });
   reactHarness.flushEffects();
   return state;
 }
 
 async function flushPromises(): Promise<void> {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
+}
+
+function snapshotResponse(productionStatusId: number) {
+  return {
+    status: 200,
+    etag: `"state-${productionStatusId}"`,
+    streamCursor: `v1;s=${productionStatusId}`,
+    streamEnabled: false,
+    snapshot: {
+      orderId: 42,
+      streamEnabled: false,
+      streamCursor: `v1;s=${productionStatusId}`,
+      cutRefsAccess: 'denied' as const,
+      details: [{ detailId: 7, productionStatusId }],
+    },
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }

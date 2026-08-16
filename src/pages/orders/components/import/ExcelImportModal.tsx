@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Modal, Steps, Button, Space, message } from 'antd';
 import { UploadOutlined, SelectOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
-import { useList } from '@refinedev/core';
+import { useList } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { useExcelParser, useRangeSelection, useImportValidation } from './hooks';
 import { FileUploadStep, RangeSelectionStep, ValidationStep } from './steps';

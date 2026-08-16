@@ -8,7 +8,7 @@ import { applyFeatureFlags, featureFlags } from '../config/featureFlags';
 import { loadOrderViaBackend } from '../hooks/useOrderBackendRead';
 import {
   resetOrderFormDataCacheForTests,
-} from '../hooks/useOrderFormData';
+} from './orderFormDataCache';
 import { appQueryClient } from './appQueryClient';
 import { prefetchOrderPrimaryRoute } from './OrderPrimaryRouteLoader';
 

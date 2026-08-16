@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { Typography, Tag } from 'antd';
-import { useOne } from '@refinedev/core';
+import { useOne } from '../../../../query/orderLifecycleQueries';
 import dayjs from 'dayjs';
 import { authStorage } from '../../../../utils/auth';
 import { canQueryUsersResource } from '../../../../utils/resourcePermissions';

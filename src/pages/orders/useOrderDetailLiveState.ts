@@ -24,6 +24,7 @@ const AUTH_RECONNECT_LEAD_MS = 30_000;
 interface UseOrderDetailLiveStateArgs {
   enabled: boolean;
   active: boolean;
+  authScopeKey: string;
   orderId?: number | null;
 }
 
@@ -46,12 +47,13 @@ const EMPTY_STATE: OrderDetailLiveStateMaps = {
 export function useOrderDetailLiveState({
   enabled,
   active,
+  authScopeKey,
   orderId,
 }: UseOrderDetailLiveStateArgs): OrderDetailLiveStateMaps {
   const visible = useDocumentVisible();
   const normalizedOrderId = Number(orderId);
   const scopeKey = Number.isSafeInteger(normalizedOrderId) && normalizedOrderId > 0
-    ? String(normalizedOrderId)
+    ? `${authScopeKey}|order:${normalizedOrderId}`
     : '';
   const [state, setState] = useState<OrderDetailLiveStateMaps>(() => EMPTY_STATE);
 
