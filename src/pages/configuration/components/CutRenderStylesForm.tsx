@@ -424,6 +424,24 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
                   <Col xs={24}>
                     <NumberSlider label="Жирность текста" value={draft.profile.label.fontWeight} min={100} max={1000} step={50} disabled={!canManage} onChange={(value) => updateLabel({ fontWeight: Math.round(value / 50) * 50 })} />
                   </Col>
+                  <Col xs={24} md={8}>
+                    <NumberSlider label="Размер строки 1: заказ" value={draft.profile.label.orderFontRatio} min={0.2} max={2.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ orderFontRatio: value })} />
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <NumberSlider label="Размер строки 2: позиция" value={draft.profile.label.positionFontRatio} min={0.2} max={2.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ positionFontRatio: value })} />
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <NumberSlider label="Размер строки 3: размеры" value={draft.profile.label.sizeFontRatio} min={0.2} max={2.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ sizeFontRatio: value })} />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <NumberSlider label="Интервал заказ - позиция" value={draft.profile.label.orderPositionGapRatio} min={-0.3} max={1.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ orderPositionGapRatio: value })} />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <NumberSlider label="Интервал позиция - размеры" value={draft.profile.label.positionSizeGapRatio} min={-0.3} max={1.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ positionSizeGapRatio: value })} />
+                  </Col>
+                  <Col xs={24}>
+                    <NumberSlider label="Плотность букв" value={draft.profile.label.letterSpacingRatio} min={-0.2} max={0.4} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ letterSpacingRatio: value })} />
+                  </Col>
                 </Row>
               </div>
 
@@ -733,7 +751,9 @@ function RenderStyleSummary({ profile }: { profile: CutRenderStyleProfile }) {
         <Text strong>MDF-превью</Text>
         <Text type="secondary">Контур: {profile.piece.stroke}, {profile.piece.strokeWidthMm} мм</Text>
         <Text type="secondary">Фрезеровка: {profile.sourceSvg.strokeColorMode}, минимум {profile.sourceSvg.minStrokePx ?? 'исходная'} px</Text>
-        <Text type="secondary">Текст: {profile.label.fillStrategy === 'contrast' ? 'контрастный' : 'фиксированный'}, weight {profile.label.fontWeight}</Text>
+        <Text type="secondary">
+          Текст: {profile.label.fillStrategy === 'contrast' ? 'контрастный' : 'фиксированный'}, weight {profile.label.fontWeight}, строки {profile.label.orderFontRatio}/{profile.label.positionFontRatio}/{profile.label.sizeFontRatio}
+        </Text>
       </Space>
     </div>
   );

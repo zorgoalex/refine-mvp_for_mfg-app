@@ -21,12 +21,12 @@ describe('buildPieceLabelLines', () => {
     // L1: order name (not "Заказ N")
     expect(lines[0]).toBe('Кухня-42');
     // L2: # prefix (not Поз.)
-    expect(lines[1]).toBe('# 3 · 1/2');
+    expect(lines[1]).toBe('# 3');
     // L3: * separator (not ×)
     expect(lines[2]).toBe('300*200');
   });
 
-  it('appends a 4th material line when materialName is a non-blank string', () => {
+  it('ignores materialName and still returns exactly 3 strings', () => {
     const lines = buildPieceLabelLines({
       orderName: 'Кухня-42',
       orderId: 42,
@@ -37,9 +37,9 @@ describe('buildPieceLabelLines', () => {
       heightMm: 200,
       materialName: 'ЛДСП Белый',
     });
-    expect(lines).toHaveLength(4);
+    expect(lines).toHaveLength(3);
     expect(lines[2]).toBe('300*200');
-    expect(lines[3]).toBe('ЛДСП Белый');
+    expect(lines).not.toContain('ЛДСП Белый');
   });
 
   it('omits the material line when materialName is null/undefined/blank', () => {
@@ -88,7 +88,7 @@ describe('buildPieceLabelLines', () => {
     expect(lines[0]).toBe('Заказ —');
   });
 
-  it('omits /qty when qty is null', () => {
+  it('does not print copy ordinal or qty on the position line', () => {
     const lines = buildPieceLabelLines({
       orderName: null,
       orderId: 10,
@@ -99,8 +99,9 @@ describe('buildPieceLabelLines', () => {
       heightMm: 100,
     });
     expect(lines).toHaveLength(3);
-    expect(lines[1]).toBe('# 5 · 2');
+    expect(lines[1]).toBe('# 5');
     expect(lines[1]).not.toContain('/');
+    expect(lines[1]).not.toContain('·');
   });
 
   it('falls back gracefully when detailNumber is null — shows # —', () => {
@@ -116,8 +117,7 @@ describe('buildPieceLabelLines', () => {
     expect(lines).toHaveLength(3);
     expect(lines[1]).toContain('#');
     expect(lines[1]).toContain('—');
-    expect(lines[1]).toContain('·');
-    expect(lines[1]).toContain('3');
+    expect(lines[1]).toBe('# —');
   });
 
   it('handles null orderId gracefully — returns non-empty line 1 with fallback', () => {
@@ -133,7 +133,7 @@ describe('buildPieceLabelLines', () => {
     expect(lines).toHaveLength(3);
     expect(lines[0].length).toBeGreaterThan(0);
     // L2 uses # prefix
-    expect(lines[1]).toBe('# 2 · 1/3');
+    expect(lines[1]).toBe('# 2');
     // L3 uses * separator
     expect(lines[2]).toBe('200*100');
   });
@@ -232,7 +232,7 @@ describe('LINE1_SCALE', () => {
 describe('fitLabelScale', () => {
   it('returns 1 for a large box (font fits easily)', () => {
     const scale = fitLabelScale({
-      lines: ['Заказ 1', '# 1 · 1/1', '200*300'],
+      lines: ['Заказ 1', '# 1', '200*300'],
       boxW: 5000,
       boxH: 3000,
       baseFont: 10,
@@ -242,7 +242,7 @@ describe('fitLabelScale', () => {
 
   it('returns a value strictly in (0.3, 1) for a medium box', () => {
     const scale = fitLabelScale({
-      lines: ['Заказ 100', '# 5 · 1/3', '800*400'],
+      lines: ['Заказ 100', '# 5', '800*400'],
       boxW: 50,
       boxH: 18,
       baseFont: 10,
@@ -253,7 +253,7 @@ describe('fitLabelScale', () => {
 
   it('clamps to default minScale 0.3 for a tiny box', () => {
     const scale = fitLabelScale({
-      lines: ['Заказ 42', '# 99 · 1/999', '9999*9999'],
+      lines: ['Заказ 42', '# 99', '9999*9999'],
       boxW: 5,
       boxH: 2,
       baseFont: 10,
@@ -284,7 +284,7 @@ describe('fitLabelScale', () => {
 
   it('can shrink below the old 0.3 floor for long names on narrow rotated pieces', () => {
     const scale = fitLabelScale({
-      lines: ['Тест SP3 листовой МДФ18', '# 45 · 1/1', '666*560'],
+      lines: ['Тест SP3 листовой МДФ18', '# 45', '666*560'],
       boxW: 520,
       boxH: 640,
       baseFont: 140,

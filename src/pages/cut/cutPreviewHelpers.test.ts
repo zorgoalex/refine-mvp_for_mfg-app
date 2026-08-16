@@ -243,7 +243,7 @@ describe('cutPreviewHelpers', () => {
         orderDetailId: null,
         detailNumber: 3,
       });
-      expect(overlay.labelLines).toEqual(['2777', '# 3 · 1', '476*345']);
+      expect(overlay.labelLines).toEqual(['2777', '# 3', '476*345']);
       expect(overlay.tooltipRows).toEqual(expect.arrayContaining([
         { label: 'Заказ', value: '2777' },
         { label: 'Позиция', value: '3' },
@@ -312,12 +312,12 @@ describe('cutPreviewHelpers', () => {
       expect(overlay.heightPct).toBe((400 / 2070) * 100);
     });
 
-    it('single-material sheet: no 4th material line (3 label lines)', () => {
+    it('single-material sheet: keeps 3 label lines', () => {
       const overlay = buildSheetPieceOverlays(placements, [item], false)[0];
       expect(overlay.labelLines).toHaveLength(3);
     });
 
-    it('mixed-material sheet: appends the material as a 4th label line per piece', () => {
+    it('mixed-material sheet: still keeps material out of the 3-line piece label', () => {
       const mixedPlacements: SheetPlacements = {
         ...placements,
         pieces: [
@@ -333,12 +333,13 @@ describe('cutPreviewHelpers', () => {
       };
       const overlays = buildSheetPieceOverlays(mixedPlacements, [item, item2], false);
       const byKey = Object.fromEntries(overlays.map((o) => [o.key, o]));
-      expect(byKey['det-42:1'].labelLines).toHaveLength(4);
-      expect(byKey['det-42:1'].labelLines[3]).toBe('МДФ 16');
-      expect(byKey['det-43:1'].labelLines[3]).toBe('ЛДСП Белый');
+      expect(byKey['det-42:1'].labelLines).toHaveLength(3);
+      expect(byKey['det-43:1'].labelLines).toHaveLength(3);
+      expect(byKey['det-42:1'].labelLines).not.toContain('МДФ 16');
+      expect(byKey['det-43:1'].labelLines).not.toContain('ЛДСП Белый');
     });
 
-    it('mixed detection keys on material id: same name, different sheetMaterialTypeId still mixed', () => {
+    it('same material names with different sheetMaterialTypeId still stay out of piece labels', () => {
       const mixedPlacements: SheetPlacements = {
         ...placements,
         pieces: [
@@ -354,8 +355,7 @@ describe('cutPreviewHelpers', () => {
         detail: { ...item.detail!, materialName: 'МДФ 16', sheetMaterialTypeId: 12 },
       };
       const overlays = buildSheetPieceOverlays(mixedPlacements, [item, item2], false);
-      // Both get a 4th line because the sheet physically mixes two materials.
-      expect(overlays.every((o) => o.labelLines.length === 4)).toBe(true);
+      expect(overlays.every((o) => o.labelLines.length === 3)).toBe(true);
     });
 
     it('transposes overlay percentages for landscape preview (legacy 90° CW, origin top-right)', () => {

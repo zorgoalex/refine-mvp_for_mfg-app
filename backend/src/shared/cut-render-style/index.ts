@@ -22,6 +22,12 @@ export interface CutRenderStyleProfile {
     lightTextStroke: string;
     lightTextStrokeWidthRatio: number;
     fontWeight: number;
+    orderFontRatio: number;
+    positionFontRatio: number;
+    sizeFontRatio: number;
+    orderPositionGapRatio: number;
+    positionSizeGapRatio: number;
+    letterSpacingRatio: number;
   };
   sourceSvg: {
     minStrokePx: number | null;
@@ -50,7 +56,9 @@ export interface CutRenderStyleTemplate {
 
 export interface CutRenderLabelLineSpec {
   text: string;
+  role: 'order' | 'position' | 'size';
   fontRatio: number;
+  gapAfterRatio: number;
 }
 
 export interface CutRenderStylesSetting {
@@ -106,6 +114,12 @@ const CUT_RENDER_STYLE_PROFILES = {
       lightTextStroke: '#111827',
       lightTextStrokeWidthRatio: 0,
       fontWeight: 500,
+      orderFontRatio: 1,
+      positionFontRatio: 0.46,
+      sizeFontRatio: 0.62,
+      orderPositionGapRatio: 0.035,
+      positionSizeGapRatio: 0.035,
+      letterSpacingRatio: 0,
     },
     sourceSvg: {
       minStrokePx: null,
@@ -136,6 +150,12 @@ const CUT_RENDER_STYLE_PROFILES = {
       lightTextStroke: '#111827',
       lightTextStrokeWidthRatio: 0.08,
       fontWeight: 800,
+      orderFontRatio: 1,
+      positionFontRatio: 0.46,
+      sizeFontRatio: 0.62,
+      orderPositionGapRatio: 0.035,
+      positionSizeGapRatio: 0.035,
+      letterSpacingRatio: 0,
     },
     sourceSvg: {
       minStrokePx: 1.6,
@@ -274,6 +294,12 @@ export function cutRenderStyleProfileJson(rule: CutRenderStyleRule | CutRenderSt
       lightTextStroke: rule.label.lightTextStroke,
       lightTextStrokeWidthRatio: rule.label.lightTextStrokeWidthRatio,
       fontWeight: rule.label.fontWeight,
+      orderFontRatio: rule.label.orderFontRatio,
+      positionFontRatio: rule.label.positionFontRatio,
+      sizeFontRatio: rule.label.sizeFontRatio,
+      orderPositionGapRatio: rule.label.orderPositionGapRatio,
+      positionSizeGapRatio: rule.label.positionSizeGapRatio,
+      letterSpacingRatio: rule.label.letterSpacingRatio,
     },
     sourceSvg: {
       minStrokePx: rule.sourceSvg.minStrokePx,
@@ -327,8 +353,12 @@ export function cutRenderLabelFontWeight(value: CutRenderStyleRef): number {
   return resolveCutRenderStyle(value).label.fontWeight;
 }
 
-export function cutRenderPositionLine(position: number, instance = 1, qty = 1): string {
-  return qty > 1 ? `# ${position} - ${instance}/${qty}` : `# ${position}`;
+export function cutRenderLabelLetterSpacingRatio(value: CutRenderStyleRef): number {
+  return resolveCutRenderStyle(value).label.letterSpacingRatio;
+}
+
+export function cutRenderPositionLine(position: number): string {
+  return `# ${position}`;
 }
 
 export function cutRenderPieceSizeLine(
@@ -345,20 +375,25 @@ export function cutRenderFormatDimension(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(1)));
 }
 
-export function cutRenderLabelLineSpecs(lines: readonly string[]): CutRenderLabelLineSpec[] {
-  return cutRenderNormalizeLabelLines(lines).map((text, index) => {
-    return {
-      text,
-      fontRatio: cutRenderLabelLineFontRatio(text, index),
-    };
-  });
+export function cutRenderLabelLineSpecs(lines: readonly string[], value?: CutRenderStyleRef): CutRenderLabelLineSpec[] {
+  const style = resolveCutRenderStyle(value);
+  const label = style.label;
+  const fontRatios = [label.orderFontRatio, label.positionFontRatio, label.sizeFontRatio] as const;
+  const gapAfterRatios = [label.orderPositionGapRatio, label.positionSizeGapRatio, 0] as const;
+  const roles = ['order', 'position', 'size'] as const;
+  return cutRenderNormalizeLabelLines(lines).map((text, index) => ({
+    text,
+    role: roles[index] ?? 'size',
+    fontRatio: fontRatios[index] ?? label.sizeFontRatio,
+    gapAfterRatio: gapAfterRatios[index] ?? 0,
+  }));
 }
 
 export function cutRenderNormalizeLabelLines(lines: readonly string[]): string[] {
   return lines
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(0, 4)
+    .slice(0, 3)
     .map((line) => line
       .replace(/^поз\.?\s*/i, '# ')
       .replace(/(\d(?:[.,]\d+)?)\s*[xхX×]\s*(\d(?:[.,]\d+)?)/g, '$1*$2'));
@@ -409,13 +444,6 @@ function sourceSvgPastelStrokeForPieceFill(
     s: style.sourceSvg.pastelSaturationPercent / 100,
     l: style.sourceSvg.pastelLightnessPercent / 100,
   });
-}
-
-function cutRenderLabelLineFontRatio(line: string, index: number): number {
-  if (index === 0) return 1;
-  if (/^#\s*\d+/.test(line)) return 0.46;
-  if (/^\d+(?:[.,]\d+)?\s*[*xхX×]\s*\d+(?:[.,]\d+)?$/i.test(line)) return 0.62;
-  return index === 1 ? 0.5 : 0.56;
 }
 
 function parseCutRenderStyleProfile(
@@ -470,6 +498,48 @@ function parseCutRenderStyleProfile(
         0.25,
       ),
       fontWeight: parseIntegerField(label.fontWeight, fallback.label.fontWeight, `${path}.label.fontWeight`, 100, 1000),
+      orderFontRatio: parseNumberField(
+        label.orderFontRatio,
+        fallback.label.orderFontRatio,
+        `${path}.label.orderFontRatio`,
+        0.2,
+        2.5,
+      ),
+      positionFontRatio: parseNumberField(
+        label.positionFontRatio,
+        fallback.label.positionFontRatio,
+        `${path}.label.positionFontRatio`,
+        0.2,
+        2.5,
+      ),
+      sizeFontRatio: parseNumberField(
+        label.sizeFontRatio,
+        fallback.label.sizeFontRatio,
+        `${path}.label.sizeFontRatio`,
+        0.2,
+        2.5,
+      ),
+      orderPositionGapRatio: parseNumberField(
+        label.orderPositionGapRatio,
+        fallback.label.orderPositionGapRatio,
+        `${path}.label.orderPositionGapRatio`,
+        -0.3,
+        1.5,
+      ),
+      positionSizeGapRatio: parseNumberField(
+        label.positionSizeGapRatio,
+        fallback.label.positionSizeGapRatio,
+        `${path}.label.positionSizeGapRatio`,
+        -0.3,
+        1.5,
+      ),
+      letterSpacingRatio: parseNumberField(
+        label.letterSpacingRatio,
+        fallback.label.letterSpacingRatio,
+        `${path}.label.letterSpacingRatio`,
+        -0.2,
+        0.4,
+      ),
     },
     sourceSvg: {
       minStrokePx: parseNullableNumberField(

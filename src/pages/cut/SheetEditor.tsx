@@ -69,7 +69,7 @@ export interface SheetEditorProps {
   violations: ManualViolation[];
   /**
    * Label info keyed by piece.item_id (e.g. "det-42").
-   * Provides orderName, orderId, detailNumber and qty for the 3-line piece label.
+   * Provides orderName, orderId and detailNumber for the 3-line piece label.
    * Falls back to piece.label when an item_id is absent from the map.
    */
   labelInfoByItemId: Map<string, { orderName: string | null; orderId: number | null; detailNumber: number | null; qty: number | null }>;
@@ -1384,7 +1384,7 @@ export function SheetEditor(props: SheetEditorProps): JSX.Element {
                             <text {...sharedProps} x={cx} y={y0} fontSize={font0} fontWeight={600}>
                               {labelLines[0]}
                             </text>
-                            {/* L1: # position · instance/qty */}
+                            {/* L1: # position */}
                             <text {...sharedProps} x={cx} y={y1} fontSize={fontSize}>
                               {labelLines[1]}
                             </text>

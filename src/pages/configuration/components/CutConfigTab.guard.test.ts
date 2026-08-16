@@ -33,6 +33,12 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(renderFormSrc).toMatch(/Сохранить как копию/);
     expect(renderFormSrc).toMatch(/type="color"/);
     expect(renderFormSrc).toMatch(/Загрузить тестовый SVG/);
+    expect(renderFormSrc).toMatch(/Размер строки 1: заказ/);
+    expect(renderFormSrc).toMatch(/Размер строки 2: позиция/);
+    expect(renderFormSrc).toMatch(/Размер строки 3: размеры/);
+    expect(renderFormSrc).toMatch(/Интервал заказ - позиция/);
+    expect(renderFormSrc).toMatch(/Интервал позиция - размеры/);
+    expect(renderFormSrc).toMatch(/Плотность букв/);
   });
 
   it('eligibility statuses use a multiselect from the production-statuses reference (no free text)', () => {

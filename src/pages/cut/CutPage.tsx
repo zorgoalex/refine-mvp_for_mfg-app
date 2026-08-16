@@ -2751,7 +2751,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }, [job?.items]);
 
   // Memoized label-info map for the active editor: keyed by piece.item_id ("det-N"),
-  // provides orderName, orderId, detailNumber and qty for the 3-line piece label.
+  // provides orderName, orderId and detailNumber for the 3-line piece label.
   const editorLabelInfoByItemId = useMemo(() => {
     const map = new Map<string, { orderName: string | null; orderId: number | null; detailNumber: number | null; qty: number | null }>();
     for (const item of job?.items ?? []) {

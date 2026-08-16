@@ -3392,9 +3392,8 @@ export class PgCutRepository implements CutRepositoryPort {
       order_delete_flag: boolean | null;
     }>(
       // material_name = sheet-material name (COALESCE sheet_material_type, legacy
-      // material) for the 4th label line; the id columns give a stable material
-      // IDENTITY for mixed-material detection (two catalog rows can share a name).
-      // Matches the FE preview overlay and the ENRICHED_ITEMS_QUERY resolution.
+      // material) for tooltips/PDF metadata. Piece labels intentionally stay
+      // three-line only: order, position, size.
       `SELECT cji.order_detail_id, cji.order_id,
               to_jsonb(od) AS detail_fields,
               od.detail_number, od.width, od.height,
@@ -3644,36 +3643,7 @@ export class PgCutRepository implements CutRepositoryPort {
       ? baseFillByOrder
       : createOrderFillResolver([...detailById.values()].map((detail) => detail.orderId), renderStyleRule);
 
-    // Resolve a piece's sheet-material name (live join; the frozen snapshot has no
-    // material). Blank/unknown → null so no material line is added. Material is read
-    // live like the FE preview overlay (which also pairs frozen placement geometry
-    // with live names), so preview and print stay consistent; a material change
-    // marks the job stale and recalc-gates the PDF before any drift can print.
-    const materialNameForPiece = (piece: FreecutPlacement): string | null => {
-      const detailId = parseFreecutItemId(piece.item_id);
-      const name = (detailId === null ? null : detailById.get(detailId)?.materialName ?? null);
-      const trimmed = name?.trim();
-      return trimmed ? trimmed : null;
-    };
-
-    // Whether a sheet mixes materials (splitByMaterial off → >1 distinct material
-    // among its pieces). Keyed on the material IDENTITY (id-based), not the display
-    // name, so two catalog rows that share a name still count as mixed. The 4th
-    // material label line is added only then.
-    const sheetMixesMaterials = (placements: SheetPlacementsJson): boolean => {
-      const distinct = new Set<string>();
-      for (const piece of placements.pieces) {
-        const detailId = parseFreecutItemId(piece.item_id);
-        const key = detailId === null ? null : detailById.get(detailId)?.materialKey ?? null;
-        if (key) distinct.add(key);
-      }
-      return distinct.size > 1;
-    };
-
-    // Sheet-scoped label builder: appends the material 4th line only when the sheet
-    // mixes materials. `includeMaterial` is fixed per sheet by the caller below.
-    const labelForPiece = (piece: FreecutPlacement, includeMaterial: boolean): string[] => {
-      const materialName = includeMaterial ? materialNameForPiece(piece) : null;
+    const labelForPiece = (piece: FreecutPlacement): string[] => {
       // Rule 7: use the frozen label snapshot when present (calc persists it).
       // Fall back to the live order_details join ONLY for legacy pre-Task-4 rows
       // whose stored placements have no label field.
@@ -3689,7 +3659,6 @@ export class PgCutRepository implements CutRepositoryPort {
           itemId: piece.item_id,
           instance: piece.instance,
           qty: quantities.get(piece.item_id) ?? 1,
-          materialName: frozenLabel.materialName ?? materialName,
         });
       }
       // Legacy fallback: live join.
@@ -3706,7 +3675,6 @@ export class PgCutRepository implements CutRepositoryPort {
         itemId: piece.item_id,
         instance: piece.instance,
         qty: quantities.get(piece.item_id) ?? 1,
-        materialName,
       });
     };
 
@@ -3732,8 +3700,7 @@ export class PgCutRepository implements CutRepositoryPort {
 
     return {
       sheets: rawSheets.map((s) => {
-        const includeMaterial = sheetMixesMaterials(s.placements);
-        const labelFor = (piece: FreecutPlacement): string[] => labelForPiece(piece, includeMaterial);
+        const labelFor = (piece: FreecutPlacement): string[] => labelForPiece(piece);
         return {
           sheetIndex: s.sheetIndex,
           placements: s.placements,
