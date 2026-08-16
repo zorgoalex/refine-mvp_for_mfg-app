@@ -14,6 +14,11 @@ import {
   describeHdfConfigErrors,
   HDF_CONFIG_SETTINGS_LOCATION,
 } from './orderHdfStatusView';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+} from '../../../../workspace/workspaceOperationPins';
 
 const { Text } = Typography;
 
@@ -46,6 +51,7 @@ function hdfNumber(value: unknown, digits: number) {
 }
 
 export function OrderHdfTab() {
+  const { tabKey } = useKeepAlive();
   const {
     header,
     hdfDetails,
@@ -97,12 +103,17 @@ export function OrderHdfTab() {
     }
     setRecalculating(true);
     try {
-      const response = await ordersApi.recalculateHdf(orderId);
+      const response = await runPageOwnedWorkspaceOperation(
+        tabKey || `/orders/edit/${orderId}`,
+        'order-hdf-recalculate',
+        () => ordersApi.recalculateHdf(orderId),
+      );
       loadOrder(mapOrderDtoToFormValues(response.order));
       setDirty(false);
       syncOriginals();
       message.success('ХДФ пересчитан');
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       message.error(error instanceof Error ? error.message : 'Не удалось пересчитать ХДФ');
     } finally {
       setRecalculating(false);

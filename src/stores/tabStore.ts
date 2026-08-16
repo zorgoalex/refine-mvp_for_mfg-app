@@ -6,6 +6,7 @@ import { resolveTabLabel, shouldPreserveTabLabel } from '../utils/tabLabels';
 import { destroyOrderDraftStore } from './orderFormStore';
 import { removeWorkspaceCheckpoint } from '../workspace/workspaceCheckpointRegistry';
 import { releaseWorkspaceAttachments } from '../workspace/workspaceAttachmentRegistry';
+import { recordWorkspaceOperationEvictionPin } from '../workspace/workspaceOperationPins';
 
 export const LEGACY_WORKSPACE_TABS_STORAGE_KEY = 'workspace-tabs';
 const INACTIVE_WORKSPACE_TABS_STORAGE_KEY = 'erp.workspaceTabs.anonymous';
@@ -24,7 +25,7 @@ export interface WorkspaceTab {
 interface TabState {
   tabs: WorkspaceTab[];
   openTab: (t: Omit<WorkspaceTab, 'dirty'> & { preserveLabel?: boolean }) => void;
-  closeTab: (key: string, opts?: { discard?: boolean }) => void;
+  closeTab: (key: string, opts?: { discard?: boolean }) => boolean;
   setTabTitle: (key: string, label: string) => void;
   setDirty: (key: string, dirty: boolean) => void;
   reorder: (from: number, to: number) => void;
@@ -143,6 +144,7 @@ export const useTabStore = create<TabState>()(
           return { tabs: [...state.tabs, { ...nextTab, dirty: false }] };
         }),
       closeTab: (key, opts) => {
+        if (recordWorkspaceOperationEvictionPin(key)) return false;
         removeWorkspaceCheckpoint(key);
         releaseWorkspaceAttachments(key);
         if (opts?.discard) {
@@ -150,6 +152,7 @@ export const useTabStore = create<TabState>()(
           if (orderKey) destroyOrderDraftStore(orderKey);
         }
         set((state) => ({ tabs: state.tabs.filter((x) => x.key !== key) }));
+        return true;
       },
       setTabTitle: (key, label) =>
         set((state) => ({ tabs: state.tabs.map((x) => (x.key === key ? { ...x, label } : x)) })),

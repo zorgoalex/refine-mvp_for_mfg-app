@@ -68,6 +68,11 @@ import {
 } from '../../../workspace/workspaceDomCheckpoint';
 import { useWorkspaceDomCheckpointCapture } from '../../../workspace/workspaceDomCheckpointReact';
 import type { WorkspaceSerializableRecord } from '../../../workspace/workspaceUiStateStore';
+import {
+  acquireWorkspaceOperationPin,
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+} from '../../../workspace/workspaceOperationPins';
 
 // Sections
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
@@ -202,6 +207,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
   const tabKey = useWorkspaceTabKey(location.pathname);
+  const orderWorkspaceKey = tabKey
+    || (orderKey === NEW_ORDER_KEY ? '/orders/create' : `/orders/edit/${orderKey}`);
   const restoredOrderFormCheckpoint = useMemo(
     () => readWorkspaceCheckpointAdapterState(tabKey, 'order-form'),
     [tabKey],
@@ -253,6 +260,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const automaticPlannedCompletionRef = useRef<string | null>(null);
   const projectClientRef = useRef<number | undefined>(undefined);
   const projectRequestIdRef = useRef(0);
+  const workspaceOwnerMountedRef = useRef(true);
   const [projectOptionsState, setProjectOptionsState] = useState<{
     scopeKey: string;
     value: Array<{ label: string; value: number }>;
@@ -260,6 +268,12 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   } | null>(null);
   const [orderFormStickyEnabled, setOrderFormStickyEnabled] = useState(false);
   const [orderFormSummaryStuck, setOrderFormSummaryStuck] = useState(false);
+  useEffect(() => {
+    workspaceOwnerMountedRef.current = true;
+    return () => {
+      workspaceOwnerMountedRef.current = false;
+    };
+  }, []);
   const orderFormStickyStyle = useMemo<OrderFormStickyStyle>(() => ({
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-compact-header-height': `${ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT}px`,
@@ -295,6 +309,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     showValidationErrors,
     clearValidation,
   } = useOrderSave(orderKey, {
+    workspaceKey: orderWorkspaceKey,
+    isWorkspaceOwnerCurrent: () => workspaceOwnerMountedRef.current,
     getBazisDraftSaveContext: () => {
       const runtime = bazisDraftRuntimeRef.current;
       if (!runtime) {
@@ -1395,6 +1411,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - payment edits applied successfully');
     }
 
+    const workspaceKey = orderWorkspaceKey;
+    const releaseOperationPin = acquireWorkspaceOperationPin(workspaceKey, 'order-save');
     try {
       const formValues = getFormValues();
       console.log('[OrderForm] handleSave - formValues:', formValues);
@@ -1446,9 +1464,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         formValues.idempotencyKey = saveKeyRef.current;
       }
 
-        console.log('[OrderForm] handleSave - calling saveOrder...');
-        const savedOrderId = await saveOrder(formValues, mode === 'edit');
-        console.log('[OrderForm] handleSave - saveOrder returned:', savedOrderId);
+      console.log('[OrderForm] handleSave - calling saveOrder...');
+      const savedOrderId = await runPageOwnedWorkspaceOperation(
+        workspaceKey,
+        'order-save',
+        () => saveOrder(formValues, mode === 'edit'),
+      );
+      console.log('[OrderForm] handleSave - saveOrder returned:', savedOrderId);
 
       if (savedOrderId) {
         saveKeyRef.current = undefined;
@@ -1503,19 +1525,25 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         // Auto-export to Google Drive
         try {
           console.log('[OrderForm] handleSave - starting auto-export to Google Drive');
-          await exportToDrive({
-            order_id: savedOrderId,
-            order_name: formValues.header.order_name,
-            order_date: formValues.header.order_date,
-            client: formValues.header.client,
-          });
+          await runPageOwnedWorkspaceOperation(
+            workspaceKey,
+            'order-excel-export',
+            (owner) => exportToDrive({
+              order_id: savedOrderId,
+              order_name: formValues.header.order_name,
+              order_date: formValues.header.order_date,
+              client: formValues.header.client,
+            }, owner),
+          );
           console.log('[OrderForm] handleSave - auto-export completed successfully');
         } catch (exportError) {
+          if (isWorkspaceOperationOwnershipLost(exportError)) return;
           // Error already handled in useOrderExport hook (shows message.error)
           console.error('[OrderForm] handleSave - auto-export failed:', exportError);
         }
       }
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       console.error('[OrderForm] handleSave - CATCH block, error:', error);
       notification.error({
         message: 'Ошибка при сохранении',
@@ -1523,6 +1551,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         duration: 0,
       });
     } finally {
+      releaseOperationPin();
       console.log('[OrderForm] ========== handleSave ENDED ==========');
     }
   };
@@ -1838,7 +1867,14 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     const closeAndLeave = (discard: boolean) => {
       // Resolve the neighbour from the PRE-removal tab list — closeTab mutates it.
       const neighbor = computeNeighborPath(useTabStore.getState().tabs, tabKey);
-      closeTab(tabKey, discard ? { discard: true } : undefined);
+      const closed = closeTab(tabKey, discard ? { discard: true } : undefined);
+      if (!closed) {
+        notification.warning({
+          message: 'Операция выполняется',
+          description: 'Дождитесь завершения операции перед закрытием вкладки',
+        });
+        return;
+      }
       navigate(neighbor);
     };
     if (isDirty) confirmDiscard(() => closeAndLeave(true));
@@ -1912,9 +1948,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                         const token = backendOrderLoadGuard.capture();
                         return token ? () => backendOrderLoadGuard.isSameResource(token) : null;
                       },
-                      deleteFn: () => ordersApi.delete(Number(orderId), {
-                        version: Number(header.version ?? 0),
-                      }),
+                      deleteFn: () => runPageOwnedWorkspaceOperation(
+                        tabKey,
+                        'order-delete',
+                        () => ordersApi.delete(Number(orderId), {
+                          version: Number(header.version ?? 0),
+                        }),
+                      ),
                       onSuccess: () => {
                         message.success('Заказ перемещён в корзину');
                         navigate('/orders');
@@ -1986,9 +2026,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                   const token = backendOrderLoadGuard.capture();
                   return token ? () => backendOrderLoadGuard.isSameResource(token) : null;
                 },
-                deleteFn: () => ordersApi.delete(Number(orderId), {
-                  version: Number(header.version ?? 0),
-                }),
+                deleteFn: () => runPageOwnedWorkspaceOperation(
+                  tabKey,
+                  'order-delete',
+                  () => ordersApi.delete(Number(orderId), {
+                    version: Number(header.version ?? 0),
+                  }),
+                ),
                 onSuccess: () => {
                   message.success('Заказ перемещён в корзину');
                   navigate('/orders');

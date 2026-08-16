@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, Tabs } from 'antd';
+import { message, Modal, Tabs } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
 import { computeNeighborPath, type WorkspaceTab, useTabStore } from '../../stores/tabStore';
@@ -8,14 +8,22 @@ export interface EvolutionTabCloseRequest {
   targetKey: string;
   activeKey: string;
   tabs: WorkspaceTab[];
-  closeTab: (key: string, options?: { discard?: boolean }) => void;
+  closeTab: (key: string, options?: { discard?: boolean }) => boolean;
   navigate: (path: string) => void;
   confirmDiscard: (onConfirm: () => void) => void;
+  onBlocked: () => void;
 }
 
 export function requestEvolutionTabClose(request: EvolutionTabCloseRequest): void {
   const close = (discard = false) => {
-    request.closeTab(request.targetKey, discard ? { discard: true } : undefined);
+    const closed = request.closeTab(
+      request.targetKey,
+      discard ? { discard: true } : undefined,
+    );
+    if (!closed) {
+      request.onBlocked();
+      return;
+    }
     if (request.targetKey === request.activeKey) {
       request.navigate(computeNeighborPath(request.tabs, request.targetKey));
     }
@@ -43,6 +51,9 @@ export const EvolutionWorkspaceTabs: React.FC = () => {
       tabs,
       closeTab,
       navigate,
+      onBlocked: () => {
+        message.warning('Дождитесь завершения операции перед закрытием вкладки');
+      },
       confirmDiscard: (onConfirm) => {
         Modal.confirm({
           title: 'Несохраненные изменения',

@@ -15,7 +15,6 @@ describe('KeepAliveOutlet guards', () => {
   });
   it('pins each mounted screen to the tab key that owns it', () => {
     expect(outlet).toContain('tabKey: key');
-    expect(outlet).toContain('tabKey: activeKey');
   });
   it('publishes workspace activity, visibility and activation revision', () => {
     expect(outlet).toContain('workspaceActive: key === activeKey');
@@ -28,14 +27,17 @@ describe('KeepAliveOutlet guards', () => {
     expect(outlet).toContain('!cacheRef.current.has(activeKey)');
     expect(outlet).toContain('cacheRef.current.set(activeKey, outlet)');
   });
-  it('can cache always-keep routes before tab sync opens their workspace tab', () => {
+  it('renders every active route through one stable cache owner before tab sync', () => {
     expect(outlet).toContain('const activeDirty = activeTab?.dirty ?? false');
-    expect(outlet).toContain('const eligible = isKeepAliveEligible(activeKey, { dirty: activeDirty })');
+    expect(outlet).toContain('if (outlet && !cacheRef.current.has(activeKey))');
     expect(outlet).toContain('tabsWithActive');
     expect(outlet).toContain("{ key: activeKey, dirty: activeDirty }");
   });
-  it('excludes /calendar from keep-alive (B7)', () => {
+  it('keeps /calendar excluded by default and activates only exact operation pins', () => {
     expect(policy).toContain("'/calendar'");
+    expect(outlet).toContain('.filter((key) => hasWorkspaceOperationPins(key))');
+    expect(outlet).toContain('recordWorkspaceOperationEvictionPin(key)');
+    expect(outlet).toContain('subscribeWorkspaceOperationPins');
   });
   it('adds no new keep-alive dependency (hand-rolled over useOutlet)', () => {
     expect(outlet).toContain('useOutlet');

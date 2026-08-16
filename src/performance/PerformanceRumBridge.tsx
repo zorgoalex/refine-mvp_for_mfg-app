@@ -9,7 +9,9 @@ import {
   subscribeAppActivityDiagnostics,
 } from './appActivityCoordinator';
 import {
+  acknowledgePerformanceRumSafetyMetrics,
   createRumSessionNonce,
+  getPendingPerformanceRumSafetyMetric,
   submitPerformanceRumBatch,
   subscribeOrderLifecycleMetrics,
   type OrderRealtimeMode,
@@ -75,10 +77,7 @@ export const PerformanceRumBridge = () => {
       const nonce = createRumSessionNonce();
       const rollout = config.rollouts?.orderLifecycleV2;
       if (!nonce || !rollout) return;
-      const measurements: ActiveRumSession['measurements'] = new Map();
-      for (const name of ZERO_SAFETY_METRICS) {
-        measurements.set(name, { name, value: 0 });
-      }
+      const measurements = createInitialSafetyMeasurements();
       const activityDiagnostics = getAppActivityDiagnostics();
       measurements.set('activity_coordinator_owner_count', {
         name: 'activity_coordinator_owner_count',
@@ -172,10 +171,17 @@ export async function flushPerformanceRumSession(keepalive = false): Promise<boo
   const session = activeSession;
   activeSession = null;
   if (!session || session.measurements.size === 0) return false;
-  return submitPerformanceRumBatch(
-    { ...session.batch, measurements: [...session.measurements.values()] },
+  seedPendingSafetyMeasurements(session.measurements);
+  const batch = { ...session.batch, measurements: [...session.measurements.values()] };
+  const submitted = await submitPerformanceRumBatch(
+    batch,
     { keepalive },
   ).catch(() => false);
+  if (submitted) {
+    acknowledgePerformanceRumSafetyMetrics(batch.measurements);
+    if (activeSession) seedPendingSafetyMeasurements(activeSession.measurements);
+  }
+  return submitted;
 }
 
 export function setPerformanceRumRealtimeMode(mode: OrderRealtimeMode): void {
@@ -191,6 +197,8 @@ export function rotatePerformanceRumSession(
 
 export function setActivePerformanceRumSessionForTests(batch: PerformanceRumBatch): void {
   const activityDiagnostics = getAppActivityDiagnostics();
+  const measurements = createInitialSafetyMeasurements();
+  batch.measurements.forEach((measurement) => measurements.set(measurement.name, measurement));
   activeSession = {
     batch: {
       schemaVersion: batch.schemaVersion,
@@ -202,9 +210,27 @@ export function setActivePerformanceRumSessionForTests(batch: PerformanceRumBatc
       dataProfile: batch.dataProfile,
       orderRealtimeMode: batch.orderRealtimeMode,
     },
-    measurements: new Map(batch.measurements.map((measurement) => [measurement.name, measurement])),
+    measurements,
     activityRefreshBaseline: activityDiagnostics.refreshTriggerCount,
   };
+}
+
+function createInitialSafetyMeasurements(): ActiveRumSession['measurements'] {
+  const measurements: ActiveRumSession['measurements'] = new Map();
+  for (const name of ZERO_SAFETY_METRICS) {
+    measurements.set(name, { name, value: 0 });
+  }
+  seedPendingSafetyMeasurements(measurements);
+  return measurements;
+}
+
+function seedPendingSafetyMeasurements(
+  measurements: ActiveRumSession['measurements'],
+): void {
+  measurements.set('operation_eviction_pin_count', {
+    name: 'operation_eviction_pin_count',
+    value: getPendingPerformanceRumSafetyMetric('operation_eviction_pin_count'),
+  });
 }
 
 export function resolvePerformanceRumRoute(pathname: string): PerformanceRumRoute | null {

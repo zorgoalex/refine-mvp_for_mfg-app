@@ -25,6 +25,8 @@ import {
   saveLabelTemplatePreference,
 } from './labelTemplatePreference';
 import { useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 
 const { Text } = Typography;
 
@@ -64,6 +66,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   initialDetailId = null,
   detailOptions = [],
 }) => {
+  const { tabKey } = useKeepAlive();
   const canGenerate = can('labels.generate');
   const canViewCut = can('cut.view');
   const labelTemplatePreferenceUserId = authSession.getUser()?.id ?? 'anon';
@@ -394,6 +397,10 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     ) return;
     const writeToken = writeGuard.capture();
     if (!writeToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${orderId}`,
+      'order-label-write',
+    );
     setGenerating(true);
     try {
       const generationPreview = await labelsApi.previewOrderLabels(orderId, {
@@ -428,6 +435,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     } catch {
       if (writeGuard.isSameResource(writeToken)) message.error('Не удалось сформировать бирки');
     } finally {
+      releaseOperationPin();
       if (writeGuard.isSameResource(writeToken)) setGenerating(false);
     }
   };

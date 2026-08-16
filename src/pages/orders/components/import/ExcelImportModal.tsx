@@ -24,6 +24,7 @@ import {
   releaseWorkspaceAttachment,
   retainWorkspaceAttachment,
 } from '../../../../workspace/workspaceAttachmentRegistry';
+import { runPageOwnedWorkspaceOperation } from '../../../../workspace/workspaceOperationPins';
 
 interface ExcelImportModalProps {
   open: boolean;
@@ -297,19 +298,21 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({ open, onClos
   }, [excelParser, rangeSelection, importValidation, onClose, workspaceKey]);
 
   const handleFileUpload = useCallback(async (file: File) => {
-    const retained = retainWorkspaceAttachment({
-      workspaceKey,
-      attachmentKey: 'excel-file',
-      value: file,
-      kind: 'file',
+    await runPageOwnedWorkspaceOperation(workspaceKey, 'order-excel-import', async () => {
+      const retained = retainWorkspaceAttachment({
+        workspaceKey,
+        attachmentKey: 'excel-file',
+        value: file,
+        kind: 'file',
+      });
+      if (!retained) {
+        const error = new Error('Лимит памяти черновиков исчерпан. Закройте другой импорт и повторите.');
+        message.error(error.message);
+        throw error;
+      }
+      releaseWorkspaceAttachment(workspaceKey, 'excel-workbook');
+      await excelParser.parseFile(file);
     });
-    if (!retained) {
-      const error = new Error('Лимит памяти черновиков исчерпан. Закройте другой импорт и повторите.');
-      message.error(error.message);
-      throw error;
-    }
-    releaseWorkspaceAttachment(workspaceKey, 'excel-workbook');
-    await excelParser.parseFile(file);
   }, [excelParser, workspaceKey]);
 
   const handleImport = useCallback(() => {

@@ -13,6 +13,8 @@ import type { ProductionActionResponse } from '../api/types/productionActionsApi
 import { featureFlags } from '../config/featureFlags';
 import { useList } from '../query/orderLifecycleQueries';
 import { ProductionStatusEvent } from '../types/orders';
+import { useKeepAlive } from '../components/workspace/KeepAliveContext';
+import { runPageOwnedWorkspaceOperation } from '../workspace/workspaceOperationPins';
 
 interface ProductionStatusCommandOptions {
   version?: number;
@@ -74,6 +76,7 @@ interface UseProductionStatusEventProps {
 export const useProductionStatusEvent = (
   props?: UseProductionStatusEventProps
 ): UseProductionStatusEventResult => {
+  const { tabKey } = useKeepAlive();
   const dataProvider = useDataProvider();
   const invalidate = useInvalidate();
   const { orderId, enabled = true } = props || {};
@@ -141,13 +144,16 @@ export const useProductionStatusEvent = (
   const recoverFromVersionConflict = useCallback(async (
     targetOrderId: number,
     options?: ProductionStatusCommandOptions,
+    assertOwnerCurrent: () => void = () => undefined,
   ) => {
     clearBackendStageOverridesForOrder(targetOrderId);
     await options?.onVersionConflict?.();
+    assertOwnerCurrent();
     await Promise.all([
       invalidate({ resource: 'orders_view', invalidates: ['list'] }),
       invalidate({ resource: 'production_status_events', invalidates: ['list'] }),
     ]);
+    assertOwnerCurrent();
     refetch();
     message.warning('Данные заказа изменились. Экран обновлён, повторите действие.');
   }, [clearBackendStageOverridesForOrder, invalidate, refetch]);
@@ -213,6 +219,10 @@ export const useProductionStatusEvent = (
       note?: string,
       options?: ProductionStatusCommandOptions,
     ) => {
+      return runPageOwnedWorkspaceOperation(
+        tabKey || `/orders/edit/${targetOrderId}`,
+        'order-production-action',
+        async (owner) => {
       if (featureFlags.useBackendProductionActions) {
         if (!Number.isInteger(options?.version)) {
           message.warning('Данные заказа устарели. Обновите экран и повторите действие.');
@@ -224,6 +234,7 @@ export const useProductionStatusEvent = (
             version: options.version,
             idempotencyKey: createProductionActionIdempotencyKey('production-stage-activate'),
           });
+          owner.assertOwnerCurrent();
           setBackendStageState(
             targetOrderId,
             productionStatusId,
@@ -234,7 +245,8 @@ export const useProductionStatusEvent = (
           return true;
         } catch (error) {
           if (isProductionActionVersionConflict(error)) {
-            await recoverFromVersionConflict(targetOrderId, options);
+            owner.assertOwnerCurrent();
+            await recoverFromVersionConflict(targetOrderId, options, owner.assertOwnerCurrent);
             return false;
           }
 
@@ -255,6 +267,7 @@ export const useProductionStatusEvent = (
             payload: {},
           },
         });
+        owner.assertOwnerCurrent();
         console.log(
           `[useProductionStatusEvent] Recorded event for order ${targetOrderId}, status ${productionStatusId}`
         );
@@ -281,8 +294,10 @@ export const useProductionStatusEvent = (
       }
 
       return true;
+        },
+      );
     },
-    [dataProvider, recoverFromVersionConflict, setBackendStageState]
+    [dataProvider, recoverFromVersionConflict, setBackendStageState, tabKey]
   );
 
   /**
@@ -290,12 +305,18 @@ export const useProductionStatusEvent = (
    */
   const recordDetailEvent = useCallback(
     async (detailId: number, productionStatusId: number, note?: string) => {
+      return runPageOwnedWorkspaceOperation(
+        tabKey || (orderId ? `/orders/edit/${orderId}` : `/order-details/${detailId}`),
+        'order-production-action',
+        async (owner) => {
       if (featureFlags.useBackendProductionActions) {
         await productionActionsApi.activateDetailProductionStage(detailId, productionStatusId, {
           idempotencyKey: createProductionActionIdempotencyKey('detail-production-stage-activate'),
           note: note || null,
         });
+        owner.assertOwnerCurrent();
         await invalidate({ resource: 'production_status_events', invalidates: ['list'] });
+        owner.assertOwnerCurrent();
         refetch();
         return;
       }
@@ -311,6 +332,7 @@ export const useProductionStatusEvent = (
             payload: {},
           },
         });
+        owner.assertOwnerCurrent();
         console.log(
           `[useProductionStatusEvent] Recorded event for detail ${detailId}, status ${productionStatusId}`
         );
@@ -334,8 +356,10 @@ export const useProductionStatusEvent = (
         console.error('[useProductionStatusEvent] Error recording event:', error);
         throw error;
       }
+        },
+      );
     },
-    [dataProvider, invalidate, refetch]
+    [dataProvider, invalidate, orderId, refetch, tabKey]
   );
 
   /**
@@ -347,6 +371,10 @@ export const useProductionStatusEvent = (
       productionStatusId: number,
       options?: ProductionStatusCommandOptions,
     ) => {
+      return runPageOwnedWorkspaceOperation(
+        tabKey || `/orders/edit/${targetOrderId}`,
+        'order-production-action',
+        async (owner) => {
       if (featureFlags.useBackendProductionActions) {
         if (!Number.isInteger(options?.version)) {
           message.warning('Данные заказа устарели. Обновите экран и повторите действие.');
@@ -358,6 +386,7 @@ export const useProductionStatusEvent = (
             version: options.version,
             idempotencyKey: createProductionActionIdempotencyKey('production-stage-deactivate'),
           });
+          owner.assertOwnerCurrent();
           setBackendStageState(
             targetOrderId,
             productionStatusId,
@@ -368,7 +397,8 @@ export const useProductionStatusEvent = (
           return true;
         } catch (error) {
           if (isProductionActionVersionConflict(error)) {
-            await recoverFromVersionConflict(targetOrderId, options);
+            owner.assertOwnerCurrent();
+            await recoverFromVersionConflict(targetOrderId, options, owner.assertOwnerCurrent);
             return false;
           }
 
@@ -391,6 +421,7 @@ export const useProductionStatusEvent = (
           resource: 'production_status_events',
           id: eventToDelete.event_id,
         });
+        owner.assertOwnerCurrent();
         console.log(
           `[useProductionStatusEvent] Removed event for order ${targetOrderId}, status ${productionStatusId}`
         );
@@ -405,8 +436,10 @@ export const useProductionStatusEvent = (
       }
 
       return true;
+        },
+      );
     },
-    [dataProvider, findEffectiveOrderEvent, recoverFromVersionConflict, setBackendStageState]
+    [dataProvider, findEffectiveOrderEvent, recoverFromVersionConflict, setBackendStageState, tabKey]
   );
 
   /**

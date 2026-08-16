@@ -11,6 +11,8 @@ import {
   OrderLifecycleReadSurface,
   useOrderAsyncReadGuard,
 } from '../../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 
 const { Text } = Typography;
 
@@ -25,6 +27,7 @@ export const GroupLinksEditor: React.FC<GroupLinksEditorProps> = ({
   version,
   initialGroups = [],
 }) => {
+  const { tabKey } = useKeepAlive();
   const readGuard = useOrderAsyncReadGuard(`order-groups:${orderId}`);
   const readScopeKey = `${readGuard.authNamespace}|order:${orderId}`;
   const [groupState, setGroupState] = useState<{
@@ -86,6 +89,10 @@ export const GroupLinksEditor: React.FC<GroupLinksEditorProps> = ({
     }
     const writeToken = readGuard.capture();
     if (!writeToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${orderId}`,
+      'order-group-write',
+    );
     setSavingState({ scopeKey: readScopeKey, value: true });
     try {
       const response = await groupsApi.replaceOrderGroups(orderId, {
@@ -115,6 +122,7 @@ export const GroupLinksEditor: React.FC<GroupLinksEditorProps> = ({
         message.error(error instanceof Error ? error.message : 'Не удалось сохранить группы заказа');
       }
     } finally {
+      releaseOperationPin();
       if (readGuard.isSameResource(writeToken)) {
         setSavingState({ scopeKey: readScopeKey, value: false });
       }

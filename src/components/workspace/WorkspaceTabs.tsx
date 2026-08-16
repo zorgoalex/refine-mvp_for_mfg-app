@@ -1,5 +1,5 @@
 import React from 'react';
-import { Tabs, Modal } from 'antd';
+import { Tabs, Modal, message } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTabStore, computeNeighborPath } from '../../stores/tabStore';
 import { DraggableModalWrapper } from '../DraggableModalWrapper';
@@ -15,7 +15,11 @@ export const WorkspaceTabs: React.FC = () => {
     if (action !== 'remove') return;
     const tab = tabs.find((t) => t.key === targetKey);
     const close = (discard?: boolean) => {
-      closeTab(String(targetKey), discard ? { discard: true } : undefined);
+      const closed = closeTab(String(targetKey), discard ? { discard: true } : undefined);
+      if (!closed) {
+        message.warning('Дождитесь завершения операции перед закрытием вкладки');
+        return;
+      }
       if (targetKey === activeKey) navigate(computeNeighborPath(tabs, String(targetKey)));
     };
     if (tab?.dirty) {

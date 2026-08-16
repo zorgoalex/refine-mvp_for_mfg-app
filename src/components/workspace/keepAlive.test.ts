@@ -66,15 +66,47 @@ describe('keep-alive policy', () => {
     expect(next.has('/orders')).toBe(true);
     expect(next.has('/clients/edit/3')).toBe(false); // clean + inactive → evicted
   });
-  it('evicts active clean dirty-only entry so outlet is not rendered twice', () => {
+  it('keeps the active route in its stable owner and evicts it after deactivation', () => {
     const cache = new Set(['/clients/edit/3']);
     const tabs = [{ key: '/clients/edit/3', dirty: false }];
     const next = nextKeepAliveCache(cache, { activeKey: '/clients/edit/3', tabs });
-    expect(next.has('/clients/edit/3')).toBe(false);
+    expect(next.has('/clients/edit/3')).toBe(true);
+
+    const inactive = nextKeepAliveCache(next, {
+      activeKey: '/orders',
+      tabs: [...tabs, { key: '/orders', dirty: false }],
+    });
+    expect(inactive.has('/clients/edit/3')).toBe(false);
   });
   it('drops entries whose tab was closed', () => {
     const cache = new Set(['/orders', '/clients/edit/3']);
     const next = nextKeepAliveCache(cache, { activeKey: '/orders', tabs: [{ key: '/orders', dirty: false }] });
     expect(next.has('/clients/edit/3')).toBe(false);
+  });
+  it('retains a policy-evicted view while its page-owned operation is pinned', () => {
+    const blocked: string[] = [];
+    const key = '/orders/show/42';
+    const next = nextKeepAliveCache(new Set([key]), {
+      activeKey: '/orders',
+      tabs: [
+        { key: '/orders', dirty: false },
+        { key, dirty: false },
+      ],
+      pinnedKeys: new Set([key]),
+      onPinnedEviction: (blockedKey) => blocked.push(blockedKey),
+    });
+
+    expect(next.has(key)).toBe(true);
+    expect(blocked).toEqual([key]);
+  });
+  it('retains the normally remount-only calendar while its operation is pinned', () => {
+    const key = '/calendar';
+    const next = nextKeepAliveCache(new Set([key]), {
+      activeKey: '/orders',
+      tabs: [{ key, dirty: false }, { key: '/orders', dirty: false }],
+      pinnedKeys: new Set([key]),
+    });
+
+    expect(next.has(key)).toBe(true);
   });
 });

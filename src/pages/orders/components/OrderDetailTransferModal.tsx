@@ -10,6 +10,10 @@ import { formatDate } from '../../../utils/dateFormat';
 import { useKeepAlive } from '../../../components/workspace/KeepAliveContext';
 import { useWorkspaceCheckpointAdapter } from '../../../workspace/workspaceCheckpointReact';
 import { readWorkspaceCheckpointAdapterState } from '../../../workspace/workspaceCheckpointRegistry';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+} from '../../../workspace/workspaceOperationPins';
 
 interface OrderDetailTransferModalProps {
   open: boolean;
@@ -123,20 +127,25 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const response = await ordersApi.transferDetails(sourceOrderId, {
-        sourceVersion,
-        detailIds,
-        target:
-          mode === 'new'
-            ? { mode: 'new', orderName: orderName.trim() }
-            : {
-                mode: 'existing',
-                orderId: selectedTarget!.orderId,
-                version: selectedTarget!.version,
-              },
-      });
+      const response = await runPageOwnedWorkspaceOperation(
+        workspaceKey,
+        'order-detail-transfer',
+        () => ordersApi.transferDetails(sourceOrderId, {
+          sourceVersion,
+          detailIds,
+          target:
+            mode === 'new'
+              ? { mode: 'new', orderName: orderName.trim() }
+              : {
+                  mode: 'existing',
+                  orderId: selectedTarget!.orderId,
+                  version: selectedTarget!.version,
+                },
+        }),
+      );
       onDone(response);
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       message.error(error instanceof Error ? error.message : 'Не удалось перенести детали');
     } finally {
       setSubmitting(false);

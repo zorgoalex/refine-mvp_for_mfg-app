@@ -53,6 +53,10 @@ import { formatDateKey } from '../utils/dateUtils';
 import { useResponsive } from '../hooks/useResponsive';
 import { useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+} from '../../../workspace/workspaceOperationPins';
+import {
   filterOrderStatusesForPacker,
   isPackerUser,
 } from '../../../utils/packerStatusAccess';
@@ -480,43 +484,53 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
 
     try {
       const order = contextMenu.order;
-      let wasAdded: boolean | null = null;
-      await queueOrderAction(order.order_id, async () => {
-        applyKnownOrderVersion(order);
-        wasAdded = await toggleOrderEvent(order.order_id, statusId, {
-          version: order.version,
-          onResponse: (response) => {
-            order.version = response.order.version;
-            setOrderVersion(order, response.order.version);
-          },
-        });
-        reserveOrderVersion(order);
-      });
+      const wasAdded = await runPageOwnedWorkspaceOperation(
+        '/calendar',
+        'order-production-action',
+        async (owner) => {
+          let result: boolean | null = null;
+          await queueOrderAction(order.order_id, async () => {
+            applyKnownOrderVersion(order);
+            result = await toggleOrderEvent(order.order_id, statusId, {
+              version: order.version,
+              onResponse: (response) => {
+                order.version = response.order.version;
+                setOrderVersion(order, response.order.version);
+              },
+            });
+            owner.assertOwnerCurrent();
+            reserveOrderVersion(order);
+          });
 
-      if (wasAdded === null) {
-        return;
-      }
+          if (result === null) return null;
 
-      // Refetch events for context menu
-      refetchEvents();
+          // Refetch events for context menu
+          refetchEvents();
 
-      // Invalidate and refetch to refresh calendar cards
-      await Promise.all([
-        invalidate({
-          resource: 'production_status_events',
-          invalidates: ['list'],
-        }),
-        invalidate({
-          resource: 'orders_view',
-          invalidates: ['list'],
-        }),
-      ]);
+          // Invalidate and refetch to refresh calendar cards
+          await Promise.all([
+            invalidate({
+              resource: 'production_status_events',
+              invalidates: ['list'],
+            }),
+            invalidate({
+              resource: 'orders_view',
+              invalidates: ['list'],
+            }),
+          ]);
+          owner.assertOwnerCurrent();
 
-      // Refetch calendar data to update cards
-      refetch();
+          // Refetch calendar data to update cards
+          refetch();
+          return result;
+        },
+      );
+
+      if (wasAdded === null) return;
 
       message.success(wasAdded ? `Этап установлен: ${statusName}` : `Этап снят: ${statusName}`);
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       console.error('[CalendarBoard] Error toggling production status:', error);
       const errorMessage = isProductionActionPermissionDenied(error)
         ? formatProductionActionPermissionDeniedMessage('production_stage')

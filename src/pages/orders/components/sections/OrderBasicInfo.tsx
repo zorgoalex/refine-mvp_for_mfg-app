@@ -28,6 +28,11 @@ import { authSession } from '../../../../api/authSession';
 import { isPackerUser } from '../../../../utils/packerStatusAccess';
 import { ordersApi } from '../../../../api/ordersApi';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+} from '../../../../workspace/workspaceOperationPins';
 
 interface OrderBasicInfoProps {
   /** Bazis draft-режим: клиент зафиксирован клиентом Базис-проекта (backend
@@ -41,6 +46,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
   clientLocked = false,
   projectField,
 }) => {
+  const { tabKey } = useKeepAlive();
   const {
     header,
     updateHeaderField,
@@ -196,19 +202,27 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
       const commandVersion = header.version;
       updateHeaderField('version', commandVersion + 1);
       try {
-        const response = await productionActionsApi.changeProductionStatus(header.order_id, {
-          productionStatusId: value,
-          version: commandVersion,
-          idempotencyKey: createProductionActionIdempotencyKey('order-header-production-status'),
-        });
-        updateHeaderField('production_status_id', value);
-        updateHeaderField('production_status_from_details_enabled', response.order.productionStatusFromDetailsEnabled ?? true);
-        syncDetailsProductionStatus(value);
-        updateHeaderField('version', response.order.version);
-        await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+        await runPageOwnedWorkspaceOperation(
+          tabKey || `/orders/edit/${header.order_id}`,
+          'order-production-action',
+          async (owner) => {
+            const response = await productionActionsApi.changeProductionStatus(header.order_id!, {
+              productionStatusId: value,
+              version: commandVersion,
+              idempotencyKey: createProductionActionIdempotencyKey('order-header-production-status'),
+            });
+            owner.assertOwnerCurrent();
+            updateHeaderField('production_status_id', value);
+            updateHeaderField('production_status_from_details_enabled', response.order.productionStatusFromDetailsEnabled ?? true);
+            syncDetailsProductionStatus(value);
+            updateHeaderField('version', response.order.version);
+            await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+          },
+        );
         notification.success({ message: 'Статус производства обновлён', duration: 2 });
         return;
       } catch (error) {
+        if (isWorkspaceOperationOwnershipLost(error)) return;
         updateHeaderField('version', commandVersion);
         if (isProductionActionVersionConflict(error)) {
           const refreshed = await refreshFullOrderFromBackend();
@@ -259,6 +273,7 @@ export const OrderBasicInfo: React.FC<OrderBasicInfoProps> = ({
     invalidate,
     refreshHeaderFromOrder,
     refreshFullOrderFromBackend,
+    tabKey,
   ]);
 
   // Load existing doweling orders for selection

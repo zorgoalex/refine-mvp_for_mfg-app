@@ -8,6 +8,73 @@ import { buildCutAddWarning, formatPlacementsMessage, restrictDetailIds, selecta
 import { useKeepAlive } from '../../../components/workspace/KeepAliveContext';
 import { useWorkspaceCheckpointAdapter } from '../../../workspace/workspaceCheckpointReact';
 import { readWorkspaceCheckpointAdapterState } from '../../../workspace/workspaceCheckpointRegistry';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+  type PageOwnedWorkspaceOperationContext,
+} from '../../../workspace/workspaceOperationPins';
+
+type AddToCutWorkflowApi = Pick<
+  typeof cutApi,
+  'addItems' | 'archive' | 'create' | 'get' | 'listEligibleDetails'
+>;
+
+interface AddToCutWorkflowInput {
+  mode: 'new' | 'existing';
+  name: string;
+  orderIds: number[];
+  detailIds?: number[];
+  targetJobId: number | null;
+}
+
+export type AddToCutWorkflowResult =
+  | { kind: 'empty'; warningText: string }
+  | { kind: 'updated'; detailIds: number[]; job: CutJobDto };
+
+export async function executeAddToCutWorkflow(
+  input: AddToCutWorkflowInput,
+  owner: PageOwnedWorkspaceOperationContext,
+  api: AddToCutWorkflowApi = cutApi,
+): Promise<AddToCutWorkflowResult> {
+  const detailMode = Array.isArray(input.detailIds);
+  const job = input.mode === 'new'
+    ? await api.create({
+        name: input.name.trim() || 'Раскрой',
+        criteria: { orderIds: input.orderIds },
+      })
+    : await resolveExistingJob(input.targetJobId, api);
+  owner.assertOwnerCurrent();
+
+  const eligible = await api.listEligibleDetails(job.cutJobId, { orderIds: input.orderIds });
+  owner.assertOwnerCurrent();
+  const selectable = selectableDetailIds(eligible.details);
+  const finalIds = detailMode
+    ? restrictDetailIds(selectable, input.detailIds!)
+    : selectable;
+  if (finalIds.length === 0) {
+    const candidates = detailMode
+      ? eligible.details.filter((detail) => input.detailIds!.includes(detail.orderDetailId))
+      : eligible.details;
+    let warningText = buildCutAddWarning(candidates);
+    if (input.mode === 'new') {
+      try {
+        await api.archive(job.cutJobId, job.version);
+        owner.assertOwnerCurrent();
+      } catch {
+        owner.assertOwnerCurrent();
+        warningText += ` Пустой раскрой #${job.cutJobId} не удалён — удалите его вручную.`;
+      }
+    }
+    return { kind: 'empty', warningText };
+  }
+
+  const updated = await api.addItems(job.cutJobId, {
+    detailIds: finalIds,
+    version: job.version,
+  });
+  owner.assertOwnerCurrent();
+  return { kind: 'updated', detailIds: finalIds, job: updated };
+}
 
 interface AddToCutModalProps {
   open: boolean;
@@ -98,45 +165,32 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
     if (orderIds.length === 0) return;
     setBusy(true);
     try {
-      const job =
-        mode === 'new'
-          ? await cutApi.create({ name: name.trim() || 'Раскрой', criteria: { orderIds } })
-          : await resolveExistingJob(targetJobId);
-
-      const eligible = await cutApi.listEligibleDetails(job.cutJobId, { orderIds });
-      const selectable = selectableDetailIds(eligible.details);
-      const finalIds = detailMode ? restrictDetailIds(selectable, detailIds!) : selectable;
-      if (finalIds.length === 0) {
-        // Don't leave an empty draft behind: a job created above for a brand-new
-        // raskroi must be rolled back (archived) when nothing eligible was added.
-        // If rollback fails, tell the operator the empty draft remains (no silent orphan).
-        const candidates = detailMode
-          ? eligible.details.filter((d) => detailIds!.includes(d.orderDetailId))
-          : eligible.details;
-        let warningText = buildCutAddWarning(candidates);
-        if (mode === 'new') {
-          try {
-            await cutApi.archive(job.cutJobId, job.version);
-          } catch {
-            warningText += ` Пустой раскрой #${job.cutJobId} не удалён — удалите его вручную.`;
-          }
+      await runPageOwnedWorkspaceOperation(workspaceKey, 'order-add-to-cut', async (owner) => {
+        const result = await executeAddToCutWorkflow({
+          mode,
+          name,
+          orderIds,
+          detailIds,
+          targetJobId,
+        }, owner);
+        if (result.kind === 'empty') {
+          message.warning(result.warningText);
+          return;
         }
-        message.warning(warningText);
-        return;
-      }
-      const updated = await cutApi.addItems(job.cutJobId, { detailIds: finalIds, version: job.version });
-      emitCutJobReady(updated, { detailIds: finalIds, orderIds });
-      // Count-free: a same-job re-add is a no-op server-side, so we don't claim a
-      // precise "added N" that may not reflect newly-inserted rows.
-      message.success(`Раскрой #${updated.cutJobId} обновлён`);
-      onDone?.(updated);
-      onClose();
+        emitCutJobReady(result.job, { detailIds: result.detailIds, orderIds });
+        // Count-free: a same-job re-add is a no-op server-side, so we don't claim a
+        // precise "added N" that may not reflect newly-inserted rows.
+        message.success(`Раскрой #${result.job.cutJobId} обновлён`);
+        onDone?.(result.job);
+        onClose();
+      });
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       message.error(error instanceof ApiError ? error.message : 'Не удалось добавить в раскрой');
     } finally {
       setBusy(false);
     }
-  }, [mode, name, orderIds, detailMode, detailIds, targetJobId, onClose, onDone]);
+  }, [mode, name, orderIds, detailMode, detailIds, targetJobId, onClose, onDone, workspaceKey]);
 
   return (
     <Modal
@@ -199,12 +253,15 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
   );
 };
 
-async function resolveExistingJob(targetJobId: number | null): Promise<CutJobDto> {
+async function resolveExistingJob(
+  targetJobId: number | null,
+  api: Pick<typeof cutApi, 'get'> = cutApi,
+): Promise<CutJobDto> {
   if (targetJobId === null) {
     throw new ApiError(400, 'NO_JOB_SELECTED', 'Выберите черновик раскроя');
   }
   // Re-fetch for the freshest optimistic version before reserving.
-  return cutApi.get(targetJobId);
+  return api.get(targetJobId);
 }
 
 function buildDefaultCutName(baseName: string, suffix?: string | null): string {

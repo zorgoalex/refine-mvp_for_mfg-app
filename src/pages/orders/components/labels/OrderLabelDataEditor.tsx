@@ -12,6 +12,8 @@ import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
 import { firstLabelPageIndexForDetail } from './orderLabelPreviewIndex';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 import { useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 
 const { Text } = Typography;
 
@@ -40,6 +42,7 @@ export const OrderLabelInlinePreviewSurface: React.FC<{ svg: string }> = ({ svg 
 );
 
 export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orderId, isOrderDirty }) => {
+  const { tabKey } = useKeepAlive();
   const isOperational = useOperationalUi();
   const canWrite = canAny(['labels.generate', 'labels.manage_templates']);
   const readGuard = useOrderAsyncReadGuard(`labels:${orderId ?? 'unsaved'}`);
@@ -174,6 +177,10 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
     if (!orderId || !data || !templateId || isOrderDirty) return;
     const writeToken = readGuard.capture();
     if (!writeToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${orderId}`,
+      'order-label-write',
+    );
     setLoading(true);
     try {
       const next = await labelsApi.updateOrderLabelData(orderId, {
@@ -198,6 +205,7 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
     } catch {
       if (readGuard.isSameResource(writeToken)) message.error('Не удалось сохранить данные бирок');
     } finally {
+      releaseOperationPin();
       if (readGuard.isSameResource(writeToken)) setLoading(false);
     }
   };

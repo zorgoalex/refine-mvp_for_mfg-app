@@ -26,6 +26,7 @@ import {
   readWorkspaceCheckpointAdapterState,
 } from '../../../../workspace/workspaceCheckpointRegistry';
 import { releaseWorkspaceAttachment } from '../../../../workspace/workspaceAttachmentRegistry';
+import { runPageOwnedWorkspaceOperation } from '../../../../workspace/workspaceOperationPins';
 
 type VlmImportStep = 'upload' | 'validation';
 
@@ -161,6 +162,15 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
     return vlmItemsToImportRows(vlmImport.result.items);
   }, [vlmImport.result]);
 
+  const handleVlmUpload = useCallback(
+    (file: File | Blob) => runPageOwnedWorkspaceOperation(
+      workspaceKey,
+      'order-vlm-import',
+      () => vlmImport.importFromImage(file),
+    ),
+    [vlmImport.importFromImage, workspaceKey],
+  );
+
   const handleNext = useCallback(() => {
     const idx = currentStepIndex;
     if (idx < STEPS.length - 1) {
@@ -281,7 +291,7 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
             error={vlmImport.error}
             result={vlmImport.result}
             importRows={importRows}
-            onFileUpload={vlmImport.importFromImage}
+            onFileUpload={handleVlmUpload}
             onReset={handleVlmReset}
           />
         );

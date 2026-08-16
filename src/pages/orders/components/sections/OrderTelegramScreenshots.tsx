@@ -20,6 +20,8 @@ import type {
   CncTelegramOrderScreenshotsResponse,
 } from '../../../../api/types/cncTelegramApi.types';
 import { useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 
 const { Text } = Typography;
 const DEFAULT_SCALE = 0.25;
@@ -34,6 +36,7 @@ interface OrderTelegramScreenshotsProps {
 }
 
 export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTelegramScreenshotsProps) {
+  const { tabKey } = useKeepAlive();
   const validOrderId = Number.isSafeInteger(orderId) && Number(orderId) > 0 ? Number(orderId) : null;
   const readGuard = useOrderAsyncReadGuard(`telegram-screenshots:${validOrderId ?? 'unsaved'}`);
   const readScopeKey = `${readGuard.authNamespace}|order:${validOrderId ?? 'unsaved'}`;
@@ -119,6 +122,10 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
     if (!validOrderId) return;
     const token = readGuard.capture();
     if (!token) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${validOrderId}`,
+      'order-telegram-operation',
+    );
     setViewerError(null);
     setRestorePolling(true);
     try {
@@ -129,13 +136,19 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
         setRestorePolling(false);
         setViewerError(readError(error, 'Не удалось поставить скрин на восстановление'));
       }
+    } finally {
+      releaseOperationPin();
     }
-  }, [readGuard.capture, readGuard.isCurrent, refresh, validOrderId]);
+  }, [readGuard.capture, readGuard.isCurrent, refresh, tabKey, validOrderId]);
 
   const loadOriginal = useCallback(async (item: CncTelegramOrderScreenshot) => {
     if (!validOrderId || originalLoadingPacketRef.current === item.packetId) return;
     const token = readGuard.capture();
     if (!token) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${validOrderId}`,
+      'order-telegram-operation',
+    );
     originalLoadingPacketRef.current = item.packetId;
     setOriginalLoading(true);
     setViewerError(null);
@@ -159,6 +172,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
         setViewerError(readError(error, item.kind === 'svg_cut' ? 'Не удалось открыть SVG-раскрой' : 'Не удалось открыть оригинал скрина'));
       }
     } finally {
+      releaseOperationPin();
       if (originalLoadingPacketRef.current === item.packetId) {
         originalLoadingPacketRef.current = null;
       }
@@ -166,7 +180,7 @@ export function OrderTelegramScreenshots({ orderId, compact = false }: OrderTele
         if (viewerPacketIdRef.current === item.packetId) setOriginalLoading(false);
       }
     }
-  }, [readGuard.capture, readGuard.isCurrent, replaceOriginalUrl, requestRestore, validOrderId]);
+  }, [readGuard.capture, readGuard.isCurrent, replaceOriginalUrl, requestRestore, tabKey, validOrderId]);
 
   useEffect(() => {
     if (!readGuard.active || !restorePolling || !selectedPacketId) return;
@@ -471,6 +485,7 @@ function ManualSvgOrderFileLink({
   orderId: number;
   file: CncTelegramManualSvgOrderFile;
 }) {
+  const { tabKey } = useKeepAlive();
   const downloadGuard = useOrderAsyncReadGuard(`telegram-manual-file:${orderId}:${file.fileId}`);
   const downloadScopeKey = `${downloadGuard.authNamespace}|order:${orderId}|file:${file.fileId}`;
   const [downloadState, setDownloadState] = useState<{
@@ -482,6 +497,10 @@ function ManualSvgOrderFileLink({
   const download = async () => {
     const downloadToken = downloadGuard.capture();
     if (!downloadToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${orderId}`,
+      'order-telegram-operation',
+    );
     setDownloadState({ scopeKey: downloadScopeKey, inFlight: true });
     try {
       const result = await cncTelegramApi.downloadOrderManualSvgFile(orderId, file.fileId);
@@ -492,6 +511,7 @@ function ManualSvgOrderFileLink({
         message.error(readError(error, 'Не удалось скачать файл раскроя'));
       }
     } finally {
+      releaseOperationPin();
       if (downloadGuard.isSameResource(downloadToken)) {
         setDownloadState({ scopeKey: downloadScopeKey, inFlight: false });
       }

@@ -33,6 +33,8 @@ import {
   loadOrderDeadlinePanelData,
 } from './orderDeadlineRulesView';
 import { useOrderAsyncReadGuard } from '../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../components/workspace/KeepAliveContext';
+import { acquireWorkspaceOperationPin } from '../../../workspace/workspaceOperationPins';
 
 const { Panel } = Collapse;
 const { Text } = Typography;
@@ -76,6 +78,7 @@ interface OverrideModalState {
 }
 
 export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlinePanelProps) {
+  const { tabKey } = useKeepAlive();
   const { data: identity } = useGetIdentity<UserIdentity>();
   const readGuard = useOrderAsyncReadGuard(`order-deadlines:${orderId ?? 'missing'}`);
   const readScopeKey = `${readGuard.authNamespace}|order:${orderId ?? 'missing'}`;
@@ -238,6 +241,10 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
 
     const writeToken = readGuard.capture();
     if (!writeToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${orderId}`,
+      'order-deadline-write',
+    );
     setSavingOverrideState({ scopeKey: readScopeKey, value: true });
     try {
       if (overrideModal.mode === 'disable') {
@@ -261,6 +268,7 @@ export function OrderDeadlinePanel({ orderId, embedded = false }: OrderDeadlineP
         message.error(error instanceof Error ? error.message : 'Не удалось сохранить настройку');
       }
     } finally {
+      releaseOperationPin();
       if (readGuard.isSameResource(writeToken)) {
         setSavingOverrideState({ scopeKey: readScopeKey, value: false });
       }

@@ -23,18 +23,31 @@ export const isKeepAliveEligible = (key: string, { dirty }: { dirty: boolean }):
 interface CacheInput {
   activeKey: string;
   tabs: Array<{ key: string; dirty: boolean }>;
+  pinnedKeys?: ReadonlySet<string>;
+  onPinnedEviction?: (key: string) => void;
 }
 
-export const nextKeepAliveCache = (cache: Set<string>, { activeKey, tabs }: CacheInput): Set<string> => {
+export const nextKeepAliveCache = (
+  cache: Set<string>,
+  { activeKey, tabs, pinnedKeys = new Set(), onPinnedEviction }: CacheInput,
+): Set<string> => {
   const open = new Map(tabs.map((t) => [t.key, t]));
   const next = new Set<string>();
   for (const key of cache) {
     const tab = open.get(key);
-    if (!tab) continue;                               // tab closed → drop
-    if (isKeepAliveEligible(key, { dirty: tab.dirty })) next.add(key);
+    const policyKeeps = Boolean(tab && isKeepAliveEligible(key, { dirty: tab.dirty }));
+    if (key === activeKey || policyKeeps) {
+      next.add(key);
+      continue;
+    }
+    if (pinnedKeys.has(key)) {
+      next.add(key);
+      onPinnedEviction?.(key);
+    }
   }
-  // ensure the active eligible key is present
+  // Active route always renders through the stable cache owner. Eligibility
+  // controls only whether it survives after becoming inactive.
   const active = open.get(activeKey);
-  if (active && isKeepAliveEligible(activeKey, { dirty: active.dirty })) next.add(activeKey);
+  if (active) next.add(activeKey);
   return next;
 };

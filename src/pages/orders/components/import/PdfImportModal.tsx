@@ -29,6 +29,7 @@ import {
   releaseWorkspaceAttachment,
   retainWorkspaceAttachment,
 } from '../../../../workspace/workspaceAttachmentRegistry';
+import { runPageOwnedWorkspaceOperation } from '../../../../workspace/workspaceOperationPins';
 
 type PdfImportStep = 'upload' | 'mapping' | 'validation';
 
@@ -156,19 +157,21 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
   const currentStepIndex = visibleSteps.findIndex(s => s.key === currentStep);
 
   const handlePdfUpload = useCallback((file: File) => {
-    setSectionMaterialOverrides({});
-    const retained = retainWorkspaceAttachment({
-      workspaceKey,
-      attachmentKey: 'pdf-file',
-      value: file,
-      kind: 'file',
+    return runPageOwnedWorkspaceOperation(workspaceKey, 'order-pdf-import', async () => {
+      setSectionMaterialOverrides({});
+      const retained = retainWorkspaceAttachment({
+        workspaceKey,
+        attachmentKey: 'pdf-file',
+        value: file,
+        kind: 'file',
+      });
+      if (!retained) {
+        const error = new Error('Лимит памяти черновиков исчерпан. Закройте другой импорт и повторите.');
+        message.error(error.message);
+        throw error;
+      }
+      return pdfParser.parseFile(file);
     });
-    if (!retained) {
-      const error = new Error('Лимит памяти черновиков исчерпан. Закройте другой импорт и повторите.');
-      message.error(error.message);
-      return Promise.reject(error);
-    }
-    return pdfParser.parseFile(file);
   }, [pdfParser.parseFile, workspaceKey]);
 
   const handleSectionMaterialMappingChange = useCallback((
@@ -194,7 +197,11 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
       return;
     }
     if (currentStep === 'mapping') {
-      const rows = await pdfParser.confirmLayouts();
+      const rows = await runPageOwnedWorkspaceOperation(
+        workspaceKey,
+        'order-pdf-import',
+        pdfParser.confirmLayouts,
+      );
       if (!rows) return;
       importValidation.processDirectRows(applyPdfSectionMaterialOverrides(
         rows,
@@ -203,7 +210,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
       ));
       setCurrentStep('validation');
     }
-  }, [currentStep, pdfParser, importValidation, sectionMaterialOverrides]);
+  }, [currentStep, pdfParser, importValidation, sectionMaterialOverrides, workspaceKey]);
 
   const handleBack = useCallback(() => {
     const idx = currentStepIndex;

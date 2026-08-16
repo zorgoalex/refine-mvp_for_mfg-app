@@ -60,6 +60,7 @@ import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext'
 import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
 import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
 import { useDeferredWorkspaceEntity } from '../../../../workspace/useDeferredWorkspaceEntity';
+import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -723,6 +724,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     }
     const refreshToken = refreshGuard.capture();
     if (!refreshToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(workspaceKey, 'order-refresh');
 
     recalculateSums();
     const afterRecalculate = storeApi.getState();
@@ -757,6 +759,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
       }
     } finally {
+      releaseOperationPin();
       if (refreshGuard.isSameResource(refreshToken)) {
         setRefreshState({ scopeKey: refreshScopeKey, inFlight: false });
       }

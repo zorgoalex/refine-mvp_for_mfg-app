@@ -132,6 +132,10 @@ import {
 } from '../../workspace/workspaceDomCheckpoint';
 import { useWorkspaceDomCheckpointCapture } from '../../workspace/workspaceDomCheckpointReact';
 import type { WorkspaceSerializableRecord } from '../../workspace/workspaceUiStateStore';
+import {
+  acquireWorkspaceOperationPin,
+  runPageOwnedWorkspaceOperation,
+} from '../../workspace/workspaceOperationPins';
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -2110,6 +2114,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isInteger(currentVersion) || currentVersion < 0) return;
     const refreshToken = showAsyncReadGuard.capture();
     if (!refreshToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(tabKey, 'order-refresh');
     setRefreshOrderState({ scopeKey: showAsyncReadScopeKey, inFlight: true });
     try {
       const response = await ordersApi.refresh(orderId, { version: currentVersion });
@@ -2127,6 +2132,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
       }
     } finally {
+      releaseOperationPin();
       if (showAsyncReadGuard.isSameResource(refreshToken)) {
         setRefreshOrderState({ scopeKey: showAsyncReadScopeKey, inFlight: false });
       }
@@ -2194,6 +2200,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     if (!record || isAnyExcelExporting || (exportMode === 'full' && !canViewFinancials)) return;
     const exportToken = showAsyncReadGuard.capture();
     if (!exportToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(tabKey, 'order-excel-export');
 
     const withoutPrices = exportMode === 'without-prices';
     setActiveExcelExport(exportMode);
@@ -2262,6 +2269,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       message.error(errorMessage);
       console.error('Ошибка экспорта:', error);
     } finally {
+      releaseOperationPin();
       if (showAsyncReadGuard.isSameResource(exportToken)) setActiveExcelExport(null);
     }
   };
@@ -2270,6 +2278,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     if (!record?.order_id || !canViewFinancials) return;
     const exportToken = showAsyncReadGuard.capture();
     if (!exportToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(tabKey, 'order-snapshot-export');
 
     setIsSnapshotExporting(true);
     try {
@@ -2281,6 +2290,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       message.error('Не удалось выгрузить JSON snapshot');
       console.error('Ошибка snapshot export:', error);
     } finally {
+      releaseOperationPin();
       if (showAsyncReadGuard.isSameResource(exportToken)) setIsSnapshotExporting(false);
     }
   };
@@ -2298,6 +2308,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     const moveToken = moveCandidatesReadGuard.capture();
     const showToken = showAsyncReadGuard.capture();
     if (!moveToken || !showToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(tabKey, 'order-project-move');
     const scopeKey = moveCandidatesScopeKey;
     setMoveSubmittingState({ scopeKey, inFlight: true });
     try {
@@ -2323,6 +2334,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         message.error(error instanceof Error ? error.message : 'Не удалось перенести заказ');
       }
     } finally {
+      releaseOperationPin();
       if (moveCandidatesReadGuard.isSameResource(moveToken)) {
         setMoveSubmittingState({ scopeKey, inFlight: false });
       }
@@ -2337,6 +2349,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     record?.order_id,
     showAsyncReadGuard.capture,
     showAsyncReadGuard.isSameResource,
+    tabKey,
   ]);
 
   const canMoveOrderProject = Boolean(
@@ -2362,10 +2375,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           const token = showAsyncReadGuard.capture();
           return token ? () => showAsyncReadGuard.isSameResource(token) : null;
         },
-        deleteFn: () =>
-          ordersApi.delete(Number(record.order_id), {
+        deleteFn: () => runPageOwnedWorkspaceOperation(
+          tabKey,
+          'order-delete',
+          () => ordersApi.delete(Number(record.order_id), {
             version: Number(record.version ?? backendOrder?.version ?? 0),
           }),
+        ),
         onSuccess: () => {
           message.success('Заказ перемещён в корзину');
           navigate('/orders');
@@ -2388,6 +2404,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     record?.version,
     showAsyncReadGuard.capture,
     showAsyncReadGuard.isSameResource,
+    tabKey,
   ]);
 
   const { settings: showColumnSettings, saveSettings: saveShowColumnSettings } = useOrderDetailColumnPreferences(

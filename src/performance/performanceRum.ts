@@ -50,10 +50,48 @@ export interface PerformanceRumBatch {
 
 type MetricListener = (measurement: { name: PerformanceRumMetricName; value: number }) => void;
 const listeners = new Set<MetricListener>();
+const STICKY_SAFETY_METRICS = new Set<PerformanceRumMetricName>([
+  'operation_eviction_pin_count',
+]);
+const pendingSafetyMetrics = new Map<PerformanceRumMetricName, number>();
 
 export function recordOrderLifecycleMetric(name: PerformanceRumMetricName, value: number): void {
   if (!Number.isFinite(value) || value < 0 || value > 3_600_000) return;
-  listeners.forEach((listener) => listener({ name, value }));
+  const recordedValue = STICKY_SAFETY_METRICS.has(name)
+    ? incrementPendingSafetyMetric(name)
+    : value;
+  listeners.forEach((listener) => listener({ name, value: recordedValue }));
+}
+
+/**
+ * Safety incidents survive workspace/auth cleanup until a successful RUM
+ * submission acknowledges them. This is intentionally process-global and
+ * contains no actor or entity identifiers: losing an incident is less safe
+ * than conservatively carrying it into the next bounded promotion batch.
+ */
+export function getPendingPerformanceRumSafetyMetric(
+  name: PerformanceRumMetricName,
+): number {
+  return pendingSafetyMetrics.get(name) ?? 0;
+}
+
+export function acknowledgePerformanceRumSafetyMetrics(
+  measurements: PerformanceRumBatch['measurements'],
+): void {
+  for (const measurement of measurements) {
+    if (!STICKY_SAFETY_METRICS.has(measurement.name) || measurement.value <= 0) continue;
+    const current = pendingSafetyMetrics.get(measurement.name) ?? 0;
+    const remaining = Math.max(0, current - measurement.value);
+    if (remaining === 0) {
+      pendingSafetyMetrics.delete(measurement.name);
+    } else {
+      pendingSafetyMetrics.set(measurement.name, remaining);
+    }
+  }
+}
+
+export function resetPerformanceRumSafetyMetricsForTests(): void {
+  pendingSafetyMetrics.clear();
 }
 
 export function subscribeOrderLifecycleMetrics(listener: MetricListener): () => void {
@@ -83,4 +121,10 @@ export async function submitPerformanceRumBatch(
 
 export function createRumSessionNonce(): string | null {
   return globalThis.crypto?.randomUUID?.() ?? null;
+}
+
+function incrementPendingSafetyMetric(name: PerformanceRumMetricName): number {
+  const nextValue = (pendingSafetyMetrics.get(name) ?? 0) + 1;
+  pendingSafetyMetrics.set(name, nextValue);
+  return nextValue;
 }

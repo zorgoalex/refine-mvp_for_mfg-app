@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { authSession } from '../api/authSession';
 import {
   PERFORMANCE_RUM_METRICS,
+  acknowledgePerformanceRumSafetyMetrics,
+  getPendingPerformanceRumSafetyMetric,
   recordOrderLifecycleMetric,
+  resetPerformanceRumSafetyMetricsForTests,
   submitPerformanceRumBatch,
   subscribeOrderLifecycleMetrics,
   type PerformanceRumBatch,
@@ -21,7 +24,10 @@ const batch: PerformanceRumBatch = {
 };
 
 describe('performance RUM client', () => {
-  beforeEach(() => authSession.clear());
+  beforeEach(() => {
+    authSession.clear();
+    resetPerformanceRumSafetyMetricsForTests();
+  });
 
   it('does not submit without authenticated session', async () => {
     const fetchImpl = vi.fn();
@@ -52,5 +58,31 @@ describe('performance RUM client', () => {
   it('names listener telemetry as coordinator-owned, not app-global', () => {
     expect(PERFORMANCE_RUM_METRICS).toContain('activity_coordinator_listener_count');
     expect(PERFORMANCE_RUM_METRICS).not.toContain('activity_dom_listener_count');
+  });
+
+  it('keeps safety incidents pending until a successful batch acknowledges them', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeOrderLifecycleMetrics(listener);
+
+    recordOrderLifecycleMetric('operation_eviction_pin_count', 1);
+    recordOrderLifecycleMetric('operation_eviction_pin_count', 2);
+
+    expect(listener).toHaveBeenNthCalledWith(1, {
+      name: 'operation_eviction_pin_count',
+      value: 1,
+    });
+    expect(listener).toHaveBeenNthCalledWith(2, {
+      name: 'operation_eviction_pin_count',
+      value: 2,
+    });
+    acknowledgePerformanceRumSafetyMetrics([
+      { name: 'operation_eviction_pin_count', value: 1 },
+    ]);
+    expect(getPendingPerformanceRumSafetyMetric('operation_eviction_pin_count')).toBe(1);
+    acknowledgePerformanceRumSafetyMetrics([
+      { name: 'operation_eviction_pin_count', value: 1 },
+    ]);
+    expect(getPendingPerformanceRumSafetyMetric('operation_eviction_pin_count')).toBe(0);
+    unsubscribe();
   });
 });
