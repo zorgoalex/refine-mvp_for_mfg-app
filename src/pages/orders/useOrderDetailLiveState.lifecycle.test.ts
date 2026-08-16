@@ -7,8 +7,17 @@ const realtimeApiMock = vi.hoisted(() => ({
 
 const authSessionMock = vi.hoisted(() => ({
   getAccessToken: vi.fn(() => null),
+  getSessionGeneration: vi.fn(() => 1),
+  getUser: vi.fn(() => ({
+    id: '1',
+    username: 'actor-a',
+    role: 'admin',
+    permissions: ['orders.view'],
+  })),
   subscribe: vi.fn(() => () => undefined),
 }));
+
+const authListeners = vi.hoisted(() => new Set<() => void>());
 
 const httpClientMock = vi.hoisted(() => ({
   getJwtExpirationTime: vi.fn(() => null as number | null),
@@ -25,6 +34,8 @@ const reactHarness = vi.hoisted(() => {
   let stateCursor = 0;
   let effectCursor = 0;
   let memoCursor = 0;
+  let externalStoreCursor = 0;
+  let externalStores: Array<() => void> = [];
 
   const changed = (next: unknown[] | undefined, previous: unknown[] | undefined) => (
     !next
@@ -38,6 +49,7 @@ const reactHarness = vi.hoisted(() => {
       stateCursor = 0;
       effectCursor = 0;
       memoCursor = 0;
+      externalStoreCursor = 0;
       pendingEffects = [];
     },
     flushEffects() {
@@ -54,6 +66,8 @@ const reactHarness = vi.hoisted(() => {
       effects = [];
       memos = [];
       pendingEffects = [];
+      externalStores.forEach((unsubscribe) => unsubscribe());
+      externalStores = [];
     },
     module: {
       useState<T>(initial: T | (() => T)) {
@@ -87,6 +101,17 @@ const reactHarness = vi.hoisted(() => {
         }
         return previous.value as T;
       },
+      useSyncExternalStore<T>(
+        subscribe: (listener: () => void) => () => void,
+        getSnapshot: () => T,
+      ): T {
+        const index = externalStoreCursor++;
+        if (!externalStores[index]) externalStores[index] = subscribe(() => undefined);
+        return getSnapshot();
+      },
+    },
+    stateAt<T>(index: number): T {
+      return states[index] as T;
     },
   };
 });
@@ -103,7 +128,6 @@ import { useOrderDetailLiveState } from './useOrderDetailLiveState';
 
 describe('useOrderDetailLiveState lifecycle', () => {
   let visibilityHandler: (() => void) | undefined;
-  let authHandler: (() => void) | undefined;
   let timers: Array<{ id: number; delay: number; handler: () => void }>;
   let nextTimerId: number;
 
@@ -126,12 +150,19 @@ describe('useOrderDetailLiveState lifecycle', () => {
       () => new Promise<Response>(() => undefined),
     );
     authSessionMock.getAccessToken.mockReset().mockReturnValue(null);
+    authSessionMock.getSessionGeneration.mockReset().mockReturnValue(1);
+    authSessionMock.getUser.mockReset().mockReturnValue({
+      id: '1',
+      username: 'actor-a',
+      role: 'admin',
+      permissions: ['orders.view'],
+    });
     httpClientMock.getJwtExpirationTime.mockReset().mockReturnValue(null);
     httpClientMock.refreshAuthSession.mockReset();
-    authHandler = undefined;
+    authListeners.clear();
     authSessionMock.subscribe.mockReset().mockImplementation((handler: () => void) => {
-      authHandler = handler;
-      return () => undefined;
+      authListeners.add(handler);
+      return () => authListeners.delete(handler);
     });
     visibilityHandler = undefined;
     timers = [];
@@ -161,6 +192,37 @@ describe('useOrderDetailLiveState lifecycle', () => {
 
     expect(realtimeApiMock.getDetailLiveState).not.toHaveBeenCalled();
     expect(realtimeApiMock.openLiveEvents).not.toHaveBeenCalled();
+  });
+
+  it('rejects an actor A snapshot after the auth scope changes to actor B', async () => {
+    const actorA = deferred<Awaited<ReturnType<typeof realtimeApiMock.getDetailLiveState>>>();
+    const actorB = deferred<Awaited<ReturnType<typeof realtimeApiMock.getDetailLiveState>>>();
+    realtimeApiMock.getDetailLiveState
+      .mockReturnValueOnce(actorA.promise)
+      .mockReturnValueOnce(actorB.promise);
+
+    renderHook(true);
+    const actorASignal = realtimeApiMock.getDetailLiveState.mock.calls[0]?.[1].signal as AbortSignal;
+    authSessionMock.getSessionGeneration.mockReturnValue(2);
+    authSessionMock.getUser.mockReturnValue({
+      id: '2',
+      username: 'actor-b',
+      role: 'manager',
+      permissions: ['orders.view'],
+    });
+    notifyAuthListeners();
+    expect(actorASignal.aborted).toBe(true);
+
+    actorA.resolve(snapshotResponse(2));
+    await flushPromises();
+    expect(reactHarness.stateAt<{ loaded: boolean }>(1).loaded).toBe(false);
+
+    const masked = renderHook(true);
+    expect(masked.loaded).toBe(false);
+
+    actorB.resolve(snapshotResponse(4));
+    await flushPromises();
+    expect(renderHook(true).statusByDetailId.get(7)).toBe(4);
   });
 
   it('aborts the stream when the workspace tab becomes inactive', async () => {
@@ -209,7 +271,7 @@ describe('useOrderDetailLiveState lifecycle', () => {
     const signal = realtimeApiMock.openLiveEvents.mock.calls[0]?.[2] as AbortSignal;
 
     authSessionMock.getAccessToken.mockReturnValue(null);
-    authHandler?.();
+    notifyAuthListeners();
     await flushPromises();
 
     expect(signal.aborted).toBe(true);
@@ -233,7 +295,7 @@ describe('useOrderDetailLiveState lifecycle', () => {
     );
     httpClientMock.refreshAuthSession.mockImplementation(async () => {
       authSessionMock.getAccessToken.mockReturnValue(null);
-      authHandler?.();
+      notifyAuthListeners();
       throw new Error('Refresh expired');
     });
 
@@ -281,4 +343,34 @@ function renderHook(active: boolean) {
 
 async function flushPromises(): Promise<void> {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
+}
+
+function snapshotResponse(productionStatusId: number) {
+  return {
+    status: 200,
+    etag: `"state-${productionStatusId}"`,
+    streamCursor: `v1;s=${productionStatusId}`,
+    streamEnabled: false,
+    snapshot: {
+      orderId: 42,
+      streamEnabled: false,
+      streamCursor: `v1;s=${productionStatusId}`,
+      cutRefsAccess: 'denied' as const,
+      details: [{ detailId: 7, productionStatusId }],
+    },
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, reject, resolve };
+}
+
+function notifyAuthListeners(): void {
+  [...authListeners].forEach((listener) => listener());
 }

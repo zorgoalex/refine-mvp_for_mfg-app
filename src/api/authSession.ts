@@ -1,8 +1,11 @@
 import type { UserIdentity } from '../types/auth';
+import { getUserAuthorizationScopeKey } from './authScopeIdentity';
 
 let accessToken: string | null = null;
 let accessTokenVersion = 0;
+let sessionGeneration = 0;
 let currentUser: UserIdentity | null = null;
+let currentIdentityScopeKey = '';
 let expired = false;
 const listeners = new Set<() => void>();
 const expiredListeners = new Set<() => void>();
@@ -28,13 +31,22 @@ export const authSession = {
     return accessTokenVersion;
   },
 
+  getSessionGeneration(): number {
+    return sessionGeneration;
+  },
+
   getUser(): UserIdentity | null {
     return currentUser;
   },
 
   setUser(user: UserIdentity | null): void {
-    if (currentUser === user) return;
+    const nextIdentityScopeKey = identityScopeKey(user);
+    if (currentUser === user && currentIdentityScopeKey === nextIdentityScopeKey) return;
+    if (currentIdentityScopeKey !== nextIdentityScopeKey) {
+      sessionGeneration += 1;
+    }
     currentUser = user;
+    currentIdentityScopeKey = nextIdentityScopeKey;
     notifyListeners();
   },
 
@@ -42,9 +54,10 @@ export const authSession = {
     // Clearing is also an explicit invalidation boundary for any in-flight
     // refresh, even when local state is already empty (cookie-only bootstrap).
     accessTokenVersion += 1;
-    if (!accessToken && !currentUser) return;
+    sessionGeneration += 1;
     accessToken = null;
     currentUser = null;
+    currentIdentityScopeKey = '';
     notifyListeners();
   },
 
@@ -69,3 +82,8 @@ export const authSession = {
     };
   },
 };
+
+function identityScopeKey(user: UserIdentity | null): string {
+  if (!user) return '';
+  return JSON.stringify([user.id, getUserAuthorizationScopeKey(user)]);
+}
