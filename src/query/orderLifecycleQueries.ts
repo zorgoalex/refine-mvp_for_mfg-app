@@ -156,8 +156,10 @@ export const OrderLifecycleReadSurface = ({
   children,
 );
 
-export async function cancelInactiveOrderLifecycleQueries(): Promise<void> {
-  await appQueryClient.cancelQueries({
+export async function cancelInactiveOrderLifecycleQueries(
+  queryClient = appQueryClient,
+): Promise<void> {
+  await queryClient.cancelQueries({
     predicate: (query) => (
       query.meta?.[ORDER_LIFECYCLE_READ_META] === true
       && !query.isActive()

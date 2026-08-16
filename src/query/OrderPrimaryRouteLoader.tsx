@@ -27,7 +27,10 @@ import { isUsableOrderLifecycleConfig } from '../performance/orderLifecycleRollo
 import { recordOrderLifecycleMetric } from '../performance/performanceRum';
 import { appQueryClient } from './appQueryClient';
 import { getAuthCacheNamespace, useAuthCacheNamespace } from './authCacheNamespace';
-import { prefetchOrderFormData } from './orderFormDataCache';
+import {
+  getCurrentOrderFormDataNamespace,
+  prefetchOrderFormData,
+} from './orderFormDataCache';
 import {
   createOrderEditBackendPrimaryIdentity,
   createOrderEditLegacyPrimaryIdentity,
@@ -53,6 +56,7 @@ import {
   ORDER_PRIMARY_QUERY_META,
 } from './orderPrimaryFetchPolicy';
 import { orderPrimaryQueryKey } from './orderQueryKeys';
+import { scheduleOrderRead } from './orderReadPriority';
 
 type PrimaryRoute =
   | { kind: 'list' }
@@ -267,8 +271,18 @@ export async function prefetchOrderPrimaryRoute(input: {
     return;
   }
 
+  const formDataNamespace = getCurrentOrderFormDataNamespace();
   const formDataPromise = featureFlags.useBackendReferences
-    ? prefetchOrderFormData()
+    ? input.queryClient.prefetchQuery({
+        queryKey: ['erp', 'order-form-data-lifecycle-owner', formDataNamespace],
+        staleTime: 0,
+        cacheTime: 0,
+        meta: ORDER_PRIMARY_QUERY_META,
+        queryFn: async ({ signal }) => {
+          await prefetchOrderFormData(formDataNamespace, { signal });
+          return null;
+        },
+      })
     : Promise.resolve(null);
   const orderPromise = featureFlags.useBackendOrdersRead
     ? fetchOrderEditBackendPrimary(
@@ -496,18 +510,20 @@ function ensureHardOrderPrimaryRoute(input: {
   if (hardPrimaryStarts.has(input.routeKey)) return;
   hardPrimaryStarts.set(input.routeKey, now);
   const navigationStartedAt = getObservedNavigationStart(input.locationKey);
-  void prefetchOrderPrimaryRoute({
-    route: input.route,
-    search: input.search,
-    routeParams: input.routeParams,
-    queryClient: appQueryClient,
-    dataProvider: input.dataProvider,
-    staleTime: ORDER_PRIMARY_HARD_STALE_TIME_MS,
-    onPrimaryRequestStart: () => {
-      recordOrderLifecycleMetric(
-        'primary_request_start_ms',
-        Math.max(0, performance.now() - navigationStartedAt),
-      );
-    },
-  }).catch(() => undefined);
+  scheduleOrderRead('critical', () => {
+    void prefetchOrderPrimaryRoute({
+      route: input.route,
+      search: input.search,
+      routeParams: input.routeParams,
+      queryClient: appQueryClient,
+      dataProvider: input.dataProvider,
+      staleTime: ORDER_PRIMARY_HARD_STALE_TIME_MS,
+      onPrimaryRequestStart: () => {
+        recordOrderLifecycleMetric(
+          'primary_request_start_ms',
+          Math.max(0, performance.now() - navigationStartedAt),
+        );
+      },
+    }).catch(() => undefined);
+  });
 }

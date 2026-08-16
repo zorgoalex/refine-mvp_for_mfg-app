@@ -106,6 +106,18 @@ describe('cutApi', () => {
     );
   });
 
+  it('passes AbortSignal to the detail-last-ready read', async () => {
+    const fetchMock = mockFetch({ details: [] });
+    const controller = new AbortController();
+
+    await cutApi.listDetailLastReady([2, 1], { signal: controller.signal });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/cut-jobs/detail-last-ready?detailIds=2%2C1',
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
+    );
+  });
+
   it('fetches a per-sheet SVG and the preset PNG from the render endpoints', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response('<svg/>', { status: 200, headers: { 'Content-Type': 'image/svg+xml' } }))

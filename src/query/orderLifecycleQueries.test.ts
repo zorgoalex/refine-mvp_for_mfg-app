@@ -192,4 +192,46 @@ describe('order lifecycle query gating', () => {
     expect(guard!.capture()).not.toBeNull();
     act(() => renderer!.unmount());
   });
+
+  it('lets one pending same-resource write complete exactly once after tab hide', async () => {
+    let guard: ReturnType<typeof useOrderAsyncReadGuard> | null = null;
+    const Probe = () => {
+      guard = useOrderAsyncReadGuard('order-write:42');
+      return null;
+    };
+    let renderer: ReactTestRenderer;
+    act(() => {
+      renderer = create(createElement(Probe));
+    });
+    const token = guard!.capture();
+    expect(token).not.toBeNull();
+    const transport = deferred<void>();
+    const startWrite = vi.fn(() => transport.promise);
+    const publishCompletion = vi.fn();
+    const pendingWrite = startWrite().then(() => {
+      if (guard!.isSameResource(token!)) publishCompletion();
+    });
+
+    harness.workspace.surfaceActive = false;
+    act(() => renderer!.update(createElement(Probe)));
+    expect(guard!.isCurrent(token!)).toBe(false);
+    expect(guard!.isSameResource(token!)).toBe(true);
+
+    transport.resolve();
+    await pendingWrite;
+
+    expect(startWrite).toHaveBeenCalledTimes(1);
+    expect(publishCompletion).toHaveBeenCalledTimes(1);
+    act(() => renderer!.unmount());
+  });
 });
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}

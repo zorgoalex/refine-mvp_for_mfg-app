@@ -6,6 +6,7 @@ import {
   ORDER_FORM_DATA_BACKEND_MODE,
   prefetchOrderFormData,
   prepareOrderFormDataActivationRefresh,
+  retainOrderFormDataRead,
   subscribeOrderFormDataResource,
   type OrderFormDataResourceSnapshot,
 } from '../query/orderFormDataCache';
@@ -53,6 +54,11 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
   );
   const readEnabled = enabled && lifecycleReadActive && documentVisible;
   const handledActivationRevisionRef = useRef(activationRevision);
+
+  useEffect(() => {
+    if (!readEnabled) return undefined;
+    return retainOrderFormDataRead(namespace);
+  }, [namespace, readEnabled]);
 
   useEffect(() => {
     if (handledActivationRevisionRef.current === activationRevision) return;

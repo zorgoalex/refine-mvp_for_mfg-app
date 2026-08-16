@@ -7,9 +7,12 @@ import type { OrderDto } from '../api/types/orderApi.types';
 import { applyFeatureFlags, featureFlags } from '../config/featureFlags';
 import { loadOrderViaBackend } from '../hooks/useOrderBackendRead';
 import {
+  getCurrentOrderFormDataNamespace,
+  getOrderFormDataResourceSnapshot,
   resetOrderFormDataCacheForTests,
 } from './orderFormDataCache';
 import { appQueryClient } from './appQueryClient';
+import { cancelInactiveOrderLifecycleQueries } from './orderLifecycleQueries';
 import { prefetchOrderPrimaryRoute } from './OrderPrimaryRouteLoader';
 
 const originalFlags = { ...featureFlags };
@@ -164,7 +167,72 @@ describe('OrderPrimaryRouteLoader primary fetch contract', () => {
 
     expect(getFormData).toHaveBeenCalledTimes(2);
   });
+
+  it('aborts an inactive hard primary query through its TanStack signal', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let requestSignal: AbortSignal | undefined;
+    const getList = vi.fn((params: Record<string, any>) => new Promise((_resolve, reject) => {
+      requestSignal = params.meta.queryContext.signal;
+      requestSignal?.addEventListener('abort', () => {
+        reject(new DOMException('Aborted', 'AbortError'));
+      });
+    }));
+    const pending = prefetchOrderPrimaryRoute({
+      route: { kind: 'list' },
+      queryClient,
+      dataProvider: { getList, getOne: vi.fn() } as any,
+      staleTime: 15_000,
+    });
+    await flushPromises();
+    expect(requestSignal?.aborted).toBe(false);
+
+    await cancelInactiveOrderLifecycleQueries(queryClient);
+    await pending;
+
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it('aborts early form-data with no mounted reader when edit prefetch deactivates', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    vi.spyOn(ordersApi, 'getById').mockResolvedValue(createOrderDto(23));
+    let requestSignal: AbortSignal | undefined;
+    vi.spyOn(ordersApi, 'getFormData').mockImplementation(
+      (options?: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+        requestSignal = options?.signal;
+        requestSignal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+      }),
+    );
+    const pending = prefetchOrderPrimaryRoute({
+      route: { kind: 'edit', orderId: 23 },
+      queryClient,
+      dataProvider: { getList: vi.fn(), getOne: vi.fn() } as any,
+      staleTime: 15_000,
+    });
+    await flushPromises();
+    expect(requestSignal?.aborted).toBe(false);
+
+    await cancelInactiveOrderLifecycleQueries(queryClient);
+    await pending;
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(getOrderFormDataResourceSnapshot(getCurrentOrderFormDataNamespace())).toMatchObject({
+      data: null,
+      status: 'idle',
+      error: null,
+      inFlight: false,
+    });
+  });
 });
+
+async function flushPromises(): Promise<void> {
+  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+}
 
 function createOrderDto(orderId: number): OrderDto {
   return {

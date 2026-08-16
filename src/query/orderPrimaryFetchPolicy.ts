@@ -6,6 +6,7 @@ export const ORDER_PRIMARY_INTENT_CACHE_TIME_MS = 60_000;
 
 export const ORDER_PRIMARY_QUERY_META = {
   erpPrimary: true,
+  erpOrderLifecycleRead: true,
 } as const;
 
 export function isOrderPrimaryQuery(query: Query): boolean {

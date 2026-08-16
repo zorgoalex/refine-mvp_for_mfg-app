@@ -36,6 +36,8 @@ describe('order delete guards', () => {
     expect(showSource).toMatch(/o\.header\.orderId\s*===\s*Number\(currentOrderId\)/);
     expect(showSource).toContain('deletedOrderState?.scopeKey === showAsyncReadScopeKey');
     expect(showSource).toContain('showAsyncReadGuard.isCurrent(token)');
+    expect(showSource).toMatch(/includeDeleted: true,[\s\S]*signal: controller\.signal/);
+    expect(showSource).toMatch(/return \(\) => \{[\s\S]*controller\.abort\(\)/);
   });
 
   it('deleted order card stays read-only', () => {

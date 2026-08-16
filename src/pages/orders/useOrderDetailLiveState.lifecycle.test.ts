@@ -177,7 +177,9 @@ describe('useOrderDetailLiveState lifecycle', () => {
       .mockReturnValueOnce(actorB.promise);
 
     renderHook(true, 'actor-a');
+    await flushPromises();
     const masked = renderHook(true, 'actor-b');
+    await flushPromises();
     expect(masked.loaded).toBe(false);
 
     actorB.resolve(snapshotResponse(4));
@@ -202,6 +204,29 @@ describe('useOrderDetailLiveState lifecycle', () => {
     renderHook(false);
 
     expect(signal.aborted).toBe(true);
+  });
+
+  it('aborts the owned snapshot when the workspace deactivates without reporting an error', async () => {
+    realtimeApiMock.getDetailLiveState.mockImplementation(
+      (_orderId: number, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+      }),
+    );
+
+    renderHook(true);
+    await flushPromises();
+    const signal = realtimeApiMock.getDetailLiveState.mock.calls[0]?.[1]?.signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    renderHook(false);
+    await flushPromises();
+
+    expect(signal.aborted).toBe(true);
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).not.toHaveBeenCalledWith(
+      'terminal-no-transport',
+    );
   });
 
   it('aborts the stream when the document becomes hidden', async () => {
@@ -246,7 +271,7 @@ describe('useOrderDetailLiveState lifecycle', () => {
 
   it('does not reconnect after proactive refresh expires the auth session', async () => {
     authSessionMock.getAccessToken.mockReturnValue('token-1');
-    httpClientMock.getJwtExpirationTime.mockReturnValue(Date.now() + 30_100);
+    httpClientMock.getJwtExpirationTime.mockImplementation(() => Date.now() + 30_100);
     realtimeApiMock.openLiveEvents.mockImplementation(
       async (_orderId: number, _cursor: string, signal: AbortSignal) => new Response(
         new ReadableStream({
@@ -339,6 +364,52 @@ describe('useOrderDetailLiveState lifecycle', () => {
 
     expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('connected');
     expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('reconnecting');
+  });
+
+  it('coalesces a burst of matching invalidations into one snapshot read', async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    realtimeApiMock.openLiveEvents.mockImplementation(
+      async (_orderId: number, _cursor: string, signal: AbortSignal) => new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+            signal.addEventListener('abort', () => controller.close());
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ),
+    );
+
+    renderHook(true);
+    await flushPromises();
+    const reconnect = timers.find((timer) => timer.delay === 0);
+    timers = timers.filter((timer) => timer.id !== reconnect?.id);
+    reconnect?.handler();
+    await flushPromises();
+
+    const event = (cursor: number) => [
+      `id: v1;s=${cursor}`,
+      'event: order.invalidate',
+      `data: ${JSON.stringify({
+        schemaVersion: 1,
+        orderId: 42,
+        cursor: `v1;s=${cursor}`,
+        domains: ['detail_status'],
+      })}`,
+      '',
+      '',
+    ].join('\n');
+    streamController?.enqueue(new TextEncoder().encode(event(2) + event(3) + event(4)));
+    await flushPromises();
+
+    const invalidationTimers = timers.filter((timer) => timer.delay === 40);
+    expect(invalidationTimers).toHaveLength(1);
+    timers = timers.filter((timer) => timer.id !== invalidationTimers[0]?.id);
+    invalidationTimers[0]?.handler();
+    await flushPromises();
+
+    expect(realtimeApiMock.getDetailLiveState).toHaveBeenCalledTimes(2);
+    expect(realtimeApiMock.openLiveEvents).toHaveBeenCalledTimes(1);
   });
 });
 

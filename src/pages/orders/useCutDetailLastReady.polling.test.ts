@@ -233,6 +233,33 @@ describe('useCutDetailLastReady polling', () => {
     expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
   });
 
+  it('starts an active cut read only after the first frame', async () => {
+    let frame: (() => void) | undefined;
+    let afterFrame: (() => void) | undefined;
+    Object.assign(window, {
+      requestAnimationFrame: vi.fn((handler: () => void) => {
+        frame = handler;
+        return 7;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      setTimeout: vi.fn((handler: () => void) => {
+        afterFrame = handler;
+        return 9;
+      }),
+      clearTimeout: vi.fn(),
+    });
+    cutApiMock.listDetailLastReady.mockResolvedValue(response(2));
+
+    renderHook([1]);
+    expect(cutApiMock.listDetailLastReady).not.toHaveBeenCalled();
+    frame?.();
+    expect(cutApiMock.listDetailLastReady).not.toHaveBeenCalled();
+    afterFrame?.();
+    await flushPromises();
+
+    expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the last ready versions after a transient poll failure', async () => {
     cutApiMock.listDetailLastReady
       .mockResolvedValueOnce(response(2))
@@ -257,7 +284,9 @@ describe('useCutDetailLastReady polling', () => {
       .mockReturnValueOnce(second.promise);
 
     renderHook([1]);
+    await flushPromises();
     renderHook([2]);
+    await flushPromises();
     second.resolve(response(4, 2));
     await flushPromises();
     expect(renderHook([2]).cutJobByDetailId.get(2)?.resultNo).toBe(4);
@@ -277,8 +306,10 @@ describe('useCutDetailLastReady polling', () => {
       .mockReturnValueOnce(actorB.promise);
 
     renderHook([1]);
+    await flushPromises();
     authNamespaceMock.value = 'actor-b';
     const masked = renderHook([1]);
+    await flushPromises();
     expect(masked.loaded).toBe(false);
     expect(masked.cutJobByDetailId.size).toBe(0);
 
@@ -329,7 +360,10 @@ describe('useCutDetailLastReady polling', () => {
     readyListener?.({ cutJobId: 9, name: 'Раскрой', detailIds: [1], orderIds: [7] });
 
     expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(2);
-    expect(cutApiMock.listDetailLastReady).toHaveBeenLastCalledWith([1, 2]);
+    expect(cutApiMock.listDetailLastReady).toHaveBeenLastCalledWith(
+      [1, 2],
+      { signal: expect.any(AbortSignal) },
+    );
 
     pending.resolve(response(4));
     await flushPromises();
@@ -351,6 +385,63 @@ describe('useCutDetailLastReady polling', () => {
     expect(hidden).toBe(loaded);
     expect(hidden.cutJobByDetailId.get(1)?.resultNo).toBe(2);
     expect(cutApiMock.listDetailLastReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts only the owned read on deactivate and preserves last-good maps', async () => {
+    cutApiMock.listDetailLastReady.mockResolvedValueOnce(response(2));
+    renderHook();
+    await flushPromises();
+    const loaded = renderHook();
+
+    const pending = deferred<CutDetailLastReadyResponse>();
+    cutApiMock.listDetailLastReady.mockReturnValueOnce(pending.promise);
+    intervalHandler?.();
+    const signal = cutApiMock.listDetailLastReady.mock.calls[1]?.[1]?.signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    const inactive = renderHook([1], false);
+
+    expect(signal.aborted).toBe(true);
+    expect(inactive).toBe(loaded);
+    pending.reject(new DOMException('Aborted', 'AbortError'));
+    await flushPromises();
+    expect(renderHook([1], false)).toBe(loaded);
+  });
+
+  it('uses sorted IDs plus generation so A to B to A is last-request-wins', async () => {
+    const firstA = deferred<CutDetailLastReadyResponse>();
+    const actorB = deferred<CutDetailLastReadyResponse>();
+    const secondA = deferred<CutDetailLastReadyResponse>();
+    cutApiMock.listDetailLastReady
+      .mockReturnValueOnce(firstA.promise)
+      .mockReturnValueOnce(actorB.promise)
+      .mockReturnValueOnce(secondA.promise);
+
+    renderHook([2, 1]);
+    await flushPromises();
+    authNamespaceMock.value = 'actor-b';
+    renderHook([3]);
+    await flushPromises();
+    authNamespaceMock.value = 'actor-a';
+    renderHook([1, 2]);
+    await flushPromises();
+
+    const firstASignal = cutApiMock.listDetailLastReady.mock.calls[0]?.[1]?.signal as AbortSignal;
+    const actorBSignal = cutApiMock.listDetailLastReady.mock.calls[1]?.[1]?.signal as AbortSignal;
+    const secondASignal = cutApiMock.listDetailLastReady.mock.calls[2]?.[1]?.signal as AbortSignal;
+    expect(firstASignal.aborted).toBe(true);
+    expect(actorBSignal.aborted).toBe(true);
+    expect(secondASignal.aborted).toBe(false);
+    expect(cutApiMock.listDetailLastReady.mock.calls[2]?.[0]).toEqual([1, 2]);
+
+    actorB.resolve(response(8, 3));
+    firstA.resolve(response(2, 1));
+    secondA.resolve(response(6, 1));
+    await flushPromises();
+
+    const current = renderHook([2, 1]);
+    expect(current.cutJobByDetailId.has(3)).toBe(false);
+    expect(current.cutJobByDetailId.get(1)?.resultNo).toBe(6);
   });
 
   it('uses the order lifecycle gate when the caller omits active', async () => {

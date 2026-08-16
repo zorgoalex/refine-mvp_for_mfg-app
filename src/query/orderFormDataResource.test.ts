@@ -146,6 +146,47 @@ describe('auth-scoped order form-data resource', () => {
     expect(namespace).toMatch(/scope:[a-f0-9]{8}/);
     expect(namespace).toContain('mode:backend-order-form-data');
   });
+
+  it('detaches request-A external abort ownership before invalidation starts request B', async () => {
+    let resolveA!: (value: OrderFormDataResponse) => void;
+    let resolveB!: (value: OrderFormDataResponse) => void;
+    let internalASignal: AbortSignal | undefined;
+    let internalBSignal: AbortSignal | undefined;
+    ordersApiMock.getFormData
+      .mockImplementationOnce((options?: { signal?: AbortSignal }) => {
+        internalASignal = options?.signal;
+        return new Promise<OrderFormDataResponse>((resolve) => {
+          resolveA = resolve;
+        });
+      })
+      .mockImplementationOnce((options?: { signal?: AbortSignal }) => {
+        internalBSignal = options?.signal;
+        return new Promise<OrderFormDataResponse>((resolve) => {
+          resolveB = resolve;
+        });
+      });
+    const namespace = getCurrentOrderFormDataNamespace();
+    const externalA = new AbortController();
+    const removeListener = vi.spyOn(externalA.signal, 'removeEventListener');
+
+    const requestA = prefetchOrderFormData(namespace, { signal: externalA.signal });
+    invalidateOrderFormDataCache(namespace);
+
+    expect(internalASignal?.aborted).toBe(true);
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+
+    const requestB = prefetchOrderFormData(namespace);
+    externalA.abort();
+    expect(internalBSignal?.aborted).toBe(false);
+
+    resolveB(response('Request B film'));
+    await requestB;
+    resolveA(response('Request A film'));
+    await requestA;
+
+    expect(getOrderFormDataResourceSnapshot(namespace).normalizedReferences.films[0]?.label)
+      .toBe('Request B film');
+  });
 });
 
 function response(name: string): OrderFormDataResponse {

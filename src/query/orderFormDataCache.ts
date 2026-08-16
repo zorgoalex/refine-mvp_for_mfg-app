@@ -35,6 +35,9 @@ interface ResourceEntry {
     revision: number;
     refreshRequired: boolean;
   };
+  activeReaders: number;
+  inactiveAbortToken: object | null;
+  externalAbortCleanups: Set<() => void> | null;
 }
 
 export interface OrderFormDataResourceDiagnostics {
@@ -42,6 +45,7 @@ export interface OrderFormDataResourceDiagnostics {
   normalizationCount: number;
   referenceOwnerCount: number;
   subscriberCount: number;
+  activeReaderCount: number;
 }
 
 const entries = new Map<string, ResourceEntry>();
@@ -63,6 +67,33 @@ export function subscribeOrderFormDataResource(listener: () => void): () => void
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
+  };
+}
+
+export function retainOrderFormDataRead(
+  namespace = getCurrentOrderFormDataNamespace(),
+): () => void {
+  const entry = getOrCreateEntry(namespace);
+  entry.activeReaders += 1;
+  entry.inactiveAbortToken = null;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    if (entries.get(namespace) !== entry) return;
+    entry.activeReaders = Math.max(0, entry.activeReaders - 1);
+    if (entry.activeReaders !== 0) return;
+    const token = {};
+    entry.inactiveAbortToken = token;
+    queueMicrotask(() => {
+      if (
+        entries.get(namespace) !== entry
+        || entry.activeReaders !== 0
+        || entry.inactiveAbortToken !== token
+      ) return;
+      entry.inactiveAbortToken = null;
+      abortOrderFormDataEntry(entry);
+    });
   };
 }
 
@@ -96,6 +127,8 @@ export function getOrderFormDataResourceDiagnostics(): OrderFormDataResourceDiag
     normalizationCount,
     referenceOwnerCount: stopReferenceOwner ? 1 : 0,
     subscriberCount: listeners.size,
+    activeReaderCount: Array.from(entries.values())
+      .reduce((total, entry) => total + entry.activeReaders, 0),
   };
 }
 
@@ -136,6 +169,8 @@ export function invalidateOrderFormDataCache(
   namespace = getCurrentOrderFormDataNamespace(),
 ): void {
   const entry = getOrCreateEntry(namespace);
+  clearExternalAbortOwners(entry.externalAbortCleanups);
+  entry.externalAbortCleanups = null;
   entry.controller?.abort();
   entry.controller = null;
   entry.promise = null;
@@ -160,17 +195,23 @@ export function clearOrderFormDataCache(): void {
 
 export function prefetchOrderFormData(
   namespace = getCurrentOrderFormDataNamespace(),
+  options: { signal?: AbortSignal } = {},
 ): Promise<OrderFormDataResponse> {
   ensureReferenceOwner();
   const entry = getOrCreateEntry(namespace);
-  if (entry.promise) return entry.promise;
+  if (entry.promise) {
+    attachExternalAbortOwner(entry, options.signal);
+    return entry.promise;
+  }
   if (entry.snapshot.data && !isEntryStale(entry)) {
     return Promise.resolve(entry.snapshot.data);
   }
 
   const requestGeneration = entry.snapshot.generation;
   const controller = new AbortController();
+  const externalAbortCleanups = new Set<() => void>();
   entry.controller = controller;
+  entry.externalAbortCleanups = externalAbortCleanups;
   requestCount += 1;
   entry.snapshot = {
     ...entry.snapshot,
@@ -213,10 +254,15 @@ export function prefetchOrderFormData(
       throw unknownError;
     })
     .finally(() => {
+      clearExternalAbortOwners(externalAbortCleanups);
+      if (entry.externalAbortCleanups === externalAbortCleanups) {
+        entry.externalAbortCleanups = null;
+      }
       if (entry.promise === request) entry.promise = null;
       if (entry.controller === controller) entry.controller = null;
     });
   entry.promise = request;
+  attachExternalAbortOwner(entry, options.signal);
   return request;
 }
 
@@ -239,6 +285,9 @@ function getOrCreateEntry(namespace: string): ResourceEntry {
     promise: null,
     controller: null,
     activationDecision: { revision: -1, refreshRequired: false },
+    activeReaders: 0,
+    inactiveAbortToken: null,
+    externalAbortCleanups: null,
   };
   entries.set(namespace, entry);
   return entry;
@@ -262,7 +311,50 @@ function isCurrentEntry(
 }
 
 function abortEntries(): void {
-  entries.forEach((entry) => entry.controller?.abort());
+  entries.forEach((entry) => {
+    entry.inactiveAbortToken = null;
+    clearExternalAbortOwners(entry.externalAbortCleanups);
+    entry.externalAbortCleanups = null;
+    entry.controller?.abort();
+  });
+}
+
+function abortOrderFormDataEntry(entry: ResourceEntry): void {
+  if (!entry.controller && !entry.snapshot.inFlight) return;
+  entry.controller?.abort();
+  entry.controller = null;
+  entry.promise = null;
+  clearExternalAbortOwners(entry.externalAbortCleanups);
+  entry.externalAbortCleanups = null;
+  generation += 1;
+  entry.snapshot = {
+    ...entry.snapshot,
+    generation,
+    status: entry.snapshot.data ? 'ready' : 'idle',
+    error: null,
+    inFlight: false,
+  };
+  emit();
+}
+
+function attachExternalAbortOwner(entry: ResourceEntry, signal?: AbortSignal): void {
+  if (!signal || !entry.controller || !entry.externalAbortCleanups) return;
+  const controller = entry.controller;
+  const cleanups = entry.externalAbortCleanups;
+  const onAbort = () => {
+    if (entry.activeReaders === 0 && entry.controller === controller) {
+      abortOrderFormDataEntry(entry);
+    }
+  };
+  const cleanup = () => signal.removeEventListener('abort', onAbort);
+  cleanups.add(cleanup);
+  signal.addEventListener('abort', onAbort, { once: true });
+  if (signal.aborted) onAbort();
+}
+
+function clearExternalAbortOwners(cleanups: Set<() => void> | null): void {
+  cleanups?.forEach((cleanup) => cleanup());
+  cleanups?.clear();
 }
 
 function ensureReferenceOwner(): void {

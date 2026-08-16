@@ -45,6 +45,8 @@ vi.mock('../performance/appActivityCoordinator', () => ({
 
 import { useOrderFormData } from './useOrderFormData';
 import {
+  getCurrentOrderFormDataNamespace,
+  getOrderFormDataResourceSnapshot,
   getOrderFormDataResourceDiagnostics,
   resetOrderFormDataCacheForTests,
 } from '../query/orderFormDataCache';
@@ -94,6 +96,7 @@ describe('useOrderFormData shared owner integration', () => {
       normalizationCount: 1,
       referenceOwnerCount: 1,
       subscriberCount: 20,
+      activeReaderCount: 20,
     });
     expect(referenceEventsHarness.subscribe).toHaveBeenCalledTimes(1);
     expect(latestReferences.size).toBe(20);
@@ -103,7 +106,10 @@ describe('useOrderFormData shared owner integration', () => {
     await act(async () => {
       renderer!.unmount();
     });
-    expect(getOrderFormDataResourceDiagnostics().subscriberCount).toBe(0);
+    expect(getOrderFormDataResourceDiagnostics()).toMatchObject({
+      subscriberCount: 0,
+      activeReaderCount: 0,
+    });
   });
 
   it('keeps twenty disabled StrictMode consumers outside the backend resource', async () => {
@@ -134,8 +140,49 @@ describe('useOrderFormData shared owner integration', () => {
       normalizationCount: 0,
       referenceOwnerCount: 0,
       subscriberCount: 0,
+      activeReaderCount: 0,
     });
     expect(sum(renderCounts.values())).toBe(rendersBeforeReferenceEvent);
+
+    await act(async () => {
+      renderer!.unmount();
+    });
+  });
+
+  it('aborts the shared read after the last active consumer deactivates', async () => {
+    let requestSignal: AbortSignal | undefined;
+    ordersApiMock.getFormData.mockImplementation((options?: { signal?: AbortSignal }) => {
+      requestSignal = options?.signal;
+      return new Promise<OrderFormDataResponse>((_resolve, reject) => {
+        requestSignal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+      });
+    });
+    let renderer: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<Consumer index={0} latest={new Map()} />);
+      await flushPromises();
+    });
+    expect(requestSignal?.aborted).toBe(false);
+    expect(getOrderFormDataResourceDiagnostics().activeReaderCount).toBe(1);
+
+    await act(async () => {
+      renderer!.update(<DisabledConsumer index={0} renders={new Map()} />);
+      await flushPromises();
+    });
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(getOrderFormDataResourceDiagnostics()).toMatchObject({
+      activeReaderCount: 0,
+      subscriberCount: 0,
+    });
+    expect(getOrderFormDataResourceSnapshot(getCurrentOrderFormDataNamespace())).toMatchObject({
+      status: 'idle',
+      error: null,
+      inFlight: false,
+    });
 
     await act(async () => {
       renderer!.unmount();

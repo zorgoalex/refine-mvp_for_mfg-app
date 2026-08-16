@@ -11,6 +11,7 @@ import type { CutDetailLastReadyJobRef } from '../../api/types/cutApi.types';
 import { setPerformanceRumRealtimeMode } from '../../performance/PerformanceRumBridge';
 import { useAppActivitySnapshot } from '../../performance/appActivityCoordinator';
 import { areCutJobLinkMapsEqual, buildCutJobLinkMaps } from './cutColumnHelpers';
+import { scheduleOrderRead } from '../../query/orderReadPriority';
 
 const INVALIDATION_COALESCE_MS = 40;
 const DISCONNECTED_POLL_GRACE_MS = 10_000;
@@ -82,6 +83,7 @@ export function useOrderDetailLiveState({
     let invalidationBarrier: Promise<boolean> | null = null;
     let invalidationRequiresUnconditionalSnapshot = false;
     let authTimer: number | null = null;
+    let cancelInitialRead = () => undefined;
 
     setState((current) => current.scopeKey === scopeKey
       ? current
@@ -101,6 +103,8 @@ export function useOrderDetailLiveState({
     };
 
     const stopAll = () => {
+      cancelInitialRead();
+      cancelInitialRead = () => undefined;
       stopTransport();
       snapshotAbort?.abort();
       snapshotAbort = null;
@@ -367,12 +371,14 @@ export function useOrderDetailLiveState({
       streamAbort.abort();
     });
 
-    void (async () => {
-      const ready = await refreshSnapshot();
-      if (disposed || terminal) return;
-      schedulePeriodic();
-      if (ready && streamEnabled) scheduleReconnect(0);
-    })();
+    cancelInitialRead = scheduleOrderRead('after-first-frame', () => {
+      void (async () => {
+        const ready = await refreshSnapshot();
+        if (disposed || terminal) return;
+        schedulePeriodic();
+        if (ready && streamEnabled) scheduleReconnect(0);
+      })();
+    });
 
     return () => {
       disposed = true;

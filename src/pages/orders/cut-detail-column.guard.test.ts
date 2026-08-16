@@ -22,9 +22,9 @@ describe('cut detail column', () => {
     const hook = readFileSync('src/pages/orders/useCutDetailLastReady.ts', 'utf8');
     expect(hook).toContain('window.setInterval(refreshWhenVisible, pollIntervalMs)');
     expect(hook).toContain("useAuthCacheNamespace('cut-detail-last-ready')");
-    expect(hook).toContain('readScopeKeyRef.current !== requestKey');
+    expect(hook).toContain('readScopeKeyRef.current !== requestScopeKey');
     expect(hook).toContain('cutJobMaps.scopeKey === readScopeKey');
-    expect(hook).toContain('current.scopeKey === requestKey');
+    expect(hook).toContain('current.scopeKey === requestScopeKey');
     expect(hook).toContain('areCutJobLinkMapsEqual(current, nextMaps)');
     expect(hook).toContain('Keep last ready versions visible; focus/event/poll can recover.');
   });

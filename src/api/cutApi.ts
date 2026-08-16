@@ -125,12 +125,16 @@ export const cutApi = {
   },
 
   /** Per-detail latest-created ready (calculated) cut job, for the order-detail Раскрой column. */
-  async listDetailLastReady(detailIds: number[]): Promise<CutDetailLastReadyResponse> {
+  async listDetailLastReady(
+    detailIds: number[],
+    options: { signal?: AbortSignal } = {},
+  ): Promise<CutDetailLastReadyResponse> {
     const ids = detailIds.filter((id) => Number.isInteger(id) && id > 0);
     if (ids.length === 0) return { details: [] };
     const query = new URLSearchParams({ detailIds: ids.join(',') });
     return httpClient.get<CutDetailLastReadyResponse>(
       `${apiRoutes.cutJobs.detailLastReady}?${query.toString()}`,
+      { signal: options.signal },
     );
   },
 

@@ -770,10 +770,14 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
     const token = showAsyncReadGuard.capture();
     if (!token) return;
+    const controller = new AbortController();
     let cancelled = false;
 
     void ordersApi
-      .getById(Number(currentOrderId), { includeDeleted: true })
+      .getById(Number(currentOrderId), {
+        includeDeleted: true,
+        signal: controller.signal,
+      })
       .then((o) => {
         if (cancelled || !showAsyncReadGuard.isCurrent(token)) {
           return;
@@ -788,6 +792,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [
     canManageOrderTrash,
