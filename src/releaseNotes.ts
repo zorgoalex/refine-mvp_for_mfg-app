@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-17",
+    title: "Бирки: пустая бирка в конце печати",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В окнах формирования бирок появился чекбокс «Добавлять в конец пустую бирку»: при печати к заданию добавляется последняя пустая страница, а выбранное состояние запоминается отдельно для каждого пользователя.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-11",
     title: "Карточка заказа: добавление детали стрелкой вниз",
     services: ["ERP"],

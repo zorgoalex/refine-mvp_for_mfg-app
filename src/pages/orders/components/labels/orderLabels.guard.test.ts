@@ -74,6 +74,15 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).toMatch(/saveLabelTemplatePreference\(labelTemplatePreferenceUserId, value\)/);
   });
 
+  it('remembers the empty trailing print label toggle per user', () => {
+    expect(generateSrc).toMatch(/loadAppendBlankLabelOnPrintPreference\(labelTemplatePreferenceUserId\)/);
+    expect(generateSrc).toMatch(/saveAppendBlankLabelOnPrintPreference\(labelTemplatePreferenceUserId, checked\)/);
+    expect(generateSrc).toMatch(/Добавлять в конец пустую бирку/);
+    expect(generateSrc).toMatch(/appendBlankLabelOnPrint=\{appendBlankLabelOnPrint\}/);
+    expect(pagesViewerSrc).toMatch(/appendBlankPage: appendBlankLabelOnPrint/);
+    expect(printSrc).toMatch(/label-print-page--blank/);
+  });
+
   it('shows the effective generated comment fallback before writing explicit overrides', () => {
     expect(dataEditorSrc).toMatch(/detail\.bazisFields\['bazis\.comment'\] \?\? detail\.note \?\? ''/);
   });

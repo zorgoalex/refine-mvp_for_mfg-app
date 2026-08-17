@@ -8,7 +8,9 @@ import { can } from '../../utils/permissions';
 import { saveLabelBlob } from '../orders/components/labels/labelDownloads';
 import { printLabelSvgPages } from '../orders/components/labels/labelPrint';
 import {
+  loadAppendBlankLabelOnPrintPreference,
   resolvePreferredLabelTemplateId,
+  saveAppendBlankLabelOnPrintPreference,
   saveLabelTemplatePreference,
 } from '../orders/components/labels/labelTemplatePreference';
 
@@ -57,6 +59,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
   const [templates, setTemplates] = useState<LabelTemplate[]>([]);
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [useBasisFields, setUseBasisFields] = useState(true);
+  const [appendBlankLabelOnPrint, setAppendBlankLabelOnPrint] = useState(false);
   const [exportFormats, setExportFormats] = useState<LabelExportFormat[]>([]);
   const [preview, setPreview] = useState<DetailLabelsPreview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -94,6 +97,7 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
 
   useEffect(() => {
     if (!open) return;
+    setAppendBlankLabelOnPrint(loadAppendBlankLabelOnPrintPreference(labelTemplatePreferenceUserId));
     setLoading(true);
     labelsApi.listTemplates()
       .then((next) => {
@@ -180,7 +184,9 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
         useBasisFields,
       });
       setPreview(printPreview);
-      const printed = printLabelSvgPages(printPreview.svgPages, `Бирки листа ${sheetIndex + 1}`);
+      const printed = printLabelSvgPages(printPreview.svgPages, `Бирки листа ${sheetIndex + 1}`, {
+        appendBlankPage: appendBlankLabelOnPrint,
+      });
       if (!printed) message.warning('Нет бирок для печати');
     } catch {
       message.error('Не удалось открыть печать бирок');
@@ -287,6 +293,16 @@ export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionPr
           />
           <Checkbox checked={useBasisFields} onChange={(event) => setUseBasisFields(event.target.checked)}>
             Использовать поля базис проекта
+          </Checkbox>
+          <Checkbox
+            checked={appendBlankLabelOnPrint}
+            onChange={(event) => {
+              const checked = event.target.checked;
+              setAppendBlankLabelOnPrint(checked);
+              saveAppendBlankLabelOnPrintPreference(labelTemplatePreferenceUserId, checked);
+            }}
+          >
+            Добавлять в конец пустую бирку
           </Checkbox>
           <div>
             <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
