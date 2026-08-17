@@ -1962,6 +1962,166 @@ describe('PgCncTelegramRepository', () => {
     expect(commandComplete?.params).toEqual([700, commandInsert?.params[1], 704]);
   });
 
+  it('keeps SVG packet when cut job display number needs review', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return {
+            rows: [
+              {
+                order_key: '2689',
+                order_id: 2689,
+                detail_id: 3101,
+                detail_number: 31,
+                width: 497,
+                height: 477,
+              },
+            ],
+          };
+        }
+        if (/SELECT od\.detail_id, od\.order_id/i.test(text)) {
+          return {
+            rows: [
+              {
+                detail_id: 3101,
+                order_id: 2689,
+                order_name: '2689',
+                order_delete_flag: false,
+                detail_number: 31,
+                detail_name: 'Detail 31',
+                height: 477,
+                width: 497,
+                order_quantity: 4,
+                area: 0.237,
+                material_id: 10,
+                sheet_material_type_id: 77,
+                sheet_material_width_mm: 2070,
+                sheet_material_height_mm: 2800,
+                material_name: 'MDF 18',
+                milling_type_id: null,
+                milling_type_name: null,
+                edge_type_id: null,
+                edge_type_name: null,
+                film_id: 88,
+                film_name: 'White',
+                priority: null,
+                production_status_id: null,
+                production_status_name: null,
+                joint_order_id: null,
+                note: null,
+                link_cutting_file: null,
+                link_cutting_image_file: null,
+                link_cad_file: null,
+                link_pdf_file: null,
+              },
+            ],
+          };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 12 }] };
+        }
+        if (/SELECT existing_job\.cut_job_id/i.test(text)) {
+          return { rows: [{ cut_job_id: 80 }] };
+        }
+        if (/FROM generate_series/i.test(text)) {
+          return { rows: [{ cut_job_id: 81 }, { cut_job_id: 82 }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              svg_cut_job_id: null,
+              svg_cut_result_id: null,
+              svg_cut_import_status: 'needs_review',
+              svg_cut_import_note: 'Задание на раскрой №12 уже существует',
+            })],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:svg-cut-conflict',
+        cuttingSequenceNo: 12,
+        items: [
+          {
+            sourceItemKey: '2689:31:497x477',
+            orderName: '2689',
+            detailNumber: 31,
+            widthMm: 497,
+            heightMm: 477,
+            quantity: 1,
+            source: 'vector' as const,
+            confidence: 1,
+            matchOrderId: 2689,
+            matchDetailId: 3101,
+            matchStatus: 'matched' as const,
+          },
+        ],
+        cutLayout: {
+          status: 'valid' as const,
+          reasons: [],
+          sheet: { widthMm: 2070, heightMm: 2800 },
+          partContourCount: 1,
+          acceptedItemCount: 1,
+          items: [
+            {
+              orderName: '2689',
+              detailNumber: 31,
+              widthMm: 497,
+              heightMm: 477,
+              quantity: 1,
+              confidence: 1,
+              sourceElementId: 'PartContour-1',
+              xMm: 10,
+              yMm: 20,
+              placedWidthMm: 497,
+              placedHeightMm: 477,
+              rotated: false,
+            },
+          ],
+        },
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const reviewUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) &&
+      /svg_cut_import_status = \$2/i.test(query.text),
+    );
+
+    expect(queries.some((query) => /INSERT INTO cut_job\s*\(/i.test(query.text))).toBe(false);
+    expect(reviewUpdate?.params.slice(1, 5)).toEqual([
+      'needs_review',
+      'Задание на раскрой №12 уже существует',
+      null,
+      null,
+    ]);
+    expect(result.packet.svgCutImportStatus).toBe('needs_review');
+    expect(result.applied).toBe(true);
+  });
+
   it('keeps ERP detail matches when manual SVG upload uses lenient validation', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {

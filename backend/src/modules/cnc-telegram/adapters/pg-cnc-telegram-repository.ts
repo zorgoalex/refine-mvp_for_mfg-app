@@ -3264,16 +3264,25 @@ async function syncSvgCutImport(
     return;
   }
 
-  const imported = await createSvgCutJob(
-    tx,
-    packetId,
-    dto,
-    layout,
-    plan,
-    cuttingSequenceNo,
-    actorUserId,
-    options.requestedCutJobId ?? null,
-  );
+  let imported: { cutJobId: number; cutResultId: number };
+  try {
+    imported = await createSvgCutJob(
+      tx,
+      packetId,
+      dto,
+      layout,
+      plan,
+      cuttingSequenceNo,
+      actorUserId,
+      options.requestedCutJobId ?? null,
+    );
+  } catch (error) {
+    if (isReviewableSvgCutImportError(error)) {
+      await setSvgCutImportState(tx, packetId, 'needs_review', svgCutImportErrorNote(error), null, null);
+      return;
+    }
+    throw error;
+  }
   await setSvgCutImportState(tx, packetId, 'imported', 'SVG layout imported into cut job', imported.cutJobId, imported.cutResultId);
 }
 
@@ -4469,6 +4478,14 @@ function sheetDimsMatch(svgWidth: number, svgHeight: number, materialWidth: numb
 
 function cutLayoutReason(layout: CncTelegramCutLayoutDto, fallback: string): string {
   return layout.reasons.length > 0 ? layout.reasons.join('; ') : fallback;
+}
+
+function isReviewableSvgCutImportError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.statusCode >= 400 && error.statusCode < 500;
+}
+
+function svgCutImportErrorNote(error: ApiError): string {
+  return truncateText(error.message, 500);
 }
 
 function dimensionKey(value: number): string {
