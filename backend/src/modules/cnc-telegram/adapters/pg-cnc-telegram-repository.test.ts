@@ -2200,15 +2200,12 @@ describe('PgCncTelegramRepository', () => {
         if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) {
           return { rows: [{ cut_group_sheet_id: 803 }] };
         }
-        if (/INSERT INTO cut_result\s*\(/i.test(text)) {
-          return { rows: [{ cut_result_id: 804 }] };
-        }
         if (/FROM cnc_telegram_packets p/i.test(text)) {
           return {
             rows: [packetRow({
               cutting_sequence_no: 104,
               svg_cut_job_id: 800,
-              svg_cut_result_id: 804,
+              svg_cut_result_id: null,
               svg_cut_import_status: 'imported',
             })],
           };
@@ -2273,7 +2270,7 @@ describe('PgCncTelegramRepository', () => {
     });
 
     const jobInsert = queries.find((query) => /INSERT INTO cut_job\s*\(/i.test(query.text));
-    const resultInsert = queries.find((query) => /INSERT INTO cut_result\s*\(/i.test(query.text));
+    const sheetInsert = queries.find((query) => /INSERT INTO cut_group_sheet\s*\(/i.test(query.text));
     const importUpdate = queries.find((query) =>
       /UPDATE cnc_telegram_packets/i.test(query.text) &&
       /svg_cut_import_status = \$2/i.test(query.text),
@@ -2281,18 +2278,19 @@ describe('PgCncTelegramRepository', () => {
 
     expect(jobInsert?.params[7]).toBe('104');
     expect(queries.some((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toBe(false);
-    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({
-      displayNumber: '104',
-      items: [],
-      groups: [{ sheets: [{ placements: { pieces: [{ label: { orderName: '2800', detailId: null } }] } }] }],
+    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
+    expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
+      pieces: [{ label: { orderId: null, orderName: '2800', detailId: null } }],
     });
     expect(importUpdate?.params.slice(1, 5)).toEqual([
       'imported',
       'SVG layout imported into cut job',
       800,
-      804,
+      null,
     ]);
     expect(result.packet.svgCutJobId).toBe(800);
+    expect(result.packet.svgCutResultId).toBeNull();
     expect(result.packet.svgCutImportStatus).toBe('imported');
   });
 

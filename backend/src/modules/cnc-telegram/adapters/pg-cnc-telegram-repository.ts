@@ -3245,7 +3245,7 @@ async function syncSvgCutImport(
   );
   const row = state.rows[0];
   if (!row) return;
-  if (row.svg_cut_import_status === 'imported' && row.svg_cut_job_id !== null && row.svg_cut_result_id !== null) {
+  if (row.svg_cut_import_status === 'imported' && row.svg_cut_job_id !== null) {
     await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, options.requestedCutJobId ?? row.cutting_sequence_no);
     return;
   }
@@ -3282,7 +3282,7 @@ async function syncSvgCutImport(
     return;
   }
 
-  let imported: { cutJobId: number; cutResultId: number };
+  let imported: { cutJobId: number; cutResultId: number | null };
   try {
     imported = await createSvgCutJob(
       tx,
@@ -3864,7 +3864,7 @@ async function createSvgCutJob(
   cuttingSequenceNo: number,
   actorUserId: string,
   requestedCutJobId: number | null = null,
-): Promise<{ cutJobId: number; cutResultId: number }> {
+): Promise<{ cutJobId: number; cutResultId: number | null }> {
   const params = SVG_REVERSE_IMPORT_PARAMS;
   const sourceDisplayNumber = String(requestedCutJobId ?? cuttingSequenceNo);
   await ensureSvgCutJobDisplayNumberAvailable(tx, sourceDisplayNumber, null);
@@ -3925,12 +3925,6 @@ async function createSvgCutJob(
   );
   const cutJobId = toNumber(job.rows[0].cut_job_id);
   const cutJobCreatedAt = toIso(job.rows[0].created_at);
-  await tx.query(
-    `INSERT INTO cut_result_command
-       (cut_job_id, command_id, command_type, payload_hash, status, created_by)
-     VALUES ($1, $2::uuid, 'manual_save', $3, 'in_progress', $4)`,
-    [cutJobId, commandId, commandPayloadHash, toNullableNumber(actorUserId)],
-  );
   const groupKey = `svg:m:${plan.sheetMaterialTypeId ?? 'none'}:f:${plan.filmId ?? 'none'}`;
   const summary = buildSvgCutSummary(plan, selectionSource);
   const group = await tx.query<{ cut_group_id: string | number }>(
@@ -3975,6 +3969,9 @@ async function createSvgCutJob(
     [cutGroupId, plan.sheetMaterialTypeId, JSON.stringify(placements)],
   );
   const cutGroupSheetId = toNumber(sheet.rows[0].cut_group_sheet_id);
+  if (!svgPlanCanCreateCutResult(plan)) {
+    return { cutJobId, cutResultId: null };
+  }
   const totals = buildSvgCutTotals(plan);
   const snapshot: CutJobDto = {
     cutJobId,
@@ -4024,6 +4021,12 @@ async function createSvgCutJob(
     renderToken: 'snapshot:j1',
   };
   const manifest = buildSvgCutResultManifest(snapshot);
+  await tx.query(
+    `INSERT INTO cut_result_command
+       (cut_job_id, command_id, command_type, payload_hash, status, created_by)
+     VALUES ($1, $2::uuid, 'manual_save', $3, 'in_progress', $4)`,
+    [cutJobId, commandId, commandPayloadHash, toNullableNumber(actorUserId)],
+  );
   const result = await tx.query<{ cut_result_id: string | number }>(
     `
     INSERT INTO cut_result (
@@ -4064,6 +4067,10 @@ async function createSvgCutJob(
     [cutJobId, commandId, cutResultId],
   );
   return { cutJobId, cutResultId };
+}
+
+function svgPlanCanCreateCutResult(plan: Extract<SvgCutImportPlan, { ok: true }>): boolean {
+  return !plan.informational || plan.placements.every((placement) => placement.orderId !== null);
 }
 
 async function ensureSvgCutJobDisplayNumberAvailable(
