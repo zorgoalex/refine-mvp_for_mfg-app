@@ -314,6 +314,8 @@ export interface CutJobMdfBoardStatus {
   reason: string;
   activePacketCount: number;
   hiddenPacketCount: number;
+  /** True when a single linked manual-SVG packet is missing the MDF-board marker and can be created safely. */
+  canCreateCard?: boolean;
   packets: CutJobLinkedMdfPacket[];
 }
 

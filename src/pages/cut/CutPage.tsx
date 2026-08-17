@@ -1000,6 +1000,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [selected, setSelected] = useState<number[]>([]);
   const [previewName, setPreviewName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [creatingMdfBoardCard, setCreatingMdfBoardCard] = useState(false);
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
   // Auto-loaded small layout previews (preset 'thumb') for a ready job's sheets,
   // keyed `${cutGroupId}:${sheetIndex}`. thumbReqRef dedupes in-flight/done fetches.
@@ -2168,6 +2169,25 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     },
     [applyPdfTemplateState, emitCutJobUpdate, job, loadJobs, handleError],
   );
+
+  const createMdfBoardCard = useCallback(async () => {
+    if (!job) return;
+    setBusy(true);
+    setCreatingMdfBoardCard(true);
+    try {
+      const updated = await cutApi.createMdfBoardCard(job.cutJobId);
+      setJob(updated);
+      applyPdfTemplateState(updated);
+      emitCutJobUpdate(updated, job);
+      message.success('Карточка файла станка создана на МДФ-доске');
+      await loadJobs();
+    } catch (error) {
+      handleError(error, 'Не удалось создать карточку файла станка для МДФ-доски');
+    } finally {
+      setCreatingMdfBoardCard(false);
+      setBusy(false);
+    }
+  }, [applyPdfTemplateState, emitCutJobUpdate, handleError, job, loadJobs]);
 
   const calculate = useCallback(async () => {
     if (!job) return;
@@ -3437,6 +3457,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       )}
     </Space>
   )) : undefined;
+  const jobCardExtra = job ? (
+    <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
+  ) : undefined;
 
   if (!can('cut.view')) {
     return <Alert type="error" message="Недостаточно прав для просмотра раскроя" showIcon />;
@@ -3954,12 +3977,25 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           className="cut-page-modern__job"
           size="small"
           title={isOperational && embeddedOrderId == null ? undefined : jobCardTitle}
-          extra={
-            isOperational && embeddedOrderId == null
-              ? undefined
-              : <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
-          }
+          extra={isOperational && embeddedOrderId == null ? undefined : jobCardExtra}
         >
+          {job.mdfBoardStatus?.canCreateCard === true && (
+            <Space style={{ marginBottom: 12 }} wrap>
+              <Tooltip title={cutJobMdfBoardTooltip(job.mdfBoardStatus)}>
+                <Button
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => void createMdfBoardCard()}
+                  loading={creatingMdfBoardCard}
+                  disabled={!canManage || busy || isArchivedJob || job.status === 'calculating'}
+                  style={{ height: 'auto', minHeight: 32, whiteSpace: 'normal', textAlign: 'left' }}
+                  data-testid="cut-job-create-mdf-board-card"
+                >
+                  Создать карточку файла станка для МДФ-доски
+                </Button>
+              </Tooltip>
+            </Space>
+          )}
           <div className="cut-job-overview">
             <aside className="cut-job-overview__history">
               <div

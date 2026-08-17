@@ -112,6 +112,7 @@ export const apiRoutes = {
     filmOptions: backendApiPath('/cut-jobs/film-options'),
     eligibleDetailsPreview: backendApiPath('/cut-jobs/eligible-details'),
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
+    mdfBoardCard: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/mdf-board-card`),
     deleteImpact: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/delete-impact`),
     results: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/results`),
     result: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}`),

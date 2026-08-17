@@ -286,6 +286,23 @@ export class CutController {
   }
 
   @ApiOperation({
+    operationId: 'createCutJobMdfBoardCard',
+    summary: 'Create a visible MDF board machine-file card for a linked SVG cut job',
+  })
+  @Post(':cutJobId/mdf-board-card')
+  async createMdfBoardCard(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    return this.cut.createMdfBoardCard({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
     operationId: 'getCutJobDeleteImpact',
     summary: 'Preview linked records affected by deleting a cut job',
   })
