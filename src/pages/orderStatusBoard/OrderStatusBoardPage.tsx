@@ -291,10 +291,7 @@ function statusBoardHorizontalScrollDirection(
 }
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
-interface StatusBoardCardStatusBadgeOverride {
-  name: string;
-  color: string;
-}
+type StatusBoardCardPrimaryStatusKind = 'board' | 'order';
 
 export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
 const CNC_DRAG_PREVIEW_KIND_LABELS: Record<CncManualCardKind, string> = {
@@ -3054,7 +3051,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cncSummaryOnly={summaryOnly}
                         cncReadiness={readiness}
                         cncMissingDetails={missingDetails}
-                        statusBadgeOverride={cncOrderStatusBadgeOverride(column.key)}
+                        primaryStatusKind="order"
                         displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         relationState={orderStateFor(entry)}
@@ -6498,7 +6495,7 @@ interface StatusBoardCardViewProps {
   cncSummaryOnly?: boolean;
   cncReadiness?: CncOrderReadiness;
   cncMissingDetails?: CncOrderMissingDetail[];
-  statusBadgeOverride?: StatusBoardCardStatusBadgeOverride;
+  primaryStatusKind?: StatusBoardCardPrimaryStatusKind;
   displayToggleVisible?: boolean;
   onToggleDisplay?: () => void;
   relationState?: CncRelationCardState;
@@ -6528,7 +6525,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   cncSummaryOnly = false,
   cncReadiness,
   cncMissingDetails = [],
-  statusBadgeOverride,
+  primaryStatusKind = 'board',
   displayToggleVisible = false,
   onToggleDisplay,
   relationState = 'normal',
@@ -6595,13 +6592,15 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   });
 
   const primaryStatus =
-    statusBadgeOverride?.name ??
-    (board === 'order'
+    primaryStatusKind === 'order' || board === 'order'
       ? card.orderStatusName || 'Без статуса'
-      : card.productionStatusName || 'Без статуса');
+      : card.productionStatusName || 'Без статуса';
   const primaryStatusColor =
-    statusBadgeOverride?.color ??
-    resolveStatusBoardStatusColor(board, card, allColumns) ??
+    (
+      primaryStatusKind === 'order' && board !== 'order'
+        ? null
+        : resolveStatusBoardStatusColor(board, card, allColumns)
+    ) ??
     '#8c8c8c';
   const {
     active: isTouchDragging,
@@ -7624,16 +7623,6 @@ function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): strin
   if (columnKey === 'baths_laminated') return '#13c2c2';
   if (columnKey === 'baths') return '#cf1322';
   return '#1677ff';
-}
-
-function cncOrderStatusBadgeOverride(
-  columnKey: CncTelegramTodayDisplayColumnKey,
-): StatusBoardCardStatusBadgeOverride | undefined {
-  if (columnKey !== 'orders_ready' && columnKey !== 'orders_issued') return undefined;
-  return {
-    name: cncColumnTitleByKey(columnKey),
-    color: cncColumnBadgeColor(columnKey),
-  };
 }
 
 function cncColumnDisplayTitle(column: CncTelegramTodayDisplayColumn): string {

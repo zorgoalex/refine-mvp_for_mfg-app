@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-17",
+    title: "МДФ-работы: статус заказа на карточке",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Карточки заказов на доске «МДФ-работы» теперь показывают реальный статус заказа из общей доски статусов и обновляют его по 15-секундной синхронизации, а не подменяют бейдж названием МДФ-колонки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-17",
     title: "МДФ-работы: период по умолчанию",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

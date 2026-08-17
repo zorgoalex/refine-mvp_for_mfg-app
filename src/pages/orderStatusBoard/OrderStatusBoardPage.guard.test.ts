@@ -93,8 +93,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('saveCncManualMoves');
     expect(page).toContain('kind="bazisCutSet"');
     expect(page).toContain('completed_laminated');
-    expect(page).toContain('cncOrderStatusBadgeOverride(column.key)');
-    expect(page).toContain('statusBadgeOverride?.name');
+    expect(page).not.toContain('cncOrderStatusBadgeOverride');
+    expect(page).not.toContain('statusBadgeOverride');
+    expect(page).toContain('primaryStatusKind="order"');
     expect(page).toContain("label: 'Переместить'");
     expect(page).toContain('trigger={[');
     expect(page).toContain('trigger: shellRef.current');
@@ -1018,6 +1019,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('orderStatusBoardApi.get({');
     expect(page).toContain('orderIds: chunk');
     expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
+    expect(page).toContain('const timer = window.setInterval(() => {');
+    expect(page).toContain('}, CNC_ORDER_STATUS_REFRESH_MS);');
+    expect(page).toContain("primaryStatusKind === 'order' || board === 'order'");
+    expect(page).toContain("card.orderStatusName || 'Без статуса'");
+    expect(page).not.toContain('statusBadgeOverride={');
     expect(page).toContain('getCncOrderRelationState');
     expect(page).toContain("onSelectRelation({ kind: 'order', id: card.orderId })");
     expect(page).toContain('openOrderOnNumber={!relationsEnabled}');
