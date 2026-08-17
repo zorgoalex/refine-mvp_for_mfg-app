@@ -86,4 +86,14 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain('Не удалось загрузить из-за отсутствия или несоответствия элементов');
     expect(config).toContain('Пропущенные дубликаты');
   });
+
+  it('offers a manage-only force refresh for recent orders', () => {
+    expect(config).toContain('refreshingRecentOrders');
+    expect(config).toContain('statusAutomationApi.refreshRecentOrders()');
+    expect(config).toContain('Будут проверены все заказы за последние два месяца');
+    expect(config).toContain('действий ${result.totals.executedActionCount}');
+    expect(config).toContain('Ошибок: ${result.failedOrderCount}');
+    expect(config).toContain('<Button');
+    expect(config).toContain('Обновить');
+  });
 });

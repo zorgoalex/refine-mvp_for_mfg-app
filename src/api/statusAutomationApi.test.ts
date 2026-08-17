@@ -19,6 +19,7 @@ describe('statusAutomationApi', () => {
       { id: 7 },
       { deleted: true },
       [],
+      { orderCount: 2 },
     );
     const update = { name: 'Updated', version: 3 };
 
@@ -32,6 +33,7 @@ describe('statusAutomationApi', () => {
     await statusAutomationApi.update(7, update);
     await statusAutomationApi.remove(7);
     await statusAutomationApi.listEventTypes();
+    await statusAutomationApi.refreshRecentOrders();
 
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/status-automation/rules');
     expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
@@ -48,6 +50,8 @@ describe('statusAutomationApi', () => {
     expect(fetchMock.mock.calls[3][1]?.method).toBe('DELETE');
     expect(fetchMock.mock.calls[4][0]).toBe('/api/v1/status-automation/event-types');
     expect(fetchMock.mock.calls[4][1]?.method).toBe('GET');
+    expect(fetchMock.mock.calls[5][0]).toBe('/api/v1/status-automation/refresh-recent-orders');
+    expect(fetchMock.mock.calls[5][1]?.method).toBe('POST');
   });
 });
 

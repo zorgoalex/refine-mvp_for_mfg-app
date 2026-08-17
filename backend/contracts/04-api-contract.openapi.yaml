@@ -7013,6 +7013,27 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/status-automation/refresh-recent-orders:
+    post:
+      tags:
+        - Status Automation
+      operationId: refreshRecentOrdersStatusAutomation
+      summary: Force-check recent orders by all enabled status automation rules
+      security:
+        - bearerAuth: []
+      x-permission: status_automation.manage
+      responses:
+        '200':
+          description: Recent orders were checked by enabled status automation rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusAutomationRecentOrdersRefreshResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/notification-event-types:
     get:
       tags:
@@ -16387,6 +16408,8 @@ components:
           items:
             type: integer
             format: int64
+        statusAutomation:
+          $ref: '#/components/schemas/StatusAutomationOrderRefreshSummary'
         auditId:
           type: string
           nullable: true
@@ -18935,6 +18958,11 @@ components:
             - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
+            - mdf.order_machine_files_present
+            - mdf.board.completed
+            - mdf.board.baths
+            - mdf.board.baths_ready
+            - mdf.board.baths_laminated
         actionType:
           type: string
           enum:
@@ -19021,6 +19049,11 @@ components:
             - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
+            - mdf.order_machine_files_present
+            - mdf.board.completed
+            - mdf.board.baths
+            - mdf.board.baths_ready
+            - mdf.board.baths_laminated
         title:
           type: string
         group:
@@ -19030,6 +19063,7 @@ components:
             - dates
             - statuses
             - payments
+            - production
         description:
           type: string
         allowedConditions:
@@ -19055,6 +19089,114 @@ components:
               - change_production_status
               - change_details_production_status
 
+    StatusAutomationOrderRefreshSummary:
+      type: object
+      required:
+        - orderId
+        - orderFound
+        - evaluatedRuleCount
+        - matchedRuleCount
+        - executedActionCount
+        - skippedRuleCount
+        - skippedActionCount
+      properties:
+        orderId:
+          type: integer
+          minimum: 1
+        orderFound:
+          type: boolean
+        evaluatedRuleCount:
+          type: integer
+          minimum: 0
+        matchedRuleCount:
+          type: integer
+          minimum: 0
+        executedActionCount:
+          type: integer
+          minimum: 0
+        skippedRuleCount:
+          type: integer
+          minimum: 0
+        skippedActionCount:
+          type: integer
+          minimum: 0
+
+    StatusAutomationRefreshTotals:
+      type: object
+      required:
+        - evaluatedRuleCount
+        - matchedRuleCount
+        - executedActionCount
+        - skippedRuleCount
+        - skippedActionCount
+      properties:
+        evaluatedRuleCount:
+          type: integer
+          minimum: 0
+        matchedRuleCount:
+          type: integer
+          minimum: 0
+        executedActionCount:
+          type: integer
+          minimum: 0
+        skippedRuleCount:
+          type: integer
+          minimum: 0
+        skippedActionCount:
+          type: integer
+          minimum: 0
+
+    StatusAutomationRefreshFailure:
+      type: object
+      required:
+        - orderId
+        - code
+        - message
+      properties:
+        orderId:
+          type: integer
+          minimum: 1
+        code:
+          type: string
+        message:
+          type: string
+
+    StatusAutomationRecentOrdersRefreshResponse:
+      type: object
+      required:
+        - cutoffDate
+        - orderCount
+        - processedOrderCount
+        - failedOrderCount
+        - failures
+        - totals
+        - refreshedAt
+        - requestId
+      properties:
+        cutoffDate:
+          type: string
+          format: date
+        orderCount:
+          type: integer
+          minimum: 0
+        processedOrderCount:
+          type: integer
+          minimum: 0
+        failedOrderCount:
+          type: integer
+          minimum: 0
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusAutomationRefreshFailure'
+        totals:
+          $ref: '#/components/schemas/StatusAutomationRefreshTotals'
+        refreshedAt:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+
     CreateStatusAutomationRuleRequest:
       type: object
       required:
@@ -19077,6 +19219,11 @@ components:
             - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
+            - mdf.order_machine_files_present
+            - mdf.board.completed
+            - mdf.board.baths
+            - mdf.board.baths_ready
+            - mdf.board.baths_laminated
         actionType:
           type: string
           enum:
@@ -19114,6 +19261,11 @@ components:
             - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
+            - mdf.order_machine_files_present
+            - mdf.board.completed
+            - mdf.board.baths
+            - mdf.board.baths_ready
+            - mdf.board.baths_laminated
         actionType:
           type: string
           enum:

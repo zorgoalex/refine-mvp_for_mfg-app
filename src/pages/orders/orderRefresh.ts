@@ -1,4 +1,5 @@
 import type { OrderDetail } from '../../types/orders';
+import type { OrderRefreshResponse } from '../../api/types/orderApi.types';
 
 const DOWELING_WORD_RE = /(^|[^\p{L}\p{N}_])присадка(?=$|[^\p{L}\p{N}_])/iu;
 
@@ -29,4 +30,23 @@ export function mergeOrderRefreshDetails(
       doweling: noteRequiresDoweling(detail.note) || detail.doweling === true,
     };
   });
+}
+
+export function formatOrderRefreshSuccessMessage(
+  response: Pick<OrderRefreshResponse, 'updatedDowelingDetailIds' | 'statusAutomation'>,
+): string {
+  const parts = [
+    response.updatedDowelingDetailIds.length > 0
+      ? `Обновлено. Присадка установлена для ${response.updatedDowelingDetailIds.length} поз.`
+      : 'Заказ и связи с документами обновлены',
+  ];
+
+  if (response.statusAutomation) {
+    parts.push(
+      `Автостатусы: проверено правил ${response.statusAutomation.evaluatedRuleCount}, `
+      + `действий ${response.statusAutomation.executedActionCount}`,
+    );
+  }
+
+  return parts.join('; ');
 }

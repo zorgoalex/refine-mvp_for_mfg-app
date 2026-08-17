@@ -11,13 +11,16 @@ import {
 import { ProductionActionStatusNotFoundError } from '../../production-actions/errors/production-action.errors';
 import {
   listEnabledRulesForEvent,
+  listEnabledRulesForManualRefresh,
   loadOrderAutomationState,
 } from '../adapters/pg-status-automation-repository';
 import {
+  evaluateRuleConditions,
   selectApplicableRules,
 } from '../domain/status-automation-evaluator';
 import type {
   StatusAutomationEvent,
+  StatusAutomationEventType,
   StatusAutomationRule,
 } from './status-automation.types';
 
@@ -37,6 +40,23 @@ export interface MdfBoardColumnAutomationInput {
   actor: CurrentUser;
   requestId: string;
   sourceIdempotencyKey: string;
+}
+
+export interface ManualStatusAutomationOrderRefreshInput {
+  orderId: number;
+  actor: CurrentUser;
+  requestId: string;
+  sourceIdempotencyKey: string;
+}
+
+export interface StatusAutomationOrderRefreshSummary {
+  orderId: number;
+  orderFound: boolean;
+  evaluatedRuleCount: number;
+  matchedRuleCount: number;
+  executedActionCount: number;
+  skippedRuleCount: number;
+  skippedActionCount: number;
 }
 
 const MEANINGFUL_SKIP_REASONS = new Set([
@@ -113,6 +133,75 @@ export async function evaluateStatusAutomation(
   }
 }
 
+export async function evaluateAllStatusAutomationRulesForOrder(
+  tx: TransactionClient,
+  input: ManualStatusAutomationOrderRefreshInput,
+): Promise<StatusAutomationOrderRefreshSummary> {
+  const state = await loadOrderAutomationState(tx, input.orderId);
+  if (state === null) {
+    return emptyOrderRefreshSummary(input.orderId, false);
+  }
+
+  const rules = await listEnabledRulesForManualRefresh(tx);
+  const summary = emptyOrderRefreshSummary(input.orderId, true);
+  summary.evaluatedRuleCount = rules.length;
+  if (rules.length === 0) {
+    return summary;
+  }
+
+  const appliedActionTypes = new Set<string>();
+  for (const rule of rules) {
+    const event = manualRefreshEventForRule(input, rule.eventType);
+    const evaluation = evaluateRuleConditions(rule, state, event);
+    if (!evaluation.matched) {
+      summary.skippedRuleCount += 1;
+      continue;
+    }
+
+    if (appliedActionTypes.has(rule.actionType)) {
+      summary.skippedRuleCount += 1;
+      await recordRuleSkipped(tx, event, rule, 'lower_priority_same_target');
+      continue;
+    }
+
+    appliedActionTypes.add(rule.actionType);
+    summary.matchedRuleCount += 1;
+    const outboxIdempotencyKey = buildOutboxIdempotencyKey(event, rule);
+    const context: AutomationActionContext = {
+      actor: input.actor,
+      requestId: input.requestId,
+      ruleId: rule.id,
+      ruleName: rule.name,
+      eventType: rule.eventType,
+      outboxIdempotencyKey,
+    };
+
+    let result: AutomationActionResult;
+    try {
+      result = await runAutomationAction(tx, input.orderId, rule, context);
+    } catch (error: unknown) {
+      if (!(error instanceof ProductionActionStatusNotFoundError)) {
+        throw error;
+      }
+      summary.skippedActionCount += 1;
+      await recordRuleSkipped(tx, event, rule, 'target_status_missing');
+      continue;
+    }
+
+    if (result.status === 'executed') {
+      summary.executedActionCount += 1;
+      await recordRuleApplied(tx, event, rule, result);
+    } else {
+      summary.skippedActionCount += 1;
+      if (result.skipReason !== undefined && MEANINGFUL_SKIP_REASONS.has(result.skipReason)) {
+        await recordRuleSkipped(tx, event, rule, result.skipReason);
+      }
+    }
+  }
+
+  return summary;
+}
+
 export async function evaluateMdfOrderMachineFilesPresentAutomation(
   tx: TransactionClient,
   input: MdfOrderMachineFilesPresentAutomationInput,
@@ -157,6 +246,35 @@ function normalizeAutomationOrderIds(
     }
   }
   return Array.from(ids).sort((left, right) => left - right);
+}
+
+function emptyOrderRefreshSummary(
+  orderId: number,
+  orderFound: boolean,
+): StatusAutomationOrderRefreshSummary {
+  return {
+    orderId,
+    orderFound,
+    evaluatedRuleCount: 0,
+    matchedRuleCount: 0,
+    executedActionCount: 0,
+    skippedRuleCount: 0,
+    skippedActionCount: 0,
+  };
+}
+
+function manualRefreshEventForRule(
+  input: ManualStatusAutomationOrderRefreshInput,
+  eventType: StatusAutomationEventType,
+): StatusAutomationEvent {
+  return {
+    eventType,
+    origin: 'user',
+    orderId: input.orderId,
+    actor: input.actor,
+    requestId: input.requestId,
+    sourceIdempotencyKey: `${input.sourceIdempotencyKey}:manual-${eventType}:order-${input.orderId}`,
+  };
 }
 
 function buildOutboxIdempotencyKey(

@@ -4,6 +4,7 @@ import type {
   CreateStatusAutomationRuleRequest,
   DeleteStatusAutomationRuleResponse,
   StatusAutomationEventTypeDto,
+  StatusAutomationRecentOrdersRefreshResponse,
   StatusAutomationRuleDto,
   UpdateStatusAutomationRuleRequest,
 } from './types/statusAutomationApi.types';
@@ -35,5 +36,12 @@ export const statusAutomationApi = {
 
   listEventTypes(): Promise<StatusAutomationEventTypeDto[]> {
     return httpClient.get<StatusAutomationEventTypeDto[]>(apiRoutes.statusAutomation.eventTypes);
+  },
+
+  refreshRecentOrders(): Promise<StatusAutomationRecentOrdersRefreshResponse> {
+    return httpClient.post<StatusAutomationRecentOrdersRefreshResponse>(
+      apiRoutes.statusAutomation.refreshRecentOrders,
+      {},
+    );
   },
 };

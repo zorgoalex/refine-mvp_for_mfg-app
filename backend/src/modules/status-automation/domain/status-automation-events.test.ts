@@ -13,6 +13,10 @@ const expectedEventTypes = [
   'order.status_changed',
   'order.production_status_changed',
   'mdf.order_machine_files_present',
+  'mdf.board.completed',
+  'mdf.board.baths',
+  'mdf.board.baths_ready',
+  'mdf.board.baths_laminated',
 ] as const;
 
 const baseConditions = [
@@ -33,15 +37,15 @@ const actionTypes = [
 ] as const;
 
 describe('status automation event catalog', () => {
-  it('contains exactly the eight supported events', () => {
-    expect(STATUS_AUTOMATION_EVENTS).toHaveLength(8);
+  it('contains exactly the supported events', () => {
+    expect(STATUS_AUTOMATION_EVENTS).toHaveLength(12);
     expect(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).toEqual(
       expectedEventTypes,
     );
   });
 
   it('exposes unique event types, groups, and user-facing descriptions', () => {
-    expect(new Set(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).size).toBe(8);
+    expect(new Set(STATUS_AUTOMATION_EVENTS.map((descriptor) => descriptor.eventType)).size).toBe(12);
     for (const descriptor of STATUS_AUTOMATION_EVENTS) {
       expect(['order', 'dates', 'statuses', 'payments', 'production']).toContain(descriptor.group);
       expect(descriptor.description.trim().length).toBeGreaterThan(10);

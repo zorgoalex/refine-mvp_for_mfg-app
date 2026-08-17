@@ -7,6 +7,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { OrderAccessPolicy } from '../../../permissions/policies/order-access.policy';
 import { PermissionsService } from '../../../permissions/permissions.service';
+import { evaluateAllStatusAutomationRulesForOrder } from '../../status-automation/application/status-automation-runtime';
 import type { OrderRefreshMetadataDto } from '../dto/order.dto';
 import { OrderNotFoundError, OrderVersionConflictError } from '../errors/order.errors';
 import type { OrderPermissionCheckerPort } from './order-transaction.types';
@@ -149,10 +150,21 @@ export class OrderRefreshService {
         });
       }
 
+      const statusAutomation = await evaluateAllStatusAutomationRulesForOrder(tx, {
+        orderId: command.orderId,
+        actor: command.currentUser,
+        requestId,
+        sourceIdempotencyKey: `${command.idempotencyKey}:status-automation-refresh`,
+      });
+      if (statusAutomation.executedActionCount > 0) {
+        version = await readCurrentOrderVersion(tx, command.orderId);
+      }
+
       const metadata: OrderRefreshMetadataDto = {
         baseVersion: command.expectedVersion,
         version,
         updatedDowelingDetailIds,
+        statusAutomation,
         auditId,
         refreshedAt: new Date().toISOString(),
         requestId,
@@ -223,6 +235,21 @@ async function forceDowelingFromNotes(
     [orderId, DOWELING_NOTE_SQL_PATTERN, actorUserId],
   );
   return result.rows;
+}
+
+async function readCurrentOrderVersion(
+  tx: TransactionClient,
+  orderId: number,
+): Promise<number> {
+  const result = await tx.query<VersionRow>(
+    'SELECT version FROM orders WHERE order_id = $1 AND delete_flag = false',
+    [orderId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new OrderNotFoundError(orderId);
+  }
+  return toNumber(row.version);
 }
 
 async function reconcileIdempotency(

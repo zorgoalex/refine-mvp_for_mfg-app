@@ -97,6 +97,7 @@ import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./order
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
 import { BasisProjectLink } from "./components/BasisProjectLink";
 import type { OrderHdfDetail } from "../../types/orders";
+import { formatOrderRefreshSuccessMessage } from './orderRefresh';
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -1762,11 +1763,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     try {
       const response = await ordersApi.refresh(orderId, { version: currentVersion });
       await queryResult.refetch();
-      message.success(
-        response.updatedDowelingDetailIds.length > 0
-          ? `Обновлено. Присадка установлена для ${response.updatedDowelingDetailIds.length} поз.`
-          : 'Заказ и связи с документами обновлены',
-      );
+      message.success(formatOrderRefreshSuccessMessage(response));
     } catch (error) {
       console.error('Order refresh failed:', error);
       message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');

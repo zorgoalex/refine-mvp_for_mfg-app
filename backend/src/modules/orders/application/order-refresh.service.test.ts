@@ -1,9 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueryResultRow } from 'pg';
 import type { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+
+const mocks = vi.hoisted(() => ({
+  evaluateAllStatusAutomationRulesForOrder: vi.fn(),
+}));
+
+vi.mock('../../status-automation/application/status-automation-runtime', () => ({
+  evaluateAllStatusAutomationRulesForOrder: mocks.evaluateAllStatusAutomationRulesForOrder,
+}));
+
 import { OrderRefreshService } from './order-refresh.service';
 
 interface CapturedQuery {
@@ -12,6 +21,11 @@ interface CapturedQuery {
 }
 
 describe('OrderRefreshService', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.evaluateAllStatusAutomationRulesForOrder.mockResolvedValue(statusAutomationSummary());
+  });
+
   it('atomically forces doweling, bumps version and records query-ready audit/outbox', async () => {
     const fake = createDatabase(({ text }) => {
       if (text.includes('FROM orders') && text.includes('FOR UPDATE')) {
@@ -79,7 +93,19 @@ describe('OrderRefreshService', () => {
     const completed = findQuery(fake.queries, "SET status = 'completed'");
     const cached = JSON.parse(String(completed.params[1]));
     expect(cached).not.toHaveProperty('order');
-    expect(cached).toMatchObject({ version: 6, updatedDowelingDetailIds: [10, 11] });
+    expect(cached).toMatchObject({
+      version: 6,
+      updatedDowelingDetailIds: [10, 11],
+      statusAutomation: statusAutomationSummary(),
+    });
+    expect(mocks.evaluateAllStatusAutomationRulesForOrder).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        orderId: 42,
+        requestId: 'request-refresh-1',
+        sourceIdempotencyKey: 'order-refresh-key-1:status-automation-refresh',
+      }),
+    );
   });
 
   it('does not bump version or emit audit/outbox for a no-op refresh', async () => {
@@ -97,7 +123,12 @@ describe('OrderRefreshService', () => {
       orderId: 42,
       expectedVersion: 5,
       idempotencyKey: 'order-refresh-key-2',
-    })).resolves.toMatchObject({ version: 5, updatedDowelingDetailIds: [], auditId: null });
+    })).resolves.toMatchObject({
+      version: 5,
+      updatedDowelingDetailIds: [],
+      statusAutomation: statusAutomationSummary(),
+      auditId: null,
+    });
 
     expect(fake.queries.some((query) => query.text.includes('UPDATE orders'))).toBe(false);
     expect(fake.queries.some((query) => query.text.includes('INSERT INTO audit_log ('))).toBe(false);
@@ -137,6 +168,7 @@ describe('OrderRefreshService', () => {
       requestId: 'retry-request',
     })).resolves.toEqual(replay);
     expect(fake.queries.some((query) => query.text.includes('WITH candidates AS'))).toBe(false);
+    expect(mocks.evaluateAllStatusAutomationRulesForOrder).not.toHaveBeenCalled();
   });
 
   it('requires both view and update permissions before opening a transaction', async () => {
@@ -253,5 +285,17 @@ function manager(): CurrentUser {
     role: 'manager',
     roleId: 10,
     permissions: getPermissionsForRole('manager'),
+  };
+}
+
+function statusAutomationSummary() {
+  return {
+    orderId: 42,
+    orderFound: true,
+    evaluatedRuleCount: 3,
+    matchedRuleCount: 1,
+    executedActionCount: 0,
+    skippedRuleCount: 2,
+    skippedActionCount: 1,
   };
 }

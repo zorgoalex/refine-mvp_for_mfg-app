@@ -78,3 +78,30 @@ export interface UpdateStatusAutomationRuleRequest {
 export interface DeleteStatusAutomationRuleResponse {
   deleted: true;
 }
+
+export interface StatusAutomationOrderRefreshSummaryDto {
+  orderId: number;
+  orderFound: boolean;
+  evaluatedRuleCount: number;
+  matchedRuleCount: number;
+  executedActionCount: number;
+  skippedRuleCount: number;
+  skippedActionCount: number;
+}
+
+export interface StatusAutomationRefreshFailureDto {
+  orderId: number;
+  code: string;
+  message: string;
+}
+
+export interface StatusAutomationRecentOrdersRefreshResponse {
+  cutoffDate: string;
+  orderCount: number;
+  processedOrderCount: number;
+  failedOrderCount: number;
+  failures: StatusAutomationRefreshFailureDto[];
+  totals: Omit<StatusAutomationOrderRefreshSummaryDto, 'orderId' | 'orderFound'>;
+  refreshedAt: string;
+  requestId: string;
+}

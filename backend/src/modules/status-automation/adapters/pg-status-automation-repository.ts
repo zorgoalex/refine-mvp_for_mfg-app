@@ -60,6 +60,10 @@ interface OrderAutomationStateRow extends QueryResultRow {
   is_import: boolean;
 }
 
+interface OrderIdRow extends QueryResultRow {
+  order_id: string | number;
+}
+
 export class PgStatusAutomationRepository {
   constructor(private readonly database: DatabaseService) {}
 
@@ -68,6 +72,21 @@ export class PgStatusAutomationRepository {
       ruleSelectSql('ORDER BY priority, id'),
     );
     return result.rows.map(mapRuleRow);
+  }
+
+  async listRecentOrderIdsForAutomation(cutoffDate: string): Promise<number[]> {
+    const result = await this.database.query<OrderIdRow>(
+      `
+      SELECT order_id
+      FROM orders
+      WHERE delete_flag = false
+        AND order_date >= $1::date
+        AND order_date <= CURRENT_DATE
+      ORDER BY order_date DESC, order_id DESC
+      `,
+      [cutoffDate],
+    );
+    return result.rows.map((row) => toNumber(row.order_id));
   }
 
   createRule(command: {
@@ -255,6 +274,15 @@ export async function listEnabledRulesForEvent(
   const result = await tx.query<StatusAutomationRuleRow>(
     ruleSelectSql('WHERE event_type = $1 AND is_enabled = true ORDER BY priority, id'),
     [eventType],
+  );
+  return result.rows.map(mapRuleRow);
+}
+
+export async function listEnabledRulesForManualRefresh(
+  tx: TransactionClient,
+): Promise<StatusAutomationRule[]> {
+  const result = await tx.query<StatusAutomationRuleRow>(
+    ruleSelectSql('WHERE is_enabled = true ORDER BY priority, id'),
   );
   return result.rows.map(mapRuleRow);
 }

@@ -91,6 +91,33 @@ export interface StatusAutomationEventTypeDto {
   allowedActions: StatusAutomationActionType[];
 }
 
+export interface StatusAutomationOrderRefreshSummaryDto {
+  orderId: number;
+  orderFound: boolean;
+  evaluatedRuleCount: number;
+  matchedRuleCount: number;
+  executedActionCount: number;
+  skippedRuleCount: number;
+  skippedActionCount: number;
+}
+
+export interface StatusAutomationRefreshFailureDto {
+  orderId: number;
+  code: string;
+  message: string;
+}
+
+export interface StatusAutomationRecentOrdersRefreshResponseDto {
+  cutoffDate: string;
+  orderCount: number;
+  processedOrderCount: number;
+  failedOrderCount: number;
+  failures: StatusAutomationRefreshFailureDto[];
+  totals: Omit<StatusAutomationOrderRefreshSummaryDto, 'orderId' | 'orderFound'>;
+  refreshedAt: string;
+  requestId: string;
+}
+
 export function parseCreateStatusAutomationRuleRequest(body: unknown): CreateStatusAutomationRuleDto {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {

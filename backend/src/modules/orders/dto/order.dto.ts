@@ -8,6 +8,7 @@ import type {
   OrderTotalsDto,
 } from './save-order.dto';
 import type { OrderGroupSummaryDto } from './order-group-link.dto';
+import type { StatusAutomationOrderRefreshSummaryDto } from '../../status-automation/dto/status-automation.dto';
 
 export interface OrderDto {
   header: OrderHeaderDto;
@@ -44,6 +45,7 @@ export interface OrderRefreshMetadataDto {
   sourceChangedHdfDetailIds?: number[];
   configMissingHdfDetailIds?: number[];
   hdfStatusCounts?: Record<string, number>;
+  statusAutomation?: StatusAutomationOrderRefreshSummaryDto;
   auditId: string | null;
   refreshedAt: string;
   requestId: string;

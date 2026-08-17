@@ -286,6 +286,7 @@ export const apiRoutes = {
     rules: backendApiPath('/status-automation/rules'),
     ruleById: (ruleId: number) => backendApiPath(`/status-automation/rules/${ruleId}`),
     eventTypes: backendApiPath('/status-automation/event-types'),
+    refreshRecentOrders: backendApiPath('/status-automation/refresh-recent-orders'),
   },
   groups: groupsRoutes,
   projects: {

@@ -51,7 +51,7 @@ import { OrderDetailTransferModal } from '../OrderDetailTransferModal';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 import type { TransferOrderDetailsResponse } from '../../../../api/types/orderApi.types';
 import { ordersApi } from '../../../../api/ordersApi';
-import { mergeOrderRefreshDetails } from '../../orderRefresh';
+import { formatOrderRefreshSuccessMessage, mergeOrderRefreshDetails } from '../../orderRefresh';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -675,11 +675,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         mergeOrderRefreshDetails(currentDetails, serverDetails),
         response.version,
       );
-      message.success(
-        response.updatedDowelingDetailIds.length > 0
-          ? `Обновлено. Присадка установлена для ${response.updatedDowelingDetailIds.length} поз.`
-          : 'Заказ и связи с документами обновлены',
-      );
+      message.success(formatOrderRefreshSuccessMessage(response));
     } catch (error) {
       console.error('Order refresh failed:', error);
       message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');

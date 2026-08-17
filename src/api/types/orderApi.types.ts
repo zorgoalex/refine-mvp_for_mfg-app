@@ -3,6 +3,7 @@ export type IsoDateTimeString = string;
 
 import type { EntityGroupLink } from './groupApi.types';
 import type { CutDetailLastReadyJobRef } from './cutApi.types';
+import type { StatusAutomationOrderRefreshSummaryDto } from './statusAutomationApi.types';
 
 export interface SaveOrderDto {
   header: SaveOrderHeaderDto;
@@ -36,6 +37,7 @@ export interface OrderRefreshResponse {
   baseVersion: number;
   version: number;
   updatedDowelingDetailIds: number[];
+  statusAutomation?: StatusAutomationOrderRefreshSummaryDto;
   auditId: string | null;
   refreshedAt: IsoDateTimeString;
   requestId: string;
