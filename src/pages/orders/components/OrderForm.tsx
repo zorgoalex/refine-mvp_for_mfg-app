@@ -16,7 +16,7 @@ import {
   OrderDraftStoreProvider,
   NEW_ORDER_KEY,
 } from '../../../stores/orderFormStore';
-import { useTabStore, computeNeighborPath } from '../../../stores/tabStore';
+import { useTabStore, computeCloseTargetPath } from '../../../stores/tabStore';
 import { useTabDirty } from '../../../hooks/useTabDirty';
 import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
 import { useWorkspaceTabKey } from '../../../components/workspace/KeepAliveContext';
@@ -1668,12 +1668,12 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       return;
     }
 
-    // Tabbed route: close the workspace tab and navigate to a neighbour.
+    // Tabbed route: close the workspace tab and navigate to its opener or neighbour.
     const closeAndLeave = (discard: boolean) => {
-      // Resolve the neighbour from the PRE-removal tab list — closeTab mutates it.
-      const neighbor = computeNeighborPath(useTabStore.getState().tabs, tabKey);
+      // Resolve from the PRE-removal tab list — closeTab mutates it.
+      const closeTargetPath = computeCloseTargetPath(useTabStore.getState().tabs, tabKey);
       closeTab(tabKey, discard ? { discard: true } : undefined);
-      navigate(neighbor);
+      navigate(closeTargetPath);
     };
     if (isDirty) confirmDiscard(() => closeAndLeave(true));
     else closeAndLeave(false);

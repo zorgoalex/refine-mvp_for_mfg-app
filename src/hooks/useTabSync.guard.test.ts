@@ -15,4 +15,10 @@ describe('useTabSync guards', () => {
     expect(src.indexOf('syncWorkspaceTabsForCurrentUser();')).toBeGreaterThan(-1);
     expect(src.indexOf('syncWorkspaceTabsForCurrentUser();')).toBeLessThan(src.indexOf('openTab({'));
   });
+  it('records the opener key from the previous workspace tab for newly opened tabs', () => {
+    expect(src).toContain('previousTabKeyRef');
+    expect(src).toContain('previousTabKeyRef.current = null');
+    expect(src).toContain('resolveTabOpenerKey(tabsBeforeOpen, location.pathname, previousTabKeyRef.current)');
+    expect(src).toContain('openerKey,');
+  });
 });

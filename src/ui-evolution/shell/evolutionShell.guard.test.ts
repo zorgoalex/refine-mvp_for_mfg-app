@@ -80,7 +80,7 @@ describe('evolution shell behavior preservation', () => {
   it('keeps dirty-tab confirmation and discard semantics', () => {
     expect(tabs).toContain("title: 'Несохраненные изменения'");
     expect(tabs).toContain("{ discard: true }");
-    expect(tabs).toContain('computeNeighborPath');
+    expect(tabs).toContain('computeCloseTargetPath');
   });
 
   it('reuses the established permission and role-visibility gates', () => {

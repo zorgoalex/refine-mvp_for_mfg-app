@@ -28,6 +28,37 @@ describe('evolution workspace tab close interaction', () => {
     expect(navigate).toHaveBeenCalledWith('/orders/create?from=list');
   });
 
+  it('returns to the opener tab when the closed active tab was opened from another tab', () => {
+    const closeTab = vi.fn();
+    const navigate = vi.fn();
+    const confirmDiscard = vi.fn();
+    const linkedTabs: WorkspaceTab[] = [
+      { key: '/orders', path: '/orders?status=active', label: 'Заказы', resource: 'orders_view', dirty: false },
+      {
+        key: '/orders/show/42',
+        path: '/orders/show/42',
+        label: '42',
+        resource: 'orders_view',
+        dirty: false,
+        openerKey: '/orders',
+      },
+      { key: '/calendar', path: '/calendar', label: 'Календарь', resource: 'calendar', dirty: false },
+    ];
+
+    requestEvolutionTabClose({
+      targetKey: '/orders/show/42',
+      activeKey: '/orders/show/42',
+      tabs: linkedTabs,
+      closeTab,
+      navigate,
+      confirmDiscard,
+    });
+
+    expect(confirmDiscard).not.toHaveBeenCalled();
+    expect(closeTab).toHaveBeenCalledWith('/orders/show/42', undefined);
+    expect(navigate).toHaveBeenCalledWith('/orders?status=active');
+  });
+
   it('keeps a dirty tab open until confirmation then discards its draft', () => {
     const closeTab = vi.fn();
     const navigate = vi.fn();

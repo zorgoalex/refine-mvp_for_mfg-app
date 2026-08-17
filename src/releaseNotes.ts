@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-17",
+    title: "Вкладки: возврат к исходному экрану",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Рабочие вкладки теперь запоминают, из какой вкладки была открыта новая карточка или страница; при закрытии активной дочерней вкладки интерфейс возвращает пользователя к исходному экрану.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-17",
     title: "Профиль: состояние левого сайдбара",
     services: ["ERP"],
     repositories: ["repo_erp"],

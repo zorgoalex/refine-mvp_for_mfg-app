@@ -17,6 +17,7 @@ export interface WorkspaceTab {
   label: string;
   resource: string;
   dirty: boolean;
+  openerKey?: string;
 }
 
 interface TabState {
@@ -34,6 +35,24 @@ export const computeNeighborPath = (tabs: WorkspaceTab[], closingKey: string): s
   if (tabs.length <= 1) return '/orders';
   const neighbor = tabs[i + 1] ?? tabs[i - 1];
   return neighbor ? neighbor.path : '/orders';
+};
+
+export const resolveTabOpenerKey = (
+  tabs: WorkspaceTab[],
+  nextKey: string,
+  previousKey: string | null | undefined,
+): string | undefined => {
+  if (!previousKey || previousKey === nextKey) return undefined;
+  if (tabs.some((tab) => tab.key === nextKey)) return undefined;
+  return tabs.some((tab) => tab.key === previousKey) ? previousKey : undefined;
+};
+
+export const computeCloseTargetPath = (tabs: WorkspaceTab[], closingKey: string): string => {
+  const closingTab = tabs.find((tab) => tab.key === closingKey);
+  const opener = closingTab?.openerKey && closingTab.openerKey !== closingKey
+    ? tabs.find((tab) => tab.key === closingTab.openerKey)
+    : undefined;
+  return opener?.path ?? computeNeighborPath(tabs, closingKey);
 };
 
 export const hasAnyDirty = (tabs: WorkspaceTab[]): boolean => tabs.some((t) => t.dirty);
@@ -128,6 +147,9 @@ export const useTabStore = create<TabState>()(
       openTab: (t) =>
         set((state) => {
           const { preserveLabel = true, ...nextTab } = t;
+          const openerKey = nextTab.openerKey && nextTab.openerKey !== nextTab.key
+            ? nextTab.openerKey
+            : undefined;
           const idx = state.tabs.findIndex((x) => x.key === t.key);
           if (idx >= 0) {
             const tabs = state.tabs.slice();
@@ -135,10 +157,11 @@ export const useTabStore = create<TabState>()(
               ...tabs[idx],
               path: nextTab.path,
               label: preserveLabel ? tabs[idx].label || nextTab.label : nextTab.label,
+              openerKey: tabs[idx].openerKey ?? openerKey,
             };
             return { tabs };
           }
-          return { tabs: [...state.tabs, { ...nextTab, dirty: false }] };
+          return { tabs: [...state.tabs, { ...nextTab, openerKey, dirty: false }] };
         }),
       closeTab: (key, opts) => {
         if (opts?.discard) {
@@ -165,7 +188,14 @@ export const useTabStore = create<TabState>()(
       migrate: migrateWorkspaceTabs,
       storage: createJSONStorage(() => userScopedWorkspaceTabsStorage),
       partialize: (state) => ({
-        tabs: state.tabs.map(({ key, path, label, resource }) => ({ key, path, label, resource, dirty: false })),
+        tabs: state.tabs.map(({ key, path, label, resource, openerKey }) => ({
+          key,
+          path,
+          label,
+          resource,
+          openerKey,
+          dirty: false,
+        })),
       }),
       merge: (persistedState, currentState) => {
         const persistedTabs = (persistedState as Partial<TabState> | undefined)?.tabs;
