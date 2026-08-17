@@ -195,7 +195,7 @@ export interface CutSheetFitWarningDto {
 
 export interface CutJobDto {
   cutJobId: number;
-  /** Operator-facing job number without result version. Vacuum-table jobs use "В-<cutJobId>". */
+  /** Operator-facing job number without result version. Vacuum-table jobs use "В-<scoped number>". */
   displayNumber?: string;
   /** True when the current job/profile is vacuum-table routed. */
   isVacuum?: boolean;
@@ -228,6 +228,8 @@ export interface CutJobDto {
   textureDirection: CutTextureDirection;
   /** Unique detail material names in active job items. Uses per-detail sheet/material names, not job sheet override. */
   materialNames: string[];
+  /** MDF board linkage, populated on list reads when CNC/MDF schema is available. */
+  mdfBoardStatus?: CutJobMdfBoardStatusDto;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
@@ -258,6 +260,18 @@ export interface CutJobLinkedMdfPacketDto {
   machine: string | null;
   programName: string | null;
   itemCount: number;
+}
+
+export type CutJobMdfBoardState = 'created' | 'hidden' | 'not_created' | 'unknown';
+
+export interface CutJobMdfBoardStatusDto {
+  state: CutJobMdfBoardState;
+  reason: string;
+  activePacketCount: number;
+  hiddenPacketCount: number;
+  /** True when a single linked manual-SVG packet is missing the MDF-board marker and can be created safely. */
+  canCreateCard?: boolean;
+  packets: CutJobLinkedMdfPacketDto[];
 }
 
 export interface CutJobDeleteImpactDto {

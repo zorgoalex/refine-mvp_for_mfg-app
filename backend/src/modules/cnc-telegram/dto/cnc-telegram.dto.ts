@@ -239,12 +239,24 @@ export interface CncTelegramOrderCuttingSequencesResponseDto {
   sequences: CncTelegramOrderCuttingSequenceDto[];
 }
 
+export interface CncTelegramSkippedDuplicateSourceFileDto {
+  status: 'skipped';
+  sha256: string;
+  fileName: string | null;
+  cutJobId: number;
+  cutJobDisplayNumber: string | null;
+  cutResultId: number | null;
+  packetId: string | null;
+  note: string;
+}
+
 export interface CncTelegramIngestResponseDto {
   packet: CncTelegramPacketDto;
   requestId: string;
   auditId?: string;
   applied: boolean;
   ignoredStaleSourceVersion: boolean;
+  skippedDuplicateSourceFile?: CncTelegramSkippedDuplicateSourceFileDto;
 }
 
 export interface CncAutoCutStatusConfigureResponseDto {
@@ -278,6 +290,14 @@ export interface CncTelegramManualSvgUploadFileDto {
   sizeBytes: number;
   sha256: string;
   base64Content: string;
+}
+
+export interface CncTelegramSourceFileIdentityDto {
+  kind: CncTelegramManualSvgUploadFileKind;
+  fileName: string;
+  contentType?: string | null;
+  sizeBytes: number;
+  sha256: string;
 }
 
 export interface CncTelegramManualSvgTelegramSendDto {
@@ -364,6 +384,7 @@ export interface CncTelegramStructuredIngestDto {
   ocrEngine?: string | null;
   parserVersion?: string | null;
   svgImportMode?: CncTelegramSvgImportModeDto;
+  sourceFiles?: CncTelegramSourceFileIdentityDto[];
   cutLayout?: CncTelegramCutLayoutDto | null;
   items: Array<{
     sourceItemKey: string;

@@ -1,6 +1,6 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tag, Typography, message, theme } from 'antd';
+import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
@@ -96,6 +96,7 @@ import {
   filterJobsByStatus,
   formatCutJobDisplayNumber,
   formatGroupSummary,
+  isVacuumCutJobDisplayNumber,
   noSheetSpecMessage,
   parseIdCsv,
   parseJobQueryParam,
@@ -133,6 +134,11 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
   { value: 'bath_profiles', label: 'Профили ванны' },
 ];
 
+type CutJobKindTab = 'vacuum' | 'regular';
+
+const CUT_JOB_KIND_TAB_VACUUM: CutJobKindTab = 'vacuum';
+const CUT_JOB_KIND_TAB_REGULAR: CutJobKindTab = 'regular';
+
 const CUT_TEXTURE_DIRECTION_LABELS: Record<CutTextureDirection, string> = {
   vertical: 'вдоль полотна',
   horizontal: 'поперёк полотна',
@@ -145,6 +151,15 @@ const CUT_TEXTURE_DIRECTION_OPTIONS: Array<{ value: CutTextureDirection; label: 
 
 function cutTextureDirectionLabel(value: CutTextureDirection | null | undefined): string {
   return CUT_TEXTURE_DIRECTION_LABELS[value ?? 'none'] ?? CUT_TEXTURE_DIRECTION_LABELS.none;
+}
+
+function cutJobMatchesKindTab(
+  job: CutJobDto,
+  profiles: Parameters<typeof isVacuumCutJobDisplayNumber>[1],
+  tab: CutJobKindTab,
+): boolean {
+  const isVacuum = isVacuumCutJobDisplayNumber(job, profiles);
+  return tab === CUT_JOB_KIND_TAB_VACUUM ? isVacuum : !isVacuum;
 }
 
 const { Title, Text } = Typography;
@@ -389,6 +404,52 @@ function formatJobMaterialNames(materialNames: string[] | undefined): string {
   const names = (materialNames ?? []).map((name) => name.trim()).filter(Boolean);
   return names.length > 0 ? names.join(', ') : '—';
 }
+
+function cutJobMdfBoardExportValue(job: CutJobDto): string {
+  const status = job.mdfBoardStatus;
+  if (!status) return 'Неизвестно: backend не вернул состояние МДФ-доски';
+  const label = cutJobMdfBoardStatusLabel(status.state);
+  return `${label}: ${status.reason}`;
+}
+
+function cutJobMdfBoardStatusLabel(state: NonNullable<CutJobDto['mdfBoardStatus']>['state']): string {
+  if (state === 'created') return 'Создана';
+  if (state === 'hidden') return 'Скрыта';
+  if (state === 'unknown') return 'Неизвестно';
+  return 'Нет';
+}
+
+function cutJobMdfBoardStatusColor(state: NonNullable<CutJobDto['mdfBoardStatus']>['state']): string {
+  if (state === 'created') return 'green';
+  if (state === 'hidden') return 'orange';
+  if (state === 'unknown') return 'default';
+  return 'default';
+}
+
+function cutJobMdfBoardTooltip(status: CutJobDto['mdfBoardStatus']): string {
+  if (!status) return 'Backend не вернул состояние МДФ-доски для этого задания.';
+  const packets = status.packets
+    .map((packet) => {
+      const program = packet.programName ?? packet.externalPacketKey;
+      return `${packet.workday}: ${program} (${packet.itemCount} поз.)`;
+    })
+    .join('\n');
+  return packets ? `${status.reason}\n${packets}` : status.reason;
+}
+
+const CutJobMdfBoardCell: React.FC<{ job: CutJobDto }> = ({ job }) => {
+  const status = job.mdfBoardStatus;
+  const state = status?.state ?? 'unknown';
+  const reason = status?.reason ?? 'Backend не вернул состояние МДФ-доски.';
+  return (
+    <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{cutJobMdfBoardTooltip(status)}</span>}>
+      <span className="cut-job-mdf-board-cell">
+        <Tag color={cutJobMdfBoardStatusColor(state)}>{cutJobMdfBoardStatusLabel(state)}</Tag>
+        <Text type="secondary" className="cut-job-mdf-board-cell__reason">{reason}</Text>
+      </span>
+    </Tooltip>
+  );
+};
 
 function defaultCutOrderDateRange(now: Dayjs = dayjs()): CutOrderDateRange {
   return [now, now];
@@ -954,6 +1015,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [selected, setSelected] = useState<number[]>([]);
   const [previewName, setPreviewName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [creatingMdfBoardCard, setCreatingMdfBoardCard] = useState(false);
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
   // Auto-loaded small layout previews (preset 'thumb') for a ready job's sheets,
   // keyed `${cutGroupId}:${sheetIndex}`. thumbReqRef dedupes in-flight/done fetches.
@@ -1105,6 +1167,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [embeddedJobIds, setEmbeddedJobIds] = useState<Set<number> | null>(null);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
+  const [jobKindTab, setJobKindTab] = useState<CutJobKindTab>(CUT_JOB_KIND_TAB_REGULAR);
   const [profileFilter, setProfileFilter] = useState<CutJobProfileFilter>();
   const [showDeletedJobs, setShowDeletedJobs] = useState(false);
   const [jobSearch, setJobSearch] = useState('');
@@ -2123,6 +2186,25 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [applyPdfTemplateState, emitCutJobUpdate, job, loadJobs, handleError],
   );
 
+  const createMdfBoardCard = useCallback(async () => {
+    if (!job) return;
+    setBusy(true);
+    setCreatingMdfBoardCard(true);
+    try {
+      const updated = await cutApi.createMdfBoardCard(job.cutJobId);
+      setJob(updated);
+      applyPdfTemplateState(updated);
+      emitCutJobUpdate(updated, job);
+      message.success('Карточка файла станка создана на МДФ-доске');
+      await loadJobs();
+    } catch (error) {
+      handleError(error, 'Не удалось создать карточку файла станка для МДФ-доски');
+    } finally {
+      setCreatingMdfBoardCard(false);
+      setBusy(false);
+    }
+  }, [applyPdfTemplateState, emitCutJobUpdate, handleError, job, loadJobs]);
+
   const calculate = useCallback(async () => {
     if (!job) return;
     if (calcCommandRef.current?.cutJobId !== job.cutJobId) {
@@ -2585,6 +2667,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setJobSearch('');
     setOperationalSheetFilter(undefined);
     setOperationalFilmFilter(undefined);
+    setJobKindTab(CUT_JOB_KIND_TAB_REGULAR);
     setProfileFilter(undefined);
     setShowDeletedJobs(false);
     listFiltersRef.current = {};
@@ -2601,17 +2684,34 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     jobSearch.trim() ||
     operationalSheetFilter ||
     operationalFilmFilter ||
+    jobKindTab !== CUT_JOB_KIND_TAB_REGULAR ||
     profileFilter ||
     showDeletedJobs,
   );
+
+  const switchCutJobKindTab = useCallback((key: string) => {
+    const next = key === CUT_JOB_KIND_TAB_VACUUM ? CUT_JOB_KIND_TAB_VACUUM : CUT_JOB_KIND_TAB_REGULAR;
+    if (next === jobKindTab) return;
+    setJobKindTab(next);
+    setJob(null);
+    setSelectedResult(null);
+    setIsFrozenResultSelection(false);
+    applyPdfTemplateState(null);
+    setEligible(null);
+    setSelected([]);
+    resetSheetViews();
+  }, [applyPdfTemplateState, jobKindTab, resetSheetViews]);
 
   const filteredJobs = useMemo(() => {
     const statusFiltered = statusFilter === 'work'
       ? jobs.filter((candidate) => candidate.status === 'draft' || candidate.status === 'calculating')
       : filterJobsByStatus(jobs, statusFilter);
-    const profileFiltered = isEmbeddedOrder
+    const kindFiltered = isEmbeddedOrder
       ? statusFiltered
-      : filterJobsByProfile(statusFiltered, profileFilter);
+      : statusFiltered.filter((candidate) => cutJobMatchesKindTab(candidate, profiles, jobKindTab));
+    const profileFiltered = isEmbeddedOrder
+      ? kindFiltered
+      : filterJobsByProfile(kindFiltered, profileFilter);
     const scoped = !isEmbeddedOrder ? profileFiltered : profileFiltered.filter((candidate) =>
       embeddedJobIds?.has(candidate.cutJobId) ||
       candidate.items?.some((item) => item.orderId === embeddedOrderId),
@@ -2652,6 +2752,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     appliedJobOrderSearch,
     isEmbeddedOrder,
     jobSearch,
+    jobKindTab,
     jobs,
     operationalFilmFilter,
     operationalSheetFilter,
@@ -2686,13 +2787,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }), [jobs]);
   const exportJobs = useCallback(() => {
     const cells = [
-      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Текстура', 'Материал'],
+      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'МДФ-доска', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Текстура', 'Материал'],
       ...filteredJobs.map((candidate) => [
         formatCutJobDisplayNumber(candidate, profiles),
         formatCutJobCreatedDate(candidate.createdAt),
         candidate.name,
         cutJobStatusLabel(candidate.status),
         cutJobSourceLabel(candidate.source),
+        cutJobMdfBoardExportValue(candidate),
         candidate.totals.positions,
         cutJobOrderRefsForJob(candidate).map(cutJobOrderLabel).join(', '),
         candidate.totals.details,
@@ -2822,6 +2924,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         key: 'source',
         width: 100,
         render: (_: unknown, row: CutJobDto) => cutJobSourceLabel(row.source),
+      },
+      {
+        title: 'МДФ-доска',
+        key: 'mdfBoard',
+        width: 132,
+        render: (_: unknown, row: CutJobDto) => <CutJobMdfBoardCell job={row} />,
       },
       {
         title: 'Позиции',
@@ -3384,6 +3492,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       )}
     </Space>
   )) : undefined;
+  const jobCardExtra = job ? (
+    <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
+  ) : undefined;
 
   if (!can('cut.view')) {
     return <Alert type="error" message="Недостаточно прав для просмотра раскроя" showIcon />;
@@ -3796,6 +3907,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           </Space>
         ) : undefined}
       >
+        {!isEmbeddedOrder ? (
+          <Tabs
+            className="cut-job-kind-tabs"
+            size="small"
+            activeKey={jobKindTab}
+            onChange={switchCutJobKindTab}
+            items={[
+              { key: CUT_JOB_KIND_TAB_VACUUM, label: 'Ванны' },
+              { key: CUT_JOB_KIND_TAB_REGULAR, label: 'Раскрои' },
+            ]}
+          />
+        ) : null}
         {isOperational && !isEmbeddedOrder ? (
           <div className="cut-operational-table-toolbar">
             <div className="cut-operational-statuses" role="group" aria-label="Статус заданий">
@@ -3867,6 +3990,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 <span>
                   {candidate.status === 'ready' ? `${candidate.totals.sheets} листов` : 'Ожидает расчета'} · {formatArea(candidate.totals.area)}
                 </span>
+                <span className="cut-jobs-operational-list__mdf">
+                  МДФ-доска: {cutJobMdfBoardExportValue(candidate)}
+                </span>
               </button>
             ))}
           </div>
@@ -3898,12 +4024,29 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           className="cut-page-modern__job"
           size="small"
           title={isOperational && embeddedOrderId == null ? undefined : jobCardTitle}
-          extra={
-            isOperational && embeddedOrderId == null
-              ? undefined
-              : <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
-          }
+          extra={isOperational && embeddedOrderId == null ? undefined : jobCardExtra}
         >
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Tooltip title={cutJobMdfBoardTooltip(job.mdfBoardStatus)}>
+              <Button
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={() => void createMdfBoardCard()}
+                loading={creatingMdfBoardCard}
+                disabled={
+                  !canManage ||
+                  busy ||
+                  isArchivedJob ||
+                  job.status === 'calculating' ||
+                  job.mdfBoardStatus?.canCreateCard !== true
+                }
+                style={{ height: 'auto', minHeight: 32, whiteSpace: 'normal', textAlign: 'left' }}
+                data-testid="cut-job-create-mdf-board-card"
+              >
+                Создать карточку файла станка для МДФ-доски
+              </Button>
+            </Tooltip>
+          </Space>
           <div className="cut-job-overview">
             <aside className="cut-job-overview__history">
               <div

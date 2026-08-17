@@ -15,6 +15,18 @@ describe('label print document', () => {
     expect(html).toContain('max-height: 100vh');
   });
 
+  it('can append one blank label as the last print page', () => {
+    const html = buildLabelPrintDocument([
+      '<svg width="85mm" height="55mm"><text>1</text></svg>',
+      '<svg width="85mm" height="55mm"><text>2</text></svg>',
+    ], 'Бирки', { appendBlankPage: true });
+
+    expect(html.match(/<section class="label-print-page/g)).toHaveLength(3);
+    expect(html).toContain('aria-label="Пустая бирка"');
+    expect(html).toContain('label-print-page__inner--blank');
+    expect(html.indexOf('aria-label="Пустая бирка"')).toBeGreaterThan(html.indexOf('aria-label="Бирка 2"'));
+  });
+
   it('does not open print for an empty page list', () => {
     expect(printLabelSvgPages([])).toBe(false);
   });

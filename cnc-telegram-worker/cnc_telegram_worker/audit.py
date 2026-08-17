@@ -714,15 +714,29 @@ async def reconcile_pending_processing_attempts(
                 reconciled.append(audit.operations[operation["operationKey"]])
                 continue
             audit.defer_saved_processing_reconciliation(operation["operationKey"], message, error_message)
-            raise
+            print(
+                "Deferred CNC Telegram processing recovery after transient ERP ingest error "
+                f"externalPacketKey={packet.get('externalPacketKey')} "
+                f"sourceVersion={packet.get('source', {}).get('version')} "
+                f"error={error_message}",
+                flush=True,
+            )
+            continue
         response_packet = response.get("packet") if isinstance(response, dict) else None
+        skipped_duplicate = response_skipped_duplicate_source_file(response)
+        response_import_status = response_svg_cut_import_status(response, response_packet)
+        response_cut_job_id = response_svg_cut_job_id(response_packet, skipped_duplicate)
+        reason_code = "backend_duplicate_source_file" if skipped_duplicate else "backend_ingest_succeeded"
+        reason_message = (
+            sanitize_text(str(skipped_duplicate.get("note") or ""), 1000)
+            if skipped_duplicate else "ERP idempotently confirmed the assignment after worker restart"
+        )
         audit.finish_saved_operation(
-            operation["operationKey"], message, "succeeded", "backend_ingest_succeeded",
-            "ERP idempotently confirmed the assignment after worker restart",
+            operation["operationKey"], message, "succeeded", reason_code, reason_message,
             externalPacketKey=packet["externalPacketKey"],
             sourceVersion=str(packet["source"]["version"]),
             packetId=response_packet.get("packetId") if isinstance(response_packet, dict) else None,
-            cutJobId=str(response_packet.get("cutJobId")) if isinstance(response_packet, dict) and response_packet.get("cutJobId") is not None else None,
+            cutJobId=str(response_cut_job_id) if response_cut_job_id is not None else None,
             cutResultNo=response_packet.get("cutResultNo") if isinstance(response_packet, dict) else None,
             cuttingSequenceNo=response_packet.get("cuttingSequenceNo") if isinstance(response_packet, dict) else None,
             backendApplied=bool(response.get("applied")) if isinstance(response, dict) else None,
@@ -733,13 +747,77 @@ async def reconcile_pending_processing_attempts(
             }],
         )
         sequence_no = response_packet.get("cuttingSequenceNo") if isinstance(response_packet, dict) else None
-        if isinstance(sequence_no, int) and not isinstance(sequence_no, bool) and sequence_no > 0:
+        if (
+            response_allows_cutting_sequence_reply(response, response_packet)
+            and isinstance(sequence_no, int)
+            and not isinstance(sequence_no, bool)
+            and sequence_no > 0
+        ):
             state.assign_cutting_sequence_number(packet["externalPacketKey"], existing_number=sequence_no)
         state.mark_posted(
             packet["externalPacketKey"], payload_hash, source_version, source_fingerprint,
+            svg_cut_import_status=response_import_status,
+            cut_job_id=response_cut_job_id,
+            source_file_sha=packet_svg_source_sha(packet),
         )
         reconciled.append(audit.operations[operation["operationKey"]])
     return reconciled
+
+
+def response_skipped_duplicate_source_file(response: Any) -> dict[str, Any] | None:
+    if not isinstance(response, dict):
+        return None
+    skipped = response.get("skippedDuplicateSourceFile")
+    if isinstance(skipped, dict) and skipped.get("status") == "skipped":
+        return skipped
+    return None
+
+
+def response_allows_cutting_sequence_reply(response: Any, response_packet: Any) -> bool:
+    return response_skipped_duplicate_source_file(response) is None and response_svg_cut_imported(response_packet)
+
+
+def response_svg_cut_imported(response_packet: Any) -> bool:
+    return isinstance(response_packet, dict) and response_packet.get("svgCutImportStatus") == "imported"
+
+
+def response_svg_cut_import_status(response: Any, response_packet: Any) -> str | None:
+    if response_skipped_duplicate_source_file(response) is not None:
+        return "skipped"
+    if isinstance(response_packet, dict):
+        status = response_packet.get("svgCutImportStatus")
+        if isinstance(status, str):
+            return status
+    return None
+
+
+def response_svg_cut_job_id(response_packet: Any, skipped_duplicate: dict[str, Any] | None) -> int | None:
+    if skipped_duplicate is not None:
+        return positive_int(skipped_duplicate.get("cutJobId"))
+    if not isinstance(response_packet, dict):
+        return None
+    return positive_int(response_packet.get("svgCutJobId") or response_packet.get("cutJobId"))
+
+
+def positive_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
+def packet_svg_source_sha(packet: dict[str, Any]) -> str | None:
+    source_files = packet.get("sourceFiles")
+    if not isinstance(source_files, list):
+        return None
+    for source_file in source_files:
+        if (
+            isinstance(source_file, dict)
+            and source_file.get("kind") == "svg"
+            and isinstance(source_file.get("sha256"), str)
+            and source_file["sha256"]
+        ):
+            return source_file["sha256"]
+    return None
 
 
 def classify_message(message: Any) -> str:

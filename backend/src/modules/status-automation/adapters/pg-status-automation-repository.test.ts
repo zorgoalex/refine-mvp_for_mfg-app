@@ -7,6 +7,7 @@ import { getPermissionsForRole } from '../../../permissions/permissions';
 import {
   PgStatusAutomationRepository,
   listEnabledRulesForEvent,
+  listEnabledRulesForManualRefresh,
   loadOrderAutomationState,
 } from './pg-status-automation-repository';
 
@@ -36,6 +37,45 @@ describe('PgStatusAutomationRepository', () => {
     expect(query?.text).toMatch(/event_type = \$1/i);
     expect(query?.text).toMatch(/is_enabled\s*=\s*true/i);
     expect(query?.text).toMatch(/ORDER BY priority, id/i);
+  });
+
+  it('lists all enabled rules for manual refresh without an event filter', async () => {
+    const database = createDatabase({
+      responses: ({ text }) =>
+        text.includes('FROM status_automation_rules')
+          ? result([
+              ruleRow({ id: '2', event_type: 'order.updated', priority: '10' }),
+              ruleRow({ id: '3', event_type: 'payment.created', priority: '20' }),
+            ])
+          : result([]),
+    });
+
+    const rules = await listEnabledRulesForManualRefresh(database.tx);
+
+    expect(rules.map((rule) => rule.id)).toEqual([2, 3]);
+    const query = database.queries.find((entry) => entry.text.includes('FROM status_automation_rules'));
+    expect(query?.text).toMatch(/is_enabled\s*=\s*true/i);
+    expect(query?.text).not.toMatch(/event_type\s*=/i);
+    expect(query?.text).toMatch(/ORDER BY priority, id/i);
+  });
+
+  it('lists recent order ids for manual automation refresh from the order date cutoff', async () => {
+    const database = createDatabase({
+      responses: ({ text }) =>
+        text.includes('FROM orders') && text.includes('order_date >= $1::date')
+          ? result([{ order_id: '44' }, { order_id: '42' }])
+          : result([]),
+    });
+
+    const ids = await new PgStatusAutomationRepository(database.service)
+      .listRecentOrderIdsForAutomation('2026-06-17');
+
+    expect(ids).toEqual([44, 42]);
+    const query = database.queries.find((entry) => entry.text.includes('order_date >= $1::date'));
+    expect(query?.params).toEqual(['2026-06-17']);
+    expect(query?.text).toMatch(/delete_flag\s*=\s*false/i);
+    expect(query?.text).toMatch(/order_date <= CURRENT_DATE/i);
+    expect(query?.text).toMatch(/ORDER BY order_date DESC, order_id DESC/i);
   });
 
   it('creates a rule after validating the target status and audits in the same transaction', async () => {

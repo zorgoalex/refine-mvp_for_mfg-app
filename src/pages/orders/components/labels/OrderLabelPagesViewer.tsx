@@ -17,6 +17,7 @@ interface OrderLabelPagesViewerProps {
   printEnabled?: boolean;
   selectedIndex?: number | null;
   onSelectedIndexChange?: (index: number) => void;
+  appendBlankLabelOnPrint?: boolean;
 }
 
 export function clampLabelPageIndex(index: number, pageCount: number): number {
@@ -37,6 +38,7 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
   printEnabled = true,
   selectedIndex: controlledSelectedIndex,
   onSelectedIndexChange,
+  appendBlankLabelOnPrint = false,
 }) => {
   const isOperational = useOperationalUi();
   const [uncontrolledSelectedIndex, setUncontrolledSelectedIndex] = useState(0);
@@ -96,7 +98,7 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
 
   const runPrint = () => {
     const pages = printScope === 'current' && selectedSvg ? [selectedSvg] : svgPages;
-    const opened = printLabelSvgPages(pages, printTitle ?? title);
+    const opened = printLabelSvgPages(pages, printTitle ?? title, { appendBlankPage: appendBlankLabelOnPrint });
     if (!opened) {
       message.error('Не удалось открыть окно печати');
     }
@@ -446,7 +448,7 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
                 />
               </label>
               <Button onClick={() => {
-                const opened = printLabelSvgPages([selectedSvg], printTitle ?? title);
+                const opened = printLabelSvgPages([selectedSvg], printTitle ?? title, { appendBlankPage: appendBlankLabelOnPrint });
                 if (!opened) message.error('Не удалось открыть окно печати');
               }}>
                 Пробная печать
@@ -531,7 +533,7 @@ export const OrderLabelPagesViewer: React.FC<OrderLabelPagesViewerProps> = ({
                   icon={<PrinterOutlined />}
                   onClick={() => {
                     setPrintScope('current');
-                    const opened = printLabelSvgPages([selectedSvg], printTitle ?? title);
+                    const opened = printLabelSvgPages([selectedSvg], printTitle ?? title, { appendBlankPage: appendBlankLabelOnPrint });
                     if (!opened) message.error('Не удалось открыть окно печати');
                   }}
                 >

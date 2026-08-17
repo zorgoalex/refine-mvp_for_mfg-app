@@ -2,13 +2,14 @@ const SIDEBAR_COLLAPSED_STORAGE_PREFIX = 'erp.sidebar.collapsed.';
 
 type SidebarCollapsedStorageReader = Pick<Storage, 'getItem'>;
 type SidebarCollapsedStorageWriter = Pick<Storage, 'setItem'>;
+export type SidebarCollapsedUserId = string | number | null | undefined;
 
-export function sidebarCollapsedStorageKey(userId: string): string {
+export function sidebarCollapsedStorageKey(userId: string | number): string {
   return `${SIDEBAR_COLLAPSED_STORAGE_PREFIX}${userId}`;
 }
 
 export function loadSidebarCollapsed(
-  userId: string | null | undefined,
+  userId: SidebarCollapsedUserId,
   defaultCollapsed: boolean,
   storage: SidebarCollapsedStorageReader | undefined = globalThis.localStorage,
 ): boolean {
@@ -24,7 +25,7 @@ export function loadSidebarCollapsed(
 }
 
 export function saveSidebarCollapsed(
-  userId: string | null | undefined,
+  userId: SidebarCollapsedUserId,
   collapsed: boolean,
   storage: SidebarCollapsedStorageWriter | undefined = globalThis.localStorage,
 ): void {

@@ -512,7 +512,7 @@ const PDF_FIELD_CATALOG: PdfFieldCatalogItem[] = [
   { id: 'job.pdf_template', source: 'job', label: 'Шаблон PDF', category: 'Задание', type: 'string' },
   { id: 'job.texture_direction', source: 'job', label: 'Направление текстуры', category: 'Задание', type: 'string' },
   { id: 'cut.number', source: 'cut', label: 'Номер раскроя', category: 'Раскрой', type: 'string' },
-  { id: 'cut.current_version', source: 'cut', label: 'Текущий номер задания раскроя', category: 'Раскрой', type: 'string' },
+  { id: 'cut.current_version', source: 'cut', label: 'Текущая/актуальная версия Карты раскроя', category: 'Раскрой', type: 'string' },
   { id: 'group.number', source: 'group', label: 'Номер группы', category: 'Группа', type: 'number' },
   { id: 'group.material', source: 'group', label: 'Материал группы', category: 'Группа', type: 'string' },
   { id: 'group.film', source: 'group', label: 'Пленка группы', category: 'Группа', type: 'string' },

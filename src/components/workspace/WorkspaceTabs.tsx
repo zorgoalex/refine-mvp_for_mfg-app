@@ -1,7 +1,7 @@
 import React from 'react';
 import { Tabs, Modal } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useTabStore, computeNeighborPath } from '../../stores/tabStore';
+import { useTabStore, computeCloseTargetPath } from '../../stores/tabStore';
 import { DraggableModalWrapper } from '../DraggableModalWrapper';
 
 export const WorkspaceTabs: React.FC = () => {
@@ -15,8 +15,9 @@ export const WorkspaceTabs: React.FC = () => {
     if (action !== 'remove') return;
     const tab = tabs.find((t) => t.key === targetKey);
     const close = (discard?: boolean) => {
+      const closeTargetPath = computeCloseTargetPath(tabs, String(targetKey));
       closeTab(String(targetKey), discard ? { discard: true } : undefined);
-      if (targetKey === activeKey) navigate(computeNeighborPath(tabs, String(targetKey)));
+      if (targetKey === activeKey) navigate(closeTargetPath);
     };
     if (tab?.dirty) {
       Modal.confirm({

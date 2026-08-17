@@ -4,8 +4,7 @@ import { describe, it, expect } from 'vitest';
 const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
 const dp  = readFileSync(new URL('../../utils/dataProvider.ts', import.meta.url), 'utf8');
 const nav = readFileSync(new URL('../../utils/navigationPermissions.ts', import.meta.url), 'utf8');
-const sider = readFileSync(new URL('../../components/CustomSider.tsx', import.meta.url), 'utf8');
-const mobile = readFileSync(new URL('../../components/MobileSiderDrawer.tsx', import.meta.url), 'utf8');
+const menuConfig = readFileSync(new URL('../../utils/navigationMenuConfig.ts', import.meta.url), 'utf8');
 const create = readFileSync(new URL('./create.tsx', import.meta.url), 'utf8');
 const show = readFileSync(new URL('./show.tsx', import.meta.url), 'utf8');
 const edit = readFileSync(new URL('./edit.tsx', import.meta.url), 'utf8');
@@ -24,8 +23,7 @@ describe('sheet-materials resource wiring', () => {
   it('nav-permission mapped to sheet_materials.view', () => expect(nav).toMatch(/sheet_material_types:\s*\[\s*['"]sheet_materials\.view['"]\s*\]/));
 
   it('desktop + mobile nav both place it under Материалы', () => {
-    expect(sider).toMatch(/sheet_material_types:\s*["']Материалы["']/);
-    expect(mobile).toMatch(/sheet_material_types:\s*["']Материалы["']/);
+    expect(menuConfig).toMatch(/sheet_material_types:\s*['"]Материалы['"]/);
   });
 
   it('tab label resolves (path seg → resource → label)', async () => {

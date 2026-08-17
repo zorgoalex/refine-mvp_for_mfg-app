@@ -1,5 +1,5 @@
 import { Table } from '../../../ui/tooltipDelay';
-import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import {
   Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Typography, Upload, message } from 'antd';
@@ -193,6 +193,7 @@ export function StatusAutomationConfig() {
   const [form, setForm] = useState<StatusAutomationFormValues>(emptyForm());
   const [saving, setSaving] = useState(false);
   const [rulesImporting, setRulesImporting] = useState(false);
+  const [refreshingRecentOrders, setRefreshingRecentOrders] = useState(false);
   const [rulesImportReport, setRulesImportReport] =
     useState<StatusAutomationRulesImportReport | null>(null);
   const [autoCutStatusSaving, setAutoCutStatusSaving] = useState(false);
@@ -664,6 +665,25 @@ export function StatusAutomationConfig() {
     }
   };
 
+  const handleRefreshRecentOrders = async () => {
+    setRefreshingRecentOrders(true);
+    try {
+      const result = await statusAutomationApi.refreshRecentOrders();
+      const text =
+        `Автостатусы проверены: заказов ${result.processedOrderCount}/${result.orderCount}, `
+        + `действий ${result.totals.executedActionCount}`;
+      if (result.failedOrderCount > 0) {
+        message.warning(`${text}. Ошибок: ${result.failedOrderCount}`);
+      } else {
+        message.success(text);
+      }
+    } catch (error) {
+      message.error(errorText(error, 'Не удалось запустить проверку автостатусов'));
+    } finally {
+      setRefreshingRecentOrders(false);
+    }
+  };
+
   const handleAutoCutStatusToggle = async (enabled: boolean) => {
     if (enabled && !cutProductionStatusAvailable) {
       message.warning('Сначала добавьте активный производственный статус «Распилен»');
@@ -924,6 +944,24 @@ export function StatusAutomationConfig() {
           >
             Выгрузить JSON
           </Button>
+          {canManage && (
+            <Popconfirm
+              title="Обновить автостатусы"
+              description="Будут проверены все заказы за последние два месяца через все включённые правила."
+              okText="Обновить"
+              cancelText="Отмена"
+              onConfirm={() => void handleRefreshRecentOrders()}
+              disabled={refreshingRecentOrders}
+            >
+              <Button
+                icon={<ReloadOutlined />}
+                loading={refreshingRecentOrders}
+                disabled={refreshingRecentOrders || loading || eventTypes.length === 0}
+              >
+                Обновить
+              </Button>
+            </Popconfirm>
+          )}
           {canManage && (
             <Upload
               accept=".json,application/json"

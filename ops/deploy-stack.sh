@@ -173,5 +173,13 @@ up_args=(up -d)
 log "Starting stack"
 docker_compose "${up_args[@]}"
 
+if compose_profile_enabled cnc-telegram; then
+  worker_up_args=(up -d)
+  [[ "$BUILD" == "1" ]] && worker_up_args+=(--build)
+  worker_up_args+=(--force-recreate cnc-telegram-worker)
+  log "Recreating CNC Telegram worker after stack update"
+  docker_compose "${worker_up_args[@]}"
+fi
+
 log "Current services"
 docker_compose ps

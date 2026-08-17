@@ -1604,6 +1604,14 @@ html {
   overflow-y: auto;
 }
 
+.cut-job-kind-tabs {
+  margin-bottom: 8px;
+}
+
+.cut-job-kind-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
 .cut-jobs-table .ant-table-thead > tr > th {
   position: sticky !important;
   top: 0;
@@ -1659,6 +1667,28 @@ html {
   line-height: 1.265;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell {
+  display: grid;
+  max-width: 132px;
+  justify-items: center;
+  gap: 2px;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell .ant-tag {
+  margin-inline-end: 0;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell__reason {
+  display: -webkit-box;
+  max-width: 124px;
+  overflow: hidden;
+  font-size: 0.9em;
+  line-height: 1.15;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .cut-jobs-table .cut-jobs-actions {

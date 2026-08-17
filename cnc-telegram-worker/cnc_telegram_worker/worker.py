@@ -398,7 +398,7 @@ class CncTelegramWorker:
                     path = write_manual_svg_send_file(send_dir, file_item, index)
                     kind = str(file_item.get("kind") or "").lower() if isinstance(file_item, dict) else ""
                     send_files.append(ManualSvgSendFile(kind=kind, path=path))
-                message_text = sanitize_text(str(task.get("messageText") or ""), 4096) or None
+                message_text = manual_svg_send_message_text(task)
                 sent = await send_manual_svg_upload_files(client, entity, send_files, message_text)
                 if audit_spool is not None:
                     try:
@@ -410,6 +410,8 @@ class CncTelegramWorker:
                             getattr(self.config, "can_send_manual_svg_uploads", getattr(self.config, "can_write_chat", False)),
                             self.config.business_timezone,
                             str(task.get("packetId") or "") or None,
+                            str(task.get("cutJobId") or "") or None,
+                            str(task.get("cutJobDisplayNumber") or "") or None,
                             sent,
                         )
                         await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
@@ -652,12 +654,10 @@ class CncTelegramWorker:
         try:
             cutting_sequence_no = group.cutting_sequence_no
             sequence_from_telegram = cutting_sequence_no is not None
-            if cutting_sequence_no is not None:
-                self.state.assign_cutting_sequence_number(external_key, existing_number=cutting_sequence_no)
-                self.state.mark_cutting_sequence_replied(external_key)
             pending_sequence_reply = (
                 self.config.can_write_chat
                 and not refresh_imported
+                and not sequence_from_telegram
                 and self.state.cutting_sequence_number(external_key) is not None
                 and not self.state.cutting_sequence_replied(external_key)
             )
@@ -704,6 +704,9 @@ class CncTelegramWorker:
                         mark_ignored_group_attachments(audit, group, "SVG не обработан: Telegram не вернул файл")
                         audit.finish_operation(audit_operation, group.vector_message, "failed", "svg_download_failed", "Telegram не вернул файл SVG")
                 return "skipped"
+            source_files: list[dict[str, Any]] = [
+                source_file_identity(vector_path, group.vector_message, "svg"),
+            ]
             svg_validation_mode = getattr(self.config, "svg_validation_mode", "lenient")
             parsed_layout = parse_svg_cut_layout(vector_path, mode=svg_validation_mode)
             cut_layout = layout_to_dict(parsed_layout)
@@ -739,6 +742,7 @@ class CncTelegramWorker:
                             )
                     raise
                 if gcode_path is not None:
+                    source_files.append(source_file_identity(gcode_path, group.gcode_message, "gcode"))
                     try:
                         gcode_text = gcode_path.read_text(encoding="utf-8", errors="replace")
                         filename = message_filename(group.gcode_message) or gcode_path.name
@@ -809,6 +813,7 @@ class CncTelegramWorker:
                 "validationMode": svg_validation_mode,
                 "refreshImported": refresh_imported,
             }
+            packet["sourceFiles"] = source_files
             payload_hash = canonical_payload_hash(packet)
             version = self.state.next_version(packet["externalPacketKey"], payload_hash)
             if dry_run:
@@ -825,6 +830,7 @@ class CncTelegramWorker:
                 and not refresh_imported
                 and not sequence_from_telegram
                 and not pending_sequence_reply
+                and self.state.posted_packet_matches(packet["externalPacketKey"], payload_hash, version.source_version)
             ):
                 if audit and audit_operation:
                     with audit.spool.transaction():
@@ -882,12 +888,20 @@ class CncTelegramWorker:
                         audit.defer_processing_reconciliation(audit_operation, group.vector_message, error_message)
                 raise
             response_packet = response.get("packet") if isinstance(response, dict) else None
+            skipped_duplicate = response_skipped_duplicate_source_file(response)
+            response_import_status = response_svg_cut_import_status(response, response_packet)
+            response_cut_job_id = response_svg_cut_job_id(response_packet, skipped_duplicate)
             if audit and audit_operation:
+                reason_code = "backend_duplicate_source_file" if skipped_duplicate else "backend_ingest_succeeded"
+                reason_message = (
+                    sanitize_text(str(skipped_duplicate.get("note") or ""), 1000)
+                    if skipped_duplicate else "Задание принято ERP"
+                )
                 audit.finish_operation(
-                    audit_operation, group.vector_message, "succeeded", "backend_ingest_succeeded", "Задание принято ERP",
+                    audit_operation, group.vector_message, "succeeded", reason_code, reason_message,
                     externalPacketKey=packet["externalPacketKey"], sourceVersion=str(version.source_version),
                     packetId=response_packet.get("packetId") if isinstance(response_packet, dict) else None,
-                    cutJobId=str(response_packet.get("cutJobId")) if isinstance(response_packet, dict) and response_packet.get("cutJobId") is not None else None,
+                    cutJobId=str(response_cut_job_id) if response_cut_job_id is not None else None,
                     cutResultNo=response_packet.get("cutResultNo") if isinstance(response_packet, dict) else None,
                     cuttingSequenceNo=response_packet.get("cuttingSequenceNo") if isinstance(response_packet, dict) else None,
                     backendApplied=bool(response.get("applied")) if isinstance(response, dict) else None,
@@ -902,8 +916,15 @@ class CncTelegramWorker:
                 if isinstance(response_packet, dict)
                 else None
             )
-            if isinstance(response_sequence_no, int) and not isinstance(response_sequence_no, bool) and response_sequence_no > 0:
+            if (
+                response_allows_cutting_sequence_reply(response, response_packet)
+                and isinstance(response_sequence_no, int)
+                and not isinstance(response_sequence_no, bool)
+                and response_sequence_no > 0
+            ):
                 self.state.assign_cutting_sequence_number(external_key, existing_number=response_sequence_no)
+                if sequence_from_telegram and cutting_sequence_no == response_sequence_no:
+                    self.state.mark_cutting_sequence_replied(external_key)
                 if (
                     self.config.can_write_chat
                     and not refresh_imported
@@ -957,6 +978,9 @@ class CncTelegramWorker:
                 payload_hash,
                 version.source_version,
                 source_fingerprint,
+                svg_cut_import_status=response_import_status,
+                cut_job_id=response_cut_job_id,
+                source_file_sha=source_files[0].get("sha256") if source_files else None,
             )
             applied = response.get("applied")
             print(f"posted {packet['externalPacketKey']} v{version.source_version} applied={applied}", flush=True)
@@ -1371,6 +1395,9 @@ def apply_known_cutting_sequence_state(
         if not state.cutting_sequence_replied(external_key):
             updated.append(group)
             continue
+        if not state.imported_svg_cut_job_confirmed(external_key):
+            updated.append(group)
+            continue
         number = state.cutting_sequence_number(external_key)
         updated.append(replace(group, cutting_sequence_no=number) if number is not None else group)
     return updated
@@ -1423,6 +1450,60 @@ async def send_manual_svg_upload_files(
     return sent_messages
 
 
+def response_svg_cut_imported(response_packet: Any) -> bool:
+    return isinstance(response_packet, dict) and response_packet.get("svgCutImportStatus") == "imported"
+
+
+def response_skipped_duplicate_source_file(response: Any) -> dict[str, Any] | None:
+    if not isinstance(response, dict):
+        return None
+    skipped = response.get("skippedDuplicateSourceFile")
+    if isinstance(skipped, dict) and skipped.get("status") == "skipped":
+        return skipped
+    return None
+
+
+def response_allows_cutting_sequence_reply(response: Any, response_packet: Any) -> bool:
+    return response_skipped_duplicate_source_file(response) is None and response_svg_cut_imported(response_packet)
+
+
+def response_svg_cut_import_status(response: Any, response_packet: Any) -> str | None:
+    if response_skipped_duplicate_source_file(response) is not None:
+        return "skipped"
+    if isinstance(response_packet, dict):
+        status = response_packet.get("svgCutImportStatus")
+        if isinstance(status, str):
+            return status
+    return None
+
+
+def response_svg_cut_job_id(response_packet: Any, skipped_duplicate: dict[str, Any] | None) -> int | None:
+    if skipped_duplicate is not None:
+        return positive_int(skipped_duplicate.get("cutJobId"))
+    if not isinstance(response_packet, dict):
+        return None
+    return positive_int(response_packet.get("svgCutJobId") or response_packet.get("cutJobId"))
+
+
+def positive_int(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
+def manual_svg_send_message_text(task: Any) -> str:
+    if not isinstance(task, dict):
+        raise RuntimeError("manual SVG Telegram send task is invalid")
+    display_number = sanitize_text(str(task.get("cutJobDisplayNumber") or ""), 80)
+    if not display_number:
+        raise RuntimeError("manual SVG Telegram send task has no real cut job display number")
+    number_line = f"Задание №{display_number}"
+    user_text = sanitize_text(str(task.get("messageText") or ""), 4096)
+    if user_text:
+        return sanitize_text(f"{number_line}\n{user_text}", 4096)
+    return number_line
+
+
 def record_manual_svg_sent_messages(
     audit_spool: AuditSpool,
     chat_id: str,
@@ -1431,6 +1512,8 @@ def record_manual_svg_sent_messages(
     can_write_chat: bool,
     business_timezone: Any,
     packet_id: str | None,
+    cut_job_id: str | None,
+    cut_job_display_number: str | None,
     sent_items: list[ManualSvgSentItem],
 ) -> None:
     valid_items = [item for item in sent_items if manual_svg_sent_message_id(item.message) is not None]
@@ -1452,6 +1535,8 @@ def record_manual_svg_sent_messages(
             item.message,
             "telegram_reply",
             packetId=packet_id,
+            cutJobId=cut_job_id,
+            cutJobDisplayNumber=cut_job_display_number,
             replyText=message_text(item.message) or None,
             sentTelegramMessageId=message_id,
         )
@@ -1462,6 +1547,8 @@ def record_manual_svg_sent_messages(
             "reply_send_succeeded",
             reason_message,
             packetId=packet_id,
+            cutJobId=cut_job_id,
+            cutJobDisplayNumber=cut_job_display_number,
             replyText=message_text(item.message) or None,
             sentTelegramMessageId=message_id,
         )
@@ -1497,6 +1584,33 @@ async def download_media(message: Any, run_dir: Path, prefix: str) -> Path | Non
     target = run_dir / f"{prefix}-{int(message.id)}{suffix}"
     result = await message.download_media(file=str(target))
     return Path(result) if result else None
+
+
+def source_file_identity(path: Path, message: Any, kind: str) -> dict[str, Any]:
+    return {
+        "kind": kind,
+        "fileName": message_filename(message) or path.name,
+        "contentType": message_content_type(message, path),
+        "sizeBytes": path.stat().st_size,
+        "sha256": file_sha256(path),
+    }
+
+
+def message_content_type(message: Any, path: Path) -> str | None:
+    file = getattr(message, "file", None)
+    mime_type = getattr(file, "mime_type", None)
+    if isinstance(mime_type, str) and mime_type.strip():
+        return mime_type.strip()
+    guessed, _encoding = mimetypes.guess_type(path.name)
+    return guessed
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def write_manual_svg_send_file(send_dir: Path, file_item: Any, index: int) -> Path:

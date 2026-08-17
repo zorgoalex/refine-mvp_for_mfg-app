@@ -99,7 +99,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
     const verifyFn = scriptText.slice(verifyStart, verifyEnd);
-    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\)/);
+    expect(verifyFn).toMatch(/\|097_\*\|098_\*\|099_\*\|100_\*\|101_\*\|102_\*\|103_\*\|104_\*\|105_\*\|106_\*\|107_\*\|108_\*\|109_\*\|110_\*\|111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\)/);
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
@@ -324,6 +324,18 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "obj_description(oid, 'pg_constraint') LIKE 'mdf-board-manual-moves-v2:%'",
     ]) expect(migration118Probe).toContain(marker);
 
+    const migration133Probe = probeFn.slice(
+      probeFn.indexOf('133_cut_job_split_display_numbers*'),
+      probeFn.indexOf('119_cnc_manual_svg_comment_presets*'),
+    );
+    for (const marker of [
+      'q_idx uq_cut_job_source_display_number',
+      "LIKE 'Operator-facing cut job number. Regular jobs use numeric text;%'",
+      "NULLIF(btrim(j.source_display_number), '') ~ '^[0-9]+$'",
+      "profile.params->>'layout_mode' = 'vacuum_table'",
+      "g.summary->>'engine_used' = 'vacuum_table'",
+    ]) expect(migration133Probe).toContain(marker);
+
     const migration125Probe = probeFn.slice(
       probeFn.indexOf('125_order_hdf_details*'),
       probeFn.indexOf('*) return 2'),
@@ -362,7 +374,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)",
     ]) expect(migration125Probe).toContain(marker);
 
-    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\)/);
+    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\|132_\*\|133_\*\)/);
   });
 });
 

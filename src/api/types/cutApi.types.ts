@@ -242,7 +242,7 @@ export type CutTextureDirection = 'vertical' | 'horizontal' | 'none';
 
 export interface CutJobDto {
   cutJobId: number;
-  /** Operator-facing job number without result version. Vacuum-table jobs use "В-<cutJobId>". */
+  /** Operator-facing job number without result version. Vacuum-table jobs use "В-<scoped number>". */
   displayNumber?: string | null;
   isVacuum?: boolean | null;
   name: string;
@@ -271,6 +271,8 @@ export interface CutJobDto {
   textureDirection: CutTextureDirection;
   /** Unique per-detail material names in this job (not the per-job sheet override). */
   materialNames: string[];
+  /** MDF board linkage, populated on list reads when the backend can inspect CNC packets. */
+  mdfBoardStatus?: CutJobMdfBoardStatus;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
@@ -303,6 +305,18 @@ export interface CutJobLinkedMdfPacket {
   machine: string | null;
   programName: string | null;
   itemCount: number;
+}
+
+export type CutJobMdfBoardState = 'created' | 'hidden' | 'not_created' | 'unknown';
+
+export interface CutJobMdfBoardStatus {
+  state: CutJobMdfBoardState;
+  reason: string;
+  activePacketCount: number;
+  hiddenPacketCount: number;
+  /** True when a single linked manual-SVG packet is missing the MDF-board marker and can be created safely. */
+  canCreateCard?: boolean;
+  packets: CutJobLinkedMdfPacket[];
 }
 
 export interface CutJobDeleteImpact {

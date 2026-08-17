@@ -96,6 +96,23 @@ export class StatusAutomationController {
     return this.service.listEventTypes(this.requireCurrentUser(request), requireRequestId(request));
   }
 
+  @ApiResponse({ status: 200, description: 'Recent orders were checked by enabled status automation rules' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiOperation({
+    operationId: 'refreshRecentOrdersStatusAutomation',
+    summary: 'Force-check recent orders by all enabled status automation rules',
+  })
+  @Post('status-automation/refresh-recent-orders')
+  @HttpCode(200)
+  @RequirePermissions('status_automation.manage')
+  async refreshRecentOrders(@Req() request: RequestWithCurrentUser) {
+    return this.service.refreshRecentOrders(
+      this.requireCurrentUser(request),
+      requireRequestId(request),
+    );
+  }
+
   private requireCurrentUser(request: RequestWithCurrentUser) {
     if (!request.user) {
       throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');

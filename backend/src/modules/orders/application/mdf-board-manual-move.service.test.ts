@@ -6,6 +6,7 @@ import type { MdfBoardManualMoveRepositoryPort } from './mdf-board-manual-move.t
 
 vi.mock('@nestjs/common', () => ({
   Injectable: () => () => undefined,
+  Optional: () => () => undefined,
 }));
 
 describe('MdfBoardManualMoveService', () => {

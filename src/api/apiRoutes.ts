@@ -112,6 +112,7 @@ export const apiRoutes = {
     filmOptions: backendApiPath('/cut-jobs/film-options'),
     eligibleDetailsPreview: backendApiPath('/cut-jobs/eligible-details'),
     byId: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}`),
+    mdfBoardCard: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/mdf-board-card`),
     deleteImpact: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/delete-impact`),
     results: (cutJobId: number) => backendApiPath(`/cut-jobs/${cutJobId}/results`),
     result: (cutJobId: number, resultNo: number) => backendApiPath(`/cut-jobs/${cutJobId}/results/${resultNo}`),
@@ -286,6 +287,7 @@ export const apiRoutes = {
     rules: backendApiPath('/status-automation/rules'),
     ruleById: (ruleId: number) => backendApiPath(`/status-automation/rules/${ruleId}`),
     eventTypes: backendApiPath('/status-automation/event-types'),
+    refreshRecentOrders: backendApiPath('/status-automation/refresh-recent-orders'),
   },
   groups: groupsRoutes,
   projects: {

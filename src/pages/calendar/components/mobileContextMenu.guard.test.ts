@@ -22,7 +22,7 @@ describe('calendar adaptive context menu', () => {
   it('uses the compact half-width menu on phone and tablet', () => {
     expect(boardSource).toContain('useDeviceTier');
     expect(boardSource).toContain('isTabletTier');
-    expect(boardSource).toContain('const compactContextMenu = isMobile || isTabletContextMenu');
+    expect(boardSource).toContain('const compactContextMenu = isMobile || isTabletLayout');
     expect(boardSource).toContain('compact={contextMenu.compact}');
     expect(mobileCss).toContain('.calendar-context-menu--compact');
     expect(mobileCss).toContain('width: calc((100vw - 16px) / 2) !important;');

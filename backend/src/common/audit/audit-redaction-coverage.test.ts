@@ -17,6 +17,9 @@ const ALLOWLIST: Record<string, number> = {
   // 2 = delete + restore audit writers (зеркальные, payload без чувствительных
   // полей: orderId/orderName/deleteFlag/deletedAt/deletedBy/version)
   'src/modules/orders/adapters/pg-order-transaction-manager.ts': 2,
+  // Permissions matrix writes a sanitized role/permission diff in the same
+  // transaction as role_permissions/role_policy_scopes updates.
+  'src/permissions/permissions.service.ts': 1,
   'src/modules/deadlines/adapters/pg-deadline-repository.ts': 2,
 };
 

@@ -14,6 +14,7 @@ vi.mock('@nestjs/common', () => ({
   Get: () => () => undefined,
   Inject: () => () => undefined,
   Injectable: () => () => undefined,
+  Optional: () => () => undefined,
   Param: () => () => undefined,
   Put: () => () => undefined,
   Req: () => () => undefined,

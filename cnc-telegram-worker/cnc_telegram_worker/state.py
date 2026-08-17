@@ -21,9 +21,18 @@ class StateStore:
 
     def next_version(self, external_packet_key: str, payload_hash: str) -> VersionDecision:
         packet = self._state.setdefault("packets", {}).get(external_packet_key)
-        if isinstance(packet, dict) and packet.get("payloadHash") == payload_hash:
+        if (
+            isinstance(packet, dict)
+            and packet.get("payloadHash") == payload_hash
+            and self._has_terminal_svg_cut_import_status(packet)
+        ):
             return VersionDecision(source_version=int(packet.get("sourceVersion", 1)), changed=False)
-        previous = int(packet.get("sourceVersion", 0)) if isinstance(packet, dict) else 0
+        previous = 0
+        if isinstance(packet, dict):
+            previous = max(
+                coerce_positive_int(packet.get("sourceVersion")),
+                coerce_positive_int(packet.get("lastSkippedSourceVersion")),
+            )
         return VersionDecision(source_version=previous + 1, changed=True)
 
     def cutting_sequence_number(self, external_packet_key: str) -> int | None:
@@ -79,6 +88,7 @@ class StateStore:
             isinstance(packet, dict)
             and packet.get("sourceFingerprint") == source_fingerprint
             and isinstance(packet.get("payloadHash"), str)
+            and self._has_terminal_svg_cut_import_status(packet)
         )
 
     def posted_packet_matches(
@@ -93,6 +103,7 @@ class StateStore:
         return (
             packet.get("payloadHash") == payload_hash
             and packet.get("sourceVersion") == source_version
+            and self._has_terminal_svg_cut_import_status(packet)
         )
 
     def mark_posted(
@@ -101,17 +112,46 @@ class StateStore:
         payload_hash: str,
         source_version: int,
         source_fingerprint: str | None = None,
+        svg_cut_import_status: str | None = None,
+        cut_job_id: int | None = None,
+        source_file_sha: str | None = None,
     ) -> None:
         existing = self._state.setdefault("packets", {}).get(external_packet_key)
         packet = dict(existing) if isinstance(existing, dict) else {}
-        packet.update({
-            "payloadHash": payload_hash,
-            "sourceFingerprint": source_fingerprint,
-            "sourceVersion": source_version,
-            "postedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        })
+        posted_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        if svg_cut_import_status == "skipped":
+            packet.pop("payloadHash", None)
+            packet.pop("sourceVersion", None)
+            packet["sourceFingerprint"] = source_fingerprint
+            packet["lastSkippedPayloadHash"] = payload_hash
+            packet["lastSkippedSourceVersion"] = source_version
+            packet["postedAt"] = posted_at
+        else:
+            packet.update({
+                "payloadHash": payload_hash,
+                "sourceFingerprint": source_fingerprint,
+                "sourceVersion": source_version,
+                "postedAt": posted_at,
+            })
+        if svg_cut_import_status in {"imported", "skipped", "needs_review", "none"}:
+            packet["svgCutImportStatus"] = svg_cut_import_status
+            if svg_cut_import_status == "skipped":
+                packet.pop("cuttingSequenceNumber", None)
+                packet.pop("cuttingSequenceReplied", None)
+        if cut_job_id is not None and cut_job_id > 0:
+            packet["cutJobId"] = cut_job_id
+        if isinstance(source_file_sha, str) and source_file_sha:
+            packet["sourceFileSha256"] = source_file_sha
         self._state["packets"][external_packet_key] = packet
         self._write()
+
+    @staticmethod
+    def _has_terminal_svg_cut_import_status(packet: dict[str, Any]) -> bool:
+        return packet.get("svgCutImportStatus") == "imported"
+
+    def imported_svg_cut_job_confirmed(self, external_packet_key: str) -> bool:
+        packet = self._state.setdefault("packets", {}).get(external_packet_key)
+        return isinstance(packet, dict) and self._has_terminal_svg_cut_import_status(packet)
 
     def _next_cutting_sequence_number(self) -> int:
         sequence = self._state.setdefault("cuttingSequence", {})
@@ -145,3 +185,11 @@ class StateStore:
         tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp_path.write_text(json.dumps(self._state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(tmp_path, self.path)
+
+
+def coerce_positive_int(value: Any) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0

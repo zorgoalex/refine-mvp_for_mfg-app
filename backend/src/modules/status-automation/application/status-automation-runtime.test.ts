@@ -10,6 +10,7 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   listEnabledRulesForEvent: vi.fn(),
+  listEnabledRulesForManualRefresh: vi.fn(),
   loadOrderAutomationState: vi.fn(),
   changeOrderStatusFromAutomationInTransaction: vi.fn(),
   changeProductionStatusFromAutomationInTransaction: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../adapters/pg-status-automation-repository', () => ({
   listEnabledRulesForEvent: mocks.listEnabledRulesForEvent,
+  listEnabledRulesForManualRefresh: mocks.listEnabledRulesForManualRefresh,
   loadOrderAutomationState: mocks.loadOrderAutomationState,
 }));
 
@@ -33,6 +35,7 @@ vi.mock('../../../common/audit/audit.service', () => ({
 }));
 
 import {
+  evaluateAllStatusAutomationRulesForOrder,
   evaluateMdfBoardColumnAutomation,
   evaluateMdfOrderMachineFilesPresentAutomation,
   evaluateStatusAutomation,
@@ -44,6 +47,7 @@ describe('evaluateStatusAutomation', () => {
     process.env.BACKEND_STATUS_AUTOMATION = 'true';
     mocks.record.mockResolvedValue('automation-audit-id');
     mocks.loadOrderAutomationState.mockResolvedValue(makeState());
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([]);
   });
 
   it('returns before querying when the feature flag is off', async () => {
@@ -314,6 +318,54 @@ describe('evaluateStatusAutomation', () => {
 
     expect(mocks.record).not.toHaveBeenCalled();
     expect(mocks.changeOrderStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('force-checks all enabled rules for one order even when the runtime flag is off', async () => {
+    process.env.BACKEND_STATUS_AUTOMATION = 'false';
+    mocks.listEnabledRulesForManualRefresh.mockResolvedValue([
+      makeRule({ id: 10, eventType: 'order.created' }),
+      makeRule({
+        id: 20,
+        eventType: 'payment.created',
+        actionType: 'change_production_status',
+        targetStatusId: 4,
+        conditions: { paidShareGte: 0 },
+      }),
+    ]);
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({
+      status: 'skipped',
+      skipReason: 'same_status',
+    });
+    mocks.changeProductionStatusFromAutomationInTransaction.mockResolvedValue({
+      status: 'executed',
+      auditId: 'production-audit-id',
+    });
+
+    await expect(evaluateAllStatusAutomationRulesForOrder(tx(), {
+      orderId: 100,
+      actor: currentUser(),
+      requestId: 'manual-request-1',
+      sourceIdempotencyKey: 'manual-key-1',
+    })).resolves.toMatchObject({
+      orderId: 100,
+      orderFound: true,
+      evaluatedRuleCount: 2,
+      matchedRuleCount: 2,
+      executedActionCount: 1,
+      skippedActionCount: 1,
+    });
+
+    expect(mocks.listEnabledRulesForEvent).not.toHaveBeenCalled();
+    expect(mocks.listEnabledRulesForManualRefresh).toHaveBeenCalledWith(expect.anything());
+    expect(mocks.changeProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      100,
+      4,
+      expect.objectContaining({
+        eventType: 'payment.created',
+        outboxIdempotencyKey: 'manual-key-1:manual-payment.created:order-100:automation-20:order-100',
+      }),
+    );
   });
 });
 

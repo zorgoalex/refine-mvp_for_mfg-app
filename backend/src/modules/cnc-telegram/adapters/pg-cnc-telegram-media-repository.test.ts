@@ -179,6 +179,8 @@ describe('PgCncTelegramMediaRepository', () => {
           return { rows: [{
             request_id: manualSvgSendRequestId(),
             packet_id: packetId(),
+            cut_job_id: 212,
+            cut_job_display_number: '67',
             message_text: 'Фрезы для ХДФ: 8',
             attempt_count: 1,
             files_json: [manualSvgClaimFile()],
@@ -197,6 +199,8 @@ describe('PgCncTelegramMediaRepository', () => {
     })).resolves.toEqual([{
       requestId: manualSvgSendRequestId(),
       packetId: packetId(),
+      cutJobId: 212,
+      cutJobDisplayNumber: '67',
       messageText: 'Фрезы для ХДФ: 8',
       attempt: 1,
       files: [manualSvgClaimFile()],
@@ -213,6 +217,11 @@ describe('PgCncTelegramMediaRepository', () => {
     expect(queries[2]?.text).toContain("sent_message_ids_json='[]'::jsonb");
     expect(queries[3]?.params).toEqual([5]);
     expect(queries[3]?.text).toContain("WHERE request.status='pending'");
+    expect(queries[3]?.text).toContain('JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id');
+    expect(queries[3]?.text).toContain('JOIN cut_job svg_job ON svg_job.cut_job_id=packet.svg_cut_job_id');
+    expect(queries[3]?.text).toContain("packet.svg_cut_import_status='imported'");
+    expect(queries[3]?.text).toContain("NULLIF(trim(svg_job.source_display_number::text), '') IS NOT NULL");
+    expect(queries[3]?.text).toContain("':mdf-card-created'");
     expect(queries[3]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
     expect(queries[3]?.text).toContain("encode(file.content_bytes, 'base64')");
   });

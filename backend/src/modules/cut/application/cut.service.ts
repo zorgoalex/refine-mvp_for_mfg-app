@@ -7,6 +7,7 @@ import type {
   ArchiveCutJobCommand,
   CalculateCutJobCommand,
   CreateCutJobCommand,
+  CreateCutJobMdfBoardCardCommand,
   CutRepositoryPort,
   CutResultStateCommand,
   CutSheetTypeOption,
@@ -105,6 +106,11 @@ export class CutService implements OnModuleInit, OnModuleDestroy {
   async archive(command: ArchiveCutJobCommand) {
     this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
     return this.ports.cut.archive(command);
+  }
+
+  async createMdfBoardCard(command: CreateCutJobMdfBoardCardCommand) {
+    this.require(command.currentUser, 'cut.manage', { cutJobId: command.cutJobId, requestId: command.requestId });
+    return this.ports.cut.createMdfBoardCard(command);
   }
 
   async getDeleteImpact(query: GetCutJobDeleteImpactQuery) {

@@ -23,16 +23,20 @@ import {
 } from "../config/bitrix24";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
+import { useSidebarCollapsedPreference } from "../hooks/useSidebarCollapsedPreference";
 import { useSidebarMenuPreferences } from "../hooks/useSidebarMenuPreferences";
 import {
   canViewResourceByRoleVisibility,
   getCurrentUserRoleKey,
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
+import {
+  LEGACY_CATEGORY_MAP,
+  LEGACY_CATEGORY_ORDER,
+} from "../utils/navigationMenuConfig";
 import { APP_VERSION } from "../version";
 import { SidebarMenuSettingsButton } from "./SidebarMenuSettingsButton";
 import { SIDER_RESOURCE_ICONS } from "./siderResourceIcons";
-import { loadSidebarCollapsed, saveSidebarCollapsed } from "./sidebarCollapsedPreference";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -42,17 +46,6 @@ const menuLabelWithTooltip = (label: string) => (
     <span className="sidebar-menu-label">{label}</span>
   </Tooltip>
 );
-
-const CATEGORY_ORDER = [
-  "Контрагенты",
-  "Финансы",
-  "Производство",
-  "Материалы",
-  "Данные",
-  "Справочники",
-  "Журналы",
-  "Настройки",
-] as const;
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Контрагенты": <TeamOutlined />,
@@ -65,36 +58,6 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Настройки": <SettingOutlined />,
 };
 
-const CATEGORY_MAP: Record<string, string> = {
-  clients: "Контрагенты",
-  clients_analytics_view: "Контрагенты",
-  suppliers: "Контрагенты",
-  vendors: "Контрагенты",
-  film_vendors: "Контрагенты",
-  payments: "Финансы",
-  payments_view: "Финансы",
-  "orders-trash": "Данные",
-  "mdf-work-board": "Производство",
-  groups: "Производство",
-  projects: "Производство",
-  order_workshops: "Производство",
-  workshops: "Производство",
-  work_centers: "Производство",
-  doweling_orders_view: "Производство",
-  bazis: "Производство",
-  "cut-jobs": "Производство",
-  "bazis-cut-sets": "Производство",
-  scan: "Производство",
-  films: "Материалы",
-  materials: "Материалы",
-  sheet_material_types: "Материалы",
-  extra_resources: "Материалы",
-  employees: "Настройки",
-  users: "Настройки",
-  configuration: "Настройки",
-  audit: "Журналы",
-};
-
 export const CustomSider: React.FC = () => {
   const { resources } = useResource();
   const { push } = useNavigation();
@@ -104,16 +67,7 @@ export const CustomSider: React.FC = () => {
   const sidebarMenuPreferences = useSidebarMenuPreferences();
   const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
   const currentUserId = currentUser?.id;
-  const [collapsed, setCollapsed] = useState(() => loadSidebarCollapsed(currentUserId, true));
-
-  useEffect(() => {
-    setCollapsed(loadSidebarCollapsed(currentUserId, true));
-  }, [currentUserId]);
-
-  const handleCollapse = useCallback((val: boolean) => {
-    setCollapsed(val);
-    saveSidebarCollapsed(currentUserId, val);
-  }, [currentUserId]);
+  const [collapsed, setCollapsed] = useSidebarCollapsedPreference(currentUserId, true);
 
   // Warm DNS/TLS to Bitrix24 while the user works in ERP.
   useEffect(() => {
@@ -153,8 +107,8 @@ export const CustomSider: React.FC = () => {
     resources,
     pathname: location.pathname,
     push,
-    categoryOrder: CATEGORY_ORDER,
-    categoryMap: CATEGORY_MAP,
+    categoryOrder: LEGACY_CATEGORY_ORDER,
+    categoryMap: LEGACY_CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: SIDER_RESOURCE_ICONS,
     canViewNavigation,
@@ -168,7 +122,7 @@ export const CustomSider: React.FC = () => {
   });
 
   return (
-    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={handleCollapse} width={195} collapsedWidth={48}>
+    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={setCollapsed} width={195} collapsedWidth={48}>
       <div
         style={{
           padding: "8px 4px",

@@ -7,7 +7,7 @@ const contract = readFileSync(
 );
 
 describe('profile preferences OpenAPI contract', () => {
-  it('requires UI variant and tablet mode in responses and accepts partial updates', () => {
+  it('requires shell preferences in responses and accepts partial updates', () => {
     const userPreferences = sectionBetween(
       contract,
       '    UserPreferences:\n',
@@ -21,6 +21,7 @@ describe('profile preferences OpenAPI contract', () => {
 
     expect(userPreferences).toMatch(/required:[\s\S]*- uiVariant/);
     expect(userPreferences).toMatch(/required:[\s\S]*- tabletMode/);
+    expect(userPreferences).toMatch(/required:[\s\S]*- sidebarCollapsed/);
     expect(userPreferences).toMatch(
       /uiVariant:\s*\n\s*type: string\s*\n\s*enum: \[legacy, evolution, line, air\]/,
     );
@@ -29,6 +30,8 @@ describe('profile preferences OpenAPI contract', () => {
     );
     expect(userPreferences).toMatch(/tabletMode:\s*\n\s*type: boolean/);
     expect(updateRequest).toMatch(/tabletMode:\s*\n\s*type: boolean/);
+    expect(userPreferences).toMatch(/sidebarCollapsed:\s*\n\s*type: boolean\s*\n\s*nullable: true/);
+    expect(updateRequest).toMatch(/sidebarCollapsed:\s*\n\s*type: boolean/);
   });
 });
 

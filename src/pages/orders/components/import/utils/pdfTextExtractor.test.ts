@@ -311,7 +311,7 @@ describe('parsePdfContent PDF fixtures', () => {
     expect(rows[0].detailName).not.toContain('~~');
   }, 30_000);
 
-  it.each([
+  const newBasisReportFixtureCases = [
     {
       fixture: 'проект отчет.pdf',
       positionsCount: 30,
@@ -330,7 +330,9 @@ describe('parsePdfContent PDF fixtures', () => {
       expectedLastProduct: null,
       expectedReferenceSource: 'order_number',
     },
-  ])(
+  ].filter(({ fixture }) => fs.existsSync(path.resolve(bazisReportFixtureDir, fixture)));
+
+  (newBasisReportFixtureCases.length > 0 ? it : it.skip).each(newBasisReportFixtureCases)(
     'parses new Basis report template $fixture',
     async ({
       fixture,

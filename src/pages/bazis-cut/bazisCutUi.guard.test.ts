@@ -11,6 +11,7 @@ const editDetails = read('../orders/components/tabs/OrderDetailsTab.tsx');
 const show = read('../orders/show.tsx');
 const desktopSider = read('../../components/CustomSider.tsx');
 const mobileSider = read('../../components/MobileSiderDrawer.tsx');
+const menuConfig = read('../../utils/navigationMenuConfig.ts');
 
 describe('Basis-cut UI integration guards', () => {
   it('registers list/card resource and both routes behind bazisCut', () => {
@@ -20,8 +21,9 @@ describe('Basis-cut UI integration guards', () => {
   });
 
   it('places the resource in Production on desktop and mobile', () => {
-    expect(desktopSider).toContain('"bazis-cut-sets": "Производство"');
-    expect(mobileSider).toContain('"bazis-cut-sets": "Производство"');
+    expect(menuConfig).toContain("'bazis-cut-sets': 'Производство'");
+    expect(desktopSider).toContain('categoryMap: LEGACY_CATEGORY_MAP');
+    expect(mobileSider).toContain('categoryMap: LEGACY_CATEGORY_MAP');
   });
 
   it('renders the exact requested list columns and source categories', () => {

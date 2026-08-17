@@ -22,6 +22,6 @@ describe('122_cut_result_informational_label_maps migration', () => {
   it('is classified by the migration runner probe map', () => {
     expect(runner).toContain('122_cut_result_informational_label_maps*) probe_all');
     expect(runner).toContain('attnotnull = false');
-    expect(runner).toContain('122_*)');
+    expect(runner).toMatch(/121_\*\|122_\*\|123_\*/);
   });
 });

@@ -187,6 +187,32 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
+  /api/v1/audit/order-options:
+    get:
+      tags: [Audit]
+      operationId: listAuditOrderOptions
+      summary: List order filter options for audit log
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/audit/participant-options:
+    get:
+      tags: [Audit]
+      operationId: listAuditParticipantOptions
+      summary: List participant filter options for audit log
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
   /api/v1/auth/login:
     post:
       tags:
@@ -1635,6 +1661,23 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/v1/orders/{orderId}/recalculate-hdf:
+    post:
+      tags: [Orders]
+      operationId: recalculateOrderHdf
+      summary: Recalculate order HDF rows
+      security: [{ bearerAuth: [] }]
+      x-permission: orders.update
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/OrderNotFound' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/orders/{orderId}/detail-live-state:
     get:
@@ -7013,6 +7056,27 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/status-automation/refresh-recent-orders:
+    post:
+      tags:
+        - Status Automation
+      operationId: refreshRecentOrdersStatusAutomation
+      summary: Force-check recent orders by all enabled status automation rules
+      security:
+        - bearerAuth: []
+      x-permission: status_automation.manage
+      responses:
+        '200':
+          description: Recent orders were checked by enabled status automation rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusAutomationRecentOrdersRefreshResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/notification-event-types:
     get:
       tags:
@@ -10698,6 +10762,259 @@ paths:
         '503':
           $ref: '#/components/responses/FeatureDisabled'
 
+  /api/v1/cnc-telegram/manual-svg-upload:
+    post:
+      tags: [CncTelegram]
+      operationId: manualSvgUpload
+      summary: Create a cut job from a user-uploaded parsed SVG layout
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '201': { description: Manual SVG upload accepted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/manual-svg-comment-presets:
+    get:
+      tags: [CncTelegram]
+      operationId: listManualSvgCommentPresets
+      summary: List comment presets for manual SVG uploads
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+    post:
+      tags: [CncTelegram]
+      operationId: createManualSvgCommentPreset
+      summary: Create a reusable comment preset for manual SVG uploads
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '201': { description: Manual SVG comment preset created }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/orders/{orderId}/screenshots:
+    get:
+      tags: [CncTelegramMedia]
+      operationId: listOrderTelegramScreenshots
+      summary: List Telegram cutting screenshots linked to an order
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/orders/{orderId}/screenshots/{packetId}/preview:
+    get:
+      tags: [CncTelegramMedia]
+      operationId: getOrderTelegramScreenshotPreview
+      summary: Get permanent compact Telegram screenshot preview
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: packetId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Image }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/orders/{orderId}/screenshots/{packetId}/image:
+    get:
+      tags: [CncTelegramMedia]
+      operationId: getOrderTelegramScreenshotImage
+      summary: Get original Telegram screenshot inside its availability window
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: packetId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Image }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '410': { description: Original expired; restoration is available }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/orders/{orderId}/screenshots/{packetId}/restore:
+    post:
+      tags: [CncTelegramMedia]
+      operationId: restoreOrderTelegramScreenshot
+      summary: Request worker restoration of an expired Telegram screenshot
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: packetId, in: path, required: true, schema: { type: string } }
+      responses:
+        '202': { description: Restore request accepted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/orders/{orderId}/manual-svg-files/{fileId}:
+    get:
+      tags: [CncTelegramMedia]
+      operationId: downloadOrderManualSvgFile
+      summary: Download a manual SVG upload file linked to an order
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - { name: orderId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - { name: fileId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: File }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '410': { description: Stored file expired }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/media-restores/claim:
+    post:
+      tags: [CncTelegramMedia]
+      operationId: claimTelegramScreenshotRestores
+      summary: Claim queued screenshot restores for Telegram worker
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/media-restores/{requestId}/complete:
+    post:
+      tags: [CncTelegramMedia]
+      operationId: completeTelegramScreenshotRestore
+      summary: Complete one worker screenshot restore
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/media-restores/{requestId}/fail:
+    post:
+      tags: [CncTelegramMedia]
+      operationId: failTelegramScreenshotRestore
+      summary: Fail one worker screenshot restore
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/manual-svg-telegram-sends/claim:
+    post:
+      tags: [CncTelegramMedia]
+      operationId: claimManualSvgTelegramSends
+      summary: Claim queued manual SVG files for Telegram sending
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/manual-svg-telegram-sends/{requestId}/complete:
+    post:
+      tags: [CncTelegramMedia]
+      operationId: completeManualSvgTelegramSend
+      summary: Complete one manual SVG Telegram send request
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/manual-svg-telegram-sends/{requestId}/fail:
+    post:
+      tags: [CncTelegramMedia]
+      operationId: failManualSvgTelegramSend
+      summary: Fail one manual SVG Telegram send request
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: requestId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
   /api/v1/cnc-telegram/media/{storageKey}:
     get:
       tags:
@@ -10854,6 +11171,116 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '503':
           $ref: '#/components/responses/FeatureDisabled'
+
+  /api/v1/production-tech-settings/hdf:
+    get:
+      tags: [ProductionTechSettings]
+      operationId: getHdfProductionTechSettings
+      summary: Read HDF production tech settings
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [ProductionTechSettings]
+      operationId: updateHdfProductionTechSettings
+      summary: Update HDF production tech settings
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.manage
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/production-tech-settings/hdf/extra-resources:
+    get:
+      tags: [ProductionTechSettings]
+      operationId: listExtraResources
+      summary: List independent extra resources directory
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.view
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [ProductionTechSettings]
+      operationId: createExtraResource
+      summary: Create independent extra resource directory item
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.manage
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/production-tech-settings/hdf/extra-resources/{extraResourceId}:
+    put:
+      tags: [ProductionTechSettings]
+      operationId: updateExtraResource
+      summary: Update independent extra resource directory item
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.manage
+      parameters:
+        - { name: extraResourceId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/production-tech-settings/hdf/milling-types/{millingTypeId}:
+    put:
+      tags: [ProductionTechSettings]
+      operationId: updateHdfMillingSettings
+      summary: Update HDF fields on a milling type
+      security: [{ bearerAuth: [] }]
+      x-permission: settings.manage
+      parameters:
+        - { name: millingTypeId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /api/v1/cut-jobs:
     post:
@@ -11082,6 +11509,86 @@ paths:
           $ref: '#/components/responses/FeatureDisabled'
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /api/v1/cut-jobs/{cutJobId}/mdf-board-card:
+    post:
+      tags: [CutJobs]
+      operationId: createCutJobMdfBoardCard
+      summary: Create a visible MDF board machine-file card for a linked SVG cut job
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/cut-jobs/{cutJobId}/delete-impact:
+    get:
+      tags: [CutJobs]
+      operationId: getCutJobDeleteImpact
+      summary: Preview linked records affected by deleting a cut job
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/cut-jobs/{cutJobId}/rotation-allowed:
+    patch:
+      tags: [CutJobs]
+      operationId: setCutJobRotationAllowed
+      summary: Toggle 90-degree detail rotation for a job calculation
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/v1/cut-jobs/{cutJobId}/texture-direction:
+    patch:
+      tags: [CutJobs]
+      operationId: setCutJobTextureDirection
+      summary: Set informational material/film texture direction for PDF maps
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      parameters:
+        - { name: cutJobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+        '500': { $ref: '#/components/responses/InternalError' }
 
   /api/v1/cut-jobs/{cutJobId}/name:
     patch:
@@ -13800,6 +14307,7 @@ components:
         - uiSize
         - uiVariant
         - tabletMode
+        - sidebarCollapsed
         - orderDetailColumns
         - recentReferences
         - pageSizePreferences
@@ -13817,6 +14325,10 @@ components:
         tabletMode:
           type: boolean
           description: Force the tablet layout independently of physical device or viewport size.
+        sidebarCollapsed:
+          type: boolean
+          nullable: true
+          description: Current user's left sidebar collapsed state; null means no explicit choice yet.
         orderDetailColumns:
           type: object
           additionalProperties:
@@ -13853,6 +14365,8 @@ components:
           type: string
           enum: [legacy, evolution, line, air]
         tabletMode:
+          type: boolean
+        sidebarCollapsed:
           type: boolean
         orderDetailColumns:
           type: object
@@ -16387,6 +16901,8 @@ components:
           items:
             type: integer
             format: int64
+        statusAutomation:
+          $ref: '#/components/schemas/StatusAutomationOrderRefreshSummary'
         auditId:
           type: string
           nullable: true
@@ -18935,6 +19451,11 @@ components:
             - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
+            - mdf.order_machine_files_present
+            - mdf.board.completed
+            - mdf.board.baths
+            - mdf.board.baths_ready
+            - mdf.board.baths_laminated
         actionType:
           type: string
           enum:
@@ -19021,6 +19542,11 @@ components:
             - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
+            - mdf.order_machine_files_present
+            - mdf.board.completed
+            - mdf.board.baths
+            - mdf.board.baths_ready
+            - mdf.board.baths_laminated
         title:
           type: string
         group:
@@ -19030,6 +19556,7 @@ components:
             - dates
             - statuses
             - payments
+            - production
         description:
           type: string
         allowedConditions:
@@ -19055,6 +19582,114 @@ components:
               - change_production_status
               - change_details_production_status
 
+    StatusAutomationOrderRefreshSummary:
+      type: object
+      required:
+        - orderId
+        - orderFound
+        - evaluatedRuleCount
+        - matchedRuleCount
+        - executedActionCount
+        - skippedRuleCount
+        - skippedActionCount
+      properties:
+        orderId:
+          type: integer
+          minimum: 1
+        orderFound:
+          type: boolean
+        evaluatedRuleCount:
+          type: integer
+          minimum: 0
+        matchedRuleCount:
+          type: integer
+          minimum: 0
+        executedActionCount:
+          type: integer
+          minimum: 0
+        skippedRuleCount:
+          type: integer
+          minimum: 0
+        skippedActionCount:
+          type: integer
+          minimum: 0
+
+    StatusAutomationRefreshTotals:
+      type: object
+      required:
+        - evaluatedRuleCount
+        - matchedRuleCount
+        - executedActionCount
+        - skippedRuleCount
+        - skippedActionCount
+      properties:
+        evaluatedRuleCount:
+          type: integer
+          minimum: 0
+        matchedRuleCount:
+          type: integer
+          minimum: 0
+        executedActionCount:
+          type: integer
+          minimum: 0
+        skippedRuleCount:
+          type: integer
+          minimum: 0
+        skippedActionCount:
+          type: integer
+          minimum: 0
+
+    StatusAutomationRefreshFailure:
+      type: object
+      required:
+        - orderId
+        - code
+        - message
+      properties:
+        orderId:
+          type: integer
+          minimum: 1
+        code:
+          type: string
+        message:
+          type: string
+
+    StatusAutomationRecentOrdersRefreshResponse:
+      type: object
+      required:
+        - cutoffDate
+        - orderCount
+        - processedOrderCount
+        - failedOrderCount
+        - failures
+        - totals
+        - refreshedAt
+        - requestId
+      properties:
+        cutoffDate:
+          type: string
+          format: date
+        orderCount:
+          type: integer
+          minimum: 0
+        processedOrderCount:
+          type: integer
+          minimum: 0
+        failedOrderCount:
+          type: integer
+          minimum: 0
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusAutomationRefreshFailure'
+        totals:
+          $ref: '#/components/schemas/StatusAutomationRefreshTotals'
+        refreshedAt:
+          type: string
+          format: date-time
+        requestId:
+          type: string
+
     CreateStatusAutomationRuleRequest:
       type: object
       required:
@@ -19077,6 +19712,11 @@ components:
             - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
+            - mdf.order_machine_files_present
+            - mdf.board.completed
+            - mdf.board.baths
+            - mdf.board.baths_ready
+            - mdf.board.baths_laminated
         actionType:
           type: string
           enum:
@@ -19114,6 +19754,11 @@ components:
             - order.planned_completion_date_changed
             - order.status_changed
             - order.production_status_changed
+            - mdf.order_machine_files_present
+            - mdf.board.completed
+            - mdf.board.baths
+            - mdf.board.baths_ready
+            - mdf.board.baths_laminated
         actionType:
           type: string
           enum:

@@ -227,6 +227,7 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   material_name: 'Материал',
   milling_type_id: 'ID фрезеровки',
   milling_type_name: 'Фрезеровка',
+  hdf_parameter_override_mm: 'ХДФ параметр',
   edge_type_id: 'Обкат',
   film_id: 'ID пленки',
   film_name: 'Пленка',

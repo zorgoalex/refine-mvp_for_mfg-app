@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../../types/orders';
-import { mergeOrderRefreshDetails, noteRequiresDoweling } from './orderRefresh';
+import {
+  formatOrderRefreshSuccessMessage,
+  mergeOrderRefreshDetails,
+  noteRequiresDoweling,
+} from './orderRefresh';
 
 const detail = (overrides: Partial<OrderDetail>): OrderDetail => ({
   detail_id: 10,
@@ -57,5 +61,20 @@ describe('order refresh draft merge', () => {
       detail({ note: 'есть Присадка', doweling: false }),
       detail({ detail_id: 11, note: null, doweling: true }),
     ], [server, detail({ detail_id: 11, doweling: false })]).map((row) => row.doweling)).toEqual([true, true]);
+  });
+
+  it('mentions forced auto-status execution in refresh success messages', () => {
+    expect(formatOrderRefreshSuccessMessage({
+      updatedDowelingDetailIds: [],
+      statusAutomation: {
+        orderId: 42,
+        orderFound: true,
+        evaluatedRuleCount: 6,
+        matchedRuleCount: 2,
+        executedActionCount: 1,
+        skippedRuleCount: 4,
+        skippedActionCount: 1,
+      },
+    })).toBe('Заказ и связи с документами обновлены; Автостатусы: проверено правил 6, действий 1');
   });
 });

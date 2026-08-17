@@ -11,6 +11,7 @@ import {
   makeCrmOpener,
   normalizeSidebarMenuOrderPreference,
   resolveCalendarRoute,
+  resolveDefaultSiderRoute,
   resolveOrdersRoute,
   resolveStatusBoardRoute,
   CRM_WINDOW_NAME,
@@ -274,6 +275,48 @@ describe('buildFlatMenuItems', () => {
     };
     const items = buildFlatMenuItems(categories, Object.keys(categories), {}, navigate);
     expect(items).toEqual([]);
+  });
+});
+
+describe('resolveDefaultSiderRoute', () => {
+  it('uses the first visible ordered top menu route', () => {
+    expect(
+      resolveDefaultSiderRoute({
+        topOrder: ['calendar', 'orders_view'],
+        topRoutes: { orders_view: '/orders', calendar: '/calendar' },
+        categorizedResources: {
+          Производство: [{ name: 'cut-jobs', label: 'Раскрой', route: '/cut' }],
+        },
+        categoryOrder: ['Производство'],
+      }),
+    ).toBe('/calendar');
+  });
+
+  it('skips hidden or external top items and uses the first ordered category resource', () => {
+    expect(
+      resolveDefaultSiderRoute({
+        topOrder: ['orders_view', 'crm'],
+        topRoutes: {},
+        categorizedResources: {
+          Производство: [{ name: 'cut-jobs', label: 'Раскрой', route: '/cut' }],
+          CRM: [{ name: 'clients', label: 'Клиенты', route: '/clients' }],
+        },
+        categoryOrder: ['CRM', 'Производство'],
+        fallback: '/orders',
+      }),
+    ).toBe('/clients');
+  });
+
+  it('falls back only when no visible sidebar route exists', () => {
+    expect(
+      resolveDefaultSiderRoute({
+        topOrder: ['orders_view'],
+        topRoutes: {},
+        categorizedResources: {},
+        categoryOrder: [],
+        fallback: '/orders',
+      }),
+    ).toBe('/orders');
   });
 });
 

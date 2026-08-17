@@ -103,6 +103,7 @@ export interface OrderStatusBoardViewState {
 
 export interface OrderStatusBoardViewStateOptions {
   cncTelegram?: boolean;
+  defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;
   defaultSort?: OrderStatusBoardSortPreference;
   fixedView?: OrderStatusBoardVisualFlow;
 }
@@ -158,8 +159,10 @@ export function parseOrderStatusBoardViewState(
   const plannedFrom = dateOnly(params.get('plannedFrom'));
   const plannedTo = dateOnly(params.get('plannedTo'));
   const cncWorkday = dateOnly(params.get('date'));
+  const defaultCncOrderSearchPeriod =
+    options.defaultCncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD;
   const cncOrderSearchPeriod = view === 'cnc_today'
-    ? parseCncOrderSearchPeriod(params.get('period')) ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD
+    ? parseCncOrderSearchPeriod(params.get('period')) ?? defaultCncOrderSearchPeriod
     : undefined;
   const sortByRaw = params.get('sort');
   const sortOrderRaw = params.get('direction');
@@ -227,12 +230,13 @@ export function buildOrderStatusBoardDatasetKey(
     'view' | 'cncWorkday' | 'cncOrderSearchPeriod'
   >,
   defaultCncWorkday: string,
+  defaultCncOrderSearchPeriod: CncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD,
 ): string {
   if (state.view === 'cnc_today') {
     const key = new URLSearchParams();
     key.set('flow', 'cnc');
     key.set('date', state.cncWorkday ?? defaultCncWorkday);
-    key.set('period', state.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD);
+    key.set('period', state.cncOrderSearchPeriod ?? defaultCncOrderSearchPeriod);
     return key.toString();
   }
   return params.toString();

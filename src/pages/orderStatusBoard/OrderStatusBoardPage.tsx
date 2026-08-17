@@ -278,23 +278,29 @@ function scrollStatusBoardColumnCardsToTop(viewport: HTMLElement | null): void {
 }
 
 type CncBoardHorizontalScrollDirection = 'left' | 'right';
+type CncBoardHorizontalScrollEdges = Record<CncBoardHorizontalScrollDirection, boolean>;
 
-function statusBoardHorizontalScrollDirection(
+const CNC_BOARD_SCROLL_EDGES_HIDDEN: CncBoardHorizontalScrollEdges = {
+  left: false,
+  right: false,
+};
+
+function statusBoardHorizontalScrollEdges(
   viewport: HTMLElement | null,
   targetLeft?: number,
-): CncBoardHorizontalScrollDirection | null {
-  if (!viewport) return null;
+): CncBoardHorizontalScrollEdges {
+  if (!viewport) return CNC_BOARD_SCROLL_EDGES_HIDDEN;
   const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-  if (maxLeft <= 2) return null;
+  if (maxLeft <= 2) return CNC_BOARD_SCROLL_EDGES_HIDDEN;
   const effectiveLeft = targetLeft ?? viewport.scrollLeft;
-  return effectiveLeft >= maxLeft - 2 ? 'left' : 'right';
+  return {
+    left: effectiveLeft > 2,
+    right: effectiveLeft < maxLeft - 2,
+  };
 }
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
-interface StatusBoardCardStatusBadgeOverride {
-  name: string;
-  color: string;
-}
+type StatusBoardCardPrimaryStatusKind = 'board' | 'order';
 
 export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
 const CNC_DRAG_PREVIEW_KIND_LABELS: Record<CncManualCardKind, string> = {
@@ -397,6 +403,7 @@ interface CncBoardDragPreview {
 }
 
 interface OrderStatusBoardPageProps {
+  defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;
   fixedView?: OrderStatusBoardViewState['view'];
 }
 
@@ -487,7 +494,10 @@ function useWorkspaceTabsHeight(): number {
   return height;
 }
 
-export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
+export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
+  defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD,
+  fixedView,
+}) => {
   const isOperational = useOperationalUi();
   const touchBoardDragEnabled = useCoarsePointer();
   const { canViewFinancials } = useOrderFinancialVisibility();
@@ -510,11 +520,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const viewState = useMemo(() => {
     const parsed = parseOrderStatusBoardViewState(searchParams, {
       cncTelegram: featureFlags.cncTelegram,
+      defaultCncOrderSearchPeriod,
       ...(defaultSort ? { defaultSort } : {}),
       ...(fixedView ? { fixedView } : {}),
     });
     return parsed;
-  }, [defaultSort, fixedView, searchParams]);
+  }, [defaultCncOrderSearchPeriod, defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
   const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
   const mdfBoardHiddenStatusesSetting =
@@ -526,8 +537,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       searchParams,
       viewState,
       dayjs().format('YYYY-MM-DD'),
+      defaultCncOrderSearchPeriod,
     );
   }, [
+    defaultCncOrderSearchPeriod,
     searchParams,
     viewState.cncOrderSearchPeriod,
     viewState.cncWorkday,
@@ -561,8 +574,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const boardViewportRef = useRef<HTMLElement | null>(null);
   const cncBoardScrollTargetLeftRef = useRef<number | null>(null);
   const cncBoardScrollButtonScrollActiveRef = useRef(false);
-  const [cncBoardScrollDirection, setCncBoardScrollDirection] =
-    useState<CncBoardHorizontalScrollDirection | null>(null);
+  const [cncBoardScrollEdges, setCncBoardScrollEdges] =
+    useState<CncBoardHorizontalScrollEdges>(CNC_BOARD_SCROLL_EDGES_HIDDEN);
   const [cncBoardScrollTopState, setCncBoardScrollTopState] = useState({
     visible: false,
     left: 0,
@@ -1151,7 +1164,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   );
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
-  const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD;
+  const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? defaultCncOrderSearchPeriod;
   const cncPlannedTodayDate = dayjs().format('YYYY-MM-DD');
   const cncPeriodColumns = cncToday?.columns ?? [];
   const cncOrderFilterOptions = useMemo(
@@ -1591,13 +1604,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     const updateTrackWidth = () => {
       topScrollbarTrack.style.width = `${viewport.scrollWidth}px`;
       topScrollbar.scrollLeft = viewport.scrollLeft;
-      setCncBoardScrollDirection(
+      setCncBoardScrollEdges(
         isCncToday
-          ? statusBoardHorizontalScrollDirection(
+          ? statusBoardHorizontalScrollEdges(
               viewport,
               cncBoardScrollTargetLeftRef.current ?? undefined,
             )
-          : null,
+          : CNC_BOARD_SCROLL_EDGES_HIDDEN,
       );
       syncCncBoardScrollTopButton(viewport);
     };
@@ -1628,8 +1641,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       if (viewport && viewport.scrollLeft !== event.currentTarget.scrollLeft) {
         cncBoardScrollTargetLeftRef.current = null;
         viewport.scrollLeft = event.currentTarget.scrollLeft;
-        setCncBoardScrollDirection(
-          isCncToday ? statusBoardHorizontalScrollDirection(viewport) : null,
+        setCncBoardScrollEdges(
+          isCncToday
+            ? statusBoardHorizontalScrollEdges(viewport)
+            : CNC_BOARD_SCROLL_EDGES_HIDDEN,
         );
       }
     },
@@ -1649,11 +1664,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
         cncBoardScrollTargetLeftRef.current = null;
         cncBoardScrollButtonScrollActiveRef.current = false;
       }
-      const scrollDirectionTargetLeft = reachedTarget ? undefined : targetLeft ?? undefined;
-      setCncBoardScrollDirection(
+      const scrollEdgesTargetLeft = reachedTarget ? undefined : targetLeft ?? undefined;
+      setCncBoardScrollEdges(
         isCncToday
-          ? statusBoardHorizontalScrollDirection(event.currentTarget, scrollDirectionTargetLeft)
-          : null,
+          ? statusBoardHorizontalScrollEdges(event.currentTarget, scrollEdgesTargetLeft)
+          : CNC_BOARD_SCROLL_EDGES_HIDDEN,
       );
       syncCncBoardScrollTopButton(event.currentTarget);
     },
@@ -1670,22 +1685,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
     }));
   }, []);
 
-  const scrollCncBoardHorizontally = useCallback(() => {
+  const scrollCncBoardHorizontally = useCallback((direction: CncBoardHorizontalScrollDirection) => {
     const viewport = boardViewportRef.current;
     if (!viewport) return;
     const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-    const currentDirection = statusBoardHorizontalScrollDirection(viewport);
-    if (!currentDirection) return;
+    const scrollEdges = statusBoardHorizontalScrollEdges(viewport);
+    if (!scrollEdges[direction]) return;
     const step = Math.max(180, Math.round(viewport.clientWidth * 0.82));
-    const nextLeft = currentDirection === 'left'
-      ? 0
+    const nextLeft = direction === 'left'
+      ? Math.max(0, viewport.scrollLeft - step)
       : Math.min(maxLeft, viewport.scrollLeft + step);
     cncBoardScrollButtonScrollActiveRef.current = true;
     cncBoardScrollTargetLeftRef.current = nextLeft;
     viewport.scrollTo({ left: nextLeft, behavior: 'smooth' });
-    setCncBoardScrollDirection(
-      statusBoardHorizontalScrollDirection(viewport, nextLeft),
-    );
+    setCncBoardScrollEdges(statusBoardHorizontalScrollEdges(viewport, nextLeft));
   }, []);
 
   const dateRange: [Dayjs | null, Dayjs | null] = [
@@ -2478,18 +2491,24 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
             onClick={scrollCncBoardToTop}
           />
         )}
-        {isCncToday && cncBoardScrollDirection && (
+        {isCncToday && cncBoardScrollEdges.left && (
           <Button
-            className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}
+            className="cnc-board-scroll-edge cnc-board-scroll-edge--left"
             type="default"
             shape="circle"
-            icon={cncBoardScrollDirection === 'left' ? <LeftOutlined /> : <RightOutlined />}
-            aria-label={
-              cncBoardScrollDirection === 'left'
-                ? 'Прокрутить МДФ-доску влево'
-                : 'Прокрутить МДФ-доску вправо'
-            }
-            onClick={scrollCncBoardHorizontally}
+            icon={<LeftOutlined />}
+            aria-label="Прокрутить МДФ-доску влево"
+            onClick={() => scrollCncBoardHorizontally('left')}
+          />
+        )}
+        {isCncToday && cncBoardScrollEdges.right && (
+          <Button
+            className="cnc-board-scroll-edge cnc-board-scroll-edge--right"
+            type="default"
+            shape="circle"
+            icon={<RightOutlined />}
+            aria-label="Прокрутить МДФ-доску вправо"
+            onClick={() => scrollCncBoardHorizontally('right')}
           />
         )}
       </main>
@@ -2498,7 +2517,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
 };
 
 export const MdfWorkBoardPage: React.FC = () => (
-  <OrderStatusBoardPage fixedView="cnc_today" />
+  <OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />
 );
 
 const StatusBoardToolbarIconToggle: React.FC<{
@@ -3047,7 +3066,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cncSummaryOnly={summaryOnly}
                         cncReadiness={readiness}
                         cncMissingDetails={missingDetails}
-                        statusBadgeOverride={cncOrderStatusBadgeOverride(column.key)}
+                        primaryStatusKind="order"
                         displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}
                         onToggleDisplay={() => toggleCardDisplay(cardKey)}
                         relationState={orderStateFor(entry)}
@@ -6491,7 +6510,7 @@ interface StatusBoardCardViewProps {
   cncSummaryOnly?: boolean;
   cncReadiness?: CncOrderReadiness;
   cncMissingDetails?: CncOrderMissingDetail[];
-  statusBadgeOverride?: StatusBoardCardStatusBadgeOverride;
+  primaryStatusKind?: StatusBoardCardPrimaryStatusKind;
   displayToggleVisible?: boolean;
   onToggleDisplay?: () => void;
   relationState?: CncRelationCardState;
@@ -6521,7 +6540,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   cncSummaryOnly = false,
   cncReadiness,
   cncMissingDetails = [],
-  statusBadgeOverride,
+  primaryStatusKind = 'board',
   displayToggleVisible = false,
   onToggleDisplay,
   relationState = 'normal',
@@ -6588,13 +6607,15 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   });
 
   const primaryStatus =
-    statusBadgeOverride?.name ??
-    (board === 'order'
+    primaryStatusKind === 'order' || board === 'order'
       ? card.orderStatusName || 'Без статуса'
-      : card.productionStatusName || 'Без статуса');
+      : card.productionStatusName || 'Без статуса';
   const primaryStatusColor =
-    statusBadgeOverride?.color ??
-    resolveStatusBoardStatusColor(board, card, allColumns) ??
+    (
+      primaryStatusKind === 'order' && board !== 'order'
+        ? null
+        : resolveStatusBoardStatusColor(board, card, allColumns)
+    ) ??
     '#8c8c8c';
   const {
     active: isTouchDragging,
@@ -7617,16 +7638,6 @@ function cncColumnBadgeColor(columnKey: CncTelegramTodayDisplayColumnKey): strin
   if (columnKey === 'baths_laminated') return '#13c2c2';
   if (columnKey === 'baths') return '#cf1322';
   return '#1677ff';
-}
-
-function cncOrderStatusBadgeOverride(
-  columnKey: CncTelegramTodayDisplayColumnKey,
-): StatusBoardCardStatusBadgeOverride | undefined {
-  if (columnKey !== 'orders_ready' && columnKey !== 'orders_issued') return undefined;
-  return {
-    name: cncColumnTitleByKey(columnKey),
-    color: cncColumnBadgeColor(columnKey),
-  };
 }
 
 function cncColumnDisplayTitle(column: CncTelegramTodayDisplayColumn): string {

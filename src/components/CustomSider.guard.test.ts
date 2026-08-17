@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./CustomSider.tsx', import.meta.url), 'utf8');
 const mobileSource = readFileSync(new URL('./MobileSiderDrawer.tsx', import.meta.url), 'utf8');
+const menuConfigSource = readFileSync(new URL('../utils/navigationMenuConfig.ts', import.meta.url), 'utf8');
 const settingsSource = readFileSync(new URL('./SidebarMenuSettingsButton.tsx', import.meta.url), 'utf8');
+const collapsedHookSource = readFileSync(new URL('../hooks/useSidebarCollapsedPreference.ts', import.meta.url), 'utf8');
 
 describe('CustomSider expanded labels', () => {
   it('uses half-size text and wraps complete labels by words', () => {
@@ -18,15 +20,17 @@ describe('CustomSider expanded labels', () => {
   it('places the trash item in the Данные category (both siders)', () => {
     // Гейт видимости — общий canViewNavigation в category-раскладке
     // (buildCategorizedResources) + navigationPermissions orders-trash→orders.delete.
-    expect(source).toContain('"orders-trash": "Данные"');
-    expect(mobileSource).toContain('"orders-trash": "Данные"');
+    expect(menuConfigSource).toContain("'orders-trash': 'Данные'");
+    expect(source).toContain('categoryMap: LEGACY_CATEGORY_MAP');
+    expect(mobileSource).toContain('categoryMap: LEGACY_CATEGORY_MAP');
     // Пункт больше НЕ в top-menu:
     expect(source).not.toContain("trash: canViewNavigation('orders-trash')");
   });
 
   it('places the standalone MDF work board in Производство (both siders)', () => {
-    expect(source).toContain('"mdf-work-board": "Производство"');
-    expect(mobileSource).toContain('"mdf-work-board": "Производство"');
+    expect(menuConfigSource).toContain("'mdf-work-board': 'Производство'");
+    expect(source).toContain('categoryMap: LEGACY_CATEGORY_MAP');
+    expect(mobileSource).toContain('categoryMap: LEGACY_CATEGORY_MAP');
   });
 
   it('renders per-user menu order settings below create and at collapsed bottom', () => {
@@ -39,9 +43,12 @@ describe('CustomSider expanded labels', () => {
   });
 
   it('persists collapsed state per user in the legacy sider', () => {
-    expect(source).toContain('loadSidebarCollapsed(currentUserId, true)');
-    expect(source).toContain('saveSidebarCollapsed(currentUserId, val)');
-    expect(source).toContain('onCollapse={handleCollapse}');
+    expect(source).toContain('useSidebarCollapsedPreference(currentUserId, true)');
+    expect(source).toContain('onCollapse={setCollapsed}');
+    expect(collapsedHookSource).toContain('profileApi.getPreferences()');
+    expect(collapsedHookSource).toContain('profileApi.updatePreferences({ sidebarCollapsed: next })');
+    expect(collapsedHookSource).toContain('loadSidebarCollapsed(userId, defaultCollapsed)');
+    expect(collapsedHookSource).toContain('saveSidebarCollapsed(userId, next)');
     expect(source).not.toContain('useState(true)');
   });
 });

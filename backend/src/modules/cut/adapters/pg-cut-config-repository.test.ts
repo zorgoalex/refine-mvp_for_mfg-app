@@ -109,24 +109,30 @@ describe('PgCutConfigRepository', () => {
     const repo = new PgCutConfigRepository(
       fakeDatabase({
         ['WHERE key = $1 LIMIT 1']: [{
-          value: {
-            ...DEFAULT_CUT_RENDER_STYLES_SETTING,
-            profiles: {
-              ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
-              mdf_board_preview: {
-                ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview,
-                piece: {
-                  ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.piece,
-                  stroke: '#123456',
-                },
-                sourceSvg: {
-                  ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
-                  minStrokePx: 3,
-                  nonScalingStroke: true,
-                },
+          value: (() => {
+            const profile = {
+              ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview,
+              piece: {
+                ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.piece,
+                stroke: '#123456',
               },
-            },
-          },
+              sourceSvg: {
+                ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
+                minStrokePx: 3,
+                nonScalingStroke: true,
+              },
+            };
+            return {
+              ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+              profiles: {
+                ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+                mdf_board_preview: profile,
+              },
+              templates: DEFAULT_CUT_RENDER_STYLES_SETTING.templates.map((template) =>
+                template.id === 'mdf_board_preview' ? { ...template, profile } : template,
+              ),
+            };
+          })(),
         }],
       }),
     );

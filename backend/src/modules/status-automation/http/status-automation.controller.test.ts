@@ -4,6 +4,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { REQUIRED_PERMISSIONS_METADATA_KEY } from '../../../permissions/require-permissions.decorator';
 import type { StatusAutomationEventTypeDto } from '../dto/status-automation.dto';
+import type { StatusAutomationRecentOrdersRefreshResponseDto } from '../dto/status-automation.dto';
 import type { StatusAutomationRule } from '../application/status-automation.types';
 import { StatusAutomationController } from './status-automation.controller';
 
@@ -37,6 +38,10 @@ describe('StatusAutomationController', () => {
         code: 'AUTH_REQUIRED',
       } satisfies Partial<ApiError>);
       await expect(controller.listEventTypes({ requestId: 'req-1' })).rejects.toMatchObject({
+        statusCode: 401,
+        code: 'AUTH_REQUIRED',
+      } satisfies Partial<ApiError>);
+      await expect(controller.refreshRecentOrders({ requestId: 'req-1' })).rejects.toMatchObject({
         statusCode: 401,
         code: 'AUTH_REQUIRED',
       } satisfies Partial<ApiError>);
@@ -163,6 +168,24 @@ describe('StatusAutomationController', () => {
       await expect(controller.listEventTypes(request())).resolves.toBe(eventTypes);
       expect(calls).toEqual([{ method: 'listEventTypes', userId: 'admin-id', requestId: 'req-list' }]);
     });
+
+    it('delegates recent-order refresh with current user and request id', async () => {
+      const calls: unknown[] = [];
+      const response = recentRefreshResponse();
+      const controller = createController({
+        service: {
+          async refreshRecentOrders(user, requestId) {
+            calls.push({ method: 'refreshRecentOrders', userId: user.id, requestId });
+            return response;
+          },
+        },
+      });
+
+      await expect(controller.refreshRecentOrders({ ...request(), requestId: 'req-refresh-recent' })).resolves.toBe(response);
+      expect(calls).toEqual([
+        { method: 'refreshRecentOrders', userId: 'admin-id', requestId: 'req-refresh-recent' },
+      ]);
+    });
   });
 
   describe('path validation', () => {
@@ -194,6 +217,7 @@ describe('StatusAutomationController', () => {
         StatusAutomationController.prototype.create,
         StatusAutomationController.prototype.update,
         StatusAutomationController.prototype.delete,
+        StatusAutomationController.prototype.refreshRecentOrders,
       ]) {
         expect(Reflect.getMetadata(REQUIRED_PERMISSIONS_METADATA_KEY, handler)).toEqual(['status_automation.manage']);
       }
@@ -207,6 +231,7 @@ interface FakeStatusAutomationService {
   update?(user: CurrentUser, requestId: string, ruleId: number, input: UpdateInput): Promise<StatusAutomationRule>;
   delete?(user: CurrentUser, requestId: string, ruleId: number): Promise<{ deleted: true }>;
   listEventTypes?(user: CurrentUser, requestId: string): Promise<StatusAutomationEventTypeDto[]>;
+  refreshRecentOrders?(user: CurrentUser, requestId: string): Promise<StatusAutomationRecentOrdersRefreshResponseDto>;
 }
 
 type CreateInput = {
@@ -242,10 +267,32 @@ function createController(overrides: { service?: FakeStatusAutomationService } =
     async listEventTypes() {
       return [];
     },
+    async refreshRecentOrders() {
+      return recentRefreshResponse();
+    },
     ...overrides.service,
   };
 
   return new StatusAutomationController(service as never);
+}
+
+function recentRefreshResponse(): StatusAutomationRecentOrdersRefreshResponseDto {
+  return {
+    cutoffDate: '2026-06-17',
+    orderCount: 2,
+    processedOrderCount: 2,
+    failedOrderCount: 0,
+    failures: [],
+    totals: {
+      evaluatedRuleCount: 4,
+      matchedRuleCount: 2,
+      executedActionCount: 1,
+      skippedRuleCount: 2,
+      skippedActionCount: 1,
+    },
+    refreshedAt: '2026-08-17T00:00:00.000Z',
+    requestId: 'req-refresh-recent',
+  };
 }
 
 function request(overrides: Partial<{ requestId: string }> = {}) {

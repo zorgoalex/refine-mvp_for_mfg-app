@@ -2,7 +2,7 @@ import React from 'react';
 import { Modal, Tabs } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DraggableModalWrapper } from '../../components/DraggableModalWrapper';
-import { computeNeighborPath, type WorkspaceTab, useTabStore } from '../../stores/tabStore';
+import { computeCloseTargetPath, type WorkspaceTab, useTabStore } from '../../stores/tabStore';
 
 export interface EvolutionTabCloseRequest {
   targetKey: string;
@@ -15,9 +15,10 @@ export interface EvolutionTabCloseRequest {
 
 export function requestEvolutionTabClose(request: EvolutionTabCloseRequest): void {
   const close = (discard = false) => {
+    const closeTargetPath = computeCloseTargetPath(request.tabs, request.targetKey);
     request.closeTab(request.targetKey, discard ? { discard: true } : undefined);
     if (request.targetKey === request.activeKey) {
-      request.navigate(computeNeighborPath(request.tabs, request.targetKey));
+      request.navigate(closeTargetPath);
     }
   };
   const tab = request.tabs.find((item) => item.key === request.targetKey);

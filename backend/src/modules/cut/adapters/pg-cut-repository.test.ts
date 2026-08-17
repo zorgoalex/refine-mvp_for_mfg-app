@@ -51,7 +51,7 @@ describe('cut PDF sheet context fields', () => {
     expect(repositorySource).toContain('filmRequirementLinearMeters: showBathMeterGuides');
     expect(repositorySource).toContain('calculateBathSheetFilmUsage(s.placements)?.linearMeters');
     expect(repositorySource).toContain('bathDetailInfoFor:');
-    expect(repositorySource).toContain('od.doweling,');
+    expect(repositorySource).toContain('ELSE od.doweling END AS doweling');
     expect(repositorySource).toContain('doweling: row.doweling === null || row.doweling === undefined ? null : row.doweling === true');
     expect(repositorySource).toContain('edgeTypeName: detail?.edgeTypeName ?? null');
     expect(repositorySource).toContain('millingTypeName: detail?.millingTypeName ?? null');
@@ -63,8 +63,16 @@ describe('cut PDF sheet context fields', () => {
 
 describe('cut job display numbering', () => {
   it('loads backend-authoritative display numbers for list and card views', () => {
+    expect(repositorySource).toContain("allocateCutJobSourceDisplayNumber(tx, 'regular')");
+    expect(repositorySource).toContain('const currentDisplayKind = cutJobDisplayNumberKind(row.source_display_number)');
+    expect(repositorySource).toContain('beforeKind !== afterKind');
+    expect(repositorySource).toContain('cutJobEffectiveDisplayKind(jobRow.source_display_number, jobRow.profile_params, jobRow.last_calc_params)');
     expect(repositorySource).toContain('formatCutJobNumber(jobId, isVacuum, jobRow.source_display_number)');
     expect(repositorySource).toContain('displayNumber: formatCutJobNumber(jobId, isVacuum, jobRow.source_display_number)');
+    expect(repositorySource).toContain('svgCutJobDisplayNumber: displayNumberOrNull(packet.svg_cut_job_display_number)');
+    expect(repositorySource).toContain('cutJobDisplayNumber: displayNumberOrNull(input.packet.svg_cut_job_display_number)');
+    expect(repositorySource).not.toContain('svgCutJobDisplayNumber: packet.svg_cut_job_display_number === null ? null : toNum(packet.svg_cut_job_display_number)');
+    expect(repositorySource).not.toContain('cutJobDisplayNumber: input.packet.svg_cut_job_display_number === null ? null : toNum(input.packet.svg_cut_job_display_number)');
     expect(repositorySource).toContain('cpp.params AS profile_params');
     expect(repositorySource).toContain("layout_mode === 'vacuum_table'");
   });
@@ -271,6 +279,8 @@ interface FakeDbOptions {
   filmOptionRows?: FakeRow[];
   /** whether the cut_param_profiles SELECT returns a row (profile is active) */
   profileActive?: boolean;
+  /** params returned for the active profile check */
+  profileParams?: Record<string, unknown>;
   /** expired calculate commands returned to the reconciliation worker */
   expiredCommandRows?: FakeRow[];
 }
@@ -283,7 +293,7 @@ function createDatabase(options: FakeDbOptions = {}) {
   let currentResultId: number | null = null;
   let nextResultNo = 1;
   let lastCalcParams: unknown = null;
-  const groupByDetail = new Map<number, number>();
+  const groupByItemId = new Map<string, number>();
   const storedGroups: FakeRow[] = [];
   const storedSheets: FakeRow[] = [];
   let storedResult: FakeRow | null = null;
@@ -368,16 +378,28 @@ function createDatabase(options: FakeDbOptions = {}) {
       return { rows: [{ cut_job_id: options.cutJob?.cut_job_id ?? 42 }], rowCount: 1 };
     }
 
-    // setProfile FOR UPDATE: narrower column list (cut_job_id, status, version, param_profile_id)
-    if (sql.startsWith('SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
+    // setProfile FOR UPDATE
+    if (sql.startsWith('SELECT j.cut_job_id, j.status, j.version, j.param_profile_id,')) {
       const base = options.cutJob ?? { cut_job_id: 42, status: 'ready', version: 0, param_profile_id: null };
-      return { rows: [{ cut_job_id: base.cut_job_id ?? 42, status: base.status ?? 'ready', version: jobVersion, param_profile_id: base.param_profile_id ?? null }], rowCount: 1 };
+      return {
+        rows: [{
+          cut_job_id: base.cut_job_id ?? 42,
+          status: base.status ?? 'ready',
+          version: jobVersion,
+          param_profile_id: base.param_profile_id ?? null,
+          source: base.source ?? 'manual',
+          source_display_number: base.source_display_number ?? null,
+          before_profile_params: base.before_profile_params ?? null,
+          before_last_calc_params: base.before_last_calc_params ?? null,
+        }],
+        rowCount: 1,
+      };
     }
 
     // profile active check
-    if (sql.startsWith('SELECT 1 FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true')) {
+    if (sql.startsWith('SELECT params FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true')) {
       const active = options.profileActive !== false; // default true
-      return { rows: active ? [{ '?column?': 1 }] : [], rowCount: active ? 1 : 0 };
+      return { rows: active ? [{ params: options.profileParams ?? {} }] : [], rowCount: active ? 1 : 0 };
     }
 
     if (sql.startsWith('SELECT od.order_id, od.quantity, od.production_status_id, od.delete_flag')) {
@@ -423,17 +445,21 @@ function createDatabase(options: FakeDbOptions = {}) {
     }
 
     if (sql.startsWith('UPDATE cut_job_item SET cut_group_id = $1')) {
-      for (const detailId of params[2] as number[]) groupByDetail.set(detailId, Number(params[0]));
-      return { rows: [], rowCount: (params[2] as number[]).length };
+      for (const itemId of params[2] as string[]) groupByItemId.set(itemId, Number(params[0]));
+      return { rows: [], rowCount: (params[2] as string[]).length };
     }
 
     if (sql.startsWith('SELECT cji.cut_job_item_id')) {
-      return { rows: options.calcItems ?? [], rowCount: (options.calcItems ?? []).length };
+      const rows = (options.calcItems ?? []).map(calcItemRow);
+      return { rows, rowCount: rows.length };
     }
 
-    if (sql.startsWith('SELECT cji.order_detail_id, cji.order_id,')) {
+    if (sql.startsWith('SELECT cji.source_type, cji.freecut_item_id,')) {
       const rows = (options.calcItems ?? []).map((item) => ({
+        source_type: sourceTypeFor(item),
+        freecut_item_id: itemIdFor(item),
         order_detail_id: item.order_detail_id,
+        order_hdf_detail_id: item.order_hdf_detail_id ?? null,
         order_id: item.order_id,
         detail_fields: item.detail_fields ?? null,
         detail_number: item.detail_number ?? null,
@@ -523,23 +549,16 @@ function createDatabase(options: FakeDbOptions = {}) {
     if (sql.startsWith('SELECT g.cut_job_id')) {
       return { rows: [{ cut_job_id: 42, sheets: 0 }], rowCount: 1 };
     }
-    if (sql.startsWith('SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id')) {
+    if (sql.startsWith('SELECT i.cut_job_item_id, i.source_type, i.freecut_item_id')) {
       const rows = (options.calcItems ?? []).map((item) => ({
         cut_job_item_id: item.cut_job_item_id,
+        source_type: sourceTypeFor(item),
+        freecut_item_id: itemIdFor(item),
         order_detail_id: item.order_detail_id,
+        order_hdf_detail_id: item.order_hdf_detail_id ?? null,
         order_id: item.order_id,
         qty: item.qty,
-        cut_group_id: groupByDetail.get(Number(item.order_detail_id)) ?? null,
-      }));
-      return { rows, rowCount: rows.length };
-    }
-    if (sql.startsWith('SELECT i.cut_job_item_id, i.order_detail_id')) {
-      const rows = (options.calcItems ?? []).map((item) => ({
-        cut_job_item_id: item.cut_job_item_id,
-        order_detail_id: item.order_detail_id,
-        order_id: item.order_id,
-        qty: item.qty,
-        cut_group_id: groupByDetail.get(Number(item.order_detail_id)) ?? null,
+        cut_group_id: groupByItemId.get(itemIdFor(item)) ?? null,
         joined_detail_id: item.order_detail_id,
         detail_fields: null,
         detail_number: item.detail_number ?? null,
@@ -658,6 +677,26 @@ function createDatabase(options: FakeDbOptions = {}) {
   return { queries, service };
 }
 
+function sourceTypeFor(item: FakeRow): 'order_detail' | 'order_hdf_detail' {
+  return item.source_type === 'order_hdf_detail' ? 'order_hdf_detail' : 'order_detail';
+}
+
+function itemIdFor(item: FakeRow): string {
+  const explicit = typeof item.freecut_item_id === 'string' ? item.freecut_item_id.trim() : '';
+  if (explicit) return explicit;
+  if (sourceTypeFor(item) === 'order_hdf_detail') return `hdf-${Number(item.order_hdf_detail_id)}`;
+  return `det-${Number(item.order_detail_id)}`;
+}
+
+function calcItemRow(item: FakeRow): FakeRow {
+  return {
+    source_type: sourceTypeFor(item),
+    freecut_item_id: itemIdFor(item),
+    order_hdf_detail_id: item.order_hdf_detail_id ?? null,
+    ...item,
+  };
+}
+
 function fakeFreecut(response: FreecutOptimizeResponse): FreecutClient {
   return { optimize: vi.fn().mockResolvedValue(response) } as unknown as FreecutClient;
 }
@@ -724,7 +763,10 @@ describe('PgCutRepository', () => {
     });
 
     const sql = db.queries.map((q) => normalize(q.text));
-    expect(sql.some((s) => s.startsWith('INSERT INTO cut_job ('))).toBe(true);
+    const jobInsert = db.queries.find((q) => normalize(q.text).startsWith('INSERT INTO cut_job ('));
+    expect(jobInsert).toBeDefined();
+    expect(jobInsert?.text).toContain('source_display_number');
+    expect(jobInsert?.params[4]).toBe('1');
     expect(sql.some((s) => s.startsWith('INSERT INTO cut_job_item ('))).toBe(true);
     const audit = db.queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
     expect(audit?.params[0]).toBe('cut_job.created');
@@ -1206,7 +1248,7 @@ describe('PgCutRepository', () => {
     // (Exclude the recalc-clear `SET cut_group_id = NULL`.)
     const groupAssigns = db.queries.filter((q) => /UPDATE cut_job_item SET cut_group_id = \$1/i.test(q.text));
     expect(groupAssigns.length).toBe(2);
-    expect(groupAssigns.every((q) => /order_detail_id = ANY/i.test(q.text))).toBe(true);
+    expect(groupAssigns.every((q) => /freecut_item_id = ANY/i.test(q.text))).toBe(true);
     // Exactly one outbox row for the whole job calc (idempotency over the full item set).
     const outbox = db.queries.filter((q) => /INSERT INTO outbox_events/i.test(q.text));
     expect(outbox.length).toBe(1);
@@ -1596,7 +1638,7 @@ describe('PgCutRepository', () => {
 
     const listQuery = db.queries.find((q) => normalize(q.text).startsWith('SELECT j.cut_job_id FROM cut_job j'));
     const sql = normalize(listQuery?.text ?? '');
-    expect(sql).not.toContain('j.status <> $');
+    expect(sql).toContain('j.status <> $');
     expect(sql).toContain('j.created_at >= $');
     expect(sql).toContain("j.created_at < ($");
     expect(sql).toContain("NULLIF(trim(j.source_display_number::text), '') = $");
@@ -1605,6 +1647,7 @@ describe('PgCutRepository', () => {
     expect(sql).toContain('o.order_name ILIKE $');
     expect(sql.indexOf('EXISTS')).toBeLessThan(sql.indexOf('ORDER BY j.cut_job_id DESC LIMIT 200'));
     expect(listQuery?.params).toEqual([
+      'archived',
       '2026-08-01',
       '2026-08-07',
       '67',
@@ -1643,6 +1686,18 @@ it('setProfile rejects a calculating job with 409 (status gate)', async () => {
   const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as never);
   await expect(repo.setProfile({ currentUser: currentUser(), cutJobId: 42, paramProfileId: 5, version: 2 }))
     .rejects.toMatchObject({ statusCode: 409 });
+});
+
+it('setProfile gives a manual job a new vacuum display number when switching to a vacuum-table profile', async () => {
+  const db = createDatabase({
+    cutJob: { cut_job_id: 42, status: 'draft', source: 'manual', version: 2, param_profile_id: null, source_display_number: '12' },
+    profileParams: { layout_mode: 'vacuum_table' },
+  });
+  const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as never);
+  await repo.setProfile({ currentUser: currentUser(), cutJobId: 42, paramProfileId: 5, version: 2 });
+  const update = db.queries.find((q) => normalize(q.text).startsWith('UPDATE cut_job SET param_profile_id'));
+  expect(update?.params[2]).toBe('В-1');
+  expect(db.queries.some((q) => q.params[0] === 'cut_job_display_number:vacuum')).toBe(true);
 });
 
 it('calculate rejects an inactive chosen profile with 422 (no freecut call)', async () => {

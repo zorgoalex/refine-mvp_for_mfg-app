@@ -3742,7 +3742,7 @@ describe('OrderTransactionService', () => {
 
   it('omits payment rows from save responses when actor cannot view payments', async () => {
     const transactions = new FakeOrderTransactions();
-    const actor = userWithPermissions('viewer', [
+    const actor = userWithPermissions('manager', [
       'orders.create',
       'orders.view_financials',
       'payments.create',

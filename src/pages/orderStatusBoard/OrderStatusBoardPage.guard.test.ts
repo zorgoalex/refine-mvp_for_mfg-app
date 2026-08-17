@@ -93,8 +93,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('saveCncManualMoves');
     expect(page).toContain('kind="bazisCutSet"');
     expect(page).toContain('completed_laminated');
-    expect(page).toContain('cncOrderStatusBadgeOverride(column.key)');
-    expect(page).toContain('statusBadgeOverride?.name');
+    expect(page).not.toContain('cncOrderStatusBadgeOverride');
+    expect(page).not.toContain('statusBadgeOverride');
+    expect(page).toContain('primaryStatusKind="order"');
     expect(page).toContain("label: 'Переместить'");
     expect(page).toContain('trigger={[');
     expect(page).toContain('trigger: shellRef.current');
@@ -403,21 +404,28 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('min-height: 40px');
     expect(css).toContain('background: rgba(17, 24, 39, 0.66)');
     expect(css).toContain('transform: translateX(-50%) scale(0.96)');
-    expect(page).toContain('function statusBoardHorizontalScrollDirection');
+    expect(page).toContain('function statusBoardHorizontalScrollEdges');
     expect(page).toContain("type CncBoardHorizontalScrollDirection = 'left' | 'right';");
+    expect(page).toContain('type CncBoardHorizontalScrollEdges = Record<CncBoardHorizontalScrollDirection, boolean>');
     expect(page).toContain('targetLeft?: number');
     expect(page).toContain('const effectiveLeft = targetLeft ?? viewport.scrollLeft');
+    expect(page).toContain('left: effectiveLeft > 2');
+    expect(page).toContain('right: effectiveLeft < maxLeft - 2');
     expect(page).toContain('const cncBoardScrollTargetLeftRef = useRef<number | null>(null)');
     expect(page).toContain('const cncBoardScrollButtonScrollActiveRef = useRef(false)');
     expect(page).toContain('if (cncBoardScrollButtonScrollActiveRef.current) {');
     expect(page).toContain('const reachedTarget =');
-    expect(page).toContain('const scrollDirectionTargetLeft = reachedTarget ? undefined : targetLeft ?? undefined');
-    expect(page).toContain('const [cncBoardScrollDirection, setCncBoardScrollDirection] =');
-    expect(page).toContain('setCncBoardScrollDirection(');
+    expect(page).toContain('const scrollEdgesTargetLeft = reachedTarget ? undefined : targetLeft ?? undefined');
+    expect(page).toContain('const [cncBoardScrollEdges, setCncBoardScrollEdges] =');
+    expect(page).toContain('setCncBoardScrollEdges(');
     expect(page).toContain('cncBoardScrollButtonScrollActiveRef.current = true');
     expect(page).toContain('cncBoardScrollButtonScrollActiveRef.current = false');
     expect(page).toContain('cncBoardScrollTargetLeftRef.current = nextLeft');
-    expect(page).toContain('statusBoardHorizontalScrollDirection(viewport, nextLeft)');
+    expect(page).toContain('statusBoardHorizontalScrollEdges(viewport, nextLeft)');
+    expect(page).toContain('scrollCncBoardHorizontally = useCallback((direction: CncBoardHorizontalScrollDirection) => {');
+    expect(page).toContain('if (!scrollEdges[direction]) return;');
+    expect(page).toContain("direction === 'left'");
+    expect(page).toContain("Math.max(0, viewport.scrollLeft - step)");
     expect(page).toContain("viewport.scrollTo({ left: nextLeft, behavior: 'smooth' })");
     expect(page).not.toContain('if (topScrollbar) topScrollbar.scrollLeft = nextLeft');
     expect(page).toContain('const [cncBoardScrollTopState, setCncBoardScrollTopState] =');
@@ -426,17 +434,21 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('className="cnc-board-scroll-top"');
     expect(page).toContain('style={{ left: cncBoardScrollTopState.left }}');
     expect(page).toContain('Прокрутить МДФ-доску наверх');
-    expect(page).toContain('className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}');
-    expect(page).toContain("cncBoardScrollDirection === 'left'");
+    expect(page).toContain('cncBoardScrollEdges.left');
+    expect(page).toContain('className="cnc-board-scroll-edge cnc-board-scroll-edge--left"');
+    expect(page).toContain("onClick={() => scrollCncBoardHorizontally('left')}");
+    expect(page).toContain('cncBoardScrollEdges.right');
+    expect(page).toContain('className="cnc-board-scroll-edge cnc-board-scroll-edge--right"');
+    expect(page).toContain("onClick={() => scrollCncBoardHorizontally('right')}");
+    expect(page).not.toContain('cncBoardScrollDirection');
     expect(page).toContain('Прокрутить МДФ-доску влево');
     expect(page).toContain('Прокрутить МДФ-доску вправо');
     expect(css).toContain('.cnc-board-scroll-edge.ant-btn');
     expect(css).toContain('inset-block-start: 50dvh');
-    expect(css).toContain('inset-inline-end: 10px');
     expect(css).toMatch(
-      /\.cnc-board-scroll-edge--left\.ant-btn,\s*\.cnc-board-scroll-edge--right\.ant-btn\s*\{[^}]*inset-inline-start: auto;[^}]*inset-inline-end: 10px;/,
+      /\.cnc-board-scroll-edge--right\.ant-btn\s*\{[^}]*inset-inline-start: auto;[^}]*inset-inline-end: 10px;/,
     );
-    expect(css).not.toMatch(
+    expect(css).toMatch(
       /\.cnc-board-scroll-edge--left\.ant-btn\s*\{[^}]*inset-inline-start: 10px;[^}]*inset-inline-end: auto;/,
     );
     expect(css).toContain('background: rgba(17, 24, 39, 0.58)');
@@ -511,7 +523,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
     expect(page).toContain('fixedView ? { fixedView } : {}');
-    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
+    expect(page).toContain('defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;');
+    expect(page).toContain('defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD');
+    expect(page).toContain('defaultCncOrderSearchPeriod,');
+    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
     expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
     expect(page).toContain('{!fixedView && (');
     expect(page).not.toContain("{ key: 'cnc_today', label: 'МДФ-работы' }");
@@ -558,7 +573,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(model).toContain('export function buildOrderStatusBoardDatasetKey(');
     expect(model).toContain("state.view === 'cnc_today'");
     expect(model).toContain("key.set('date', state.cncWorkday ?? defaultCncWorkday)");
-    expect(model).toContain("key.set('period', state.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD)");
+    expect(model).toContain("key.set('period', state.cncOrderSearchPeriod ?? defaultCncOrderSearchPeriod)");
     expect(page).not.toContain("if (params.get('flow') === 'cnc') params.delete('order');");
     expect(page).toContain('const standardGridMinWidth = displayColumns.length * 220');
     expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}, 1fr))`');
@@ -1015,6 +1030,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('orderStatusBoardApi.get({');
     expect(page).toContain('orderIds: chunk');
     expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
+    expect(page).toContain('const timer = window.setInterval(() => {');
+    expect(page).toContain('}, CNC_ORDER_STATUS_REFRESH_MS);');
+    expect(page).toContain("primaryStatusKind === 'order' || board === 'order'");
+    expect(page).toContain("card.orderStatusName || 'Без статуса'");
+    expect(page).not.toContain('statusBadgeOverride={');
     expect(page).toContain('getCncOrderRelationState');
     expect(page).toContain("onSelectRelation({ kind: 'order', id: card.orderId })");
     expect(page).toContain('openOrderOnNumber={!relationsEnabled}');

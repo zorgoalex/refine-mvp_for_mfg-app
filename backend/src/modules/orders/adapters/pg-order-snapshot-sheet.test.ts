@@ -235,15 +235,17 @@ describe('mapDetailSnapshot — SP3 sheetMaterialTypeId export', () => {
 describe('orderHeaderInsertParams — sheet_material_type_id', () => {
   it('includes sheetMaterialTypeId=null at index 30 (placeholder $31)', () => {
     const params = insertParams(makeNormalizedHeader({ sheetMaterialTypeId: null }), makeTotals(), 500);
-    expect(params).toHaveLength(32);
+    expect(params).toHaveLength(33);
     expect(params[30]).toBeNull();
-    expect(params[31]).toBe(500);
+    expect(params[31]).toBeNull();
+    expect(params[32]).toBe(500);
   });
 
   it('includes sheetMaterialTypeId=42 at index 30', () => {
     const params = insertParams(makeNormalizedHeader({ sheetMaterialTypeId: 42 }), makeTotals(), 500);
     expect(params[30]).toBe(42);
-    expect(params[31]).toBe(500);
+    expect(params[31]).toBeNull();
+    expect(params[32]).toBe(500);
   });
 
   it('forces materialId to null when sheetMaterialTypeId is set (header invariant)', () => {
@@ -252,7 +254,8 @@ describe('orderHeaderInsertParams — sheet_material_type_id', () => {
     const params = insertParams(makeNormalizedHeader({ materialId: 7, sheetMaterialTypeId: 42 }), makeTotals(), 500);
     expect(params[25]).toBeNull();  // materialId forced null
     expect(params[30]).toBe(42);   // sheetMaterialTypeId
-    expect(params[31]).toBe(500);  // projectId
+    expect(params[31]).toBeNull(); // hdfMinThresholdMm
+    expect(params[32]).toBe(500);  // projectId
   });
 
   it('always binds null for materialId regardless of sheetMaterialTypeId (Variant B sunset)', () => {
@@ -260,36 +263,40 @@ describe('orderHeaderInsertParams — sheet_material_type_id', () => {
     const params = insertParams(makeNormalizedHeader({ materialId: 3, sheetMaterialTypeId: null }), makeTotals(), 500);
     expect(params[25]).toBeNull(); // materialId always null (Variant B invariant)
     expect(params[30]).toBeNull(); // sheetMaterialTypeId null
-    expect(params[31]).toBe(500); // projectId
+    expect(params[31]).toBeNull(); // hdfMinThresholdMm
+    expect(params[32]).toBe(500); // projectId
   });
 });
 
 // ── orderHeaderUpdateParams (SP3) ─────────────────────────────────────────
 
 describe('orderHeaderUpdateParams — sheet_material_type_id', () => {
-  it('includes sheetMaterialTypeId=null at index 29 (placeholder $31 with $1=orderId)', () => {
+  it('includes sheetMaterialTypeId=null at index 28 and hdfMinThresholdMm at index 29', () => {
     const params = updateParams(makeNormalizedHeader({ sheetMaterialTypeId: null }), makeTotals());
     expect(params).toHaveLength(30);
+    expect(params[28]).toBeNull();
     expect(params[29]).toBeNull();
   });
 
-  it('includes sheetMaterialTypeId=99 at index 29', () => {
-    const params = updateParams(makeNormalizedHeader({ sheetMaterialTypeId: 99 }), makeTotals());
-    expect(params[29]).toBe(99);
+  it('includes sheetMaterialTypeId=99 at index 28 and hdfMinThresholdMm=12 at index 29', () => {
+    const params = updateParams(makeNormalizedHeader({ sheetMaterialTypeId: 99, hdfMinThresholdMm: 12 }), makeTotals());
+    expect(params[28]).toBe(99);
+    expect(params[29]).toBe(12);
   });
 
   it('forces materialId to null when sheetMaterialTypeId is set (update header invariant)', () => {
     // materialId position in updateParams: index 24 (same column, one less than insert due to missing flag).
     const params = updateParams(makeNormalizedHeader({ materialId: 8, sheetMaterialTypeId: 33 }), makeTotals());
     expect(params[24]).toBeNull(); // materialId forced null
-    expect(params[29]).toBe(33);  // sheetMaterialTypeId
+    expect(params[28]).toBe(33);  // sheetMaterialTypeId
   });
 
   it('always binds null for materialId regardless of sheetMaterialTypeId (Variant B sunset)', () => {
     // Variant B: header material_id is fully sunset — ALWAYS null, even without a sheet id.
     const params = updateParams(makeNormalizedHeader({ materialId: 5, sheetMaterialTypeId: null }), makeTotals());
     expect(params[24]).toBeNull(); // materialId always null (Variant B invariant)
-    expect(params[29]).toBeNull(); // sheetMaterialTypeId null
+    expect(params[28]).toBeNull(); // sheetMaterialTypeId null
+    expect(params[29]).toBeNull(); // hdfMinThresholdMm null
   });
 });
 

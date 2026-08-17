@@ -11,10 +11,12 @@ describe('orders list keep-alive gating', () => {
   });
   it('every query hook is gated on isActive', () => {
     const hookCalls = (src.match(/use(Table|List|Many|Select)\(/g) || []).length;
-    const gated = (src.match(/enabled:\s*isActive/g) || []).length;
+    const directlyGated = (src.match(/enabled:\s*isActive/g) || []).length;
+    const orderCardCatalogGated = (src.match(/enabled:\s*orderCardCatalogEnabled/g) || []).length;
     // useAppSettings is gated via its own arg; count it separately
     expect(src).toContain('useAppSettings({ enabled: isActive })');
-    expect(gated).toBeGreaterThanOrEqual(hookCalls);
+    expect(src).toContain("const orderCardCatalogEnabled = isActive &&");
+    expect(directlyGated + orderCardCatalogGated).toBeGreaterThanOrEqual(hookCalls);
   });
   it('disables refetchOnWindowFocus on the main table', () => {
     expect(src).toContain('refetchOnWindowFocus: false');

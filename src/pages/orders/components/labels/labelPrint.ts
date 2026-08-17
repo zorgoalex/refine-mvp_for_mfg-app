@@ -1,11 +1,27 @@
-export function buildLabelPrintDocument(svgPages: readonly string[], title = 'Печать бирок'): string {
-  const pages = svgPages
+export interface LabelPrintOptions {
+  appendBlankPage?: boolean;
+}
+
+export function buildLabelPrintDocument(
+  svgPages: readonly string[],
+  title = 'Печать бирок',
+  options: LabelPrintOptions = {},
+): string {
+  const labelPages = svgPages
     .map((svg, index) => `
       <section class="label-print-page" aria-label="Бирка ${index + 1}">
         <div class="label-print-page__inner">${svg}</div>
       </section>
     `)
     .join('\n');
+  const blankPage = options.appendBlankPage && svgPages.length > 0
+    ? `
+      <section class="label-print-page label-print-page--blank" aria-label="Пустая бирка">
+        <div class="label-print-page__inner label-print-page__inner--blank" aria-hidden="true"></div>
+      </section>
+    `
+    : '';
+  const pages = [labelPages, blankPage].filter(Boolean).join('\n');
 
   return `<!doctype html>
 <html lang="ru">
@@ -48,6 +64,12 @@ export function buildLabelPrintDocument(svgPages: readonly string[], title = 'П
       line-height: 0;
     }
 
+    .label-print-page__inner--blank {
+      height: 0;
+      overflow: hidden;
+      width: 0;
+    }
+
     .label-print-page svg {
       display: block;
       height: auto;
@@ -77,7 +99,11 @@ export function buildLabelPrintDocument(svgPages: readonly string[], title = 'П
 </html>`;
 }
 
-export function printLabelSvgPages(svgPages: readonly string[], title = 'Печать бирок'): boolean {
+export function printLabelSvgPages(
+  svgPages: readonly string[],
+  title = 'Печать бирок',
+  options: LabelPrintOptions = {},
+): boolean {
   if (typeof document === 'undefined' || svgPages.length === 0) {
     return false;
   }
@@ -113,7 +139,7 @@ export function printLabelSvgPages(svgPages: readonly string[], title = 'Печ�
   cleanupTimer = window.setTimeout(cleanup, 120_000);
 
   frameDocument.open();
-  frameDocument.write(buildLabelPrintDocument(svgPages, title));
+  frameDocument.write(buildLabelPrintDocument(svgPages, title, options));
   frameDocument.close();
 
   window.setTimeout(() => {

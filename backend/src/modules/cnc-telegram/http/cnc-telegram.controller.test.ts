@@ -20,6 +20,7 @@ describe('CncTelegramController parsing', () => {
       externalPacketKey: 'chat:-100:message:10',
       source: { version: 2 },
       cuttingSequenceNo: 7,
+      sourceFiles: [],
       items: [{ orderName: '2689', detailNumber: 31 }],
     });
 
@@ -42,6 +43,27 @@ describe('CncTelegramController parsing', () => {
     }, 'cnc:test:1')).toMatchObject({
       svgImportMode: { validationMode: 'lenient', refreshImported: true },
     });
+  });
+
+  it('accepts structured packet source file identities for Telegram SVG dedupe', () => {
+    const parsed = parseStructuredIngest({
+      ...structuredPayload(),
+      sourceFiles: [{
+        kind: 'svg',
+        fileName: 'CNC#1_1234.svg',
+        contentType: 'image/svg+xml',
+        sizeBytes: 1200,
+        sha256: 'A'.repeat(64),
+      }],
+    }, 'cnc:test:source-files');
+
+    expect(parsed.sourceFiles).toEqual([{
+      kind: 'svg',
+      fileName: 'CNC#1_1234.svg',
+      contentType: 'image/svg+xml',
+      sizeBytes: 1200,
+      sha256: 'a'.repeat(64),
+    }]);
   });
 
   it('reads idempotency only from the Idempotency-Key header', () => {

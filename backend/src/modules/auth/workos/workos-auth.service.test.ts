@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
+import { getPermissionsForRole, mapRoleIdToRole } from '../../../permissions/permissions';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import { ApiError } from '../../../common/errors/api-error';
 import type { DatabaseService } from '../../../database/database.service';
 import { LoginMethodNotAllowedError } from '../auth.errors';
@@ -186,7 +188,24 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
     },
     audit: { writeLoginFailed: state.loginFailed },
     passwords: { verify: async () => state.passwordValid },
-    permissions: { canUser: state.canUser } as WorkosAuthServicePorts['permissions'],
+    permissions: {
+      canUser: state.canUser,
+      loadRoleAuthorization: vi.fn(async (roleId: number) => {
+        const role = mapRoleIdToRole(roleId);
+        if (!role) {
+          return {
+            permissions: [],
+            scopes: ROLE_POLICIES.viewer,
+            version: 'static',
+          };
+        }
+        return {
+          permissions: getPermissionsForRole(role),
+          scopes: ROLE_POLICIES[role],
+          version: 'static',
+        };
+      }),
+    } as WorkosAuthServicePorts['permissions'],
     deniedAudit: { recordDenied: state.recordDenied },
     database: state.database,
     frontendOrigin: 'https://erp.example.test',

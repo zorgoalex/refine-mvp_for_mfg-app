@@ -21,7 +21,9 @@ import {
   type OrderCutMapSelectionSource,
 } from './orderCutMapSelection';
 import {
+  loadAppendBlankLabelOnPrintPreference,
   resolvePreferredLabelTemplateId,
+  saveAppendBlankLabelOnPrintPreference,
   saveLabelTemplatePreference,
 } from './labelTemplatePreference';
 
@@ -71,6 +73,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [previewDetailId, setPreviewDetailId] = useState<number | null>(initialDetailId);
   const [useBasisFields, setUseBasisFields] = useState(true);
+  const [appendBlankLabelOnPrint, setAppendBlankLabelOnPrint] = useState(false);
   const [preview, setPreview] = useState<OrderLabelsPreview | null>(null);
   const [generatedPreview, setGeneratedPreview] = useState<OrderLabelsPreview | null>(null);
   const [generatedGenerationId, setGeneratedGenerationId] = useState<number | null>(null);
@@ -193,8 +196,9 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     setPreview(null);
     setGeneratedPreview(null);
     setGeneratedGenerationId(null);
+    setAppendBlankLabelOnPrint(loadAppendBlankLabelOnPrintPreference(labelTemplatePreferenceUserId));
     void loadTemplates();
-  }, [initialDetailId, loadTemplates, open]);
+  }, [initialDetailId, labelTemplatePreferenceUserId, loadTemplates, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -455,6 +459,16 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
               >
                 Использовать поля базис проекта
               </Checkbox>
+              <Checkbox
+                checked={appendBlankLabelOnPrint}
+                onChange={(event) => {
+                  const checked = event.target.checked;
+                  setAppendBlankLabelOnPrint(checked);
+                  saveAppendBlankLabelOnPrintPreference(labelTemplatePreferenceUserId, checked);
+                }}
+              >
+                Добавлять в конец пустую бирку
+              </Checkbox>
               {hasCutMap && (
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Text strong>Раскрой для миниатюры</Text>
@@ -556,6 +570,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
                 rows={generatedPreview.rows}
                 title={`Сформированные бирки${generatedGenerationId ? ` #${generatedGenerationId}` : ''}: ${generatedPreview.labelCount} шт.`}
                 printTitle={`Заказ ${orderId} — бирки${generatedGenerationId ? ` #${generatedGenerationId}` : ''}`}
+                appendBlankLabelOnPrint={appendBlankLabelOnPrint}
               />
             ) : preview && selectedTemplate ? (
               <OrderLabelGeneratePreviewSurface preview={preview} template={selectedTemplate} />

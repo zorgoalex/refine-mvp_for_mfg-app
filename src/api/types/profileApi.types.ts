@@ -43,6 +43,8 @@ export interface UserPreferencesDto {
   uiVariant?: UiVariant;
   /** Optional only while frontend can meet an older backend during rollout. */
   tabletMode?: boolean;
+  /** Optional during mixed frontend/backend rollout. Null means no user choice yet. */
+  sidebarCollapsed?: boolean | null;
   orderDetailColumns: Record<string, OrderDetailColumnPreference>;
   /** Optional during mixed frontend/backend rollout. */
   recentReferences?: RecentReferences;
@@ -71,6 +73,7 @@ export interface UpdateUserPreferencesRequest {
   uiSize?: UiSize;
   uiVariant?: UiVariant;
   tabletMode?: boolean;
+  sidebarCollapsed?: boolean;
   orderDetailColumns?: Record<string, OrderDetailColumnPreference>;
   pageSizePreferences?: PageSizePreferences;
   sidebarMenuOrder?: SidebarMenuOrderPreference;

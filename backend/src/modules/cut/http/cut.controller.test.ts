@@ -165,6 +165,7 @@ describe('CutController', () => {
         createJob: vi.fn(async (c) => { calls.push(`create:${c.dto.name}`); return jobDto(); }),
         calculate: vi.fn(async (c) => { calls.push(`calc:${c.cutJobId}:${c.version}`); return jobDto(); }),
         archive: vi.fn(async (c) => { calls.push(`archive:${c.cutJobId}:${c.version}`); return jobDto(); }),
+        createMdfBoardCard: vi.fn(async (c) => { calls.push(`mdf:${c.cutJobId}`); return jobDto(); }),
         setCurrentResult: vi.fn(async (c) => { calls.push(`current:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
         archiveResult: vi.fn(async (c) => { calls.push(`archiveResult:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
         unarchiveResult: vi.fn(async (c) => { calls.push(`unarchiveResult:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
@@ -174,6 +175,7 @@ describe('CutController', () => {
     await expect(controller.create({ user: currentUser() } as never, { name: 'Тест' })).resolves.toMatchObject({ cutJobId: 42 });
     await controller.calculate({ user: currentUser() } as never, '42', { version: 3, commandId: TEST_COMMAND_ID });
     await controller.archive({ user: currentUser() } as never, '42', { version: 5 });
+    await controller.createMdfBoardCard({ user: currentUser(), requestId: 'req-mdf' } as never, '42');
     await controller.setResultCurrent({ user: currentUser() } as never, '42', '2');
     await controller.archiveResult({ user: currentUser() } as never, '42', '3');
     await controller.unarchiveResult({ user: currentUser() } as never, '42', '4');
@@ -181,6 +183,7 @@ describe('CutController', () => {
       'create:Тест',
       'calc:42:3',
       'archive:42:5',
+      'mdf:42',
       'current:42:2',
       'archiveResult:42:3',
       'unarchiveResult:42:4',

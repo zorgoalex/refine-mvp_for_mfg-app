@@ -1770,7 +1770,7 @@ async function insertOrderHeader(
       discount, surcharge, total_amount, final_amount, paid_amount, parts_count, total_area,
       link_cutting_file, link_cutting_image_file, link_cad_file, link_pdf_file,
       notes, material_id, milling_type_id, edge_type_id, film_id, ref_key_1c,
-      sheet_material_type_id, project_id, version
+      sheet_material_type_id, hdf_min_threshold_mm, project_id, version
     )
     VALUES (
       $1, $2, $3, $4, $5,
@@ -1779,7 +1779,7 @@ async function insertOrderHeader(
       $14, $15, $16, $17, $18, $19, $20,
       $21, $22, $23, $24,
       $25, $26, $27, $28, $29, $30,
-      $31, $32, 1
+      $31, $32, $33, 1
     )
     RETURNING order_id AS id
     `,
@@ -1827,7 +1827,8 @@ async function updateOrderHeader(
         edge_type_id = $27,
         film_id = $28,
         ref_key_1c = $29,
-        sheet_material_type_id = $30
+        sheet_material_type_id = $30,
+        hdf_min_threshold_mm = $31
     WHERE order_id = $1 AND delete_flag = false
     `,
     [orderId, ...orderHeaderUpdateParams(header, totals)],
@@ -1835,7 +1836,7 @@ async function updateOrderHeader(
   return orderId;
 }
 
-/** Params for INSERT — includes production_status_from_details_enabled ($9), sheet_material_type_id ($31), project_id ($32). */
+/** Params for INSERT — includes production_status_from_details_enabled ($9), sheet_material_type_id ($31), hdf_min_threshold_mm ($32), project_id ($33). */
 function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTotalsDto, projectId: number) {
   return [
     header.orderName,
@@ -1872,6 +1873,7 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
     header.filmId,
     header.refKey1c,
     header.sheetMaterialTypeId ?? null,
+    header.hdfMinThresholdMm ?? null,
     projectId,
   ];
 }
@@ -1879,7 +1881,8 @@ function orderHeaderParams(header: NormalizedSaveOrderHeaderDto, totals: OrderTo
 /**
  * Params for UPDATE — same as orderHeaderParams but WITHOUT production status mode/current status.
  * Production status is derived from details after child persistence.
- * Includes sheet_material_type_id ($30 in UPDATE, $29 without orderId prefix removed by caller).
+ * Includes sheet_material_type_id ($30 in UPDATE, $29 without orderId prefix removed by caller)
+ * and hdf_min_threshold_mm ($31 in UPDATE, $30 without orderId).
  * NOTE: pg-order-transaction-manager.ts has its own equivalent inline order UPDATE (different column
  * subset) that also omits this flag — keep both in sync if order header columns change.
  */
@@ -1916,6 +1919,7 @@ function orderHeaderUpdateParams(header: NormalizedSaveOrderHeaderDto, totals: O
     header.filmId,
     header.refKey1c,
     header.sheetMaterialTypeId ?? null,
+    header.hdfMinThresholdMm ?? null,
   ];
 }
 

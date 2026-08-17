@@ -539,7 +539,12 @@ describe('CutPage source guards', () => {
 describe('CutPage profile + totals columns (source guard)', () => {
   it('filters the job list by cut profile from the top filter block', () => {
     expect(source).toContain('const [profileFilter, setProfileFilter]');
-    expect(source).toContain(': filterJobsByProfile(statusFiltered, profileFilter)');
+    expect(source).toContain('const [jobKindTab, setJobKindTab]');
+    expect(source).toContain('cutJobMatchesKindTab(candidate, profiles, jobKindTab)');
+    expect(source).toContain(': filterJobsByProfile(kindFiltered, profileFilter)');
+    expect(source).toContain("label: 'Ванны'");
+    expect(source).toContain("label: 'Раскрои'");
+    expect(source).toContain('<Tabs');
     expect(source).toContain('<span>Профиль раскроя</span>');
     expect(source).toContain('aria-label="Фильтр по профилю раскроя"');
     expect(source).toContain('placeholder="Все профили"');
@@ -548,6 +553,12 @@ describe('CutPage profile + totals columns (source guard)', () => {
 
   it('renames the positions column and adds totals/profile/sheets columns', () => {
     expect(source).toContain("title: 'Позиции'");
+    expect(source).toContain("title: 'МДФ-доска'");
+    expect(source).toContain('<CutJobMdfBoardCell job={row} />');
+    expect(source).toContain('cutJobMdfBoardExportValue(candidate)');
+    expect(source).toContain('cutApi.createMdfBoardCard(job.cutJobId)');
+    expect(source).toContain('job.mdfBoardStatus?.canCreateCard !== true');
+    expect(source).toContain('Создать карточку файла станка для МДФ-доски');
     expect(source).toContain("title: 'Заказы'");
     expect(source).toContain('<CutJobOrderLinks');
     expect(source).toContain('items={row.items}');

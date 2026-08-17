@@ -24,6 +24,7 @@ function repo(overrides: Partial<CutRepositoryPort> = {}): CutRepositoryPort {
     removeItem: reject,
     calculate: reject,
     archive: reject,
+    createMdfBoardCard: reject,
     setCurrentResult: reject,
     archiveResult: reject,
     unarchiveResult: reject,
@@ -112,6 +113,9 @@ describe('CutService RBAC (§8 principle 8)', () => {
       service.archive({ currentUser: viewer, cutJobId: 1, version: 0 }),
     ).rejects.toMatchObject({ statusCode: 403 });
     await expect(
+      service.createMdfBoardCard({ currentUser: viewer, cutJobId: 1 }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    await expect(
       service.setCurrentResult({ currentUser: viewer, cutJobId: 1, resultNo: 2 }),
     ).rejects.toMatchObject({ statusCode: 403 });
     await expect(
@@ -136,6 +140,13 @@ describe('CutService RBAC (§8 principle 8)', () => {
     expect(setCurrentResult).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, resultNo: 2 }));
     expect(archiveResult).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, resultNo: 3 }));
     expect(unarchiveResult).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, resultNo: 4 }));
+  });
+
+  it('createMdfBoardCard requires cut.manage and delegates to the repo', async () => {
+    const createMdfBoardCard = vi.fn(async () => ({ cutJobId: 42 }) as never);
+    const service = new CutService({ cut: repo({ createMdfBoardCard }) });
+    await service.createMdfBoardCard({ currentUser: user(['cut.manage']), cutJobId: 42, requestId: 'rq-mdf' });
+    expect(createMdfBoardCard).toHaveBeenCalledWith(expect.objectContaining({ cutJobId: 42, requestId: 'rq-mdf' }));
   });
 
   it('throws a 403 ApiError carrying the required permission', async () => {

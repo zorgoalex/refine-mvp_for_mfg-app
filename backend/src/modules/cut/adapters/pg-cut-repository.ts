@@ -29,6 +29,11 @@ import {
   formatCutNumber,
 } from '../application/cut-numbering';
 import {
+  allocateCutJobSourceDisplayNumber,
+  cutJobDisplayNumberKind,
+  type CutJobDisplayNumberKind,
+} from './cut-job-display-number';
+import {
   classifyDetailEligibility,
   type DetailEligibilityCandidate,
 } from '../application/cut-eligibility';
@@ -66,6 +71,7 @@ import type {
   ArchiveCutJobCommand,
   CalculateCutJobCommand,
   CreateCutJobCommand,
+  CreateCutJobMdfBoardCardCommand,
   CutRepositoryPort,
   CutResultStateCommand,
   DetailLastReadyQuery,
@@ -105,6 +111,7 @@ import type {
   CutGroupDto,
   CutJobDeleteImpactDto,
   CutJobLinkedMdfPacketDto,
+  CutJobMdfBoardStatusDto,
   CutJobItemDto,
   CutJobDto,
   CutJobRefDto,
@@ -160,8 +167,12 @@ import {
   CutStaleVersionError,
 } from '../errors/cut.errors';
 import type { LabelCustomExpressionScalar } from '../../labels/application/label-custom-field-expression';
+import { evaluateMdfOrderMachineFilesPresentAutomation } from '../../status-automation/application/status-automation-runtime';
 
 const AUDIT_SOURCE = 'backend-cut-command';
+const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
+const MDF_BOARD_CARD_CREATED_EVENT = 'cnc.manual_svg_upload.mdf_card_created';
+const MDF_BOARD_CARD_CREATED_SOURCE = 'backend-cut-job-mdf-board-command';
 
 /**
  * Ready-to-cut statuses and the default freecut params are sourced from the
@@ -296,6 +307,41 @@ interface DeleteImpactPacketRow extends QueryResultRow {
   machine: string | null;
   program_name: string | null;
   item_count: string | number;
+}
+
+interface MdfBoardStatusRow extends QueryResultRow {
+  cut_job_id: string | number;
+  status: string;
+  selection_criteria: Record<string, unknown> | null;
+  active_packet_count: string | number | null;
+  hidden_packet_count: string | number | null;
+  manual_pending_packet_count: string | number | null;
+  active_packets_json: unknown;
+}
+
+interface MdfBoardCardPacketRow extends QueryResultRow {
+  packet_id: string;
+  external_packet_key: string;
+  cutting_sequence_no: string | number | null;
+  source_chat_id: string;
+  source_version: string | number;
+  workday: string | Date;
+  machine: string | null;
+  program_name: string | null;
+  material_name: string | null;
+  parse_status: string;
+  completion_status: string;
+  thumbs_up: boolean;
+  rework: boolean;
+  parser_version: string | null;
+  svg_cut_job_id: string | number | null;
+  svg_cut_job_display_number: string | number | null;
+  svg_cut_result_id: string | number | null;
+  svg_cut_result_no: string | number | null;
+  svg_cut_import_status: string | null;
+  svg_cut_import_note: string | null;
+  item_count: string | number;
+  item_quantity_total: string | number | null;
 }
 
 const CUT_RESULT_LEASE_MS = 15 * 60 * 1000;
@@ -731,10 +777,11 @@ export class PgCutRepository implements CutRepositoryPort {
       // config edit after the draft exists must NOT retro-mutate this job. The
       // snapshot is the authoritative payload at calculate time.
       const paramsSnapshot = await this.config.getDefaultParams();
+      const sourceDisplayNumber = await allocateCutJobSourceDisplayNumber(tx, 'regular');
       const inserted = await tx.query<{ cut_job_id: string | number }>(
         `
-        INSERT INTO cut_job (name, source, selection_criteria, params, created_by)
-        VALUES ($1, 'manual', $2::jsonb, $3::jsonb, $4)
+        INSERT INTO cut_job (name, source, selection_criteria, params, created_by, source_display_number)
+        VALUES ($1, 'manual', $2::jsonb, $3::jsonb, $4, $5)
         RETURNING cut_job_id
         `,
         [
@@ -742,6 +789,7 @@ export class PgCutRepository implements CutRepositoryPort {
           command.dto.criteria ? JSON.stringify(command.dto.criteria) : null,
           JSON.stringify(paramsSnapshot),
           numOrNull(command.currentUser.id),
+          sourceDisplayNumber,
         ],
       );
       const cutJobId = toNum(inserted.rows[0].cut_job_id);
@@ -773,7 +821,7 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId,
         requestId: command.requestId,
         related: { orderIds: reservedOrderIds, sheetMaterialTypeIds: reservedSheetTypeIds },
-        metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount },
+        metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount, displayNumber: sourceDisplayNumber },
       });
 
       return loadJob(tx, cutJobId);
@@ -1533,6 +1581,87 @@ export class PgCutRepository implements CutRepositoryPort {
     return loadCutJobDeleteImpact(this.database, query.cutJobId);
   }
 
+  createMdfBoardCard(command: CreateCutJobMdfBoardCardCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      const requestId = command.requestId ?? 'cut-job-mdf-board-card-create';
+      await setSessionUser(tx, command.currentUser.id);
+      const job = await loadJobForUpdate(tx, command.cutJobId);
+      if (job.status === 'archived') {
+        throw new ApiError(409, 'CUT_JOB_ARCHIVED', 'Удалённое задание нельзя вывести на МДФ-доску');
+      }
+      if (!(await hasMdfBoardHiddenColumns(tx))) {
+        throw new ApiError(503, 'CUT_JOB_MDF_BOARD_SCHEMA_UNAVAILABLE', 'Схема МДФ-доски недоступна');
+      }
+
+      const packet = await loadSingleMdfBoardCardPacket(tx, command.cutJobId);
+      const eventKey = mdfBoardCardEventKey(packet);
+      await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [eventKey]);
+
+      if (packet.source_chat_id !== MANUAL_SVG_CHAT_ID || await mdfBoardCardEventExists(tx, eventKey)) {
+        throw new ApiError(
+          409,
+          'CUT_JOB_MDF_BOARD_CARD_ALREADY_EXISTS',
+          'Карточка файла станка уже есть на МДФ-доске',
+          { cutJobId: command.cutJobId, packetId: packet.packet_id, externalPacketKey: packet.external_packet_key },
+        );
+      }
+
+      const orderIds = await loadMdfBoardPacketOrderIds(tx, packet.packet_id);
+      const auditId = await auditService.record(tx, {
+        event: MDF_BOARD_CARD_CREATED_EVENT,
+        entityType: 'cnc_telegram_packet',
+        entityId: packet.packet_id,
+        actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username ?? null,
+        actorRole: command.currentUser.role ?? null,
+        requestId,
+        source: MDF_BOARD_CARD_CREATED_SOURCE,
+        before: null,
+        after: mdfBoardPacketSnapshot(packet),
+        diff: {
+          mdfMachineFileCardCreated: true,
+          forcedFromCutJob: true,
+          completionStatus: packet.completion_status,
+          thumbsUp: packet.thumbs_up,
+          svgCutImportStatus: packet.svg_cut_import_status ?? 'none',
+        },
+        metadata: {
+          source: MDF_BOARD_CARD_CREATED_SOURCE,
+          action: 'cut_job_mdf_board_card_create',
+          manualSvgStage: 'mdf_machine_file_card_created',
+          stageStatus: 'succeeded',
+          duplicateGuard: 'outbox_events.idempotency_key',
+          mdfMachineFileCardEventKey: eventKey,
+          cutJobId: command.cutJobId,
+          packetId: packet.packet_id,
+          externalPacketKey: packet.external_packet_key,
+          sourceVersion: toNum(packet.source_version),
+          selectedOrderIds: orderIds,
+          requestId,
+        },
+        relatedEntities: mdfBoardPacketRelatedEntities(packet, orderIds),
+      });
+
+      await enqueueMdfBoardCardCreatedEvent(tx, {
+        packet,
+        eventKey,
+        auditId,
+        orderIds,
+        actorUserId: command.currentUser.id,
+        requestId,
+      });
+
+      await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+        orderIds,
+        actor: command.currentUser,
+        requestId,
+        sourceIdempotencyKey: `cnc-manual-svg:${packet.packet_id}:source-${packet.source_version}:machine-files`,
+      });
+
+      return loadJobWithMdfBoardStatus(tx, command.cutJobId);
+    });
+  }
+
   archive(command: ArchiveCutJobCommand): Promise<CutJobDto> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
@@ -1616,7 +1745,16 @@ export class PgCutRepository implements CutRepositoryPort {
   }
 
   async getJob(query: GetCutJobQuery): Promise<CutJobDto> {
-    const base = await loadJob(this.database, query.cutJobId);
+    const mdfBoardStatusById = await loadMdfBoardStatuses(this.database, [query.cutJobId]);
+    const base = await loadJob(
+      this.database,
+      query.cutJobId,
+      true,
+      undefined,
+      undefined,
+      false,
+      mdfBoardStatusById.get(query.cutJobId),
+    );
 
     // Read last_calc_params and last_calc_basis from cut_job (single extra query).
     const calcRow = await this.database.query<{ last_calc_params: unknown; last_calc_basis: string | null }>(
@@ -2641,10 +2779,19 @@ export class PgCutRepository implements CutRepositoryPort {
     const ids = result.rows.map((row) => toNum(row.cut_job_id));
     const totalsById = await computeTotals(this.database, ids);
     const materialNamesById = await computeMaterialNames(this.database, ids);
+    const mdfBoardStatusById = await loadMdfBoardStatuses(this.database, ids);
     const jobs: CutJobDto[] = [];
     for (const id of ids) {
       // List only renders item/group counts -> skip the per-item detail joins.
-      jobs.push(await loadJob(this.database, id, false, totalsById.get(id), materialNamesById.get(id) ?? []));
+      jobs.push(await loadJob(
+        this.database,
+        id,
+        false,
+        totalsById.get(id),
+        materialNamesById.get(id) ?? [],
+        false,
+        mdfBoardStatusById.get(id),
+      ));
     }
     return jobs;
   }
@@ -4140,8 +4287,24 @@ export class PgCutRepository implements CutRepositoryPort {
   async setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto> {
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
-      const jobRes = await tx.query<{ cut_job_id: string | number; status: string; version: string | number; param_profile_id: string | number | null }>(
-        `SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+      const jobRes = await tx.query<{
+        cut_job_id: string | number;
+        status: string;
+        version: string | number;
+        param_profile_id: string | number | null;
+        source: string;
+        source_display_number: string | number | null;
+        before_profile_params: unknown;
+        before_last_calc_params: unknown;
+      }>(
+        `SELECT j.cut_job_id, j.status, j.version, j.param_profile_id,
+                j.source, j.source_display_number, before_profile.params AS before_profile_params,
+                j.last_calc_params AS before_last_calc_params
+         FROM cut_job j
+         LEFT JOIN cut_param_profiles before_profile
+           ON before_profile.cut_param_profile_id = j.param_profile_id
+         WHERE j.cut_job_id = $1
+         FOR UPDATE OF j`,
         [command.cutJobId],
       );
       const row = jobRes.rows[0];
@@ -4150,12 +4313,15 @@ export class PgCutRepository implements CutRepositoryPort {
       if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
         throw new CutJobNotMutableError(command.cutJobId, row.status);
       }
+      let afterProfileParams: unknown = null;
       if (command.paramProfileId !== null) {
-        const exists = await tx.query(
-          `SELECT 1 FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true LIMIT 1`,
+        const exists = await tx.query<{ params: unknown }>(
+          `SELECT params FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true LIMIT 1`,
           [command.paramProfileId],
         );
-        if (exists.rows.length === 0) throw new CutParamProfileNotFoundError(command.paramProfileId);
+        const profileRow = exists.rows[0];
+        if (!profileRow) throw new CutParamProfileNotFoundError(command.paramProfileId);
+        afterProfileParams = profileRow.params;
       }
       const beforeProfileId = row.param_profile_id === null ? null : toNum(row.param_profile_id);
 
@@ -4167,9 +4333,24 @@ export class PgCutRepository implements CutRepositoryPort {
         return;
       }
 
+      const currentDisplayKind = cutJobDisplayNumberKind(row.source_display_number);
+      const beforeKind = cutJobEffectiveDisplayKind(
+        row.source_display_number,
+        row.before_profile_params,
+        row.before_last_calc_params,
+      );
+      const afterKind: CutJobDisplayNumberKind = cutParamsUseVacuumTable(afterProfileParams) ? 'vacuum' : 'regular';
+      const nextSourceDisplayNumber = row.source === 'manual' && (currentDisplayKind === null || beforeKind !== afterKind)
+        ? await allocateCutJobSourceDisplayNumber(tx, afterKind)
+        : null;
       await tx.query(
-        `UPDATE cut_job SET param_profile_id = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
-        [command.cutJobId, command.paramProfileId],
+        `UPDATE cut_job
+         SET param_profile_id = $2,
+             source_display_number = COALESCE($3, source_display_number),
+             version = version + 1,
+             updated_at = now()
+         WHERE cut_job_id = $1`,
+        [command.cutJobId, command.paramProfileId, nextSourceDisplayNumber],
       );
 
       await this.audit(tx, command.currentUser, {
@@ -4177,8 +4358,13 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId: command.cutJobId,
         requestId: command.requestId,
         before: { paramProfileId: beforeProfileId },
-        after: { paramProfileId: command.paramProfileId },
-        metadata: { beforeProfileId, afterProfileId: command.paramProfileId },
+        after: { paramProfileId: command.paramProfileId, sourceDisplayNumber: nextSourceDisplayNumber ?? row.source_display_number ?? null },
+        metadata: {
+          beforeProfileId,
+          afterProfileId: command.paramProfileId,
+          beforeDisplayNumber: row.source_display_number ?? null,
+          afterDisplayNumber: nextSourceDisplayNumber ?? row.source_display_number ?? null,
+        },
       });
 
       await tx.query(
@@ -5302,6 +5488,15 @@ function cutParamsUseVacuumTable(params: unknown): boolean {
     && (params as { layout_mode?: unknown }).layout_mode === 'vacuum_table';
 }
 
+function cutJobEffectiveDisplayKind(
+  sourceDisplayNumber: string | number | null | undefined,
+  profileParams: unknown,
+  lastCalcParams: unknown,
+): CutJobDisplayNumberKind {
+  return cutJobDisplayNumberKind(sourceDisplayNumber)
+    ?? (cutParamsUseVacuumTable(profileParams) || cutParamsUseVacuumTable(lastCalcParams) ? 'vacuum' : 'regular');
+}
+
 function buildPdfSheetMeta(
   placements: SheetPlacementsJson,
   detailById: ReadonlyMap<number, RenderDetailInfo>,
@@ -5934,6 +6129,7 @@ async function loadJob(
   totals?: CutJobTotals,
   materialNames?: string[],
   frozenItems = false,
+  mdfBoardStatus?: CutJobMdfBoardStatusDto,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
     `SELECT j.cut_job_id, j.name, j.status, j.source, j.version, j.pdf_prewarm_state, j.failure_code, j.failure_reason,
@@ -6055,7 +6251,7 @@ async function loadJob(
   };
 
   const jobId = toNum(jobRow.cut_job_id);
-  const isVacuum = cutParamsUseVacuumTable(jobRow.profile_params) || cutParamsUseVacuumTable(jobRow.last_calc_params);
+  const isVacuum = cutJobEffectiveDisplayKind(jobRow.source_display_number, jobRow.profile_params, jobRow.last_calc_params) === 'vacuum';
 
   return {
     cutJobId: jobId,
@@ -6077,6 +6273,7 @@ async function loadJob(
     rotationAllowed: jobRow.rotation_allowed !== false,
     textureDirection: normalizeCutTextureDirection(jobRow.texture_direction),
     materialNames: resolvedMaterialNames,
+    ...(mdfBoardStatus ? { mdfBoardStatus } : {}),
     totals: resolvedTotals,
     items: itemDtos,
     groups,
@@ -6374,10 +6571,19 @@ async function loadCutJobDeleteImpact(client: DatabaseClient, cutJobId: number):
       LEFT JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
       WHERE p.svg_cut_job_id = $1
         AND p.mdf_board_hidden_at IS NULL
+        AND (
+          p.source_chat_id IS DISTINCT FROM $2
+          OR EXISTS (
+            SELECT 1
+            FROM outbox_events mdf_card
+            WHERE mdf_card.idempotency_key =
+              'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+          )
+        )
       GROUP BY p.packet_id, p.external_packet_key, p.workday, p.machine, p.program_name, p.updated_at
       ORDER BY p.workday DESC, p.updated_at DESC, p.external_packet_key
       `,
-      [cutJobId],
+      [cutJobId, MANUAL_SVG_CHAT_ID],
     );
     const packetRows = packets.rows as DeleteImpactPacketRow[];
     linkedMdfPackets = packetRows.map((row) => ({
@@ -6403,6 +6609,397 @@ async function loadCutJobDeleteImpact(client: DatabaseClient, cutJobId: number):
   };
 }
 
+async function loadSingleMdfBoardCardPacket(
+  tx: TransactionClient,
+  cutJobId: number,
+): Promise<MdfBoardCardPacketRow> {
+  const result = await tx.query<MdfBoardCardPacketRow>(
+    `
+    SELECT
+      p.packet_id::text AS packet_id,
+      p.external_packet_key,
+      p.cutting_sequence_no,
+      p.source_chat_id,
+      p.source_version,
+      p.workday,
+      p.machine,
+      p.program_name,
+      p.material_name,
+      p.parse_status,
+      p.completion_status,
+      p.thumbs_up,
+      p.rework,
+      p.parser_version,
+      p.svg_cut_job_id,
+      svg_job.source_display_number AS svg_cut_job_display_number,
+      p.svg_cut_result_id,
+      svg_result.result_no AS svg_cut_result_no,
+      p.svg_cut_import_status,
+      p.svg_cut_import_note,
+      (
+        SELECT COUNT(i.packet_item_id)::integer
+        FROM cnc_telegram_packet_items i
+        WHERE i.packet_id = p.packet_id
+      ) AS item_count,
+      (
+        SELECT COALESCE(SUM(i.quantity), 0)
+        FROM cnc_telegram_packet_items i
+        WHERE i.packet_id = p.packet_id
+      ) AS item_quantity_total
+    FROM cnc_telegram_packets p
+    JOIN cut_job svg_job ON svg_job.cut_job_id = p.svg_cut_job_id
+    LEFT JOIN cut_result svg_result
+      ON svg_result.cut_job_id = p.svg_cut_job_id
+     AND svg_result.cut_result_id = p.svg_cut_result_id
+    WHERE p.svg_cut_job_id = $1
+      AND p.svg_cut_import_status = 'imported'
+      AND p.mdf_board_hidden_at IS NULL
+    ORDER BY p.workday DESC, p.updated_at DESC, p.external_packet_key
+    LIMIT 2
+    FOR UPDATE OF p
+    `,
+    [cutJobId],
+  );
+  if (result.rows.length === 0) {
+    throw new ApiError(
+      422,
+      'CUT_JOB_MDF_BOARD_PACKET_NOT_FOUND',
+      'У задания нет связанного импортированного SVG-файла для создания карточки МДФ-доски',
+      { cutJobId },
+    );
+  }
+  if (result.rows.length > 1) {
+    throw new ApiError(
+      409,
+      'CUT_JOB_MDF_BOARD_MULTIPLE_PACKETS',
+      'У задания найдено несколько связанных SVG-файлов; создание карточки МДФ-доски неоднозначно',
+      { cutJobId, packetIds: result.rows.map((row) => row.packet_id) },
+    );
+  }
+  return result.rows[0]!;
+}
+
+async function loadMdfBoardPacketOrderIds(
+  tx: TransactionClient,
+  packetId: string,
+): Promise<number[]> {
+  const result = await tx.query<{ order_id: string | number }>(
+    `
+    SELECT DISTINCT match_order_id AS order_id
+    FROM cnc_telegram_packet_items
+    WHERE packet_id = $1::uuid
+      AND match_order_id IS NOT NULL
+    ORDER BY match_order_id
+    `,
+    [packetId],
+  );
+  return result.rows.map((row) => toNum(row.order_id)).filter((id) => Number.isFinite(id) && id > 0);
+}
+
+async function mdfBoardCardEventExists(
+  tx: TransactionClient,
+  eventKey: string,
+): Promise<boolean> {
+  const result = await tx.query<{ exists: boolean }>(
+    `
+    SELECT EXISTS (
+      SELECT 1
+      FROM outbox_events
+      WHERE idempotency_key = $1
+    ) AS "exists"
+    `,
+    [eventKey],
+  );
+  return result.rows[0]?.exists === true;
+}
+
+function mdfBoardCardEventKey(packet: Pick<MdfBoardCardPacketRow, 'packet_id' | 'source_version'>): string {
+  return `cnc-manual-svg:${packet.packet_id}:source-${packet.source_version}:mdf-card-created`;
+}
+
+function mdfBoardPacketSnapshot(packet: MdfBoardCardPacketRow): Record<string, unknown> {
+  return {
+    packetId: packet.packet_id,
+    externalPacketKey: packet.external_packet_key,
+    cuttingSequenceNo: packet.cutting_sequence_no === null ? null : toNum(packet.cutting_sequence_no),
+    sourceVersion: toNum(packet.source_version),
+    workday: dateOnly(packet.workday) ?? String(packet.workday),
+    machine: packet.machine,
+    programName: packet.program_name,
+    materialName: packet.material_name,
+    parseStatus: packet.parse_status,
+    completionStatus: packet.completion_status,
+    thumbsUp: packet.thumbs_up,
+    rework: packet.rework,
+    itemCount: toNum(packet.item_count),
+    itemQuantityTotal: toNum(packet.item_quantity_total ?? 0),
+    svgCutImportStatus: packet.svg_cut_import_status ?? 'none',
+    svgCutImportNote: packet.svg_cut_import_note,
+    svgCutJobId: packet.svg_cut_job_id === null ? null : toNum(packet.svg_cut_job_id),
+    svgCutJobDisplayNumber: displayNumberOrNull(packet.svg_cut_job_display_number),
+    svgCutResultId: packet.svg_cut_result_id === null ? null : toNum(packet.svg_cut_result_id),
+    svgCutResultNo: packet.svg_cut_result_no === null ? null : toNum(packet.svg_cut_result_no),
+  };
+}
+
+function mdfBoardPacketRelatedEntities(
+  packet: MdfBoardCardPacketRow,
+  orderIds: number[],
+): Array<{ entityType: string; entityId: number }> {
+  return [
+    ...orderIds.map((entityId) => ({ entityType: 'order', entityId })),
+    ...(packet.svg_cut_job_id === null ? [] : [{ entityType: 'cut_job', entityId: toNum(packet.svg_cut_job_id) }]),
+    ...(packet.svg_cut_result_id === null ? [] : [{ entityType: 'cut_result', entityId: toNum(packet.svg_cut_result_id) }]),
+  ];
+}
+
+async function enqueueMdfBoardCardCreatedEvent(
+  tx: TransactionClient,
+  input: {
+    packet: MdfBoardCardPacketRow;
+    eventKey: string;
+    auditId: string;
+    orderIds: number[];
+    actorUserId: string | number;
+    requestId: string;
+  },
+): Promise<void> {
+  await tx.query(
+    `
+    INSERT INTO outbox_events (
+      event_type, aggregate_type, aggregate_id, payload_json, idempotency_key
+    )
+    VALUES ($1, $2, $3, $4::jsonb, $5)
+    ON CONFLICT (idempotency_key) DO NOTHING
+    `,
+    [
+      MDF_BOARD_CARD_CREATED_EVENT,
+      'cnc_telegram_packet',
+      input.packet.packet_id,
+      JSON.stringify({
+        eventType: MDF_BOARD_CARD_CREATED_EVENT,
+        actorUserId: input.actorUserId,
+        requestId: input.requestId,
+        auditId: input.auditId,
+        packetId: input.packet.packet_id,
+        externalPacketKey: input.packet.external_packet_key,
+        sourceChatId: input.packet.source_chat_id,
+        sourceVersion: toNum(input.packet.source_version),
+        selectedOrderIds: input.orderIds,
+        createMdfMachineFileCard: true,
+        forcedFromCutJob: true,
+        cutJobId: input.packet.svg_cut_job_id === null ? null : toNum(input.packet.svg_cut_job_id),
+        cutJobDisplayNumber: displayNumberOrNull(input.packet.svg_cut_job_display_number),
+        cutResultId: input.packet.svg_cut_result_id === null ? null : toNum(input.packet.svg_cut_result_id),
+        cutResultNo: input.packet.svg_cut_result_no === null ? null : toNum(input.packet.svg_cut_result_no),
+        svgCutImportStatus: input.packet.svg_cut_import_status ?? 'none',
+        svgCutImportNote: input.packet.svg_cut_import_note,
+        workday: dateOnly(input.packet.workday) ?? String(input.packet.workday),
+        machine: input.packet.machine,
+        programName: input.packet.program_name,
+        materialName: input.packet.material_name,
+        parseStatus: input.packet.parse_status,
+        completionStatus: input.packet.completion_status,
+        rework: input.packet.rework,
+        itemCount: toNum(input.packet.item_count),
+        itemQuantityTotal: toNum(input.packet.item_quantity_total ?? 0),
+        idempotencyKey: input.eventKey,
+      }),
+      input.eventKey,
+    ],
+  );
+}
+
+async function loadJobWithMdfBoardStatus(
+  client: DatabaseClient,
+  cutJobId: number,
+): Promise<CutJobDto> {
+  const statusById = await loadMdfBoardStatuses(client, [cutJobId]);
+  return loadJob(client, cutJobId, true, undefined, undefined, false, statusById.get(cutJobId));
+}
+
+async function loadMdfBoardStatuses(
+  client: DatabaseClient,
+  cutJobIds: number[],
+): Promise<Map<number, CutJobMdfBoardStatusDto>> {
+  const ids = [...new Set(cutJobIds.filter((id) => Number.isInteger(id) && id > 0))];
+  const out = new Map<number, CutJobMdfBoardStatusDto>();
+  if (ids.length === 0) return out;
+
+  if (!(await hasMdfBoardHiddenColumns(client))) {
+    for (const id of ids) {
+      out.set(id, {
+        state: 'unknown',
+        reason: 'Схема МДФ-доски недоступна: нельзя проверить связанные карточки.',
+        activePacketCount: 0,
+        hiddenPacketCount: 0,
+        packets: [],
+      });
+    }
+    return out;
+  }
+
+  const result = await client.query<MdfBoardStatusRow>(
+    `
+    WITH packet_summary AS (
+      SELECT
+        p.svg_cut_job_id::bigint AS cut_job_id,
+        COUNT(*) FILTER (
+          WHERE p.mdf_board_hidden_at IS NULL
+            AND (
+              p.source_chat_id IS DISTINCT FROM $2
+              OR mdf_card.idempotency_key IS NOT NULL
+            )
+        )::integer AS active_packet_count,
+        COUNT(*) FILTER (
+          WHERE p.mdf_board_hidden_at IS NOT NULL
+            AND (
+              p.source_chat_id IS DISTINCT FROM $2
+              OR mdf_card.idempotency_key IS NOT NULL
+            )
+        )::integer AS hidden_packet_count,
+        COUNT(*) FILTER (
+          WHERE p.mdf_board_hidden_at IS NULL
+            AND p.source_chat_id = $2
+            AND mdf_card.idempotency_key IS NULL
+        )::integer AS manual_pending_packet_count,
+        COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'packetId', p.packet_id::text,
+              'externalPacketKey', p.external_packet_key,
+              'workday', p.workday,
+              'machine', p.machine,
+              'programName', p.program_name,
+              'itemCount', packet_items.item_count
+            )
+            ORDER BY p.workday DESC, p.updated_at DESC, p.external_packet_key
+          ) FILTER (
+            WHERE p.mdf_board_hidden_at IS NULL
+              AND (
+                p.source_chat_id IS DISTINCT FROM $2
+                OR mdf_card.idempotency_key IS NOT NULL
+              )
+          ),
+          '[]'::jsonb
+        ) AS active_packets_json
+      FROM cnc_telegram_packets p
+      LEFT JOIN outbox_events mdf_card
+        ON mdf_card.idempotency_key =
+          'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+      LEFT JOIN LATERAL (
+        SELECT COUNT(i.packet_item_id)::integer AS item_count
+        FROM cnc_telegram_packet_items i
+        WHERE i.packet_id = p.packet_id
+      ) packet_items ON true
+      WHERE p.svg_cut_job_id = ANY($1::bigint[])
+      GROUP BY p.svg_cut_job_id
+    )
+    SELECT
+      j.cut_job_id,
+      j.status,
+      j.selection_criteria,
+      COALESCE(packet_summary.active_packet_count, 0)::integer AS active_packet_count,
+      COALESCE(packet_summary.hidden_packet_count, 0)::integer AS hidden_packet_count,
+      COALESCE(packet_summary.manual_pending_packet_count, 0)::integer AS manual_pending_packet_count,
+      COALESCE(packet_summary.active_packets_json, '[]'::jsonb) AS active_packets_json
+    FROM cut_job j
+    LEFT JOIN packet_summary ON packet_summary.cut_job_id = j.cut_job_id
+    WHERE j.cut_job_id = ANY($1::bigint[])
+    `,
+    [ids, MANUAL_SVG_CHAT_ID],
+  );
+
+  for (const row of result.rows) {
+    out.set(toNum(row.cut_job_id), buildMdfBoardStatus(row));
+  }
+  return out;
+}
+
+function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatusDto {
+  const activePacketCount = toNum(row.active_packet_count ?? 0);
+  const hiddenPacketCount = toNum(row.hidden_packet_count ?? 0);
+  const manualPendingPacketCount = toNum(row.manual_pending_packet_count ?? 0);
+  const packets = cutJobLinkedMdfPacketsFromJson(row.active_packets_json);
+
+  if (activePacketCount > 0) {
+    return {
+      state: 'created',
+      reason: activePacketCount === 1
+        ? 'Карточка создана и видна на МДФ-доске.'
+        : `Создано ${activePacketCount} карточек, видимых на МДФ-доске.`,
+      activePacketCount,
+      hiddenPacketCount,
+      canCreateCard: false,
+      packets,
+    };
+  }
+
+  if (hiddenPacketCount > 0) {
+    return {
+      state: 'hidden',
+      reason: hiddenPacketCount === 1
+        ? 'Связанная карточка была скрыта с МДФ-доски.'
+        : `Связанные карточки скрыты с МДФ-доски: ${hiddenPacketCount}.`,
+      activePacketCount,
+      hiddenPacketCount,
+      canCreateCard: false,
+      packets,
+    };
+  }
+
+  const source = cutJobSelectionSource(row.selection_criteria);
+  return {
+    state: 'not_created',
+    reason: mdfBoardNotCreatedReason(source, row.status),
+    activePacketCount,
+    hiddenPacketCount,
+    canCreateCard: manualPendingPacketCount === 1,
+    packets,
+  };
+}
+
+function cutJobLinkedMdfPacketsFromJson(value: unknown): CutJobLinkedMdfPacketDto[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = item as Record<string, unknown>;
+    return {
+      packetId: String(row.packetId ?? ''),
+      externalPacketKey: String(row.externalPacketKey ?? ''),
+      workday: mdfPacketWorkday(row.workday),
+      machine: typeof row.machine === 'string' ? row.machine : null,
+      programName: typeof row.programName === 'string' ? row.programName : null,
+      itemCount: typeof row.itemCount === 'number' || typeof row.itemCount === 'string'
+        ? toNum(row.itemCount)
+        : 0,
+    };
+  }).filter((packet) => packet.packetId.length > 0);
+}
+
+function mdfPacketWorkday(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date || typeof value === 'string') return dateOnly(value) ?? String(value);
+  return String(value);
+}
+
+function cutJobSelectionSource(selectionCriteria: Record<string, unknown> | null): string | null {
+  const source = selectionCriteria?.source;
+  return typeof source === 'string' && source.trim() ? source.trim() : null;
+}
+
+function mdfBoardNotCreatedReason(source: string | null, status: string): string {
+  if (source === 'manual_svg_upload') {
+    return 'Задание импортировано из SVG, но связанная карточка МДФ-доски не найдена.';
+  }
+  if (source === 'cnc_telegram_svg') {
+    return 'Задание импортировано из Telegram SVG, но карточка МДФ-доски не найдена.';
+  }
+  if (status !== 'ready') {
+    return 'Задание ещё не готово; карточка МДФ-доски создаётся только для импортированного SVG-раскроя.';
+  }
+  return 'Задание создано обычным способом, без карточки файла станка на МДФ-доске.';
+}
+
 async function hideLinkedMdfPacketsForCutJob(
   client: DatabaseClient,
   cutJobId: number,
@@ -6421,9 +7018,18 @@ async function hideLinkedMdfPacketsForCutJob(
         updated_at = now()
     WHERE svg_cut_job_id = $1
       AND mdf_board_hidden_at IS NULL
+      AND (
+        source_chat_id IS DISTINCT FROM $3
+        OR EXISTS (
+          SELECT 1
+          FROM outbox_events mdf_card
+          WHERE mdf_card.idempotency_key =
+            'cnc-manual-svg:' || cnc_telegram_packets.packet_id::text || ':source-' || cnc_telegram_packets.source_version::text || ':mdf-card-created'
+        )
+      )
     RETURNING packet_id::text AS packet_id
     `,
-    [cutJobId, numOrNull(userId) ?? null],
+    [cutJobId, numOrNull(userId) ?? null, MANUAL_SVG_CHAT_ID],
   );
   const rows = result.rows as Array<{ packet_id: string }>;
   return rows.map((row) => row.packet_id);
@@ -6436,6 +7042,12 @@ function cleanIds(values: Array<number | null> | undefined): number[] {
 
 function toNum(value: string | number): number {
   return Number(value);
+}
+
+function displayNumberOrNull(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text === '' ? null : text;
 }
 
 function numOrNull(value: string | number | null | undefined): number | null {

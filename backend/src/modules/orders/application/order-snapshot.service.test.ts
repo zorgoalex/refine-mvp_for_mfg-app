@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
-import { getPermissionsForRole } from '../../../permissions/permissions';
+import { getPermissionsForRole, type PermissionName } from '../../../permissions/permissions';
 import { ApiError } from '../../../common/errors/api-error';
 import { ORDER_SNAPSHOT_FORMAT_VERSION, ORDER_SNAPSHOT_SCHEMA } from '../dto/order-snapshot.dto';
 import type { OrderSnapshotPort } from './order-snapshot.types';
@@ -82,14 +82,14 @@ describe('OrderSnapshotService', () => {
     );
     expectPermissionDeniedWithRequired(() =>
       service.importOrderSnapshot({
-        currentUser: manager(),
+        currentUser: importerWithoutPaymentDelete(),
         snapshot: minimalSnapshot(),
       }),
       'payments.delete',
     );
     expectPermissionDeniedWithRequired(() =>
       service.importOrderSnapshotBatch({
-        currentUser: manager(),
+        currentUser: importerWithoutPaymentDelete(),
         zipBase64: 'zip',
       }),
       'payments.delete',
@@ -161,6 +161,25 @@ function manager(): CurrentUser {
     role: 'manager',
     roleId: 10,
     permissions: getPermissionsForRole('manager'),
+  };
+}
+
+function importerWithoutPaymentDelete(): CurrentUser {
+  return userWithPermissions('limited-importer', [
+    'orders.import',
+    'orders.view_financials',
+    'payments.create',
+    'payments.update',
+  ]);
+}
+
+function userWithPermissions(username: string, permissions: PermissionName[]): CurrentUser {
+  return {
+    id: username,
+    username,
+    role: 'viewer',
+    roleId: 100,
+    permissions,
   };
 }
 

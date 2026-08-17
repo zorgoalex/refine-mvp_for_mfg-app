@@ -8,13 +8,13 @@ import {
   Popconfirm,
   Select,
   Space,
-  Table,
   Tag,
   Typography,
   message,
 } from 'antd';
 import { ReloadOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Table } from '../../../ui/tooltipDelay';
 import { ApiError } from '../../../api/apiError';
 import { permissionsMatrixApi } from '../../../api/permissionsMatrixApi';
 import type {

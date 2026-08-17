@@ -90,6 +90,10 @@ export const cutApi = {
     return httpClient.get<CutJobDeleteImpact>(apiRoutes.cutJobs.deleteImpact(validateCutJobId(cutJobId)));
   },
 
+  async createMdfBoardCard(cutJobId: number): Promise<CutJobDto> {
+    return httpClient.post<CutJobDto>(apiRoutes.cutJobs.mdfBoardCard(validateCutJobId(cutJobId)), {});
+  },
+
   async archive(cutJobId: number, version: number, options: { deleteLinkedMdfPackets?: boolean } = {}): Promise<CutJobDto> {
     return httpClient.delete<CutJobDto>(apiRoutes.cutJobs.byId(validateCutJobId(cutJobId)), {
       body: JSON.stringify({ version, deleteLinkedMdfPackets: options.deleteLinkedMdfPackets === true }),

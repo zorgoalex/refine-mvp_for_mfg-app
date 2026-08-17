@@ -11,6 +11,7 @@ describe('evolution shell behavior preservation', () => {
   const navigation = readFileSync('src/ui-evolution/shell/useEvolutionNavigation.tsx', 'utf8');
   const tabletNavigation = readFileSync('src/ui-evolution/shell/EvolutionTabletNavigation.tsx', 'utf8');
   const tabletUtilities = readFileSync('src/ui-evolution/shell/EvolutionTabletUtilities.tsx', 'utf8');
+  const collapsedHook = readFileSync('src/hooks/useSidebarCollapsedPreference.ts', 'utf8');
   const headerUtilities = readFileSync('src/ui-evolution/shell/EvolutionHeaderUtilities.tsx', 'utf8');
   const mobileNavigation = readFileSync('src/ui-evolution/shell/EvolutionMobileNavigation.tsx', 'utf8');
   const notificationBell = readFileSync('src/components/NotificationBell.tsx', 'utf8');
@@ -79,7 +80,7 @@ describe('evolution shell behavior preservation', () => {
   it('keeps dirty-tab confirmation and discard semantics', () => {
     expect(tabs).toContain("title: 'Несохраненные изменения'");
     expect(tabs).toContain("{ discard: true }");
-    expect(tabs).toContain('computeNeighborPath');
+    expect(tabs).toContain('computeCloseTargetPath');
   });
 
   it('reuses the established permission and role-visibility gates', () => {
@@ -99,8 +100,11 @@ describe('evolution shell behavior preservation', () => {
   });
 
   it('persists collapsed state per user in the modern sider shell', () => {
-    expect(layout).toContain('loadSidebarCollapsed(currentUserId, false)');
-    expect(layout).toContain('saveSidebarCollapsed(currentUserId, next)');
+    expect(layout).toContain('useSidebarCollapsedPreference(currentUserId, false)');
+    expect(collapsedHook).toContain('profileApi.getPreferences()');
+    expect(collapsedHook).toContain('profileApi.updatePreferences({ sidebarCollapsed: next })');
+    expect(collapsedHook).toContain('loadSidebarCollapsed(userId, defaultCollapsed)');
+    expect(collapsedHook).toContain('saveSidebarCollapsed(userId, next)');
     expect(layout).not.toContain('SIDEBAR_STORAGE_KEY');
     expect(layout).not.toContain('erp.ui.evolution.sidebar.collapsed');
   });

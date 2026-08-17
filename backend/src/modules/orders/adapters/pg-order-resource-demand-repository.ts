@@ -108,7 +108,7 @@ interface FilmAccumulator {
 interface ProjectionInput {
   orders: OrderRow[];
   details: ResourceDemandDetailRow[];
-  hdfDetails: ResourceDemandHdfRow[];
+  hdfDetails?: ResourceDemandHdfRow[];
   detailCutJobs: DetailCutJobRow[];
   cutGroups: ResourceDemandCutGroupRow[];
   cutSheets: ResourceDemandCutSheetRow[];
@@ -372,7 +372,7 @@ export function buildOrderResourceDemandProjection(input: ProjectionInput): Orde
     }
   }
 
-  for (const hdf of input.hdfDetails) {
+  for (const hdf of input.hdfDetails ?? []) {
     const orderId = toNumber(hdf.order_id);
     const sheetMaterialTypeId = toNullableNumber(hdf.hdf_sheet_material_type_id);
     if (sheetMaterialTypeId === null) continue;

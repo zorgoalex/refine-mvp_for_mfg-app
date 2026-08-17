@@ -1555,10 +1555,16 @@ const BACKEND_ONLY_WRITE_RESOURCES = new Set<string>(['sheet_material_types']);
 const RBAC_BACKEND_OWNED_WRITE_RESOURCES = new Set<string>(['orders', 'payments']);
 
 function assertNotBackendOnlyWrite(resource: string): void {
-  const isRbacBackendOwned =
-    featureFlags.useBackendPermissions && RBAC_BACKEND_OWNED_WRITE_RESOURCES.has(resource);
+  if (BACKEND_ONLY_WRITE_RESOURCES.has(resource)) {
+    throw {
+      message: `${resource} is written only through the backend API; Hasura writes are disabled`,
+      statusCode: 403,
+    };
+  }
+}
 
-  if (BACKEND_ONLY_WRITE_RESOURCES.has(resource) || isRbacBackendOwned) {
+function assertNotRbacBackendOwnedWrite(resource: string): void {
+  if (featureFlags.useBackendPermissions && RBAC_BACKEND_OWNED_WRITE_RESOURCES.has(resource)) {
     throw {
       message: `${resource} is written only through the backend API; Hasura writes are disabled`,
       statusCode: 403,
@@ -1918,6 +1924,7 @@ export const dataProvider = (_apiUrl: string) => {
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
+      assertNotRbacBackendOwnedWrite(resource);
       assertHasuraWriteAccess(resource);
       getHasuraUrl();
       const selection = fieldsFor(resource);
@@ -2005,6 +2012,7 @@ export const dataProvider = (_apiUrl: string) => {
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
+      assertNotRbacBackendOwnedWrite(resource);
       assertHasuraWriteAccess(resource);
       getHasuraUrl();
       const idCol = ID_COLUMNS[resource] ?? "id";
@@ -2060,6 +2068,7 @@ export const dataProvider = (_apiUrl: string) => {
       if (resource === "orders_view") {
         throw { message: "orders_view is read-only", statusCode: 400 };
       }
+      assertNotRbacBackendOwnedWrite(resource);
       assertHasuraWriteAccess(resource);
       getHasuraUrl();
       const idCol = ID_COLUMNS[resource] ?? "id";

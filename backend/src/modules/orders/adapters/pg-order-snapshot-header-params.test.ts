@@ -32,6 +32,7 @@ function header(overrides: Partial<NormalizedSaveOrderHeaderDto> = {}): Normaliz
     notes: null,
     materialId: null,
     sheetMaterialTypeId: null,
+    hdfMinThresholdMm: null,
     millingTypeId: null,
     edgeTypeId: null,
     filmId: null,
@@ -69,23 +70,25 @@ describe('pg-order-snapshot orderHeaderInsertParams', () => {
     expect(params[8]).toBe(true);
   });
 
-  it('returns 32 elements matching INSERT columns ($1..$32, with project_id as $32)', () => {
+  it('returns 33 elements matching INSERT columns ($1..$33, with project_id as $33)', () => {
     const params = insertParams(header(), totals(), 501);
-    expect(params).toHaveLength(32);
+    expect(params).toHaveLength(33);
   });
 
-  it('places refKey1c at index 29, sheetMaterialTypeId at index 30 and projectId last (index 31)', () => {
+  it('places refKey1c at index 29, sheetMaterialTypeId at index 30, hdfMinThresholdMm at index 31 and projectId last (index 32)', () => {
     const params = insertParams(header({ refKey1c: 'snap-key', sheetMaterialTypeId: null }), totals(), 501);
     expect(params[29]).toBe('snap-key');
     expect(params[30]).toBeNull(); // sheetMaterialTypeId
-    expect(params[31]).toBe(501); // projectId
+    expect(params[31]).toBeNull(); // hdfMinThresholdMm
+    expect(params[32]).toBe(501); // projectId
   });
 
   it('forces materialId to null when sheetMaterialTypeId is set (header invariant)', () => {
-    const params = insertParams(header({ materialId: 5, sheetMaterialTypeId: 42 }), totals(), 501);
+    const params = insertParams(header({ materialId: 5, sheetMaterialTypeId: 42, hdfMinThresholdMm: 12 }), totals(), 501);
     expect(params[25]).toBeNull(); // materialId forced null
     expect(params[30]).toBe(42);  // sheetMaterialTypeId
-    expect(params[31]).toBe(501); // projectId
+    expect(params[31]).toBe(12); // hdfMinThresholdMm
+    expect(params[32]).toBe(501); // projectId
   });
 });
 
@@ -96,23 +99,25 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
     expect(params).not.toContain(false);
   });
 
-  it('returns 29 elements (insert has production mode, current status and projectId; update does not)', () => {
+  it('returns 30 elements (insert has production mode, current status and projectId; update does not)', () => {
     const insert = insertParams(header(), totals(), 501);
     const update = updateParams(header(), totals());
     expect(update).toHaveLength(insert.length - 3);
-    expect(update).toHaveLength(29);
+    expect(update).toHaveLength(30);
   });
 
-  it('places refKey1c at index 27 and sheetMaterialTypeId last (index 28) matching $29/$30 in UPDATE SQL', () => {
-    const params = updateParams(header({ refKey1c: 'update-key', sheetMaterialTypeId: null }), totals());
+  it('places refKey1c at index 27, sheetMaterialTypeId at index 28 and hdfMinThresholdMm last (index 29) matching $29/$30/$31 in UPDATE SQL', () => {
+    const params = updateParams(header({ refKey1c: 'update-key', sheetMaterialTypeId: null, hdfMinThresholdMm: 14 }), totals());
     expect(params[27]).toBe('update-key');
     expect(params[28]).toBeNull(); // sheetMaterialTypeId
+    expect(params[29]).toBe(14); // hdfMinThresholdMm
   });
 
   it('forces materialId to null when sheetMaterialTypeId is set (header invariant — update path)', () => {
     const params = updateParams(header({ materialId: 7, sheetMaterialTypeId: 99 }), totals());
     expect(params[23]).toBeNull(); // materialId forced null (index 23 = $25 with orderId $1 prefix)
     expect(params[28]).toBe(99);  // sheetMaterialTypeId at end
+    expect(params[29]).toBeNull(); // hdfMinThresholdMm
   });
 
   it('passing productionStatusFromDetailsEnabled=false does not appear in returned array', () => {
@@ -136,5 +141,6 @@ describe('pg-order-snapshot orderHeaderUpdateParams', () => {
     const params = updateParams(header({ sheetMaterialTypeId: null, materialId: 3 }), totals());
     expect(params[23]).toBeNull(); // materialId always null (Variant B invariant)
     expect(params[28]).toBeNull(); // sheetMaterialTypeId
+    expect(params[29]).toBeNull(); // hdfMinThresholdMm
   });
 });

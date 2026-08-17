@@ -125,12 +125,12 @@ function makeRepoForSetSheet(opts: {
     }
 
     // loadJob reads (after update)
-    if (sql.startsWith('SELECT cut_job_id, name, status, source, version,')) {
+    if (sql.startsWith('SELECT j.cut_job_id, j.name, j.status, j.source, j.version,')) {
       return { rows: [{ cut_job_id: 9, name: 'J', status: opts.status, source: 'manual', created_at: new Date('2026-08-07T00:00:00Z'), version: opts.version, pdf_prewarm_state: 'pending', failure_code: null, failure_reason: null, param_profile_id: null, sheet_material_type_id: null, pdf_template_code: null, combine_films: false, split_by_material: true, rotation_allowed: true, texture_direction: 'none', last_calc_params: null }], rowCount: 1 };
     }
     if (sql.startsWith('SELECT i.cut_job_id')) return { rows: [{ cut_job_id: 9, positions: 0, details: 0, area: 0 }], rowCount: 1 };
     if (sql.startsWith('SELECT g.cut_job_id')) return { rows: [{ cut_job_id: 9, sheets: 0 }], rowCount: 1 };
-    if (sql.startsWith('SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id')) return { rows: [], rowCount: 0 };
+    if (sql.startsWith('SELECT i.cut_job_item_id, i.source_type, i.freecut_item_id')) return { rows: [], rowCount: 0 };
     if (sql.startsWith('SELECT cg.cut_group_id,')) return { rows: [], rowCount: 0 };
 
     return { rows: [], rowCount: 0 };

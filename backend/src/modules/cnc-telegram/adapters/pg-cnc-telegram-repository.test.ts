@@ -12,7 +12,10 @@ const repositorySource = readFileSync(new URL('./pg-cnc-telegram-repository.ts',
 
 describe('PgCncTelegramRepository', () => {
   it('returns bath display cut numbers without result version', () => {
-    expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
+    expect(repositorySource).toContain('j.source_display_number');
+    expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true, row.source_display_number)');
+    expect(repositorySource).toContain('cutNumber: formatCutNumber(cutJobId, resultNo, true, row.source_display_number)');
+    expect(repositorySource).not.toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
   });
 
   it('emits the MDF machine-files automation event from pending board cards', () => {
@@ -54,8 +57,42 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('telegramSendEnabled');
     expect(repositorySource).toContain('generatedScreenshotContrast');
     expect(repositorySource).toContain('enqueueManualSvgTelegramSendRequest');
+    expect(repositorySource).toContain('assertManualSvgTelegramCutJobReady');
+    expect(repositorySource).toContain('manualSvgCutJobDisplayNumber(packet) !== null');
+    expect(repositorySource).not.toContain('packet.svgCutResultId != null;');
+    expect(repositorySource).toContain('MANUAL_SVG_TELEGRAM_MDF_CARD_REQUIRED');
+    expect(repositorySource).toContain('manualSvgMdfCardEventExists(tx, input.packet)');
+    expect(repositorySource).toContain('sourceFiles: manualSvgUploadSourceFileIdentities(dto.sourceFiles ?? [])');
+    expect(repositorySource).toContain('const { sourceFiles: _sourceFiles, ...payloadDto } = dto');
     expect(repositorySource).toContain('renderManualSvgScreenshot');
     expect(repositorySource).toContain('lockActiveManualSvgTelegramSend');
+  });
+
+  it('skips Telegram SVG reverse import when source file already belongs to a cut job', () => {
+    const replayIndex = repositorySource.indexOf('const replayResponse = await reconcileIdempotency(');
+    const preflightIndex = repositorySource.indexOf('const skippedDuplicateSourceFileResponse = await skippedExistingTelegramSvgSourceFileResponse(');
+    const insertPacketIndex = repositorySource.indexOf('const packetId = existing?.packet_id ?? await insertPacket(tx, resolvedCommand, payloadHash);');
+    const resolverIndex = repositorySource.indexOf('const matchedDto = await resolveItemMatches(tx, effectiveCommand.dto);');
+    expect(repositorySource).toContain('if (replayResponse) return replayResponse;');
+    expect(repositorySource).toContain('lockSvgSourceFileIfPresent');
+    expect(repositorySource).toContain('skippedExistingTelegramSvgSourceFileResponse');
+    expect(repositorySource).toContain('findExistingSvgCutJobForSourceFile');
+    expect(repositorySource).toContain('skipExistingTelegramSvgCutJobForSourceFile');
+    expect(repositorySource).toContain('cnc_manual_svg_upload_files file');
+    expect(repositorySource).toContain("lower(file.content_sha256)=lower($1)");
+    expect(repositorySource).toContain("packet.svg_cut_import_status='imported'");
+    expect(repositorySource).toContain('packet.packet_id::text AS packet_id');
+    expect(repositorySource).toContain("svg_job.status <> 'archived'");
+    expect(repositorySource).toContain("job.selection_criteria->'sourceFiles'");
+    expect(repositorySource).toContain("job.status <> 'archived'");
+    expect(repositorySource).toContain('skippedDuplicateSourceFile');
+    expect(repositorySource).toContain('await completeIdempotency(tx, command.dto.idempotencyKey, skippedDuplicateSourceFileResponse);');
+    expect(repositorySource).toContain('Telegram scan не создавал новое задание');
+    expect(replayIndex).toBeGreaterThan(-1);
+    expect(preflightIndex).toBeGreaterThan(-1);
+    expect(preflightIndex).toBeGreaterThan(replayIndex);
+    expect(resolverIndex).toBeGreaterThan(preflightIndex);
+    expect(insertPacketIndex).toBeGreaterThan(preflightIndex);
   });
 
   it('refreshes a pending manual SVG Telegram send before relinking files', () => {
@@ -68,6 +105,7 @@ describe('PgCncTelegramRepository', () => {
 
   it('supports forced manual SVG cut-job display number without reusing the identity id', () => {
     expect(repositorySource).toContain('requestedCutJobId: command.dto.requestedCutJobId ?? null');
+    expect(repositorySource).toContain('allocateCutJobSourceDisplayNumber(tx, \'regular\')');
     expect(repositorySource).toContain('CUT_JOB_NUMBER_CONFLICT');
     expect(repositorySource).toContain('suggestedCutJobIds');
     expect(repositorySource).toContain('ensureSvgCutJobDisplayNumberAvailable');
@@ -280,6 +318,202 @@ describe('PgCncTelegramRepository', () => {
     expect(packetInsert?.params[5]).toBe('2026-07-24T07:59:00.000Z');
     expect(packetInsert?.params[6]).toBe('2026-07-24T07:59:00.000Z');
     expect(packetInsert?.params[18]).toBe('2026-07-24T07:59:00.000Z');
+  });
+
+  it('skips duplicate Telegram SVG source before packet and board side effects', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const svgSha = 'b'.repeat(64);
+    const existingPacketId = '00000000-0000-0000-0000-000000000104';
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/WITH manual_file AS/i.test(text) && /job\.selection_criteria->'sourceFiles'/i.test(text)) {
+          return {
+            rows: [{
+              cut_job_id: 98,
+              cut_job_display_number: '104',
+              cut_result_id: 500,
+              packet_id: existingPacketId,
+              file_name: 'CNC#1_1234.svg',
+              matched_by: 'cut_job_selection',
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              packet_id: existingPacketId,
+              external_packet_key: 'erp-svg-upload:existing',
+              source_chat_id: 'erp-manual-svg-upload',
+              source_message_id: null,
+              source_version: 1,
+              cutting_sequence_no: 104,
+              svg_cut_job_id: 98,
+              svg_cut_job_display_number: '104',
+              svg_cut_result_id: 500,
+              svg_cut_import_status: 'imported',
+            })],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:repo:duplicate-svg-source-preflight',
+      externalPacketKey: 'telegram:-100123:321',
+      programName: 'CNC#1_1234.svg',
+      sourceFiles: [{
+        kind: 'svg' as const,
+        fileName: 'CNC#1_1234.svg',
+        contentType: 'image/svg+xml',
+        sizeBytes: 1234,
+        sha256: svgSha,
+      }],
+    };
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto,
+      requestId: 'request-cnc-duplicate-svg-source-preflight',
+    });
+
+    const lockIndex = queries.findIndex((query) => /pg_advisory_xact_lock\(hashtextextended/i.test(query.text));
+    const duplicateIndex = queries.findIndex((query) => /WITH manual_file AS/i.test(query.text));
+    const loadPacketIndex = queries.findIndex((query) => /FROM cnc_telegram_packets p/i.test(query.text));
+    const completeIdempotencyIndex = queries.findIndex((query) =>
+      /UPDATE command_idempotency_keys/i.test(query.text)
+      && query.params[0] === 'cnc:test:repo:duplicate-svg-source-preflight',
+    );
+
+    expect(result).toMatchObject({
+      applied: false,
+      ignoredStaleSourceVersion: false,
+      packet: {
+        packetId: existingPacketId,
+        cuttingSequenceNo: 104,
+        svgCutJobId: 98,
+        svgCutJobDisplayNumber: '104',
+        svgCutImportStatus: 'imported',
+      },
+      skippedDuplicateSourceFile: {
+        status: 'skipped',
+        sha256: svgSha,
+        fileName: 'CNC#1_1234.svg',
+        cutJobId: 98,
+        cutJobDisplayNumber: '104',
+        cutResultId: 500,
+        packetId: existingPacketId,
+      },
+    });
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(duplicateIndex).toBeGreaterThan(lockIndex);
+    expect(loadPacketIndex).toBeGreaterThan(duplicateIndex);
+    expect(completeIdempotencyIndex).toBeGreaterThan(loadPacketIndex);
+    expect(queries[duplicateIndex]?.params).toEqual([svgSha, null]);
+    expect(queries[duplicateIndex]?.text).toContain("svg_job.status <> 'archived'");
+    expect(queries[duplicateIndex]?.text).toContain("job.status <> 'archived'");
+    expect(queries.some((query) => /INSERT INTO cnc_telegram_packets/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cnc_telegram_packet_items/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_job\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO audit_log/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO outbox_events/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /projectTelegramLabelMap/i.test(query.text))).toBe(false);
+  });
+
+  it('replays completed duplicate SVG idempotency before archived-state rechecks', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const svgSha = 'c'.repeat(64);
+    const existingPacketId = '00000000-0000-0000-0000-000000000204';
+    const storedResponse = {
+      packet: {
+        packetId: existingPacketId,
+        externalPacketKey: 'erp-svg-upload:existing',
+        sourceVersion: 1,
+        cuttingSequenceNo: 104,
+        svgCutJobId: 98,
+        svgCutJobDisplayNumber: '104',
+        svgCutResultId: 500,
+        svgCutImportStatus: 'imported',
+      },
+      requestId: 'request-cnc-duplicate-svg-source-preflight',
+      applied: false,
+      ignoredStaleSourceVersion: false,
+      skippedDuplicateSourceFile: {
+        status: 'skipped',
+        sha256: svgSha,
+        fileName: 'CNC#1_1234.svg',
+        cutJobId: 98,
+        cutJobDisplayNumber: '104',
+        cutResultId: 500,
+        packetId: existingPacketId,
+        note: 'SVG-файл уже есть в задании на раскрой 104. Telegram scan не создавал новое задание.',
+      },
+    };
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/FROM command_idempotency_keys/i.test(text)) {
+          const inserted = queries.find((query) =>
+            /INSERT INTO command_idempotency_keys/i.test(query.text),
+          );
+          return {
+            rows: [{
+              request_hash: inserted?.params[4],
+              response_json: storedResponse,
+              status: 'completed',
+            }],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:repo:duplicate-svg-source-replay',
+      externalPacketKey: 'telegram:-100123:321',
+      programName: 'CNC#1_1234.svg',
+      sourceFiles: [{
+        kind: 'svg' as const,
+        fileName: 'CNC#1_1234.svg',
+        contentType: 'image/svg+xml',
+        sizeBytes: 1234,
+        sha256: svgSha,
+      }],
+    };
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto,
+      requestId: 'request-cnc-duplicate-svg-source-recovery',
+    });
+
+    expect(result).toEqual(storedResponse);
+    expect(queries.some((query) => /WITH manual_file AS/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cnc_telegram_packets/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cnc_telegram_packet_items/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_job\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO audit_log/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO outbox_events/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE command_idempotency_keys/i.test(query.text))).toBe(false);
   });
 
   it('returns only posted and completed columns for the daily CNC board', async () => {
@@ -1143,7 +1377,56 @@ describe('PgCncTelegramRepository', () => {
     expect(result.packet.cuttingSequenceNo).toBe(7);
   });
 
-  it('replays completed idempotency when Telegram later adds an explicit cutting sequence number', async () => {
+  it('keeps ingesting when an explicit Telegram cutting sequence number is already taken', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/WHERE cutting_sequence_no = \$2::integer/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000099' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow({ cutting_sequence_no: null })] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:explicit-sequence-conflict',
+        cuttingSequenceNo: 7,
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const sequenceUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets[\s\S]*cutting_sequence_no = \$2::integer/i.test(query.text),
+    );
+    expect(sequenceUpdate).toBeUndefined();
+    expect(result.applied).toBe(true);
+    expect(result.packet.cuttingSequenceNo).toBeNull();
+  });
+
+  it('replays completed idempotency without applying a later explicit cutting sequence number', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const dto = {
       ...ingestDto(),
@@ -1164,7 +1447,7 @@ describe('PgCncTelegramRepository', () => {
             rows: [{
               request_hash: inserted?.params[4],
               response_json: {
-                packet: { ...packetRow(), cuttingSequenceNo: null },
+                packet: { packetId: '00000000-0000-0000-0000-000000000001', cuttingSequenceNo: null },
                 requestId: 'request-cnc-1',
                 applied: false,
                 ignoredStaleSourceVersion: false,
@@ -1202,16 +1485,13 @@ describe('PgCncTelegramRepository', () => {
     const sequenceUpdate = queries.find((query) =>
       /UPDATE cnc_telegram_packets[\s\S]*cutting_sequence_no = \$2::integer/i.test(query.text),
     );
-    expect(sequenceUpdate?.params).toEqual([
-      '00000000-0000-0000-0000-000000000001',
-      17,
-      42,
-    ]);
+    expect(sequenceUpdate).toBeUndefined();
+    expect(queries.some((query) => /FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(query.text))).toBe(false);
     expect(result.applied).toBe(false);
-    expect(result.packet.cuttingSequenceNo).toBe(17);
+    expect(result.packet.cuttingSequenceNo).toBeNull();
   });
 
-  it('can assign a missing cutting sequence when replaying completed idempotency for a pending packet', async () => {
+  it('replays completed idempotency without assigning a missing cutting sequence for a pending packet', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const dto = {
       ...ingestDto(),
@@ -1233,7 +1513,7 @@ describe('PgCncTelegramRepository', () => {
             rows: [{
               request_hash: inserted?.params[4],
               response_json: {
-                packet: { cuttingSequenceNo: null },
+                packet: { packetId: '00000000-0000-0000-0000-000000000001', cuttingSequenceNo: null },
                 requestId: 'request-cnc-1',
                 applied: true,
                 ignoredStaleSourceVersion: false,
@@ -1275,9 +1555,10 @@ describe('PgCncTelegramRepository', () => {
     });
 
     const sql = queries.map((query) => query.text).join('\n');
-    expect(sql).toContain('MAX(cutting_sequence_no)');
-    expect(result.applied).toBe(false);
-    expect(result.packet.cuttingSequenceNo).toBe(21);
+    expect(sql).not.toContain('MAX(cutting_sequence_no)');
+    expect(queries.some((query) => /FROM cnc_telegram_packets p/i.test(query.text))).toBe(false);
+    expect(result.applied).toBe(true);
+    expect(result.packet.cuttingSequenceNo).toBeNull();
   });
 
   it('can assign a missing cutting sequence on stale source-version replays', async () => {
@@ -1954,12 +2235,313 @@ describe('PgCncTelegramRepository', () => {
     expect(resultInsertIndex).toBeGreaterThan(commandInsertIndex);
     expect(resultInsert?.text).toContain('command_id, command_payload_hash, request_hash');
     expect(jobInsert?.text).toContain('source_display_number');
-    expect(jobInsert?.params[7]).toBe('12');
+    expect(jobInsert?.params[7]).toBe('1');
+    expect(queries.some((query) => query.params[0] === 'cut_job_display_number:regular')).toBe(true);
     expect(commandInsert?.params[1]).toMatch(/^[0-9a-f-]{36}$/i);
     expect(resultInsert?.params[1]).toBe(commandInsert?.params[1]);
     expect(resultInsert?.params[2]).toBe(commandInsert?.params[2]);
-    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({ displayNumber: '12', unplaced: [] });
+    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({ displayNumber: '1', unplaced: [] });
     expect(commandComplete?.params).toEqual([700, commandInsert?.params[1], 704]);
+  });
+
+  it('does not block Telegram SVG import when chat sequence number is already a cut display number', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return {
+            rows: [
+              {
+                order_key: '2689',
+                order_id: 2689,
+                detail_id: 3101,
+                detail_number: 31,
+                width: 497,
+                height: 477,
+              },
+            ],
+          };
+        }
+        if (/SELECT od\.detail_id, od\.order_id/i.test(text)) {
+          return {
+            rows: [
+              {
+                detail_id: 3101,
+                order_id: 2689,
+                order_name: '2689',
+                order_delete_flag: false,
+                detail_number: 31,
+                detail_name: 'Detail 31',
+                height: 477,
+                width: 497,
+                order_quantity: 4,
+                area: 0.237,
+                material_id: 10,
+                sheet_material_type_id: 77,
+                sheet_material_width_mm: 2070,
+                sheet_material_height_mm: 2800,
+                material_name: 'MDF 18',
+                milling_type_id: null,
+                milling_type_name: null,
+                edge_type_id: null,
+                edge_type_name: null,
+                film_id: 88,
+                film_name: 'White',
+                priority: null,
+                production_status_id: null,
+                production_status_name: null,
+                joint_order_id: null,
+                note: null,
+                link_cutting_file: null,
+                link_cutting_image_file: null,
+                link_cad_file: null,
+                link_pdf_file: null,
+              },
+            ],
+          };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 12 }] };
+        }
+        if (/SELECT existing_job\.cut_job_id/i.test(text)) {
+          return { rows: [{ cut_job_id: 80 }] };
+        }
+        if (/FROM generate_series/i.test(text)) {
+          return { rows: [{ cut_job_id: 81 }, { cut_job_id: 82 }] };
+        }
+        if (/INSERT INTO cut_job\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_id: 700, created_at: '2026-07-24T08:00:00.000Z' }] };
+        }
+        if (/INSERT INTO cut_group\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_id: 701 }] };
+        }
+        if (/INSERT INTO cut_job_item\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_item_id: 702 }] };
+        }
+        if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_sheet_id: 703 }] };
+        }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) {
+          return { rows: [{ cut_result_id: 704 }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              svg_cut_job_id: 700,
+              svg_cut_result_id: 704,
+              svg_cut_import_status: 'imported',
+              svg_cut_import_note: 'SVG layout imported into cut job',
+            })],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:svg-cut-conflict',
+        cuttingSequenceNo: 12,
+        items: [
+          {
+            sourceItemKey: '2689:31:497x477',
+            orderName: '2689',
+            detailNumber: 31,
+            widthMm: 497,
+            heightMm: 477,
+            quantity: 1,
+            source: 'vector' as const,
+            confidence: 1,
+            matchOrderId: 2689,
+            matchDetailId: 3101,
+            matchStatus: 'matched' as const,
+          },
+        ],
+        cutLayout: {
+          status: 'valid' as const,
+          reasons: [],
+          sheet: { widthMm: 2070, heightMm: 2800 },
+          partContourCount: 1,
+          acceptedItemCount: 1,
+          items: [
+            {
+              orderName: '2689',
+              detailNumber: 31,
+              widthMm: 497,
+              heightMm: 477,
+              quantity: 1,
+              confidence: 1,
+              sourceElementId: 'PartContour-1',
+              xMm: 10,
+              yMm: 20,
+              placedWidthMm: 497,
+              placedHeightMm: 477,
+              rotated: false,
+            },
+          ],
+        },
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const importUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) &&
+      /svg_cut_import_status = \$2/i.test(query.text),
+    );
+    const jobInsert = queries.find((query) => /INSERT INTO cut_job\s*\(/i.test(query.text));
+
+    expect(queries.some((query) => /SELECT existing_job\.cut_job_id/i.test(query.text))).toBe(false);
+    expect(jobInsert?.params[7]).toBe('1');
+    expect(importUpdate?.params.slice(1, 5)).toEqual([
+      'imported',
+      'SVG layout imported into cut job',
+      700,
+      704,
+    ]);
+    expect(result.packet.svgCutImportStatus).toBe('imported');
+    expect(result.applied).toBe(true);
+  });
+
+  it('imports valid Telegram SVG as an informational cut job when ERP detail match is ambiguous', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 104 }] };
+        }
+        if (/INSERT INTO cut_job\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_id: 800, created_at: '2026-08-17T07:00:00.000Z' }] };
+        }
+        if (/INSERT INTO cut_group\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_id: 801 }] };
+        }
+        if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_sheet_id: 803 }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              cutting_sequence_no: 104,
+              svg_cut_job_id: 800,
+              svg_cut_result_id: null,
+              svg_cut_import_status: 'imported',
+            })],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:svg-informational-ambiguous-match',
+        cuttingSequenceNo: 104,
+        materialName: 'МДФ 16мм',
+        items: [
+          {
+            sourceItemKey: '2800:6:95x720',
+            orderName: '2800',
+            detailNumber: 6,
+            widthMm: 95,
+            heightMm: 720,
+            quantity: 1,
+            source: 'vector' as const,
+            confidence: 1,
+            matchStatus: 'needs_review' as const,
+            reviewNote: 'not unique',
+          },
+        ],
+        cutLayout: {
+          status: 'valid' as const,
+          reasons: [],
+          sheet: { widthMm: 2070, heightMm: 2800 },
+          partContourCount: 1,
+          acceptedItemCount: 1,
+          items: [
+            {
+              orderName: '2800',
+              detailNumber: 6,
+              widthMm: 95,
+              heightMm: 720,
+              quantity: 1,
+              confidence: 1,
+              sourceElementId: 'PartContour-1',
+              xMm: 10,
+              yMm: 20,
+              placedWidthMm: 95,
+              placedHeightMm: 720,
+              rotated: false,
+            },
+          ],
+        },
+      },
+      requestId: 'request-cnc-informational',
+    });
+
+    const jobInsert = queries.find((query) => /INSERT INTO cut_job\s*\(/i.test(query.text));
+    const sheetInsert = queries.find((query) => /INSERT INTO cut_group_sheet\s*\(/i.test(query.text));
+    const importUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) &&
+      /svg_cut_import_status = \$2/i.test(query.text),
+    );
+
+    expect(jobInsert?.params[7]).toBe('1');
+    expect(queries.some((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
+    expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
+      pieces: [{ label: { orderId: null, orderName: '2800', detailId: null } }],
+    });
+    expect(importUpdate?.params.slice(1, 5)).toEqual([
+      'imported',
+      'SVG layout imported into cut job',
+      800,
+      null,
+    ]);
+    expect(result.packet.svgCutJobId).toBe(800);
+    expect(result.packet.svgCutResultId).toBeNull();
+    expect(result.packet.svgCutImportStatus).toBe('imported');
   });
 
   it('keeps ERP detail matches when manual SVG upload uses lenient validation', async () => {

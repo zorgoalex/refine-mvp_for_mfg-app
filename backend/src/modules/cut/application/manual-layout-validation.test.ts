@@ -262,9 +262,16 @@ describe('reconstructManualSheets', () => {
     expect([p.width_mm, p.height_mm, p.rotated, p.x_mm, p.y_mm]).toEqual([400, 600, true, 5, 7]);
     expect(r.sheets[0].placements.sheet_width_mm).toBe(2800);
   });
-  it('rejects a sheetIndex out of range (no new stock)', () => {
+  it('allows an operator-created sheetIndex and reuses stock geometry', () => {
     const r = reconstructManualSheets({ moves: [move('det-1', 2)], autoPieces, autoSheets, trim });
-    expect(r.error?.code).toBe('foreign_sheet');
+    expect(r.error).toBeUndefined();
+    expect(r.sheets[0]).toMatchObject({
+      sheetIndex: 2,
+      placements: {
+        sheet_width_mm: 2800,
+        sheet_height_mm: 2070,
+      },
+    });
   });
   it('preserves real sheet_index for every stock sheet (no renumber) (Codex R14 MAJOR #4)', () => {
     const r = reconstructManualSheets({ moves: [move('det-1', 1), move('det-2', 1), move('det-3', 0)], autoPieces, autoSheets, trim });
