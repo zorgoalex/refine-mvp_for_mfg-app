@@ -50,7 +50,7 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
     ).toEqual(['12', '# 7', '600*400']);
   });
 
-  it('adds instance count as its own line when qty > 1', () => {
+  it('keeps instance count out of the position line when qty > 1', () => {
     expect(
       composePieceLabelLines({
         orderId: 12,
@@ -62,7 +62,7 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
         instance: 2,
         qty: 3,
       }),
-    ).toEqual(['12', '# 7 - 2/3', '600*400']);
+    ).toEqual(['12', '# 7', '600*400']);
   });
 
   it('shows the order name on line 1 when provided, replacing the numeric id', () => {
@@ -88,10 +88,10 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
     expect(composePieceLabelLines(base)).toEqual(['12', '# 7', '600*400']);
   });
 
-  it('falls back to a single line when the order is unknown', () => {
+  it('still returns three lines when the order is unknown', () => {
     expect(
       composePieceLabelLines({ orderId: null, detailId: null, itemId: 'weird', instance: 1, qty: 1 }),
-    ).toEqual(['weird']);
+    ).toEqual(['weird', '# —', 'размер -']);
   });
 
   it('renders order-level informative SVG labels without a real order detail id', () => {
@@ -108,10 +108,10 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
         qty: 1,
         materialName: 'ХДФ',
       }),
-    ).toEqual(['2701', '# 3', '600*400', 'ХДФ']);
+    ).toEqual(['2701', '# 3', '600*400']);
   });
 
-  it('appends a 4th material line when materialName is a non-blank string', () => {
+  it('ignores materialName and always keeps the label to order, position, and size', () => {
     expect(
       composePieceLabelLines({
         orderId: 12,
@@ -124,7 +124,7 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
         qty: 1,
         materialName: 'ЛДСП Белый',
       }),
-    ).toEqual(['12', '# 7', '600*400', 'ЛДСП Белый']);
+    ).toEqual(['12', '# 7', '600*400']);
   });
 
   it('omits the material line when materialName is null/blank', () => {
@@ -136,7 +136,7 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
   it('does not add a material line to the unknown-order fallback', () => {
     expect(
       composePieceLabelLines({ orderId: null, detailId: null, itemId: 'weird', instance: 1, qty: 1, materialName: 'ЛДСП' }),
-    ).toEqual(['weird']);
+    ).toEqual(['weird', '# —', 'размер -']);
   });
 });
 
@@ -245,6 +245,12 @@ describe('buildSheetSvg multi-line labels', () => {
             lightFill: '#fefefe',
             lightTextStroke: '#222222',
             lightTextStrokeWidthRatio: 0.05,
+            orderFontRatio: 1.2,
+            positionFontRatio: 0.4,
+            sizeFontRatio: 0.7,
+            orderPositionGapRatio: 0.2,
+            positionSizeGapRatio: 0.3,
+            letterSpacingRatio: -0.1,
           },
           sourceSvg: {
             ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
@@ -284,6 +290,10 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(svg).toContain(cutRenderSourceSvgCss(customStyle, '#111827'));
     expect(svg).not.toContain('vector-effect:non-scaling-stroke!important');
     expect(svg).toContain('fill="#fefefe" stroke="#222222"');
+    expect(svg).toContain('letter-spacing="-2.4"');
+    expect(svg).toContain('font-size="28.8">2723</tspan>');
+    expect(svg).toContain('font-size="9.6"># 1</tspan>');
+    expect(svg).toContain('font-size="16.8">100*80</tspan>');
   });
 
   it('uses deterministic per-order fills when provided', () => {

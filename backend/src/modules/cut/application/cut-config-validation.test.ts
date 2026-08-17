@@ -60,6 +60,15 @@ describe('cut-config validation', () => {
             minStrokePx: 3,
             nonScalingStroke: true,
           },
+          label: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label,
+            orderFontRatio: 1.2,
+            positionFontRatio: 0.4,
+            sizeFontRatio: 0.7,
+            orderPositionGapRatio: 0.2,
+            positionSizeGapRatio: 0.3,
+            letterSpacingRatio: -0.1,
+          },
           rawSvgScreenshot: { minStrokePx: 3 },
         },
       },
@@ -69,6 +78,14 @@ describe('cut-config validation', () => {
       profiles: {
         mdf_board_preview: {
           sourceSvg: { minStrokePx: 3, nonScalingStroke: true },
+          label: {
+            orderFontRatio: 1.2,
+            positionFontRatio: 0.4,
+            sizeFontRatio: 0.7,
+            orderPositionGapRatio: 0.2,
+            positionSizeGapRatio: 0.3,
+            letterSpacingRatio: -0.1,
+          },
           rawSvgScreenshot: { minStrokePx: 3 },
         },
       },
@@ -83,6 +100,42 @@ describe('cut-config validation', () => {
         },
       }),
     ).toThrow(/HEX/);
+  });
+
+  it('backfills new render.styles label controls when legacy JSON omits them', () => {
+    const legacyLabel: Record<string, unknown> = { ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label };
+    delete legacyLabel.orderFontRatio;
+    delete legacyLabel.positionFontRatio;
+    delete legacyLabel.sizeFontRatio;
+    delete legacyLabel.orderPositionGapRatio;
+    delete legacyLabel.positionSizeGapRatio;
+    delete legacyLabel.letterSpacingRatio;
+    const value = validateSettingValue(CUT_RENDER_STYLES_SETTING_KEY, {
+      ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      templates: undefined,
+      profiles: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+        mdf_board_preview: {
+          ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview,
+          label: legacyLabel,
+        },
+      },
+    });
+
+    expect(value).toMatchObject({
+      profiles: {
+        mdf_board_preview: {
+          label: {
+            orderFontRatio: DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label.orderFontRatio,
+            positionFontRatio: DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label.positionFontRatio,
+            sizeFontRatio: DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label.sizeFontRatio,
+            orderPositionGapRatio: DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label.orderPositionGapRatio,
+            positionSizeGapRatio: DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label.positionSizeGapRatio,
+            letterSpacingRatio: DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label.letterSpacingRatio,
+          },
+        },
+      },
+    });
   });
 
   it('validates render preset target px is positive', () => {

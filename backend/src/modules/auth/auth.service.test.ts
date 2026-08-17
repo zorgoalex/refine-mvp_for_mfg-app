@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { getPermissionsForRole } from '../../permissions/permissions';
+import { ROLE_POLICIES } from '../../permissions/policies/role-policies';
 import { InvalidCredentialsError, LoginMethodNotAllowedError, UserInactiveError } from './auth.errors';
 import { AuthService } from './auth.service';
 import type { AuthServicePorts } from './auth.service';
@@ -58,6 +60,16 @@ function createPorts(
         auditWrites.push(input);
       },
     },
+    permissions: {
+      async loadRoleAuthorization(roleId) {
+        const role = roleId === 2 ? 'superadmin' : 'manager';
+        return {
+          permissions: getPermissionsForRole(role),
+          scopes: ROLE_POLICIES[role],
+          version: 11,
+        };
+      },
+    },
   };
 }
 
@@ -98,6 +110,10 @@ describe('AuthService login contract', () => {
     expect(result.refreshToken).toBe('refresh_secret');
     expect(tokenIssueCalls).toEqual([
       expect.objectContaining({
+        currentUser: expect.objectContaining({
+          permissionsVersion: 11,
+          policyScopes: ROLE_POLICIES.superadmin,
+        }),
         options: {
           notAfter: new Date('2026-05-07T00:00:00.000Z'),
         },

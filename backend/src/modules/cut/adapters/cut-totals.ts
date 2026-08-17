@@ -44,16 +44,26 @@ export function mapTotalsRow(row: TotalsRow): CutJobTotals {
  *  Grouped by cut_job_id so one query serves a whole list. */
 export const TOTALS_BY_JOB_SQL = `
   SELECT i.cut_job_id,
-         COUNT(od.detail_id)                          AS positions,
+         COUNT(*)                                     AS positions,
          COALESCE(SUM(i.qty), 0)                      AS details,
-         COALESCE(SUM(od.area * i.qty), 0)            AS area,
+         COALESCE(SUM(
+           CASE
+             WHEN i.source_type = 'order_hdf_detail'
+               THEN (hdf.hdf_height_mm * hdf.hdf_width_mm / 1000000.0) * i.qty
+             ELSE od.area * i.qty
+           END
+         ), 0)                                        AS area,
          CASE WHEN NOT cj.split_by_material
               THEN 1
-              ELSE COUNT(DISTINCT COALESCE(od.sheet_material_type_id, cj.sheet_material_type_id)) END AS materials_count,
-         COUNT(DISTINCT od.film_id)                   AS films_count
+              ELSE COUNT(DISTINCT COALESCE(
+                CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.hdf_sheet_material_type_id ELSE od.sheet_material_type_id END,
+                cj.sheet_material_type_id
+              )) END AS materials_count,
+         COUNT(DISTINCT CASE WHEN i.source_type = 'order_hdf_detail' THEN NULL ELSE od.film_id END) AS films_count
   FROM cut_job_item i
   JOIN cut_job cj ON cj.cut_job_id = i.cut_job_id
-  LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND od.delete_flag = false
+  LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND i.source_type = 'order_detail' AND od.delete_flag = false
+  LEFT JOIN order_hdf_details hdf ON hdf.order_hdf_detail_id = i.order_hdf_detail_id AND i.source_type = 'order_hdf_detail' AND hdf.delete_flag = false
   WHERE i.cut_job_id = ANY($1::bigint[]) AND i.is_active = true
   GROUP BY i.cut_job_id, cj.sheet_material_type_id, cj.split_by_material
 `;
@@ -85,14 +95,19 @@ export const SHEETS_BY_JOB_SQL = `
  * this job", not "what override sheet will be used for cutting". */
 export const MATERIAL_NAMES_BY_JOB_SQL = `
   SELECT i.cut_job_id,
-         ARRAY_AGG(DISTINCT COALESCE(smt.name, m.material_name) ORDER BY COALESCE(smt.name, m.material_name)) AS material_names
+         ARRAY_AGG(DISTINCT resolved_material.name ORDER BY resolved_material.name) AS material_names
   FROM cut_job_item i
-  LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND od.delete_flag = false
+  LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND i.source_type = 'order_detail' AND od.delete_flag = false
+  LEFT JOIN order_hdf_details hdf ON hdf.order_hdf_detail_id = i.order_hdf_detail_id AND i.source_type = 'order_hdf_detail' AND hdf.delete_flag = false
   LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id
+  LEFT JOIN sheet_material_types hdf_smt ON hdf_smt.sheet_material_type_id = hdf.hdf_sheet_material_type_id
   LEFT JOIN materials m ON m.material_id = od.material_id
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(hdf_smt.name, smt.name, m.material_name) AS name
+  ) resolved_material
   WHERE i.cut_job_id = ANY($1::bigint[])
     AND i.is_active = true
-    AND COALESCE(smt.name, m.material_name) IS NOT NULL
-    AND btrim(COALESCE(smt.name, m.material_name)) <> ''
+    AND resolved_material.name IS NOT NULL
+    AND btrim(resolved_material.name) <> ''
   GROUP BY i.cut_job_id
 `;

@@ -1,5 +1,6 @@
 import { createParser, type EventSourceMessage } from 'eventsource-parser';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { getUserAuthorizationScopeKey } from '../../api/authScopeIdentity';
 import { authSession } from '../../api/authSession';
 import { getJwtExpirationTime, refreshAuthSession } from '../../api/httpClient';
 import {
@@ -48,14 +49,17 @@ export function useOrderDetailLiveState({
   orderId,
 }: UseOrderDetailLiveStateArgs): OrderDetailLiveStateMaps {
   const visible = useDocumentVisible();
+  const authScopeKey = useOrderRealtimeAuthScopeKey();
   const normalizedOrderId = Number(orderId);
   const scopeKey = Number.isSafeInteger(normalizedOrderId) && normalizedOrderId > 0
-    ? String(normalizedOrderId)
+    ? JSON.stringify([authScopeKey, normalizedOrderId])
     : '';
   const [state, setState] = useState<OrderDetailLiveStateMaps>(() => EMPTY_STATE);
 
   useEffect(() => {
     if (!enabled || !active || !visible || !scopeKey) return undefined;
+
+    const isCurrentScope = () => authScopeKey === getOrderRealtimeAuthScopeKey();
 
     let disposed = false;
     let terminal = false;
@@ -111,12 +115,16 @@ export function useOrderDetailLiveState({
     };
 
     const applySnapshot = (snapshot: OrderDetailLiveStateSnapshot) => {
+      if (!isCurrentScope()) return;
       const next = buildOrderDetailLiveStateMaps(snapshot, scopeKey);
-      setState((current) => areOrderDetailLiveStateMapsEqual(current, next) ? current : next);
+      setState((current) => {
+        if (!isCurrentScope()) return current;
+        return areOrderDetailLiveStateMapsEqual(current, next) ? current : next;
+      });
     };
 
     const refreshSnapshot = async (unconditional = false): Promise<boolean> => {
-      if (disposed || terminal) return false;
+      if (disposed || terminal || !isCurrentScope()) return false;
       if (snapshotRequest) {
         if (!unconditional) return snapshotRequest;
         if (unconditionalSnapshotRequest) return unconditionalSnapshotRequest;
@@ -138,13 +146,14 @@ export function useOrderDetailLiveState({
             etag: unconditional ? null : etag,
             signal: controller.signal,
           });
-          if (disposed || terminal) return false;
+          if (disposed || terminal || !isCurrentScope()) return false;
           etag = response.etag ?? etag;
           snapshotCursor = response.streamCursor || snapshotCursor;
           streamEnabled = response.streamEnabled;
           if (response.snapshot) applySnapshot(response.snapshot);
           return true;
         } catch (error) {
+          if (!isCurrentScope()) return false;
           if (
             error instanceof OrderRealtimeHttpError
             && (error.status === 401 || error.status === 403 || error.status === 404)
@@ -163,7 +172,7 @@ export function useOrderDetailLiveState({
 
     const schedulePeriodic = () => {
       clearTimer(periodicTimer);
-      if (disposed || terminal) return;
+      if (disposed || terminal || !isCurrentScope()) return;
 
       const disconnectedFor = Date.now() - disconnectedAt;
       const delay = connected
@@ -173,7 +182,9 @@ export function useOrderDetailLiveState({
           : DISCONNECTED_POLL_MS + jitter(1_000);
       periodicTimer = window.setTimeout(async () => {
         periodicTimer = null;
+        if (!isCurrentScope()) return;
         const refreshed = await refreshSnapshot();
+        if (!isCurrentScope()) return;
         if (refreshed && streamEnabled && !connected) scheduleReconnect(0);
         schedulePeriodic();
       }, delay);
@@ -186,7 +197,7 @@ export function useOrderDetailLiveState({
     };
 
     const queueInvalidationSnapshot = (unconditional = false) => {
-      if (disposed || terminal) return;
+      if (disposed || terminal || !isCurrentScope()) return;
       invalidationRequiresUnconditionalSnapshot ||= unconditional;
       if (snapshotRequest) invalidationBarrier = snapshotRequest;
       if (invalidationTimer !== null) return;
@@ -195,16 +206,19 @@ export function useOrderDetailLiveState({
       // be incorrectly treated as covered by the in-flight promise.
       invalidationTimer = window.setTimeout(async () => {
         invalidationTimer = null;
+        if (!isCurrentScope()) return;
         const barrier = invalidationBarrier;
         invalidationBarrier = null;
         const forceSnapshot = invalidationRequiresUnconditionalSnapshot;
         invalidationRequiresUnconditionalSnapshot = false;
         if (barrier) await barrier;
+        if (!isCurrentScope()) return;
         await refreshSnapshot(forceSnapshot);
       }, INVALIDATION_COALESCE_MS);
     };
 
     const handleEvent = (event: EventSourceMessage) => {
+      if (!isCurrentScope()) return;
       const action = parseOrderRealtimeEvent(event, normalizedOrderId);
       if (action === 'invalidate') queueInvalidationSnapshot();
       if (action === 'reset') queueInvalidationSnapshot(true);
@@ -226,12 +240,18 @@ export function useOrderDetailLiveState({
       const delay = Math.max(0, expiresAt - Date.now() - AUTH_RECONNECT_LEAD_MS);
       authTimer = window.setTimeout(async () => {
         authTimer = null;
+        if (!isCurrentScope()) return;
         try {
           await refreshAuthSession();
         } catch {
           if (!authSession.getAccessToken()) failTerminal();
         } finally {
-          if (!disposed && !terminal && streamAbort === controller) controller.abort();
+          if (
+            !disposed
+            && !terminal
+            && isCurrentScope()
+            && streamAbort === controller
+          ) controller.abort();
         }
       }, delay);
     };
@@ -256,9 +276,10 @@ export function useOrderDetailLiveState({
       });
       const reader = response.body.getReader();
       try {
-        while (!disposed && !controller.signal.aborted) {
+        while (!disposed && isCurrentScope() && !controller.signal.aborted) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (!isCurrentScope()) break;
           parser.feed(decoder.decode(value, { stream: true }));
           if (parseFailure) throw new OrderRealtimeStreamProtocolError(parseFailure.message);
         }
@@ -270,7 +291,7 @@ export function useOrderDetailLiveState({
     };
 
     const connectStream = async () => {
-      if (disposed || terminal || !streamEnabled || streamAbort) return;
+      if (disposed || terminal || !isCurrentScope() || !streamEnabled || streamAbort) return;
       const controller = new AbortController();
       streamAbort = controller;
       const tokenAtOpen = authSession.getAccessToken();
@@ -284,7 +305,7 @@ export function useOrderDetailLiveState({
           snapshotCursor,
           controller.signal,
         );
-        if (disposed || controller.signal.aborted) return;
+        if (disposed || !isCurrentScope() || controller.signal.aborted) return;
         if (response.status === 204) {
           streamEnabled = false;
           return;
@@ -309,7 +330,7 @@ export function useOrderDetailLiveState({
         await consumeStream(response, controller);
         if (!controller.signal.aborted && !disposed) await refreshSnapshot();
       } catch (error) {
-        if (!isAbortError(error) && !disposed) {
+        if (!isAbortError(error) && !disposed && isCurrentScope()) {
           await refreshSnapshot(error instanceof OrderRealtimeStreamProtocolError);
         }
       } finally {
@@ -317,7 +338,7 @@ export function useOrderDetailLiveState({
         authTimer = null;
         if (streamAbort === controller) streamAbort = null;
         if (streamAbort === null) streamTokenAtOpen = null;
-        if (!disposed && !terminal) {
+        if (!disposed && !terminal && isCurrentScope()) {
           markDisconnected();
           if (streamEnabled) {
             if (controller.signal.aborted) {
@@ -337,14 +358,26 @@ export function useOrderDetailLiveState({
     };
 
     function scheduleReconnect(delay: number) {
-      if (disposed || terminal || !streamEnabled || streamAbort || reconnectTimer !== null) return;
+      if (
+        disposed
+        || terminal
+        || !isCurrentScope()
+        || !streamEnabled
+        || streamAbort
+        || reconnectTimer !== null
+      ) return;
       reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null;
+        if (!isCurrentScope()) return;
         void connectStream();
       }, delay);
     }
 
     const unsubscribeAuth = authSession.subscribe(() => {
+      if (!isCurrentScope()) {
+        failTerminal();
+        return;
+      }
       if (!streamAbort || authSession.getAccessToken() === streamTokenAtOpen) return;
       if (!authSession.getAccessToken()) {
         failTerminal();
@@ -355,7 +388,7 @@ export function useOrderDetailLiveState({
 
     void (async () => {
       const ready = await refreshSnapshot();
-      if (disposed || terminal) return;
+      if (disposed || terminal || !isCurrentScope()) return;
       schedulePeriodic();
       if (ready && streamEnabled) scheduleReconnect(0);
     })();
@@ -365,12 +398,31 @@ export function useOrderDetailLiveState({
       unsubscribeAuth();
       stopAll();
     };
-  }, [active, enabled, normalizedOrderId, scopeKey, visible]);
+  }, [active, authScopeKey, enabled, normalizedOrderId, scopeKey, visible]);
 
   return useMemo(
     () => enabled && state.scopeKey === scopeKey ? state : EMPTY_STATE,
     [enabled, scopeKey, state],
   );
+}
+
+function useOrderRealtimeAuthScopeKey(): string {
+  return useSyncExternalStore(
+    authSession.subscribe,
+    getOrderRealtimeAuthScopeKey,
+    getOrderRealtimeAuthScopeKey,
+  );
+}
+
+function getOrderRealtimeAuthScopeKey(): string {
+  const sessionGeneration = authSession.getSessionGeneration();
+  const user = authSession.getUser();
+  if (!user) return JSON.stringify(['anonymous', sessionGeneration]);
+  return JSON.stringify([
+    user.id,
+    sessionGeneration,
+    getUserAuthorizationScopeKey(user),
+  ]);
 }
 
 export function buildOrderDetailLiveStateMaps(

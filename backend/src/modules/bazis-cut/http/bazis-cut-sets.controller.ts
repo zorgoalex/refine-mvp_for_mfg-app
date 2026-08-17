@@ -221,9 +221,10 @@ export class BazisCutSetsController {
 
   @ApiOperation({ operationId: 'createBazisCutSet', summary: 'Create a Basis-cut set from order details' })
   @ApiHeader(commandHeader)
-  @ApiBody({ schema: { type: 'object', required: ['orderId', 'detailIds'], properties: {
+  @ApiBody({ schema: { type: 'object', required: ['orderId'], properties: {
     name: { type: 'string', minLength: 1, maxLength: 200 }, orderId: { type: 'integer', minimum: 1 },
     detailIds: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'integer', minimum: 1 } },
+    hdfDetailIds: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'integer', minimum: 1 } },
   } } })
   @ApiResponse({ status: 201, description: 'Persistent set and snapshot details', schema: mutationResponseSchema })
   @Post()
@@ -279,9 +280,10 @@ export class BazisCutSetsController {
   @ApiOperation({ operationId: 'addBazisCutSetDetails', summary: 'Add order details to a Basis-cut set' })
   @ApiParam(idParameter)
   @ApiHeader(commandHeader)
-  @ApiBody({ schema: { type: 'object', required: ['orderId', 'detailIds', 'expectedVersion'], properties: {
+  @ApiBody({ schema: { type: 'object', required: ['orderId', 'expectedVersion'], properties: {
     orderId: { type: 'integer', minimum: 1 }, expectedVersion: { type: 'integer', minimum: 0 },
     detailIds: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'integer', minimum: 1 } },
+    hdfDetailIds: { type: 'array', minItems: 1, maxItems: 500, items: { type: 'integer', minimum: 1 } },
   } } })
   @ApiResponse({ status: 201, description: 'Updated set', schema: mutationResponseSchema })
   @Post(':setId/details')

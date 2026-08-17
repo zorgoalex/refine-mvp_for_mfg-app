@@ -1,5 +1,6 @@
 import { getPermissionsForRole, mapRoleIdToRole } from '../../permissions/permissions';
 import type { CurrentUser } from '../../permissions/current-user';
+import type { PermissionsService } from '../../permissions/permissions.service';
 import {
   InvalidCredentialsError,
   LoginMethodNotAllowedError,
@@ -33,6 +34,7 @@ export interface AuthServicePorts {
   tokens: AccessTokenIssuerPort;
   audit: AuthAuditPort;
   rateLimits: LoginRateLimitPort;
+  permissions?: Pick<PermissionsService, 'loadRoleAuthorization'>;
 }
 
 export class AuthService {
@@ -97,7 +99,7 @@ export class AuthService {
       throw error;
     }
     await this.ports.rateLimits.refund(accountLimit);
-    const currentUser = this.toCurrentUser(user, session.sessionId);
+    const currentUser = await this.toCurrentUser(user, session.sessionId);
     const accessToken = await this.ports.tokens.issueAccessToken(currentUser, {
       notAfter: session.refreshTokenExpiresAt,
     });
@@ -109,20 +111,38 @@ export class AuthService {
     };
   }
 
-  private toCurrentUser(user: AuthUserRecord, sessionId: string): CurrentUser {
+  private async toCurrentUser(user: AuthUserRecord, sessionId: string): Promise<CurrentUser> {
     const role = mapRoleIdToRole(user.roleId);
 
     if (!role) {
       throw new UnknownRoleError(user.roleId);
     }
 
+    const authorization = await this.loadAuthorization(user.roleId, role);
+
     return {
       id: user.id,
       username: user.username,
       role,
       roleId: user.roleId,
-      permissions: getPermissionsForRole(role),
+      permissions: authorization.permissions,
+      policyScopes: authorization.scopes,
+      permissionsVersion: authorization.version,
       sessionId,
+    };
+  }
+
+  private async loadAuthorization(
+    roleId: number,
+    role: NonNullable<ReturnType<typeof mapRoleIdToRole>>,
+  ) {
+    if (this.ports.permissions) {
+      return this.ports.permissions.loadRoleAuthorization(roleId);
+    }
+    return {
+      permissions: getPermissionsForRole(role),
+      scopes: undefined,
+      version: 0,
     };
   }
 

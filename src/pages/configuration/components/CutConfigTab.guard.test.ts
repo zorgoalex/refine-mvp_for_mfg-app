@@ -33,6 +33,31 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(renderFormSrc).toMatch(/Сохранить как копию/);
     expect(renderFormSrc).toMatch(/type="color"/);
     expect(renderFormSrc).toMatch(/Загрузить тестовый SVG/);
+    expect(renderFormSrc).toMatch(/Размер строки 1: заказ/);
+    expect(renderFormSrc).toMatch(/Размер строки 2: позиция/);
+    expect(renderFormSrc).toMatch(/Размер строки 3: размеры/);
+    expect(renderFormSrc).toMatch(/Интервал заказ - позиция/);
+    expect(renderFormSrc).toMatch(/Интервал позиция - размеры/);
+    expect(renderFormSrc).toMatch(/Плотность букв/);
+  });
+
+  it('keeps render settings tab and uploaded SVG preview mounted after saving', () => {
+    expect(tabSrc).toMatch(/const \[activeInnerTabKey, setActiveInnerTabKey\]/);
+    expect(tabSrc).toMatch(/activeKey=\{activeInnerTabKey\}/);
+    expect(tabSrc).toMatch(/onChange=\{\(key\) => setActiveInnerTabKey\(key as CutConfigInnerTabKey\)\}/);
+    expect(tabSrc).toMatch(/const updateSettingInConfig = useCallback/);
+    expect(tabSrc).toMatch(/onSaved=\{updateSettingInConfig\}/);
+    expect(tabSrc).not.toMatch(/CutRenderStylesForm config=\{config\} canManage=\{canManage\} onSaved=\{reload\}/);
+    expect(renderFormSrc).toMatch(/const savedSetting = await cutConfigApi\.updateSetting/);
+    expect(renderFormSrc).toMatch(/await onSaved\(savedSetting\)/);
+  });
+
+  it('renders SVG preview from the unsaved draft of the selected render template', () => {
+    expect(renderFormSrc).toContain(
+      'buildSettingWithDraft(resolvedSetting, draft, selectedTemplateId, selectedTemplateId)',
+    );
+    expect(renderFormSrc).toMatch(/const previewSvg = useMemo\(/);
+    expect(renderFormSrc).toMatch(/\[previewParsed, previewSetting\]/);
   });
 
   it('eligibility statuses use a multiselect from the production-statuses reference (no free text)', () => {

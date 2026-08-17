@@ -8,7 +8,8 @@ import {
 const FIT_EPSILON_MM = 1e-7;
 
 export interface SelectedSheetFitItem {
-  orderDetailId: number;
+  itemId?: string;
+  orderDetailId: number | null;
   widthMm: number;
   heightMm: number;
   filmTexture: boolean | null;
@@ -60,7 +61,7 @@ export function computeSelectedSheetFitWarnings(input: {
         ? input.grainRules.textured
         : input.grainRules.plain;
       return {
-        id: freecutItemId(item.orderDetailId),
+        id: item.itemId ?? (item.orderDetailId === null ? 'unknown' : freecutItemId(item.orderDetailId)),
         width_mm: item.widthMm,
         height_mm: item.heightMm,
         qty: 1,
@@ -100,7 +101,7 @@ export function computeSelectedSheetFitWarnings(input: {
     if (rotatedFits && !rotationForbidden) continue;
 
     warnings.push({
-      orderDetailId: item.orderDetailId,
+      orderDetailId: item.orderDetailId ?? 0,
       reason: rotatedFits && rotationForbidden ? 'orientation' : 'dimensions',
       rotationForbidden,
       widthMm: item.widthMm,

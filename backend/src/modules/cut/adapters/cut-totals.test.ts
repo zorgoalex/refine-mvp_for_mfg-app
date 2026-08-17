@@ -34,8 +34,10 @@ describe('TOTALS_BY_JOB_SQL materials_count resolution', () => {
     const sql = TOTALS_BY_JOB_SQL.replace(/\s+/g, ' ');
     expect(sql).toContain('JOIN cut_job cj ON cj.cut_job_id = i.cut_job_id');
     expect(sql).toContain('COALESCE(SUM(i.qty), 0) AS details');
-    expect(sql).toContain('COALESCE(SUM(od.area * i.qty), 0) AS area');
-    expect(sql).toContain('CASE WHEN NOT cj.split_by_material THEN 1 ELSE COUNT(DISTINCT COALESCE(od.sheet_material_type_id, cj.sheet_material_type_id)) END AS materials_count');
+    expect(sql).toContain("WHEN i.source_type = 'order_hdf_detail' THEN (hdf.hdf_height_mm * hdf.hdf_width_mm / 1000000.0) * i.qty");
+    expect(sql).toContain('ELSE od.area * i.qty');
+    expect(sql).toContain("CASE WHEN i.source_type = 'order_hdf_detail' THEN hdf.hdf_sheet_material_type_id ELSE od.sheet_material_type_id END");
+    expect(sql).toContain('CASE WHEN NOT cj.split_by_material THEN 1 ELSE COUNT(DISTINCT COALESCE(');
     expect(sql).toContain('GROUP BY i.cut_job_id, cj.sheet_material_type_id, cj.split_by_material');
   });
 });
@@ -53,10 +55,13 @@ describe('TOTALS_FROZEN_ITEMS_BY_JOB_SQL', () => {
 describe('MATERIAL_NAMES_BY_JOB_SQL', () => {
   it('aggregates unique detail material names without using the job sheet override', () => {
     const sql = MATERIAL_NAMES_BY_JOB_SQL.replace(/\s+/g, ' ');
-    expect(sql).toContain('ARRAY_AGG(DISTINCT COALESCE(smt.name, m.material_name) ORDER BY COALESCE(smt.name, m.material_name)) AS material_names');
-    expect(sql).toContain('LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND od.delete_flag = false');
+    expect(sql).toContain('ARRAY_AGG(DISTINCT resolved_material.name ORDER BY resolved_material.name) AS material_names');
+    expect(sql).toContain("LEFT JOIN order_details od ON od.detail_id = i.order_detail_id AND i.source_type = 'order_detail' AND od.delete_flag = false");
+    expect(sql).toContain("LEFT JOIN order_hdf_details hdf ON hdf.order_hdf_detail_id = i.order_hdf_detail_id AND i.source_type = 'order_hdf_detail' AND hdf.delete_flag = false");
     expect(sql).toContain('LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = od.sheet_material_type_id');
+    expect(sql).toContain('LEFT JOIN sheet_material_types hdf_smt ON hdf_smt.sheet_material_type_id = hdf.hdf_sheet_material_type_id');
     expect(sql).toContain('LEFT JOIN materials m ON m.material_id = od.material_id');
+    expect(sql).toContain('COALESCE(hdf_smt.name, smt.name, m.material_name) AS name');
     expect(sql).not.toContain('cj.sheet_material_type_id');
   });
 });

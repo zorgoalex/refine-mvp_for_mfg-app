@@ -12,6 +12,7 @@ import {
 import {
   CUT_RENDER_STYLE_DEFAULT,
   cutRenderLabelFontWeight,
+  cutRenderLabelLetterSpacingRatio,
   cutRenderLabelFillForBackground,
   cutRenderLabelLineSpecs,
   cutRenderNormalizeLabelLines,
@@ -64,13 +65,11 @@ export interface PieceLabelInput {
   heightMm?: number | null;
   /** raw freecut item id (fallback label when order/detail are unknown). */
   itemId: string;
+  /** Legacy input kept for compatibility. Copy ordinal is no longer printed in the piece label. */
   instance: number;
+  /** Legacy input kept for compatibility. Quantity is no longer printed in the piece label. */
   qty: number;
-  /**
-   * Sheet-material name for the 4th line. Pass a non-blank name ONLY when the
-   * sheet mixes materials (splitByMaterial off); omit/null otherwise. Mirrors the
-   * frontend preview overlay so print/PDF match the on-screen preview.
-   */
+  /** Legacy input kept for compatibility. Material is no longer printed in the piece label. */
   materialName?: string | null;
 }
 
@@ -83,31 +82,25 @@ export interface BathPieceDetailInfo {
 /**
  * Piece label lines shown inside every placed detail:
  * 1) order name (orders.order_name), falling back to the numeric order id when
- * the name is blank/unresolved, 2) order detail position + instance count,
- * 3) size (width x height), 4) material name — appended ONLY when `materialName`
- * is a non-blank string (mixed-material sheet). When the order can't be resolved
- * we fall back to a single line with the raw item id so the label is never empty.
+ * the name is blank/unresolved, 2) order detail position,
+ * 3) size (width x height). Material type/name is intentionally omitted.
  */
 export function composePieceLabelLines(input: PieceLabelInput): string[] {
-  const { orderId, orderName, detailId, detailNumber, widthMm, heightMm, itemId, instance, qty } = input;
-  if (orderId === null) {
-    return [formatPieceLabel(itemId, instance, qty)];
-  }
+  const { orderId, orderName, detailId, detailNumber, widthMm, heightMm, itemId } = input;
+  const orderLabel = orderName?.trim() || (orderId === null ? itemId : String(orderId));
   const position = detailNumber ?? detailId;
-  if (position === null) return [formatPieceLabel(itemId, instance, qty)];
-  const orderLabel = orderName?.trim() || String(orderId);
-  const lines = [
+  const positionLabel = position === null
+    ? '# —'
+    : formatPositionLine(position);
+  return [
     orderLabel,
-    formatPositionLine(position, instance, qty),
+    positionLabel,
     formatPieceSize(widthMm, heightMm),
   ];
-  const material = input.materialName?.trim();
-  if (material) lines.push(material);
-  return lines;
 }
 
-function formatPositionLine(position: number, instance: number, qty: number): string {
-  return cutRenderPositionLine(position, instance, qty);
+function formatPositionLine(position: number): string {
+  return cutRenderPositionLine(position);
 }
 
 function formatPieceSize(widthMm: number | null | undefined, heightMm: number | null | undefined): string {
@@ -397,7 +390,9 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
           cx,
           cy,
           fontMm,
+          renderStyle,
           fontWeight: cutRenderLabelFontWeight(renderStyle),
+          letterSpacingRatio: cutRenderLabelLetterSpacingRatio(renderStyle),
           fill: labelFill,
           strokeAttrs: labelStrokeAttrs,
         }),
@@ -428,26 +423,30 @@ function renderPieceLabelText(input: {
   cx: number;
   cy: number;
   fontMm: number;
+  renderStyle: CutRenderStyleRef;
   fontWeight: number;
+  letterSpacingRatio: number;
   fill: string;
   strokeAttrs: string;
 }): string {
-  const specs = cutRenderLabelLineSpecs(input.lines);
+  const specs = cutRenderLabelLineSpecs(input.lines, input.renderStyle);
   if (specs.length === 0) return '';
-  const gapMm = input.fontMm * 0.035;
   const lineHeights = specs.map((spec) => input.fontMm * spec.fontRatio * 0.82);
-  const totalHeight = lineHeights.reduce((sum, height) => sum + height, 0) + gapMm * Math.max(0, specs.length - 1);
+  const gaps = specs.map((spec, index) => index < specs.length - 1 ? input.fontMm * spec.gapAfterRatio : 0);
+  const totalHeight = lineHeights.reduce((sum, height, index) => sum + height + (gaps[index] ?? 0), 0);
   let top = input.cy - totalHeight / 2;
   const tspans = specs.map((spec, index) => {
     const fontSize = input.fontMm * spec.fontRatio;
     const lineHeight = lineHeights[index] ?? fontSize * 0.82;
     const y = top + lineHeight / 2;
-    top += lineHeight + gapMm;
+    top += lineHeight + (gaps[index] ?? 0);
     return `<tspan x="${num(input.cx)}" y="${num(y)}" font-size="${num(fontSize)}">${escapeXml(spec.text)}</tspan>`;
   }).join('');
+  const letterSpacing = input.fontMm * input.letterSpacingRatio;
+  const letterSpacingAttr = letterSpacing === 0 ? '' : ` letter-spacing="${num(letterSpacing)}"`;
   return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, sans-serif" font-size="${num(
     input.fontMm,
-  )}" font-weight="${num(input.fontWeight)}" fill="${input.fill}"${input.strokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
+  )}" font-weight="${num(input.fontWeight)}"${letterSpacingAttr} fill="${input.fill}"${input.strokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
 }
 
 function renderPieceSourceSvgFragment(

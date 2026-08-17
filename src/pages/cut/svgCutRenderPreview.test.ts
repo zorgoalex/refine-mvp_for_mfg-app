@@ -26,6 +26,7 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).toContain('># 01</tspan>');
     expect(rendered).toContain('>300*200</tspan>');
     expect(rendered).toContain('># 2</tspan>');
+    expect(rendered).not.toContain('>МДФ 18</tspan>');
     expect(rendered).not.toContain('поз.');
     expect(rendered).not.toContain('300X200');
     expect(rendered.indexOf('cut-sheet-piece-source-svg')).toBeLessThan(rendered.indexOf('>2723</tspan>'));
@@ -49,6 +50,12 @@ describe('buildStyledSvgUploadPreview', () => {
             ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.label,
             lightFill: '#fefefe',
             lightTextStroke: '#222222',
+            orderFontRatio: 1.2,
+            positionFontRatio: 0.4,
+            sizeFontRatio: 0.7,
+            orderPositionGapRatio: 0.2,
+            positionSizeGapRatio: 0.3,
+            letterSpacingRatio: -0.1,
           },
           sourceSvg: {
             ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.mdf_board_preview.sourceSvg,
@@ -66,6 +73,10 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).toContain(cutRenderSourceSvgCss(style, '#111827'));
     expect(rendered).not.toContain('vector-effect:non-scaling-stroke!important');
     expect(rendered).toContain('fill="#fefefe" stroke="#222222"');
+    expect(rendered).toContain('letter-spacing="-2.4"');
+    expect(rendered).toContain('font-size="28.8">2723</tspan>');
+    expect(rendered).toContain('font-size="9.6"># 01</tspan>');
+    expect(rendered).toContain('font-size="16.8">300*200</tspan>');
   });
 });
 
@@ -93,7 +104,7 @@ function parsedUpload(): ParsedSvgUpload {
             viewBox: { xMm: 0, yMm: 0, widthMm: 300, heightMm: 200 },
             body: '<line x1="0" y1="0" x2="300" y2="200" stroke="#626769" stroke-width="0.5"/>',
           },
-          visualLabel: { rawLines: ['2723', '# 01', '300*200'] },
+          visualLabel: { rawLines: ['2723', '# 01', '300*200', 'МДФ 18'] },
         },
         {
           orderName: '2724',

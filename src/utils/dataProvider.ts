@@ -1552,9 +1552,13 @@ function shouldUseBackendClientPhoneMutation(resource: string): boolean {
 // backend client (e.g. sheetMaterialsApi -> /api/v1/sheet-material-types), which
 // enforces RBAC, audit, optimistic version and the feature flag.
 const BACKEND_ONLY_WRITE_RESOURCES = new Set<string>(['sheet_material_types']);
+const RBAC_BACKEND_OWNED_WRITE_RESOURCES = new Set<string>(['orders', 'payments']);
 
 function assertNotBackendOnlyWrite(resource: string): void {
-  if (BACKEND_ONLY_WRITE_RESOURCES.has(resource)) {
+  const isRbacBackendOwned =
+    featureFlags.useBackendPermissions && RBAC_BACKEND_OWNED_WRITE_RESOURCES.has(resource);
+
+  if (BACKEND_ONLY_WRITE_RESOURCES.has(resource) || isRbacBackendOwned) {
     throw {
       message: `${resource} is written only through the backend API; Hasura writes are disabled`,
       statusCode: 403,

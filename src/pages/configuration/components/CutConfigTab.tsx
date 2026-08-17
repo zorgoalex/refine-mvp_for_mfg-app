@@ -27,6 +27,7 @@ import {
   type CutParamProfile,
   type CutPdfTemplate,
   type CutRenderPreset,
+  type CutSettingRow,
 } from '../../../api/cutConfigApi';
 import { notifyCutPdfTemplatesChanged } from '../../../api/cutPdfTemplateEvents';
 import type { LabelCustomExpressionNode, LabelFieldCatalogItem } from '../../../api/types/labelsApi.types';
@@ -106,6 +107,8 @@ const CUT_QUALITY_OPTIONS: Array<{ value: FreecutCutQuality; label: string }> = 
   { value: 'max', label: 'Max' },
 ];
 
+type CutConfigInnerTabKey = 'cut-settings' | 'pdf-template-editor' | 'render-style-settings';
+
 function isEngineChoice(value: string | number): value is FreecutEngineChoice {
   return value === 'auto' || value === 'heuristic' || value === 'ga';
 }
@@ -130,6 +133,7 @@ export const CutConfigTab: React.FC = () => {
   const [presetCreate, setPresetCreate] = useState(false);
   const [eligibilityCodes, setEligibilityCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [activeInnerTabKey, setActiveInnerTabKey] = useState<CutConfigInnerTabKey>('cut-settings');
 
   // Production statuses come from the retained Hasura reference layer (lookup/select,
   // CLAUDE.md principle 1) — same read path as the production workflow tab. Includes
@@ -179,6 +183,19 @@ export const CutConfigTab: React.FC = () => {
       return { ...prev, pdfTemplates };
     });
     notifyCutPdfTemplatesChanged();
+  }, []);
+
+  const updateSettingInConfig = useCallback((setting: CutSettingRow) => {
+    setConfig((prev) => {
+      if (!prev) return prev;
+      const exists = prev.settings.some((item) => item.key === setting.key);
+      return {
+        ...prev,
+        settings: exists
+          ? prev.settings.map((item) => (item.key === setting.key ? setting : item))
+          : [...prev.settings, setting],
+      };
+    });
   }, []);
 
   const saveEligibility = useCallback(async () => {
@@ -294,6 +311,8 @@ export const CutConfigTab: React.FC = () => {
       <Title level={4}>Раскрой</Title>
 
       <Tabs
+        activeKey={activeInnerTabKey}
+        onChange={(key) => setActiveInnerTabKey(key as CutConfigInnerTabKey)}
         items={[
           {
             key: 'cut-settings',
@@ -379,7 +398,7 @@ export const CutConfigTab: React.FC = () => {
           {
             key: 'render-style-settings',
             label: 'Настройки рендера',
-            children: <CutRenderStylesForm config={config} canManage={canManage} onSaved={reload} />,
+            children: <CutRenderStylesForm config={config} canManage={canManage} onSaved={updateSettingInConfig} />,
           },
         ]}
       />

@@ -1249,15 +1249,6 @@ html {
   color: var(--app-text);
 }
 
-.order-detail-hdf-cell__qty {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 9px;
-  color: var(--app-text-muted);
-}
-
 .order-detail-hdf-cell--parameter,
 .order-detail-hdf-cell--status,
 .order-detail-hdf-cell--empty {
@@ -1355,6 +1346,21 @@ html {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 10px;
+}
+
+.order-hdf-table__link-list {
+  max-width: 100%;
+  line-height: 1.1;
+}
+
+.order-hdf-table__link {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .order-hdf-table .ant-select-selector {

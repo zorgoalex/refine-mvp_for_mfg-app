@@ -123,7 +123,9 @@ interface OrderScopeRow extends QueryResultRow {
 
 interface Snapshot {
   provenance: {
-    sourceOrderDetailId: number;
+    sourceType: 'order_detail' | 'order_hdf_detail';
+    sourceOrderDetailId: number | null;
+    sourceOrderHdfDetailId: number | null;
     sourceOrderId: number;
     sourceProjectId: number;
     sourceBazisProjectId: number | null;
@@ -258,8 +260,9 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
       const detailIds = uniqueIds(command.detailIds);
+      const hdfDetailIds = uniqueIds(command.hdfDetailIds ?? []);
       const requestHash = hashRequest('bazis_cut_set.create', command.currentUser, {
-        orderId: command.orderId, detailIds,
+        orderId: command.orderId, detailIds, hdfDetailIds,
       });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.create', actorId(command.currentUser), 'bazis_cut_set', 'pending', requestHash);
@@ -270,13 +273,19 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
         'UPDATE bazis_cut_sets SET name=$2 WHERE bazis_cut_set_id=$1',
         [setId, buildBazisCutSetName(setId)],
       );
-      const snapshots = await loadSnapshots(tx, command.orderId, detailIds);
+      const snapshots = [
+        ...(detailIds.length > 0 ? await loadSnapshots(tx, command.orderId, detailIds) : []),
+        ...(hdfDetailIds.length > 0 ? await loadHdfSnapshots(tx, command.orderId, hdfDetailIds) : []),
+      ];
       await insertSnapshots(tx, setId, snapshots, 0, actorId(command.currentUser));
       const set = await loadSet(tx, setId);
       const result = { set, addedCount: snapshots.length };
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.created', setId,
         command.idempotencyKey, null, summaryAudit(set), set, set.details,
-        { addedDetailIds: snapshots.map((item) => item.provenance.sourceOrderDetailId) });
+        {
+          addedDetailIds: snapshots.map((item) => item.provenance.sourceOrderDetailId).filter((id): id is number => id !== null),
+          addedHdfDetailIds: snapshots.map((item) => item.provenance.sourceOrderHdfDetailId).filter((id): id is number => id !== null),
+        });
       await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'created');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
@@ -362,22 +371,34 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser);
       const detailIds = uniqueIds(command.detailIds);
+      const hdfDetailIds = uniqueIds(command.hdfDetailIds ?? []);
       const requestHash = hashRequest('bazis_cut_set.details.add', command.currentUser,
-        { setId: command.setId, orderId: command.orderId, detailIds, expectedVersion: command.expectedVersion });
+        { setId: command.setId, orderId: command.orderId, detailIds, hdfDetailIds, expectedVersion: command.expectedVersion });
       const replay = await claimIdempotency<BazisCutMutationResultDto>(tx, command.idempotencyKey,
         'bazis_cut_set.details.add', actorId(command.currentUser), 'bazis_cut_set', String(command.setId), requestHash);
       if (replay) return replay;
       await lockSet(tx, command.setId, command.expectedVersion);
 
-      const snapshots = await loadSnapshots(tx, command.orderId, detailIds);
+      const snapshots = [
+        ...(detailIds.length > 0 ? await loadSnapshots(tx, command.orderId, detailIds) : []),
+        ...(hdfDetailIds.length > 0 ? await loadHdfSnapshots(tx, command.orderId, hdfDetailIds) : []),
+      ];
       const currentCount = await countSetDetails(tx, command.setId);
-      const existing = await tx.query<{ source_order_detail_id: string | number }>(
-        `SELECT source_order_detail_id FROM bazis_cut_set_details
-         WHERE bazis_cut_set_id=$1 AND source_order_detail_id=ANY($2::bigint[])`,
-        [command.setId, detailIds],
+      const existing = await tx.query<{ source_order_detail_id: string | number | null; source_order_hdf_detail_id: string | number | null }>(
+        `SELECT source_order_detail_id, source_order_hdf_detail_id FROM bazis_cut_set_details
+         WHERE bazis_cut_set_id=$1
+           AND (
+             source_order_detail_id=ANY($2::bigint[])
+             OR source_order_hdf_detail_id=ANY($3::bigint[])
+           )`,
+        [command.setId, detailIds, hdfDetailIds],
       );
-      const existingIds = new Set(existing.rows.map((row) => toNumber(row.source_order_detail_id)));
-      const additions = snapshots.filter((item) => !existingIds.has(item.provenance.sourceOrderDetailId));
+      const existingKeys = new Set(existing.rows.map((row) => sourceKey({
+        sourceType: row.source_order_hdf_detail_id === null ? 'order_detail' : 'order_hdf_detail',
+        sourceOrderDetailId: nullableNumber(row.source_order_detail_id),
+        sourceOrderHdfDetailId: nullableNumber(row.source_order_hdf_detail_id),
+      })));
+      const additions = snapshots.filter((item) => !existingKeys.has(sourceKey(item.provenance)));
       if (currentCount + additions.length > 65_535) {
         throw new ApiError(422, 'BAZIS_CUT_SET_TOO_LARGE', 'Набор превышает лимит BIFF8');
       }
@@ -394,7 +415,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       await recordMutation(tx, command.currentUser, command.requestId, 'bazis_cut_set.details_added', command.setId,
         command.idempotencyKey, null, { addedCount: additions.length, version: set.version }, set,
         set.details.filter((detail) => additions.some((item) => item.provenance.sourceOrderDetailId === detail.sourceOrderDetailId)),
-        { addedDetailIds: additions.map((item) => item.provenance.sourceOrderDetailId) });
+        {
+          addedDetailIds: additions.map((item) => item.provenance.sourceOrderDetailId).filter((id): id is number => id !== null),
+          addedHdfDetailIds: additions.map((item) => item.provenance.sourceOrderHdfDetailId).filter((id): id is number => id !== null),
+        });
       await evaluateBazisCutSetMachineFilesPresentAutomation(tx, command.currentUser, command.requestId, set, 'details-added');
       await completeIdempotency(tx, command.idempotencyKey, result);
       return result;
@@ -693,6 +717,8 @@ async function loadSnapshots(client: DatabaseClient, orderId: number | null, det
     snapshots.push({
       provenance: {
         sourceOrderDetailId: toNumber(row.detail_id), sourceOrderId: toNumber(row.order_id),
+        sourceType: 'order_detail',
+        sourceOrderHdfDetailId: null,
         sourceProjectId: toNumber(row.project_id), sourceBazisProjectId: bazisProjectId,
         sourceBazisRevisionId: bazisRevisionId,
         sourceBazisNodeId: exactCount === 1 ? nullableNumber(row.exact_node_id) : null,
@@ -715,9 +741,126 @@ async function loadSnapshots(client: DatabaseClient, orderId: number | null, det
   return snapshots;
 }
 
+async function loadHdfSnapshots(client: DatabaseClient, orderId: number | null, hdfDetailIds: number[]): Promise<Snapshot[]> {
+  const result = await client.query<{
+    order_hdf_detail_id: string | number;
+    order_id: string | number;
+    project_id: string | number;
+    order_name: string;
+    order_full_number: string;
+    project_code: string;
+    material_name: string | null;
+    thickness_mm: string | number | null;
+    source_detail_number: string | number | null;
+    source_detail_name: string | null;
+    hdf_height_mm: string | number | null;
+    hdf_width_mm: string | number | null;
+    quantity: string | number | null;
+    milling_type_name: string | null;
+  }>(
+    `SELECT hdf.order_hdf_detail_id,
+            hdf.order_id,
+            o.project_id,
+            o.order_name,
+            (p.code || '-' || o.order_name) AS order_full_number,
+            p.code::text AS project_code,
+            COALESCE(NULLIF(hdf.hdf_sheet_material_name, ''), smt.name) AS material_name,
+            smt.thickness_mm,
+            hdf.source_detail_number,
+            hdf.source_detail_name,
+            hdf.hdf_height_mm,
+            hdf.hdf_width_mm,
+            hdf.quantity,
+            hdf.milling_type_name
+     FROM order_hdf_details hdf
+     JOIN hdf_calculation_config_state state ON state.id = 1
+     JOIN orders o ON o.order_id = hdf.order_id AND o.delete_flag=false
+     JOIN projects p ON p.project_id=o.project_id
+     LEFT JOIN sheet_material_types smt ON smt.sheet_material_type_id = hdf.hdf_sheet_material_type_id
+     WHERE ($1::bigint IS NULL OR hdf.order_id=$1)
+       AND hdf.delete_flag=false
+       AND hdf.status='ok'
+       AND hdf.config_revision = state.revision
+       AND hdf.order_hdf_detail_id=ANY($2::bigint[])
+     ORDER BY hdf.order_id, hdf.source_detail_number, hdf.order_hdf_detail_id`,
+    [orderId, hdfDetailIds],
+  );
+  const found = new Set(result.rows.map((row) => toNumber(row.order_hdf_detail_id)));
+  const missing = hdfDetailIds.filter((id) => !found.has(id));
+  if (missing.length > 0) {
+    if (orderId === null) throw pickerSelectionStale();
+    throw new ApiError(404, 'ORDER_NOT_FOUND', 'Order not found', { orderId });
+  }
+
+  const invalid: number[] = [];
+  const snapshots: Snapshot[] = [];
+  for (const row of result.rows) {
+    const thickness = nullableNumber(row.thickness_mm);
+    const height = nullableNumber(row.hdf_height_mm);
+    const width = nullableNumber(row.hdf_width_mm);
+    const quantity = nullableNumber(row.quantity);
+    const hdfDetailId = toNumber(row.order_hdf_detail_id);
+    if (!row.material_name?.trim() || !positive(thickness) || !positive(height)
+      || !positive(width) || !positive(quantity) || !Number.isInteger(quantity)) {
+      invalid.push(hdfDetailId);
+      continue;
+    }
+    const detailNumber = nullableNumber(row.source_detail_number) ?? hdfDetailId;
+    const snapshotSource = {
+      materialName: row.material_name,
+      thicknessMm: thickness!,
+      detailNumber,
+      importedFromBazisProject: false,
+      bazisProject: '',
+      bazisOrder: '',
+      bazisNodeDesignation: null,
+      basisDesignation: null,
+      basisData: null,
+      detailName: row.source_detail_name ? `ХДФ ${row.source_detail_name}` : 'ХДФ',
+      heightMm: height!,
+      widthMm: width!,
+      quantity: quantity!,
+      note: 'ХДФ',
+      milling: row.milling_type_name,
+      film: null,
+      doweling: false,
+      verticalTexture: false,
+    };
+    const fields = mapBazisCutSnapshotFields(snapshotSource);
+    if (!fields) { invalid.push(hdfDetailId); continue; }
+    snapshots.push({
+      provenance: {
+        sourceType: 'order_hdf_detail',
+        sourceOrderDetailId: null,
+        sourceOrderHdfDetailId: hdfDetailId,
+        sourceOrderId: toNumber(row.order_id),
+        sourceProjectId: toNumber(row.project_id),
+        sourceBazisProjectId: null,
+        sourceBazisRevisionId: null,
+        sourceBazisNodeId: null,
+        sourceOrderName: row.order_name,
+        sourceOrderFullNumber: row.order_full_number,
+        sourceProjectCode: row.project_code,
+        sourceBathCutNumber: '',
+        sourceBazisProjectName: '',
+        sourceBazisOrderNo: '',
+        sourceBazisProductName: '',
+      },
+      fields,
+    });
+  }
+  if (invalid.length > 0) {
+    throw new ApiError(422, 'BAZIS_CUT_DETAIL_NOT_EXPORTABLE', 'Некоторые ХДФ-детали нельзя экспортировать', {
+      hdfDetailIds: uniqueIds(invalid),
+    });
+  }
+  return snapshots;
+}
+
 async function insertSnapshots(client: DatabaseClient, setId: number, snapshots: Snapshot[], startSort: number, userId: number | null): Promise<void> {
   const provenanceColumns = [
-    'source_order_detail_id', 'source_order_id', 'source_project_id', 'source_bazis_project_id',
+    'source_type', 'source_order_detail_id', 'source_order_hdf_detail_id',
+    'source_order_id', 'source_project_id', 'source_bazis_project_id',
     'source_bazis_revision_id', 'source_bazis_node_id', 'source_order_name',
     'source_order_full_number', 'source_project_code', 'source_bazis_project_name', 'source_bazis_order_no',
     'source_bazis_product_name', 'source_bath_cut_number',
@@ -726,17 +869,20 @@ async function insertSnapshots(client: DatabaseClient, setId: number, snapshots:
     const snapshot = snapshots[index];
     const p = snapshot.provenance;
     const values = [setId, startSort + index,
-      p.sourceOrderDetailId, p.sourceOrderId, p.sourceProjectId, p.sourceBazisProjectId,
+      p.sourceType, p.sourceOrderDetailId, p.sourceOrderHdfDetailId,
+      p.sourceOrderId, p.sourceProjectId, p.sourceBazisProjectId,
       p.sourceBazisRevisionId, p.sourceBazisNodeId, p.sourceOrderName, p.sourceOrderFullNumber,
       p.sourceProjectCode, p.sourceBazisProjectName, p.sourceBazisOrderNo, p.sourceBazisProductName,
       p.sourceBathCutNumber,
       ...fieldsToValues(snapshot.fields), userId, userId];
     const columns = ['bazis_cut_set_id', 'sort_order', ...provenanceColumns, ...DETAIL_FIELD_COLUMNS, 'created_by', 'updated_by'];
+    const conflictTarget = p.sourceType === 'order_hdf_detail'
+      ? '(bazis_cut_set_id, source_order_hdf_detail_id) WHERE source_order_hdf_detail_id IS NOT NULL'
+      : '(bazis_cut_set_id, source_order_detail_id) WHERE source_order_detail_id IS NOT NULL';
     await client.query(
       `INSERT INTO bazis_cut_set_details (${columns.join(',')})
        VALUES (${values.map((_, valueIndex) => `$${valueIndex + 1}`).join(',')})
-       ON CONFLICT (bazis_cut_set_id, source_order_detail_id)
-         WHERE source_order_detail_id IS NOT NULL DO NOTHING`,
+       ON CONFLICT ${conflictTarget} DO NOTHING`,
       values,
     );
   }
@@ -1133,6 +1279,16 @@ function pickerSelectionStale() {
 function setNotFound(id: number) { return new ApiError(404, 'BAZIS_CUT_SET_NOT_FOUND', 'Набор Базис-раскрой не найден', { setId: id }); }
 function detailNotFound(id: number) { return new ApiError(404, 'BAZIS_CUT_DETAIL_NOT_FOUND', 'Деталь набора не найдена', { detailId: id }); }
 function uniqueIds(ids: number[]): number[] { return [...new Set(ids)].sort((a, b) => a - b); }
+
+function sourceKey(input: {
+  sourceType: 'order_detail' | 'order_hdf_detail';
+  sourceOrderDetailId: number | null;
+  sourceOrderHdfDetailId: number | null;
+}): string {
+  return input.sourceType === 'order_hdf_detail'
+    ? `hdf:${input.sourceOrderHdfDetailId ?? 0}`
+    : `detail:${input.sourceOrderDetailId ?? 0}`;
+}
 function positive(value: number | null): value is number { return value !== null && Number.isFinite(value) && value > 0; }
 function toNumber(value: unknown): number { return Number(value); }
 function nullableNumber(value: unknown): number | null { if (value === null || value === undefined || value === '') return null; const n = Number(value); return Number.isFinite(n) ? n : null; }

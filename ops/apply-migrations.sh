@@ -1383,6 +1383,25 @@ probe_file() {
                      "$(q_idx uq_cnc_manual_svg_telegram_send_idempotency_key)" \
                      "$(q_idx uq_cnc_manual_svg_telegram_send_active_packet)" \
                      "$(q_idx idx_cnc_manual_svg_telegram_send_claim)" ;;
+    124_roles_matrix*) probe_all \
+                     "$(q_tbl permissions_catalog)" \
+                     "$(q_tbl role_permissions)" \
+                     "$(q_tbl role_policy_scopes)" \
+                     "$(q_tbl permissions_state)" \
+                     "$(q_col permissions_catalog permission_name)" \
+                     "$(q_col permissions_catalog is_dangerous)" \
+                     "$(q_col role_permissions is_enabled)" \
+                     "$(q_col role_policy_scopes scope_value)" \
+                     "$(q_col permissions_state version)" \
+                     "$(q_con_on role_permissions role_permissions_role_id_fkey)" \
+                     "$(q_con_on role_permissions role_permissions_permission_name_fkey)" \
+                     "$(q_con_on role_policy_scopes role_policy_scopes_role_id_fkey)" \
+                     "$(q_con_on role_policy_scopes role_policy_scopes_scope_value_check)" \
+                     "$(q_con_on permissions_state permissions_state_singleton)" \
+                     "$(q_con_on permissions_state permissions_state_positive_version)" \
+                     "$(q_idx idx_role_permissions_permission_enabled)" \
+                     "$(q_idx idx_role_policy_scopes_key_value)" \
+                     "SELECT EXISTS (SELECT 1 FROM permissions_state WHERE id = true AND version >= 1);" ;;
     125_order_hdf_details*) probe_all \
                      "$(q_col app_settings version)" \
                      "$(q_col milling_types hdf_enabled)" \

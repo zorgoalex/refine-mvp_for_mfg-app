@@ -1,5 +1,5 @@
 import type { CurrentUser } from '../current-user';
-import type { Scope } from './role-policies';
+import { ROLE_POLICIES, type RolePolicy, type Scope } from './role-policies';
 
 export interface ScopedEntity {
   createdByUserId?: string | null;
@@ -27,4 +27,8 @@ export function allowsScope(user: CurrentUser, scope: Scope, entity: ScopedEntit
     case 'none':
       return false;
   }
+}
+
+export function rolePolicyForUser(user: CurrentUser): RolePolicy {
+  return user.policyScopes ?? ROLE_POLICIES[user.role];
 }

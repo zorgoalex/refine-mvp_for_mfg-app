@@ -262,6 +262,7 @@ export function buildSheetPieceOverlays(
   axisOrigin: CutAxisOrigin = 'top-left',
 ): CutPieceOverlay[] {
   const itemByDetail = new Map(items.map((item) => [item.orderDetailId, item]));
+  const itemByItemId = new Map(items.map((item) => [item.itemId ?? `det-${item.orderDetailId}`, item]));
   const sheetW = placements.sheet_width_mm;
   const sheetH = placements.sheet_height_mm;
 
@@ -273,7 +274,7 @@ export function buildSheetPieceOverlays(
   const distinctMaterials = new Set<string>();
   for (const piece of placements.pieces) {
     const detailId = parseCutPieceDetailId(piece.item_id);
-    const detail = (detailId === null ? undefined : itemByDetail.get(detailId))?.detail;
+    const detail = (itemByItemId.get(piece.item_id) ?? (detailId === null ? undefined : itemByDetail.get(detailId)))?.detail;
     const labelMaterial = detail ? null : piece.label?.materialName?.trim();
     const nm = detail?.materialName?.trim() || labelMaterial;
     const key =
@@ -291,7 +292,7 @@ export function buildSheetPieceOverlays(
   return placements.pieces
     .map((piece) => {
       const detailId = parseCutPieceDetailId(piece.item_id);
-      const item = detailId === null ? undefined : itemByDetail.get(detailId);
+      const item = itemByItemId.get(piece.item_id) ?? (detailId === null ? undefined : itemByDetail.get(detailId));
       const label = piece.label;
       if (!item && !pieceHasDisplayLabel(piece)) return null;
 
@@ -346,11 +347,12 @@ export function buildSheetVacuumOrientationWarnings(
   items: readonly CutJobItemDto[],
 ): CutSheetVacuumOrientationWarningItem[] {
   const itemByDetail = new Map(items.map((item) => [item.orderDetailId, item]));
+  const itemByItemId = new Map(items.map((item) => [item.itemId ?? `det-${item.orderDetailId}`, item]));
   return placements.pieces
     .filter((piece) => piece.vacuum_orientation_warning)
     .map((piece) => {
       const detailId = parseCutPieceDetailId(piece.item_id);
-      const item = detailId === null ? undefined : itemByDetail.get(detailId);
+      const item = itemByItemId.get(piece.item_id) ?? (detailId === null ? undefined : itemByDetail.get(detailId));
       const orderText = item ? `заказ ${formatTooltipValue(item.orderId)}` : 'заказ —';
       const detailNumber = item?.detail?.detailNumber ?? detailId;
       const detailName = item?.detail?.detailName?.trim();

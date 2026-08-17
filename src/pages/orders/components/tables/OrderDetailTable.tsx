@@ -229,7 +229,6 @@ const ORDER_DETAIL_TABLE_SCROLL_SAFETY_ROWS = 1;
 type OrderDetailHdfDisplay = {
   heightMm: number | null;
   widthMm: number | null;
-  quantity: number | null;
   areaM2: number;
   status: string;
   isStale: boolean;
@@ -237,7 +236,7 @@ type OrderDetailHdfDisplay = {
 
 const ORDER_DETAIL_HDF_STATUS_LABELS: Record<string, string> = {
   ok: 'ХДФ',
-  too_narrow: 'узко',
+  too_narrow: 'Узкая деталь',
   config_missing: 'нет настр.',
   source_changed: 'деталь изм.',
 };
@@ -254,7 +253,6 @@ function buildOrderDetailHdfDisplayBySourceDetailId(
     const display: OrderDetailHdfDisplay = {
       heightMm: nullableFiniteNumber(detail.hdf_height_mm),
       widthMm: nullableFiniteNumber(detail.hdf_width_mm),
-      quantity: nullableFiniteNumber(detail.quantity),
       areaM2: finiteNumber(detail.area_m2),
       status: detail.status,
       isStale: detail.is_stale === true,
@@ -313,11 +311,6 @@ function formatOrderDetailHdfDimension(value: number | null): string {
   return formatNumber(value, value % 1 === 0 ? 0 : 1);
 }
 
-function formatOrderDetailHdfQuantity(value: number | null): string {
-  if (value === null) return '—';
-  return formatNumber(value, value % 1 === 0 ? 0 : 1);
-}
-
 function OrderDetailHdfDisplayCell({
   display,
   parameterMm,
@@ -327,11 +320,9 @@ function OrderDetailHdfDisplayCell({
 }) {
   if (display?.status === 'ok' && !display.isStale && display.heightMm !== null && display.widthMm !== null) {
     const dimensions = `${formatOrderDetailHdfDimension(display.heightMm)}×${formatOrderDetailHdfDimension(display.widthMm)}`;
-    const quantity = formatOrderDetailHdfQuantity(display.quantity);
     return (
-      <span className="order-detail-hdf-cell" title={`${dimensions}, ${quantity} шт., ${formatNumber(display.areaM2, 2)} м²`}>
+      <span className="order-detail-hdf-cell" title={dimensions}>
         <span className="order-detail-hdf-cell__size">{dimensions}</span>
-        <span className="order-detail-hdf-cell__qty">{quantity} шт.</span>
       </span>
     );
   }
@@ -1700,7 +1691,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         <div style={{ lineHeight: '1.1', textAlign: 'center' }}>
           <span style={{ fontSize: '75%' }}>ХДФ</span>
           <br />
-          <span style={{ fontSize: '70%', fontWeight: 'normal' }}>мм/шт</span>
+          <span style={{ fontSize: '70%', fontWeight: 'normal' }}>мм</span>
         </div>
       ),
       dataIndex: 'hdf_parameter_override_mm',

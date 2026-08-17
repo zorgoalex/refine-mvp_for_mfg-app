@@ -40,9 +40,13 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain('Базис-раскрой');
     expect(config).toContain('Карты ванн');
     expect(config).toContain('Переносить, когда все заказы в статусах');
+    expect(config).toContain('Статусы ниже скрывают карточки заказов с МДФ-доски');
+    expect(config).toContain('убирается из активных колонок');
+    expect(config).toContain('сами по себе карточку не скрывают');
     expect(config).toContain('aria-label="Производственные статусы, скрывающие карточки с МДФ-доски"');
     expect(config).toContain('aria-label="Статусы заказа, скрывающие карточки с МДФ-доски"');
-    expect(config).toContain('Обычные статусы заказа');
+    expect(config).toContain('Обычные статусы заказа, скрывающие карточки');
+    expect(config).toContain('Производственные статусы, скрывающие карточки');
   });
 
   it('shows a permission-aware toggle in the Auto statuses tab', () => {

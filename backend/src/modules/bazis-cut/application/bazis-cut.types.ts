@@ -21,6 +21,7 @@ export interface CreateBazisCutSetCommand extends BazisCutContext {
   name?: string;
   orderId: number;
   detailIds: number[];
+  hdfDetailIds?: number[];
   idempotencyKey: string;
 }
 
@@ -28,6 +29,7 @@ export interface AddBazisCutDetailsCommand extends BazisCutContext {
   setId: number;
   orderId: number;
   detailIds: number[];
+  hdfDetailIds?: number[];
   expectedVersion: number;
   idempotencyKey: string;
 }

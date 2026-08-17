@@ -9,17 +9,13 @@ export interface PieceLabelInput {
   orderName: string | null;
   orderId: number | null;
   detailNumber: number | null;
-  /** This piece's copy ordinal among the position's qty copies. */
+  /** Legacy input kept for compatibility. Copy ordinal is no longer printed in the piece label. */
   instance: number;
-  /** Total copies of this position in the job (null when unavailable). */
+  /** Legacy input kept for compatibility. Quantity is no longer printed in the piece label. */
   qty: number | null;
   widthMm: number;
   heightMm: number;
-  /**
-   * Sheet-material name for the 4th label line. Pass a non-blank name ONLY when the
-   * sheet mixes materials (splitByMaterial off) so the operator can tell which
-   * detail is which material; omit/null on single-material sheets (redundant).
-   */
+  /** Legacy input kept for compatibility. Material is no longer printed in the piece label. */
   materialName?: string | null;
 }
 
@@ -52,34 +48,27 @@ export function splitDimsLine(line: string): { w: string; h: string } | null {
 }
 
 /**
- * Build three label lines for a cut piece.
+ * Build exactly three label lines for a cut piece.
  *
  * Line 1: order name (large/bold) — `orders.order_name`, or `Заказ {orderId}` fallback.
- * Line 2: `# {detailNumber} · {instance}/{qty}` (base font). `# —` when detailNumber null.
+ * Line 2: `# {detailNumber}` (base font). `# —` when detailNumber null.
  * Line 3: `{widthMm}*{heightMm}` — asterisk separator; integer dims have no decimal, floats 1 dp.
- * Line 4 (optional): sheet-material name — appended ONLY when `materialName` is a
- *   non-blank string (mixed-material sheet). Omitted otherwise.
  *
- * Returns 3 non-empty strings, or 4 when a material line is appended.
+ * Returns 3 non-empty strings. Material type/name is intentionally omitted.
  */
 export function buildPieceLabelLines(p: PieceLabelInput): string[] {
   // Line 1: order name or fallback
   const nm = p.orderName?.trim();
   const line1 = nm || (p.orderId !== null ? `Заказ ${p.orderId}` : 'Заказ —');
 
-  // Line 2: position + copy ordinal (# prefix, not Поз.)
+  // Line 2: position only (# prefix, not Поз.)
   const pos = p.detailNumber !== null ? `# ${p.detailNumber}` : '# —';
-  const line2 =
-    p.qty !== null
-      ? `${pos} · ${p.instance}/${p.qty}`
-      : `${pos} · ${p.instance}`;
+  const line2 = pos;
 
   // Line 3: rendered dimensions with asterisk separator (not ×)
   const line3 = `${fmtDim(p.widthMm)}*${fmtDim(p.heightMm)}`;
 
-  // Line 4 (optional): material — only for mixed-material sheets.
-  const material = p.materialName?.trim();
-  return material ? [line1, line2, line3, material] : [line1, line2, line3];
+  return [line1, line2, line3];
 }
 
 /**

@@ -5,6 +5,7 @@ const nonEmpty = (max: number) => text(max).trim().min(1);
 const positiveMm = z.number().positive().max(99_999_999.99);
 const edgeMm = z.number().min(0).max(99_999_999.99);
 const positiveId = z.number().int().positive();
+const sourceIds = z.array(positiveId).max(500).default([]);
 const pickerIdArray = z.array(positiveId).max(500).default([]);
 const pickerTextArray = z.array(z.string().trim().min(1).max(200)).max(500).default([]);
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
@@ -85,17 +86,25 @@ export const bazisCutDetailFieldsSchema = z.object({
   film: text(200),
 }).strict();
 
+function requireAtLeastOneSource(value: { detailIds: number[]; hdfDetailIds: number[] }, context: z.RefinementCtx): void {
+  if (value.detailIds.length === 0 && value.hdfDetailIds.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['detailIds'], message: 'Нужно выбрать детали' });
+  }
+}
+
 export const createBazisCutSetSchema = z.object({
   name: nonEmpty(200).optional(),
   orderId: z.number().int().positive(),
-  detailIds: z.array(z.number().int().positive()).min(1).max(500),
-}).strict();
+  detailIds: sourceIds,
+  hdfDetailIds: sourceIds,
+}).strict().superRefine(requireAtLeastOneSource);
 
 export const addBazisCutSetDetailsSchema = z.object({
   orderId: z.number().int().positive(),
-  detailIds: z.array(z.number().int().positive()).min(1).max(500),
+  detailIds: sourceIds,
+  hdfDetailIds: sourceIds,
   expectedVersion: z.number().int().min(0),
-}).strict();
+}).strict().superRefine(requireAtLeastOneSource);
 
 export const renameBazisCutSetSchema = z.object({
   name: nonEmpty(200),

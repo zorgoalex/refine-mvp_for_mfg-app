@@ -328,6 +328,27 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       probeFn.indexOf('125_order_hdf_details*'),
       probeFn.indexOf('*) return 2'),
     );
+    const migration124RolesProbe = probeFn.slice(
+      probeFn.indexOf('124_roles_matrix*'),
+      probeFn.indexOf('125_order_hdf_details*'),
+    );
+    for (const marker of [
+      'q_tbl permissions_catalog',
+      'q_tbl role_permissions',
+      'q_tbl role_policy_scopes',
+      'q_tbl permissions_state',
+      'q_col permissions_catalog permission_name',
+      'q_col role_permissions is_enabled',
+      'q_col role_policy_scopes scope_value',
+      'q_col permissions_state version',
+      'role_permissions_role_id_fkey',
+      'role_policy_scopes_scope_value_check',
+      'permissions_state_singleton',
+      'idx_role_permissions_permission_enabled',
+      'idx_role_policy_scopes_key_value',
+      'version >= 1',
+    ]) expect(migration124RolesProbe).toContain(marker);
+
     for (const marker of [
       'q_tbl order_hdf_details',
       'q_tbl hdf_calculation_config_state',
@@ -341,7 +362,7 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
       "pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)",
     ]) expect(migration125Probe).toContain(marker);
 
-    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\)/);
+    expect(scriptText).toMatch(/111_\*\|112_\*\|113_\*\|114_\*\|115_\*\|116_\*\|117_\*\|118_\*\|119_\*\|120_\*\|121_\*\|122_\*\|123_\*\|124_\*\|125_\*\|126_\*\|127_\*\|128_\*\|129_\*\|130_\*\|131_\*\)/);
   });
 });
 

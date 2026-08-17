@@ -17,6 +17,7 @@ import {
   ScissorOutlined,
   TagsOutlined,
   FileExcelOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import { useAppSettings, SETTING_KEYS, CurrencySettings } from '../../hooks/useAppSettings';
 import { featureFlags } from '../../config/featureFlags';
@@ -32,6 +33,7 @@ import { LabelsConfigTab } from './components/LabelsConfigTab';
 import { FinancialLayerAccessMatrix } from './components/FinancialLayerAccessMatrix';
 import { ExportTemplatesConfigTab } from './components/ExportTemplatesConfigTab';
 import { ProductionThresholdsConfigTab } from './components/ProductionThresholdsConfigTab';
+import { RolesPermissionsMatrixTab, canViewRolesMatrixTab } from './components/RolesPermissionsMatrixTab';
 import { can } from '../../utils/permissions';
 import {
   buildInitialResourceVisibility,
@@ -527,7 +529,10 @@ export const ConfigurationPage: React.FC = () => {
     featureFlags.useBackendDeadlines &&
     (!featureFlags.useBackendPermissions || can('deadlines.view') || can('settings.manage'));
   const generalSettingsVisible =
-    !featureFlags.useBackendPermissions || can('settings.view') || can('settings.manage');
+    !featureFlags.useBackendPermissions ||
+    can('settings.view') ||
+    can('settings.manage') ||
+    canViewRolesMatrixTab();
 
   const allTabItems = [
     {
@@ -620,6 +625,20 @@ export const ConfigurationPage: React.FC = () => {
       ),
       children: <TableVisibilityByRoleTab />,
     },
+    ...(canViewRolesMatrixTab()
+      ? [
+          {
+            key: 'roles-permissions',
+            label: (
+              <span>
+                <SafetyCertificateOutlined />
+                Права ролей
+              </span>
+            ),
+            children: <RolesPermissionsMatrixTab />,
+          },
+        ]
+      : []),
     {
       key: 'vlm',
       label: (

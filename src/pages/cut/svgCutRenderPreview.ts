@@ -1,6 +1,7 @@
 import {
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
   cutRenderLabelFontWeight,
+  cutRenderLabelLetterSpacingRatio,
   cutRenderLabelFillForBackground,
   cutRenderLabelLineSpecs,
   cutRenderNormalizeLabelLines,
@@ -10,6 +11,7 @@ import {
   cutRenderPositionLine,
   cutRenderSourceSvgCss,
   resolveCutRenderStyleFromSetting,
+  type CutRenderStyleRef,
   type CutRenderStylesSetting,
 } from '@shared/cut-render-style';
 import type { ParsedSvgUpload } from './svgCutUploadParser';
@@ -58,7 +60,9 @@ export function buildStyledSvgUploadPreview(
       cx,
       cy,
       fontMm,
+      renderStyle: style,
       fontWeight: cutRenderLabelFontWeight(style),
+      letterSpacingRatio: cutRenderLabelLetterSpacingRatio(style),
       fill: labelFill,
       strokeAttrs: labelStrokeAttrs,
     });
@@ -88,26 +92,30 @@ function renderPieceLabelText(input: {
   cx: number;
   cy: number;
   fontMm: number;
+  renderStyle: CutRenderStyleRef;
   fontWeight: number;
+  letterSpacingRatio: number;
   fill: string;
   strokeAttrs: string;
 }): string {
-  const specs = cutRenderLabelLineSpecs(input.lines);
+  const specs = cutRenderLabelLineSpecs(input.lines, input.renderStyle);
   if (specs.length === 0) return '';
-  const gapMm = input.fontMm * 0.035;
   const lineHeights = specs.map((spec) => input.fontMm * spec.fontRatio * 0.82);
-  const totalHeight = lineHeights.reduce((sum, height) => sum + height, 0) + gapMm * Math.max(0, specs.length - 1);
+  const gaps = specs.map((spec, index) => index < specs.length - 1 ? input.fontMm * spec.gapAfterRatio : 0);
+  const totalHeight = lineHeights.reduce((sum, height, index) => sum + height + (gaps[index] ?? 0), 0);
   let top = input.cy - totalHeight / 2;
   const tspans = specs.map((spec, index) => {
     const fontSize = input.fontMm * spec.fontRatio;
     const lineHeight = lineHeights[index] ?? fontSize * 0.82;
     const y = top + lineHeight / 2;
-    top += lineHeight + gapMm;
+    top += lineHeight + (gaps[index] ?? 0);
     return `<tspan x="${num(input.cx)}" y="${num(y)}" font-size="${num(fontSize)}">${escapeXml(spec.text)}</tspan>`;
   }).join('');
+  const letterSpacing = input.fontMm * input.letterSpacingRatio;
+  const letterSpacingAttr = letterSpacing === 0 ? '' : ` letter-spacing="${num(letterSpacing)}"`;
   return `<text x="${num(input.cx)}" y="${num(input.cy)}" font-family="Liberation Sans, Arial, sans-serif" font-size="${num(
     input.fontMm,
-  )}" font-weight="${num(input.fontWeight)}" fill="${input.fill}"${input.strokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
+  )}" font-weight="${num(input.fontWeight)}"${letterSpacingAttr} fill="${input.fill}"${input.strokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
 }
 
 function fillForOrderName(

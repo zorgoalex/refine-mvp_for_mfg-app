@@ -63,8 +63,9 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
         tokenService: TokenService,
         rateLimits: RateLimitService,
         capabilities: AuthSchemaCapabilities,
+        permissions: PermissionsService,
       ) => {
-        const sessionManager = createPgSessionManager(config, database, tokenService, capabilities);
+        const sessionManager = createPgSessionManager(config, database, tokenService, capabilities, permissions);
 
         if (!sessionManager) {
           return createUnavailableAuthService();
@@ -77,9 +78,10 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
           tokens: createAccessTokenIssuer(config),
           audit: new PgAuthAuditRepository(database),
           rateLimits,
+          permissions,
         });
       },
-      inject: [ConfigService, DatabaseService, TokenService, RateLimitService, AUTH_SCHEMA_CAPABILITIES],
+      inject: [ConfigService, DatabaseService, TokenService, RateLimitService, AUTH_SCHEMA_CAPABILITIES, PermissionsService],
     },
     {
       provide: AUTH_SESSION_HTTP_PORT,
@@ -88,10 +90,11 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
         database: DatabaseService,
         tokenService: TokenService,
         capabilities: AuthSchemaCapabilities,
+        permissions: PermissionsService,
       ) =>
-        createPgSessionManager(config, database, tokenService, capabilities) ??
+        createPgSessionManager(config, database, tokenService, capabilities, permissions) ??
         new UnavailableAuthSessionHttpPort(),
-      inject: [ConfigService, DatabaseService, TokenService, AUTH_SCHEMA_CAPABILITIES],
+      inject: [ConfigService, DatabaseService, TokenService, AUTH_SCHEMA_CAPABILITIES, PermissionsService],
     },
     {
       provide: WORKOS_IDENTITY_REPOSITORY,
@@ -114,7 +117,7 @@ export const AUTH_SCHEMA_CAPABILITIES = Symbol('AUTH_SCHEMA_CAPABILITIES');
         capabilities: AuthSchemaCapabilities,
         permissions: PermissionsService,
       ): WorkosAuthService | null => {
-        const sessionManager = createPgSessionManager(config, database, tokenService, capabilities);
+        const sessionManager = createPgSessionManager(config, database, tokenService, capabilities, permissions);
         const workosClient = createWorkosClient(config);
 
         // Fail closed (controller answers 503) until the base 052 identity
@@ -355,6 +358,7 @@ function createPgSessionManager(
   database: DatabaseService,
   tokenService: TokenService,
   capabilities: AuthSchemaCapabilities,
+  permissions: PermissionsService,
 ): PgAuthSessionManager | null {
   const refreshTokenPepper = config.get('REFRESH_TOKEN_PEPPER', { infer: true });
   const accessTokenSecret = config.get('JWT_ACCESS_SECRET', { infer: true });
@@ -363,14 +367,20 @@ function createPgSessionManager(
     return null;
   }
 
-  return new PgAuthSessionManager(database, tokenService, createAccessTokenIssuer(config), {
-    refreshTokenPepper,
-    refreshTokenTtlDays: config.get('REFRESH_TOKEN_TTL_DAYS', { infer: true }),
-    sessionTtlSeconds: config.get('AUTH_SESSION_TTL_SECONDS', { infer: true }),
-    // Schema capability, NOT the feature flag: already-issued WorkOS
-    // sessions keep their provenance (audit source, sid-less 'unavailable'
-    // logout) even while the SSO entrypoints are rolled back.
-    supportsProviderSessions: capabilities.providerSessions,
-    enforceLoginPolicy: capabilities.loginPolicy,
-  });
+  return new PgAuthSessionManager(
+    database,
+    tokenService,
+    createAccessTokenIssuer(config),
+    {
+      refreshTokenPepper,
+      refreshTokenTtlDays: config.get('REFRESH_TOKEN_TTL_DAYS', { infer: true }),
+      sessionTtlSeconds: config.get('AUTH_SESSION_TTL_SECONDS', { infer: true }),
+      // Schema capability, NOT the feature flag: already-issued WorkOS
+      // sessions keep their provenance (audit source, sid-less 'unavailable'
+      // logout) even while the SSO entrypoints are rolled back.
+      supportsProviderSessions: capabilities.providerSessions,
+      enforceLoginPolicy: capabilities.loginPolicy,
+    },
+    permissions,
+  );
 }

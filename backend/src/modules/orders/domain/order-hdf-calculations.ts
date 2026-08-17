@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
 
+export const HDF_CLEARANCE_PER_SIDE_MM = 0.5;
+export const HDF_TOTAL_CLEARANCE_MM = HDF_CLEARANCE_PER_SIDE_MM * 2;
+
 export type OrderHdfStatus =
   | 'ok'
   | 'too_narrow'
@@ -75,8 +78,8 @@ export function calculateOrderHdfDetail(
     return result('invalid_dimensions', configErrors, edgeMm, thresholdMm, null, null, quantity, snapshot, sourceSnapshotHash, config.configRevision);
   }
 
-  const hdfHeightMm = roundMm(heightMm - edgeMm * 2 - 1);
-  const hdfWidthMm = roundMm(widthMm - edgeMm * 2 - 1);
+  const hdfHeightMm = roundMm(heightMm - edgeMm * 2 - HDF_TOTAL_CLEARANCE_MM);
+  const hdfWidthMm = roundMm(widthMm - edgeMm * 2 - HDF_TOTAL_CLEARANCE_MM);
   if (hdfHeightMm <= 0 || hdfWidthMm <= 0) {
     return result('invalid_dimensions', configErrors, edgeMm, thresholdMm, hdfHeightMm, hdfWidthMm, quantity, snapshot, sourceSnapshotHash, config.configRevision);
   }
@@ -156,6 +159,8 @@ function buildSourceSnapshot(
     hdfParameterOverrideMm: source.hdfParameterOverrideMm ?? null,
     hdfEnabled: milling.hdfEnabled,
     edgeMm: milling.hdfEdgeMm,
+    clearancePerSideMm: HDF_CLEARANCE_PER_SIDE_MM,
+    totalClearanceMm: HDF_TOTAL_CLEARANCE_MM,
     thresholdMm: config.thresholdMm,
     hdfSheetMaterialTypeId: config.hdfSheetMaterialTypeId,
     hdfSheetMaterialName: config.hdfSheetMaterialName,

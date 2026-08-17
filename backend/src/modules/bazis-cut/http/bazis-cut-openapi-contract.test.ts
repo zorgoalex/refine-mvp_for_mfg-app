@@ -63,7 +63,11 @@ describe('Bazis-cut OpenAPI contract', () => {
         ? create.requestBody.content['application/json']?.schema
         : undefined;
       expect(createSchema && 'required' in createSchema ? createSchema.required : [])
-        .toEqual(['orderId', 'detailIds']);
+        .toEqual(['orderId']);
+      expect(createSchema && 'properties' in createSchema ? createSchema.properties : {}).toMatchObject({
+        detailIds: { type: 'array' },
+        hdfDetailIds: { type: 'array' },
+      });
 
       const update = document.paths['/bazis-cut-sets/{setId}/details/{detailId}']?.patch;
       const schema = update?.requestBody && 'content' in update.requestBody

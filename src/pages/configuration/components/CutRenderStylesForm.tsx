@@ -21,7 +21,7 @@ import {
   type CutRenderStyleTemplate,
   type CutRenderStylesSetting,
 } from '@shared/cut-render-style';
-import { cutConfigApi, type CutConfig } from '../../../api/cutConfigApi';
+import { cutConfigApi, type CutConfig, type CutSettingRow } from '../../../api/cutConfigApi';
 import { ApiError } from '../../../api/httpClient';
 import { buildStyledSvgUploadPreview } from '../../cut/svgCutRenderPreview';
 import { parseSvgCutUploadFile, type ParsedSvgUpload } from '../../cut/svgCutUploadParser';
@@ -35,7 +35,7 @@ const { Text, Title } = Typography;
 interface CutRenderStylesFormProps {
   config: CutConfig;
   canManage: boolean;
-  onSaved: () => Promise<void>;
+  onSaved: (setting: CutSettingRow) => Promise<void> | void;
 }
 
 interface TemplateDraft {
@@ -88,7 +88,7 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
 
   const previewSetting = useMemo(() => {
     try {
-      return buildSettingWithDraft(resolvedSetting, draft, selectedTemplateId, resolvedSetting.defaultProfileId);
+      return buildSettingWithDraft(resolvedSetting, draft, selectedTemplateId, selectedTemplateId);
     } catch {
       return resolvedSetting;
     }
@@ -107,10 +107,10 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
     }
     setSaving(true);
     try {
-      await cutConfigApi.updateSetting(CUT_RENDER_STYLES_SETTING_KEY, nextSetting, settingRow.version);
+      const savedSetting = await cutConfigApi.updateSetting(CUT_RENDER_STYLES_SETTING_KEY, nextSetting, settingRow.version);
+      await onSaved(savedSetting);
       setSelectedTemplateId(nextSelectedId);
       message.success('Настройки рендера сохранены');
-      await onSaved();
     } catch (error) {
       message.error(error instanceof ApiError ? error.message : 'Не удалось сохранить настройки рендера');
     } finally {
@@ -424,6 +424,24 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
                   <Col xs={24}>
                     <NumberSlider label="Жирность текста" value={draft.profile.label.fontWeight} min={100} max={1000} step={50} disabled={!canManage} onChange={(value) => updateLabel({ fontWeight: Math.round(value / 50) * 50 })} />
                   </Col>
+                  <Col xs={24} md={8}>
+                    <NumberSlider label="Размер строки 1: заказ" value={draft.profile.label.orderFontRatio} min={0.2} max={2.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ orderFontRatio: value })} />
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <NumberSlider label="Размер строки 2: позиция" value={draft.profile.label.positionFontRatio} min={0.2} max={2.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ positionFontRatio: value })} />
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <NumberSlider label="Размер строки 3: размеры" value={draft.profile.label.sizeFontRatio} min={0.2} max={2.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ sizeFontRatio: value })} />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <NumberSlider label="Интервал заказ - позиция" value={draft.profile.label.orderPositionGapRatio} min={-0.3} max={1.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ orderPositionGapRatio: value })} />
+                  </Col>
+                  <Col xs={24} md={12}>
+                    <NumberSlider label="Интервал позиция - размеры" value={draft.profile.label.positionSizeGapRatio} min={-0.3} max={1.5} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ positionSizeGapRatio: value })} />
+                  </Col>
+                  <Col xs={24}>
+                    <NumberSlider label="Плотность букв" value={draft.profile.label.letterSpacingRatio} min={-0.2} max={0.4} step={0.01} disabled={!canManage} onChange={(value) => updateLabel({ letterSpacingRatio: value })} />
+                  </Col>
                 </Row>
               </div>
 
@@ -733,7 +751,9 @@ function RenderStyleSummary({ profile }: { profile: CutRenderStyleProfile }) {
         <Text strong>MDF-превью</Text>
         <Text type="secondary">Контур: {profile.piece.stroke}, {profile.piece.strokeWidthMm} мм</Text>
         <Text type="secondary">Фрезеровка: {profile.sourceSvg.strokeColorMode}, минимум {profile.sourceSvg.minStrokePx ?? 'исходная'} px</Text>
-        <Text type="secondary">Текст: {profile.label.fillStrategy === 'contrast' ? 'контрастный' : 'фиксированный'}, weight {profile.label.fontWeight}</Text>
+        <Text type="secondary">
+          Текст: {profile.label.fillStrategy === 'contrast' ? 'контрастный' : 'фиксированный'}, weight {profile.label.fontWeight}, строки {profile.label.orderFontRatio}/{profile.label.positionFontRatio}/{profile.label.sizeFontRatio}
+        </Text>
       </Space>
     </div>
   );
