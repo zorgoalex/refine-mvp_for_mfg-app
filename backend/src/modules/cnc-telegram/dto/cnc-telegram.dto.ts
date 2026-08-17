@@ -234,12 +234,24 @@ export interface CncTelegramOrderCuttingSequencesResponseDto {
   sequences: CncTelegramOrderCuttingSequenceDto[];
 }
 
+export interface CncTelegramSkippedDuplicateSourceFileDto {
+  status: 'skipped';
+  sha256: string;
+  fileName: string | null;
+  cutJobId: number;
+  cutJobDisplayNumber: string | null;
+  cutResultId: number | null;
+  packetId: string | null;
+  note: string;
+}
+
 export interface CncTelegramIngestResponseDto {
   packet: CncTelegramPacketDto;
   requestId: string;
   auditId?: string;
   applied: boolean;
   ignoredStaleSourceVersion: boolean;
+  skippedDuplicateSourceFile?: CncTelegramSkippedDuplicateSourceFileDto;
 }
 
 export interface CncAutoCutStatusConfigureResponseDto {

@@ -69,6 +69,7 @@ import type {
   CncTelegramPacketDto,
   CncTelegramPacketCutSheetDto,
   CncTelegramPacketItemDto,
+  CncTelegramSkippedDuplicateSourceFileDto,
   CncTelegramSourceFileIdentityDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayColumnDto,
@@ -515,11 +516,12 @@ export class PgCncTelegramRepository
       await setSessionUser(tx, command.currentUser.id);
       const requestId = command.requestId || 'cnc-telegram-ingest';
       const incomingPayloadHash = hashPayload(command.dto);
-      await reconcileIdempotency(tx, {
+      const replayResponse = await reconcileIdempotency(tx, {
         dto: command.dto,
         currentUserId: command.currentUser.id,
         payloadHash: incomingPayloadHash,
       });
+      if (replayResponse) return replayResponse;
 
       let payloadHash = incomingPayloadHash;
       let effectiveCommand = command;
@@ -577,6 +579,18 @@ export class PgCncTelegramRepository
             sourceVersion: effectiveCommand.dto.source.version,
           },
         );
+      }
+
+      await lockSvgSourceFileIfPresent(tx, effectiveCommand.dto);
+      const skippedDuplicateSourceFileResponse = await skippedExistingTelegramSvgSourceFileResponse(
+        tx,
+        effectiveCommand.dto,
+        requestId,
+        existing?.packet_id ?? null,
+      );
+      if (skippedDuplicateSourceFileResponse) {
+        await completeIdempotency(tx, command.dto.idempotencyKey, skippedDuplicateSourceFileResponse);
+        return skippedDuplicateSourceFileResponse;
       }
 
       if (
@@ -726,6 +740,7 @@ export class PgCncTelegramRepository
       await setSessionUser(tx, command.currentUser.id);
       const requestId = command.requestId || 'cnc-manual-svg-upload';
       const dto = buildManualSvgStructuredDto(command.dto);
+      await lockSvgSourceFileIfPresent(tx, dto);
       const payloadHash = hashPayload(manualSvgSourcePayloadDto(dto));
       const replayResponse = await reconcileManualSvgUploadIdempotency(tx, {
         command,
@@ -3457,6 +3472,90 @@ function sourceDisplayNumberFromCuttingSequence(value: string | number | null): 
   return cuttingSequenceNo === null ? null : String(cuttingSequenceNo);
 }
 
+async function lockSvgSourceFileIfPresent(
+  tx: TransactionClient,
+  dto: CncTelegramStructuredIngestDto,
+): Promise<void> {
+  const sourceFile = sourceSvgIdentity(dto.sourceFiles ?? []);
+  if (!sourceFile) return;
+  await tx.query(
+    `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+    [`cnc-svg-source:${sourceFile.sha256.toLowerCase()}`],
+  );
+}
+
+async function skippedExistingTelegramSvgSourceFileResponse(
+  tx: TransactionClient,
+  dto: CncTelegramStructuredIngestDto,
+  requestId: string,
+  currentPacketId: string | null,
+): Promise<CncTelegramIngestResponseDto | null> {
+  if (dto.source.chatId === MANUAL_SVG_CHAT_ID) return null;
+  const match = await findExistingSvgCutJobForSourceFile(tx, dto, currentPacketId);
+  if (!match) return null;
+  const packet = await loadExistingSvgSourceFilePacket(tx, match);
+  const skippedDuplicateSourceFile = skippedDuplicateSourceFileDto(match);
+  return {
+    packet,
+    requestId,
+    applied: false,
+    ignoredStaleSourceVersion: false,
+    skippedDuplicateSourceFile,
+  };
+}
+
+async function loadExistingSvgSourceFilePacket(
+  tx: TransactionClient,
+  match: ExistingSvgSourceFileCutJob,
+): Promise<CncTelegramPacketDto> {
+  if (match.packetId) {
+    const packet = await loadPacketIfExists(tx, match.packetId);
+    if (packet) return packet;
+  }
+  const result = await tx.query<{ packet_id: string }>(
+    `SELECT packet_id
+     FROM cnc_telegram_packets
+     WHERE svg_cut_job_id = $1::bigint
+     ORDER BY updated_at DESC, packet_id
+     LIMIT 1`,
+    [match.cutJobId],
+  );
+  const packetId = result.rows[0]?.packet_id;
+  if (packetId) return loadPacket(tx, packetId);
+  throw new ApiError(
+    409,
+    'CNC_TELEGRAM_SVG_SOURCE_FILE_ALREADY_IMPORTED',
+    'SVG-файл уже есть в задании на раскрой; новый Telegram packet не создан',
+    { skippedDuplicateSourceFile: skippedDuplicateSourceFileDto(match) },
+  );
+}
+
+async function loadPacketIfExists(
+  tx: TransactionClient,
+  packetId: string,
+): Promise<CncTelegramPacketDto | null> {
+  const rows = await tx.query<PacketJoinedRow>(
+    packetSelectSql('p.packet_id = $1::uuid'),
+    [packetId],
+  );
+  return mapPacketRows(rows.rows)[0] ?? null;
+}
+
+function skippedDuplicateSourceFileDto(
+  match: ExistingSvgSourceFileCutJob,
+): CncTelegramSkippedDuplicateSourceFileDto {
+  return {
+    status: 'skipped',
+    sha256: match.sha256,
+    fileName: match.fileName,
+    cutJobId: match.cutJobId,
+    cutJobDisplayNumber: match.cutJobDisplayNumber,
+    cutResultId: match.cutResultId,
+    packetId: match.packetId,
+    note: existingSvgSourceFileCutJobNote(match),
+  };
+}
+
 async function skipExistingTelegramSvgCutJobForSourceFile(
   tx: TransactionClient,
   packetId: string,
@@ -3477,6 +3576,7 @@ async function skipExistingTelegramSvgCutJobForSourceFile(
 }
 
 interface ExistingSvgSourceFileCutJob {
+  sha256: string;
   cutJobId: number;
   cutJobDisplayNumber: string | null;
   cutResultId: number | null;
@@ -3497,7 +3597,7 @@ interface ExistingSvgSourceFileCutJobRow extends QueryResultRow {
 async function findExistingSvgCutJobForSourceFile(
   tx: TransactionClient,
   dto: CncTelegramStructuredIngestDto,
-  currentPacketId: string,
+  currentPacketId: string | null,
 ): Promise<ExistingSvgSourceFileCutJob | null> {
   const sourceFile = sourceSvgIdentity(dto.sourceFiles ?? []);
   if (!sourceFile) return null;
@@ -3519,7 +3619,8 @@ async function findExistingSvgCutJobForSourceFile(
         AND lower(file.content_sha256)=lower($1)
         AND packet.svg_cut_import_status='imported'
         AND packet.svg_cut_job_id IS NOT NULL
-        AND packet.packet_id <> $2::uuid
+        AND svg_job.status <> 'archived'
+        AND ($2::uuid IS NULL OR packet.packet_id <> $2::uuid)
       ORDER BY file.updated_at DESC
       LIMIT 1
     ),
@@ -3527,7 +3628,14 @@ async function findExistingSvgCutJobForSourceFile(
       SELECT job.cut_job_id,
              job.source_display_number AS cut_job_display_number,
              packet.svg_cut_result_id AS cut_result_id,
-             packet.packet_id,
+             COALESCE(
+               packet.packet_id::text,
+               CASE
+                 WHEN job.selection_criteria->>'packetId' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                   THEN job.selection_criteria->>'packetId'
+                 ELSE NULL
+               END
+             ) AS packet_id,
              source_file.value->>'fileName' AS file_name,
              'cut_job_selection'::text AS matched_by,
              2 AS priority,
@@ -3537,7 +3645,8 @@ async function findExistingSvgCutJobForSourceFile(
       CROSS JOIN LATERAL jsonb_array_elements(COALESCE(job.selection_criteria->'sourceFiles', '[]'::jsonb)) AS source_file(value)
       WHERE source_file.value->>'kind'='svg'
         AND lower(source_file.value->>'sha256')=lower($1)
-        AND (packet.packet_id IS NULL OR packet.packet_id <> $2::uuid)
+        AND job.status <> 'archived'
+        AND ($2::uuid IS NULL OR packet.packet_id IS NULL OR packet.packet_id <> $2::uuid)
       ORDER BY job.created_at DESC
       LIMIT 1
     )
@@ -3555,6 +3664,7 @@ async function findExistingSvgCutJobForSourceFile(
   const row = result.rows[0];
   if (!row) return null;
   return {
+    sha256: sourceFile.sha256.toLowerCase(),
     cutJobId: toNumber(row.cut_job_id),
     cutJobDisplayNumber: nullableDisplayNumber(row.cut_job_id, row.cut_job_display_number),
     cutResultId: toNullableNumber(row.cut_result_id),
@@ -6122,7 +6232,7 @@ async function reconcileIdempotency(
     currentUserId: string;
     payloadHash: string;
   },
-): Promise<void> {
+): Promise<CncTelegramIngestResponseDto | null> {
   const requestHash = hashRequest({
     actorUserId: input.currentUserId,
     commandName: COMMAND_NAME,
@@ -6147,7 +6257,7 @@ async function reconcileIdempotency(
       requestHash,
     ],
   );
-  if (inserted.rows[0]) return;
+  if (inserted.rows[0]) return null;
 
   const existing = await tx.query<IdempotencyRow>(
     `
@@ -6164,7 +6274,14 @@ async function reconcileIdempotency(
     throw idempotencyError('IDEMPOTENCY_KEY_REUSED', input.dto.idempotencyKey);
   }
   if (row.status === 'completed' && row.response_json) {
-    return;
+    const response = cncTelegramIngestResponseFromJson(row.response_json);
+    if (response) return response;
+    throw new ApiError(
+      500,
+      'IDEMPOTENCY_RESPONSE_INVALID',
+      'Stored CNC Telegram ingest response is invalid',
+      { idempotencyKey: input.dto.idempotencyKey },
+    );
   }
   if (row.status === 'failed') {
     throw idempotencyError('IDEMPOTENCY_FAILED', input.dto.idempotencyKey);
@@ -6332,6 +6449,24 @@ function manualSvgUploadResponseFromJson(
   if (!parsed || typeof parsed.requestId !== 'string' || typeof parsed.packet !== 'object' || parsed.packet === null) return null;
   if (!('createdMdfMachineFileCard' in parsed) || typeof parsed.createdMdfMachineFileCard !== 'boolean') return null;
   return parsed as unknown as CncTelegramManualSvgUploadResponseDto;
+}
+
+function cncTelegramIngestResponseFromJson(
+  value: IdempotencyRow['response_json'],
+): CncTelegramIngestResponseDto | null {
+  const parsed = parseStoredJsonObject(value);
+  if (!parsed || typeof parsed.requestId !== 'string' || typeof parsed.packet !== 'object' || parsed.packet === null) return null;
+  if (typeof parsed.applied !== 'boolean' || typeof parsed.ignoredStaleSourceVersion !== 'boolean') return null;
+  if ('auditId' in parsed && typeof parsed.auditId !== 'string') return null;
+  if (
+    'skippedDuplicateSourceFile' in parsed
+    && (
+      typeof parsed.skippedDuplicateSourceFile !== 'object'
+      || parsed.skippedDuplicateSourceFile === null
+      || Array.isArray(parsed.skippedDuplicateSourceFile)
+    )
+  ) return null;
+  return parsed as unknown as CncTelegramIngestResponseDto;
 }
 
 function manualSvgPresetResponseFromJson(

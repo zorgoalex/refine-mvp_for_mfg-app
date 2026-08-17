@@ -66,17 +66,29 @@ describe('PgCncTelegramRepository', () => {
   });
 
   it('skips Telegram SVG reverse import when source file already belongs to a cut job', () => {
-    const earlySkipIndex = repositorySource.indexOf('const skippedExistingSourceFile = await skipExistingTelegramSvgCutJobForSourceFile(tx, packetId, resolvedDto);');
-    const sequenceIndex = repositorySource.indexOf('await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));');
+    const replayIndex = repositorySource.indexOf('const replayResponse = await reconcileIdempotency(');
+    const preflightIndex = repositorySource.indexOf('const skippedDuplicateSourceFileResponse = await skippedExistingTelegramSvgSourceFileResponse(');
+    const insertPacketIndex = repositorySource.indexOf('const packetId = existing?.packet_id ?? await insertPacket(tx, resolvedCommand, payloadHash);');
+    const resolverIndex = repositorySource.indexOf('const matchedDto = await resolveItemMatches(tx, effectiveCommand.dto);');
+    expect(repositorySource).toContain('if (replayResponse) return replayResponse;');
+    expect(repositorySource).toContain('lockSvgSourceFileIfPresent');
+    expect(repositorySource).toContain('skippedExistingTelegramSvgSourceFileResponse');
     expect(repositorySource).toContain('findExistingSvgCutJobForSourceFile');
     expect(repositorySource).toContain('skipExistingTelegramSvgCutJobForSourceFile');
     expect(repositorySource).toContain('cnc_manual_svg_upload_files file');
     expect(repositorySource).toContain("lower(file.content_sha256)=lower($1)");
     expect(repositorySource).toContain("packet.svg_cut_import_status='imported'");
+    expect(repositorySource).toContain("svg_job.status <> 'archived'");
     expect(repositorySource).toContain("job.selection_criteria->'sourceFiles'");
+    expect(repositorySource).toContain("job.status <> 'archived'");
+    expect(repositorySource).toContain('skippedDuplicateSourceFile');
+    expect(repositorySource).toContain('await completeIdempotency(tx, command.dto.idempotencyKey, skippedDuplicateSourceFileResponse);');
     expect(repositorySource).toContain('Telegram scan не создавал новое задание');
-    expect(earlySkipIndex).toBeGreaterThan(-1);
-    expect(sequenceIndex).toBeGreaterThan(earlySkipIndex);
+    expect(replayIndex).toBeGreaterThan(-1);
+    expect(preflightIndex).toBeGreaterThan(-1);
+    expect(preflightIndex).toBeGreaterThan(replayIndex);
+    expect(resolverIndex).toBeGreaterThan(preflightIndex);
+    expect(insertPacketIndex).toBeGreaterThan(preflightIndex);
   });
 
   it('refreshes a pending manual SVG Telegram send before relinking files', () => {
@@ -301,6 +313,202 @@ describe('PgCncTelegramRepository', () => {
     expect(packetInsert?.params[5]).toBe('2026-07-24T07:59:00.000Z');
     expect(packetInsert?.params[6]).toBe('2026-07-24T07:59:00.000Z');
     expect(packetInsert?.params[18]).toBe('2026-07-24T07:59:00.000Z');
+  });
+
+  it('skips duplicate Telegram SVG source before packet and board side effects', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const svgSha = 'b'.repeat(64);
+    const existingPacketId = '00000000-0000-0000-0000-000000000104';
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/WITH manual_file AS/i.test(text) && /job\.selection_criteria->'sourceFiles'/i.test(text)) {
+          return {
+            rows: [{
+              cut_job_id: 98,
+              cut_job_display_number: '104',
+              cut_result_id: 500,
+              packet_id: existingPacketId,
+              file_name: 'CNC#1_1234.svg',
+              matched_by: 'cut_job_selection',
+            }],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              packet_id: existingPacketId,
+              external_packet_key: 'erp-svg-upload:existing',
+              source_chat_id: 'erp-manual-svg-upload',
+              source_message_id: null,
+              source_version: 1,
+              cutting_sequence_no: 104,
+              svg_cut_job_id: 98,
+              svg_cut_job_display_number: '104',
+              svg_cut_result_id: 500,
+              svg_cut_import_status: 'imported',
+            })],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:repo:duplicate-svg-source-preflight',
+      externalPacketKey: 'telegram:-100123:321',
+      programName: 'CNC#1_1234.svg',
+      sourceFiles: [{
+        kind: 'svg' as const,
+        fileName: 'CNC#1_1234.svg',
+        contentType: 'image/svg+xml',
+        sizeBytes: 1234,
+        sha256: svgSha,
+      }],
+    };
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto,
+      requestId: 'request-cnc-duplicate-svg-source-preflight',
+    });
+
+    const lockIndex = queries.findIndex((query) => /pg_advisory_xact_lock\(hashtextextended/i.test(query.text));
+    const duplicateIndex = queries.findIndex((query) => /WITH manual_file AS/i.test(query.text));
+    const loadPacketIndex = queries.findIndex((query) => /FROM cnc_telegram_packets p/i.test(query.text));
+    const completeIdempotencyIndex = queries.findIndex((query) =>
+      /UPDATE command_idempotency_keys/i.test(query.text)
+      && query.params[0] === 'cnc:test:repo:duplicate-svg-source-preflight',
+    );
+
+    expect(result).toMatchObject({
+      applied: false,
+      ignoredStaleSourceVersion: false,
+      packet: {
+        packetId: existingPacketId,
+        cuttingSequenceNo: 104,
+        svgCutJobId: 98,
+        svgCutJobDisplayNumber: '104',
+        svgCutImportStatus: 'imported',
+      },
+      skippedDuplicateSourceFile: {
+        status: 'skipped',
+        sha256: svgSha,
+        fileName: 'CNC#1_1234.svg',
+        cutJobId: 98,
+        cutJobDisplayNumber: '104',
+        cutResultId: 500,
+        packetId: existingPacketId,
+      },
+    });
+    expect(lockIndex).toBeGreaterThan(-1);
+    expect(duplicateIndex).toBeGreaterThan(lockIndex);
+    expect(loadPacketIndex).toBeGreaterThan(duplicateIndex);
+    expect(completeIdempotencyIndex).toBeGreaterThan(loadPacketIndex);
+    expect(queries[duplicateIndex]?.params).toEqual([svgSha, null]);
+    expect(queries[duplicateIndex]?.text).toContain("svg_job.status <> 'archived'");
+    expect(queries[duplicateIndex]?.text).toContain("job.status <> 'archived'");
+    expect(queries.some((query) => /INSERT INTO cnc_telegram_packets/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cnc_telegram_packet_items/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_job\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO audit_log/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO outbox_events/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /projectTelegramLabelMap/i.test(query.text))).toBe(false);
+  });
+
+  it('replays completed duplicate SVG idempotency before archived-state rechecks', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const svgSha = 'c'.repeat(64);
+    const existingPacketId = '00000000-0000-0000-0000-000000000204';
+    const storedResponse = {
+      packet: {
+        packetId: existingPacketId,
+        externalPacketKey: 'erp-svg-upload:existing',
+        sourceVersion: 1,
+        cuttingSequenceNo: 104,
+        svgCutJobId: 98,
+        svgCutJobDisplayNumber: '104',
+        svgCutResultId: 500,
+        svgCutImportStatus: 'imported',
+      },
+      requestId: 'request-cnc-duplicate-svg-source-preflight',
+      applied: false,
+      ignoredStaleSourceVersion: false,
+      skippedDuplicateSourceFile: {
+        status: 'skipped',
+        sha256: svgSha,
+        fileName: 'CNC#1_1234.svg',
+        cutJobId: 98,
+        cutJobDisplayNumber: '104',
+        cutResultId: 500,
+        packetId: existingPacketId,
+        note: 'SVG-файл уже есть в задании на раскрой 104. Telegram scan не создавал новое задание.',
+      },
+    };
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/FROM command_idempotency_keys/i.test(text)) {
+          const inserted = queries.find((query) =>
+            /INSERT INTO command_idempotency_keys/i.test(query.text),
+          );
+          return {
+            rows: [{
+              request_hash: inserted?.params[4],
+              response_json: storedResponse,
+              status: 'completed',
+            }],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+    const dto = {
+      ...ingestDto(),
+      idempotencyKey: 'cnc:test:repo:duplicate-svg-source-replay',
+      externalPacketKey: 'telegram:-100123:321',
+      programName: 'CNC#1_1234.svg',
+      sourceFiles: [{
+        kind: 'svg' as const,
+        fileName: 'CNC#1_1234.svg',
+        contentType: 'image/svg+xml',
+        sizeBytes: 1234,
+        sha256: svgSha,
+      }],
+    };
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto,
+      requestId: 'request-cnc-duplicate-svg-source-recovery',
+    });
+
+    expect(result).toEqual(storedResponse);
+    expect(queries.some((query) => /WITH manual_file AS/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cnc_telegram_packets/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cnc_telegram_packet_items/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO cut_job\s*\(/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO audit_log/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /INSERT INTO outbox_events/i.test(query.text))).toBe(false);
+    expect(queries.some((query) => /UPDATE command_idempotency_keys/i.test(query.text))).toBe(false);
   });
 
   it('returns only posted and completed columns for the daily CNC board', async () => {
@@ -1213,7 +1421,7 @@ describe('PgCncTelegramRepository', () => {
     expect(result.packet.cuttingSequenceNo).toBeNull();
   });
 
-  it('replays completed idempotency when Telegram later adds an explicit cutting sequence number', async () => {
+  it('replays completed idempotency without applying a later explicit cutting sequence number', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const dto = {
       ...ingestDto(),
@@ -1234,7 +1442,7 @@ describe('PgCncTelegramRepository', () => {
             rows: [{
               request_hash: inserted?.params[4],
               response_json: {
-                packet: { ...packetRow(), cuttingSequenceNo: null },
+                packet: { packetId: '00000000-0000-0000-0000-000000000001', cuttingSequenceNo: null },
                 requestId: 'request-cnc-1',
                 applied: false,
                 ignoredStaleSourceVersion: false,
@@ -1272,16 +1480,13 @@ describe('PgCncTelegramRepository', () => {
     const sequenceUpdate = queries.find((query) =>
       /UPDATE cnc_telegram_packets[\s\S]*cutting_sequence_no = \$2::integer/i.test(query.text),
     );
-    expect(sequenceUpdate?.params).toEqual([
-      '00000000-0000-0000-0000-000000000001',
-      17,
-      42,
-    ]);
+    expect(sequenceUpdate).toBeUndefined();
+    expect(queries.some((query) => /FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(query.text))).toBe(false);
     expect(result.applied).toBe(false);
-    expect(result.packet.cuttingSequenceNo).toBe(17);
+    expect(result.packet.cuttingSequenceNo).toBeNull();
   });
 
-  it('can assign a missing cutting sequence when replaying completed idempotency for a pending packet', async () => {
+  it('replays completed idempotency without assigning a missing cutting sequence for a pending packet', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const dto = {
       ...ingestDto(),
@@ -1303,7 +1508,7 @@ describe('PgCncTelegramRepository', () => {
             rows: [{
               request_hash: inserted?.params[4],
               response_json: {
-                packet: { cuttingSequenceNo: null },
+                packet: { packetId: '00000000-0000-0000-0000-000000000001', cuttingSequenceNo: null },
                 requestId: 'request-cnc-1',
                 applied: true,
                 ignoredStaleSourceVersion: false,
@@ -1345,9 +1550,10 @@ describe('PgCncTelegramRepository', () => {
     });
 
     const sql = queries.map((query) => query.text).join('\n');
-    expect(sql).toContain('MAX(cutting_sequence_no)');
-    expect(result.applied).toBe(false);
-    expect(result.packet.cuttingSequenceNo).toBe(21);
+    expect(sql).not.toContain('MAX(cutting_sequence_no)');
+    expect(queries.some((query) => /FROM cnc_telegram_packets p/i.test(query.text))).toBe(false);
+    expect(result.applied).toBe(true);
+    expect(result.packet.cuttingSequenceNo).toBeNull();
   });
 
   it('can assign a missing cutting sequence on stale source-version replays', async () => {
