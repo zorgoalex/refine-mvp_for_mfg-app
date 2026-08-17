@@ -278,16 +278,25 @@ function scrollStatusBoardColumnCardsToTop(viewport: HTMLElement | null): void {
 }
 
 type CncBoardHorizontalScrollDirection = 'left' | 'right';
+type CncBoardHorizontalScrollEdges = Record<CncBoardHorizontalScrollDirection, boolean>;
 
-function statusBoardHorizontalScrollDirection(
+const CNC_BOARD_SCROLL_EDGES_HIDDEN: CncBoardHorizontalScrollEdges = {
+  left: false,
+  right: false,
+};
+
+function statusBoardHorizontalScrollEdges(
   viewport: HTMLElement | null,
   targetLeft?: number,
-): CncBoardHorizontalScrollDirection | null {
-  if (!viewport) return null;
+): CncBoardHorizontalScrollEdges {
+  if (!viewport) return CNC_BOARD_SCROLL_EDGES_HIDDEN;
   const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-  if (maxLeft <= 2) return null;
+  if (maxLeft <= 2) return CNC_BOARD_SCROLL_EDGES_HIDDEN;
   const effectiveLeft = targetLeft ?? viewport.scrollLeft;
-  return effectiveLeft >= maxLeft - 2 ? 'left' : 'right';
+  return {
+    left: effectiveLeft > 2,
+    right: effectiveLeft < maxLeft - 2,
+  };
 }
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
@@ -565,8 +574,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const boardViewportRef = useRef<HTMLElement | null>(null);
   const cncBoardScrollTargetLeftRef = useRef<number | null>(null);
   const cncBoardScrollButtonScrollActiveRef = useRef(false);
-  const [cncBoardScrollDirection, setCncBoardScrollDirection] =
-    useState<CncBoardHorizontalScrollDirection | null>(null);
+  const [cncBoardScrollEdges, setCncBoardScrollEdges] =
+    useState<CncBoardHorizontalScrollEdges>(CNC_BOARD_SCROLL_EDGES_HIDDEN);
   const [cncBoardScrollTopState, setCncBoardScrollTopState] = useState({
     visible: false,
     left: 0,
@@ -1595,13 +1604,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     const updateTrackWidth = () => {
       topScrollbarTrack.style.width = `${viewport.scrollWidth}px`;
       topScrollbar.scrollLeft = viewport.scrollLeft;
-      setCncBoardScrollDirection(
+      setCncBoardScrollEdges(
         isCncToday
-          ? statusBoardHorizontalScrollDirection(
+          ? statusBoardHorizontalScrollEdges(
               viewport,
               cncBoardScrollTargetLeftRef.current ?? undefined,
             )
-          : null,
+          : CNC_BOARD_SCROLL_EDGES_HIDDEN,
       );
       syncCncBoardScrollTopButton(viewport);
     };
@@ -1632,8 +1641,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       if (viewport && viewport.scrollLeft !== event.currentTarget.scrollLeft) {
         cncBoardScrollTargetLeftRef.current = null;
         viewport.scrollLeft = event.currentTarget.scrollLeft;
-        setCncBoardScrollDirection(
-          isCncToday ? statusBoardHorizontalScrollDirection(viewport) : null,
+        setCncBoardScrollEdges(
+          isCncToday
+            ? statusBoardHorizontalScrollEdges(viewport)
+            : CNC_BOARD_SCROLL_EDGES_HIDDEN,
         );
       }
     },
@@ -1653,11 +1664,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         cncBoardScrollTargetLeftRef.current = null;
         cncBoardScrollButtonScrollActiveRef.current = false;
       }
-      const scrollDirectionTargetLeft = reachedTarget ? undefined : targetLeft ?? undefined;
-      setCncBoardScrollDirection(
+      const scrollEdgesTargetLeft = reachedTarget ? undefined : targetLeft ?? undefined;
+      setCncBoardScrollEdges(
         isCncToday
-          ? statusBoardHorizontalScrollDirection(event.currentTarget, scrollDirectionTargetLeft)
-          : null,
+          ? statusBoardHorizontalScrollEdges(event.currentTarget, scrollEdgesTargetLeft)
+          : CNC_BOARD_SCROLL_EDGES_HIDDEN,
       );
       syncCncBoardScrollTopButton(event.currentTarget);
     },
@@ -1674,22 +1685,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     }));
   }, []);
 
-  const scrollCncBoardHorizontally = useCallback(() => {
+  const scrollCncBoardHorizontally = useCallback((direction: CncBoardHorizontalScrollDirection) => {
     const viewport = boardViewportRef.current;
     if (!viewport) return;
     const maxLeft = Math.max(0, viewport.scrollWidth - viewport.clientWidth);
-    const currentDirection = statusBoardHorizontalScrollDirection(viewport);
-    if (!currentDirection) return;
+    const scrollEdges = statusBoardHorizontalScrollEdges(viewport);
+    if (!scrollEdges[direction]) return;
     const step = Math.max(180, Math.round(viewport.clientWidth * 0.82));
-    const nextLeft = currentDirection === 'left'
-      ? 0
+    const nextLeft = direction === 'left'
+      ? Math.max(0, viewport.scrollLeft - step)
       : Math.min(maxLeft, viewport.scrollLeft + step);
     cncBoardScrollButtonScrollActiveRef.current = true;
     cncBoardScrollTargetLeftRef.current = nextLeft;
     viewport.scrollTo({ left: nextLeft, behavior: 'smooth' });
-    setCncBoardScrollDirection(
-      statusBoardHorizontalScrollDirection(viewport, nextLeft),
-    );
+    setCncBoardScrollEdges(statusBoardHorizontalScrollEdges(viewport, nextLeft));
   }, []);
 
   const dateRange: [Dayjs | null, Dayjs | null] = [
@@ -2482,18 +2491,24 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             onClick={scrollCncBoardToTop}
           />
         )}
-        {isCncToday && cncBoardScrollDirection && (
+        {isCncToday && cncBoardScrollEdges.left && (
           <Button
-            className={`cnc-board-scroll-edge cnc-board-scroll-edge--${cncBoardScrollDirection}`}
+            className="cnc-board-scroll-edge cnc-board-scroll-edge--left"
             type="default"
             shape="circle"
-            icon={cncBoardScrollDirection === 'left' ? <LeftOutlined /> : <RightOutlined />}
-            aria-label={
-              cncBoardScrollDirection === 'left'
-                ? 'Прокрутить МДФ-доску влево'
-                : 'Прокрутить МДФ-доску вправо'
-            }
-            onClick={scrollCncBoardHorizontally}
+            icon={<LeftOutlined />}
+            aria-label="Прокрутить МДФ-доску влево"
+            onClick={() => scrollCncBoardHorizontally('left')}
+          />
+        )}
+        {isCncToday && cncBoardScrollEdges.right && (
+          <Button
+            className="cnc-board-scroll-edge cnc-board-scroll-edge--right"
+            type="default"
+            shape="circle"
+            icon={<RightOutlined />}
+            aria-label="Прокрутить МДФ-доску вправо"
+            onClick={() => scrollCncBoardHorizontally('right')}
           />
         )}
       </main>
