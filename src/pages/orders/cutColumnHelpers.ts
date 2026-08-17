@@ -73,7 +73,7 @@ function normalizeCutJobRef(value: unknown): CutDetailLastReadyJobRef | null {
   return {
     cutJobId,
     resultNo,
-    cutNumber: rawCutNumber || `${cutJobId}-${resultNo}`,
+    cutNumber: stripCutResultNoSuffix(rawCutNumber, resultNo) || String(cutJobId),
     name: typeof ref.name === 'string' && ref.name.trim() ? ref.name : `Раскрой ${cutJobId}`,
     paramProfileId: normalizeNullableInteger(ref.paramProfileId),
     profileName: typeof ref.profileName === 'string' ? ref.profileName : null,
@@ -167,12 +167,12 @@ export function cutJobDeepLink(
   return `/cut?${params.toString()}`;
 }
 
-/** User-facing current/acting cut result number for order detail columns. */
+/** User-facing cut job number for order detail columns. */
 export function cutJobVersionLabel(
   ref: Pick<CutDetailLastReadyJobRef, 'cutJobId' | 'resultNo' | 'cutNumber'>,
 ): string {
-  const cutNumber = ref.cutNumber.trim();
-  return cutNumber || `${ref.cutJobId}-${ref.resultNo}`;
+  const cutNumber = stripCutResultNoSuffix(ref.cutNumber.trim(), ref.resultNo);
+  return cutNumber || String(ref.cutJobId);
 }
 
 /** Human-readable cut profile label for order-facing cut job refs. */
@@ -182,4 +182,10 @@ export function cutJobProfileLabel(job: Pick<CutJobRef, 'paramProfileId' | 'prof
     return job.profileIsActive === false ? `${profileName} (неактивен)` : profileName;
   }
   return job.paramProfileId != null ? `Профиль #${job.paramProfileId}` : 'По умолчанию';
+}
+
+function stripCutResultNoSuffix(cutNumber: string, resultNo: number): string {
+  const suffix = `-${resultNo}`;
+  if (!cutNumber.endsWith(suffix)) return cutNumber;
+  return cutNumber.slice(0, -suffix.length).trim();
 }

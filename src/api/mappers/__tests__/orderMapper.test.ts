@@ -118,8 +118,8 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
       details: [
         {
           ...(dto.details[0] as any),
-          cutJob: { cutJobId: 41, resultNo: 2, cutNumber: '41-2', name: 'Раскрой заказа', paramProfileId: null, profileName: null, profileIsActive: null },
-          bathCutJob: { cutJobId: 42, resultNo: 3, cutNumber: 'В-42-3', name: 'Ванна заказа', paramProfileId: 7, profileName: 'Вакуум', profileIsActive: true },
+          cutJob: { cutJobId: 41, resultNo: 2, cutNumber: '41', name: 'Раскрой заказа', paramProfileId: null, profileName: null, profileIsActive: null },
+          bathCutJob: { cutJobId: 42, resultNo: 3, cutNumber: 'В-42', name: 'Ванна заказа', paramProfileId: 7, profileName: 'Вакуум', profileIsActive: true },
         } as any,
       ],
     } as any;
@@ -186,13 +186,13 @@ describe('mapOrderListItemToLegacyRow — header-material fallback (critic R8)',
   it('maps backend production-number aggregates for orders-list columns', () => {
     const item = makeListItem({
       bazisCutNumbers: ['БР-8', 'БР-12'],
-      cutNumbers: ['42-3', '51-1'],
-      bathCutNumbers: ['В-70-2'],
+      cutNumbers: ['42', '51'],
+      bathCutNumbers: ['В-70'],
     });
     const row = mapOrderListItemToLegacyRow(item);
     expect(row.bazis_cut_numbers).toEqual(['БР-8', 'БР-12']);
-    expect(row.cut_numbers).toEqual(['42-3', '51-1']);
-    expect(row.bath_cut_numbers).toEqual(['В-70-2']);
+    expect(row.cut_numbers).toEqual(['42', '51']);
+    expect(row.bath_cut_numbers).toEqual(['В-70']);
   });
 
   it('maps backend detail filmNames for the orders list film column', () => {

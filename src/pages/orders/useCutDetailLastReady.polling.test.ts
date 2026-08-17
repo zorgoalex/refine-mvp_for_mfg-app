@@ -286,7 +286,7 @@ function response(resultNo: number, orderDetailId = 1): CutDetailLastReadyRespon
       cutJob: {
         cutJobId: 9,
         resultNo,
-        cutNumber: `9-${resultNo}`,
+        cutNumber: '9',
         name: 'Раскрой',
         paramProfileId: null,
         profileName: null,

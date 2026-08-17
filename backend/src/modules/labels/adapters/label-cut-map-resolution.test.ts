@@ -26,12 +26,12 @@ describe('label cut-map resolution', () => {
 
     expect(resolved.rows[0].cutMap).toMatchObject({
       cutResultPlacementId: 700,
-      cutNumber: '30-4',
+      cutNumber: '30',
       sheetNumber: 2,
       xMm: 110,
       yMm: 70,
     });
-    expect(resolved.rows[0].values).toMatchObject({ 'cut.number': '30-4', 'cut.sheet_number': 2 });
+    expect(resolved.rows[0].values).toMatchObject({ 'cut.number': '30', 'cut.sheet_number': 2 });
     expect(resolved.assets.get('cut_result:600')).toEqual({
       svg: expect.stringContaining('<svg'),
       isVacuum: false,
@@ -46,7 +46,7 @@ describe('label cut-map resolution', () => {
     const client = databaseReturning(placementRow({
       is_vacuum: true,
       regular_cut_number: null,
-      vacuum_cut_number: 'В-30-4',
+      vacuum_cut_number: 'В-30',
     }));
     const resolved = await resolveLabelCutMaps(
       client,
@@ -59,9 +59,9 @@ describe('label cut-map resolution', () => {
 
     expect(resolved.rows[0].cutMap).toMatchObject({
       cutResultPlacementId: 700,
-      cutNumber: 'В-30-4',
+      cutNumber: 'В-30',
     });
-    expect(resolved.rows[0].values).toMatchObject({ 'cut.number': 'В-30-4' });
+    expect(resolved.rows[0].values).toMatchObject({ 'cut.number': 'В-30' });
     expect(resolved.assets.get('cut_result:600')).toMatchObject({ isVacuum: true });
   });
 
@@ -145,7 +145,7 @@ describe('label cut-map resolution', () => {
   });
 
   it('rejects a selected placement when it does not match the detail source cut number', async () => {
-    const client = databaseReturning(placementRow({ regular_cut_number: '31-4' }));
+    const client = databaseReturning(placementRow({ regular_cut_number: '31' }));
 
     await expect(resolveLabelCutMaps(
       client,
@@ -156,7 +156,7 @@ describe('label cut-map resolution', () => {
       'regular',
     )).rejects.toMatchObject({
       code: 'LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH',
-      details: expect.objectContaining({ cutNumber: '30-4', expectedCutNumber: '31-4' }),
+      details: expect.objectContaining({ cutNumber: '30', expectedCutNumber: '31' }),
     });
   });
 
@@ -323,8 +323,8 @@ describe('label cut-map resolution', () => {
         template(),
         [labelRow({
           values: {
-            'detail.cut_result_version_no': '30-4',
-            'detail.bath_cut_result_version_no': '31-1',
+            'detail.cut_result_version_no': '30',
+            'detail.bath_cut_result_version_no': '31',
           },
         })],
         [],
@@ -343,7 +343,7 @@ describe('label cut-map resolution', () => {
       expect(resolved.rows[0].values).toMatchObject({
         'cut.number': '№47',
         'detail.cut_result_version_no': '№47',
-        'detail.bath_cut_result_version_no': '31-1',
+        'detail.bath_cut_result_version_no': '31',
       });
       const svg = renderSvgPages(template(), resolved.rows, resolved.assets).pages[0];
       expect(svg).toContain('data-cut-number="№47"');
@@ -784,7 +784,7 @@ function placementRow(overrides: Record<string, unknown> = {}) {
     base_svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2800 2070"></svg>',
     dimensions_match: true,
     is_vacuum: false,
-    regular_cut_number: '30-4',
+    regular_cut_number: '30',
     vacuum_cut_number: null,
     ...overrides,
   };

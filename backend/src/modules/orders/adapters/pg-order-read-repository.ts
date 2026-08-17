@@ -17,7 +17,7 @@ import type {
   OrderListSortBy,
   OrderReadRepositoryPort,
 } from '../application/order-query.types';
-import { formatCutNumber } from '../../cut/application/cut-numbering';
+import { formatCutJobNumber } from '../../cut/application/cut-numbering';
 
 const SORT_COLUMNS: Record<OrderListSortBy, string> = {
   orderId: 'o.order_id',
@@ -556,8 +556,12 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
                 cpp.params->>'layout_mode',
                 cj.params->>'layout_mode'
               ) = 'vacuum_table'
-                THEN 'В-' || COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) || '-' || cr.result_no::text
-              ELSE COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) || '-' || cr.result_no::text
+                THEN CASE
+                  WHEN COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) LIKE 'В-%'
+                    THEN COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text)
+                  ELSE 'В-' || COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text)
+                END
+              ELSE COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text)
             END AS cut_number,
             COALESCE(
               cj.last_calc_params->>'layout_mode',
@@ -1674,7 +1678,7 @@ function mapHdfCutJob(row: OrderHdfDetailRow) {
   return {
     cutJobId,
     resultNo,
-    cutNumber: `${row.cut_job_source_display_number ?? cutJobId}-${resultNo}`,
+    cutNumber: formatCutJobNumber(cutJobId, false, row.cut_job_source_display_number),
     name: row.cut_job_name ?? '',
     paramProfileId: toNullableNumber(row.cut_job_param_profile_id),
     profileName: row.cut_job_profile_name,
@@ -1736,7 +1740,7 @@ function mapDetailCutJob(row: OrderDetailRow, kind: 'cut' | 'bath') {
   return {
     cutJobId,
     resultNo,
-    cutNumber: formatCutNumber(cutJobId, resultNo, kind === 'bath', sourceDisplayNumber),
+    cutNumber: formatCutJobNumber(cutJobId, kind === 'bath', sourceDisplayNumber),
     name: name ?? `Раскрой ${cutJobId}`,
     paramProfileId: toNullableNumber(kind === 'cut' ? row.cut_job_param_profile_id : row.bath_cut_job_param_profile_id),
     profileName: kind === 'cut' ? row.cut_job_profile_name : row.bath_cut_job_profile_name,

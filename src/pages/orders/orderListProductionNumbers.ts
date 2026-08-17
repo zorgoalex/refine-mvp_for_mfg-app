@@ -6,11 +6,16 @@ export function normalizeOrderListProductionNumbers(values: unknown): string[] {
 
   for (const value of values) {
     if (typeof value !== 'string' && typeof value !== 'number') continue;
-    const text = String(value).trim();
+    const text = stripSimpleCutResultSuffix(String(value).trim());
     if (!text || seen.has(text)) continue;
     seen.add(text);
     normalized.push(text);
   }
 
   return normalized;
+}
+
+function stripSimpleCutResultSuffix(value: string): string {
+  const match = value.match(/^(В-\d+|\d+)-\d+$/);
+  return match?.[1] ?? value;
 }

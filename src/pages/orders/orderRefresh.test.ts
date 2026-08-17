@@ -34,7 +34,7 @@ describe('order refresh draft merge', () => {
       note: 'Присадка',
       doweling: true,
       height: 100,
-      cut_job: { cutJobId: 4, resultNo: 2, cutNumber: '4-2', name: 'Р-4', paramProfileId: null, profileName: null, profileIsActive: null },
+      cut_job: { cutJobId: 4, resultNo: 2, cutNumber: '4', name: 'Р-4', paramProfileId: null, profileName: null, profileIsActive: null },
       bazis_cut_sets: [{ bazisCutSetId: 9, name: 'БР-9' }],
       bazis_projects: [{ bazisProjectId: 5, bazisRevisionId: 6, revisionNo: 2, name: 'Шкаф' }],
     });

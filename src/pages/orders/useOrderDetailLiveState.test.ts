@@ -19,7 +19,7 @@ const snapshot: OrderDetailLiveStateSnapshot = {
       cutJob: {
         cutJobId: 10,
         resultNo: 2,
-        cutNumber: '10-2',
+        cutNumber: '10',
         name: 'Раскрой 10',
         paramProfileId: null,
         profileName: null,

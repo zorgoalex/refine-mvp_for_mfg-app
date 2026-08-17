@@ -3014,7 +3014,7 @@ export class PgCutRepository implements CutRepositoryPort {
       const ref = {
         cutJobId,
         resultNo,
-        cutNumber: formatCutNumber(cutJobId, resultNo, row.is_vacuum === true, row.source_display_number),
+        cutNumber: formatCutJobNumber(cutJobId, row.is_vacuum === true, row.source_display_number),
         name: row.name,
         paramProfileId: row.param_profile_id === null ? null : toNum(row.param_profile_id),
         profileName: row.profile_name,
@@ -3337,8 +3337,8 @@ export class PgCutRepository implements CutRepositoryPort {
       : cutJobSnapshotUsesVacuumTable(row?.requested_snapshot_job) || row?.job_is_vacuum === true;
     return {
       cutJobId,
-      cutNumber: resultNo === null ? null : formatCutNumber(cutJobId, resultNo, requestedIsVacuum, row?.source_display_number),
-      currentCutNumber: currentResultNo === null ? null : formatCutNumber(cutJobId, currentResultNo, currentIsVacuum, row?.source_display_number),
+      cutNumber: resultNo === null ? null : formatCutJobNumber(cutJobId, requestedIsVacuum, row?.source_display_number),
+      currentCutNumber: currentResultNo === null ? null : formatCutJobNumber(cutJobId, currentIsVacuum, row?.source_display_number),
     };
   }
 

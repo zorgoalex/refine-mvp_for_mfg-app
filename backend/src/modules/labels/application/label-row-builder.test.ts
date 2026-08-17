@@ -119,7 +119,7 @@ describe('label row builder', () => {
     });
   });
 
-  it('exposes split regular and vacuum cut result version numbers as detail fields', () => {
+  it('exposes split regular and vacuum cut job numbers as detail fields', () => {
     const [row] = buildLabelRows({
       orderName: 'ERP-548',
       today: '2026-08-03',
@@ -127,16 +127,16 @@ describe('label row builder', () => {
       details: [
         detail({
           detailFields: {
-            cut_result_version_no: '45-1',
-            bath_cut_result_version_no: 'В-28-2',
+            cut_result_version_no: '45',
+            bath_cut_result_version_no: 'В-28',
           },
         }),
       ],
     });
 
     expect(row.values).toMatchObject({
-      'detail.cut_result_version_no': '45-1',
-      'detail.bath_cut_result_version_no': 'В-28-2',
+      'detail.cut_result_version_no': '45',
+      'detail.bath_cut_result_version_no': 'В-28',
     });
   });
 

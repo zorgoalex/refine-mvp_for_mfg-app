@@ -53,13 +53,13 @@ describe('Bazis label field catalog', () => {
     );
   });
 
-  it('adds computed detail cut result version fields to static and runtime catalogs', () => {
+  it('adds computed detail cut job number fields to static and runtime catalogs', () => {
     expect(COMPUTED_DETAIL_FIELD_CATALOG).toEqual([
       expect.objectContaining({
         id: 'detail.cut_result_version_no',
         source: 'dynamic',
         sourceColumn: null,
-        label: '№ версии раскроя (обычные профили)',
+        label: '№ задания раскроя (обычные профили)',
         type: 'string',
         category: 'Деталь',
       }),
@@ -67,7 +67,7 @@ describe('Bazis label field catalog', () => {
         id: 'detail.bath_cut_result_version_no',
         source: 'dynamic',
         sourceColumn: null,
-        label: '№ версии раскроя (вакуумный стол)',
+        label: '№ задания раскроя (вакуумный стол)',
         type: 'string',
         category: 'Деталь',
       }),

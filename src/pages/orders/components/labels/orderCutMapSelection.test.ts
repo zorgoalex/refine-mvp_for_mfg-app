@@ -20,13 +20,13 @@ const data: OrderLabelCutMapOptions = {
     detailNumber: '3',
     detailName: 'Фасад',
     quantity: 2,
-    cutJobCutNumber: '50-4',
+    cutJobCutNumber: '50',
     bathCutJobCutNumber: null,
     options: [
-      option(101, 1, 5, '50-4', true),
-      option(102, 2, 5, '50-4', true),
-      option(201, 1, 4, '40-9', true),
-      option(202, 2, 4, '40-9', false),
+      option(101, 1, 5, '50', true),
+      option(102, 2, 5, '50', true),
+      option(201, 1, 4, '40', true),
+      option(202, 2, 4, '40', false),
     ],
   }],
 };
@@ -35,8 +35,8 @@ describe('order cut-map selection', () => {
   it('creates one exact selector per physical detail instance', () => {
     const rows = buildOrderCutMapLabelRows(data);
     expect(rows.map((row) => [row.key, row.options.map((option) => option.cutNumber)])).toEqual([
-      ['11:1', ['50-4', '40-9']],
-      ['11:2', ['50-4']],
+      ['11:1', ['50', '40']],
+      ['11:2', ['50']],
     ]);
     expect(buildDefaultOrderCutMapSelection(rows)).toEqual({ '11:1': 101, '11:2': 102 });
   });
@@ -56,8 +56,8 @@ describe('order cut-map selection', () => {
       details: [{
         ...data.details[0],
         options: [
-          option(301, 1, 6, '50-5', true),
-          option(202, 2, 4, '40-9', true),
+          option(301, 1, 6, '50', true),
+          option(202, 2, 4, '40', true),
         ],
       }],
     });
@@ -71,13 +71,13 @@ describe('order cut-map selection', () => {
         ...data.details[0],
         quantity: 1,
         options: [
-          { ...option(401, 1, 8, '50-8', true), isArchived: true },
-          option(402, 1, 9, '50-9', true),
+          { ...option(401, 1, 8, '50', true), isArchived: true },
+          option(402, 1, 9, '50', true),
         ],
       }],
     });
 
-    expect(rows[0]?.options.map((item) => item.cutNumber)).toEqual(['50-9']);
+    expect(rows[0]?.options.map((item) => item.cutNumber)).toEqual(['50']);
     expect(buildDefaultOrderCutMapSelection(rows)).toEqual({ '11:1': 402 });
   });
 
@@ -87,12 +87,12 @@ describe('order cut-map selection', () => {
       details: [{
         ...data.details[0],
         options: [
-          { ...option(501, 1, 20, 'В-28-2', true), isCurrent: true, isVacuum: true },
-          { ...option(502, 2, 20, 'В-28-2', true), isCurrent: true, isVacuum: true },
-          { ...option(601, 1, 21, '45-1', true), isCurrent: true, isVacuum: false },
-          { ...option(602, 2, 21, '45-1', true), isCurrent: true, isVacuum: false },
-          { ...option(701, 1, 22, '40-9', true), isCurrent: false, isVacuum: false },
-          { ...option(702, 2, 22, '40-9', true), isCurrent: false, isVacuum: false },
+          { ...option(501, 1, 20, 'В-28', true), isCurrent: true, isVacuum: true },
+          { ...option(502, 2, 20, 'В-28', true), isCurrent: true, isVacuum: true },
+          { ...option(601, 1, 21, '45', true), isCurrent: true, isVacuum: false },
+          { ...option(602, 2, 21, '45', true), isCurrent: true, isVacuum: false },
+          { ...option(701, 1, 22, '40', true), isCurrent: false, isVacuum: false },
+          { ...option(702, 2, 22, '40', true), isCurrent: false, isVacuum: false },
         ],
       }],
     });
@@ -106,25 +106,25 @@ describe('order cut-map selection', () => {
       details: [{
         ...data.details[0],
         quantity: 5,
-        cutJobCutNumber: '45-1',
-        bathCutJobCutNumber: 'В-28-2',
+        cutJobCutNumber: '45',
+        bathCutJobCutNumber: 'В-28',
         options: [
-          option(601, 1, 21, '45-1', true),
-          option(602, 2, 21, '45-1', true),
-          option(603, 3, 21, '45-1', true),
-          option(604, 4, 21, '45-1', true),
-          { ...option(501, 1, 20, 'В-28-2', true), isVacuum: true },
-          { ...option(502, 2, 20, 'В-28-2', true), isVacuum: true },
-          { ...option(503, 3, 20, 'В-28-2', true), isVacuum: true },
-          { ...option(504, 4, 20, 'В-28-2', true), isVacuum: true },
-          { ...option(505, 5, 20, 'В-28-2', true), isVacuum: true },
+          option(601, 1, 21, '45', true),
+          option(602, 2, 21, '45', true),
+          option(603, 3, 21, '45', true),
+          option(604, 4, 21, '45', true),
+          { ...option(501, 1, 20, 'В-28', true), isVacuum: true },
+          { ...option(502, 2, 20, 'В-28', true), isVacuum: true },
+          { ...option(503, 3, 20, 'В-28', true), isVacuum: true },
+          { ...option(504, 4, 20, 'В-28', true), isVacuum: true },
+          { ...option(505, 5, 20, 'В-28', true), isVacuum: true },
         ],
       }],
     });
 
     expect(pickDefaultOrderCutMapSource(rows)).toBe('regular');
-    expect(orderCutMapSourceCutNumbers(rows, 'regular')).toEqual(['45-1']);
-    expect(orderCutMapSourceCutNumbers(rows, 'bath')).toEqual(['В-28-2']);
+    expect(orderCutMapSourceCutNumbers(rows, 'regular')).toEqual(['45']);
+    expect(orderCutMapSourceCutNumbers(rows, 'bath')).toEqual(['В-28']);
     expect(buildOrderCutMapSelectionForSource(rows, 'regular')).toEqual({
       '11:1': 601,
       '11:2': 602,
@@ -143,31 +143,31 @@ describe('order cut-map selection', () => {
       ...data,
       details: [{
         ...data.details[0],
-        cutJobCutNumber: '45-1',
-        bathCutJobCutNumber: 'В-28-2',
+        cutJobCutNumber: '45',
+        bathCutJobCutNumber: 'В-28',
         options: [
-          option(601, 1, 21, '45-1', true),
-          option(602, 2, 21, '45-1', true),
-          { ...option(501, 1, 20, 'В-28-2', true), isVacuum: true },
-          { ...option(502, 2, 20, 'В-28-2', true), isVacuum: true },
+          option(601, 1, 21, '45', true),
+          option(602, 2, 21, '45', true),
+          { ...option(501, 1, 20, 'В-28', true), isVacuum: true },
+          { ...option(502, 2, 20, 'В-28', true), isVacuum: true },
         ],
       }],
     });
 
     expect(buildOrderCutMapSelectionForSource(rows, 'bath')).toEqual({ '11:1': 501, '11:2': 502 });
-    expect(filterOrderCutMapRowOptions(rows[0], 'bath').map((item) => item.cutNumber)).toEqual(['В-28-2']);
+    expect(filterOrderCutMapRowOptions(rows[0], 'bath').map((item) => item.cutNumber)).toEqual(['В-28']);
   });
 
   it('matches stale raw options against the selected source cut number', () => {
     const detail = {
       ...data.details[0],
-      cutJobCutNumber: '45-1',
-      bathCutJobCutNumber: 'В-28-2',
+      cutJobCutNumber: '45',
+      bathCutJobCutNumber: 'В-28',
     };
 
-    expect(orderCutMapRawOptionMatchesSource(detail, option(601, 1, 21, '45-1', false), 'regular')).toBe(true);
-    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, 'В-28-2', false), isVacuum: true }, 'bath')).toBe(true);
-    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, 'В-28-2', false), isVacuum: true }, 'regular')).toBe(false);
+    expect(orderCutMapRawOptionMatchesSource(detail, option(601, 1, 21, '45', false), 'regular')).toBe(true);
+    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, 'В-28', false), isVacuum: true }, 'bath')).toBe(true);
+    expect(orderCutMapRawOptionMatchesSource(detail, { ...option(501, 1, 20, 'В-28', false), isVacuum: true }, 'regular')).toBe(false);
   });
 
   it('treats Telegram SVG and screenshot fallbacks as regular-source coverage', () => {
@@ -197,7 +197,7 @@ describe('order cut-map selection', () => {
       details: [{
         ...data.details[0],
         quantity: 1,
-        options: [option(101, 1, 5, '50-4', true)],
+        options: [option(101, 1, 5, '50', true)],
         telegramSvgFallbackInstances: [{ copyIndex: 1, packetId: 'p1', sourceMessageId: 10 }],
       }],
     });

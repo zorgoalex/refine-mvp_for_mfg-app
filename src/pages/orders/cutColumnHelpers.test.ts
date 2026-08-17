@@ -16,12 +16,12 @@ describe('cutColumnHelpers', () => {
     const map = buildCutJobByDetailId([
       {
         orderDetailId: 1,
-        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'A', paramProfileId: null, profileName: null, profileIsActive: null },
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9', name: 'A', paramProfileId: null, profileName: null, profileIsActive: null },
         bathCutJob: null,
       },
       {
         orderDetailId: 2,
-        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'A', paramProfileId: null, profileName: null, profileIsActive: null },
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9', name: 'A', paramProfileId: null, profileName: null, profileIsActive: null },
         bathCutJob: null,
       },
     ]);
@@ -34,8 +34,8 @@ describe('cutColumnHelpers', () => {
     const maps = buildCutJobLinkMaps([
       {
         orderDetailId: 1,
-        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
-        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
       },
     ]);
     expect(maps.cutJobByDetailId.get(1)?.name).toBe('Regular');
@@ -46,11 +46,11 @@ describe('cutColumnHelpers', () => {
     const maps = buildCutJobLinkMapsFromDetails([
       {
         detail_id: 11,
-        cut_job: { cutJobId: 41, resultNo: 2, cutNumber: '41-2', name: 'Раскрой заказа' },
+        cut_job: { cutJobId: 41, resultNo: 2, cutNumber: '41', name: 'Раскрой заказа' },
         bath_cut_job: {
           cutJobId: 42,
           resultNo: 3,
-          cutNumber: 'В-42-3',
+          cutNumber: 'В-42',
           name: 'Ванна заказа',
           paramProfileId: '7',
           profileName: 'Вакуум',
@@ -71,13 +71,13 @@ describe('cutColumnHelpers', () => {
     const embedded = buildCutJobLinkMapsFromDetails([
       {
         detail_id: 11,
-        cut_job: { cutJobId: 41, resultNo: 2, cutNumber: '41-2', name: 'Snapshot' },
+        cut_job: { cutJobId: 41, resultNo: 2, cutNumber: '41', name: 'Snapshot' },
       },
     ]);
     const live = buildCutJobLinkMaps([
       {
         orderDetailId: 11,
-        cutJob: { cutJobId: 43, resultNo: 4, cutNumber: '43-4', name: 'Live', paramProfileId: null, profileName: null, profileIsActive: null },
+        cutJob: { cutJobId: 43, resultNo: 4, cutNumber: '43', name: 'Live', paramProfileId: null, profileName: null, profileIsActive: null },
         bathCutJob: null,
       },
     ]);
@@ -88,22 +88,22 @@ describe('cutColumnHelpers', () => {
     const first = buildCutJobLinkMaps([
       {
         orderDetailId: 1,
-        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
-        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
       },
     ]);
     const unchanged = buildCutJobLinkMaps([
       {
         orderDetailId: 1,
-        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9-2', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
-        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+        cutJob: { cutJobId: 9, resultNo: 2, cutNumber: '9', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
       },
     ]);
     const changed = buildCutJobLinkMaps([
       {
         orderDetailId: 1,
-        cutJob: { cutJobId: 9, resultNo: 4, cutNumber: '9-4', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
-        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10-3', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
+        cutJob: { cutJobId: 9, resultNo: 4, cutNumber: '9', name: 'Regular', paramProfileId: null, profileName: null, profileIsActive: null },
+        bathCutJob: { cutJobId: 10, resultNo: 3, cutNumber: 'В-10', name: 'Bath', paramProfileId: 7, profileName: 'Вакуумный стол', profileIsActive: true },
       },
     ]);
 
@@ -115,13 +115,13 @@ describe('cutColumnHelpers', () => {
     const cutRef = {
       cutJobId: 9,
       resultNo: 2,
-      cutNumber: '9-2',
+      cutNumber: '9',
       name: 'Regular',
       paramProfileId: null,
       profileName: null,
       profileIsActive: null,
     };
-    const bathRef = { ...cutRef, cutJobId: 10, cutNumber: 'В-10-2', name: 'Bath' };
+    const bathRef = { ...cutRef, cutJobId: 10, cutNumber: 'В-10', name: 'Bath' };
     const input = {
       currentDetailProductionStatusById: new Map([[1, 4]]),
       productionStatusesById: new Map([[4, { name: 'В работе', color: '#1677ff' }]]),
@@ -152,11 +152,11 @@ describe('cutColumnHelpers', () => {
     })).not.toBe(version);
     expect(buildOrderDetailLiveCellRenderVersion({
       ...input,
-      cutJobByDetailId: new Map([[1, { ...cutRef, resultNo: 3, cutNumber: '9-3' }]]),
+      cutJobByDetailId: new Map([[1, { ...cutRef, resultNo: 3, cutNumber: '9' }]]),
     })).not.toBe(version);
     expect(buildOrderDetailLiveCellRenderVersion({
       ...input,
-      bathCutJobByDetailId: new Map([[1, { ...bathRef, resultNo: 3, cutNumber: 'В-10-3' }]]),
+      bathCutJobByDetailId: new Map([[1, { ...bathRef, resultNo: 3, cutNumber: 'В-10' }]]),
     })).not.toBe(version);
   });
 
@@ -166,10 +166,11 @@ describe('cutColumnHelpers', () => {
     expect(cutJobDeepLink({ cutJobId: 45, resultNo: 3 })).toBe('/cut?job=45&result=3');
   });
 
-  it('cutJobVersionLabel prefers the current result cut number', () => {
-    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '45-3' })).toBe('45-3');
-    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: 'В-45-3' })).toBe('В-45-3');
-    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '   ' })).toBe('45-3');
+  it('cutJobVersionLabel shows the job number without the result version suffix', () => {
+    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '45' })).toBe('45');
+    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '45-3' })).toBe('45');
+    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: 'В-45-3' })).toBe('В-45');
+    expect(cutJobVersionLabel({ cutJobId: 45, resultNo: 3, cutNumber: '   ' })).toBe('45');
   });
 
   it('cutJobProfileLabel resolves profile display names', () => {

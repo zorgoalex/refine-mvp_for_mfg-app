@@ -76,7 +76,7 @@ describe('extractGroupValue', () => {
     const cutRef = {
       cutJobId: 21,
       resultNo: 3,
-      cutNumber: '21-3',
+      cutNumber: '21',
       name: 'Раскрой заказа',
       paramProfileId: null,
       profileName: null,

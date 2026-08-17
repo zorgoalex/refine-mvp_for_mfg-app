@@ -286,7 +286,7 @@ SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision,
              'cutJob', CASE WHEN d.regular_cut_job_id IS NULL THEN NULL ELSE jsonb_build_object(
                'cutJobId', d.regular_cut_job_id,
                'resultNo', d.regular_result_no,
-               'cutNumber', COALESCE(NULLIF(btrim(d.regular_source_display_number), ''), d.regular_cut_job_id::text) || '-' || d.regular_result_no::text,
+               'cutNumber', COALESCE(NULLIF(btrim(d.regular_source_display_number), ''), d.regular_cut_job_id::text),
                'name', d.regular_name,
                'paramProfileId', d.regular_profile_id,
                'profileName', d.regular_profile_name,
@@ -295,7 +295,11 @@ SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision,
              'bathCutJob', CASE WHEN d.bath_cut_job_id IS NULL THEN NULL ELSE jsonb_build_object(
                'cutJobId', d.bath_cut_job_id,
                'resultNo', d.bath_result_no,
-               'cutNumber', 'В-' || COALESCE(NULLIF(btrim(d.bath_source_display_number), ''), d.bath_cut_job_id::text) || '-' || d.bath_result_no::text,
+               'cutNumber', CASE
+                 WHEN COALESCE(NULLIF(btrim(d.bath_source_display_number), ''), d.bath_cut_job_id::text) LIKE 'В-%'
+                   THEN COALESCE(NULLIF(btrim(d.bath_source_display_number), ''), d.bath_cut_job_id::text)
+                 ELSE 'В-' || COALESCE(NULLIF(btrim(d.bath_source_display_number), ''), d.bath_cut_job_id::text)
+               END,
                'name', d.bath_name,
                'paramProfileId', d.bath_profile_id,
                'profileName', d.bath_profile_name,

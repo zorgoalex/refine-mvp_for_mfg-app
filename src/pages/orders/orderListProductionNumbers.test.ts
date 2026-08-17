@@ -5,10 +5,10 @@ import { normalizeOrderListProductionNumbers } from './orderListProductionNumber
 
 describe('normalizeOrderListProductionNumbers', () => {
   it('normalizes, deduplicates, and keeps server order', () => {
-    expect(normalizeOrderListProductionNumbers([' 42-3 ', '42-3', '51-1', ' В-70-2 ', null, ''])).toEqual([
-      '42-3',
-      '51-1',
-      'В-70-2',
+    expect(normalizeOrderListProductionNumbers([' 42 ', '42-3', '42', '51', ' В-70-2 ', null, ''])).toEqual([
+      '42',
+      '51',
+      'В-70',
     ]);
   });
 

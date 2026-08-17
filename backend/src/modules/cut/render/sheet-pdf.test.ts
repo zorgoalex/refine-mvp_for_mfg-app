@@ -558,8 +558,8 @@ describe('buildSheetsPdf', () => {
         sheetWidthMm: 1400,
         sheetHeightMm: 2800,
         cutJobId: 42,
-        cutNumber: '42-3',
-        currentCutNumber: '42-4',
+        cutNumber: '42',
+        currentCutNumber: '42',
         jobName: 'Задание ванна',
         textureDirection: 'вдоль полотна',
         filmRequirementLinearMeters: 2.1,
@@ -579,8 +579,8 @@ describe('buildSheetsPdf', () => {
 
     const rendered = textSpy.mock.calls.map((call) => String(call[0]));
     expect(rendered).toContain('42');
-    expect(rendered).toContain('42-3');
-    expect(rendered).toContain('42-4');
+    expect(rendered).not.toContain('42-3');
+    expect(rendered).not.toContain('42-4');
     expect(rendered).toContain('2,1 пог. м');
     expect(rendered).toContain('вдоль полотна');
   });
