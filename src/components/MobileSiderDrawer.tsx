@@ -13,54 +13,19 @@ import { useOrderFinancialVisibility } from "../hooks/useOrderFinancialVisibilit
 import { useSiderMenuItems } from "../utils/siderMenuItems";
 import { bitrix24MenuConfig } from "../config/bitrix24";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
+import { useSidebarMenuPreferences } from "../hooks/useSidebarMenuPreferences";
 import {
   canViewResourceByRoleVisibility,
   getCurrentUserRoleKey,
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
+import {
+  LEGACY_CATEGORY_MAP,
+  LEGACY_CATEGORY_ORDER,
+} from "../utils/navigationMenuConfig";
 import { SIDER_RESOURCE_ICONS } from "./siderResourceIcons";
 
 const { Title } = Typography;
-
-const CATEGORY_ORDER = [
-  "Контрагенты",
-  "Финансы",
-  "Производство",
-  "Материалы",
-  "Данные",
-  "Справочники",
-  "Журналы",
-  "Настройки",
-] as const;
-
-const CATEGORY_MAP: Record<string, string> = {
-  clients: "Контрагенты",
-  clients_analytics_view: "Контрагенты",
-  suppliers: "Контрагенты",
-  vendors: "Контрагенты",
-  film_vendors: "Контрагенты",
-  payments: "Финансы",
-  payments_view: "Финансы",
-  "orders-trash": "Данные",
-  "mdf-work-board": "Производство",
-  groups: "Производство",
-  projects: "Производство",
-  order_workshops: "Производство",
-  workshops: "Производство",
-  work_centers: "Производство",
-  doweling_orders_view: "Производство",
-  bazis: "Производство",
-  "cut-jobs": "Производство",
-  "bazis-cut-sets": "Производство",
-  films: "Материалы",
-  materials: "Материалы",
-  sheet_material_types: "Материалы",
-  extra_resources: "Материалы",
-  employees: "Настройки",
-  users: "Настройки",
-  configuration: "Настройки",
-  audit: "Журналы",
-};
 
 const RESOURCE_LABELS: Record<string, string> = {
   orders_view: "Заказы",
@@ -89,6 +54,7 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
   const location = useLocation();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const { getSetting } = useAppSettings();
+  const sidebarMenuPreferences = useSidebarMenuPreferences();
 
   const currentUser = featureFlags.useBackendPermissions
     ? authSession.getUser()
@@ -125,8 +91,8 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
       push(route);
       onClose();
     },
-    categoryOrder: CATEGORY_ORDER,
-    categoryMap: CATEGORY_MAP,
+    categoryOrder: LEGACY_CATEGORY_ORDER,
+    categoryMap: LEGACY_CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: SIDER_RESOURCE_ICONS,
     canViewNavigation,
@@ -136,6 +102,7 @@ export const MobileSiderDrawer: React.FC<MobileSiderDrawerProps> = ({ open, onCl
     crm: bitrix24MenuConfig
       ? { ...bitrix24MenuConfig, icon: <ContactsOutlined /> }
       : null,
+    sidebarMenuOrder: sidebarMenuPreferences.settings,
   });
 
   return (

@@ -1,7 +1,7 @@
 import { Refine, Authenticated } from "@refinedev/core";
 import { RefineKbar, RefineKbarProvider } from "@refinedev/kbar";
 import { VariantWorkspaceLayout } from "./ui-variant/shellRegistry";
-import routerProvider, { CatchAllNavigate, NavigateToResource } from "@refinedev/react-router-v6";
+import routerProvider, { CatchAllNavigate } from "@refinedev/react-router-v6";
 import { BrowserRouter, Navigate, Route, Routes, Outlet } from "react-router-dom";
 import { ConfigProvider, Spin, notification, theme as antdTheme } from "antd";
 import { useEffect, lazy, type ReactNode } from "react";
@@ -28,6 +28,7 @@ import { getModernUiTheme } from "./ui-evolution/theme/evolutionTheme";
 import { can } from "./utils/permissions";
 import type { PermissionName } from "./api/types/authApi.types";
 import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility";
+import { DefaultRootRedirect } from "./components/DefaultRootRedirect";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -692,7 +693,7 @@ const ThemedApp = () => {
                 >
                   <Route
                     index
-                    element={<NavigateToResource resource="orders_view" />}
+                    element={<DefaultRootRedirect />}
                   />
                   <Route path="/orders" >
                     <Route index element={<OrderList />} />

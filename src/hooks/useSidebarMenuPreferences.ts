@@ -10,9 +10,11 @@ export const EMPTY_SIDEBAR_MENU_ORDER: SidebarMenuOrderPreference = {
 
 export function useSidebarMenuPreferences() {
   const [settings, setSettings] = useState<SidebarMenuOrderPreference>(EMPTY_SIDEBAR_MENU_ORDER);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
+    setIsLoading(true);
     profileApi.getPreferences()
       .then((response) => {
         if (!alive) return;
@@ -20,6 +22,9 @@ export function useSidebarMenuPreferences() {
       })
       .catch(() => {
         if (alive) setSettings(EMPTY_SIDEBAR_MENU_ORDER);
+      })
+      .finally(() => {
+        if (alive) setIsLoading(false);
       });
     return () => {
       alive = false;
@@ -32,5 +37,5 @@ export function useSidebarMenuPreferences() {
     setSettings(response.preferences.sidebarMenuOrder ?? next);
   }, []);
 
-  return { settings, saveSettings };
+  return { settings, saveSettings, isLoading };
 }

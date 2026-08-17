@@ -33,6 +33,7 @@ export interface SiderMenuData {
   selectedKey: string;
   canCreateOrders: boolean;
   canViewSettings: boolean;
+  defaultRoute: string;
   ordersRoute: string;
   calendarRoute: string;
   statusBoardRoute: string | null;
@@ -224,6 +225,27 @@ export function applySidebarMenuOrderToResources(
     result[category].push(...byName.values());
   }
   return result;
+}
+
+export function resolveDefaultSiderRoute(args: {
+  topOrder: readonly string[];
+  topRoutes: Record<string, string | null | undefined>;
+  categorizedResources: Record<string, SiderMenuItem[]>;
+  categoryOrder: readonly string[];
+  fallback?: string;
+}): string {
+  for (const key of args.topOrder) {
+    const route = args.topRoutes[key];
+    if (route) return route;
+  }
+
+  for (const category of args.categoryOrder) {
+    const firstRoute = (args.categorizedResources[category] ?? [])
+      .find((item) => Boolean(item.route))?.route;
+    if (firstRoute) return firstRoute;
+  }
+
+  return args.fallback ?? '/orders';
 }
 
 /**
@@ -539,6 +561,28 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     [categorizedResources, orderedCategoryOrder, resourceIcons, handleNavigate],
   );
 
+  const defaultRoute = useMemo(
+    () => resolveDefaultSiderRoute({
+      topOrder: menuOrderSettings.top,
+      topRoutes: {
+        orders_view: ordersRoute,
+        calendar: calendarRoute,
+        'order-status-board': statusBoard?.route,
+      },
+      categorizedResources,
+      categoryOrder: orderedCategoryOrder,
+      fallback: ordersRoute,
+    }),
+    [
+      calendarRoute,
+      categorizedResources,
+      menuOrderSettings.top,
+      orderedCategoryOrder,
+      ordersRoute,
+      statusBoard,
+    ],
+  );
+
   return {
     topMenuItems,
     topMenuOrderItems: extractMenuOrderItems(defaultTopMenuItems),
@@ -550,6 +594,7 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
     selectedKey,
     canCreateOrders,
     canViewSettings,
+    defaultRoute,
     ordersRoute,
     calendarRoute,
     statusBoardRoute: statusBoard?.route ?? null,

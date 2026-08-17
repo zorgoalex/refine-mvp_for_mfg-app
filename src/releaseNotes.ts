@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-17",
+    title: "Навигация: стартовый экран по видимому меню",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "После входа приложение открывает первый доступный экран из сайдбара с учётом скрытых пунктов и личного порядка меню пользователя, а не всегда экран «Заказы».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-17",
     title: "Бирки: пустая бирка в конце печати",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

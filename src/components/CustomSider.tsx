@@ -30,6 +30,10 @@ import {
   getCurrentUserRoleKey,
   normalizeRoleVisibilityMatrix,
 } from "../utils/resourceVisibility";
+import {
+  LEGACY_CATEGORY_MAP,
+  LEGACY_CATEGORY_ORDER,
+} from "../utils/navigationMenuConfig";
 import { APP_VERSION } from "../version";
 import { SidebarMenuSettingsButton } from "./SidebarMenuSettingsButton";
 import { SIDER_RESOURCE_ICONS } from "./siderResourceIcons";
@@ -43,17 +47,6 @@ const menuLabelWithTooltip = (label: string) => (
   </Tooltip>
 );
 
-const CATEGORY_ORDER = [
-  "Контрагенты",
-  "Финансы",
-  "Производство",
-  "Материалы",
-  "Данные",
-  "Справочники",
-  "Журналы",
-  "Настройки",
-] as const;
-
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Контрагенты": <TeamOutlined />,
   "Финансы": <DollarOutlined />,
@@ -63,36 +56,6 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
   "Справочники": <SettingOutlined />,
   "Журналы": <AuditOutlined />,
   "Настройки": <SettingOutlined />,
-};
-
-const CATEGORY_MAP: Record<string, string> = {
-  clients: "Контрагенты",
-  clients_analytics_view: "Контрагенты",
-  suppliers: "Контрагенты",
-  vendors: "Контрагенты",
-  film_vendors: "Контрагенты",
-  payments: "Финансы",
-  payments_view: "Финансы",
-  "orders-trash": "Данные",
-  "mdf-work-board": "Производство",
-  groups: "Производство",
-  projects: "Производство",
-  order_workshops: "Производство",
-  workshops: "Производство",
-  work_centers: "Производство",
-  doweling_orders_view: "Производство",
-  bazis: "Производство",
-  "cut-jobs": "Производство",
-  "bazis-cut-sets": "Производство",
-  scan: "Производство",
-  films: "Материалы",
-  materials: "Материалы",
-  sheet_material_types: "Материалы",
-  extra_resources: "Материалы",
-  employees: "Настройки",
-  users: "Настройки",
-  configuration: "Настройки",
-  audit: "Журналы",
 };
 
 export const CustomSider: React.FC = () => {
@@ -144,8 +107,8 @@ export const CustomSider: React.FC = () => {
     resources,
     pathname: location.pathname,
     push,
-    categoryOrder: CATEGORY_ORDER,
-    categoryMap: CATEGORY_MAP,
+    categoryOrder: LEGACY_CATEGORY_ORDER,
+    categoryMap: LEGACY_CATEGORY_MAP,
     resourceLabels: RESOURCE_LABELS,
     resourceIcons: SIDER_RESOURCE_ICONS,
     canViewNavigation,
