@@ -29,6 +29,11 @@ import {
   formatCutNumber,
 } from '../application/cut-numbering';
 import {
+  allocateCutJobSourceDisplayNumber,
+  cutJobDisplayNumberKind,
+  type CutJobDisplayNumberKind,
+} from './cut-job-display-number';
+import {
   classifyDetailEligibility,
   type DetailEligibilityCandidate,
 } from '../application/cut-eligibility';
@@ -772,10 +777,11 @@ export class PgCutRepository implements CutRepositoryPort {
       // config edit after the draft exists must NOT retro-mutate this job. The
       // snapshot is the authoritative payload at calculate time.
       const paramsSnapshot = await this.config.getDefaultParams();
+      const sourceDisplayNumber = await allocateCutJobSourceDisplayNumber(tx, 'regular');
       const inserted = await tx.query<{ cut_job_id: string | number }>(
         `
-        INSERT INTO cut_job (name, source, selection_criteria, params, created_by)
-        VALUES ($1, 'manual', $2::jsonb, $3::jsonb, $4)
+        INSERT INTO cut_job (name, source, selection_criteria, params, created_by, source_display_number)
+        VALUES ($1, 'manual', $2::jsonb, $3::jsonb, $4, $5)
         RETURNING cut_job_id
         `,
         [
@@ -783,6 +789,7 @@ export class PgCutRepository implements CutRepositoryPort {
           command.dto.criteria ? JSON.stringify(command.dto.criteria) : null,
           JSON.stringify(paramsSnapshot),
           numOrNull(command.currentUser.id),
+          sourceDisplayNumber,
         ],
       );
       const cutJobId = toNum(inserted.rows[0].cut_job_id);
@@ -814,7 +821,7 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId,
         requestId: command.requestId,
         related: { orderIds: reservedOrderIds, sheetMaterialTypeIds: reservedSheetTypeIds },
-        metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount },
+        metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount, displayNumber: sourceDisplayNumber },
       });
 
       return loadJob(tx, cutJobId);
@@ -4280,8 +4287,24 @@ export class PgCutRepository implements CutRepositoryPort {
   async setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto> {
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
-      const jobRes = await tx.query<{ cut_job_id: string | number; status: string; version: string | number; param_profile_id: string | number | null }>(
-        `SELECT cut_job_id, status, version, param_profile_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+      const jobRes = await tx.query<{
+        cut_job_id: string | number;
+        status: string;
+        version: string | number;
+        param_profile_id: string | number | null;
+        source: string;
+        source_display_number: string | number | null;
+        before_profile_params: unknown;
+        before_last_calc_params: unknown;
+      }>(
+        `SELECT j.cut_job_id, j.status, j.version, j.param_profile_id,
+                j.source, j.source_display_number, before_profile.params AS before_profile_params,
+                j.last_calc_params AS before_last_calc_params
+         FROM cut_job j
+         LEFT JOIN cut_param_profiles before_profile
+           ON before_profile.cut_param_profile_id = j.param_profile_id
+         WHERE j.cut_job_id = $1
+         FOR UPDATE OF j`,
         [command.cutJobId],
       );
       const row = jobRes.rows[0];
@@ -4290,12 +4313,15 @@ export class PgCutRepository implements CutRepositoryPort {
       if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
         throw new CutJobNotMutableError(command.cutJobId, row.status);
       }
+      let afterProfileParams: unknown = null;
       if (command.paramProfileId !== null) {
-        const exists = await tx.query(
-          `SELECT 1 FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true LIMIT 1`,
+        const exists = await tx.query<{ params: unknown }>(
+          `SELECT params FROM cut_param_profiles WHERE cut_param_profile_id = $1 AND is_active = true LIMIT 1`,
           [command.paramProfileId],
         );
-        if (exists.rows.length === 0) throw new CutParamProfileNotFoundError(command.paramProfileId);
+        const profileRow = exists.rows[0];
+        if (!profileRow) throw new CutParamProfileNotFoundError(command.paramProfileId);
+        afterProfileParams = profileRow.params;
       }
       const beforeProfileId = row.param_profile_id === null ? null : toNum(row.param_profile_id);
 
@@ -4307,9 +4333,24 @@ export class PgCutRepository implements CutRepositoryPort {
         return;
       }
 
+      const currentDisplayKind = cutJobDisplayNumberKind(row.source_display_number);
+      const beforeKind = cutJobEffectiveDisplayKind(
+        row.source_display_number,
+        row.before_profile_params,
+        row.before_last_calc_params,
+      );
+      const afterKind: CutJobDisplayNumberKind = cutParamsUseVacuumTable(afterProfileParams) ? 'vacuum' : 'regular';
+      const nextSourceDisplayNumber = row.source === 'manual' && (currentDisplayKind === null || beforeKind !== afterKind)
+        ? await allocateCutJobSourceDisplayNumber(tx, afterKind)
+        : null;
       await tx.query(
-        `UPDATE cut_job SET param_profile_id = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
-        [command.cutJobId, command.paramProfileId],
+        `UPDATE cut_job
+         SET param_profile_id = $2,
+             source_display_number = COALESCE($3, source_display_number),
+             version = version + 1,
+             updated_at = now()
+         WHERE cut_job_id = $1`,
+        [command.cutJobId, command.paramProfileId, nextSourceDisplayNumber],
       );
 
       await this.audit(tx, command.currentUser, {
@@ -4317,8 +4358,13 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId: command.cutJobId,
         requestId: command.requestId,
         before: { paramProfileId: beforeProfileId },
-        after: { paramProfileId: command.paramProfileId },
-        metadata: { beforeProfileId, afterProfileId: command.paramProfileId },
+        after: { paramProfileId: command.paramProfileId, sourceDisplayNumber: nextSourceDisplayNumber ?? row.source_display_number ?? null },
+        metadata: {
+          beforeProfileId,
+          afterProfileId: command.paramProfileId,
+          beforeDisplayNumber: row.source_display_number ?? null,
+          afterDisplayNumber: nextSourceDisplayNumber ?? row.source_display_number ?? null,
+        },
       });
 
       await tx.query(
@@ -5442,6 +5488,15 @@ function cutParamsUseVacuumTable(params: unknown): boolean {
     && (params as { layout_mode?: unknown }).layout_mode === 'vacuum_table';
 }
 
+function cutJobEffectiveDisplayKind(
+  sourceDisplayNumber: string | number | null | undefined,
+  profileParams: unknown,
+  lastCalcParams: unknown,
+): CutJobDisplayNumberKind {
+  return cutJobDisplayNumberKind(sourceDisplayNumber)
+    ?? (cutParamsUseVacuumTable(profileParams) || cutParamsUseVacuumTable(lastCalcParams) ? 'vacuum' : 'regular');
+}
+
 function buildPdfSheetMeta(
   placements: SheetPlacementsJson,
   detailById: ReadonlyMap<number, RenderDetailInfo>,
@@ -6196,7 +6251,7 @@ async function loadJob(
   };
 
   const jobId = toNum(jobRow.cut_job_id);
-  const isVacuum = cutParamsUseVacuumTable(jobRow.profile_params) || cutParamsUseVacuumTable(jobRow.last_calc_params);
+  const isVacuum = cutJobEffectiveDisplayKind(jobRow.source_display_number, jobRow.profile_params, jobRow.last_calc_params) === 'vacuum';
 
   return {
     cutJobId: jobId,
@@ -6681,7 +6736,7 @@ function mdfBoardPacketSnapshot(packet: MdfBoardCardPacketRow): Record<string, u
     svgCutImportStatus: packet.svg_cut_import_status ?? 'none',
     svgCutImportNote: packet.svg_cut_import_note,
     svgCutJobId: packet.svg_cut_job_id === null ? null : toNum(packet.svg_cut_job_id),
-    svgCutJobDisplayNumber: packet.svg_cut_job_display_number === null ? null : toNum(packet.svg_cut_job_display_number),
+    svgCutJobDisplayNumber: displayNumberOrNull(packet.svg_cut_job_display_number),
     svgCutResultId: packet.svg_cut_result_id === null ? null : toNum(packet.svg_cut_result_id),
     svgCutResultNo: packet.svg_cut_result_no === null ? null : toNum(packet.svg_cut_result_no),
   };
@@ -6734,7 +6789,7 @@ async function enqueueMdfBoardCardCreatedEvent(
         createMdfMachineFileCard: true,
         forcedFromCutJob: true,
         cutJobId: input.packet.svg_cut_job_id === null ? null : toNum(input.packet.svg_cut_job_id),
-        cutJobDisplayNumber: input.packet.svg_cut_job_display_number === null ? null : toNum(input.packet.svg_cut_job_display_number),
+        cutJobDisplayNumber: displayNumberOrNull(input.packet.svg_cut_job_display_number),
         cutResultId: input.packet.svg_cut_result_id === null ? null : toNum(input.packet.svg_cut_result_id),
         cutResultNo: input.packet.svg_cut_result_no === null ? null : toNum(input.packet.svg_cut_result_no),
         svgCutImportStatus: input.packet.svg_cut_import_status ?? 'none',
@@ -6987,6 +7042,12 @@ function cleanIds(values: Array<number | null> | undefined): number[] {
 
 function toNum(value: string | number): number {
   return Number(value);
+}
+
+function displayNumberOrNull(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text === '' ? null : text;
 }
 
 function numOrNull(value: string | number | null | undefined): number | null {

@@ -1604,6 +1604,14 @@ html {
   overflow-y: auto;
 }
 
+.cut-job-kind-tabs {
+  margin-bottom: 8px;
+}
+
+.cut-job-kind-tabs .ant-tabs-nav {
+  margin-bottom: 0;
+}
+
 .cut-jobs-table .ant-table-thead > tr > th {
   position: sticky !important;
   top: 0;

@@ -12,7 +12,10 @@ const repositorySource = readFileSync(new URL('./pg-cnc-telegram-repository.ts',
 
 describe('PgCncTelegramRepository', () => {
   it('returns bath display cut numbers without result version', () => {
-    expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
+    expect(repositorySource).toContain('j.source_display_number');
+    expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true, row.source_display_number)');
+    expect(repositorySource).toContain('cutNumber: formatCutNumber(cutJobId, resultNo, true, row.source_display_number)');
+    expect(repositorySource).not.toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
   });
 
   it('emits the MDF machine-files automation event from pending board cards', () => {
@@ -102,6 +105,7 @@ describe('PgCncTelegramRepository', () => {
 
   it('supports forced manual SVG cut-job display number without reusing the identity id', () => {
     expect(repositorySource).toContain('requestedCutJobId: command.dto.requestedCutJobId ?? null');
+    expect(repositorySource).toContain('allocateCutJobSourceDisplayNumber(tx, \'regular\')');
     expect(repositorySource).toContain('CUT_JOB_NUMBER_CONFLICT');
     expect(repositorySource).toContain('suggestedCutJobIds');
     expect(repositorySource).toContain('ensureSvgCutJobDisplayNumberAvailable');
@@ -2231,15 +2235,16 @@ describe('PgCncTelegramRepository', () => {
     expect(resultInsertIndex).toBeGreaterThan(commandInsertIndex);
     expect(resultInsert?.text).toContain('command_id, command_payload_hash, request_hash');
     expect(jobInsert?.text).toContain('source_display_number');
-    expect(jobInsert?.params[7]).toBe('12');
+    expect(jobInsert?.params[7]).toBe('1');
+    expect(queries.some((query) => query.params[0] === 'cut_job_display_number:regular')).toBe(true);
     expect(commandInsert?.params[1]).toMatch(/^[0-9a-f-]{36}$/i);
     expect(resultInsert?.params[1]).toBe(commandInsert?.params[1]);
     expect(resultInsert?.params[2]).toBe(commandInsert?.params[2]);
-    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({ displayNumber: '12', unplaced: [] });
+    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({ displayNumber: '1', unplaced: [] });
     expect(commandComplete?.params).toEqual([700, commandInsert?.params[1], 704]);
   });
 
-  it('keeps SVG packet when cut job display number needs review', async () => {
+  it('does not block Telegram SVG import when chat sequence number is already a cut display number', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
       query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
@@ -2314,13 +2319,28 @@ describe('PgCncTelegramRepository', () => {
         if (/FROM generate_series/i.test(text)) {
           return { rows: [{ cut_job_id: 81 }, { cut_job_id: 82 }] };
         }
+        if (/INSERT INTO cut_job\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_id: 700, created_at: '2026-07-24T08:00:00.000Z' }] };
+        }
+        if (/INSERT INTO cut_group\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_id: 701 }] };
+        }
+        if (/INSERT INTO cut_job_item\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_item_id: 702 }] };
+        }
+        if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_sheet_id: 703 }] };
+        }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) {
+          return { rows: [{ cut_result_id: 704 }] };
+        }
         if (/FROM cnc_telegram_packets p/i.test(text)) {
           return {
             rows: [packetRow({
-              svg_cut_job_id: null,
-              svg_cut_result_id: null,
-              svg_cut_import_status: 'needs_review',
-              svg_cut_import_note: 'Задание на раскрой №12 уже существует',
+              svg_cut_job_id: 700,
+              svg_cut_result_id: 704,
+              svg_cut_import_status: 'imported',
+              svg_cut_import_note: 'SVG layout imported into cut job',
             })],
           };
         }
@@ -2383,19 +2403,21 @@ describe('PgCncTelegramRepository', () => {
       requestId: 'request-cnc-1',
     });
 
-    const reviewUpdate = queries.find((query) =>
+    const importUpdate = queries.find((query) =>
       /UPDATE cnc_telegram_packets/i.test(query.text) &&
       /svg_cut_import_status = \$2/i.test(query.text),
     );
+    const jobInsert = queries.find((query) => /INSERT INTO cut_job\s*\(/i.test(query.text));
 
-    expect(queries.some((query) => /INSERT INTO cut_job\s*\(/i.test(query.text))).toBe(false);
-    expect(reviewUpdate?.params.slice(1, 5)).toEqual([
-      'needs_review',
-      'Задание на раскрой №12 уже существует',
-      null,
-      null,
+    expect(queries.some((query) => /SELECT existing_job\.cut_job_id/i.test(query.text))).toBe(false);
+    expect(jobInsert?.params[7]).toBe('1');
+    expect(importUpdate?.params.slice(1, 5)).toEqual([
+      'imported',
+      'SVG layout imported into cut job',
+      700,
+      704,
     ]);
-    expect(result.packet.svgCutImportStatus).toBe('needs_review');
+    expect(result.packet.svgCutImportStatus).toBe('imported');
     expect(result.applied).toBe(true);
   });
 
@@ -2504,7 +2526,7 @@ describe('PgCncTelegramRepository', () => {
       /svg_cut_import_status = \$2/i.test(query.text),
     );
 
-    expect(jobInsert?.params[7]).toBe('104');
+    expect(jobInsert?.params[7]).toBe('1');
     expect(queries.some((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);

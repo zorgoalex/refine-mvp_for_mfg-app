@@ -16,6 +16,7 @@ import {
 } from '../../../shared/cut-render-style';
 import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
 import { formatCutJobNumber, formatCutNumber } from '../../cut/application/cut-numbering';
+import { allocateCutJobSourceDisplayNumber } from '../../cut/adapters/cut-job-display-number';
 import type {
   CutGroupDto,
   CutJobDto,
@@ -244,6 +245,7 @@ interface CurrentDateRow extends QueryResultRow {
 interface BathJoinedRow extends QueryResultRow {
   cut_result_id: string | number;
   cut_job_id: string | number;
+  source_display_number: string | number | null;
   result_no: string | number;
   revision_no: string | number;
   result_created_at: string | Date;
@@ -551,7 +553,6 @@ export class PgCncTelegramRepository
         );
         if (!skippedExistingSourceFile) {
           await ensureCuttingSequenceNo(tx, existing.packet_id, effectiveCommand.dto, Number(command.currentUser.id));
-          await syncExistingSvgCutJobSourceDisplayNumber(tx, existing.packet_id);
         }
         const packet = await loadPacket(tx, existing.packet_id);
         const response: CncTelegramIngestResponseDto = {
@@ -3371,7 +3372,9 @@ async function syncSvgCutImport(
   const row = state.rows[0];
   if (!row) return;
   if (row.svg_cut_import_status === 'imported' && row.svg_cut_job_id !== null) {
-    await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, options.requestedCutJobId ?? row.cutting_sequence_no);
+    if (options.requestedCutJobId !== null && options.requestedCutJobId !== undefined) {
+      await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, options.requestedCutJobId);
+    }
     return;
   }
 
@@ -3433,9 +3436,9 @@ async function syncSvgCutImport(
 async function syncSvgCutJobSourceDisplayNumber(
   tx: TransactionClient,
   cutJobId: string | number | null,
-  cuttingSequenceNo: string | number | null,
+  requestedCutJobId: string | number | null,
 ): Promise<void> {
-  const displayNumber = sourceDisplayNumberFromCuttingSequence(cuttingSequenceNo);
+  const displayNumber = sourceDisplayNumberFromRequestedCutJobId(requestedCutJobId);
   const resolvedCutJobId = toNullableNumber(cutJobId);
   if (resolvedCutJobId === null || displayNumber === null) return;
   await ensureSvgCutJobDisplayNumberAvailable(tx, displayNumber, resolvedCutJobId);
@@ -3449,27 +3452,9 @@ async function syncSvgCutJobSourceDisplayNumber(
   );
 }
 
-async function syncExistingSvgCutJobSourceDisplayNumber(
-  tx: TransactionClient,
-  packetId: string,
-): Promise<void> {
-  const result = await tx.query<{
-    svg_cut_job_id: string | number | null;
-    cutting_sequence_no: string | number | null;
-  }>(
-    `SELECT svg_cut_job_id, cutting_sequence_no
-     FROM cnc_telegram_packets
-     WHERE packet_id = $1::uuid`,
-    [packetId],
-  );
-  const row = result.rows[0];
-  if (!row) return;
-  await syncSvgCutJobSourceDisplayNumber(tx, row.svg_cut_job_id, row.cutting_sequence_no);
-}
-
-function sourceDisplayNumberFromCuttingSequence(value: string | number | null): string | null {
-  const cuttingSequenceNo = toPositiveInteger(value);
-  return cuttingSequenceNo === null ? null : String(cuttingSequenceNo);
+function sourceDisplayNumberFromRequestedCutJobId(value: string | number | null): string | null {
+  const requestedCutJobId = toPositiveInteger(value);
+  return requestedCutJobId === null ? null : String(requestedCutJobId);
 }
 
 async function lockSvgSourceFileIfPresent(
@@ -4231,8 +4216,10 @@ async function createSvgCutJob(
   requestedCutJobId: number | null = null,
 ): Promise<{ cutJobId: number; cutResultId: number | null }> {
   const params = SVG_REVERSE_IMPORT_PARAMS;
-  const sourceDisplayNumber = String(requestedCutJobId ?? cuttingSequenceNo);
-  await ensureSvgCutJobDisplayNumberAvailable(tx, sourceDisplayNumber, null);
+  const requestedSourceDisplayNumber = requestedCutJobId === null ? null : String(requestedCutJobId);
+  if (requestedSourceDisplayNumber !== null) {
+    await ensureSvgCutJobDisplayNumberAvailable(tx, requestedSourceDisplayNumber, null);
+  }
   const isManualSvgUpload = dto.source.chatId === MANUAL_SVG_CHAT_ID;
   const selectionSource = isManualSvgUpload ? 'manual_svg_upload' : 'cnc_telegram_svg';
   const selectionCriteria = {
@@ -4263,6 +4250,8 @@ async function createSvgCutJob(
     cuttingSequenceNo,
     requestHash,
   });
+  const resolvedSourceDisplayNumber = requestedSourceDisplayNumber
+    ?? await allocateCutJobSourceDisplayNumber(tx, 'regular');
   const cutJobInsertParams = [
     jobName,
     JSON.stringify(selectionCriteria),
@@ -4271,7 +4260,7 @@ async function createSvgCutJob(
     toNullableNumber(actorUserId),
     requestHash,
     plan.sheetMaterialTypeId,
-    sourceDisplayNumber,
+    resolvedSourceDisplayNumber,
   ];
   const job = await tx.query<{ cut_job_id: string | number; created_at: string | Date }>(
     `
@@ -4341,7 +4330,7 @@ async function createSvgCutJob(
   const totals = buildSvgCutTotals(plan);
   const snapshot: CutJobDto = {
     cutJobId,
-    displayNumber: formatCutJobNumber(cutJobId, false, sourceDisplayNumber),
+    displayNumber: formatCutJobNumber(cutJobId, false, resolvedSourceDisplayNumber),
     createdAt: cutJobCreatedAt,
     name: jobName,
     status: 'ready',
@@ -6829,6 +6818,7 @@ async function loadBathCards(
       SELECT
         r.cut_result_id,
         r.cut_job_id,
+        j.source_display_number,
         r.result_no,
         r.revision_no,
         r.created_at AS result_created_at,
@@ -7201,8 +7191,8 @@ function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
         cutResultId,
         resultNo,
         revisionNo,
-        cutNumber: formatCutNumber(cutJobId, resultNo, true),
-        displayCutNumber: formatCutJobNumber(cutJobId, true),
+        cutNumber: formatCutNumber(cutJobId, resultNo, true, row.source_display_number),
+        displayCutNumber: formatCutJobNumber(cutJobId, true, row.source_display_number),
         cutJobName: normalizeOptional(row.cut_job_name) ?? `Раскрой ${cutJobId}`,
         createdAt: toIso(row.result_created_at),
         ready: false,

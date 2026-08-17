@@ -57,7 +57,8 @@ describe('PgLabelsRepository structural guards', () => {
     expect(source).toContain('PARTITION BY (is_vacuum IS TRUE)');
     expect(source).toContain("COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) AS cut_job_display_number");
     expect(source).toContain("max(cut_job_display_number || '-' || result_no::text) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number");
-    expect(source).toContain("max('В-' || cut_job_display_number || '-' || result_no::text) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number");
+    expect(source).toContain("WHEN cut_job_display_number LIKE 'В-%' THEN cut_job_display_number");
+    expect(source).toContain("ELSE 'В-' || cut_job_display_number");
     expect(source).toContain('FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number');
     expect(source).toContain('FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number');
   });
@@ -140,7 +141,8 @@ describe('PgLabelsRepository structural guards', () => {
   it('filters required label cut-map selections by selected source', () => {
     expect(source).toContain("$4::text = 'bath'");
     expect(source).toContain("$4::text = 'regular'");
-    expect(source).toContain("'В-' || COALESCE(NULLIF(btrim(j.source_display_number), ''), p.cut_job_id::text) || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number");
+    expect(source).toContain("WHEN NULLIF(btrim(j.source_display_number), '') LIKE 'В-%'");
+    expect(source).toContain("ELSE 'В-' || COALESCE(NULLIF(btrim(j.source_display_number), ''), p.cut_job_id::text)");
     expect(source).toContain("= cut_version_fields.regular_cut_number");
     expect(source).toContain('LABEL_CUT_MAP_SELECTION_SOURCE_MISMATCH');
     expect(source).toContain('cutMapSourceMatches');

@@ -539,7 +539,12 @@ describe('CutPage source guards', () => {
 describe('CutPage profile + totals columns (source guard)', () => {
   it('filters the job list by cut profile from the top filter block', () => {
     expect(source).toContain('const [profileFilter, setProfileFilter]');
-    expect(source).toContain(': filterJobsByProfile(statusFiltered, profileFilter)');
+    expect(source).toContain('const [jobKindTab, setJobKindTab]');
+    expect(source).toContain('cutJobMatchesKindTab(candidate, profiles, jobKindTab)');
+    expect(source).toContain(': filterJobsByProfile(kindFiltered, profileFilter)');
+    expect(source).toContain("label: 'Ванны'");
+    expect(source).toContain("label: 'Раскрои'");
+    expect(source).toContain('<Tabs');
     expect(source).toContain('<span>Профиль раскроя</span>');
     expect(source).toContain('aria-label="Фильтр по профилю раскроя"');
     expect(source).toContain('placeholder="Все профили"');

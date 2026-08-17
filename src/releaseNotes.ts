@@ -41,6 +41,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-17",
+    title: "Раскрой: вкладки и отдельная нумерация",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "Экран «Раскрой» разделён на вкладки «Ванны» и «Раскрои»: задания с профилями вакуумного стола вынесены отдельно от остальных раскроев.",
+    ],
+    changed: [
+      "Номера заданий раскроя теперь ведутся независимо для обычных раскроев и ванн; номера ванн показываются как «В-<номер>».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-17",
     title: "МДФ-работы: период по умолчанию",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

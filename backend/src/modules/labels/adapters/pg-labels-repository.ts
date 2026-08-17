@@ -213,7 +213,12 @@ LEFT JOIN LATERAL (
   )
   SELECT
     max(cut_job_display_number || '-' || result_no::text) FILTER (WHERE is_vacuum IS NOT TRUE AND rn = 1) AS regular_cut_number,
-    max('В-' || cut_job_display_number || '-' || result_no::text) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number
+    max(
+      CASE
+        WHEN cut_job_display_number LIKE 'В-%' THEN cut_job_display_number
+        ELSE 'В-' || cut_job_display_number
+      END || '-' || result_no::text
+    ) FILTER (WHERE is_vacuum IS TRUE AND rn = 1) AS vacuum_cut_number
   FROM ranked
 ) cut_version_fields ON true
 `;
@@ -2539,7 +2544,11 @@ export async function resolveLabelCutMaps(
              cpp.params->>'layout_mode',
              j.params->>'layout_mode'
            ) = 'vacuum_table'
-           AND ('В-' || COALESCE(NULLIF(btrim(j.source_display_number), ''), p.cut_job_id::text) || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number)
+           AND ((CASE
+                  WHEN NULLIF(btrim(j.source_display_number), '') LIKE 'В-%'
+                    THEN NULLIF(btrim(j.source_display_number), '')
+                  ELSE 'В-' || COALESCE(NULLIF(btrim(j.source_display_number), ''), p.cut_job_id::text)
+                END) || '-' || r.result_no::text) = cut_version_fields.vacuum_cut_number)
            OR ($4::text = 'regular' AND COALESCE(
              j.last_calc_params->>'layout_mode',
              cpp.params->>'layout_mode',

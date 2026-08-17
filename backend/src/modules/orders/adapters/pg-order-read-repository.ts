@@ -556,7 +556,11 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
                 cpp.params->>'layout_mode',
                 cj.params->>'layout_mode'
               ) = 'vacuum_table'
-                THEN 'В-' || COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) || '-' || cr.result_no::text
+                THEN CASE
+                  WHEN NULLIF(btrim(cj.source_display_number), '') LIKE 'В-%'
+                    THEN NULLIF(btrim(cj.source_display_number), '')
+                  ELSE 'В-' || COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text)
+                END || '-' || cr.result_no::text
               ELSE COALESCE(NULLIF(btrim(cj.source_display_number), ''), cj.cut_job_id::text) || '-' || cr.result_no::text
             END AS cut_number,
             COALESCE(

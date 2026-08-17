@@ -295,7 +295,11 @@ SELECT s.commit_sequence, s.detail_status_revision, s.cut_refs_revision,
              'bathCutJob', CASE WHEN d.bath_cut_job_id IS NULL THEN NULL ELSE jsonb_build_object(
                'cutJobId', d.bath_cut_job_id,
                'resultNo', d.bath_result_no,
-               'cutNumber', 'В-' || COALESCE(NULLIF(btrim(d.bath_source_display_number), ''), d.bath_cut_job_id::text) || '-' || d.bath_result_no::text,
+               'cutNumber', CASE
+                 WHEN NULLIF(btrim(d.bath_source_display_number), '') LIKE 'В-%'
+                   THEN NULLIF(btrim(d.bath_source_display_number), '')
+                 ELSE 'В-' || COALESCE(NULLIF(btrim(d.bath_source_display_number), ''), d.bath_cut_job_id::text)
+               END || '-' || d.bath_result_no::text,
                'name', d.bath_name,
                'paramProfileId', d.bath_profile_id,
                'profileName', d.bath_profile_name,

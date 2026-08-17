@@ -195,7 +195,7 @@ export interface CutSheetFitWarningDto {
 
 export interface CutJobDto {
   cutJobId: number;
-  /** Operator-facing job number without result version. Vacuum-table jobs use "В-<cutJobId>". */
+  /** Operator-facing job number without result version. Vacuum-table jobs use "В-<scoped number>". */
   displayNumber?: string;
   /** True when the current job/profile is vacuum-table routed. */
   isVacuum?: boolean;

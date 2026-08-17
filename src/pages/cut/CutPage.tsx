@@ -1,6 +1,6 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tag, Typography, message, theme } from 'antd';
+import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
@@ -96,6 +96,7 @@ import {
   filterJobsByStatus,
   formatCutJobDisplayNumber,
   formatGroupSummary,
+  isVacuumCutJobDisplayNumber,
   noSheetSpecMessage,
   parseIdCsv,
   parseJobQueryParam,
@@ -133,6 +134,11 @@ const DEFAULT_PDF_TEMPLATE_OPTIONS = [
   { value: 'bath_profiles', label: 'Профили ванны' },
 ];
 
+type CutJobKindTab = 'vacuum' | 'regular';
+
+const CUT_JOB_KIND_TAB_VACUUM: CutJobKindTab = 'vacuum';
+const CUT_JOB_KIND_TAB_REGULAR: CutJobKindTab = 'regular';
+
 const CUT_TEXTURE_DIRECTION_LABELS: Record<CutTextureDirection, string> = {
   vertical: 'вдоль полотна',
   horizontal: 'поперёк полотна',
@@ -145,6 +151,15 @@ const CUT_TEXTURE_DIRECTION_OPTIONS: Array<{ value: CutTextureDirection; label: 
 
 function cutTextureDirectionLabel(value: CutTextureDirection | null | undefined): string {
   return CUT_TEXTURE_DIRECTION_LABELS[value ?? 'none'] ?? CUT_TEXTURE_DIRECTION_LABELS.none;
+}
+
+function cutJobMatchesKindTab(
+  job: CutJobDto,
+  profiles: Parameters<typeof isVacuumCutJobDisplayNumber>[1],
+  tab: CutJobKindTab,
+): boolean {
+  const isVacuum = isVacuumCutJobDisplayNumber(job, profiles);
+  return tab === CUT_JOB_KIND_TAB_VACUUM ? isVacuum : !isVacuum;
 }
 
 const { Title, Text } = Typography;
@@ -1152,6 +1167,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [embeddedJobIds, setEmbeddedJobIds] = useState<Set<number> | null>(null);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>(CUT_JOB_STATUS_FILTER_ALL);
+  const [jobKindTab, setJobKindTab] = useState<CutJobKindTab>(CUT_JOB_KIND_TAB_REGULAR);
   const [profileFilter, setProfileFilter] = useState<CutJobProfileFilter>();
   const [showDeletedJobs, setShowDeletedJobs] = useState(false);
   const [jobSearch, setJobSearch] = useState('');
@@ -2651,6 +2667,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setJobSearch('');
     setOperationalSheetFilter(undefined);
     setOperationalFilmFilter(undefined);
+    setJobKindTab(CUT_JOB_KIND_TAB_REGULAR);
     setProfileFilter(undefined);
     setShowDeletedJobs(false);
     listFiltersRef.current = {};
@@ -2667,17 +2684,34 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     jobSearch.trim() ||
     operationalSheetFilter ||
     operationalFilmFilter ||
+    jobKindTab !== CUT_JOB_KIND_TAB_REGULAR ||
     profileFilter ||
     showDeletedJobs,
   );
+
+  const switchCutJobKindTab = useCallback((key: string) => {
+    const next = key === CUT_JOB_KIND_TAB_VACUUM ? CUT_JOB_KIND_TAB_VACUUM : CUT_JOB_KIND_TAB_REGULAR;
+    if (next === jobKindTab) return;
+    setJobKindTab(next);
+    setJob(null);
+    setSelectedResult(null);
+    setIsFrozenResultSelection(false);
+    applyPdfTemplateState(null);
+    setEligible(null);
+    setSelected([]);
+    resetSheetViews();
+  }, [applyPdfTemplateState, jobKindTab, resetSheetViews]);
 
   const filteredJobs = useMemo(() => {
     const statusFiltered = statusFilter === 'work'
       ? jobs.filter((candidate) => candidate.status === 'draft' || candidate.status === 'calculating')
       : filterJobsByStatus(jobs, statusFilter);
-    const profileFiltered = isEmbeddedOrder
+    const kindFiltered = isEmbeddedOrder
       ? statusFiltered
-      : filterJobsByProfile(statusFiltered, profileFilter);
+      : statusFiltered.filter((candidate) => cutJobMatchesKindTab(candidate, profiles, jobKindTab));
+    const profileFiltered = isEmbeddedOrder
+      ? kindFiltered
+      : filterJobsByProfile(kindFiltered, profileFilter);
     const scoped = !isEmbeddedOrder ? profileFiltered : profileFiltered.filter((candidate) =>
       embeddedJobIds?.has(candidate.cutJobId) ||
       candidate.items?.some((item) => item.orderId === embeddedOrderId),
@@ -2718,6 +2752,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     appliedJobOrderSearch,
     isEmbeddedOrder,
     jobSearch,
+    jobKindTab,
     jobs,
     operationalFilmFilter,
     operationalSheetFilter,
@@ -3872,6 +3907,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           </Space>
         ) : undefined}
       >
+        {!isEmbeddedOrder ? (
+          <Tabs
+            className="cut-job-kind-tabs"
+            size="small"
+            activeKey={jobKindTab}
+            onChange={switchCutJobKindTab}
+            items={[
+              { key: CUT_JOB_KIND_TAB_VACUUM, label: 'Ванны' },
+              { key: CUT_JOB_KIND_TAB_REGULAR, label: 'Раскрои' },
+            ]}
+          />
+        ) : null}
         {isOperational && !isEmbeddedOrder ? (
           <div className="cut-operational-table-toolbar">
             <div className="cut-operational-statuses" role="group" aria-label="Статус заданий">

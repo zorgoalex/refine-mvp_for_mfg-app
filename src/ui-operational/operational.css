@@ -1396,6 +1396,11 @@
   padding: 0;
 }
 
+:root:where([data-ui-variant="line"], [data-ui-variant="air"]) .cut-page-modern__jobs .cut-job-kind-tabs {
+  padding: 0 12px;
+  border-bottom: 1px solid var(--operational-border);
+}
+
 .cut-operational-table-toolbar {
   display: flex;
   min-height: 54px;
