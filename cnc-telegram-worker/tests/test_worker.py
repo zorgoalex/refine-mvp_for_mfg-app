@@ -1208,9 +1208,11 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
                     FakeTelegramClient([]), object(), group, "-100123", date(2026, 7, 24), audit=audit,
                 )
 
-            with self.assertRaisesRegex(RuntimeError, "ERP unavailable"):
-                await reconcile_pending_processing_attempts(spool, FailingErpClient(), worker.state)
+            failing_erp = FailingErpClient()
+            recovered = await reconcile_pending_processing_attempts(spool, failing_erp, worker.state)
 
+            self.assertEqual(recovered, [])
+            self.assertEqual(failing_erp.packets, accepting_erp.packets)
             operation = latest_processing_attempt(spool)
             self.assertEqual(operation["status"], "planned")
             self.assertEqual(operation["errorCode"], "backend_ingest_failed")

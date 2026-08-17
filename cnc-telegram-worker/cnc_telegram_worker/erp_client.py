@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -10,6 +11,11 @@ import httpx
 
 INGEST_MAX_ATTEMPTS = 3
 INGEST_RETRY_BASE_SECONDS = 0.5
+_SECRET_PATTERNS = (
+    (re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I), "Bearer [REDACTED]"),
+    (re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{20,}\b"), "[BOT_TOKEN_REDACTED]"),
+    (re.compile(r"\b(password|secret|api[_-]?hash|token)\s*[:=]\s*[^\s,;]+", re.I), r"\1=[REDACTED]"),
+)
 
 
 @dataclass
@@ -17,6 +23,12 @@ class BackendAuth:
     bearer_token: str = ""
     username: str = ""
     password: str = ""
+
+
+class ErpResponseError(RuntimeError):
+    def __init__(self, response: httpx.Response, action: str) -> None:
+        self.response = response
+        super().__init__(response_error_message(response, action))
 
 
 class ErpClient:
@@ -40,7 +52,8 @@ class ErpClient:
                     headers["Authorization"] = await self._authorization_header(force=True)
                     response = await client.post(f"{self.api_url}/cnc-telegram/ingest", json=packet, headers=headers)
                 if response.status_code < 500 or attempt + 1 >= INGEST_MAX_ATTEMPTS:
-                    response.raise_for_status()
+                    if response.is_error:
+                        raise ErpResponseError(response, "ERP ingest")
                     return response.json()
                 delay_seconds = INGEST_RETRY_BASE_SECONDS * (2 ** attempt)
                 print(
@@ -63,7 +76,8 @@ class ErpClient:
                     f"{self.api_url}/cnc-telegram/worker-logs/capabilities",
                     headers={"Authorization": await self._authorization_header(force=True)},
                 )
-            response.raise_for_status()
+            if response.is_error:
+                raise ErpResponseError(response, "ERP audit capabilities")
             data = response.json()
         if data.get("capability") != "cnc_telegram_worker_audit_v1":
             raise RuntimeError("backend does not expose cnc_telegram_worker_audit_v1")
@@ -83,7 +97,8 @@ class ErpClient:
                     json=payload,
                     headers={"Authorization": await self._authorization_header(force=True)},
                 )
-            response.raise_for_status()
+            if response.is_error:
+                raise ErpResponseError(response, "ERP audit batch")
             return response.json()
 
     async def claim_media_restores(self) -> dict[str, Any]:
@@ -132,7 +147,8 @@ class ErpClient:
                 self._access_token = ""
                 headers["Authorization"] = await self._authorization_header(force=True)
                 response = await client.post(f"{self.api_url}{path}", json=payload, headers=headers)
-            response.raise_for_status()
+            if response.is_error:
+                raise ErpResponseError(response, f"ERP POST {path}")
             return response.json()
 
     async def _authorization_header(self, force: bool = False) -> str:
@@ -147,7 +163,8 @@ class ErpClient:
                 f"{self.api_url}/auth/login",
                 json={"username": self.auth.username, "password": self.auth.password},
             )
-            response.raise_for_status()
+            if response.is_error:
+                raise ErpResponseError(response, "backend login")
             data = response.json()
         token = data.get("accessToken")
         if not isinstance(token, str) or not token:
@@ -164,3 +181,23 @@ def parse_expires_at(value: Any) -> datetime:
         except ValueError:
             pass
     return datetime.now(timezone.utc) + timedelta(minutes=10)
+
+
+def response_error_message(response: httpx.Response, action: str) -> str:
+    reason = response.reason_phrase or "HTTP error"
+    body = _response_body_excerpt(response)
+    message = f"{action} failed with {response.status_code} {reason}"
+    if body:
+        message = f"{message}: {body}"
+    return message
+
+
+def _response_body_excerpt(response: httpx.Response) -> str:
+    try:
+        text = response.text
+    except Exception:
+        return ""
+    text = " ".join(text.split())
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text[:1000]

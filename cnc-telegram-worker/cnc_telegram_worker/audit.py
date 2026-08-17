@@ -714,7 +714,14 @@ async def reconcile_pending_processing_attempts(
                 reconciled.append(audit.operations[operation["operationKey"]])
                 continue
             audit.defer_saved_processing_reconciliation(operation["operationKey"], message, error_message)
-            raise
+            print(
+                "Deferred CNC Telegram processing recovery after transient ERP ingest error "
+                f"externalPacketKey={packet.get('externalPacketKey')} "
+                f"sourceVersion={packet.get('source', {}).get('version')} "
+                f"error={error_message}",
+                flush=True,
+            )
+            continue
         response_packet = response.get("packet") if isinstance(response, dict) else None
         audit.finish_saved_operation(
             operation["operationKey"], message, "succeeded", "backend_ingest_succeeded",
