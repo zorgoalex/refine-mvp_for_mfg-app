@@ -3099,6 +3099,19 @@ async function ensureCuttingSequenceNo(
 ): Promise<void> {
   if (dto.cuttingSequenceNo != null) {
     await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['cnc_telegram_cutting_sequence_no']);
+    const conflict = await tx.query<{ packet_id: string }>(
+      `
+      SELECT packet_id
+      FROM cnc_telegram_packets
+      WHERE cutting_sequence_no = $2::integer
+        AND packet_id <> $1::uuid
+      LIMIT 1
+      `,
+      [packetId, dto.cuttingSequenceNo],
+    );
+    if (conflict.rows[0]) {
+      return;
+    }
     await tx.query(
       `
       UPDATE cnc_telegram_packets

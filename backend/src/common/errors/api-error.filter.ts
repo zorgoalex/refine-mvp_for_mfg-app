@@ -4,15 +4,20 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
+  Logger,
 } from '@nestjs/common';
 import { ApiError, createInternalError, formatApiError } from './api-error';
 
 interface RequestWithRequestId {
   requestId?: string;
+  method?: string;
+  url?: string;
 }
 
 @Catch()
 export class ApiErrorFilter implements ExceptionFilter {
+  private readonly logger = new Logger(ApiErrorFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const context = host.switchToHttp();
     const request = context.getRequest<RequestWithRequestId>();
@@ -38,6 +43,20 @@ export class ApiErrorFilter implements ExceptionFilter {
       return;
     }
 
+    this.logger.error(
+      `Unhandled exception requestId=${requestId} method=${request.method ?? 'UNKNOWN'} path=${request.url ?? 'UNKNOWN'} error=${describeException(exception)}`,
+      exception instanceof Error ? exception.stack : undefined,
+    );
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json(createInternalError(requestId));
   }
+}
+
+function describeException(exception: unknown): string {
+  if (exception instanceof Error) {
+    return exception.message;
+  }
+  if (typeof exception === 'string') {
+    return exception;
+  }
+  return 'Unknown non-Error exception';
 }

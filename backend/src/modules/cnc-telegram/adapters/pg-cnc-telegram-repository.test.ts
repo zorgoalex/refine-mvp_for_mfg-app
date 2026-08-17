@@ -1143,6 +1143,55 @@ describe('PgCncTelegramRepository', () => {
     expect(result.packet.cuttingSequenceNo).toBe(7);
   });
 
+  it('keeps ingesting when an explicit Telegram cutting sequence number is already taken', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/WHERE cutting_sequence_no = \$2::integer/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000099' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow({ cutting_sequence_no: null })] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:explicit-sequence-conflict',
+        cuttingSequenceNo: 7,
+      },
+      requestId: 'request-cnc-1',
+    });
+
+    const sequenceUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets[\s\S]*cutting_sequence_no = \$2::integer/i.test(query.text),
+    );
+    expect(sequenceUpdate).toBeUndefined();
+    expect(result.applied).toBe(true);
+    expect(result.packet.cuttingSequenceNo).toBeNull();
+  });
+
   it('replays completed idempotency when Telegram later adds an explicit cutting sequence number', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const dto = {
