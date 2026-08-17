@@ -228,6 +228,8 @@ export interface CutJobDto {
   textureDirection: CutTextureDirection;
   /** Unique detail material names in active job items. Uses per-detail sheet/material names, not job sheet override. */
   materialNames: string[];
+  /** MDF board linkage, populated on list reads when CNC/MDF schema is available. */
+  mdfBoardStatus?: CutJobMdfBoardStatusDto;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
@@ -258,6 +260,16 @@ export interface CutJobLinkedMdfPacketDto {
   machine: string | null;
   programName: string | null;
   itemCount: number;
+}
+
+export type CutJobMdfBoardState = 'created' | 'hidden' | 'not_created' | 'unknown';
+
+export interface CutJobMdfBoardStatusDto {
+  state: CutJobMdfBoardState;
+  reason: string;
+  activePacketCount: number;
+  hiddenPacketCount: number;
+  packets: CutJobLinkedMdfPacketDto[];
 }
 
 export interface CutJobDeleteImpactDto {

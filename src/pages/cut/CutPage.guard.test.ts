@@ -548,6 +548,9 @@ describe('CutPage profile + totals columns (source guard)', () => {
 
   it('renames the positions column and adds totals/profile/sheets columns', () => {
     expect(source).toContain("title: 'Позиции'");
+    expect(source).toContain("title: 'МДФ-доска'");
+    expect(source).toContain('<CutJobMdfBoardCell job={row} />');
+    expect(source).toContain('cutJobMdfBoardExportValue(candidate)');
     expect(source).toContain("title: 'Заказы'");
     expect(source).toContain('<CutJobOrderLinks');
     expect(source).toContain('items={row.items}');

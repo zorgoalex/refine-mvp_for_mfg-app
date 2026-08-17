@@ -1661,6 +1661,28 @@ html {
   overflow-wrap: anywhere;
 }
 
+.cut-jobs-table .cut-job-mdf-board-cell {
+  display: grid;
+  max-width: 132px;
+  justify-items: center;
+  gap: 2px;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell .ant-tag {
+  margin-inline-end: 0;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell__reason {
+  display: -webkit-box;
+  max-width: 124px;
+  overflow: hidden;
+  font-size: 0.9em;
+  line-height: 1.15;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .cut-jobs-table .cut-jobs-actions {
   align-items: center;
   justify-content: center;

@@ -105,6 +105,7 @@ import type {
   CutGroupDto,
   CutJobDeleteImpactDto,
   CutJobLinkedMdfPacketDto,
+  CutJobMdfBoardStatusDto,
   CutJobItemDto,
   CutJobDto,
   CutJobRefDto,
@@ -296,6 +297,15 @@ interface DeleteImpactPacketRow extends QueryResultRow {
   machine: string | null;
   program_name: string | null;
   item_count: string | number;
+}
+
+interface MdfBoardStatusRow extends QueryResultRow {
+  cut_job_id: string | number;
+  status: string;
+  selection_criteria: Record<string, unknown> | null;
+  active_packet_count: string | number | null;
+  hidden_packet_count: string | number | null;
+  active_packets_json: unknown;
 }
 
 const CUT_RESULT_LEASE_MS = 15 * 60 * 1000;
@@ -2641,10 +2651,19 @@ export class PgCutRepository implements CutRepositoryPort {
     const ids = result.rows.map((row) => toNum(row.cut_job_id));
     const totalsById = await computeTotals(this.database, ids);
     const materialNamesById = await computeMaterialNames(this.database, ids);
+    const mdfBoardStatusById = await loadMdfBoardStatuses(this.database, ids);
     const jobs: CutJobDto[] = [];
     for (const id of ids) {
       // List only renders item/group counts -> skip the per-item detail joins.
-      jobs.push(await loadJob(this.database, id, false, totalsById.get(id), materialNamesById.get(id) ?? []));
+      jobs.push(await loadJob(
+        this.database,
+        id,
+        false,
+        totalsById.get(id),
+        materialNamesById.get(id) ?? [],
+        false,
+        mdfBoardStatusById.get(id),
+      ));
     }
     return jobs;
   }
@@ -5934,6 +5953,7 @@ async function loadJob(
   totals?: CutJobTotals,
   materialNames?: string[],
   frozenItems = false,
+  mdfBoardStatus?: CutJobMdfBoardStatusDto,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
     `SELECT j.cut_job_id, j.name, j.status, j.source, j.version, j.pdf_prewarm_state, j.failure_code, j.failure_reason,
@@ -6077,6 +6097,7 @@ async function loadJob(
     rotationAllowed: jobRow.rotation_allowed !== false,
     textureDirection: normalizeCutTextureDirection(jobRow.texture_direction),
     materialNames: resolvedMaterialNames,
+    ...(mdfBoardStatus ? { mdfBoardStatus } : {}),
     totals: resolvedTotals,
     items: itemDtos,
     groups,
@@ -6401,6 +6422,157 @@ async function loadCutJobDeleteImpact(client: DatabaseClient, cutJobId: number):
       ),
     ],
   };
+}
+
+async function loadMdfBoardStatuses(
+  client: DatabaseClient,
+  cutJobIds: number[],
+): Promise<Map<number, CutJobMdfBoardStatusDto>> {
+  const ids = [...new Set(cutJobIds.filter((id) => Number.isInteger(id) && id > 0))];
+  const out = new Map<number, CutJobMdfBoardStatusDto>();
+  if (ids.length === 0) return out;
+
+  if (!(await hasMdfBoardHiddenColumns(client))) {
+    for (const id of ids) {
+      out.set(id, {
+        state: 'unknown',
+        reason: 'Схема МДФ-доски недоступна: нельзя проверить связанные карточки.',
+        activePacketCount: 0,
+        hiddenPacketCount: 0,
+        packets: [],
+      });
+    }
+    return out;
+  }
+
+  const result = await client.query<MdfBoardStatusRow>(
+    `
+    WITH packet_summary AS (
+      SELECT
+        p.svg_cut_job_id::bigint AS cut_job_id,
+        COUNT(*) FILTER (WHERE p.mdf_board_hidden_at IS NULL)::integer AS active_packet_count,
+        COUNT(*) FILTER (WHERE p.mdf_board_hidden_at IS NOT NULL)::integer AS hidden_packet_count,
+        COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'packetId', p.packet_id::text,
+              'externalPacketKey', p.external_packet_key,
+              'workday', p.workday,
+              'machine', p.machine,
+              'programName', p.program_name,
+              'itemCount', packet_items.item_count
+            )
+            ORDER BY p.workday DESC, p.updated_at DESC, p.external_packet_key
+          ) FILTER (WHERE p.mdf_board_hidden_at IS NULL),
+          '[]'::jsonb
+        ) AS active_packets_json
+      FROM cnc_telegram_packets p
+      LEFT JOIN LATERAL (
+        SELECT COUNT(i.packet_item_id)::integer AS item_count
+        FROM cnc_telegram_packet_items i
+        WHERE i.packet_id = p.packet_id
+      ) packet_items ON true
+      WHERE p.svg_cut_job_id = ANY($1::bigint[])
+      GROUP BY p.svg_cut_job_id
+    )
+    SELECT
+      j.cut_job_id,
+      j.status,
+      j.selection_criteria,
+      COALESCE(packet_summary.active_packet_count, 0)::integer AS active_packet_count,
+      COALESCE(packet_summary.hidden_packet_count, 0)::integer AS hidden_packet_count,
+      COALESCE(packet_summary.active_packets_json, '[]'::jsonb) AS active_packets_json
+    FROM cut_job j
+    LEFT JOIN packet_summary ON packet_summary.cut_job_id = j.cut_job_id
+    WHERE j.cut_job_id = ANY($1::bigint[])
+    `,
+    [ids],
+  );
+
+  for (const row of result.rows) {
+    out.set(toNum(row.cut_job_id), buildMdfBoardStatus(row));
+  }
+  return out;
+}
+
+function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatusDto {
+  const activePacketCount = toNum(row.active_packet_count ?? 0);
+  const hiddenPacketCount = toNum(row.hidden_packet_count ?? 0);
+  const packets = cutJobLinkedMdfPacketsFromJson(row.active_packets_json);
+
+  if (activePacketCount > 0) {
+    return {
+      state: 'created',
+      reason: activePacketCount === 1
+        ? 'Карточка создана и видна на МДФ-доске.'
+        : `Создано ${activePacketCount} карточек, видимых на МДФ-доске.`,
+      activePacketCount,
+      hiddenPacketCount,
+      packets,
+    };
+  }
+
+  if (hiddenPacketCount > 0) {
+    return {
+      state: 'hidden',
+      reason: hiddenPacketCount === 1
+        ? 'Связанная карточка была скрыта с МДФ-доски.'
+        : `Связанные карточки скрыты с МДФ-доски: ${hiddenPacketCount}.`,
+      activePacketCount,
+      hiddenPacketCount,
+      packets,
+    };
+  }
+
+  const source = cutJobSelectionSource(row.selection_criteria);
+  return {
+    state: 'not_created',
+    reason: mdfBoardNotCreatedReason(source, row.status),
+    activePacketCount,
+    hiddenPacketCount,
+    packets,
+  };
+}
+
+function cutJobLinkedMdfPacketsFromJson(value: unknown): CutJobLinkedMdfPacketDto[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = item as Record<string, unknown>;
+    return {
+      packetId: String(row.packetId ?? ''),
+      externalPacketKey: String(row.externalPacketKey ?? ''),
+      workday: mdfPacketWorkday(row.workday),
+      machine: typeof row.machine === 'string' ? row.machine : null,
+      programName: typeof row.programName === 'string' ? row.programName : null,
+      itemCount: typeof row.itemCount === 'number' || typeof row.itemCount === 'string'
+        ? toNum(row.itemCount)
+        : 0,
+    };
+  }).filter((packet) => packet.packetId.length > 0);
+}
+
+function mdfPacketWorkday(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date || typeof value === 'string') return dateOnly(value) ?? String(value);
+  return String(value);
+}
+
+function cutJobSelectionSource(selectionCriteria: Record<string, unknown> | null): string | null {
+  const source = selectionCriteria?.source;
+  return typeof source === 'string' && source.trim() ? source.trim() : null;
+}
+
+function mdfBoardNotCreatedReason(source: string | null, status: string): string {
+  if (source === 'manual_svg_upload') {
+    return 'Задание импортировано из SVG, но связанная карточка МДФ-доски не найдена.';
+  }
+  if (source === 'cnc_telegram_svg') {
+    return 'Задание импортировано из Telegram SVG, но карточка МДФ-доски не найдена.';
+  }
+  if (status !== 'ready') {
+    return 'Задание ещё не готово; карточка МДФ-доски создаётся только для импортированного SVG-раскроя.';
+  }
+  return 'Задание создано обычным способом, без карточки файла станка на МДФ-доске.';
 }
 
 async function hideLinkedMdfPacketsForCutJob(

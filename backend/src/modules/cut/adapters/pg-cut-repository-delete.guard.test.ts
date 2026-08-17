@@ -15,6 +15,14 @@ describe('PgCutRepository delete cut job contract', () => {
     expect(source).toContain('mdf_board_hidden_at = COALESCE(mdf_board_hidden_at, now())');
   });
 
+  it('loads MDF board status for cut-job list rows from linked packets', () => {
+    expect(source).toContain('loadMdfBoardStatuses');
+    expect(source).toContain('p.svg_cut_job_id = ANY($1::bigint[])');
+    expect(source).toContain('mdfBoardStatusById.get(id)');
+    expect(source).toContain("state: 'created'");
+    expect(source).toContain("state: 'not_created'");
+  });
+
   it('records cut-job deletion as a deletion audit event with affected entities', () => {
     expect(source).toContain('event: CUT_AUDIT_EVENTS.deleted');
     expect(source).toContain('releasedOrderDetailIds');

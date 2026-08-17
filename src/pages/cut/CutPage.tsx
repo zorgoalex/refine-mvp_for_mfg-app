@@ -390,6 +390,52 @@ function formatJobMaterialNames(materialNames: string[] | undefined): string {
   return names.length > 0 ? names.join(', ') : '—';
 }
 
+function cutJobMdfBoardExportValue(job: CutJobDto): string {
+  const status = job.mdfBoardStatus;
+  if (!status) return 'Неизвестно: backend не вернул состояние МДФ-доски';
+  const label = cutJobMdfBoardStatusLabel(status.state);
+  return `${label}: ${status.reason}`;
+}
+
+function cutJobMdfBoardStatusLabel(state: NonNullable<CutJobDto['mdfBoardStatus']>['state']): string {
+  if (state === 'created') return 'Создана';
+  if (state === 'hidden') return 'Скрыта';
+  if (state === 'unknown') return 'Неизвестно';
+  return 'Нет';
+}
+
+function cutJobMdfBoardStatusColor(state: NonNullable<CutJobDto['mdfBoardStatus']>['state']): string {
+  if (state === 'created') return 'green';
+  if (state === 'hidden') return 'orange';
+  if (state === 'unknown') return 'default';
+  return 'default';
+}
+
+function cutJobMdfBoardTooltip(status: CutJobDto['mdfBoardStatus']): string {
+  if (!status) return 'Backend не вернул состояние МДФ-доски для этого задания.';
+  const packets = status.packets
+    .map((packet) => {
+      const program = packet.programName ?? packet.externalPacketKey;
+      return `${packet.workday}: ${program} (${packet.itemCount} поз.)`;
+    })
+    .join('\n');
+  return packets ? `${status.reason}\n${packets}` : status.reason;
+}
+
+const CutJobMdfBoardCell: React.FC<{ job: CutJobDto }> = ({ job }) => {
+  const status = job.mdfBoardStatus;
+  const state = status?.state ?? 'unknown';
+  const reason = status?.reason ?? 'Backend не вернул состояние МДФ-доски.';
+  return (
+    <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{cutJobMdfBoardTooltip(status)}</span>}>
+      <span className="cut-job-mdf-board-cell">
+        <Tag color={cutJobMdfBoardStatusColor(state)}>{cutJobMdfBoardStatusLabel(state)}</Tag>
+        <Text type="secondary" className="cut-job-mdf-board-cell__reason">{reason}</Text>
+      </span>
+    </Tooltip>
+  );
+};
+
 function defaultCutOrderDateRange(now: Dayjs = dayjs()): CutOrderDateRange {
   return [now, now];
 }
@@ -2686,13 +2732,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }), [jobs]);
   const exportJobs = useCallback(() => {
     const cells = [
-      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Текстура', 'Материал'],
+      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'МДФ-доска', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Текстура', 'Материал'],
       ...filteredJobs.map((candidate) => [
         formatCutJobDisplayNumber(candidate, profiles),
         formatCutJobCreatedDate(candidate.createdAt),
         candidate.name,
         cutJobStatusLabel(candidate.status),
         cutJobSourceLabel(candidate.source),
+        cutJobMdfBoardExportValue(candidate),
         candidate.totals.positions,
         cutJobOrderRefsForJob(candidate).map(cutJobOrderLabel).join(', '),
         candidate.totals.details,
@@ -2822,6 +2869,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         key: 'source',
         width: 100,
         render: (_: unknown, row: CutJobDto) => cutJobSourceLabel(row.source),
+      },
+      {
+        title: 'МДФ-доска',
+        key: 'mdfBoard',
+        width: 132,
+        render: (_: unknown, row: CutJobDto) => <CutJobMdfBoardCell job={row} />,
       },
       {
         title: 'Позиции',
@@ -3866,6 +3919,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 </span>
                 <span>
                   {candidate.status === 'ready' ? `${candidate.totals.sheets} листов` : 'Ожидает расчета'} · {formatArea(candidate.totals.area)}
+                </span>
+                <span className="cut-jobs-operational-list__mdf">
+                  МДФ-доска: {cutJobMdfBoardExportValue(candidate)}
                 </span>
               </button>
             ))}
