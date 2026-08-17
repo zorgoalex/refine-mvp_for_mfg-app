@@ -2171,6 +2171,131 @@ describe('PgCncTelegramRepository', () => {
     expect(result.applied).toBe(true);
   });
 
+  it('imports valid Telegram SVG as an informational cut job when ERP detail match is ambiguous', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 104 }] };
+        }
+        if (/INSERT INTO cut_job\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_id: 800, created_at: '2026-08-17T07:00:00.000Z' }] };
+        }
+        if (/INSERT INTO cut_group\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_id: 801 }] };
+        }
+        if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) {
+          return { rows: [{ cut_group_sheet_id: 803 }] };
+        }
+        if (/INSERT INTO cut_result\s*\(/i.test(text)) {
+          return { rows: [{ cut_result_id: 804 }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              cutting_sequence_no: 104,
+              svg_cut_job_id: 800,
+              svg_cut_result_id: 804,
+              svg_cut_import_status: 'imported',
+            })],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:svg-informational-ambiguous-match',
+        cuttingSequenceNo: 104,
+        materialName: 'МДФ 16мм',
+        items: [
+          {
+            sourceItemKey: '2800:6:95x720',
+            orderName: '2800',
+            detailNumber: 6,
+            widthMm: 95,
+            heightMm: 720,
+            quantity: 1,
+            source: 'vector' as const,
+            confidence: 1,
+            matchStatus: 'needs_review' as const,
+            reviewNote: 'not unique',
+          },
+        ],
+        cutLayout: {
+          status: 'valid' as const,
+          reasons: [],
+          sheet: { widthMm: 2070, heightMm: 2800 },
+          partContourCount: 1,
+          acceptedItemCount: 1,
+          items: [
+            {
+              orderName: '2800',
+              detailNumber: 6,
+              widthMm: 95,
+              heightMm: 720,
+              quantity: 1,
+              confidence: 1,
+              sourceElementId: 'PartContour-1',
+              xMm: 10,
+              yMm: 20,
+              placedWidthMm: 95,
+              placedHeightMm: 720,
+              rotated: false,
+            },
+          ],
+        },
+      },
+      requestId: 'request-cnc-informational',
+    });
+
+    const jobInsert = queries.find((query) => /INSERT INTO cut_job\s*\(/i.test(query.text));
+    const resultInsert = queries.find((query) => /INSERT INTO cut_result\s*\(/i.test(query.text));
+    const importUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) &&
+      /svg_cut_import_status = \$2/i.test(query.text),
+    );
+
+    expect(jobInsert?.params[7]).toBe('104');
+    expect(queries.some((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toBe(false);
+    expect(JSON.parse(String(resultInsert?.params[4]))).toMatchObject({
+      displayNumber: '104',
+      items: [],
+      groups: [{ sheets: [{ placements: { pieces: [{ label: { orderName: '2800', detailId: null } }] } }] }],
+    });
+    expect(importUpdate?.params.slice(1, 5)).toEqual([
+      'imported',
+      'SVG layout imported into cut job',
+      800,
+      804,
+    ]);
+    expect(result.packet.svgCutJobId).toBe(800);
+    expect(result.packet.svgCutImportStatus).toBe('imported');
+  });
+
   it('keeps ERP detail matches when manual SVG upload uses lenient validation', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {

@@ -3261,14 +3261,19 @@ async function syncSvgCutImport(
     return;
   }
 
-  const plan = await buildSvgCutImportPlan(tx, dto, matchSourceDto, layout, {
+  let plan = await buildSvgCutImportPlan(tx, dto, matchSourceDto, layout, {
     matchMode: options.matchMode ?? 'order_details',
     validationMode: options.validationMode ?? 'strict',
     selectedOrderIds: options.selectedOrderIds ?? [],
   });
   if (!plan.ok) {
-    await setSvgCutImportState(tx, packetId, 'needs_review', plan.reason, null, null);
-    return;
+    const fallbackPlan = buildTelegramInformationalSvgCutImportPlan(dto, layout, plan.reason);
+    if (fallbackPlan.ok) {
+      plan = fallbackPlan;
+    } else {
+      await setSvgCutImportState(tx, packetId, 'needs_review', plan.reason, null, null);
+      return;
+    }
   }
 
   const cuttingSequenceNo = toPositiveInteger(row.cutting_sequence_no);
@@ -3693,6 +3698,53 @@ async function buildInformationalSvgCutImportPlan(
     details: [],
     placements,
   };
+}
+
+function buildTelegramInformationalSvgCutImportPlan(
+  dto: CncTelegramStructuredIngestDto,
+  layout: CncTelegramCutLayoutDto,
+  strictFailureReason: string,
+): SvgCutImportPlan {
+  if (dto.source.chatId === MANUAL_SVG_CHAT_ID || !isTelegramSvgDetailMatchFailure(strictFailureReason)) {
+    return { ok: false, reason: strictFailureReason };
+  }
+  const sheet = layout.sheet;
+  const items = layout.items ?? [];
+  if (!sheet || !isPositiveFinite(sheet.widthMm) || !isPositiveFinite(sheet.heightMm)) {
+    return { ok: false, reason: strictFailureReason };
+  }
+  if (items.length === 0) {
+    return { ok: false, reason: strictFailureReason };
+  }
+  const placements: SvgCutPlacement[] = [];
+  for (const [index, item] of items.entries()) {
+    if (!layoutGeometryInsideSheet(item, sheet.widthMm, sheet.heightMm)) {
+      return { ok: false, reason: strictFailureReason };
+    }
+    placements.push({
+      ...item,
+      orderName: normalizeOptional(item.orderName) ?? 'SVG',
+      orderId: null,
+      orderDetailId: null,
+      itemKey: informationalSvgItemKey(item, index),
+      materialName: normalizeOptional(dto.materialName),
+    });
+  }
+  return {
+    ok: true,
+    sheetWidthMm: round3(sheet.widthMm),
+    sheetHeightMm: round3(sheet.heightMm),
+    sheetMaterialTypeId: null,
+    filmId: null,
+    materialName: normalizeOptional(dto.materialName),
+    informational: true,
+    details: [],
+    placements,
+  };
+}
+
+function isTelegramSvgDetailMatchFailure(reason: string): boolean {
+  return reason.includes('is not uniquely matched to an order detail');
 }
 
 function informationalOrderForLayoutItem(
