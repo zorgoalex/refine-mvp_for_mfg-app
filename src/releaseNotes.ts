@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-17",
+    title: "Профиль: состояние левого сайдбара",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Свёрнутость левого сайдбара теперь сохраняется в профиле пользователя и восстанавливается индивидуально для каждого пользователя, а не только в текущем браузере.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-14",
     title: "Настройки: матрица ролей и прав",
     services: ["ERP"],
