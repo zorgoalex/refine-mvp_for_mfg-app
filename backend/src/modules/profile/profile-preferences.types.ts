@@ -55,6 +55,7 @@ export interface UserPreferencesDto {
   uiSize: UiSize;
   uiVariant: UiVariant;
   tabletMode: boolean;
+  sidebarCollapsed: boolean | null;
   orderDetailColumns: OrderDetailColumnPreferencesDto;
   recentReferences: RecentReferenceEntitiesDto;
   pageSizePreferences: PageSizePreferencesDto;

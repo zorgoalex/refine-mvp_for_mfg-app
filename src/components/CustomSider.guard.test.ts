@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(new URL('./CustomSider.tsx', import.meta.url), 'utf8');
 const mobileSource = readFileSync(new URL('./MobileSiderDrawer.tsx', import.meta.url), 'utf8');
 const settingsSource = readFileSync(new URL('./SidebarMenuSettingsButton.tsx', import.meta.url), 'utf8');
+const collapsedHookSource = readFileSync(new URL('../hooks/useSidebarCollapsedPreference.ts', import.meta.url), 'utf8');
 
 describe('CustomSider expanded labels', () => {
   it('uses half-size text and wraps complete labels by words', () => {
@@ -39,9 +40,12 @@ describe('CustomSider expanded labels', () => {
   });
 
   it('persists collapsed state per user in the legacy sider', () => {
-    expect(source).toContain('loadSidebarCollapsed(currentUserId, true)');
-    expect(source).toContain('saveSidebarCollapsed(currentUserId, val)');
-    expect(source).toContain('onCollapse={handleCollapse}');
+    expect(source).toContain('useSidebarCollapsedPreference(currentUserId, true)');
+    expect(source).toContain('onCollapse={setCollapsed}');
+    expect(collapsedHookSource).toContain('profileApi.getPreferences()');
+    expect(collapsedHookSource).toContain('profileApi.updatePreferences({ sidebarCollapsed: next })');
+    expect(collapsedHookSource).toContain('loadSidebarCollapsed(userId, defaultCollapsed)');
+    expect(collapsedHookSource).toContain('saveSidebarCollapsed(userId, next)');
     expect(source).not.toContain('useState(true)');
   });
 });

@@ -13821,6 +13821,7 @@ components:
         - uiSize
         - uiVariant
         - tabletMode
+        - sidebarCollapsed
         - orderDetailColumns
         - recentReferences
         - pageSizePreferences
@@ -13838,6 +13839,10 @@ components:
         tabletMode:
           type: boolean
           description: Force the tablet layout independently of physical device or viewport size.
+        sidebarCollapsed:
+          type: boolean
+          nullable: true
+          description: Current user's left sidebar collapsed state; null means no explicit choice yet.
         orderDetailColumns:
           type: object
           additionalProperties:
@@ -13874,6 +13879,8 @@ components:
           type: string
           enum: [legacy, evolution, line, air]
         tabletMode:
+          type: boolean
+        sidebarCollapsed:
           type: boolean
         orderDetailColumns:
           type: object

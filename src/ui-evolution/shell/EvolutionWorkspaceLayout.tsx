@@ -3,7 +3,6 @@ import { Layout, Skeleton } from 'antd';
 import { useLocation } from 'react-router-dom';
 import { AppFooter } from '../../components/AppFooter';
 import { GlobalTableTopScrollbars } from '../../components/GlobalTableTopScrollbars';
-import { loadSidebarCollapsed, saveSidebarCollapsed } from '../../components/sidebarCollapsedPreference';
 import { KeepAliveOutlet } from '../../components/workspace/KeepAliveOutlet';
 import { authSession } from '../../api/authSession';
 import { featureFlags } from '../../config/featureFlags';
@@ -14,6 +13,7 @@ import {
 } from '../../hooks/useDeviceTier';
 import { authStorage } from '../../utils/auth';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { useSidebarCollapsedPreference } from '../../hooks/useSidebarCollapsedPreference';
 import { useTabSync } from '../../hooks/useTabSync';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { useUiVariant } from '../../ui-variant/UiVariantProvider';
@@ -58,7 +58,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
   const [isNavigationOpen, setIsNavigationOpen] = React.useState(false);
   const [tabletHeaderCompact, setTabletHeaderCompact] = React.useState(false);
   const tabletHeaderScrollTargetRef = React.useRef<HTMLElement | null>(null);
-  const [collapsed, setCollapsed] = React.useState(() => loadSidebarCollapsed(currentUserId, false));
+  const [collapsed, setCollapsed] = useSidebarCollapsedPreference(currentUserId, false);
   const deviceTier = useDeviceTier();
   const shortTabletLandscape = useMediaQuery(SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY);
   const isMobile = deviceTier === 'phone';
@@ -83,10 +83,6 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
 
   useTabSync();
   useGlobalUnloadGuard();
-
-  React.useEffect(() => {
-    setCollapsed(loadSidebarCollapsed(currentUserId, false));
-  }, [currentUserId]);
 
   React.useEffect(() => {
     tabletHeaderScrollTargetRef.current = null;
@@ -143,7 +139,6 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
 
   const handleCollapse = (next: boolean) => {
     setCollapsed(next);
-    saveSidebarCollapsed(currentUserId, next);
   };
 
   const shellClassName = [

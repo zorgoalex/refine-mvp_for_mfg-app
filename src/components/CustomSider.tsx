@@ -23,6 +23,7 @@ import {
 } from "../config/bitrix24";
 import { RESOURCE_LABELS } from "../utils/tabLabels";
 import { useAppSettings, SETTING_KEYS } from "../hooks/useAppSettings";
+import { useSidebarCollapsedPreference } from "../hooks/useSidebarCollapsedPreference";
 import { useSidebarMenuPreferences } from "../hooks/useSidebarMenuPreferences";
 import {
   canViewResourceByRoleVisibility,
@@ -32,7 +33,6 @@ import {
 import { APP_VERSION } from "../version";
 import { SidebarMenuSettingsButton } from "./SidebarMenuSettingsButton";
 import { SIDER_RESOURCE_ICONS } from "./siderResourceIcons";
-import { loadSidebarCollapsed, saveSidebarCollapsed } from "./sidebarCollapsedPreference";
 
 const { Panel } = Collapse;
 const { Title } = Typography;
@@ -104,16 +104,7 @@ export const CustomSider: React.FC = () => {
   const sidebarMenuPreferences = useSidebarMenuPreferences();
   const currentUser = featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser();
   const currentUserId = currentUser?.id;
-  const [collapsed, setCollapsed] = useState(() => loadSidebarCollapsed(currentUserId, true));
-
-  useEffect(() => {
-    setCollapsed(loadSidebarCollapsed(currentUserId, true));
-  }, [currentUserId]);
-
-  const handleCollapse = useCallback((val: boolean) => {
-    setCollapsed(val);
-    saveSidebarCollapsed(currentUserId, val);
-  }, [currentUserId]);
+  const [collapsed, setCollapsed] = useSidebarCollapsedPreference(currentUserId, true);
 
   // Warm DNS/TLS to Bitrix24 while the user works in ERP.
   useEffect(() => {
@@ -168,7 +159,7 @@ export const CustomSider: React.FC = () => {
   });
 
   return (
-    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={handleCollapse} width={195} collapsedWidth={48}>
+    <AntLayout.Sider collapsible collapsed={collapsed} onCollapse={setCollapsed} width={195} collapsedWidth={48}>
       <div
         style={{
           padding: "8px 4px",

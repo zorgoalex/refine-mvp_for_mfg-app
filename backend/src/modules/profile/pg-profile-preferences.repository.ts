@@ -23,6 +23,7 @@ interface PreferenceRow extends QueryResultRow {
   ui_size: string | null;
   ui_variant: string | null;
   tablet_mode: boolean | null;
+  sidebar_collapsed: boolean | null;
   order_detail_columns: unknown;
   recent_reference_entities: unknown;
   page_size_preferences: unknown;
@@ -35,7 +36,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
   async getUserPreferences(userId: number): Promise<UserPreferencesDto> {
     const result = await this.database.query<PreferenceRow>(
       `
-      SELECT theme_mode, ui_size, ui_variant, tablet_mode, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
+      SELECT theme_mode, ui_size, ui_variant, tablet_mode, sidebar_collapsed, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
       FROM user_preferences
       WHERE user_id = $1
       `,
@@ -54,6 +55,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
       preferences.uiSize === undefined &&
       preferences.uiVariant === undefined &&
       preferences.tabletMode === undefined &&
+      preferences.sidebarCollapsed === undefined &&
       preferences.orderDetailColumns === undefined &&
       preferences.pageSizePreferences === undefined &&
       preferences.sidebarMenuOrder === undefined
@@ -63,7 +65,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
 
     const result = await this.database.query<PreferenceRow>(
       `
-      INSERT INTO user_preferences (user_id, theme_mode, ui_size, ui_variant, order_detail_columns, page_size_preferences, sidebar_menu_order, tablet_mode)
+      INSERT INTO user_preferences (user_id, theme_mode, ui_size, ui_variant, order_detail_columns, page_size_preferences, sidebar_menu_order, tablet_mode, sidebar_collapsed)
       VALUES (
         $1,
         COALESCE($2, 'light'),
@@ -72,7 +74,8 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         COALESCE($5::jsonb, '{}'::jsonb),
         COALESCE($6::jsonb, '{}'::jsonb),
         COALESCE($7::jsonb, '{}'::jsonb),
-        COALESCE($8, FALSE)
+        COALESCE($8, FALSE),
+        $9::boolean
       )
       ON CONFLICT (user_id)
       DO UPDATE SET
@@ -80,6 +83,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         ui_size = COALESCE($3, user_preferences.ui_size),
         ui_variant = COALESCE($4, user_preferences.ui_variant),
         tablet_mode = COALESCE($8, user_preferences.tablet_mode),
+        sidebar_collapsed = COALESCE($9::boolean, user_preferences.sidebar_collapsed),
         order_detail_columns = COALESCE($5::jsonb, user_preferences.order_detail_columns),
         sidebar_menu_order = COALESCE($7::jsonb, user_preferences.sidebar_menu_order),
         page_size_preferences = CASE
@@ -89,7 +93,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         updated_at = now()
       WHERE $6::jsonb IS NULL
         OR jsonb_object_length(user_preferences.page_size_preferences || $6::jsonb) <= 128
-      RETURNING theme_mode, ui_size, ui_variant, tablet_mode, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
+      RETURNING theme_mode, ui_size, ui_variant, tablet_mode, sidebar_collapsed, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
       `,
       [
         userId,
@@ -100,6 +104,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
         preferences.pageSizePreferences === undefined ? null : JSON.stringify(preferences.pageSizePreferences),
         preferences.sidebarMenuOrder === undefined ? null : JSON.stringify(preferences.sidebarMenuOrder),
         preferences.tabletMode ?? null,
+        preferences.sidebarCollapsed ?? null,
       ],
     );
 
@@ -167,7 +172,7 @@ export class PgProfilePreferencesRepository implements UserPreferencesRepository
           true
         ),
         updated_at = now()
-      RETURNING theme_mode, ui_size, ui_variant, tablet_mode, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
+      RETURNING theme_mode, ui_size, ui_variant, tablet_mode, sidebar_collapsed, order_detail_columns, recent_reference_entities, page_size_preferences, sidebar_menu_order
       `,
       [userId, resource, entityId],
     );
@@ -182,6 +187,7 @@ function mapPreferenceRow(row: PreferenceRow | undefined): UserPreferencesDto {
     uiSize: normalizeUiSize(row?.ui_size),
     uiVariant: normalizeUiVariant(row?.ui_variant),
     tabletMode: row?.tablet_mode === true,
+    sidebarCollapsed: typeof row?.sidebar_collapsed === 'boolean' ? row.sidebar_collapsed : null,
     orderDetailColumns: normalizeOrderDetailColumns(row?.order_detail_columns),
     recentReferences: normalizeRecentReferences(row?.recent_reference_entities),
     pageSizePreferences: normalizePageSizePreferences(row?.page_size_preferences),
