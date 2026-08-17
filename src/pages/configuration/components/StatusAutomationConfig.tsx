@@ -846,10 +846,13 @@ export function StatusAutomationConfig() {
             ]}
           />
           <Text type="secondary">
-            Настройки ниже управляют видимостью карточек заказов на МДФ-доске.
+            Статусы ниже скрывают карточки заказов с МДФ-доски: если заказ имеет
+            любой из выбранных обычных или производственных статусов, его карточка
+            убирается из активных колонок. Статусы, которых нет в этих списках,
+            сами по себе карточку не скрывают.
           </Text>
           <div>
-            <Text strong>Обычные статусы заказа</Text>
+            <Text strong>Обычные статусы заказа, скрывающие карточки</Text>
             <Select<number[]>
               mode="multiple"
               value={mdfBoardHiddenOrderStatusIds}
@@ -857,7 +860,7 @@ export function StatusAutomationConfig() {
               options={orderStatusOptions}
               disabled={!canManage || appSettingsLoading || orderStatusesLoading}
               loading={appSettingsLoading || orderStatusesLoading}
-              placeholder="Выберите статусы заказа"
+              placeholder="Выберите статусы заказа, которые убирают карточки"
               style={{ width: '100%', marginTop: 4 }}
               allowClear
               showSearch
@@ -867,7 +870,7 @@ export function StatusAutomationConfig() {
             />
           </div>
           <div>
-            <Text strong>Производственные статусы</Text>
+            <Text strong>Производственные статусы, скрывающие карточки</Text>
             <Select<number[]>
               mode="multiple"
               value={mdfBoardHiddenProductionStatusIds}
@@ -877,7 +880,7 @@ export function StatusAutomationConfig() {
               options={productionStatusOptions}
               disabled={!canManage || appSettingsLoading || productionStatusesLoading}
               loading={appSettingsLoading || productionStatusesLoading}
-              placeholder="Выберите производственные статусы"
+              placeholder="Выберите производственные статусы, которые убирают карточки"
               style={{ width: '100%', marginTop: 4 }}
               allowClear
               showSearch
