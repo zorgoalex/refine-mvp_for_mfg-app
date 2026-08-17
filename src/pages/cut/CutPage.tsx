@@ -3979,23 +3979,27 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           title={isOperational && embeddedOrderId == null ? undefined : jobCardTitle}
           extra={isOperational && embeddedOrderId == null ? undefined : jobCardExtra}
         >
-          {job.mdfBoardStatus?.canCreateCard === true && (
-            <Space style={{ marginBottom: 12 }} wrap>
-              <Tooltip title={cutJobMdfBoardTooltip(job.mdfBoardStatus)}>
-                <Button
-                  size="small"
-                  icon={<PlusOutlined />}
-                  onClick={() => void createMdfBoardCard()}
-                  loading={creatingMdfBoardCard}
-                  disabled={!canManage || busy || isArchivedJob || job.status === 'calculating'}
-                  style={{ height: 'auto', minHeight: 32, whiteSpace: 'normal', textAlign: 'left' }}
-                  data-testid="cut-job-create-mdf-board-card"
-                >
-                  Создать карточку файла станка для МДФ-доски
-                </Button>
-              </Tooltip>
-            </Space>
-          )}
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Tooltip title={cutJobMdfBoardTooltip(job.mdfBoardStatus)}>
+              <Button
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={() => void createMdfBoardCard()}
+                loading={creatingMdfBoardCard}
+                disabled={
+                  !canManage ||
+                  busy ||
+                  isArchivedJob ||
+                  job.status === 'calculating' ||
+                  job.mdfBoardStatus?.canCreateCard !== true
+                }
+                style={{ height: 'auto', minHeight: 32, whiteSpace: 'normal', textAlign: 'left' }}
+                data-testid="cut-job-create-mdf-board-card"
+              >
+                Создать карточку файла станка для МДФ-доски
+              </Button>
+            </Tooltip>
+          </Space>
           <div className="cut-job-overview">
             <aside className="cut-job-overview__history">
               <div
