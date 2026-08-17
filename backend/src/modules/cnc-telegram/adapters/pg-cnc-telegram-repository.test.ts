@@ -78,6 +78,7 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('cnc_manual_svg_upload_files file');
     expect(repositorySource).toContain("lower(file.content_sha256)=lower($1)");
     expect(repositorySource).toContain("packet.svg_cut_import_status='imported'");
+    expect(repositorySource).toContain('packet.packet_id::text AS packet_id');
     expect(repositorySource).toContain("svg_job.status <> 'archived'");
     expect(repositorySource).toContain("job.selection_criteria->'sourceFiles'");
     expect(repositorySource).toContain("job.status <> 'archived'");

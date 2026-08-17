@@ -3607,7 +3607,7 @@ async function findExistingSvgCutJobForSourceFile(
       SELECT packet.svg_cut_job_id AS cut_job_id,
              svg_job.source_display_number AS cut_job_display_number,
              packet.svg_cut_result_id AS cut_result_id,
-             packet.packet_id,
+             packet.packet_id::text AS packet_id,
              file.original_file_name AS file_name,
              'manual_svg_upload_file'::text AS matched_by,
              1 AS priority,
