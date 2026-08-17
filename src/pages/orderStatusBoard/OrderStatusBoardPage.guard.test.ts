@@ -511,7 +511,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('keeps CNC work as a separate visual flow and API contract', () => {
     expect(page).toContain('cncTelegram: featureFlags.cncTelegram');
     expect(page).toContain('fixedView ? { fixedView } : {}');
-    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" />');
+    expect(page).toContain('defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;');
+    expect(page).toContain('defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD');
+    expect(page).toContain('defaultCncOrderSearchPeriod,');
+    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
     expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
     expect(page).toContain('{!fixedView && (');
     expect(page).not.toContain("{ key: 'cnc_today', label: 'МДФ-работы' }");
@@ -558,7 +561,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(model).toContain('export function buildOrderStatusBoardDatasetKey(');
     expect(model).toContain("state.view === 'cnc_today'");
     expect(model).toContain("key.set('date', state.cncWorkday ?? defaultCncWorkday)");
-    expect(model).toContain("key.set('period', state.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD)");
+    expect(model).toContain("key.set('period', state.cncOrderSearchPeriod ?? defaultCncOrderSearchPeriod)");
     expect(page).not.toContain("if (params.get('flow') === 'cnc') params.delete('order');");
     expect(page).toContain('const standardGridMinWidth = displayColumns.length * 220');
     expect(page).toContain('gridTemplateColumns: `repeat(${displayColumns.length}, minmax(${cncColumnMinWidth}, 1fr))`');

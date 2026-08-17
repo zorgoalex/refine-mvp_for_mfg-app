@@ -397,6 +397,7 @@ interface CncBoardDragPreview {
 }
 
 interface OrderStatusBoardPageProps {
+  defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;
   fixedView?: OrderStatusBoardViewState['view'];
 }
 
@@ -487,7 +488,10 @@ function useWorkspaceTabsHeight(): number {
   return height;
 }
 
-export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixedView }) => {
+export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
+  defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD,
+  fixedView,
+}) => {
   const isOperational = useOperationalUi();
   const touchBoardDragEnabled = useCoarsePointer();
   const { canViewFinancials } = useOrderFinancialVisibility();
@@ -510,11 +514,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   const viewState = useMemo(() => {
     const parsed = parseOrderStatusBoardViewState(searchParams, {
       cncTelegram: featureFlags.cncTelegram,
+      defaultCncOrderSearchPeriod,
       ...(defaultSort ? { defaultSort } : {}),
       ...(fixedView ? { fixedView } : {}),
     });
     return parsed;
-  }, [defaultSort, fixedView, searchParams]);
+  }, [defaultCncOrderSearchPeriod, defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
   const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
   const mdfBoardHiddenStatusesSetting =
@@ -526,8 +531,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
       searchParams,
       viewState,
       dayjs().format('YYYY-MM-DD'),
+      defaultCncOrderSearchPeriod,
     );
   }, [
+    defaultCncOrderSearchPeriod,
     searchParams,
     viewState.cncOrderSearchPeriod,
     viewState.cncWorkday,
@@ -1151,7 +1158,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
   );
   const cncOrderFilters = viewState.cncOrderFilters;
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
-  const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? DEFAULT_CNC_ORDER_SEARCH_PERIOD;
+  const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? defaultCncOrderSearchPeriod;
   const cncPlannedTodayDate = dayjs().format('YYYY-MM-DD');
   const cncPeriodColumns = cncToday?.columns ?? [];
   const cncOrderFilterOptions = useMemo(
@@ -2498,7 +2505,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({ fixe
 };
 
 export const MdfWorkBoardPage: React.FC = () => (
-  <OrderStatusBoardPage fixedView="cnc_today" />
+  <OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />
 );
 
 const StatusBoardToolbarIconToggle: React.FC<{

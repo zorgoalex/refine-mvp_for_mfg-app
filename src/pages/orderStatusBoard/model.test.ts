@@ -253,6 +253,16 @@ describe('order status board model', () => {
     );
     expect(defaultPeriodState.cncOrderSearchPeriod).toBe('1w');
 
+    const defaultMdfWorkBoardPeriodState = parseOrderStatusBoardViewState(
+      new URLSearchParams(''),
+      {
+        cncTelegram: true,
+        defaultCncOrderSearchPeriod: '1m',
+        fixedView: 'cnc_today',
+      },
+    );
+    expect(defaultMdfWorkBoardPeriodState.cncOrderSearchPeriod).toBe('1m');
+
     const fixedMdfState = parseOrderStatusBoardViewState(
       new URLSearchParams('period=1m&order=2707'),
       { cncTelegram: true, fixedView: 'cnc_today' },
@@ -305,6 +315,7 @@ describe('order status board model', () => {
     const fixedMdfParams = new URLSearchParams('hideEmpty=1&plannedToday=1');
     const fixedMdfState = parseOrderStatusBoardViewState(fixedMdfParams, {
       cncTelegram: true,
+      defaultCncOrderSearchPeriod: '1m',
       fixedView: 'cnc_today',
     });
 
@@ -312,7 +323,8 @@ describe('order status board model', () => {
       fixedMdfParams,
       fixedMdfState,
       '2026-08-11',
-    )).toBe('flow=cnc&date=2026-08-11&period=1w');
+      '1m',
+    )).toBe('flow=cnc&date=2026-08-11&period=1m');
   });
 
   it('builds CNC order search ranges from the selected board date', () => {

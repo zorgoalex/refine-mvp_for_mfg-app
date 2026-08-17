@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-17",
+    title: "МДФ-работы: период по умолчанию",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Отдельная доска «МДФ-работы» теперь открывается с периодом «1м» по умолчанию, чтобы сразу показывать работы за последний месяц.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-17",
     title: "Вкладки: возврат к исходному экрану",
     services: ["ERP"],
     repositories: ["repo_erp"],
