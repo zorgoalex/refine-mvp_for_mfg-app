@@ -445,12 +445,13 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       manualSvgGeneratedScreenshotContrastKey(generatedScreenshotContrast, Boolean(screenshotSourceFile)),
       sendToTelegram ? telegramMessageText : 'telegram-off',
       lenientValidation ? 'lenient' : 'strict',
+      'mdf-card-first',
     ].join(':'));
     setSubmitting(true);
     try {
       const uploadBody: CncTelegramManualSvgUploadRequest = {
         selectedOrderIds,
-        createMdfMachineFileCard: false,
+        createMdfMachineFileCard: true,
         matchMode: uploadMatchMode,
         validationMode: lenientValidation ? 'lenient' : 'strict',
         requestedCutJobId,
@@ -478,23 +479,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
       const cutJobPath = response.cutJobPath ?? (cutJobId ? `/cut?job=${cutJobId}` : null);
       const cutJobDisplayNumber = await resolveManualSvgCutJobDisplayNumber(response.cutJobDisplayNumber ?? response.packet.svgCutJobDisplayNumber ?? null, cutJobId);
       const cutJobDisplayLabel = formatCutJobDisplayLabel(cutJobDisplayNumber, cutJobId);
-      let mdfCardCreated = false;
-      if (cutJobId && await askCreateMdfMachineFileCard()) {
-        const mdfCardIdempotencyKey = createIdempotencyKey([
-          parsed.svgContentHash,
-          requestedCutJobId ?? 'auto-number',
-          cutJobId,
-          lenientValidation ? 'lenient' : 'strict',
-          'mdf-card',
-        ].join(':'));
-        const mdfResponse = await cncTelegramApi.manualSvgUpload({
-          ...uploadBody,
-          createMdfMachineFileCard: true,
-          sourceFiles: [],
-          telegramSend: { enabled: false, message: null },
-        }, mdfCardIdempotencyKey);
-        mdfCardCreated = mdfResponse.createdMdfMachineFileCard;
-      }
+      const mdfCardCreated = response.createdMdfMachineFileCard;
       const openCutJob = cutJobPath
         ? () => {
             Modal.destroyAll();
@@ -1589,18 +1574,6 @@ function SvgValidationSummary({
       )}
     />
   );
-}
-
-function askCreateMdfMachineFileCard(): Promise<boolean> {
-  return new Promise((resolve) => {
-    Modal.confirm({
-      title: 'создать карточку файла станка для Доски МДФ из раскроя?',
-      okText: 'Создать',
-      cancelText: 'Не создавать',
-      onOk: () => resolve(true),
-      onCancel: () => resolve(false),
-    });
-  });
 }
 
 function showSvgMatchProblems(problems: SvgMatchProblem[]): void {

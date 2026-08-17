@@ -96,6 +96,8 @@ interface ManualSvgFileContentRow extends ManualSvgOrderFileRow {
 interface ManualSvgTelegramSendTaskRow extends QueryResultRow {
   request_id: string;
   packet_id: string;
+  cut_job_id: string | number;
+  cut_job_display_number: string | number;
   message_text: string;
   attempt_count: string | number;
   files_json: unknown;
@@ -336,11 +338,22 @@ export class PgCncTelegramMediaRepository {
     const result = await this.database.transaction(async (tx) => {
       await markStaleManualSvgTelegramSendsUnknown(tx, input);
       return tx.query<ManualSvgTelegramSendTaskRow>(
-        `WITH candidates AS (
+         `WITH candidates AS (
            SELECT request.request_id
            FROM cnc_manual_svg_telegram_send_requests request
+           JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id
+           JOIN cut_job svg_job ON svg_job.cut_job_id=packet.svg_cut_job_id
            WHERE request.status='pending'
              AND request.attempt_count < 5
+             AND packet.svg_cut_import_status='imported'
+             AND packet.svg_cut_job_id IS NOT NULL
+             AND NULLIF(trim(svg_job.source_display_number::text), '') IS NOT NULL
+             AND EXISTS (
+               SELECT 1
+               FROM outbox_events mdf_card
+               WHERE mdf_card.idempotency_key =
+                 'cnc-manual-svg:' || packet.packet_id::text || ':source-' || packet.source_version::text || ':mdf-card-created'
+             )
              AND EXISTS (
                SELECT 1
                FROM cnc_manual_svg_telegram_send_request_files request_file
@@ -365,7 +378,10 @@ export class PgCncTelegramMediaRepository {
            WHERE request.request_id=candidates.request_id
            RETURNING request.request_id, request.packet_id, request.message_text, request.attempt_count
          )
-         SELECT claimed.request_id, claimed.packet_id, claimed.message_text, claimed.attempt_count,
+         SELECT claimed.request_id, claimed.packet_id,
+                packet.svg_cut_job_id AS cut_job_id,
+                svg_job.source_display_number AS cut_job_display_number,
+                claimed.message_text, claimed.attempt_count,
                 COALESCE(jsonb_agg(
                   jsonb_build_object(
                     'fileId', file.file_id,
@@ -376,13 +392,16 @@ export class PgCncTelegramMediaRepository {
                     'sha256', file.content_sha256,
                     'base64Content', encode(file.content_bytes, 'base64')
                   )
-                  ORDER BY request_file.send_order
+                 ORDER BY request_file.send_order
                 ) FILTER (WHERE file.file_id IS NOT NULL), '[]'::jsonb) AS files_json
          FROM claimed
+         JOIN cnc_telegram_packets packet ON packet.packet_id=claimed.packet_id
+         JOIN cut_job svg_job ON svg_job.cut_job_id=packet.svg_cut_job_id
          JOIN cnc_manual_svg_telegram_send_request_files request_file ON request_file.request_id=claimed.request_id
          JOIN cnc_manual_svg_upload_files file ON file.file_id=request_file.file_id
           AND file.expires_at > now()
-         GROUP BY claimed.request_id, claimed.packet_id, claimed.message_text, claimed.attempt_count
+         GROUP BY claimed.request_id, claimed.packet_id, packet.svg_cut_job_id,
+                  svg_job.source_display_number, claimed.message_text, claimed.attempt_count
          ORDER BY claimed.request_id`,
         [input.limit],
       );
@@ -879,6 +898,8 @@ function mapManualSvgTelegramSendTaskRow(
   return {
     requestId: row.request_id,
     packetId: row.packet_id,
+    cutJobId: Number(row.cut_job_id),
+    cutJobDisplayNumber: String(row.cut_job_display_number).trim(),
     messageText: row.message_text,
     attempt: Number(row.attempt_count),
     files: parseManualSvgTelegramSendFiles(row.files_json),

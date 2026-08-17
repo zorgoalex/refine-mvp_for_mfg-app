@@ -12,14 +12,17 @@ const tabletUtilities = readFileSync('src/ui-evolution/shell/EvolutionTabletUtil
 const cncApi = readFileSync('src/api/cncTelegramApi.ts', 'utf8');
 
 describe('manual SVG cut upload UI guard', () => {
-  it('uses backend manual SVG command and exact MDF-card question', () => {
+  it('uses backend manual SVG command and creates MDF-card before Telegram', () => {
     expect(cncApi).toContain('manualSvgUpload');
     expect(cncApi).toContain('Idempotency-Key');
     expect(modal).toContain('parseSvgCutUploadFile');
     expect(modal).toContain('parseSvgCutUploadFileNameHints');
     expect(modal).toContain('applyFileNameOrderHints');
-    expect(modal).toContain('создать карточку файла станка для Доски МДФ из раскроя?');
     expect(modal).toContain('createMdfMachineFileCard');
+    expect(modal).toContain('createMdfMachineFileCard: true');
+    expect(modal).toContain('mdf-card-first');
+    expect(modal).not.toContain('askCreateMdfMachineFileCard');
+    expect(modal).not.toContain('Не создавать');
     expect(modal).toContain('requestedCutJobId');
     expect(modal).toContain('№ задания');
     expect(modal).toContain('Оставьте пустым для авто-номера');

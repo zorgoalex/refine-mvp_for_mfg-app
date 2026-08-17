@@ -136,6 +136,16 @@ const cutLayoutSchema = z.object({
   items: z.array(cutLayoutItemSchema).max(5000).default([]),
 }).strict();
 
+const SHA256_RE = /^[a-f0-9]{64}$/i;
+
+const sourceFileIdentitySchema = z.object({
+  kind: z.enum(['svg', 'gcode', 'screenshot']),
+  fileName: z.string().trim().min(1).max(240),
+  contentType: z.string().trim().min(1).max(120).nullable().optional(),
+  sizeBytes: z.number().int().positive().max(50 * 1024 * 1024),
+  sha256: z.string().trim().regex(SHA256_RE).transform((value) => value.toLowerCase()),
+}).strict();
+
 const ingestSchema = z.object({
   externalPacketKey: z.string().trim().min(1).max(200),
   source: z.object({
@@ -167,11 +177,11 @@ const ingestSchema = z.object({
   analysisWarnings: z.array(z.string().trim().min(1).max(500)).max(100).optional(),
   ocrEngine: z.string().trim().min(1).max(120).nullable().optional(),
   parserVersion: z.string().trim().min(1).max(120).nullable().optional(),
+  sourceFiles: z.array(sourceFileIdentitySchema).max(3).optional().default([]),
   cutLayout: cutLayoutSchema.nullable().optional(),
   items: z.array(itemSchema).min(1).max(2000),
 }).strict();
 
-const SHA256_RE = /^[a-f0-9]{64}$/i;
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const MANUAL_SVG_UPLOAD_MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
 const MANUAL_SVG_UPLOAD_MAX_TOTAL_FILE_SIZE_BYTES = 36 * 1024 * 1024;

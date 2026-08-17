@@ -275,6 +275,14 @@ export interface CncTelegramManualSvgUploadFileDto {
   base64Content: string;
 }
 
+export interface CncTelegramSourceFileIdentityDto {
+  kind: CncTelegramManualSvgUploadFileKind;
+  fileName: string;
+  contentType?: string | null;
+  sizeBytes: number;
+  sha256: string;
+}
+
 export interface CncTelegramManualSvgTelegramSendDto {
   enabled: boolean;
   message?: string | null;
@@ -358,6 +366,7 @@ export interface CncTelegramStructuredIngestDto {
   analysisWarnings?: string[];
   ocrEngine?: string | null;
   parserVersion?: string | null;
+  sourceFiles?: CncTelegramSourceFileIdentityDto[];
   cutLayout?: CncTelegramCutLayoutDto | null;
   items: Array<{
     sourceItemKey: string;

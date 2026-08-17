@@ -139,7 +139,7 @@ class FakeErpClient:
 
     async def ingest_packet(self, packet: dict[str, object], idempotency_key: str) -> dict[str, object]:
         self.packets.append(packet)
-        return {"applied": True, "packet": {"cuttingSequenceNo": 12}}
+        return {"applied": True, "packet": {"cuttingSequenceNo": 12, "svgCutImportStatus": "imported"}}
 
     async def audit_batch(self, payload: dict[str, object]) -> None:
         self.audit_batches.append(payload)
@@ -161,6 +161,12 @@ class RejectingErpClient(FakeErpClient):
     async def ingest_packet(self, packet: dict[str, object], idempotency_key: str) -> dict[str, object]:
         self.packets.append(packet)
         raise BackendRejectedError()
+
+
+class SkippedDuplicateErpClient(FakeErpClient):
+    async def ingest_packet(self, packet: dict[str, object], idempotency_key: str) -> dict[str, object]:
+        self.packets.append(packet)
+        return {"applied": True, "packet": {"cuttingSequenceNo": 44, "svgCutImportStatus": "skipped"}}
 
 
 class FailingTelegramClient(FakeTelegramClient):
@@ -777,6 +783,9 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
             packet = worker.erp.packets[0]
             self.assertEqual(packet["externalPacketKey"], "telegram:-100123:301")
             self.assertEqual(packet["cutLayout"]["status"], "valid")
+            self.assertEqual(packet["sourceFiles"][0]["kind"], "svg")
+            self.assertEqual(packet["sourceFiles"][0]["fileName"], "CNC#1_1234.svg")
+            self.assertEqual(packet["sourceFiles"][0]["sha256"], "9210668b8e3da1b6aafe2a34068835c5c5cfa65742a712de94e728b6b4cce659")
             self.assertEqual(client.sent_messages, [])
             self.assertFalse(worker.state.cutting_sequence_replied("telegram:-100123:301"))
 
@@ -1049,6 +1058,31 @@ class WorkerSvgProcessingTest(unittest.IsolatedAsyncioTestCase):
                 [{"entity": entity, "text": "Раскрой №12", "reply_to": 320}],
             )
             self.assertTrue(worker.state.cutting_sequence_replied("telegram:-100123:320"))
+
+    async def test_writer_does_not_reply_when_backend_skips_existing_svg(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp), can_write_chat=True)
+            worker.erp = SkippedDuplicateErpClient()
+            vector = FakeMessage(
+                321,
+                filename="CNC#1_1234.svg",
+                mime_type="image/svg+xml",
+                media_content=VALID_SVG,
+            )
+            group = SvgGroup(
+                vector_message=vector,
+                image_message=None,
+                comments=[],
+                cutting_sequence_no=None,
+                gcode_message=None,
+            )
+            client = FakeTelegramClient([])
+
+            await worker.process_group(client, object(), group, "-100123", date(2026, 7, 24))
+
+            self.assertEqual(client.sent_messages, [])
+            self.assertIsNone(worker.state.cutting_sequence_number("telegram:-100123:321"))
+            self.assertFalse(worker.state.cutting_sequence_replied("telegram:-100123:321"))
 
     async def test_valid_svg_ignores_screenshot_ocr_even_when_glm_enabled(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

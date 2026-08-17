@@ -205,6 +205,8 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                     "tasks": [{
                         "requestId": "00000000-0000-4000-8000-000000000003",
                         "packetId": "00000000-0000-4000-8000-000000000011",
+                        "cutJobId": 98,
+                        "cutJobDisplayNumber": "104",
                         "messageText": "Фрезы для ХДФ: 8",
                         "files": [
                             svg_payload,
@@ -235,7 +237,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                 "CNC#1_2777+2723-HDF.svg",
                 "CNC#1_2777+2723-HDF.jpg",
             ])
-            self.assertEqual(client.messages, ["Фрезы для ХДФ: 8"])
+            self.assertEqual(client.messages, ["Задание №104\nФрезы для ХДФ: 8"])
 
     async def test_worker_sends_screenshot_as_image_and_comment_last(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -246,6 +248,8 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                     "capability": "cnc_manual_svg_telegram_send_v1",
                     "tasks": [{
                         "requestId": "00000000-0000-4000-8000-000000000005",
+                        "cutJobId": 97,
+                        "cutJobDisplayNumber": "102",
                         "messageText": "Черновой",
                         "files": [
                             manual_svg_send_file("svg", "CNC#2_2769-HDF.svg", b"<svg></svg>"),
@@ -272,7 +276,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                 "CNC#2_2769-HDF.svg",
                 "CNC#2_2769-HDF.png",
             ])
-            self.assertEqual(client.messages, ["Черновой"])
+            self.assertEqual(client.messages, ["Задание №102\nЧерновой"])
 
     async def test_worker_records_manual_svg_outgoing_messages_in_audit(self) -> None:
         with tempfile.TemporaryDirectory() as root:
@@ -307,6 +311,8 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                     "tasks": [{
                         "requestId": "00000000-0000-4000-8000-000000000006",
                         "packetId": "00000000-0000-4000-8000-000000000011",
+                        "cutJobId": 97,
+                        "cutJobDisplayNumber": "102",
                         "messageText": "ХДФ!!!\nФрезы для ХДФ: 8",
                         "files": [
                             manual_svg_send_file("gcode", "CNC#2_2769-HDF.nc", b"G01 X1"),
@@ -340,7 +346,9 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(message["outgoing"] for message in used_messages))
                 self.assertTrue(all(message["status"] == "used" for message in used_messages))
                 self.assertTrue(all(message["packetId"] == "00000000-0000-4000-8000-000000000011" for message in used_messages))
+                self.assertTrue(all(message["cutJobId"] == "97" for message in used_messages))
                 self.assertIn("ХДФ!!!", used_messages[-1]["messageText"])
+                self.assertIn("Задание №102", used_messages[-1]["messageText"])
                 self.assertTrue(any(
                     "скрин раскроя CNC#2_2769-HDF.jpg отправлен" in message["reasonMessage"]
                     for message in used_messages

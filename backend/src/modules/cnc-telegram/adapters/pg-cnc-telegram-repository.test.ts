@@ -54,8 +54,29 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('telegramSendEnabled');
     expect(repositorySource).toContain('generatedScreenshotContrast');
     expect(repositorySource).toContain('enqueueManualSvgTelegramSendRequest');
+    expect(repositorySource).toContain('assertManualSvgTelegramCutJobReady');
+    expect(repositorySource).toContain('manualSvgCutJobDisplayNumber(packet) !== null');
+    expect(repositorySource).not.toContain('packet.svgCutResultId != null;');
+    expect(repositorySource).toContain('MANUAL_SVG_TELEGRAM_MDF_CARD_REQUIRED');
+    expect(repositorySource).toContain('manualSvgMdfCardEventExists(tx, input.packet)');
+    expect(repositorySource).toContain('sourceFiles: manualSvgUploadSourceFileIdentities(dto.sourceFiles ?? [])');
+    expect(repositorySource).toContain('const { sourceFiles: _sourceFiles, ...payloadDto } = dto');
     expect(repositorySource).toContain('renderManualSvgScreenshot');
     expect(repositorySource).toContain('lockActiveManualSvgTelegramSend');
+  });
+
+  it('skips Telegram SVG reverse import when source file already belongs to a cut job', () => {
+    const earlySkipIndex = repositorySource.indexOf('const skippedExistingSourceFile = await skipExistingTelegramSvgCutJobForSourceFile(tx, packetId, resolvedDto);');
+    const sequenceIndex = repositorySource.indexOf('await ensureCuttingSequenceNo(tx, packetId, resolvedDto, Number(command.currentUser.id));');
+    expect(repositorySource).toContain('findExistingSvgCutJobForSourceFile');
+    expect(repositorySource).toContain('skipExistingTelegramSvgCutJobForSourceFile');
+    expect(repositorySource).toContain('cnc_manual_svg_upload_files file');
+    expect(repositorySource).toContain("lower(file.content_sha256)=lower($1)");
+    expect(repositorySource).toContain("packet.svg_cut_import_status='imported'");
+    expect(repositorySource).toContain("job.selection_criteria->'sourceFiles'");
+    expect(repositorySource).toContain('Telegram scan не создавал новое задание');
+    expect(earlySkipIndex).toBeGreaterThan(-1);
+    expect(sequenceIndex).toBeGreaterThan(earlySkipIndex);
   });
 
   it('refreshes a pending manual SVG Telegram send before relinking files', () => {
