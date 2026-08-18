@@ -198,6 +198,15 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     });
   }, []);
 
+  const handleReadyCutsOnlyChange = useCallback((checked: boolean) => {
+    setReadyCutsOnly(checked);
+    if (checked) {
+      setSelectedRowKeys([]);
+      setSelectedRowsByKey(new Map());
+    }
+    setPage(DEFAULT_PAGE);
+  }, []);
+
   const openReportModal = useCallback(() => {
     const selectedOnly = selectedRowKeys.length > 0;
     const rowsForReport = selectedOnly
@@ -275,10 +284,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           <Checkbox
             checked={readyCutsOnly}
             style={{ whiteSpace: 'nowrap' }}
-            onChange={(event) => {
-              setReadyCutsOnly(event.target.checked);
-              resetPage();
-            }}
+            onChange={(event) => handleReadyCutsOnlyChange(event.target.checked)}
           >
             Готовые раскрои
           </Checkbox>
