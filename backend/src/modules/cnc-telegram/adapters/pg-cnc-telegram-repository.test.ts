@@ -706,6 +706,11 @@ describe('PgCncTelegramRepository', () => {
     expect(queries[0]).toContain('LEFT JOIN cut_job svg_job');
     expect(queries[0]).toContain('svg_job.source_display_number AS svg_cut_job_display_number');
     expect(queries[0]).toContain('svg_result.result_no AS svg_cut_result_no');
+    expect(queries[0]).toContain('FROM cut_group live_group');
+    expect(queries[0]).toContain('JOIN cut_group_sheet live_sheet');
+    expect(queries[0]).toContain('live_sheet.sheet_index + 1 AS sheet_ordinal');
+    expect(queries[0]).toContain('p.svg_cut_result_id IS NULL');
+    expect(queries[0]).toContain("piece.value -> 'label' -> 'detailId'");
     expect(result.columns[1].packets[0]).toMatchObject({
       svgCutJobId: 35,
       svgCutJobDisplayNumber: '67',

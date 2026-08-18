@@ -2820,6 +2820,28 @@ function packetSelectSql(whereSql: string): string {
            AND sheet.is_effective = true
           WHERE placement.cut_result_id = p.svg_cut_result_id
           GROUP BY sheet.cut_group_id, sheet.sheet_index, sheet.sheet_ordinal, sheet.variant
+
+          UNION ALL
+
+          SELECT
+            live_group.cut_group_id,
+            live_sheet.sheet_index,
+            live_sheet.sheet_index + 1 AS sheet_ordinal,
+            'auto'::text AS variant,
+            COALESCE((
+              SELECT jsonb_agg(
+                (piece.value -> 'label' ->> 'detailId')::bigint
+                ORDER BY piece.ordinality
+              )
+              FROM jsonb_array_elements(
+                COALESCE(live_sheet.placements -> 'pieces', '[]'::jsonb)
+              ) WITH ORDINALITY AS piece(value, ordinality)
+              WHERE jsonb_typeof(piece.value -> 'label' -> 'detailId') = 'number'
+            ), '[]'::jsonb) AS detail_ids
+          FROM cut_group live_group
+          JOIN cut_group_sheet live_sheet ON live_sheet.cut_group_id = live_group.cut_group_id
+          WHERE p.svg_cut_result_id IS NULL
+            AND live_group.cut_job_id = p.svg_cut_job_id
         ) sheet_summary
       ) AS svg_cut_sheets_json,
       p.updated_at,

@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-18",
+    title: "МДФ-работы: превью текущего раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Карточки файлов станка без сохранённой версии результата теперь показывают превью из текущих листов связанного задания на раскрой.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-18",
     title: "Потребности заказов: выбор и фильтры",
     services: ["ERP"],
     repositories: ["repo_erp"],
