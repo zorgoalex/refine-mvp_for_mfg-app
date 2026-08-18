@@ -21,6 +21,7 @@ const stageBackendApiUrl = trimTrailingSlash(
     process.env.FRONTEND_PAGES_STAGE_BACKEND_API_URL ?? 'https://backend.dev.mebelkz.app',
 );
 const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
+const publicPreviewEnabled = process.env.FRONTEND_PAGES_STAGE_PUBLIC_PREVIEW === 'true';
 const stagePostgresContainer =
     process.env.FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
 const ORDERS_VIEW_VERSION_SCHEMA_ERROR = "field 'version' not found in type: 'orders_view'";
@@ -36,8 +37,8 @@ test.describe('Frontend pages stage canary', () => {
         `Stage postgres container ${stagePostgresContainer} is required for frontend pages stage canary.`,
     );
     test.skip(
-        canaryEnabled && !vercelAutomationBypassSecret,
-        'VERCEL_AUTOMATION_BYPASS_SECRET is required for protected deployed frontend access.',
+        canaryEnabled && !vercelAutomationBypassSecret && !publicPreviewEnabled,
+        'Set VERCEL_AUTOMATION_BYPASS_SECRET for protected previews or FRONTEND_PAGES_STAGE_PUBLIC_PREVIEW=true.',
     );
     test.setTimeout(600000);
 
@@ -240,6 +241,7 @@ async function loginThroughUi(page: Page, username: string, password: string) {
         (response) =>
             response.url().includes('/api/v1/auth/login') &&
             response.request().method() === 'POST',
+        { timeout: 30000 },
     );
     await page.locator('input[autocomplete="username"], input#username').fill(username);
     await page.locator('input[autocomplete="current-password"], input#password').fill(password);
