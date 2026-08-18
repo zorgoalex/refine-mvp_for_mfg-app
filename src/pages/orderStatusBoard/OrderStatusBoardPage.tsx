@@ -5564,7 +5564,8 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
                 size="small"
                 icon={<PrinterOutlined />}
                 disabled={!objectUrl}
-                onClick={printSheetImage}
+                aria-haspopup="dialog"
+                onClick={() => setPrintPreviewOpen(true)}
                 aria-label={`Печать скрина листа ${title}`}
               />
             </Tooltip>

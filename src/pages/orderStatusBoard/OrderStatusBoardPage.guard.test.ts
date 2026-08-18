@@ -1504,6 +1504,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('const canGenerateLabels = labelDetailInstances.length > 0 && (hasCutSheetScope || cutMapFallbackImage !== null)');
     expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
+    expect(sheetPreview).not.toContain('printSheetImage');
+    expect(sheetPreview.match(/onClick=\{\(\) => setPrintPreviewOpen\(true\)\}/g)).toHaveLength(2);
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
     expect(sheetPreview).toContain("status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}");
     expect(sheetPreview).toContain('printHeader={printHeader}');
