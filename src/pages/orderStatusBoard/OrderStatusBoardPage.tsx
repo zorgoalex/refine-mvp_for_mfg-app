@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Popover, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   CalendarOutlined,
@@ -26,6 +26,7 @@ import {
   PlusOutlined,
   PrinterOutlined,
   ProfileOutlined,
+  QuestionCircleOutlined,
   ReloadOutlined,
   RightOutlined,
   ScheduleOutlined,
@@ -536,6 +537,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const navigate = useNavigate();
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const currentUser = authSession.getUser();
+  const todayCncWorkday = dayjs().format('YYYY-MM-DD');
+  const mdfWorkdayOpenSyncedRef = useRef(false);
   const sortPreferenceBoard: OrderStatusBoardType =
     fixedView === 'production' || (!fixedView && searchParams.get('board') === 'production')
       ? 'production'
@@ -557,6 +560,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     return parsed;
   }, [defaultCncOrderSearchPeriod, defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
+  const shouldApplyMdfWorkdayTodayOnOpen =
+    fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
+  const mdfWorkdayTodayOpenPatchNeeded =
+    shouldApplyMdfWorkdayTodayOnOpen &&
+    (viewState.cncWorkday !== todayCncWorkday || viewState.cncOrderFilters.length > 0);
   const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
   const mdfBoardHiddenStatusesSetting =
     getAppSetting<MdfBoardHiddenStatusesSetting>(
@@ -566,12 +574,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     return buildOrderStatusBoardDatasetKey(
       searchParams,
       viewState,
-      dayjs().format('YYYY-MM-DD'),
+      todayCncWorkday,
       defaultCncOrderSearchPeriod,
     );
   }, [
     defaultCncOrderSearchPeriod,
     searchParams,
+    todayCncWorkday,
     viewState.cncOrderSearchPeriod,
     viewState.cncWorkday,
     viewState.view,
@@ -677,6 +686,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     },
     [setSearchParams, viewState],
   );
+  useEffect(() => {
+    if (!shouldApplyMdfWorkdayTodayOnOpen) return;
+    mdfWorkdayOpenSyncedRef.current = true;
+    if (!mdfWorkdayTodayOpenPatchNeeded) return;
+    updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });
+  }, [
+    mdfWorkdayTodayOpenPatchNeeded,
+    shouldApplyMdfWorkdayTodayOnOpen,
+    todayCncWorkday,
+    updateViewState,
+  ]);
   const switchStatusBoardView = useCallback(
     (view: OrderStatusBoardType) => {
       const savedSort = readStatusBoardSortPreference(currentUser?.id, view)
@@ -721,20 +741,43 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           return false;
         }
         if (viewStateRef.current.view === 'cnc_today') {
-          const workday = viewStateRef.current.cncWorkday ?? dayjs().format('YYYY-MM-DD');
+          const currentViewState = viewStateRef.current;
+          const workday = currentViewState.cncWorkday ?? dayjs().format('YYYY-MM-DD');
           const displayRange = buildCncOrderSearchDateRange(
             workday,
-            viewStateRef.current.cncOrderSearchPeriod,
+            currentViewState.cncOrderSearchPeriod,
           );
           const response = await cncTelegramApi.today({
             dateFrom: displayRange.dateFrom,
             dateTo: displayRange.dateTo,
           });
+          const refreshedOrderIds = collectCncOrderStatusBoardIds(
+            response.columns,
+            currentViewState,
+            cncBathsRequireMachineFiles,
+          );
+          let refreshedOrderBoard: OrderStatusBoardResponse | null = null;
+          if (refreshedOrderIds.length > 0) {
+            setCncOrderBoardLoading(true);
+            try {
+              refreshedOrderBoard = await fetchCncOrderStatusBoard(refreshedOrderIds, {
+                sortBy: currentViewState.sortBy,
+                sortOrder: currentViewState.sortOrder,
+              });
+            } catch (error) {
+              message.warning(errorMessage(error, 'Не удалось загрузить статусы заказов MDF.'));
+            } finally {
+              if (datasetRevisionRef.current === revision) setCncOrderBoardLoading(false);
+            }
+          } else {
+            setCncOrderBoardLoading(false);
+          }
           if (datasetRevisionRef.current !== revision) return false;
           cncTodayRef.current = response;
           cncOrderSearchTodayRef.current = response;
           setCncToday(response);
           setCncOrderSearchToday(response);
+          setCncOrderBoard(refreshedOrderBoard);
           boardRef.current = null;
           setBoard(null);
           setStale(false);
@@ -805,10 +848,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         return false;
       }
     },
-    [replacePending],
+    [cncBathsRequireMachineFiles, replacePending],
   );
 
   useEffect(() => {
+    if (mdfWorkdayTodayOpenPatchNeeded) return;
     setBoard(null);
     boardRef.current = null;
     setCncToday(null);
@@ -821,7 +865,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     void fetchInitial();
     // datasetKey is the canonical backend data revision trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetKey]);
+  }, [datasetKey, mdfWorkdayTodayOpenPatchNeeded]);
 
   useEffect(() => {
     setCncCardDisplayMode(readCncCardDisplayPreference(currentUser?.id));
@@ -1291,11 +1335,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncMutedOrderIds = useMemo(
     () => new Set(
       cncDisplayOrderStatusCards
-        .filter((card) => isCncOrderHiddenFromMdfBoard(
-          card,
-          cncHiddenProductionStatusIds,
-          cncHiddenOrderStatusIds,
-        ))
+        .filter((card) =>
+          resolveCncOrderStatusColumn(card) === null &&
+          isCncOrderHiddenFromMdfBoard(
+            card,
+            cncHiddenProductionStatusIds,
+            cncHiddenOrderStatusIds,
+          ))
         .map((card) => card.orderId),
     ),
     [cncDisplayOrderStatusCards, cncHiddenOrderStatusIds, cncHiddenProductionStatusIds],
@@ -2660,6 +2706,148 @@ export interface CncTelegramTodayDisplayColumn {
   orderCards?: CncOrderBoardCard[];
 }
 
+interface ColumnLeaveHelp {
+  title: string;
+  points: string[];
+}
+
+const CNC_COLUMN_LEAVE_HELP: Record<CncTelegramTodayDisplayColumnKey, ColumnLeaveHelp> = {
+  parsed: {
+    title: 'Когда файл уходит из колонки',
+    points: [
+      'Файл уходит дальше, когда станок прислал выполнение или оператор отметил файл выполненным.',
+      'Обычно после этого карточка переходит в «Распилено».',
+      'Если все связанные детали заказа уже упакованы или находятся дальше по процессу, файл попадает в «Распиленные файлы».',
+    ],
+  },
+  completed: {
+    title: 'Когда файл уходит из колонки',
+    points: [
+      'Файл остается здесь, пока он распилен, но связанные детали заказа еще не дошли до упаковки.',
+      'Карточка уходит в «Распиленные файлы», когда все связанные детали уже упакованы или находятся дальше по процессу.',
+      'Операторский перенос карточки тоже может изменить колонку.',
+    ],
+  },
+  completed_laminated: {
+    title: 'Почему карточка остается здесь',
+    points: [
+      'Это завершенная колонка для распиленных файлов и наборов.',
+      'Автоматика дальше их не двигает: карточка остается здесь, пока попадает в выбранную дату и фильтры.',
+      'Карточка может исчезнуть из вида при смене даты, фильтров, архивации раскроя или ручном переносе.',
+    ],
+  },
+  baths: {
+    title: 'Когда ванна уходит из колонки',
+    points: [
+      'Ванна уходит в «Готовы к закатке», когда по всем ее МДФ-деталям набрано нужное количество выполненных файлов со станков.',
+      'Файлы ХДФ, ЛДСП и фанеры в готовность МДФ-ванны не засчитываются.',
+      'Если детали уже имеют статус «Закатан» или дальше, ванна может сразу попасть в «Закатаны».',
+    ],
+  },
+  baths_ready: {
+    title: 'Когда ванна уходит из колонки',
+    points: [
+      'Ванна остается здесь, пока все МДФ-детали распилены, но еще не все детали имеют статус «Закатан» или дальше.',
+      'Карточка уходит в «Закатаны», когда все детали ванны получают статус «Закатан» или следующий производственный статус.',
+      'Если все детали уже упакованы или дальше по процессу, ванна уходит в «Завершенные ванны».',
+    ],
+  },
+  baths_laminated: {
+    title: 'Когда ванна уходит из колонки',
+    points: [
+      'Ванна остается здесь, когда она готова, все ее детали уже «Закатаны» или дальше, но еще не все детали упакованы.',
+      'Карточка уходит в «Завершенные ванны», когда все детали ванны получают статус «Упакован» или следующий производственный статус.',
+      'Если оператор перенес карточку вручную или статусы деталей откатили назад, колонка тоже может измениться.',
+    ],
+  },
+  completed_baths: {
+    title: 'Почему карточка остается здесь',
+    points: [
+      'Это завершенная колонка для ванн.',
+      'Ванна попадает сюда, когда все ее детали уже упакованы или находятся дальше по процессу.',
+      'Автоматика дальше ее не двигает; карточка пропадет только из-за даты, фильтров, архивации или ручного переноса.',
+    ],
+  },
+  orders: {
+    title: 'Когда заказ уходит из колонки',
+    points: [
+      'Заказ остается здесь, пока по его МДФ-деталям еще есть остаток к распилу или закатке.',
+      'Если статус заказа стал «Готов к выдаче», карточка сразу переходит в колонку «Готов к выдаче».',
+      'Если статус заказа стал «Выдан», карточка сразу переходит в колонку «Выдан».',
+    ],
+  },
+  orders_ready: {
+    title: 'Когда заказ уходит из колонки',
+    points: [
+      'Заказ остается здесь, если его статус «Готов к выдаче» или все МДФ-детали готовы по расчету доски.',
+      'Если статус заказа стал «Выдан», карточка сразу переходит в колонку «Выдан».',
+      'Если статус больше не «Готов к выдаче» и по МДФ-деталям снова есть остаток, карточка возвращается в «Заказы».',
+    ],
+  },
+  orders_issued: {
+    title: 'Почему карточка остается здесь',
+    points: [
+      'Заказ остается здесь, пока его статус «Выдан».',
+      'Кнопка «Обновить» и автообновление доски заново проверяют статус и возвращают выданные заказы в эту колонку.',
+      'Если статус изменили обратно, карточка перейдет в «Готов к выдаче» или «Заказы» по текущему состоянию заказа.',
+    ],
+  },
+};
+
+function cncColumnLeaveHelp(columnKey: CncTelegramTodayDisplayColumnKey): ColumnLeaveHelp {
+  return CNC_COLUMN_LEAVE_HELP[columnKey];
+}
+
+function statusColumnLeaveHelp(statusName: string): ColumnLeaveHelp {
+  return {
+    title: 'Когда заказ уходит из колонки',
+    points: [
+      `Заказ находится здесь, пока его текущий статус: «${statusName}».`,
+      'Карточка уходит из колонки, когда статус заказа меняет пользователь, производство или правило автостатуса.',
+      'Если новый статус показан на этой доске, карточка переедет в его колонку. Если заказ скрыт фильтрами, удален или новый статус не выводится, карточка исчезнет из списка.',
+    ],
+  };
+}
+
+function StatusBoardColumnHelpButton({
+  columnTitle,
+  help,
+}: {
+  columnTitle: string;
+  help: ColumnLeaveHelp;
+}): React.ReactElement {
+  return (
+    <Popover
+      trigger="click"
+      placement="bottomLeft"
+      title={help.title}
+      content={(
+        <div className="status-board-column-help">
+          <ul className="status-board-column-help__list">
+            {help.points.map((point) => (
+              <li key={point}>{point}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    >
+      <Button
+        type="text"
+        shape="circle"
+        size="small"
+        className="status-board-column-help__trigger"
+        icon={<QuestionCircleOutlined />}
+        aria-label={`Как карточки покидают колонку «${columnTitle}»`}
+        draggable={false}
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
+        onTouchStart={(event) => event.stopPropagation()}
+      />
+    </Popover>
+  );
+}
+
 function createCncPlaceholderColumn(
   key: CncTelegramTodayColumn['key'],
   title: string,
@@ -3006,6 +3194,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 <div className="status-board-column__title">
                   <span className="status-board-column__marker" aria-hidden="true" />
                   <Typography.Text strong>{title}</Typography.Text>
+                  <StatusBoardColumnHelpButton
+                    columnTitle={title}
+                    help={cncColumnLeaveHelp(column.key)}
+                  />
                 </div>
                 {loading ? (
                   <Skeleton.Button
@@ -6495,6 +6687,10 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
           <Typography.Text strong ellipsis={{ tooltip: column.status.name }}>
             {column.status.name}
           </Typography.Text>
+          <StatusBoardColumnHelpButton
+            columnTitle={column.status.name}
+            help={statusColumnLeaveHelp(column.status.name)}
+          />
           {!column.status.isActive && <Tag>Неактивен</Tag>}
         </div>
         <Badge
@@ -7197,6 +7393,18 @@ async function fetchCncOrderStatusBoard(
   return mergeCncOrderStatusBoardResponses(responses);
 }
 
+function collectCncOrderStatusBoardIds(
+  columns: CncTelegramTodayColumn[],
+  viewState: OrderStatusBoardViewState,
+  bathsRequireMachineFiles: boolean,
+): number[] {
+  const filteredByOrder = filterCncTodayColumnsByOrders(columns, viewState.cncOrderFilters);
+  const filteredColumns = bathsRequireMachineFiles
+    ? filterCncBathColumnsByMachineOrderMatches(filteredByOrder)
+    : filteredByOrder;
+  return collectCncOrderIds(filteredColumns);
+}
+
 function chunkCncOrderIds(orderIds: readonly number[]): number[][] {
   const chunks: number[][] = [];
   for (let index = 0; index < orderIds.length; index += CNC_ORDER_STATUS_BOARD_BATCH_SIZE) {
@@ -7598,11 +7806,13 @@ export function splitCncOrderCardsByManualColumn(
       card,
       readinessByOrderId.get(card.orderId),
     );
-    const autoColumn: CncTelegramTodayDisplayColumnKey =
+    const statusColumn = resolveCncOrderStatusColumn(card);
+    const readinessColumn: CncTelegramTodayDisplayColumnKey =
       readiness.totalDetails > 0 && readiness.remainingDetails === 0
         ? 'orders_ready'
         : 'orders';
-    const targetColumn = resolveCncManualTarget(
+    const autoColumn = statusColumn ?? readinessColumn;
+    const targetColumn = statusColumn ?? resolveCncManualTarget(
       'order',
       String(card.orderId),
       autoColumn,
@@ -7621,6 +7831,19 @@ export function splitCncOrderCardsByManualColumn(
     );
   }
   return result;
+}
+
+export function resolveCncOrderStatusColumn(
+  card: Pick<OrderStatusBoardCard, 'orderStatusName'>,
+): CncOrderDisplayColumnKey | null {
+  const statusName = normalizeCncOrderStatusName(card.orderStatusName);
+  if (statusName === 'выдан') return 'orders_issued';
+  if (statusName === 'готов к выдаче') return 'orders_ready';
+  return null;
+}
+
+function normalizeCncOrderStatusName(value: string | null | undefined): string {
+  return (value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru-RU');
 }
 
 function compareCncOrderBoardCards(

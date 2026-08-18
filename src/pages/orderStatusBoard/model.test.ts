@@ -834,6 +834,34 @@ describe('order status board model', () => {
     });
   });
 
+  it('forces MDF order cards into status columns before manual moves and readiness', () => {
+    const split = splitCncOrderCardsByManualColumn(
+      [
+        card(3001, { orderStatusName: 'Выдан' }),
+        card(3002, { orderStatusName: ' готов к выдаче ' }),
+        card(3003, { orderStatusName: 'Новый', partsCount: 2 }),
+        card(3004, { orderStatusName: 'Новый' }),
+      ],
+      new Map([
+        [3003, {
+          totalDetails: 2,
+          cutDetails: 2,
+          rolledDetails: 0,
+          remainingDetails: 0,
+        }],
+      ]),
+      {
+        [cncManualMoveStorageKey('order', '3001')]: 'orders',
+        [cncManualMoveStorageKey('order', '3002')]: 'orders_issued',
+        [cncManualMoveStorageKey('order', '3004')]: 'orders_issued',
+      },
+    );
+
+    expect(split.orders).toEqual([]);
+    expect(split.orders_ready.map(({ card: item }) => item.orderId)).toEqual([3002, 3003]);
+    expect(split.orders_issued.map(({ card: item }) => item.orderId)).toEqual([3001, 3004]);
+  });
+
   it('sorts MDF order cards by order number by default and supports selected direction', () => {
     const cards = [
       { ...card(10), orderName: '10', updatedAt: '2026-07-19T09:00:00.000Z' },

@@ -1022,6 +1022,34 @@
   gap: 8px;
 }
 
+.status-board-column-help {
+  max-width: 340px;
+}
+
+.status-board-column-help__list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.status-board-column-help__list li + li {
+  margin-top: 6px;
+}
+
+.status-board-column-help__trigger.ant-btn {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  padding: 0;
+  color: var(--app-text-muted);
+}
+
+.status-board-column-help__trigger.ant-btn:hover,
+.status-board-column-help__trigger.ant-btn:focus-visible {
+  color: var(--status-color);
+  background: color-mix(in srgb, var(--status-color) 10%, transparent);
+}
+
 .status-board-column__marker {
   width: 8px;
   height: 8px;
@@ -3031,6 +3059,14 @@
   font-size: clamp(10px, 0.9vw, 14px);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-board-columns--cnc .status-board-column-help__trigger.ant-btn {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  flex-basis: 20px;
+  font-size: 12px;
 }
 
 .status-board-columns--cnc .status-board-column__cards {

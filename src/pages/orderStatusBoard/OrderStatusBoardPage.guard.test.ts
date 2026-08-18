@@ -164,6 +164,39 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('touch-action: pan-y');
   });
 
+  it('opens the dedicated MDF work board on today before loading data', () => {
+    expect(page).toContain("const todayCncWorkday = dayjs().format('YYYY-MM-DD');");
+    expect(page).toContain("fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current");
+    expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
+    expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
+    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
+  });
+
+  it('shows click help icons explaining how cards leave columns', () => {
+    expect(page).toContain('QuestionCircleOutlined');
+    expect(page).toContain('function StatusBoardColumnHelpButton');
+    expect(page).toContain('trigger="click"');
+    expect(page).toContain('help={cncColumnLeaveHelp(column.key)}');
+    expect(page).toContain('help={statusColumnLeaveHelp(column.status.name)}');
+    expect(page).toContain('Когда ванна уходит из колонки');
+    expect(page).toContain('Когда заказ уходит из колонки');
+    expect(page).toContain('Если статус заказа стал «Готов к выдаче»');
+    expect(page).toContain('Если статус заказа стал «Выдан»');
+    expect(page).toContain('Кнопка «Обновить» и автообновление доски заново проверяют статус');
+    expect(css).toContain('.status-board-column-help__trigger.ant-btn');
+    expect(css).toContain('.status-board-column-help__list li + li');
+  });
+
+  it('refreshes MDF order statuses and forces status-owned order columns', () => {
+    expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
+    expect(page).toContain('setCncOrderBoard(refreshedOrderBoard);');
+    expect(page).toContain('function collectCncOrderStatusBoardIds(');
+    expect(page).toContain('resolveCncOrderStatusColumn(card) === null');
+    expect(page).toContain('const statusColumn = resolveCncOrderStatusColumn(card);');
+    expect(page).toContain("if (statusName === 'выдан') return 'orders_issued';");
+    expect(page).toContain("if (statusName === 'готов к выдаче') return 'orders_ready';");
+  });
+
   it('keeps order status badge in the header and overdue as a clock icon', () => {
     expect(page).toContain('status-board-card__identity');
     expect(page).toContain('status-board-card__status-badge');
