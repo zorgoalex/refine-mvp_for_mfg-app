@@ -1,4 +1,4 @@
-import { Tooltip } from '../../ui/tooltipDelay';
+import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import React, {
   memo,
   useCallback,
@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Popover, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   CalendarOutlined,
@@ -304,6 +304,13 @@ function statusBoardHorizontalScrollEdges(
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 type StatusBoardCardPrimaryStatusKind = 'board' | 'order';
+export type CncOrderSortField =
+  | 'orderName'
+  | 'readyPercent'
+  | 'remainingDetails'
+  | 'totalDetails'
+  | 'sourceUpdatedAt';
+export type CncOrderSortDirection = 'asc' | 'desc';
 
 export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
 const CNC_DRAG_PREVIEW_KIND_LABELS: Record<CncManualCardKind, string> = {
@@ -326,7 +333,6 @@ export type CncRelationCardState =
   | 'dimmed';
 type CncDetailedBathPlacement = 'left' | 'right';
 type CncPdfjsModule = typeof import('pdfjs-dist');
-export type CncManualCardKind = 'packet' | 'bath' | 'order';
 
 export interface CncOrderSortSettings {
   field: CncOrderSortField;
@@ -6757,6 +6763,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
               mutationsEnabled={mutationsEnabled}
               pending={pendingOrders.has(card.orderId)}
               displayMode={cardDisplayMode}
+              finePointer={finePointer}
               touchDragEnabled={mutationsEnabled && touchDragEnabled}
               onMove={onMove}
               onAnnounce={onAnnounce}
@@ -6807,6 +6814,7 @@ interface StatusBoardCardViewProps {
   mutationsEnabled: boolean;
   pending: boolean;
   displayMode: StatusBoardCardDisplayMode;
+  finePointer: boolean;
   actionsVisible?: boolean;
   cncOrderCard?: boolean;
   cncMuted?: boolean;
@@ -6836,6 +6844,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   mutationsEnabled,
   pending,
   displayMode,
+  finePointer,
   actionsVisible = true,
   cncOrderCard = false,
   cncMuted = false,
@@ -8035,8 +8044,8 @@ function cncColumnTitleByKey(
 }
 
 function cncColumnCardNoun(columnKey: CncTelegramTodayDisplayColumnKey): string {
-  if (isCncBathColumn(columnKey)) return 'ванн';
-  if (isCncOrderColumn(columnKey)) return 'заказов';
+  if (isCncBathColumnKey(columnKey)) return 'ванн';
+  if (isCncOrderColumnKey(columnKey)) return 'заказов';
   return 'CNC-пакетов';
 }
 
