@@ -47,6 +47,18 @@ const imagePrintPreview = readFileSync(
 );
 
 describe('OrderStatusBoardPage UX guards', () => {
+  it('keeps status-board drag and column helpers bound after branch merges', () => {
+    expect(page).toContain("export type CncOrderSortField =");
+    expect(page).toContain("export type CncOrderSortDirection = 'asc' | 'desc';");
+    expect(page.match(/export type CncManualCardKind =/g)).toHaveLength(1);
+    expect(page).toContain('finePointer={finePointer}');
+    expect(page).toContain('finePointer: boolean;');
+    expect(page).toContain('if (isCncBathColumnKey(columnKey))');
+    expect(page).toContain('if (isCncOrderColumnKey(columnKey))');
+    expect(page).not.toContain('isCncBathColumn(columnKey)');
+    expect(page).not.toContain('isCncOrderColumn(columnKey)');
+  });
+
   it('keeps keyboard move, live announcements and focus restoration', () => {
     expect(page).toContain('cardRef.current');
     expect(page).toContain('function isKeyboardMoveMenuTrigger');
@@ -707,6 +719,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(mdfSheetPreview).toContain('CUT_RENDER_STYLE_MDF_BOARD_PREVIEW');
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain('CutSheetLabelGenerateAction');
+    expect(page).toContain('svgCutSheet && svgCutSheet.detailIds.length > 0');
     expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
     expect(page).toContain('buildLabelDetailsFromPacketItems(packet.items)');
     expect(page).toContain('detailInstances={labelDetailInstances}');

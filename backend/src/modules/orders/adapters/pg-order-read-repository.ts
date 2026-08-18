@@ -732,6 +732,30 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         o.payment_status_id, pay_s.payment_status_name,
         o.production_status_id, prod_s.production_status_name,
         o.production_status_from_details_enabled,
+        (
+          SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code)
+          FROM (
+            SELECT
+              ps.production_status_code,
+              MIN(COALESCE(ps.sort_order, 0)) AS sort_order
+            FROM (
+              SELECT pse.production_status_id
+              FROM production_status_events pse
+              WHERE pse.order_id = o.order_id
+              UNION
+              SELECT o.production_status_id
+              WHERE o.production_status_id IS NOT NULL
+              UNION
+              SELECT od.production_status_id
+              FROM order_details od
+              WHERE od.order_id = o.order_id
+                AND od.delete_flag = false
+                AND od.production_status_id IS NOT NULL
+            ) actual_statuses
+            INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id
+            GROUP BY ps.production_status_code
+          ) statuses
+        ) AS passed_production_status_codes,
         o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,
         o.discount, o.surcharge, o.notes, o.manager_id,
         o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,
@@ -1479,6 +1503,7 @@ function mapOrderDto(
       productionStatusId: toNullableNumber(row.production_status_id),
       productionStatusName: row.production_status_name,
       productionStatusFromDetailsEnabled: row.production_status_from_details_enabled,
+      passedProductionStatusCodes: toStringArray(row.passed_production_status_codes),
       plannedCompletionDate: toDateOnly(row.planned_completion_date),
       completionDate: toDateOnly(row.completion_date),
       issueDate: toDateOnly(row.issue_date),

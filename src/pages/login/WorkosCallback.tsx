@@ -20,11 +20,6 @@ type WorkosCallbackError = {
   canSelectAnotherAccount: boolean;
 };
 
-type WorkosCallbackError = {
-  message: string;
-  canSelectAnotherAccount: boolean;
-};
-
 // Backend errors raised BEFORE the state/code were consumed (throttle, origin
 // check, feature off, validation, expired bearer on the link path): the code
 // and the state cookie are still valid, so the same callback URL may retry.

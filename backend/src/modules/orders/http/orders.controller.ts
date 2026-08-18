@@ -531,6 +531,7 @@ export const orderHeaderResponseSwaggerSchema = {
     productionStatusId: nullableIntegerSwaggerSchema,
     productionStatusName: nullableStringSwaggerSchema,
     productionStatusFromDetailsEnabled: { type: 'boolean' },
+    passedProductionStatusCodes: { type: 'array', items: { type: 'string' } },
     plannedCompletionDate: { ...dateOnlySwaggerSchema, nullable: true },
     completionDate: { ...dateOnlySwaggerSchema, nullable: true },
     issueDate: { ...dateOnlySwaggerSchema, nullable: true },

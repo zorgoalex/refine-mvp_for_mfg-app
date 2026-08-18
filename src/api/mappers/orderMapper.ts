@@ -192,6 +192,7 @@ export function mapOrderDtoToFormValues(order: OrderDto): OrderFormValues {
     payment_status_name: order.header.paymentStatusName ?? undefined,
     production_status_id: optionalNumber(order.header.productionStatusId),
     production_status_name: order.header.productionStatusName ?? undefined,
+    passed_production_status_codes: order.header.passedProductionStatusCodes ?? [],
     production_status_from_details_enabled: normalizeBoolean(
       order.header.productionStatusFromDetailsEnabled,
       true,
