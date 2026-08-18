@@ -19,6 +19,7 @@ import {
   selectApplicableRules,
 } from '../domain/status-automation-evaluator';
 import type {
+  OrderAutomationState,
   StatusAutomationEvent,
   StatusAutomationEventType,
   StatusAutomationRule,
@@ -64,7 +65,14 @@ const MEANINGFUL_SKIP_REASONS = new Set([
   'target_status_missing',
   'no_details',
   'lower_priority_same_target',
+  'mapping_source_status_missing',
 ]);
+
+interface StatusAutomationActionRunResult extends AutomationActionResult {
+  resolvedTargetStatusId: number | null;
+  mappingSourceStatusId?: number;
+  mappingDirection?: 'order_to_details' | 'production_to_order';
+}
 
 export function isStatusAutomationEnabled(): boolean {
   return process.env.BACKEND_STATUS_AUTOMATION === 'true';
@@ -103,9 +111,9 @@ export async function evaluateStatusAutomation(
       outboxIdempotencyKey,
     };
 
-    let result: AutomationActionResult;
+    let result: StatusAutomationActionRunResult;
     try {
-      result = await runAutomationAction(tx, event.orderId, rule, context);
+      result = await runAutomationAction(tx, event.orderId, state, rule, context);
     } catch (error: unknown) {
       if (!(error instanceof ProductionActionStatusNotFoundError)) {
         throw error;
@@ -176,9 +184,9 @@ export async function evaluateAllStatusAutomationRulesForOrder(
       outboxIdempotencyKey,
     };
 
-    let result: AutomationActionResult;
+    let result: StatusAutomationActionRunResult;
     try {
-      result = await runAutomationAction(tx, input.orderId, rule, context);
+      result = await runAutomationAction(tx, input.orderId, state, rule, context);
     } catch (error: unknown) {
       if (!(error instanceof ProductionActionStatusNotFoundError)) {
         throw error;
@@ -290,39 +298,79 @@ function buildOutboxIdempotencyKey(
 async function runAutomationAction(
   tx: TransactionClient,
   orderId: number,
+  state: OrderAutomationState,
   rule: StatusAutomationRule,
   context: AutomationActionContext,
-): Promise<AutomationActionResult> {
+): Promise<StatusAutomationActionRunResult> {
+  const run = async (
+    targetStatusId: number,
+    action: () => Promise<AutomationActionResult>,
+    mapping?: Pick<StatusAutomationActionRunResult, 'mappingSourceStatusId' | 'mappingDirection'>,
+  ): Promise<StatusAutomationActionRunResult> => ({
+    ...(await action()),
+    resolvedTargetStatusId: targetStatusId,
+    ...mapping,
+  });
+
   switch (rule.actionType) {
     case 'change_order_status':
-      return changeOrderStatusFromAutomationInTransaction(
-        tx,
-        orderId,
-        rule.targetStatusId,
-        context,
+      return run(requireTargetStatusId(rule), () =>
+        changeOrderStatusFromAutomationInTransaction(tx, orderId, requireTargetStatusId(rule), context),
       );
     case 'change_production_status':
-      return changeProductionStatusFromAutomationInTransaction(
-        tx,
-        orderId,
-        rule.targetStatusId,
-        context,
+      return run(requireTargetStatusId(rule), () =>
+        changeProductionStatusFromAutomationInTransaction(tx, orderId, requireTargetStatusId(rule), context),
       );
     case 'change_details_production_status':
-      return changeDetailsProductionStatusFromAutomationInTransaction(
-        tx,
-        orderId,
-        rule.targetStatusId,
-        context,
+      return run(requireTargetStatusId(rule), () =>
+        changeDetailsProductionStatusFromAutomationInTransaction(tx, orderId, requireTargetStatusId(rule), context),
       );
+    case 'map_order_status_to_details_production_status': {
+      const targetStatusId = resolveMappedStatusId(rule, state.orderStatusId);
+      if (targetStatusId === null) {
+        return { status: 'skipped', skipReason: 'mapping_source_status_missing', resolvedTargetStatusId: null };
+      }
+      return run(
+        targetStatusId,
+        () => changeDetailsProductionStatusFromAutomationInTransaction(tx, orderId, targetStatusId, context),
+        { mappingSourceStatusId: state.orderStatusId, mappingDirection: 'order_to_details' },
+      );
+    }
+    case 'map_production_status_to_order_status': {
+      if (state.productionStatusId === null) {
+        return { status: 'skipped', skipReason: 'mapping_source_status_missing', resolvedTargetStatusId: null };
+      }
+      const targetStatusId = resolveMappedStatusId(rule, state.productionStatusId);
+      if (targetStatusId === null) {
+        return { status: 'skipped', skipReason: 'mapping_source_status_missing', resolvedTargetStatusId: null };
+      }
+      return run(
+        targetStatusId,
+        () => changeOrderStatusFromAutomationInTransaction(tx, orderId, targetStatusId, context),
+        { mappingSourceStatusId: state.productionStatusId, mappingDirection: 'production_to_order' },
+      );
+    }
   }
+}
+
+function requireTargetStatusId(rule: StatusAutomationRule): number {
+  if (rule.targetStatusId === null) {
+    throw new Error(`Rule ${rule.id} has no target status`);
+  }
+  return rule.targetStatusId;
+}
+
+function resolveMappedStatusId(rule: StatusAutomationRule, sourceStatusId: number): number | null {
+  return rule.actionConfig?.statusMapping?.entries.find((entry) =>
+    entry.sourceStatusIds.includes(sourceStatusId),
+  )?.targetStatusId ?? null;
 }
 
 async function recordRuleApplied(
   tx: TransactionClient,
   event: StatusAutomationEvent,
   rule: StatusAutomationRule,
-  result: AutomationActionResult,
+  result: StatusAutomationActionRunResult,
 ): Promise<void> {
   await auditService.record(tx, {
     event: 'status_automation.rule_applied',
@@ -337,7 +385,12 @@ async function recordRuleApplied(
     metadata: {
       eventType: event.eventType,
       actionType: rule.actionType,
-      targetStatusId: rule.targetStatusId,
+      targetStatusId: result.resolvedTargetStatusId,
+      ...(result.mappingDirection ? {
+        configuredTargetStatusId: rule.targetStatusId,
+        mappingSourceStatusId: result.mappingSourceStatusId ?? null,
+        mappingDirection: result.mappingDirection,
+      } : {}),
       ruleName: rule.name,
       statusCommandAuditId: result.auditId ?? null,
       paymentStatusIdBefore: event.paymentStatusIdBefore ?? null,

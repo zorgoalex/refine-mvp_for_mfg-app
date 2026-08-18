@@ -76,8 +76,17 @@ describe('status automation event catalog', () => {
         baseConditions.length + (descriptor.eventType === 'payment.created' ? 1 : 0),
       );
       expect(descriptor.allowedActions).toEqual(expect.arrayContaining(actionTypes));
-      expect(descriptor.allowedActions).toHaveLength(3);
     }
+    expect(getEventDescriptor('payment.created')?.allowedActions).toHaveLength(3);
+    expect(getEventDescriptor('order.status_changed')?.allowedActions).toContain(
+      'map_order_status_to_details_production_status',
+    );
+    expect(getEventDescriptor('order.status_changed')?.allowedActions).not.toContain(
+      'map_production_status_to_order_status',
+    );
+    expect(getEventDescriptor('order.production_status_changed')?.allowedActions).toContain(
+      'map_production_status_to_order_status',
+    );
   });
 
   it('looks up known events and returns null for unknown events', () => {

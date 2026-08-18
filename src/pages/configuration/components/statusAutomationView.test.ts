@@ -9,6 +9,7 @@ import {
   buildEventTypeSelectOptions,
   buildStatusAutomationRulesExportFile,
   buildUpdatePayload,
+  describeAction,
   describeConditions,
   planStatusAutomationRulesImport,
   readStatusAutomationRulesImportSource,
@@ -21,7 +22,7 @@ const catalogs = {
     [2, 'Оплачен'],
   ]),
   paymentStatusNames: new Map([[3, 'Частично оплачен']]),
-  productionStatusNames: new Map([[4, 'В работе']]),
+  productionStatusNames: new Map([[4, 'В работе'], [5, 'Готово']]),
 };
 
 const baseForm: StatusAutomationFormValues = {
@@ -403,5 +404,29 @@ describe('statusAutomationView', () => {
         ],
       },
     ]);
+  });
+
+  it('builds and describes many-to-one mapping actions', () => {
+    const mappingRule: StatusAutomationRuleDto = {
+      ...rule,
+      actionType: 'map_production_status_to_order_status',
+      targetStatusId: null,
+      actionConfig: {
+        statusMapping: { entries: [{ sourceStatusIds: [4, 5], targetStatusId: 2 }] },
+      },
+    };
+
+    expect(describeAction(mappingRule, catalogs)).toBe('В работе, Готово → Оплачен');
+    expect(buildCreatePayload({
+      ...baseForm,
+      eventType: 'order.status_changed',
+      actionType: 'map_order_status_to_details_production_status',
+      statusMappingEntries: [{ sourceStatusIds: [1, 2], targetStatusId: 5 }],
+    })).toMatchObject({
+      targetStatusId: null,
+      actionConfig: {
+        statusMapping: { entries: [{ sourceStatusIds: [1, 2], targetStatusId: 5 }] },
+      },
+    });
   });
 });
