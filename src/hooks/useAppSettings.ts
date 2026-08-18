@@ -50,6 +50,7 @@ export const useAppSettings = (options?: { enabled?: boolean }): UseAppSettingsR
     // We load both active and inactive rows to avoid UNIQUE(setting_key) conflicts
     // when a key exists but was deactivated in DB.
     filters: [{ field: 'is_active', operator: 'in', value: [true, false] }],
+    meta: { fetchOptions: { cache: 'no-store' } },
     queryOptions: { enabled, refetchOnWindowFocus: false, staleTime: 30_000 },
   });
 

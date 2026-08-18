@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-18",
+    title: "МДФ-работы: полное обновление доски",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Кнопка «Обновить» на доске «МДФ-работы» теперь без браузерного кэша перечитывает карточки, ручные перемещения, актуальные статусы заказов и настройки блока «Автостатусы → МДФ-доска», после чего заново вычисляет видимые и скрытые колонки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-18",
     title: "МДФ-работы: дата при открытии",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

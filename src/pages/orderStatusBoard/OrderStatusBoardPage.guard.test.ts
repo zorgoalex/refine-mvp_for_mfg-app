@@ -189,7 +189,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('refreshes MDF order statuses and forces status-owned order columns', () => {
     expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
-    expect(page).toContain('setCncOrderBoard(refreshedOrderBoard);');
+    expect(page).toContain('setCncOrderBoard(orderBoardResponse);');
     expect(page).toContain('function collectCncOrderStatusBoardIds(');
     expect(page).toContain('resolveCncOrderStatusColumn(card) === null');
     expect(page).toContain('const statusColumn = resolveCncOrderStatusColumn(card);');
@@ -989,6 +989,46 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncHiddenOrderStatusIds');
     expect(page).toContain('cncHiddenProductionStatusIds');
     expect(page).toContain('cncDisplayOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId))');
+  });
+
+  it('forces MDF refresh to reload all freshness inputs without browser cache', () => {
+    expect(page).toContain('refetch: refetchAppSettings');
+    expect(page).toContain('const cncStrongRefreshInFlightRef = useRef(false)');
+    expect(page).toContain('const cncAuxiliaryRefreshRevisionRef = useRef(0)');
+    expect(page).toContain('const auxiliaryRevision = ++cncAuxiliaryRefreshRevisionRef.current');
+    expect(page).toContain("cncTelegramApi.today({");
+    expect(page).toContain("}, { cache: 'no-store' })");
+    expect(page).toContain("fetchCncManualMoves({ cache: 'no-store' })");
+    expect(page).toContain('refetchMdfBoardSettings()');
+    expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
+    expect(page).toContain('fetchCncOrderStatusBoard(refreshedOrderIds, {');
+    expect(page).toContain("}, { cache: 'no-store' });");
+    expect(page).toContain('cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision');
+    expect(page).toContain('cncStrongRefreshInFlightRef.current = false');
+    expect(page).toContain('cncAuxiliaryRefreshRevisionRef.current === requestRevision');
+  });
+
+  it('prevents failed manual-move recovery from overwriting a strong MDF refresh', () => {
+    const fallbackStart = page.indexOf(
+      'const refreshSupersededMove =',
+    );
+    const fallbackEnd = page.indexOf(
+      "message.error(errorMessage(error, 'Не удалось сохранить ручное перемещение МДФ-доски.'))",
+      fallbackStart,
+    );
+    const fallback = page.slice(fallbackStart, fallbackEnd);
+
+    expect(fallbackStart).toBeGreaterThan(-1);
+    expect(page).toContain(
+      'const moveRefreshRevision = cncAuxiliaryRefreshRevisionRef.current',
+    );
+    expect(fallback).toContain('if (!refreshSupersededMove)');
+    expect(fallback).toContain('setCncManualMoves((current) =>');
+    expect(fallback).toContain("fetchCncManualMoves({ cache: 'no-store' })");
+    expect(fallback).toContain('cncStrongRefreshInFlightRef.current');
+    expect(fallback).toContain(
+      'cncAuxiliaryRefreshRevisionRef.current !== moveRefreshRevision',
+    );
   });
 
   it('keeps visible MDF columns fluid and switches narrow boards to order numbers only', () => {

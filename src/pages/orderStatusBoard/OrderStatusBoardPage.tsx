@@ -45,6 +45,7 @@ import { isApiError } from '../../api/apiError';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
+import type { RequestOptions } from '../../api/httpClient';
 import { orderStatusBoardApi } from '../../api/orderStatusBoardApi';
 import {
   createProductionActionIdempotencyKey,
@@ -566,7 +567,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const mdfWorkdayTodayOpenPatchNeeded =
     shouldApplyMdfWorkdayTodayOnOpen &&
     (viewState.cncWorkday !== todayCncWorkday || viewState.cncOrderFilters.length > 0);
-  const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
+  const {
+    getSetting: getAppSetting,
+    refetch: refetchAppSettings,
+  } = useAppSettings({ enabled: isCncToday });
   const mdfBoardHiddenStatusesSetting =
     getAppSetting<MdfBoardHiddenStatusesSetting>(
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
@@ -637,6 +641,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     useState<CncRelationTarget | null>(null);
   const [cncManualMoves, setCncManualMoves] = useState<CncBoardManualMoveState>({});
   const cncManualMovesRef = useRef<CncBoardManualMoveState>({});
+  const cncStrongRefreshInFlightRef = useRef(false);
+  const cncAuxiliaryRefreshRevisionRef = useRef(0);
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
@@ -651,6 +657,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   useEffect(() => {
     cncManualMovesRef.current = cncManualMoves;
   }, [cncManualMoves]);
+
+  const fetchCncManualMoves = useCallback(async (
+    options?: RequestOptions,
+  ): Promise<CncBoardManualMoveState> => {
+    const response = await orderStatusBoardApi.listMdfManualMoves(options);
+    return mapMdfBoardManualMovesResponse(response.moves);
+  }, []);
+
+  const refetchMdfBoardSettings = useCallback(async (): Promise<void> => {
+    const result = await refetchAppSettings();
+    if (isFailedRefetchResult(result)) {
+      throw result.error instanceof Error
+        ? result.error
+        : new Error('Не удалось обновить настройки МДФ-доски.');
+    }
+  }, [refetchAppSettings]);
 
   useEffect(() => {
     if (viewState.view === 'cnc_today') return;
@@ -743,48 +765,56 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         }
         if (viewStateRef.current.view === 'cnc_today') {
           const currentViewState = viewStateRef.current;
+          const auxiliaryRevision = ++cncAuxiliaryRefreshRevisionRef.current;
+          cncStrongRefreshInFlightRef.current = true;
           const workday = currentViewState.cncWorkday ?? dayjs().format('YYYY-MM-DD');
           const displayRange = buildCncOrderSearchDateRange(
             workday,
             currentViewState.cncOrderSearchPeriod,
           );
-          const response = await cncTelegramApi.today({
-            dateFrom: displayRange.dateFrom,
-            dateTo: displayRange.dateTo,
-          });
-          const refreshedOrderIds = collectCncOrderStatusBoardIds(
-            response.columns,
-            currentViewState,
-            cncBathsRequireMachineFiles,
-          );
-          let refreshedOrderBoard: OrderStatusBoardResponse | null = null;
-          if (refreshedOrderIds.length > 0) {
-            setCncOrderBoardLoading(true);
-            try {
-              refreshedOrderBoard = await fetchCncOrderStatusBoard(refreshedOrderIds, {
-                sortBy: currentViewState.sortBy,
-                sortOrder: currentViewState.sortOrder,
-              });
-            } catch (error) {
-              message.warning(errorMessage(error, 'Не удалось загрузить статусы заказов MDF.'));
-            } finally {
-              if (datasetRevisionRef.current === revision) setCncOrderBoardLoading(false);
+          try {
+            const [response, manualMoves] = await Promise.all([
+              cncTelegramApi.today({
+                dateFrom: displayRange.dateFrom,
+                dateTo: displayRange.dateTo,
+              }, { cache: 'no-store' }),
+              fetchCncManualMoves({ cache: 'no-store' }),
+              refetchMdfBoardSettings(),
+            ]);
+            const refreshedOrderIds = collectCncOrderStatusBoardIds(
+              response.columns,
+              currentViewState,
+              cncBathsRequireMachineFiles,
+            );
+            const orderBoardResponse = await fetchCncOrderStatusBoard(refreshedOrderIds, {
+              sortBy: currentViewState.sortBy,
+              sortOrder: currentViewState.sortOrder,
+            }, { cache: 'no-store' });
+            if (
+              datasetRevisionRef.current !== revision
+              || cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision
+            ) {
+              return false;
             }
-          } else {
-            setCncOrderBoardLoading(false);
+            cncTodayRef.current = response;
+            cncOrderSearchTodayRef.current = response;
+            setCncToday(response);
+            setCncOrderSearchToday(response);
+            cncManualMovesRef.current = manualMoves;
+            setCncManualMoves(manualMoves);
+            setCncOrderBoard(orderBoardResponse);
+            boardRef.current = null;
+            setBoard(null);
+            setStale(false);
+            replacePending(new Set());
+            setLoading(false);
+            return true;
+          } finally {
+            if (cncAuxiliaryRefreshRevisionRef.current === auxiliaryRevision) {
+              cncStrongRefreshInFlightRef.current = false;
+              setCncOrderBoardLoading(false);
+            }
           }
-          if (datasetRevisionRef.current !== revision) return false;
-          cncTodayRef.current = response;
-          cncOrderSearchTodayRef.current = response;
-          setCncToday(response);
-          setCncOrderSearchToday(response);
-          setCncOrderBoard(refreshedOrderBoard);
-          boardRef.current = null;
-          setBoard(null);
-          setStale(false);
-          replacePending(new Set());
-          setLoading(false);
-          return true;
         }
 
         const response = await orderStatusBoardApi.get(
@@ -849,7 +879,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         return false;
       }
     },
-    [cncBathsRequireMachineFiles, replacePending],
+    [cncBathsRequireMachineFiles, fetchCncManualMoves, refetchMdfBoardSettings, replacePending],
   );
 
   useEffect(() => {
@@ -1450,8 +1480,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     let initialLoad = true;
     let warned = false;
     const loadOrderBoard = async () => {
+      if (cncStrongRefreshInFlightRef.current) return;
       if (inFlight) return;
       inFlight = true;
+      const requestRevision = cncAuxiliaryRefreshRevisionRef.current;
       const showLoading = initialLoad;
       initialLoad = false;
       if (showLoading) setCncOrderBoardLoading(true);
@@ -1459,8 +1491,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         const response = await fetchCncOrderStatusBoard(cncOrderIds, {
           sortBy: viewState.sortBy,
           sortOrder: viewState.sortOrder,
-        });
-        if (!cancelled) setCncOrderBoard(response);
+        }, { cache: 'no-store' });
+        if (
+          !cancelled
+          && cncAuxiliaryRefreshRevisionRef.current === requestRevision
+        ) {
+          setCncOrderBoard(response);
+        }
       } catch (error) {
         if (!cancelled && !warned) {
           warned = true;
@@ -1482,11 +1519,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     };
   }, [cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
 
-  const fetchCncManualMoves = useCallback(async (): Promise<CncBoardManualMoveState> => {
-    const response = await orderStatusBoardApi.listMdfManualMoves();
-    return mapMdfBoardManualMovesResponse(response.moves);
-  }, []);
-
   useEffect(() => {
     if (!isCncToday) {
       cncManualMovesRef.current = {};
@@ -1498,11 +1530,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     let warned = false;
     let inFlight = false;
     const loadManualMoves = async () => {
+      if (cncStrongRefreshInFlightRef.current) return;
       if (inFlight) return;
       inFlight = true;
+      const requestRevision = cncAuxiliaryRefreshRevisionRef.current;
       try {
-        const moves = await fetchCncManualMoves();
-        if (!cancelled) {
+        const moves = await fetchCncManualMoves({ cache: 'no-store' });
+        if (
+          !cancelled
+          && cncAuxiliaryRefreshRevisionRef.current === requestRevision
+        ) {
           cncManualMovesRef.current = moves;
           setCncManualMoves(moves);
         }
@@ -1607,6 +1644,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     }
     const key = cncManualMoveStorageKey(kind, cardId);
     const previousTarget = cncManualMovesRef.current[key];
+    const moveRefreshRevision = cncAuxiliaryRefreshRevisionRef.current;
     const requestSeq = (cncManualMoveRequestSeqRef.current[key] ?? 0) + 1;
     cncManualMoveRequestSeqRef.current[key] = requestSeq;
     const optimisticMoves = {
@@ -1635,22 +1673,31 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       })
       .catch((error) => {
         if (cncManualMoveRequestSeqRef.current[key] !== requestSeq) return;
-        setCncManualMoves((current) => {
-          const next = { ...current };
-          if (previousTarget) {
-            next[key] = previousTarget;
-          } else {
-            delete next[key];
-          }
-          cncManualMovesRef.current = next;
-          return next;
-        });
-        void fetchCncManualMoves()
-          .then((moves) => {
-            cncManualMovesRef.current = moves;
-            setCncManualMoves(moves);
-          })
-          .catch(() => undefined);
+        const refreshSupersededMove =
+          cncStrongRefreshInFlightRef.current
+          || cncAuxiliaryRefreshRevisionRef.current !== moveRefreshRevision;
+        if (!refreshSupersededMove) {
+          setCncManualMoves((current) => {
+            const next = { ...current };
+            if (previousTarget) {
+              next[key] = previousTarget;
+            } else {
+              delete next[key];
+            }
+            cncManualMovesRef.current = next;
+            return next;
+          });
+          void fetchCncManualMoves({ cache: 'no-store' })
+            .then((moves) => {
+              if (
+                cncStrongRefreshInFlightRef.current
+                || cncAuxiliaryRefreshRevisionRef.current !== moveRefreshRevision
+              ) return;
+              cncManualMovesRef.current = moves;
+              setCncManualMoves(moves);
+            })
+            .catch(() => undefined);
+        }
         message.error(errorMessage(error, 'Не удалось сохранить ручное перемещение МДФ-доски.'));
       });
   }, [fetchCncManualMoves]);
@@ -7279,6 +7326,14 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
+function isFailedRefetchResult(result: unknown): result is { isError: true; error?: unknown } {
+  return (
+    typeof result === 'object'
+    && result !== null
+    && (result as { isError?: unknown }).isError === true
+  );
+}
+
 function formatDateTime(value: string): string {
   const parsed = dayjs(value);
   return parsed.isValid() ? parsed.format('DD.MM.YYYY HH:mm') : '—';
@@ -7339,6 +7394,7 @@ async function fetchCncOrderStatusBoard(
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
   },
+  options?: RequestOptions,
 ): Promise<OrderStatusBoardResponse | null> {
   if (orderIds.length === 0) return null;
   const responses = await Promise.all(
@@ -7350,7 +7406,7 @@ async function fetchCncOrderStatusBoard(
         orderIds: chunk,
         sortBy: sortPreference.sortBy,
         sortOrder: sortPreference.sortOrder,
-      }),
+      }, options),
     ),
   );
   return mergeCncOrderStatusBoardResponses(responses);

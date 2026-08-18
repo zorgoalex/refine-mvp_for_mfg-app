@@ -20,6 +20,10 @@ import { canMutateHasuraResource, canQueryHasuraResource } from './resourcePermi
 
 type AnyObject = Record<string, any>;
 
+interface HasuraRequestOptions {
+  cache?: RequestCache;
+}
+
 const HASURA_NOT_CONFIGURED_ERROR = {
   message: 'Legacy Hasura GraphQL URL is not configured',
   statusCode: 503,
@@ -1001,10 +1005,15 @@ const parsePostgresError = (message: string): string => {
   return message;
 };
 
-const gqlRequest = async (query: string, variables?: AnyObject): Promise<any> => {
+const gqlRequest = async (
+  query: string,
+  variables?: AnyObject,
+  options: HasuraRequestOptions = {},
+): Promise<any> => {
   const hasuraUrl = getHasuraUrl();
   const res = await fetch(hasuraUrl, {
     method: "POST",
+    ...(options.cache ? { cache: options.cache } : {}),
     headers: await headers(),
     body: JSON.stringify(variables ? { query, variables } : { query }),
   });
@@ -1023,6 +1032,27 @@ const gqlRequest = async (query: string, variables?: AnyObject): Promise<any> =>
 
   return json.data;
 };
+
+function hasuraRequestOptionsFromMeta(meta: unknown): HasuraRequestOptions {
+  if (!meta || typeof meta !== 'object') return {};
+  const candidate = meta as {
+    cache?: unknown;
+    fetchOptions?: { cache?: unknown };
+  };
+  const cache = candidate.fetchOptions?.cache ?? candidate.cache;
+  return isRequestCacheValue(cache) ? { cache } : {};
+}
+
+function isRequestCacheValue(value: unknown): value is RequestCache {
+  return (
+    value === 'default'
+    || value === 'force-cache'
+    || value === 'no-cache'
+    || value === 'no-store'
+    || value === 'only-if-cached'
+    || value === 'reload'
+  );
+}
 
 const escapeValue = (v: any) => {
   if (v === null || v === undefined) return "null";
@@ -1791,7 +1821,7 @@ export const dataProvider = (_apiUrl: string) => {
   return {
     getApiUrl: () => getConfiguredHasuraUrl() ?? '',
 
-    getList: async ({ resource, pagination, sorters, filters }: AnyObject) => {
+    getList: async ({ resource, pagination, sorters, filters, meta }: AnyObject) => {
       const backendOrdersList = await getBackendOrdersListIfEnabled(
         resource,
         pagination,
@@ -1868,7 +1898,7 @@ export const dataProvider = (_apiUrl: string) => {
           ${resource}_aggregate${aggregateWhere} { aggregate { count } }
         }
       `;
-      const data = await gqlRequest(query);
+      const data = await gqlRequest(query, undefined, hasuraRequestOptionsFromMeta(meta));
       return {
         data: data[resource],
         total: data[`${resource}_aggregate`]?.aggregate?.count ?? 0,
