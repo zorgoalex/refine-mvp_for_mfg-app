@@ -6,6 +6,7 @@ import type {
   StatusAutomationEventTypeDto,
   StatusAutomationOrderSource,
   StatusAutomationRuleDto,
+  StatusAutomationStatusMappingEntryDto,
   UpdateStatusAutomationRuleRequest,
 } from '../../../api/types/statusAutomationApi.types';
 
@@ -87,7 +88,8 @@ export interface StatusAutomationFormValues {
   name: string;
   eventType: StatusAutomationEventType;
   actionType: StatusAutomationActionType;
-  targetStatusId: number;
+  targetStatusId: number | null;
+  statusMappingEntries?: StatusAutomationStatusMappingEntryDto[];
   currentOrderStatusIn?: number[];
   currentOrderStatusNotIn?: number[];
   currentPaymentStatusIn?: number[];
@@ -123,7 +125,35 @@ const ACTION_TYPES: StatusAutomationActionType[] = [
   'change_order_status',
   'change_production_status',
   'change_details_production_status',
+  'map_order_status_to_details_production_status',
+  'map_production_status_to_order_status',
 ];
+
+export function isStatusMappingAction(actionType: StatusAutomationActionType): boolean {
+  return actionType === 'map_order_status_to_details_production_status' ||
+    actionType === 'map_production_status_to_order_status';
+}
+
+export function describeAction(
+  rule: StatusAutomationRuleDto,
+  catalogs: StatusAutomationCatalogs,
+): string {
+  if (isStatusMappingAction(rule.actionType)) {
+    const sourceNames = rule.actionType === 'map_order_status_to_details_production_status'
+      ? catalogs.orderStatusNames
+      : catalogs.productionStatusNames;
+    const targetNames = rule.actionType === 'map_order_status_to_details_production_status'
+      ? catalogs.productionStatusNames
+      : catalogs.orderStatusNames;
+    return (rule.actionConfig?.statusMapping?.entries ?? [])
+      .map((entry) => `${formatStatusIds(entry.sourceStatusIds, sourceNames)} → ${targetNames.get(entry.targetStatusId) ?? `#${entry.targetStatusId}`}`)
+      .join('; ');
+  }
+  const targetNames = rule.actionType === 'change_order_status'
+    ? catalogs.orderStatusNames
+    : catalogs.productionStatusNames;
+  return `${targetNames.get(rule.targetStatusId ?? 0) ?? `#${rule.targetStatusId ?? '?'}`}`;
+}
 
 const ORDER_SOURCES: StatusAutomationOrderSource[] = ['manual', 'bazis', 'import'];
 
@@ -236,12 +266,14 @@ function buildConditions(form: StatusAutomationFormValues): StatusAutomationCond
 export function buildCreatePayload(
   form: StatusAutomationFormValues,
 ): CreateStatusAutomationRuleRequest {
+  const actionConfig = buildActionConfig(form);
   return {
     name: form.name,
     eventType: form.eventType,
     actionType: form.actionType,
-    targetStatusId: form.targetStatusId,
+    targetStatusId: isStatusMappingAction(form.actionType) ? null : form.targetStatusId,
     conditions: buildConditions(form),
+    ...(actionConfig ? { actionConfig } : {}),
     priority: form.priority,
     isEnabled: form.isEnabled,
   };
@@ -251,16 +283,24 @@ export function buildUpdatePayload(
   rule: StatusAutomationRuleDto,
   form: StatusAutomationFormValues,
 ): UpdateStatusAutomationRuleRequest {
+  const actionConfig = buildActionConfig(form);
   return {
     name: form.name,
     eventType: form.eventType,
     actionType: form.actionType,
-    targetStatusId: form.targetStatusId,
+    targetStatusId: isStatusMappingAction(form.actionType) ? null : form.targetStatusId,
     conditions: buildConditions(form),
+    ...(actionConfig ? { actionConfig } : {}),
     priority: form.priority,
     isEnabled: form.isEnabled,
     version: rule.version,
   };
+}
+
+function buildActionConfig(form: StatusAutomationFormValues) {
+  return isStatusMappingAction(form.actionType)
+    ? { statusMapping: { entries: (form.statusMappingEntries ?? []).map((entry) => ({ ...entry, sourceStatusIds: [...entry.sourceStatusIds] })) } }
+    : undefined;
 }
 
 export function buildStatusAutomationRulesExportFile(
@@ -276,6 +316,7 @@ export function buildStatusAutomationRulesExportFile(
       actionType: rule.actionType,
       targetStatusId: rule.targetStatusId,
       conditions: normalizeConditionsForExport(rule.conditions),
+      ...(rule.actionConfig?.statusMapping ? { actionConfig: rule.actionConfig } : {}),
       priority: rule.priority,
       isEnabled: rule.isEnabled,
     })),
@@ -348,7 +389,7 @@ export function planStatusAutomationRulesImport(
 export function statusAutomationRuleSignature(
   rule: Pick<
     CreateStatusAutomationRuleRequest,
-    'eventType' | 'actionType' | 'targetStatusId' | 'conditions' | 'priority' | 'isEnabled'
+    'eventType' | 'actionType' | 'targetStatusId' | 'conditions' | 'actionConfig' | 'priority' | 'isEnabled'
   >,
 ): string {
   return JSON.stringify({
@@ -356,6 +397,7 @@ export function statusAutomationRuleSignature(
     actionType: rule.actionType,
     targetStatusId: rule.targetStatusId,
     conditions: normalizeConditionsForExport(rule.conditions ?? {}),
+    actionConfig: rule.actionConfig ?? {},
     priority: rule.priority ?? 100,
     isEnabled: rule.isEnabled ?? false,
   });
@@ -381,10 +423,13 @@ function parseImportedStatusAutomationRule(
     errors.push('Не указано допустимое действие правила');
   }
 
-  const targetStatusId = toPositiveInteger(rawRule.targetStatusId);
-  if (targetStatusId === null) {
+  const mappingAction = isStatusAutomationActionType(actionType) && isStatusMappingAction(actionType);
+  const targetStatusId = mappingAction ? null : toPositiveInteger(rawRule.targetStatusId);
+  if (!mappingAction && targetStatusId === null) {
     errors.push('Не указан целевой статус');
   }
+  const actionConfigResult = parseImportedActionConfig(rawRule.actionConfig, mappingAction);
+  errors.push(...actionConfigResult.errors);
 
   const priority = rawRule.priority === undefined ? 100 : toInteger(rawRule.priority);
   if (priority === null) {
@@ -408,7 +453,7 @@ function parseImportedStatusAutomationRule(
     errors.length > 0 ||
     !eventType ||
     !isStatusAutomationActionType(actionType) ||
-    targetStatusId === null ||
+    (!mappingAction && targetStatusId === null) ||
     priority === null ||
     isEnabled === null ||
     !conditionsResult.conditions
@@ -423,10 +468,45 @@ function parseImportedStatusAutomationRule(
       actionType,
       targetStatusId,
       conditions: conditionsResult.conditions,
+      ...(actionConfigResult.actionConfig ? { actionConfig: actionConfigResult.actionConfig } : {}),
       priority,
       isEnabled,
     },
     errors: [],
+  };
+}
+
+function parseImportedActionConfig(
+  rawConfig: unknown,
+  mappingAction: boolean,
+): { actionConfig: CreateStatusAutomationRuleRequest['actionConfig']; errors: string[] } {
+  if (!mappingAction) return { actionConfig: undefined, errors: [] };
+  if (!isRecord(rawConfig) || !isRecord(rawConfig.statusMapping) || !Array.isArray(rawConfig.statusMapping.entries)) {
+    return { actionConfig: undefined, errors: ['Не указан маппинг статусов'] };
+  }
+
+  const errors: string[] = [];
+  const seen = new Set<number>();
+  const entries = rawConfig.statusMapping.entries.flatMap((rawEntry, index) => {
+    if (!isRecord(rawEntry)) {
+      errors.push(`Строка маппинга ${index + 1} должна быть объектом`);
+      return [];
+    }
+    const sources = parsePositiveIntegerArray(rawEntry.sourceStatusIds, `Строка маппинга ${index + 1}`);
+    errors.push(...sources.errors);
+    const target = toPositiveInteger(rawEntry.targetStatusId);
+    if (sources.value.length === 0) errors.push(`Строка маппинга ${index + 1}: нет исходных статусов`);
+    if (target === null) errors.push(`Строка маппинга ${index + 1}: нет целевого статуса`);
+    for (const source of sources.value) {
+      if (seen.has(source)) errors.push(`Исходный статус #${source} указан несколько раз`);
+      seen.add(source);
+    }
+    return target === null ? [] : [{ sourceStatusIds: sources.value, targetStatusId: target }];
+  });
+  if (entries.length === 0) errors.push('Маппинг должен содержать хотя бы одну строку');
+  return {
+    actionConfig: errors.length === 0 ? { statusMapping: { entries } } : undefined,
+    errors,
   };
 }
 
@@ -528,15 +608,25 @@ function validateImportedStatusAutomationRule(
     }
   }
 
-  if (rule.actionType === 'change_order_status') {
+  if (rule.actionType === 'map_order_status_to_details_production_status') {
+    for (const entry of rule.actionConfig?.statusMapping?.entries ?? []) {
+      pushMissingStatusErrors(errors, entry.sourceStatusIds, statusCatalog.orderStatusIds, 'исходные статусы заказа');
+      pushMissingStatusErrors(errors, [entry.targetStatusId], statusCatalog.productionStatusIds, 'целевые статусы производства');
+    }
+  } else if (rule.actionType === 'map_production_status_to_order_status') {
+    for (const entry of rule.actionConfig?.statusMapping?.entries ?? []) {
+      pushMissingStatusErrors(errors, entry.sourceStatusIds, statusCatalog.productionStatusIds, 'исходные статусы производства');
+      pushMissingStatusErrors(errors, [entry.targetStatusId], statusCatalog.orderStatusIds, 'целевые статусы заказа');
+    }
+  } else if (rule.actionType === 'change_order_status' && rule.targetStatusId !== null) {
     if (!statusCatalog.orderStatusIds.has(rule.targetStatusId)) {
       errors.push(`Целевой статус заказа #${rule.targetStatusId} отсутствует`);
     } else if (!statusCatalog.activeOrderStatusIds.has(rule.targetStatusId)) {
       errors.push(`Целевой статус заказа #${rule.targetStatusId} неактивен`);
     }
-  } else if (!statusCatalog.productionStatusIds.has(rule.targetStatusId)) {
+  } else if (rule.targetStatusId !== null && !statusCatalog.productionStatusIds.has(rule.targetStatusId)) {
     errors.push(`Целевой производственный статус #${rule.targetStatusId} отсутствует`);
-  } else if (!statusCatalog.activeProductionStatusIds.has(rule.targetStatusId)) {
+  } else if (rule.targetStatusId !== null && !statusCatalog.activeProductionStatusIds.has(rule.targetStatusId)) {
     errors.push(`Целевой производственный статус #${rule.targetStatusId} неактивен`);
   }
 

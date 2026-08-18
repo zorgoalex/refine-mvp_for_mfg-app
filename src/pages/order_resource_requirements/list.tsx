@@ -94,11 +94,16 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const [readyCutsOnly, setReadyCutsOnly] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportRows, setReportRows] = useState<OrderResourceDemandRow[]>(EMPTY_RESOURCE_DEMAND_ROWS);
+  const [reportSelectedOnly, setReportSelectedOnly] = useState(false);
   const [reportGeneratedAt, setReportGeneratedAt] = useState(() => new Date());
   const [reportMaterial, setReportMaterial] = useState<ResourceDemandReportMaterial>('films');
   const [reportFormat, setReportFormat] = useState<ResourceDemandReportFormat>('brief');
   const [reportFileFormat, setReportFileFormat] = useState<ResourceDemandReportFileFormat>('txt');
   const [headerFilters, setHeaderFilters] = useState<HeaderFilterState>(() => createDefaultHeaderFilters());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
+  const [selectedRowsByKey, setSelectedRowsByKey] = useState<Map<Key, OrderResourceDemandRow>>(
+    () => new Map(),
+  );
   const [sortState, setSortState] = useState<HeaderSortState>(DEFAULT_SORT_STATE);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const deferredSearch = useDeferredValue(searchInput.trim());
@@ -146,6 +151,25 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     setPage(DEFAULT_PAGE);
   }, [pageSize]);
 
+  useEffect(() => {
+    if (selectedRowKeys.length === 0) {
+      setSelectedRowsByKey((current) => (current.size === 0 ? current : new Map()));
+      return;
+    }
+    const selectedKeys = new Set(selectedRowKeys);
+    setSelectedRowsByKey((current) => {
+      const next = new Map(current);
+      let changed = false;
+      rows.forEach((row) => {
+        if (selectedKeys.has(row.orderId) && next.get(row.orderId) !== row) {
+          next.set(row.orderId, row);
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, [rows, selectedRowKeys]);
+
   const applyHeaderFilter = useCallback((field: HeaderFilterField, keys: Key[] | null) => {
     setHeaderFilters((current) => ({
       ...current,
@@ -164,11 +188,37 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
     setRefreshRevision((value) => value + 1);
   }, []);
 
+  const handleRowSelectionChange = useCallback((keys: Key[], selectedRows: OrderResourceDemandRow[]) => {
+    const selectedKeys = new Set(keys);
+    setSelectedRowKeys(keys);
+    setSelectedRowsByKey((current) => {
+      const next = new Map(Array.from(current).filter(([key]) => selectedKeys.has(key)));
+      selectedRows.forEach((row) => next.set(row.orderId, row));
+      return next;
+    });
+  }, []);
+
+  const handleReadyCutsOnlyChange = useCallback((checked: boolean) => {
+    setReadyCutsOnly(checked);
+    if (checked) {
+      setSelectedRowKeys([]);
+      setSelectedRowsByKey(new Map());
+    }
+    setPage(DEFAULT_PAGE);
+  }, []);
+
   const openReportModal = useCallback(() => {
-    setReportRows(tableRows);
+    const selectedOnly = selectedRowKeys.length > 0;
+    const rowsForReport = selectedOnly
+      ? selectedRowKeys
+          .map((key) => selectedRowsByKey.get(key))
+          .filter((row): row is OrderResourceDemandRow => row != null)
+      : tableRows;
+    setReportRows(rowsForReport);
+    setReportSelectedOnly(selectedOnly);
     setReportGeneratedAt(new Date());
     setReportOpen(true);
-  }, [tableRows]);
+  }, [selectedRowKeys, selectedRowsByKey, tableRows]);
 
   const handleTableChange: TableProps<OrderResourceDemandRow>['onChange'] = useCallback(
     (_pagination, _filters, sorter, extra) => {
@@ -234,10 +284,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
           <Checkbox
             checked={readyCutsOnly}
             style={{ whiteSpace: 'nowrap' }}
-            onChange={(event) => {
-              setReadyCutsOnly(event.target.checked);
-              resetPage();
-            }}
+            onChange={(event) => handleReadyCutsOnlyChange(event.target.checked)}
           >
             Готовые раскрои
           </Checkbox>
@@ -273,6 +320,12 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
 
         <Table
           rowKey="orderId"
+          rowSelection={{
+            selectedRowKeys,
+            onChange: handleRowSelectionChange,
+            preserveSelectedRowKeys: true,
+            columnWidth: 48,
+          }}
           dataSource={tableRows}
           loading={loading && !response}
           scroll={{ x: 1080 }}
@@ -303,7 +356,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             width={230}
             sorter
             sortOrder={sortState.columnKey === 'order' ? sortState.order : null}
-            {...filterProps('order', filterOptions.orders)}
+            {...filterProps('order', filterOptions.order)}
             render={(_, row: OrderResourceDemandRow) => (
               <Space direction="vertical" size={0}>
                 <Link to={`/orders/show/${row.orderId}`}>{orderDisplayNumber(row)}</Link>
@@ -319,7 +372,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             width={125}
             sorter
             sortOrder={sortState.columnKey === 'date' ? sortState.order : null}
-            {...filterProps('date', filterOptions.dates)}
+            {...filterProps('date', filterOptions.date)}
             render={(_, row: OrderResourceDemandRow) => (
               <span style={numericStyle}>{row.orderDate ? formatDate(row.orderDate) : '—'}</span>
             )}
@@ -350,6 +403,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
         <ResourceDemandReportModal
           open={reportOpen}
           report={report}
+          selectedOnly={reportSelectedOnly}
           material={reportMaterial}
           reportFormat={reportFormat}
           fileFormat={reportFileFormat}
@@ -432,6 +486,7 @@ const ResourceDemandFilterDropdown: React.FC<
 const ResourceDemandReportModal: React.FC<{
   open: boolean;
   report: ResourceDemandReport;
+  selectedOnly: boolean;
   material: ResourceDemandReportMaterial;
   reportFormat: ResourceDemandReportFormat;
   fileFormat: ResourceDemandReportFileFormat;
@@ -443,6 +498,7 @@ const ResourceDemandReportModal: React.FC<{
 }> = ({
   open,
   report,
+  selectedOnly,
   material,
   reportFormat,
   fileFormat,
@@ -494,9 +550,14 @@ const ResourceDemandReportModal: React.FC<{
           />
         </Space>
       </Space>
-      <Typography.Text type="secondary" style={numericStyle}>
-        Строк в отчёте: {reportRowCount(report)}
-      </Typography.Text>
+      <Space wrap size={8}>
+        <Typography.Text type="secondary" style={numericStyle}>
+          Строк в отчёте: {reportRowCount(report)}
+        </Typography.Text>
+        {selectedOnly && (
+          <Typography.Text strong>отчёт только для выделенных заказов</Typography.Text>
+        )}
+      </Space>
       <ResourceDemandReportPreview report={report} />
     </Space>
   </Modal>

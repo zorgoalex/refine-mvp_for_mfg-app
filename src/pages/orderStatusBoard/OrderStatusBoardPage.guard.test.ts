@@ -47,6 +47,18 @@ const imagePrintPreview = readFileSync(
 );
 
 describe('OrderStatusBoardPage UX guards', () => {
+  it('keeps status-board drag and column helpers bound after branch merges', () => {
+    expect(page).toContain("export type CncOrderSortField =");
+    expect(page).toContain("export type CncOrderSortDirection = 'asc' | 'desc';");
+    expect(page.match(/export type CncManualCardKind =/g)).toHaveLength(1);
+    expect(page).toContain('finePointer={finePointer}');
+    expect(page).toContain('finePointer: boolean;');
+    expect(page).toContain('if (isCncBathColumnKey(columnKey))');
+    expect(page).toContain('if (isCncOrderColumnKey(columnKey))');
+    expect(page).not.toContain('isCncBathColumn(columnKey)');
+    expect(page).not.toContain('isCncOrderColumn(columnKey)');
+  });
+
   it('keeps keyboard move, live announcements and focus restoration', () => {
     expect(page).toContain('cardRef.current');
     expect(page).toContain('function isKeyboardMoveMenuTrigger');
@@ -189,7 +201,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('refreshes MDF order statuses and forces status-owned order columns', () => {
     expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
-    expect(page).toContain('setCncOrderBoard(refreshedOrderBoard);');
+    expect(page).toContain('setCncOrderBoard(orderBoardResponse);');
     expect(page).toContain('function collectCncOrderStatusBoardIds(');
     expect(page).toContain('resolveCncOrderStatusColumn(card) === null');
     expect(page).toContain('const statusColumn = resolveCncOrderStatusColumn(card);');
@@ -476,9 +488,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Прокрутить МДФ-доску наверх');
     expect(page).toContain('cncBoardScrollEdges.left');
     expect(page).toContain('className="cnc-board-scroll-edge cnc-board-scroll-edge--left"');
+    expect(page).toContain('style={{ insetInlineStart: cncBoardScrollButtonInsets.left }}');
     expect(page).toContain("onClick={() => scrollCncBoardHorizontally('left')}");
     expect(page).toContain('cncBoardScrollEdges.right');
     expect(page).toContain('className="cnc-board-scroll-edge cnc-board-scroll-edge--right"');
+    expect(page).toContain('style={{ insetInlineEnd: cncBoardScrollButtonInsets.right }}');
     expect(page).toContain("onClick={() => scrollCncBoardHorizontally('right')}");
     expect(page).not.toContain('cncBoardScrollDirection');
     expect(page).toContain('Прокрутить МДФ-доску влево');
@@ -705,6 +719,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(mdfSheetPreview).toContain('CUT_RENDER_STYLE_MDF_BOARD_PREVIEW');
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain('CutSheetLabelGenerateAction');
+    expect(page).toContain('svgCutSheet && svgCutSheet.detailIds.length > 0');
     expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
     expect(page).toContain('buildLabelDetailsFromPacketItems(packet.items)');
     expect(page).toContain('detailInstances={labelDetailInstances}');
@@ -921,6 +936,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("cardDisplayMode === 'screenshot' ? 'status-board-columns--cnc-screenshot' : ''");
     expect(packetCard).toContain("displayMode === 'screenshot' && hasSheetPreview");
     expect(packetCard).toContain("setActiveAuxView('sheet')");
+    expect(packetCard).toContain("if (displayMode !== 'screenshot')");
+    expect(packetCard).toContain("current === 'sheet' ? null : current");
     expect(packetCard).toContain("data-cnc-card-view={displayMode === 'screenshot' ? 'screenshot' : summaryOnly ? 'compact' : 'standard'}");
   });
 
@@ -989,6 +1006,46 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncHiddenOrderStatusIds');
     expect(page).toContain('cncHiddenProductionStatusIds');
     expect(page).toContain('cncDisplayOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId))');
+  });
+
+  it('forces MDF refresh to reload all freshness inputs without browser cache', () => {
+    expect(page).toContain('refetch: refetchAppSettings');
+    expect(page).toContain('const cncStrongRefreshInFlightRef = useRef(false)');
+    expect(page).toContain('const cncAuxiliaryRefreshRevisionRef = useRef(0)');
+    expect(page).toContain('const auxiliaryRevision = ++cncAuxiliaryRefreshRevisionRef.current');
+    expect(page).toContain("cncTelegramApi.today({");
+    expect(page).toContain("}, { cache: 'no-store' })");
+    expect(page).toContain("fetchCncManualMoves({ cache: 'no-store' })");
+    expect(page).toContain('refetchMdfBoardSettings()');
+    expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
+    expect(page).toContain('fetchCncOrderStatusBoard(refreshedOrderIds, {');
+    expect(page).toContain("}, { cache: 'no-store' });");
+    expect(page).toContain('cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision');
+    expect(page).toContain('cncStrongRefreshInFlightRef.current = false');
+    expect(page).toContain('cncAuxiliaryRefreshRevisionRef.current === requestRevision');
+  });
+
+  it('prevents failed manual-move recovery from overwriting a strong MDF refresh', () => {
+    const fallbackStart = page.indexOf(
+      'const refreshSupersededMove =',
+    );
+    const fallbackEnd = page.indexOf(
+      "message.error(errorMessage(error, 'Не удалось сохранить ручное перемещение МДФ-доски.'))",
+      fallbackStart,
+    );
+    const fallback = page.slice(fallbackStart, fallbackEnd);
+
+    expect(fallbackStart).toBeGreaterThan(-1);
+    expect(page).toContain(
+      'const moveRefreshRevision = cncAuxiliaryRefreshRevisionRef.current',
+    );
+    expect(fallback).toContain('if (!refreshSupersededMove)');
+    expect(fallback).toContain('setCncManualMoves((current) =>');
+    expect(fallback).toContain("fetchCncManualMoves({ cache: 'no-store' })");
+    expect(fallback).toContain('cncStrongRefreshInFlightRef.current');
+    expect(fallback).toContain(
+      'cncAuxiliaryRefreshRevisionRef.current !== moveRefreshRevision',
+    );
   });
 
   it('keeps visible MDF columns fluid and switches narrow boards to order numbers only', () => {
@@ -1318,7 +1375,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(cncToolbar).toContain('active={viewState.cncPlannedTodayOnly}');
     expect(cncToolbar).toContain('label="Плановая дата сегодня"');
     expect(cncToolbar).toContain('icon={<ScheduleOutlined />}');
-    expect(cncToolbar).toContain('updateViewState({ cncPlannedTodayOnly: !viewState.cncPlannedTodayOnly })');
+    expect(page).toContain('const toggleCncPlannedTodayFilter = useCallback(() => {');
+    expect(page).toContain('cncWorkday: todayCncWorkday');
+    expect(page).toContain('cncOrderSearchPeriod: defaultCncOrderSearchPeriod');
+    expect(page).toContain('cncOrderFilters: []');
+    expect(page).toContain('hideEmpty: false');
+    expect(page).toContain('setCncBathsRequireMachineFiles(false)');
+    expect(page).toContain('setCncTerminalColumnsVisible(false)');
+    expect(cncToolbar).toContain('onToggle={toggleCncPlannedTodayFilter}');
     expect(cncToolbar).not.toContain('Вчера');
     expect(cncToolbar).not.toContain('checked={viewState.hideEmpty}');
     expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
@@ -1507,7 +1571,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).not.toContain('printSheetImage');
-    expect(sheetPreview.match(/onClick=\{\(\) => setPrintPreviewOpen\(true\)\}/g)).toHaveLength(2);
+    expect(sheetPreview.match(/<CutSheetLabelGenerateAction/g)).toHaveLength(1);
+    expect(sheetPreview.match(/onClick=\{\(\) => setPrintPreviewOpen\(true\)\}/g)).toHaveLength(1);
+    expect(sheetPreview).not.toContain('cnc-packet-card__sheet-toolbar');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
     expect(sheetPreview).toContain("status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}");
     expect(sheetPreview).toContain('printHeader={printHeader}');

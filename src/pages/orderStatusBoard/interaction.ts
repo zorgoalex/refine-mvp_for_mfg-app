@@ -120,6 +120,25 @@ interface StatusBoardElementRect {
   height: number;
 }
 
+export interface StatusBoardEdgeButtonInsets {
+  left: number;
+  right: number;
+}
+
+export function resolveStatusBoardEdgeButtonInsets(
+  viewportRect: Pick<StatusBoardElementRect, 'left' | 'width'>,
+  windowWidth: number,
+  margin = 10,
+  buttonWidth = 44,
+): StatusBoardEdgeButtonInsets {
+  const maximumInset = Math.max(margin, windowWidth - buttonWidth - margin);
+  const viewportRight = viewportRect.left + viewportRect.width;
+  return {
+    left: Math.min(maximumInset, Math.max(margin, viewportRect.left + margin)),
+    right: Math.min(maximumInset, Math.max(margin, windowWidth - viewportRight + margin)),
+  };
+}
+
 export interface StatusBoardRevealTarget {
   focus: (options?: FocusOptions) => void;
   getBoundingClientRect: () => StatusBoardElementRect;

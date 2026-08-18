@@ -9,6 +9,7 @@ import {
   STATUS_AUTOMATION_EVENTS,
 } from '../domain/status-automation-events';
 import type {
+  StatusAutomationActionConfig,
   StatusAutomationActionType,
   StatusAutomationConditions,
   StatusAutomationEventType,
@@ -18,7 +19,25 @@ const actionTypeSchema = z.enum([
   'change_order_status',
   'change_production_status',
   'change_details_production_status',
+  'map_order_status_to_details_production_status',
+  'map_production_status_to_order_status',
 ]);
+
+const statusMappingEntrySchema = z
+  .object({
+    sourceStatusIds: z.array(z.number().int().positive()).min(1),
+    targetStatusId: z.number().int().positive(),
+  })
+  .strict();
+
+const actionConfigSchema = z
+  .object({
+    statusMapping: z
+      .object({ entries: z.array(statusMappingEntrySchema).min(1) })
+      .strict()
+      .optional(),
+  })
+  .strict();
 
 const conditionSchema = z
   .object({
@@ -39,21 +58,23 @@ const createSchema = z
     name: z.string().trim().min(1).max(200),
     eventType: z.string().trim().min(1),
     actionType: actionTypeSchema,
-    targetStatusId: z.number().int().positive(),
+    targetStatusId: z.number().int().positive().nullable().optional(),
     conditions: conditionSchema.default({}),
+    actionConfig: actionConfigSchema.default({}),
     priority: z.number().int().default(100),
     isEnabled: z.boolean().default(false),
   })
   .strict()
-  .superRefine((value, context) => validateEventSpecificFields(value.eventType, value.actionType, value.conditions, context));
+  .superRefine((value, context) => validateRuleShape(value, context));
 
 const updateSchema = z
   .object({
     name: z.string().trim().min(1).max(200).optional(),
     eventType: z.string().trim().min(1).optional(),
     actionType: actionTypeSchema.optional(),
-    targetStatusId: z.number().int().positive().optional(),
+    targetStatusId: z.number().int().positive().nullable().optional(),
     conditions: conditionSchema.optional(),
+    actionConfig: actionConfigSchema.optional(),
     priority: z.number().int().optional(),
     isEnabled: z.boolean().optional(),
     version: z.number().int().positive(),
@@ -66,6 +87,7 @@ const updateSchema = z
       value.actionType !== undefined ||
       value.targetStatusId !== undefined ||
       value.conditions !== undefined ||
+      value.actionConfig !== undefined ||
       value.priority !== undefined ||
       value.isEnabled !== undefined;
 
@@ -77,8 +99,14 @@ const updateSchema = z
       });
     }
 
-    if (value.eventType !== undefined || value.actionType !== undefined || value.conditions !== undefined) {
-      validateEventSpecificFields(value.eventType, value.actionType, value.conditions, context);
+    if (
+      value.eventType !== undefined ||
+      value.actionType !== undefined ||
+      value.targetStatusId !== undefined ||
+      value.conditions !== undefined ||
+      value.actionConfig !== undefined
+    ) {
+      validateRuleShape(value, context);
     }
   });
 
@@ -125,12 +153,14 @@ export function parseCreateStatusAutomationRuleRequest(body: unknown): CreateSta
   }
 
   const data = parsed.data;
+  const actionConfig = normalizeActionConfig(data.actionConfig);
   return {
     name: data.name,
     eventType: data.eventType as StatusAutomationEventType,
     actionType: data.actionType,
-    targetStatusId: data.targetStatusId,
+    targetStatusId: data.targetStatusId ?? null,
     conditions: normalizeConditions(data.conditions),
+    ...(actionConfig.statusMapping ? { actionConfig } : {}),
     priority: data.priority,
     isEnabled: data.isEnabled,
   };
@@ -148,12 +178,27 @@ export function parseUpdateStatusAutomationRuleRequest(body: unknown): UpdateSta
   if (data.name !== undefined) result.name = data.name;
   if (data.eventType !== undefined) result.eventType = data.eventType as StatusAutomationEventType;
   if (data.actionType !== undefined) result.actionType = data.actionType;
-  if (data.targetStatusId !== undefined) result.targetStatusId = data.targetStatusId;
+  if (data.targetStatusId !== undefined) result.targetStatusId = data.targetStatusId ?? null;
   if (data.conditions !== undefined) result.conditions = normalizeConditions(data.conditions);
+  if (data.actionConfig !== undefined) result.actionConfig = normalizeActionConfig(data.actionConfig);
   if (data.priority !== undefined) result.priority = data.priority;
   if (data.isEnabled !== undefined) result.isEnabled = data.isEnabled;
 
   return result;
+}
+
+function validateRuleShape(
+  value: {
+    eventType?: string;
+    actionType?: StatusAutomationActionType;
+    targetStatusId?: number | null;
+    conditions?: z.infer<typeof conditionSchema>;
+    actionConfig?: z.infer<typeof actionConfigSchema>;
+  },
+  context: z.RefinementCtx,
+): void {
+  validateEventSpecificFields(value.eventType, value.actionType, value.conditions, context);
+  validateActionSpecificFields(value.actionType, value.targetStatusId, value.actionConfig, context);
 }
 
 function validateEventSpecificFields(
@@ -228,6 +273,69 @@ function normalizeConditions(value: z.infer<typeof conditionSchema>): StatusAuto
   if (value.firstPaymentOnly !== undefined) conditions.firstPaymentOnly = value.firstPaymentOnly;
 
   return conditions;
+}
+
+function validateActionSpecificFields(
+  actionType: StatusAutomationActionType | undefined,
+  targetStatusId: number | null | undefined,
+  actionConfig: z.infer<typeof actionConfigSchema> | undefined,
+  context: z.RefinementCtx,
+): void {
+  if (actionType === undefined) return;
+
+  const isMappingAction =
+    actionType === 'map_order_status_to_details_production_status' ||
+    actionType === 'map_production_status_to_order_status';
+  const entries = actionConfig?.statusMapping?.entries ?? [];
+
+  if (isMappingAction) {
+    if (entries.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['actionConfig', 'statusMapping', 'entries'],
+        message: 'Status mapping entries are required for mapping actions',
+      });
+    }
+    const seen = new Set<number>();
+    const duplicates = new Set<number>();
+    for (const entry of entries) {
+      for (const sourceStatusId of entry.sourceStatusIds) {
+        if (seen.has(sourceStatusId)) duplicates.add(sourceStatusId);
+        seen.add(sourceStatusId);
+      }
+    }
+    if (duplicates.size > 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['actionConfig', 'statusMapping', 'entries'],
+        message: `Source statuses are mapped more than once: ${[...duplicates].join(', ')}`,
+      });
+    }
+    return;
+  }
+
+  if (targetStatusId === undefined || targetStatusId === null) {
+    context.addIssue({
+      code: 'custom',
+      path: ['targetStatusId'],
+      message: 'Target status is required for this action',
+    });
+  }
+  if (entries.length > 0) {
+    context.addIssue({
+      code: 'custom',
+      path: ['actionConfig', 'statusMapping'],
+      message: 'Status mapping is allowed only for mapping actions',
+    });
+  }
+}
+
+function normalizeActionConfig(value: z.infer<typeof actionConfigSchema>): StatusAutomationActionConfig {
+  const entries = value.statusMapping?.entries.map((entry) => ({
+    sourceStatusIds: Array.from(new Set(entry.sourceStatusIds)),
+    targetStatusId: entry.targetStatusId,
+  }));
+  return entries?.length ? { statusMapping: { entries } } : {};
 }
 
 function validationError(error: z.ZodError): ApiError {

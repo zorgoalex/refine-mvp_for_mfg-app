@@ -17,7 +17,9 @@ export type StatusAutomationEventType =
 export type StatusAutomationActionType =
   | 'change_order_status'
   | 'change_production_status'
-  | 'change_details_production_status';
+  | 'change_details_production_status'
+  | 'map_order_status_to_details_production_status'
+  | 'map_production_status_to_order_status';
 
 export type StatusAutomationOrigin = 'user' | 'automation';
 
@@ -33,13 +35,25 @@ export interface StatusAutomationConditions {
   firstPaymentOnly?: boolean; // только payment.created
 }
 
+export interface StatusAutomationStatusMappingEntry {
+  sourceStatusIds: number[];
+  targetStatusId: number;
+}
+
+export interface StatusAutomationActionConfig {
+  statusMapping?: {
+    entries: StatusAutomationStatusMappingEntry[];
+  };
+}
+
 export interface StatusAutomationRule {
   id: number;
   name: string;
   eventType: StatusAutomationEventType;
   actionType: StatusAutomationActionType;
-  targetStatusId: number;
+  targetStatusId: number | null;
   conditions: StatusAutomationConditions;
+  actionConfig?: StatusAutomationActionConfig;
   priority: number;
   isEnabled: boolean;
   version: number;

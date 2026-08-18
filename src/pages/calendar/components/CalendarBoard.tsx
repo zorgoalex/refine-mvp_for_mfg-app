@@ -303,6 +303,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   } = filters;
 
   useEffect(() => {
+    if (!filtersOpen) return;
     filterForm.setFieldsValue({
       orderQuery,
       clientQuery,
@@ -314,6 +315,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
   }, [
     clientQuery,
     filterForm,
+    filtersOpen,
     materialName,
     millingTypeName,
     orderQuery,

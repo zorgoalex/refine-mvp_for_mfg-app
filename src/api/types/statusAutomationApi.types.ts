@@ -17,7 +17,18 @@ export type StatusAutomationEventGroup = 'order' | 'dates' | 'statuses' | 'payme
 export type StatusAutomationActionType =
   | 'change_order_status'
   | 'change_production_status'
-  | 'change_details_production_status';
+  | 'change_details_production_status'
+  | 'map_order_status_to_details_production_status'
+  | 'map_production_status_to_order_status';
+
+export interface StatusAutomationStatusMappingEntryDto {
+  sourceStatusIds: number[];
+  targetStatusId: number;
+}
+
+export interface StatusAutomationActionConfigDto {
+  statusMapping?: { entries: StatusAutomationStatusMappingEntryDto[] };
+}
 
 export type StatusAutomationOrderSource = 'manual' | 'bazis' | 'import';
 
@@ -38,8 +49,9 @@ export interface StatusAutomationRuleDto {
   name: string;
   eventType: StatusAutomationEventType;
   actionType: StatusAutomationActionType;
-  targetStatusId: number;
+  targetStatusId: number | null;
   conditions: StatusAutomationConditionsDto;
+  actionConfig?: StatusAutomationActionConfigDto;
   priority: number;
   isEnabled: boolean;
   version: number;
@@ -58,8 +70,9 @@ export interface CreateStatusAutomationRuleRequest {
   name: string;
   eventType: StatusAutomationEventType;
   actionType: StatusAutomationActionType;
-  targetStatusId: number;
+  targetStatusId: number | null;
   conditions?: StatusAutomationConditionsDto;
+  actionConfig?: StatusAutomationActionConfigDto;
   priority?: number;
   isEnabled?: boolean;
 }
@@ -68,8 +81,9 @@ export interface UpdateStatusAutomationRuleRequest {
   name?: string;
   eventType?: StatusAutomationEventType;
   actionType?: StatusAutomationActionType;
-  targetStatusId?: number;
+  targetStatusId?: number | null;
   conditions?: StatusAutomationConditionsDto;
+  actionConfig?: StatusAutomationActionConfigDto;
   priority?: number;
   isEnabled?: boolean;
   version: number;

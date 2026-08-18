@@ -57,6 +57,26 @@ describe('cncTelegramApi', () => {
     );
   });
 
+  it('can bypass browser cache when refreshing the CNC Telegram projection', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          workday: '2026-07-24',
+          generatedAt: '2026-07-24T08:00:00.000Z',
+          columns: [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.today({ date: '2026-07-24' }, { cache: 'no-store' });
+
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({ method: 'GET', cache: 'no-store' }),
+    );
+  });
+
   it('loads machine-file cutting sequence numbers for an order card', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ orderId: 2700, sequences: [] }), {

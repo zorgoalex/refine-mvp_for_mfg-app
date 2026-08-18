@@ -1,4 +1,4 @@
-import { Tooltip } from '../../ui/tooltipDelay';
+import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import React, {
   memo,
   useCallback,
@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Popover, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
+import { Alert, Badge, Button, Checkbox, Collapse, DatePicker, Dropdown, Empty, Input, Modal, Segmented, Select, Skeleton, Spin, Switch, Tabs, Tag, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   CalendarOutlined,
@@ -45,6 +45,7 @@ import { isApiError } from '../../api/apiError';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
+import type { RequestOptions } from '../../api/httpClient';
 import { orderStatusBoardApi } from '../../api/orderStatusBoardApi';
 import {
   createProductionActionIdempotencyKey,
@@ -89,6 +90,7 @@ import {
   isCncPreviewRequestCurrent,
   releaseCncPreviewLoadKey,
   reserveOrderStatusBoardMutation,
+  resolveStatusBoardEdgeButtonInsets,
   revealOrderStatusBoardCard,
   restoreOrderStatusBoardFocus,
   syncCncBathSelectedDetail,
@@ -302,6 +304,13 @@ function statusBoardHorizontalScrollEdges(
 
 type StatusBoardCardDisplayMode = 'standard' | 'compact' | 'minimal';
 type StatusBoardCardPrimaryStatusKind = 'board' | 'order';
+export type CncOrderSortField =
+  | 'orderName'
+  | 'readyPercent'
+  | 'remainingDetails'
+  | 'totalDetails'
+  | 'sourceUpdatedAt';
+export type CncOrderSortDirection = 'asc' | 'desc';
 
 export type CncManualCardKind = 'packet' | 'bazisCutSet' | 'bath' | 'order';
 const CNC_DRAG_PREVIEW_KIND_LABELS: Record<CncManualCardKind, string> = {
@@ -324,7 +333,6 @@ export type CncRelationCardState =
   | 'dimmed';
 type CncDetailedBathPlacement = 'left' | 'right';
 type CncPdfjsModule = typeof import('pdfjs-dist');
-export type CncManualCardKind = 'packet' | 'bath' | 'order';
 
 export interface CncOrderSortSettings {
   field: CncOrderSortField;
@@ -566,7 +574,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const mdfWorkdayTodayOpenPatchNeeded =
     shouldApplyMdfWorkdayTodayOnOpen &&
     (viewState.cncWorkday !== todayCncWorkday || viewState.cncOrderFilters.length > 0);
-  const { getSetting: getAppSetting } = useAppSettings({ enabled: isCncToday });
+  const {
+    getSetting: getAppSetting,
+    refetch: refetchAppSettings,
+  } = useAppSettings({ enabled: isCncToday });
   const mdfBoardHiddenStatusesSetting =
     getAppSetting<MdfBoardHiddenStatusesSetting>(
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
@@ -616,6 +627,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncBoardScrollButtonScrollActiveRef = useRef(false);
   const [cncBoardScrollEdges, setCncBoardScrollEdges] =
     useState<CncBoardHorizontalScrollEdges>(CNC_BOARD_SCROLL_EDGES_HIDDEN);
+  const [cncBoardScrollButtonInsets, setCncBoardScrollButtonInsets] = useState({
+    left: 10,
+    right: 10,
+  });
   const [cncBoardScrollTopState, setCncBoardScrollTopState] = useState({
     visible: false,
     left: 0,
@@ -637,6 +652,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     useState<CncRelationTarget | null>(null);
   const [cncManualMoves, setCncManualMoves] = useState<CncBoardManualMoveState>({});
   const cncManualMovesRef = useRef<CncBoardManualMoveState>({});
+  const cncStrongRefreshInFlightRef = useRef(false);
+  const cncAuxiliaryRefreshRevisionRef = useRef(0);
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
@@ -651,6 +668,22 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   useEffect(() => {
     cncManualMovesRef.current = cncManualMoves;
   }, [cncManualMoves]);
+
+  const fetchCncManualMoves = useCallback(async (
+    options?: RequestOptions,
+  ): Promise<CncBoardManualMoveState> => {
+    const response = await orderStatusBoardApi.listMdfManualMoves(options);
+    return mapMdfBoardManualMovesResponse(response.moves);
+  }, []);
+
+  const refetchMdfBoardSettings = useCallback(async (): Promise<void> => {
+    const result = await refetchAppSettings();
+    if (isFailedRefetchResult(result)) {
+      throw result.error instanceof Error
+        ? result.error
+        : new Error('Не удалось обновить настройки МДФ-доски.');
+    }
+  }, [refetchAppSettings]);
 
   useEffect(() => {
     if (viewState.view === 'cnc_today') return;
@@ -743,48 +776,56 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         }
         if (viewStateRef.current.view === 'cnc_today') {
           const currentViewState = viewStateRef.current;
+          const auxiliaryRevision = ++cncAuxiliaryRefreshRevisionRef.current;
+          cncStrongRefreshInFlightRef.current = true;
           const workday = currentViewState.cncWorkday ?? dayjs().format('YYYY-MM-DD');
           const displayRange = buildCncOrderSearchDateRange(
             workday,
             currentViewState.cncOrderSearchPeriod,
           );
-          const response = await cncTelegramApi.today({
-            dateFrom: displayRange.dateFrom,
-            dateTo: displayRange.dateTo,
-          });
-          const refreshedOrderIds = collectCncOrderStatusBoardIds(
-            response.columns,
-            currentViewState,
-            cncBathsRequireMachineFiles,
-          );
-          let refreshedOrderBoard: OrderStatusBoardResponse | null = null;
-          if (refreshedOrderIds.length > 0) {
-            setCncOrderBoardLoading(true);
-            try {
-              refreshedOrderBoard = await fetchCncOrderStatusBoard(refreshedOrderIds, {
-                sortBy: currentViewState.sortBy,
-                sortOrder: currentViewState.sortOrder,
-              });
-            } catch (error) {
-              message.warning(errorMessage(error, 'Не удалось загрузить статусы заказов MDF.'));
-            } finally {
-              if (datasetRevisionRef.current === revision) setCncOrderBoardLoading(false);
+          try {
+            const [response, manualMoves] = await Promise.all([
+              cncTelegramApi.today({
+                dateFrom: displayRange.dateFrom,
+                dateTo: displayRange.dateTo,
+              }, { cache: 'no-store' }),
+              fetchCncManualMoves({ cache: 'no-store' }),
+              refetchMdfBoardSettings(),
+            ]);
+            const refreshedOrderIds = collectCncOrderStatusBoardIds(
+              response.columns,
+              currentViewState,
+              cncBathsRequireMachineFiles,
+            );
+            const orderBoardResponse = await fetchCncOrderStatusBoard(refreshedOrderIds, {
+              sortBy: currentViewState.sortBy,
+              sortOrder: currentViewState.sortOrder,
+            }, { cache: 'no-store' });
+            if (
+              datasetRevisionRef.current !== revision
+              || cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision
+            ) {
+              return false;
             }
-          } else {
-            setCncOrderBoardLoading(false);
+            cncTodayRef.current = response;
+            cncOrderSearchTodayRef.current = response;
+            setCncToday(response);
+            setCncOrderSearchToday(response);
+            cncManualMovesRef.current = manualMoves;
+            setCncManualMoves(manualMoves);
+            setCncOrderBoard(orderBoardResponse);
+            boardRef.current = null;
+            setBoard(null);
+            setStale(false);
+            replacePending(new Set());
+            setLoading(false);
+            return true;
+          } finally {
+            if (cncAuxiliaryRefreshRevisionRef.current === auxiliaryRevision) {
+              cncStrongRefreshInFlightRef.current = false;
+              setCncOrderBoardLoading(false);
+            }
           }
-          if (datasetRevisionRef.current !== revision) return false;
-          cncTodayRef.current = response;
-          cncOrderSearchTodayRef.current = response;
-          setCncToday(response);
-          setCncOrderSearchToday(response);
-          setCncOrderBoard(refreshedOrderBoard);
-          boardRef.current = null;
-          setBoard(null);
-          setStale(false);
-          replacePending(new Set());
-          setLoading(false);
-          return true;
         }
 
         const response = await orderStatusBoardApi.get(
@@ -849,7 +890,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         return false;
       }
     },
-    [cncBathsRequireMachineFiles, replacePending],
+    [cncBathsRequireMachineFiles, fetchCncManualMoves, refetchMdfBoardSettings, replacePending],
   );
 
   useEffect(() => {
@@ -1450,8 +1491,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     let initialLoad = true;
     let warned = false;
     const loadOrderBoard = async () => {
+      if (cncStrongRefreshInFlightRef.current) return;
       if (inFlight) return;
       inFlight = true;
+      const requestRevision = cncAuxiliaryRefreshRevisionRef.current;
       const showLoading = initialLoad;
       initialLoad = false;
       if (showLoading) setCncOrderBoardLoading(true);
@@ -1459,8 +1502,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         const response = await fetchCncOrderStatusBoard(cncOrderIds, {
           sortBy: viewState.sortBy,
           sortOrder: viewState.sortOrder,
-        });
-        if (!cancelled) setCncOrderBoard(response);
+        }, { cache: 'no-store' });
+        if (
+          !cancelled
+          && cncAuxiliaryRefreshRevisionRef.current === requestRevision
+        ) {
+          setCncOrderBoard(response);
+        }
       } catch (error) {
         if (!cancelled && !warned) {
           warned = true;
@@ -1482,11 +1530,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     };
   }, [cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
 
-  const fetchCncManualMoves = useCallback(async (): Promise<CncBoardManualMoveState> => {
-    const response = await orderStatusBoardApi.listMdfManualMoves();
-    return mapMdfBoardManualMovesResponse(response.moves);
-  }, []);
-
   useEffect(() => {
     if (!isCncToday) {
       cncManualMovesRef.current = {};
@@ -1498,11 +1541,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     let warned = false;
     let inFlight = false;
     const loadManualMoves = async () => {
+      if (cncStrongRefreshInFlightRef.current) return;
       if (inFlight) return;
       inFlight = true;
+      const requestRevision = cncAuxiliaryRefreshRevisionRef.current;
       try {
-        const moves = await fetchCncManualMoves();
-        if (!cancelled) {
+        const moves = await fetchCncManualMoves({ cache: 'no-store' });
+        if (
+          !cancelled
+          && cncAuxiliaryRefreshRevisionRef.current === requestRevision
+        ) {
           cncManualMovesRef.current = moves;
           setCncManualMoves(moves);
         }
@@ -1607,6 +1655,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     }
     const key = cncManualMoveStorageKey(kind, cardId);
     const previousTarget = cncManualMovesRef.current[key];
+    const moveRefreshRevision = cncAuxiliaryRefreshRevisionRef.current;
     const requestSeq = (cncManualMoveRequestSeqRef.current[key] ?? 0) + 1;
     cncManualMoveRequestSeqRef.current[key] = requestSeq;
     const optimisticMoves = {
@@ -1635,22 +1684,31 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       })
       .catch((error) => {
         if (cncManualMoveRequestSeqRef.current[key] !== requestSeq) return;
-        setCncManualMoves((current) => {
-          const next = { ...current };
-          if (previousTarget) {
-            next[key] = previousTarget;
-          } else {
-            delete next[key];
-          }
-          cncManualMovesRef.current = next;
-          return next;
-        });
-        void fetchCncManualMoves()
-          .then((moves) => {
-            cncManualMovesRef.current = moves;
-            setCncManualMoves(moves);
-          })
-          .catch(() => undefined);
+        const refreshSupersededMove =
+          cncStrongRefreshInFlightRef.current
+          || cncAuxiliaryRefreshRevisionRef.current !== moveRefreshRevision;
+        if (!refreshSupersededMove) {
+          setCncManualMoves((current) => {
+            const next = { ...current };
+            if (previousTarget) {
+              next[key] = previousTarget;
+            } else {
+              delete next[key];
+            }
+            cncManualMovesRef.current = next;
+            return next;
+          });
+          void fetchCncManualMoves({ cache: 'no-store' })
+            .then((moves) => {
+              if (
+                cncStrongRefreshInFlightRef.current
+                || cncAuxiliaryRefreshRevisionRef.current !== moveRefreshRevision
+              ) return;
+              cncManualMovesRef.current = moves;
+              setCncManualMoves(moves);
+            })
+            .catch(() => undefined);
+        }
         message.error(errorMessage(error, 'Не удалось сохранить ручное перемещение МДФ-доски.'));
       });
   }, [fetchCncManualMoves]);
@@ -1671,6 +1729,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     });
   }, [isCncToday]);
 
+  const syncCncBoardScrollButtonInsets = useCallback((viewport: HTMLElement) => {
+    const next = resolveStatusBoardEdgeButtonInsets(
+      viewport.getBoundingClientRect(),
+      window.innerWidth,
+    );
+    setCncBoardScrollButtonInsets((current) =>
+      current.left === next.left && current.right === next.right ? current : next,
+    );
+  }, []);
+
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
     const topScrollbarTrack = topScrollbarTrackRef.current;
@@ -1688,6 +1756,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             )
           : CNC_BOARD_SCROLL_EDGES_HIDDEN,
       );
+      syncCncBoardScrollButtonInsets(viewport);
       syncCncBoardScrollTopButton(viewport);
     };
     updateTrackWidth();
@@ -1705,6 +1774,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     datasetKey,
     isCncToday,
     loading,
+    syncCncBoardScrollButtonInsets,
     syncCncBoardScrollTopButton,
   ]);
 
@@ -1804,6 +1874,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     }
     updateViewState({ cncOrderSearchPeriod: period });
   };
+  const toggleCncPlannedTodayFilter = useCallback(() => {
+    setCncBathsRequireMachineFiles(false);
+    setCncTerminalColumnsVisible(false);
+    updateViewState({
+      cncWorkday: todayCncWorkday,
+      cncOrderSearchPeriod: defaultCncOrderSearchPeriod,
+      cncOrderFilters: [],
+      cncPlannedTodayOnly: !viewState.cncPlannedTodayOnly,
+      hideEmpty: false,
+    });
+  }, [defaultCncOrderSearchPeriod, todayCncWorkday, updateViewState, viewState.cncPlannedTodayOnly]);
   const cardDisplayModeLabel = STATUS_BOARD_CARD_DISPLAY_OPTIONS.find(
     (option) => option.value === cardDisplayMode,
   )?.label ?? 'Компактный';
@@ -2304,9 +2385,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               active={viewState.cncPlannedTodayOnly}
               label="Плановая дата сегодня"
               icon={<ScheduleOutlined />}
-              onToggle={() =>
-                updateViewState({ cncPlannedTodayOnly: !viewState.cncPlannedTodayOnly })
-              }
+              onToggle={toggleCncPlannedTodayFilter}
             />
             <div
               className="status-board-toolbar__cnc-period"
@@ -2574,6 +2653,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             shape="circle"
             icon={<LeftOutlined />}
             aria-label="Прокрутить МДФ-доску влево"
+            style={{ insetInlineStart: cncBoardScrollButtonInsets.left }}
             onClick={() => scrollCncBoardHorizontally('left')}
           />
         )}
@@ -2584,6 +2664,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             shape="circle"
             icon={<RightOutlined />}
             aria-label="Прокрутить МДФ-доску вправо"
+            style={{ insetInlineEnd: cncBoardScrollButtonInsets.right }}
             onClick={() => scrollCncBoardHorizontally('right')}
           />
         )}
@@ -5089,7 +5170,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const hasSheetPreview = hasSheetImage || hasSvgSheetPreview;
   const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);
   const labelDetailBuild = useMemo(
-    () => svgCutSheet
+    () => svgCutSheet && svgCutSheet.detailIds.length > 0
       ? buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)
       : buildLabelDetailsFromPacketItems(packet.items),
     [packet.items, svgCutSheet],
@@ -5127,6 +5208,10 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   }, [activeAuxView, hasSheetPreview]);
 
   useEffect(() => {
+    if (displayMode !== 'screenshot') {
+      setActiveAuxView((current) => current === 'sheet' ? null : current);
+      return;
+    }
     if (displayMode === 'screenshot' && hasSheetPreview) {
       setActiveAuxView('sheet');
     }
@@ -5540,36 +5625,6 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
           </Tooltip>
         </div>
         <div className="cnc-packet-card__sheet-body">
-          <div className="cnc-packet-card__sheet-toolbar" onClick={(event) => event.stopPropagation()}>
-            {cutJobId && labelSheet ? (
-              <CutSheetLabelGenerateAction
-                detailInstances={labelDetailInstances}
-                cutJobId={cutJobId}
-                cutGroupId={labelSheet.cutGroupId}
-                sheetIndex={labelSheet.sheetIndex}
-                labelCoverage={labelCoverage}
-              />
-            ) : (
-              <Tooltip title="Нет связанного листа раскроя для бирок">
-                <span>
-                  <Button className="app-hit-area-sm" size="small" icon={<TagsOutlined />} disabled>
-                    Бирки
-                  </Button>
-                </span>
-              </Tooltip>
-            )}
-            <Tooltip title="Печать скрина листа">
-              <Button
-                className="app-hit-area-sm"
-                size="small"
-                icon={<PrinterOutlined />}
-                disabled={!objectUrl}
-                aria-haspopup="dialog"
-                onClick={() => setPrintPreviewOpen(true)}
-                aria-label={`Печать скрина листа ${title}`}
-              />
-            </Tooltip>
-          </div>
           {loading && (
             <div className="cnc-packet-card__sheet-loading">
               <Spin size="small" />
@@ -6708,6 +6763,7 @@ const StatusBoardColumnView: React.FC<StatusBoardColumnViewProps> = ({
               mutationsEnabled={mutationsEnabled}
               pending={pendingOrders.has(card.orderId)}
               displayMode={cardDisplayMode}
+              finePointer={finePointer}
               touchDragEnabled={mutationsEnabled && touchDragEnabled}
               onMove={onMove}
               onAnnounce={onAnnounce}
@@ -6758,6 +6814,7 @@ interface StatusBoardCardViewProps {
   mutationsEnabled: boolean;
   pending: boolean;
   displayMode: StatusBoardCardDisplayMode;
+  finePointer: boolean;
   actionsVisible?: boolean;
   cncOrderCard?: boolean;
   cncMuted?: boolean;
@@ -6787,6 +6844,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   mutationsEnabled,
   pending,
   displayMode,
+  finePointer,
   actionsVisible = true,
   cncOrderCard = false,
   cncMuted = false,
@@ -7279,6 +7337,14 @@ function escapeHtml(value: string): string {
     .replaceAll("'", '&#39;');
 }
 
+function isFailedRefetchResult(result: unknown): result is { isError: true; error?: unknown } {
+  return (
+    typeof result === 'object'
+    && result !== null
+    && (result as { isError?: unknown }).isError === true
+  );
+}
+
 function formatDateTime(value: string): string {
   const parsed = dayjs(value);
   return parsed.isValid() ? parsed.format('DD.MM.YYYY HH:mm') : '—';
@@ -7339,6 +7405,7 @@ async function fetchCncOrderStatusBoard(
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
   },
+  options?: RequestOptions,
 ): Promise<OrderStatusBoardResponse | null> {
   if (orderIds.length === 0) return null;
   const responses = await Promise.all(
@@ -7350,7 +7417,7 @@ async function fetchCncOrderStatusBoard(
         orderIds: chunk,
         sortBy: sortPreference.sortBy,
         sortOrder: sortPreference.sortOrder,
-      }),
+      }, options),
     ),
   );
   return mergeCncOrderStatusBoardResponses(responses);
@@ -7977,8 +8044,8 @@ function cncColumnTitleByKey(
 }
 
 function cncColumnCardNoun(columnKey: CncTelegramTodayDisplayColumnKey): string {
-  if (isCncBathColumn(columnKey)) return 'ванн';
-  if (isCncOrderColumn(columnKey)) return 'заказов';
+  if (isCncBathColumnKey(columnKey)) return 'ванн';
+  if (isCncOrderColumnKey(columnKey)) return 'заказов';
   return 'CNC-пакетов';
 }
 

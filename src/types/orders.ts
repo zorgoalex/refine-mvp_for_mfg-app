@@ -32,6 +32,7 @@ export interface Order {
   production_status_id?: number | null;
   production_status_name?: string | null;
   production_status_from_details_enabled?: boolean;
+  passed_production_status_codes?: string[];
 
   // Financial fields
   total_amount?: number | null;

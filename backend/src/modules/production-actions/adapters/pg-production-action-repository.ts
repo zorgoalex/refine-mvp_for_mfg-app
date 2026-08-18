@@ -469,12 +469,13 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         requestId,
         sourceIdempotencyKey: command.dto.idempotencyKey,
       });
+      const responseVersion = await readOrderVersion(tx, order.orderId);
 
       const response = {
         order: {
           orderId: order.orderId,
           orderStatusId: status.orderStatusId,
-          version: nextVersion,
+          version: responseVersion,
         },
         auditId,
         requestId,
@@ -1452,6 +1453,16 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
           idempotencyKey: command.dto.idempotencyKey,
         },
       });
+      if (order.productionStatusId !== afterProductionStatusId) {
+        await evaluateStatusAutomationInTransaction(tx, {
+          eventType: 'order.production_status_changed',
+          origin: 'user',
+          orderId: order.orderId,
+          actor: command.currentUser,
+          requestId,
+          sourceIdempotencyKey: command.dto.idempotencyKey,
+        });
+      }
       await evaluateMdfBoardLaminatedBathAutomationForDetails(tx, {
         detailIds: changedDetailIds,
         actor: command.currentUser,

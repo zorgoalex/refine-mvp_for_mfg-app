@@ -279,6 +279,93 @@ describe('evaluateStatusAutomation', () => {
     );
   });
 
+  it('maps a production status group to an order status target', async () => {
+    const rule = makeRule({
+      id: 30,
+      eventType: 'order.production_status_changed',
+      actionType: 'map_production_status_to_order_status',
+      targetStatusId: null,
+      actionConfig: {
+        statusMapping: { entries: [{ sourceStatusIds: [3, 4], targetStatusId: 8 }] },
+      },
+    });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.loadOrderAutomationState.mockResolvedValue(makeState({ productionStatusId: 4 }));
+    mocks.changeOrderStatusFromAutomationInTransaction.mockResolvedValue({
+      status: 'executed',
+      auditId: 'mapped-audit-id',
+    });
+
+    await evaluateStatusAutomation(tx(), event({ eventType: 'order.production_status_changed' }));
+
+    expect(mocks.changeOrderStatusFromAutomationInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      100,
+      8,
+      expect.objectContaining({ ruleId: 30 }),
+    );
+    expect(mocks.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        event: 'status_automation.rule_applied',
+        metadata: expect.objectContaining({
+          targetStatusId: 8,
+          configuredTargetStatusId: null,
+          mappingSourceStatusId: 4,
+          mappingDirection: 'production_to_order',
+        }),
+      }),
+    );
+  });
+
+  it('maps an order status group to all detail production statuses', async () => {
+    const rule = makeRule({
+      id: 40,
+      eventType: 'order.status_changed',
+      actionType: 'map_order_status_to_details_production_status',
+      targetStatusId: null,
+      actionConfig: {
+        statusMapping: { entries: [{ sourceStatusIds: [1, 2], targetStatusId: 7 }] },
+      },
+    });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+    mocks.loadOrderAutomationState.mockResolvedValue(makeState({ orderStatusId: 2 }));
+    mocks.changeDetailsProductionStatusFromAutomationInTransaction.mockResolvedValue({ status: 'executed' });
+
+    await evaluateStatusAutomation(tx(), event({ eventType: 'order.status_changed' }));
+
+    expect(mocks.changeDetailsProductionStatusFromAutomationInTransaction).toHaveBeenCalledWith(
+      expect.anything(),
+      100,
+      7,
+      expect.objectContaining({ ruleId: 40 }),
+    );
+  });
+
+  it('audits a mapping source status that has no target', async () => {
+    const rule = makeRule({
+      id: 50,
+      eventType: 'order.production_status_changed',
+      actionType: 'map_production_status_to_order_status',
+      targetStatusId: null,
+      actionConfig: {
+        statusMapping: { entries: [{ sourceStatusIds: [9], targetStatusId: 8 }] },
+      },
+    });
+    mocks.listEnabledRulesForEvent.mockResolvedValue([rule]);
+
+    await evaluateStatusAutomation(tx(), event({ eventType: 'order.production_status_changed' }));
+
+    expect(mocks.changeOrderStatusFromAutomationInTransaction).not.toHaveBeenCalled();
+    expect(mocks.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        event: 'status_automation.rule_skipped',
+        metadata: expect.objectContaining({ reason: 'mapping_source_status_missing' }),
+      }),
+    );
+  });
+
   it('audits meaningful skips returned by actions and the evaluator', async () => {
     const first = makeRule({ id: 10 });
     const lowerPriority = makeRule({ id: 20, priority: 20 });
@@ -409,7 +496,7 @@ function makeRule(overrides: Partial<StatusAutomationRule> = {}): StatusAutomati
   };
 }
 
-function makeState(): OrderAutomationState {
+function makeState(overrides: Partial<OrderAutomationState> = {}): OrderAutomationState {
   return {
     orderId: 100,
     orderStatusId: 1,
@@ -421,5 +508,6 @@ function makeState(): OrderAutomationState {
     source: 'manual',
     version: 1,
     clientId: 5,
+    ...overrides,
   };
 }

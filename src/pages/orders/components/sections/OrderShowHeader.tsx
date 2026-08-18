@@ -234,8 +234,15 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
       statusId: record?.production_status_id,
       statusName: record?.production_status_name,
       statusIdToCode: productionStatusIdToCode,
+      passedCodes: record?.passed_production_status_codes ?? record?.passedProductionStatusCodes ?? [],
+      detailStatuses: details
+        .filter((detail) => detail.delete_flag !== true)
+        .map((detail) => ({
+          statusId: detail.production_status_id,
+          statusName: detail.production_status_name,
+        })),
     }),
-    [productionStatusIdToCode, record?.production_status_id, record?.production_status_name],
+    [details, productionStatusIdToCode, record],
   );
 
   const fallbackBasisProjectName =

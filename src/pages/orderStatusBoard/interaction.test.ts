@@ -7,6 +7,7 @@ import {
   isCncPreviewRequestCurrent,
   releaseCncPreviewLoadKey,
   reserveOrderStatusBoardMutation,
+  resolveStatusBoardEdgeButtonInsets,
   revealOrderStatusBoardCard,
   restoreOrderStatusBoardFocus,
   syncCncBathSelectedDetail,
@@ -183,6 +184,22 @@ describe('order status board interactions', () => {
     expect(focus).toHaveBeenCalledWith({ preventScroll: true });
     expect(scrollBoard).toHaveBeenCalledWith({ left: 1020, behavior: 'smooth' });
     expect(scrollCards).toHaveBeenCalledWith({ top: 950, behavior: 'smooth' });
+  });
+
+  it('positions fixed edge buttons inside the board instead of under the desktop sidebar', () => {
+    expect(
+      resolveStatusBoardEdgeButtonInsets(
+        { left: 224, width: 1216 },
+        1440,
+      ),
+    ).toEqual({ left: 234, right: 10 });
+
+    expect(
+      resolveStatusBoardEdgeButtonInsets(
+        { left: 0, width: 390 },
+        390,
+      ),
+    ).toEqual({ left: 10, right: 10 });
   });
 
   it('updates the selected bath detail marker in the rendered SVG without rebuilding it', () => {

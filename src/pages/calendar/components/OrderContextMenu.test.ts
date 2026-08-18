@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isSameDateMove, resolveCurrentSourceDate } from './OrderContextMenu';
+import {
+  isCurrentStatus,
+  isSameDateMove,
+  resolveCurrentSourceDate,
+} from './OrderContextMenu';
 import type { CalendarOrder } from '../types/calendar';
 
 function makeOrder(planned_completion_date: string | null): CalendarOrder {
@@ -59,5 +63,17 @@ describe('isSameDateMove (AD-2 UX guard)', () => {
     const pickedEvening = new Date('2026-06-15T22:30:00');
     expect(isSameDateMove(order, pickedMorning)).toBe(true);
     expect(isSameDateMove(order, pickedEvening)).toBe(true);
+  });
+});
+
+describe('isCurrentStatus', () => {
+  it('matches the current order or payment status by id', () => {
+    expect(isCurrentStatus(3, 3)).toBe(true);
+    expect(isCurrentStatus(3, 4)).toBe(false);
+  });
+
+  it('does not highlight a status when the order has no current id', () => {
+    expect(isCurrentStatus(undefined, 3)).toBe(false);
+    expect(isCurrentStatus(null, 3)).toBe(false);
   });
 });

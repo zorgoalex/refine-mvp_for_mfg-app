@@ -6,6 +6,7 @@ import type { TransactionClient } from '../../../database/database.types';
 import type { CurrentUser } from '../../../permissions/current-user';
 import type {
   OrderAutomationState,
+  StatusAutomationActionConfig,
   StatusAutomationActionType,
   StatusAutomationConditions,
   StatusAutomationEventType,
@@ -17,8 +18,9 @@ export interface CreateStatusAutomationRuleDto {
   name: string;
   eventType: StatusAutomationEventType;
   actionType: StatusAutomationActionType;
-  targetStatusId: number;
+  targetStatusId: number | null;
   conditions: StatusAutomationConditions;
+  actionConfig?: StatusAutomationActionConfig;
   priority: number;
   isEnabled: boolean;
 }
@@ -27,8 +29,9 @@ export interface UpdateStatusAutomationRuleDto {
   name?: string;
   eventType?: StatusAutomationEventType;
   actionType?: StatusAutomationActionType;
-  targetStatusId?: number;
+  targetStatusId?: number | null;
   conditions?: StatusAutomationConditions;
+  actionConfig?: StatusAutomationActionConfig;
   priority?: number;
   isEnabled?: boolean;
   version: number;
@@ -39,8 +42,9 @@ interface StatusAutomationRuleRow extends QueryResultRow {
   name: string;
   event_type: string;
   action_type: string;
-  target_status_id: string | number;
+  target_status_id: string | number | null;
   conditions_json: StatusAutomationConditions | string | null;
+  action_config_json: StatusAutomationActionConfig | string | null;
   priority: string | number;
   is_enabled: boolean;
   version: string | number;
@@ -96,18 +100,23 @@ export class PgStatusAutomationRepository {
   }): Promise<StatusAutomationRule> {
     return this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
-      await validateTargetStatus(tx, command.dto.actionType, command.dto.targetStatusId);
+      assertConditionsAllowedForEvent(command.dto.eventType, command.dto.conditions, 0);
+      assertActionAllowedForEvent(command.dto.eventType, command.dto.actionType, 0);
+      const actionConfig = command.dto.actionConfig ?? {};
+      assertActionConfigShape(command.dto.actionType, command.dto.targetStatusId, actionConfig, 0);
+      await validateConditionStatusReferences(tx, command.dto.conditions);
+      await validateRuleStatusReferences(tx, command.dto.actionType, command.dto.targetStatusId, actionConfig);
 
       const inserted = await tx.query<StatusAutomationRuleRow>(
         `
         INSERT INTO status_automation_rules (
           name, event_type, action_type, target_status_id,
-          conditions_json, priority, is_enabled, created_by, edited_by
+          conditions_json, action_config_json, priority, is_enabled, created_by, edited_by
         )
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $8)
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $9)
         RETURNING
           id, name, event_type, action_type, target_status_id,
-          conditions_json, priority, is_enabled, version
+          conditions_json, action_config_json, priority, is_enabled, version
         `,
         [
           command.dto.name,
@@ -115,6 +124,7 @@ export class PgStatusAutomationRepository {
           command.dto.actionType,
           command.dto.targetStatusId,
           JSON.stringify(command.dto.conditions),
+          JSON.stringify(actionConfig),
           command.dto.priority,
           command.dto.isEnabled,
           command.currentUser.id,
@@ -158,14 +168,19 @@ export class PgStatusAutomationRepository {
       const existing = mapRuleRow(existingRow);
       const nextEventType = command.dto.eventType ?? existing.eventType;
       const nextActionType = command.dto.actionType ?? existing.actionType;
-      const nextTargetStatusId = command.dto.targetStatusId ?? existing.targetStatusId;
+      const nextTargetStatusId =
+        command.dto.targetStatusId !== undefined ? command.dto.targetStatusId : existing.targetStatusId;
       const nextConditions = command.dto.conditions ?? existing.conditions;
+      const nextActionConfig = command.dto.actionConfig ?? existing.actionConfig ?? {};
       if (existing.version === command.dto.version) {
         // Валидируется СМЕРДЖЕННОЕ правило, не только дельта: смена eventType без
         // повторной отправки conditions и «оживление» правила с протухшим целевым
         // статусом (PATCH { isEnabled: true }) обязаны падать 422 здесь.
         assertConditionsAllowedForEvent(nextEventType, nextConditions, command.ruleId);
-        await validateTargetStatus(tx, nextActionType, nextTargetStatusId);
+        assertActionAllowedForEvent(nextEventType, nextActionType, command.ruleId);
+        assertActionConfigShape(nextActionType, nextTargetStatusId, nextActionConfig, command.ruleId);
+        await validateConditionStatusReferences(tx, nextConditions);
+        await validateRuleStatusReferences(tx, nextActionType, nextTargetStatusId, nextActionConfig);
       }
 
       const assignments: string[] = [];
@@ -181,6 +196,13 @@ export class PgStatusAutomationRepository {
         command.dto.conditions === undefined ? undefined : JSON.stringify(command.dto.conditions),
         '::jsonb',
       );
+      addUpdateAssignment(
+        assignments,
+        values,
+        'action_config_json',
+        command.dto.actionConfig === undefined ? undefined : JSON.stringify(command.dto.actionConfig),
+        '::jsonb',
+      );
       addUpdateAssignment(assignments, values, 'priority', command.dto.priority);
       addUpdateAssignment(assignments, values, 'is_enabled', command.dto.isEnabled);
 
@@ -194,7 +216,7 @@ export class PgStatusAutomationRepository {
         WHERE id = $1 AND version = $2
         RETURNING
           id, name, event_type, action_type, target_status_id,
-          conditions_json, priority, is_enabled, version
+          conditions_json, action_config_json, priority, is_enabled, version
         `,
         values,
       );
@@ -242,7 +264,7 @@ export class PgStatusAutomationRepository {
         WHERE id = $1
         RETURNING
           id, name, event_type, action_type, target_status_id,
-          conditions_json, priority, is_enabled, version
+          conditions_json, action_config_json, priority, is_enabled, version
         `,
         [command.ruleId],
       );
@@ -325,10 +347,25 @@ export async function loadOrderAutomationState(
 function ruleSelectSql(suffix = ''): string {
   return `
     SELECT id, name, event_type, action_type, target_status_id,
-           conditions_json, priority, is_enabled, version
+           conditions_json, action_config_json, priority, is_enabled, version
     FROM status_automation_rules
     ${suffix}
   `;
+}
+
+function assertActionAllowedForEvent(
+  eventType: StatusAutomationEventType,
+  actionType: StatusAutomationActionType,
+  ruleId: number,
+): void {
+  const descriptor = getEventDescriptor(eventType);
+  if (!descriptor || !descriptor.allowedActions.includes(actionType)) {
+    throw new ApiError(422, 'VALIDATION_ERROR', `Действие ${actionType} неприменимо к событию ${eventType}`, {
+      ruleId,
+      eventType,
+      actionType,
+    });
+  }
 }
 
 function assertConditionsAllowedForEvent(
@@ -352,28 +389,103 @@ function assertConditionsAllowedForEvent(
   }
 }
 
-async function validateTargetStatus(
+function assertActionConfigShape(
+  actionType: StatusAutomationActionType,
+  targetStatusId: number | null,
+  actionConfig: StatusAutomationActionConfig,
+  ruleId: number,
+): void {
+  const isMapping =
+    actionType === 'map_order_status_to_details_production_status' ||
+    actionType === 'map_production_status_to_order_status';
+  const entries = actionConfig.statusMapping?.entries ?? [];
+  if (isMapping && entries.length === 0) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Для действия маппинга нужны строки соответствий', { ruleId });
+  }
+  if (!isMapping && targetStatusId === null) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Для действия нужен целевой статус', { ruleId });
+  }
+}
+
+async function validateRuleStatusReferences(
   tx: TransactionClient,
   actionType: StatusAutomationActionType,
-  targetStatusId: number,
+  targetStatusId: number | null,
+  actionConfig: StatusAutomationActionConfig,
 ): Promise<void> {
-  const isOrderStatus = actionType === 'change_order_status';
-  const table = isOrderStatus ? 'order_statuses' : 'production_statuses';
-  const column = isOrderStatus ? 'order_status_id' : 'production_status_id';
+  if (actionType === 'map_order_status_to_details_production_status') {
+    await validateStatusIds(tx, 'order', actionConfig.statusMapping?.entries.flatMap((entry) => entry.sourceStatusIds) ?? [], actionType);
+    await validateStatusIds(tx, 'production', actionConfig.statusMapping?.entries.map((entry) => entry.targetStatusId) ?? [], actionType);
+    return;
+  }
+  if (actionType === 'map_production_status_to_order_status') {
+    await validateStatusIds(tx, 'production', actionConfig.statusMapping?.entries.flatMap((entry) => entry.sourceStatusIds) ?? [], actionType);
+    await validateStatusIds(tx, 'order', actionConfig.statusMapping?.entries.map((entry) => entry.targetStatusId) ?? [], actionType);
+    return;
+  }
+  if (targetStatusId === null) return;
+  await validateStatusIds(tx, actionType === 'change_order_status' ? 'order' : 'production', [targetStatusId], actionType);
+}
+
+async function validateConditionStatusReferences(
+  tx: TransactionClient,
+  conditions: StatusAutomationConditions,
+): Promise<void> {
+  await validateStatusIds(
+    tx,
+    'order',
+    [...(conditions.currentOrderStatusIn ?? []), ...(conditions.currentOrderStatusNotIn ?? [])],
+    'conditions',
+  );
+  await validateStatusIds(
+    tx,
+    'payment',
+    [...(conditions.currentPaymentStatusIn ?? []), ...(conditions.currentPaymentStatusNotIn ?? [])],
+    'conditions',
+  );
+  await validateStatusIds(
+    tx,
+    'production',
+    [...(conditions.currentProductionStatusIn ?? []), ...(conditions.currentProductionStatusNotIn ?? [])],
+    'conditions',
+  );
+}
+
+async function validateStatusIds(
+  tx: TransactionClient,
+  kind: 'order' | 'payment' | 'production',
+  statusIds: number[],
+  reference: StatusAutomationActionType | 'conditions',
+): Promise<void> {
+  const uniqueIds = Array.from(new Set(statusIds));
+  if (uniqueIds.length === 0) return;
+  const statusReference = {
+    order: { table: 'order_statuses', column: 'order_status_id' },
+    payment: { table: 'payment_statuses', column: 'payment_status_id' },
+    production: { table: 'production_statuses', column: 'production_status_id' },
+  }[kind];
   const result = await tx.query(
     `
-    SELECT ${isOrderStatus ? 'order_status_id, order_status_name' : 'production_status_id, production_status_name, production_status_code'}
-    FROM ${table}
-    WHERE ${column} = $1 AND is_active = true
-    LIMIT 1
+    SELECT ${statusReference.column}
+    FROM ${statusReference.table}
+    WHERE ${statusReference.column} = ANY($1::bigint[]) AND is_active = true
     `,
-    [targetStatusId],
+    [uniqueIds],
   );
-  if (!hasRows(result)) {
-    throw new ApiError(422, 'TARGET_STATUS_NOT_FOUND', 'Целевой статус не найден или неактивен', {
-      actionType,
-      targetStatusId,
-    });
+  if (result.rows.length !== uniqueIds.length) {
+    const isCondition = reference === 'conditions';
+    throw new ApiError(
+      422,
+      isCondition ? 'CONDITION_STATUS_NOT_FOUND' : 'TARGET_STATUS_NOT_FOUND',
+      isCondition
+        ? 'Статус условия не найден или неактивен'
+        : 'Целевой статус не найден или неактивен',
+      {
+        reference,
+        statusIds: uniqueIds,
+        statusKind: kind,
+      },
+    );
   }
 }
 
@@ -418,6 +530,7 @@ async function writeRuleAudit(
       eventType: event.rule.eventType,
       actionType: event.rule.actionType,
       targetStatusId: event.rule.targetStatusId,
+      ...(event.rule.actionConfig?.statusMapping ? { actionConfig: event.rule.actionConfig } : {}),
     },
   });
 }
@@ -429,14 +542,19 @@ function mapRuleRow(row: StatusAutomationRuleRow): StatusAutomationRule {
   } else {
     conditions = row.conditions_json ?? {};
   }
+  const actionConfig =
+    typeof row.action_config_json === 'string'
+      ? (JSON.parse(row.action_config_json) as StatusAutomationActionConfig)
+      : row.action_config_json ?? {};
 
   return {
     id: toNumber(row.id),
     name: row.name,
     eventType: row.event_type as StatusAutomationEventType,
     actionType: row.action_type as StatusAutomationActionType,
-    targetStatusId: toNumber(row.target_status_id),
+    targetStatusId: row.target_status_id === null ? null : toNumber(row.target_status_id),
     conditions,
+    actionConfig,
     priority: toNumber(row.priority),
     isEnabled: row.is_enabled,
     version: toNumber(row.version),

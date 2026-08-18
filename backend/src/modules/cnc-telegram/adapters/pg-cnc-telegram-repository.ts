@@ -2820,28 +2820,56 @@ function packetSelectSql(whereSql: string): string {
            AND sheet.is_effective = true
           WHERE placement.cut_result_id = p.svg_cut_result_id
           GROUP BY sheet.cut_group_id, sheet.sheet_index, sheet.sheet_ordinal, sheet.variant
+
+          UNION ALL
+
+          SELECT
+            live_group.cut_group_id,
+            live_sheet.sheet_index,
+            live_sheet.sheet_index + 1 AS sheet_ordinal,
+            'auto'::text AS variant,
+            COALESCE((
+              SELECT jsonb_agg(
+                (piece.value -> 'label' ->> 'detailId')::bigint
+                ORDER BY piece.ordinality
+              )
+              FROM jsonb_array_elements(
+                COALESCE(live_sheet.placements -> 'pieces', '[]'::jsonb)
+              ) WITH ORDINALITY AS piece(value, ordinality)
+              WHERE jsonb_typeof(piece.value -> 'label' -> 'detailId') = 'number'
+            ), '[]'::jsonb) AS detail_ids
+          FROM cut_group live_group
+          JOIN cut_group_sheet live_sheet ON live_sheet.cut_group_id = live_group.cut_group_id
+          WHERE p.svg_cut_result_id IS NULL
+            AND live_group.cut_job_id = p.svg_cut_job_id
         ) sheet_summary
       ) AS svg_cut_sheets_json,
       p.updated_at,
       i.packet_item_id,
       i.source_item_key,
       i.order_name,
-      COALESCE(i.match_order_id, item_order.order_id) AS item_order_id,
-      COALESCE(matched_order.delete_flag, false) AS order_delete_flag,
+      COALESCE(active_matched_order.order_id, item_order.order_id, matched_order.order_id) AS item_order_id,
+      CASE
+        WHEN COALESCE(active_matched_order.order_id, item_order.order_id) IS NOT NULL THEN false
+        ELSE COALESCE(matched_order.delete_flag, false)
+      END AS order_delete_flag,
       i.detail_number,
       i.width_mm,
       i.height_mm,
       i.quantity,
       i.source AS item_source,
       i.confidence,
-      i.match_order_id,
-      i.match_detail_id,
-      matched_detail.quantity AS match_detail_quantity,
-      i.match_status,
+      COALESCE(active_matched_order.order_id, item_order.order_id, matched_order.order_id) AS match_order_id,
+      COALESCE(matched_detail.detail_id, inferred_detail.detail_id) AS match_detail_id,
+      COALESCE(matched_detail.quantity, inferred_detail.quantity) AS match_detail_quantity,
+      CASE
+        WHEN COALESCE(matched_detail.detail_id, inferred_detail.detail_id) IS NOT NULL THEN 'matched'
+        WHEN i.match_status = 'matched' THEN 'unmatched'
+        ELSE i.match_status
+      END AS match_status,
       i.review_note,
       CASE
-        WHEN i.match_status = 'matched'
-          AND matched_detail.detail_id IS NOT NULL
+        WHEN COALESCE(matched_detail.detail_id, inferred_detail.detail_id) IS NOT NULL
           AND detail_status.sort_order IS NOT NULL
           AND laminated_status.sort_order IS NOT NULL
           THEN detail_status.sort_order >= laminated_status.sort_order
@@ -2870,13 +2898,49 @@ function packetSelectSql(whereSql: string): string {
     ) item_order
       ON item_order.order_key = lower(trim(i.order_name))
     LEFT JOIN orders matched_order ON matched_order.order_id = i.match_order_id
-    LEFT JOIN orders linked_order
-      ON linked_order.order_id = COALESCE(i.match_order_id, item_order.order_id)
+    LEFT JOIN orders active_matched_order
+      ON active_matched_order.order_id = i.match_order_id
+     AND active_matched_order.delete_flag = false
     LEFT JOIN order_details matched_detail
       ON matched_detail.detail_id = i.match_detail_id
+     AND matched_detail.order_id = active_matched_order.order_id
      AND matched_detail.delete_flag = false
+    LEFT JOIN LATERAL (
+      SELECT
+        MIN(candidate.detail_id)::bigint AS detail_id,
+        MIN(candidate.quantity)::integer AS quantity,
+        MIN(candidate.production_status_id)::bigint AS production_status_id
+      FROM order_details candidate
+      WHERE candidate.order_id = COALESCE(active_matched_order.order_id, item_order.order_id)
+        AND candidate.delete_flag = false
+        AND i.detail_number IS NOT NULL
+        AND candidate.detail_number = i.detail_number
+        AND i.width_mm IS NOT NULL
+        AND i.height_mm IS NOT NULL
+        AND candidate.width IS NOT NULL
+        AND candidate.height IS NOT NULL
+        AND (
+          (
+            i.source <> 'ocr'
+            AND (
+              (i.width_mm::numeric = candidate.width::numeric AND i.height_mm::numeric = candidate.height::numeric)
+              OR (i.width_mm::numeric = candidate.height::numeric AND i.height_mm::numeric = candidate.width::numeric)
+            )
+          )
+          OR (
+            i.source = 'ocr'
+            AND (
+              (ABS(i.width_mm::numeric - candidate.width::numeric) <= 3 AND ABS(i.height_mm::numeric - candidate.height::numeric) <= 3)
+              OR (ABS(i.width_mm::numeric - candidate.height::numeric) <= 3 AND ABS(i.height_mm::numeric - candidate.width::numeric) <= 3)
+            )
+          )
+        )
+      HAVING COUNT(*) = 1
+    ) inferred_detail ON matched_detail.detail_id IS NULL
+    LEFT JOIN orders linked_order
+      ON linked_order.order_id = COALESCE(active_matched_order.order_id, item_order.order_id)
     LEFT JOIN production_statuses detail_status
-      ON detail_status.production_status_id = matched_detail.production_status_id
+      ON detail_status.production_status_id = COALESCE(matched_detail.production_status_id, inferred_detail.production_status_id)
     LEFT JOIN LATERAL (
       SELECT COALESCE(
         MIN(ps.sort_order) FILTER (
