@@ -2,7 +2,7 @@ import type { QueryResult, QueryResultRow } from 'pg';
 import { describe, expect, it } from 'vitest';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
-import { parseWorkerAuditBatch, type WorkerAuditBatchDto } from '../dto/cnc-telegram-worker-audit.dto';
+import { parseTechnicalLogBatch, parseWorkerAuditBatch, type WorkerAuditBatchDto } from '../dto/cnc-telegram-worker-audit.dto';
 import { PgCncTelegramWorkerAuditRepository } from './pg-cnc-telegram-worker-audit-repository';
 
 const scanId = '550e8400-e29b-41d4-a716-446655440000';
@@ -161,7 +161,38 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     expect(messageSql).toContain("m.source_created_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Almaty')");
     expect(messageSql).toContain('ORDER BY m.source_created_at ASC, m.source_message_id ASC, m.log_id ASC');
   });
+
+  it('accepts an exact technical-line replay idempotently without counting a new row', async () => {
+    const database = fakeDatabase((sql) => sql.includes('INSERT INTO cnc_telegram_worker_technical_logs')
+      ? [{ log_id: '44444444-4444-4444-8444-444444444444', inserted: false }]
+      : []);
+    const repository = new PgCncTelegramWorkerAuditRepository(database.service);
+
+    await expect(repository.writeTechnicalBatch(technicalBatch(), { id: '77' })).resolves.toEqual({ accepted: 0 });
+    const insertSql = database.sql.find((sql) => sql.includes('INSERT INTO cnc_telegram_worker_technical_logs')) ?? '';
+    expect(insertSql).toContain('ON CONFLICT (worker_instance_id, sequence)');
+    expect(insertSql).toContain('message=EXCLUDED.message');
+    expect(insertSql).toContain('dropped_before=EXCLUDED.dropped_before');
+  });
+
+  it('rejects a conflicting technical-line replay', async () => {
+    const database = fakeDatabase(() => []);
+    const repository = new PgCncTelegramWorkerAuditRepository(database.service);
+    await expect(repository.writeTechnicalBatch(technicalBatch(), { id: '77' }))
+      .rejects.toMatchObject({ code: 'TECHNICAL_LOG_IDENTITY_CONFLICT', statusCode: 409 });
+  });
 });
+
+function technicalBatch() {
+  return parseTechnicalLogBatch({
+    batchId: '550e8400-e29b-41d4-a716-446655440001',
+    lines: [{
+      workerInstanceId: scanId, sequence: 1, observedAt: '2026-08-18T14:49:40+00:00',
+      stream: 'stderr', message: 'traceback line', redactionVersion: 'worker-v1',
+      redacted: false, truncated: false, redactionCategories: [], droppedBefore: 0,
+    }],
+  });
+}
 
 function batch(options: { operation?: boolean; observation?: boolean; plannedOperation?: boolean } = {}): WorkerAuditBatchDto {
   const hasOperation = options.operation || options.plannedOperation;

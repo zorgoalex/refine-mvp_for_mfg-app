@@ -157,6 +157,7 @@ export const PERMISSIONS = [
   'settings.view',
   'settings.manage',
   'audit.view',
+  'audit.technical.view',
   'notifications.view_rules',
   'notifications.manage_rules',
   'status_automation.view',

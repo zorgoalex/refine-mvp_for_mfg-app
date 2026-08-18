@@ -171,6 +171,38 @@ describe('CncTelegramWorkerAuditService', () => {
     )).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
     expect(exportDetailed).not.toHaveBeenCalled();
   });
+
+  it('requires the distinct dangerous permission for raw technical logs', async () => {
+    const listTechnical = vi.fn();
+    const service = createService(deniedAuditPort(), { listTechnical });
+    const query = { dateFrom: '2026-08-18', dateTo: '2026-08-18', page: 1, pageSize: 100 };
+
+    expect(() => service.listTechnical(user('auditor', ['audit.view']), query))
+      .toThrow(expect.objectContaining({ code: 'PERMISSION_DENIED', statusCode: 403 }));
+    expect(listTechnical).not.toHaveBeenCalled();
+
+    await service.listTechnical(user('admin', ['audit.technical.view']), query);
+    expect(listTechnical).toHaveBeenCalledWith(query);
+  });
+
+  it('redacts worker credentials again before storing technical lines', async () => {
+    const writeTechnicalBatch = vi.fn().mockResolvedValue({ accepted: 1 });
+    const service = createService(deniedAuditPort(), {
+      technicalCapabilities: vi.fn().mockResolvedValue(true), writeTechnicalBatch,
+    });
+    await service.writeTechnicalRawBatch(user('cnc-bot', ['cut.manage']), {
+      batchId: '550e8400-e29b-41d4-a716-446655440001',
+      lines: [{
+        workerInstanceId: scanId, sequence: 1, observedAt: '2026-08-18T14:49:40+00:00',
+        stream: 'stderr', message: 'Authorization: Bearer unsafe-token-value',
+        redactionVersion: 'worker-v1', redacted: false, truncated: false,
+        redactionCategories: [], droppedBefore: 0,
+      }],
+    });
+    expect(writeTechnicalBatch).toHaveBeenCalledWith(expect.objectContaining({
+      lines: [expect.objectContaining({ message: 'Authorization: [REDACTED]', redacted: true, redactionCategories: ['authorization'] })],
+    }), { id: '7' });
+  });
 });
 
 function createService(
@@ -180,6 +212,7 @@ function createService(
   const repository = {
     capabilities: vi.fn().mockResolvedValue(true),
     writeBatch: vi.fn().mockResolvedValue({ accepted: 1 }),
+    listTechnical: vi.fn().mockResolvedValue({}),
     ...repositoryOverrides,
   } as unknown as PgCncTelegramWorkerAuditRepository;
   const config = {

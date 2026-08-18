@@ -252,12 +252,95 @@ export interface WorkerAuditListQueryDto {
 
 export type WorkerAuditExportQueryDto = Omit<WorkerAuditListQueryDto, 'page' | 'pageSize' | 'sortDirection'>;
 
+const technicalLogLineSchema = z.object({
+  workerInstanceId: uuid,
+  sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  observedAt: dateTime,
+  stream: z.enum(['stdout', 'stderr']),
+  message: z.string().min(1).max(8192),
+  redactionVersion: z.string().trim().min(1).max(64),
+  redacted: z.boolean(),
+  truncated: z.boolean(),
+  redactionCategories: z.array(z.string().regex(/^[a-z0-9_-]{1,40}$/)).max(16),
+  droppedBefore: z.number().int().min(0).max(1_000_000_000),
+}).strict();
+
+const technicalLogBatchSchema = z.object({
+  batchId: uuid,
+  lines: z.array(technicalLogLineSchema).min(1).max(200),
+}).strict().superRefine((value, context) => {
+  const identities = new Set(value.lines.map((line) => `${line.workerInstanceId}:${line.sequence}`));
+  if (identities.size !== value.lines.length) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['lines'], message: 'line identities must be unique' });
+  }
+});
+
+export type TechnicalLogBatchDto = z.infer<typeof technicalLogBatchSchema>;
+
+export interface TechnicalLogQueryDto {
+  dateFrom: string;
+  dateTo: string;
+  page: number;
+  pageSize: number;
+  stream?: 'stdout' | 'stderr';
+  workerInstanceId?: string;
+  search?: string;
+}
+
+export type TechnicalLogExportQueryDto = Omit<TechnicalLogQueryDto, 'page' | 'pageSize'>;
+
 export function parseWorkerAuditBatch(value: unknown): WorkerAuditBatchDto {
   const parsed = workerAuditBatchSchema.safeParse(value);
   if (!parsed.success) {
     throw new ApiError(422, 'INVALID_CNC_TELEGRAM_WORKER_AUDIT', 'Некорректный пакет журнала Telegram-бота', {
       issues: parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
     });
+  }
+  return parsed.data;
+}
+
+export function parseTechnicalLogBatch(value: unknown): TechnicalLogBatchDto {
+  const parsed = technicalLogBatchSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new ApiError(422, 'INVALID_CNC_TELEGRAM_TECHNICAL_LOG_BATCH', 'Некорректный пакет технических логов worker', {
+      issues: parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
+    });
+  }
+  return parsed.data;
+}
+
+export function parseTechnicalLogListQuery(value: Record<string, unknown>): TechnicalLogQueryDto {
+  return parseTechnicalLogQuery(value, true) as TechnicalLogQueryDto;
+}
+
+export function parseTechnicalLogExportQuery(value: Record<string, unknown>): TechnicalLogExportQueryDto {
+  return parseTechnicalLogQuery(value, false) as TechnicalLogExportQueryDto;
+}
+
+function parseTechnicalLogQuery(
+  value: Record<string, unknown>,
+  paginated: boolean,
+): TechnicalLogQueryDto | TechnicalLogExportQueryDto {
+  const now = new Date();
+  const defaultTo = now.toISOString().slice(0, 10);
+  const from = new Date(now);
+  from.setUTCDate(from.getUTCDate() - 1);
+  const filters = {
+    dateFrom: dateOnly.default(from.toISOString().slice(0, 10)),
+    dateTo: dateOnly.default(defaultTo),
+    stream: z.enum(['stdout', 'stderr']).optional(),
+    workerInstanceId: uuid.optional(),
+    search: z.string().trim().min(1).max(200).optional(),
+  };
+  const schema = paginated
+    ? z.object({ ...filters, page: z.coerce.number().int().positive().default(1), pageSize: z.coerce.number().int().positive().max(200).default(100) }).strict()
+    : z.object(filters).strict();
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new ApiError(422, 'INVALID_TECHNICAL_LOG_QUERY', 'Некорректные фильтры технических логов worker');
+  const dateFromValue = new Date(`${parsed.data.dateFrom}T00:00:00Z`);
+  const dateToValue = new Date(`${parsed.data.dateTo}T00:00:00Z`);
+  if (dateToValue < dateFromValue || dateToValue.getTime() - dateFromValue.getTime() > 30 * 86_400_000) {
+    throw new ApiError(422, 'INVALID_TECHNICAL_LOG_DATE_RANGE', 'Период должен быть от 1 до 31 дня');
   }
   return parsed.data;
 }

@@ -101,6 +101,9 @@ class ErpClient:
                 raise ErpResponseError(response, "ERP audit batch")
             return response.json()
 
+    async def technical_log_batch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return await self._authorized_post("/cnc-telegram/worker-logs/technical/batch", payload=payload)
+
     async def claim_media_restores(self) -> dict[str, Any]:
         return await self._authorized_post("/cnc-telegram/media-restores/claim")
 

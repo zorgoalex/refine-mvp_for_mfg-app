@@ -2,6 +2,9 @@ import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
 import type {
+  TechnicalLogBatchDto,
+  TechnicalLogExportQueryDto,
+  TechnicalLogQueryDto,
   WorkerAuditBatchDto,
   WorkerAuditExportQueryDto,
   WorkerAuditListQueryDto,
@@ -85,6 +88,114 @@ export class PgCncTelegramWorkerAuditRepository {
       FROM expected_schema
     `);
     return Boolean(result.rows[0]?.ready);
+  }
+
+  async technicalCapabilities(): Promise<boolean> {
+    const result = await this.database.query<{ ready: boolean }>(`
+      SELECT to_regclass('public.cnc_telegram_worker_technical_logs') IS NOT NULL
+        AND NOT EXISTS (
+          SELECT required.column_name
+          FROM (VALUES
+            ('log_id'), ('worker_instance_id'), ('sequence'), ('observed_at'), ('stream'),
+            ('message'), ('redaction_version'), ('redacted'), ('truncated'),
+            ('redaction_categories'), ('dropped_before'), ('batch_id'), ('writer_user_id'), ('ingested_at')
+          ) AS required(column_name)
+          EXCEPT
+          SELECT column_name FROM information_schema.columns
+          WHERE table_schema='public' AND table_name='cnc_telegram_worker_technical_logs'
+        )
+        AND EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname='uq_cnc_tg_technical_instance_sequence'
+            AND conrelid=to_regclass('public.cnc_telegram_worker_technical_logs')
+        ) AS ready
+    `);
+    return Boolean(result.rows[0]?.ready);
+  }
+
+  async writeTechnicalBatch(dto: TechnicalLogBatchDto, writer: Writer): Promise<{ accepted: number }> {
+    return this.database.transaction(async (client) => {
+      let accepted = 0;
+      for (const line of dto.lines) {
+        const result = await client.query<{ log_id: string; inserted: boolean }>(`
+          INSERT INTO cnc_telegram_worker_technical_logs (
+            worker_instance_id, sequence, observed_at, stream, message, redaction_version,
+            redacted, truncated, redaction_categories, dropped_before, batch_id, writer_user_id
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::text[],$10,$11,$12)
+          ON CONFLICT (worker_instance_id, sequence) DO UPDATE SET sequence=EXCLUDED.sequence
+          WHERE cnc_telegram_worker_technical_logs.observed_at=EXCLUDED.observed_at
+            AND cnc_telegram_worker_technical_logs.stream=EXCLUDED.stream
+            AND cnc_telegram_worker_technical_logs.message=EXCLUDED.message
+            AND cnc_telegram_worker_technical_logs.redaction_version=EXCLUDED.redaction_version
+            AND cnc_telegram_worker_technical_logs.redacted=EXCLUDED.redacted
+            AND cnc_telegram_worker_technical_logs.truncated=EXCLUDED.truncated
+            AND cnc_telegram_worker_technical_logs.redaction_categories=EXCLUDED.redaction_categories
+            AND cnc_telegram_worker_technical_logs.dropped_before=EXCLUDED.dropped_before
+          RETURNING log_id, (xmax = 0) AS inserted
+        `, [
+          line.workerInstanceId, line.sequence, line.observedAt, line.stream, line.message,
+          line.redactionVersion, line.redacted, line.truncated, line.redactionCategories,
+          line.droppedBefore, dto.batchId, writer.id,
+        ]);
+        if (!result.rows[0]) {
+          throw new ApiError(409, 'TECHNICAL_LOG_IDENTITY_CONFLICT', 'Конфликт неизменяемой строки технического лога');
+        }
+        if (result.rows[0].inserted) accepted += 1;
+      }
+      await client.query(`DELETE FROM cnc_telegram_worker_technical_logs WHERE observed_at < now() - interval '14 days'`);
+      return { accepted };
+    });
+  }
+
+  async listTechnical(query: TechnicalLogQueryDto): Promise<Record<string, unknown>> {
+    const { params, where } = buildTechnicalFilter(query);
+    const count = await this.database.query<{ total: string }>(
+      `SELECT count(*)::text AS total FROM cnc_telegram_worker_technical_logs t WHERE ${where.join(' AND ')}`,
+      params,
+    );
+    const pageParams = [...params, query.pageSize, (query.page - 1) * query.pageSize];
+    const rows = await this.database.query<Record<string, unknown>>(`
+      SELECT log_id AS "logId", worker_instance_id AS "workerInstanceId", sequence::text AS sequence,
+        observed_at AS "observedAt", stream, message, redaction_version AS "redactionVersion",
+        redacted, truncated, redaction_categories AS "redactionCategories",
+        dropped_before AS "droppedBefore", batch_id AS "batchId", ingested_at AS "ingestedAt"
+      FROM cnc_telegram_worker_technical_logs t
+      WHERE ${where.join(' AND ')}
+      ORDER BY observed_at DESC, sequence DESC
+      LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length}
+    `, pageParams);
+    const health = await this.database.query<{ latest_line_at: string | null; latest_heartbeat_at: string | null; dropped: string }>(`
+      SELECT max(observed_at)::text AS latest_line_at,
+        max(observed_at) FILTER (WHERE message LIKE 'worker heartbeat%')::text AS latest_heartbeat_at,
+        COALESCE(sum(dropped_before), 0)::text AS dropped
+      FROM cnc_telegram_worker_technical_logs
+      WHERE observed_at >= now() - interval '14 days'
+    `);
+    return {
+      data: rows.rows,
+      health: {
+        latestLineAt: health.rows[0]?.latest_line_at ?? null,
+        latestHeartbeatAt: health.rows[0]?.latest_heartbeat_at ?? null,
+        droppedLines: Number(health.rows[0]?.dropped ?? 0),
+      },
+      pagination: { page: query.page, pageSize: query.pageSize, total: Number(count.rows[0]?.total ?? 0) },
+    };
+  }
+
+  async exportTechnical(query: TechnicalLogExportQueryDto): Promise<Record<string, unknown>[]> {
+    const { params, where } = buildTechnicalFilter(query);
+    params.push(MAX_DETAILED_EXPORT_ROWS + 1);
+    const rows = await this.database.query<Record<string, unknown>>(`
+      SELECT worker_instance_id AS "workerInstanceId", sequence::text AS sequence,
+        observed_at AS "observedAt", stream, message, redacted, truncated,
+        redaction_categories AS "redactionCategories", dropped_before AS "droppedBefore"
+      FROM cnc_telegram_worker_technical_logs t
+      WHERE ${where.join(' AND ')}
+      ORDER BY observed_at ASC, sequence ASC
+      LIMIT $${params.length}
+    `, params);
+    if (rows.rows.length > MAX_DETAILED_EXPORT_ROWS) throw exportTooLarge('строк технического лога');
+    return rows.rows;
   }
 
   async writeBatch(dto: WorkerAuditBatchDto, writer: Writer): Promise<{ accepted: number }> {
@@ -614,6 +725,24 @@ function buildMessageFilter(
       );
     }
   }
+  return { params, where };
+}
+
+function buildTechnicalFilter(
+  query: TechnicalLogQueryDto | TechnicalLogExportQueryDto,
+): { params: unknown[]; where: string[] } {
+  const params: unknown[] = [query.dateFrom, query.dateTo];
+  const where = [
+    "t.observed_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Almaty')",
+    "t.observed_at < ((($2::date + 1)::timestamp) AT TIME ZONE 'Asia/Almaty')",
+  ];
+  const add = (sql: string, value: unknown) => {
+    params.push(value);
+    where.push(sql.replace('?', `$${params.length}`));
+  };
+  if (query.stream) add('t.stream = ?', query.stream);
+  if (query.workerInstanceId) add('t.worker_instance_id = ?::uuid', query.workerInstanceId);
+  if (query.search) add('t.message ILIKE ?', `%${query.search}%`);
   return { params, where };
 }
 

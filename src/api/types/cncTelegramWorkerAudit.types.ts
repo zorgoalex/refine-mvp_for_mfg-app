@@ -153,3 +153,37 @@ export interface TelegramWorkerAuditQuery {
 }
 
 export type TelegramWorkerAuditExportQuery = Omit<TelegramWorkerAuditQuery, 'page' | 'pageSize' | 'sortDirection'>;
+
+export interface TelegramWorkerTechnicalLog {
+  logId: string;
+  workerInstanceId: string;
+  sequence: string;
+  observedAt: string;
+  stream: 'stdout' | 'stderr';
+  message: string;
+  redactionVersion: string;
+  redacted: boolean;
+  truncated: boolean;
+  redactionCategories: string[];
+  droppedBefore: number;
+  batchId: string;
+  ingestedAt: string;
+}
+
+export interface TelegramWorkerTechnicalLogQuery {
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+  pageSize?: number;
+  stream?: 'stdout' | 'stderr';
+  workerInstanceId?: string;
+  search?: string;
+}
+
+export type TelegramWorkerTechnicalLogExportQuery = Omit<TelegramWorkerTechnicalLogQuery, 'page' | 'pageSize'>;
+
+export interface TelegramWorkerTechnicalLogListResponse {
+  data: TelegramWorkerTechnicalLog[];
+  health: { latestLineAt: string | null; latestHeartbeatAt: string | null; droppedLines: number };
+  pagination: { page: number; pageSize: number; total: number };
+}
