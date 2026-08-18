@@ -5543,7 +5543,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
           <div className="cnc-packet-card__sheet-toolbar" onClick={(event) => event.stopPropagation()}>
             {cutJobId && labelSheet ? (
               <CutSheetLabelGenerateAction
-                detailIds={labelSheet.detailIds}
+                detailInstances={labelDetailInstances}
                 cutJobId={cutJobId}
                 cutGroupId={labelSheet.cutGroupId}
                 sheetIndex={labelSheet.sheetIndex}

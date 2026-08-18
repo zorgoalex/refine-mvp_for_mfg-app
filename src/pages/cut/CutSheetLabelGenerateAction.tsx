@@ -59,7 +59,7 @@ export interface CutSheetLabelCoverage {
 export type CutSheetLabelDetailInstance = LabelCutSheetDetailInstance;
 
 export const CutSheetLabelGenerateAction: React.FC<CutSheetLabelGenerateActionProps> = ({
-  detailInstances,
+  detailInstances = [],
   cutJobId,
   cutGroupId,
   sheetIndex,

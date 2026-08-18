@@ -707,6 +707,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('CutSheetLabelGenerateAction');
     expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
     expect(page).toContain('buildLabelDetailsFromPacketItems(packet.items)');
+    expect(page).toContain('detailInstances={labelDetailInstances}');
+    expect(page).not.toContain('detailIds={labelSheet.detailIds}');
     expect(page).toContain('labelCoverage={labelCoverage}');
     expect(page).toContain('labelCoverage: CutSheetLabelCoverage | null;');
     expect(page).toContain('item.matchDetailQuantity');

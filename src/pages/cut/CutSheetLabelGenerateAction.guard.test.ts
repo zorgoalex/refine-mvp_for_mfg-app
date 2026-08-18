@@ -5,6 +5,11 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(fileURLToPath(new URL('./CutSheetLabelGenerateAction.tsx', import.meta.url)), 'utf8');
 
 describe('CutSheetLabelGenerateAction source guard', () => {
+  it('does not crash the board when a caller omits detail instances', () => {
+    expect(source).toContain('detailInstances = []');
+    expect(source).toContain('const detailIds = useMemo(() => detailInstances.map');
+  });
+
   it('persists the trailing blank label print toggle per user', () => {
     expect(source).toContain('loadAppendBlankLabelOnPrintPreference(labelTemplatePreferenceUserId)');
     expect(source).toContain('saveAppendBlankLabelOnPrintPreference(labelTemplatePreferenceUserId, checked)');
