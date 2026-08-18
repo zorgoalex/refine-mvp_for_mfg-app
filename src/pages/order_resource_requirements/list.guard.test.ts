@@ -69,7 +69,14 @@ describe('order resource requirements list guards', () => {
   it('добавляет отчет по текущим отфильтрованным строкам с предпросмотром и выгрузкой', () => {
     expect(source).toContain('Отчёт');
     expect(source).toContain('openReportModal');
-    expect(source).toContain('setReportRows(tableRows)');
+    expect(source).toContain('selectedRowsByKey');
+    expect(source).toContain('handleRowSelectionChange');
+    expect(source).toContain('selectedRowKeys.length > 0');
+    expect(source).toContain('selectedRowsByKey.get(key)');
+    expect(source).toContain(': tableRows');
+    expect(source).toContain('setReportRows(rowsForReport)');
+    expect(source).toContain('reportSelectedOnly');
+    expect(source).toContain('<Typography.Text strong>отчёт только для выделенных заказов</Typography.Text>');
     expect(source).toContain('ResourceDemandReportModal');
     expect(source).toContain('ResourceDemandReportPreview');
     expect(source).toContain('downloadResourceDemandReport');
