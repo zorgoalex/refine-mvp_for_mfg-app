@@ -263,6 +263,16 @@ export function StatusAutomationConfig() {
       })),
     [orderStatusesData],
   );
+  const activeOrderStatusOptions = useMemo(
+    () =>
+      (orderStatusesData?.data ?? [])
+        .filter((status) => status.is_active !== false)
+        .map((status) => ({
+          value: status.order_status_id,
+          label: status.order_status_name,
+        })),
+    [orderStatusesData],
+  );
   const paymentStatusOptions = useMemo(
     () =>
       (paymentStatusesData?.data ?? []).map((status) => ({
@@ -277,6 +287,16 @@ export function StatusAutomationConfig() {
         value: status.production_status_id,
         label: status.production_status_name,
       })),
+    [productionStatusesData],
+  );
+  const activeProductionStatusOptions = useMemo(
+    () =>
+      (productionStatusesData?.data ?? [])
+        .filter((status) => status.is_active !== false)
+        .map((status) => ({
+          value: status.production_status_id,
+          label: status.production_status_name,
+        })),
     [productionStatusesData],
   );
   const cutProductionStatusAvailable = useMemo(
@@ -417,12 +437,12 @@ export function StatusAutomationConfig() {
     form.actionType === 'change_order_status' ? orderStatusOptions : productionStatusOptions;
   const mappingSourceOptions =
     form.actionType === 'map_order_status_to_details_production_status'
-      ? orderStatusOptions
-      : productionStatusOptions;
+      ? activeOrderStatusOptions
+      : activeProductionStatusOptions;
   const mappingTargetOptions =
     form.actionType === 'map_order_status_to_details_production_status'
-      ? productionStatusOptions
-      : orderStatusOptions;
+      ? activeProductionStatusOptions
+      : activeOrderStatusOptions;
 
   const loadRules = useCallback(async () => {
     if (!canView) {
