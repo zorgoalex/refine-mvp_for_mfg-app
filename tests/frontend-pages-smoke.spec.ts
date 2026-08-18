@@ -12,11 +12,11 @@ type SmokeRoute = {
     waitForText?: string | RegExp;
 };
 
-const authenticatedRoutes: SmokeRoute[] = [
+const allAuthenticatedRoutes: SmokeRoute[] = [
     { path: '/', label: 'home route', waitForText: /Заказы|Orders/i },
     { path: '/orders', label: 'orders list', waitForText: /Заказы|Orders/i },
     { path: '/orders/edit/15', label: 'orders edit', waitForText: /E2E all-pages order|Основная/i },
-    { path: '/orders/show/15', label: 'orders show', waitForText: /E2E all-pages order|Основная/i },
+    { path: '/orders/show/15', label: 'orders show', waitForText: 'Просмотр заказа' },
     { path: '/calendar', label: 'calendar list', waitForText: 'Производственный календарь' },
     { path: '/doweling-orders', label: 'doweling orders list' },
     { path: '/doweling-orders/edit/1', label: 'doweling orders edit' },
@@ -53,6 +53,11 @@ const authenticatedRoutes: SmokeRoute[] = [
     ...crudRoutes('/order-workshops', 'order workshops', 1),
     ...crudRoutes('/order-resource-requirements', 'order resource requirements', 1),
 ];
+
+const criticalRoutePaths = new Set(['/', '/orders', '/orders/edit/15', '/orders/show/15']);
+const authenticatedRoutes = process.env.FRONTEND_CRITICAL_ONLY === 'true'
+    ? allAuthenticatedRoutes.filter((route) => criticalRoutePaths.has(route.path))
+    : allAuthenticatedRoutes;
 
 test.describe('Frontend pages smoke', () => {
     test.setTimeout(600000);

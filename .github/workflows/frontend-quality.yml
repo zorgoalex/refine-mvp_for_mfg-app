@@ -1,0 +1,78 @@
+name: Frontend Quality
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - feat/backend-erp-stage1
+  push:
+    branches:
+      - main
+      - feat/backend-erp-stage1
+
+concurrency:
+  group: frontend-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  promotion-policy:
+    name: Main promotion policy
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require stage as the source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: test "$HEAD_REF" = "feat/backend-erp-stage1"
+
+  frontend-quality:
+    name: Typecheck, unit, build, browser smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prevent new TypeScript errors
+        run: npm run typecheck:ratchet
+
+      - name: Prevent baseline growth
+        env:
+          BASELINE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: npm run typecheck:baseline-policy -- "$BASELINE_REF"
+
+      - name: Run frontend unit tests
+        run: npm run test:frontend
+
+      - name: Build frontend
+        run: npm run build:vite
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Smoke order screens and MDF preview
+        run: npm run test:e2e:frontend-critical
+
+      - name: Open real MDF machine-file preview
+        run: npm run test:e2e:mdf-machine-preview
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, DatePicker, Empty, Form, Input, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, DatePicker, Empty, Form, Input, Select, Space, Tag, Typography, message } from 'antd';
+import { Table } from '../../ui/tooltipDelay';
 import { CopyOutlined, DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
