@@ -148,6 +148,29 @@ describe('PgStatusAutomationRepository', () => {
     expect(database.queries.some((entry) => entry.text.includes('INSERT INTO status_automation_rules'))).toBe(false);
   });
 
+  it('rejects creation when a condition references an inactive status', async () => {
+    const database = createDatabase({
+      responses: ({ text }) => (text.includes('FROM order_statuses') ? result([]) : result([])),
+    });
+
+    await expect(
+      new PgStatusAutomationRepository(database.service).createRule({
+        currentUser: currentUser(),
+        requestId: 'request-inactive-condition',
+        dto: {
+          name: 'Правило с архивным условием',
+          eventType: 'order.created',
+          actionType: 'change_order_status',
+          targetStatusId: 7,
+          conditions: { currentOrderStatusIn: [5] },
+          priority: 100,
+          isEnabled: false,
+        },
+      }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'CONDITION_STATUS_NOT_FOUND' });
+    expect(database.queries.some((entry) => entry.text.includes('INSERT INTO status_automation_rules'))).toBe(false);
+  });
+
   it('creates a many-to-one mapping after validating both status catalogs', async () => {
     const database = createDatabase({
       responses: ({ text, params }) => {

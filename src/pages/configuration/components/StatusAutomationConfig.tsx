@@ -281,6 +281,16 @@ export function StatusAutomationConfig() {
       })),
     [paymentStatusesData],
   );
+  const activePaymentStatusOptions = useMemo(
+    () =>
+      (paymentStatusesData?.data ?? [])
+        .filter((status) => status.is_active !== false)
+        .map((status) => ({
+          value: status.payment_status_id,
+          label: status.payment_status_name,
+        })),
+    [paymentStatusesData],
+  );
   const productionStatusOptions = useMemo(
     () =>
       (productionStatusesData?.data ?? []).map((status) => ({
@@ -434,7 +444,9 @@ export function StatusAutomationConfig() {
   const allowedConditionSet = useMemo(() => new Set(allowedConditionKeys), [allowedConditionKeys]);
   const mappingAction = isStatusMappingAction(form.actionType);
   const targetStatusOptions =
-    form.actionType === 'change_order_status' ? orderStatusOptions : productionStatusOptions;
+    form.actionType === 'change_order_status'
+      ? activeOrderStatusOptions
+      : activeProductionStatusOptions;
   const mappingSourceOptions =
     form.actionType === 'map_order_status_to_details_production_status'
       ? activeOrderStatusOptions
@@ -1277,7 +1289,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentOrderStatusIn ?? []}
                   onChange={(value) => updateForm({ currentOrderStatusIn: value })}
-                  options={orderStatusOptions}
+                  options={activeOrderStatusOptions}
                   disabled={!allowedConditionSet.has('currentOrderStatusIn')}
                   placeholder="Статусы заказа"
                   style={{ width: '100%' }}
@@ -1291,7 +1303,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentOrderStatusNotIn ?? []}
                   onChange={(value) => updateForm({ currentOrderStatusNotIn: value })}
-                  options={orderStatusOptions}
+                  options={activeOrderStatusOptions}
                   disabled={!allowedConditionSet.has('currentOrderStatusNotIn')}
                   placeholder="Исключить статусы заказа"
                   style={{ width: '100%' }}
@@ -1305,7 +1317,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentPaymentStatusIn ?? []}
                   onChange={(value) => updateForm({ currentPaymentStatusIn: value })}
-                  options={paymentStatusOptions}
+                  options={activePaymentStatusOptions}
                   disabled={!allowedConditionSet.has('currentPaymentStatusIn')}
                   placeholder="Статусы оплаты"
                   style={{ width: '100%' }}
@@ -1319,7 +1331,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentPaymentStatusNotIn ?? []}
                   onChange={(value) => updateForm({ currentPaymentStatusNotIn: value })}
-                  options={paymentStatusOptions}
+                  options={activePaymentStatusOptions}
                   disabled={!allowedConditionSet.has('currentPaymentStatusNotIn')}
                   placeholder="Исключить статусы оплаты"
                   style={{ width: '100%' }}
@@ -1333,7 +1345,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentProductionStatusIn ?? []}
                   onChange={(value) => updateForm({ currentProductionStatusIn: value })}
-                  options={productionStatusOptions}
+                  options={activeProductionStatusOptions}
                   disabled={!allowedConditionSet.has('currentProductionStatusIn')}
                   placeholder="Статусы производства"
                   style={{ width: '100%' }}
@@ -1347,7 +1359,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentProductionStatusNotIn ?? []}
                   onChange={(value) => updateForm({ currentProductionStatusNotIn: value })}
-                  options={productionStatusOptions}
+                  options={activeProductionStatusOptions}
                   disabled={!allowedConditionSet.has('currentProductionStatusNotIn')}
                   placeholder="Исключить статусы производства"
                   style={{ width: '100%' }}

@@ -104,6 +104,7 @@ export class PgStatusAutomationRepository {
       assertActionAllowedForEvent(command.dto.eventType, command.dto.actionType, 0);
       const actionConfig = command.dto.actionConfig ?? {};
       assertActionConfigShape(command.dto.actionType, command.dto.targetStatusId, actionConfig, 0);
+      await validateConditionStatusReferences(tx, command.dto.conditions);
       await validateRuleStatusReferences(tx, command.dto.actionType, command.dto.targetStatusId, actionConfig);
 
       const inserted = await tx.query<StatusAutomationRuleRow>(
@@ -178,6 +179,7 @@ export class PgStatusAutomationRepository {
         assertConditionsAllowedForEvent(nextEventType, nextConditions, command.ruleId);
         assertActionAllowedForEvent(nextEventType, nextActionType, command.ruleId);
         assertActionConfigShape(nextActionType, nextTargetStatusId, nextActionConfig, command.ruleId);
+        await validateConditionStatusReferences(tx, nextConditions);
         await validateRuleStatusReferences(tx, nextActionType, nextTargetStatusId, nextActionConfig);
       }
 
@@ -425,31 +427,65 @@ async function validateRuleStatusReferences(
   await validateStatusIds(tx, actionType === 'change_order_status' ? 'order' : 'production', [targetStatusId], actionType);
 }
 
+async function validateConditionStatusReferences(
+  tx: TransactionClient,
+  conditions: StatusAutomationConditions,
+): Promise<void> {
+  await validateStatusIds(
+    tx,
+    'order',
+    [...(conditions.currentOrderStatusIn ?? []), ...(conditions.currentOrderStatusNotIn ?? [])],
+    'conditions',
+  );
+  await validateStatusIds(
+    tx,
+    'payment',
+    [...(conditions.currentPaymentStatusIn ?? []), ...(conditions.currentPaymentStatusNotIn ?? [])],
+    'conditions',
+  );
+  await validateStatusIds(
+    tx,
+    'production',
+    [...(conditions.currentProductionStatusIn ?? []), ...(conditions.currentProductionStatusNotIn ?? [])],
+    'conditions',
+  );
+}
+
 async function validateStatusIds(
   tx: TransactionClient,
-  kind: 'order' | 'production',
+  kind: 'order' | 'payment' | 'production',
   statusIds: number[],
-  actionType: StatusAutomationActionType,
+  reference: StatusAutomationActionType | 'conditions',
 ): Promise<void> {
   const uniqueIds = Array.from(new Set(statusIds));
   if (uniqueIds.length === 0) return;
-  const isOrderStatus = kind === 'order';
-  const table = isOrderStatus ? 'order_statuses' : 'production_statuses';
-  const column = isOrderStatus ? 'order_status_id' : 'production_status_id';
+  const statusReference = {
+    order: { table: 'order_statuses', column: 'order_status_id' },
+    payment: { table: 'payment_statuses', column: 'payment_status_id' },
+    production: { table: 'production_statuses', column: 'production_status_id' },
+  }[kind];
   const result = await tx.query(
     `
-    SELECT ${isOrderStatus ? 'order_status_id, order_status_name' : 'production_status_id, production_status_name, production_status_code'}
-    FROM ${table}
-    WHERE ${column} = ANY($1::bigint[]) AND is_active = true
+    SELECT ${statusReference.column}
+    FROM ${statusReference.table}
+    WHERE ${statusReference.column} = ANY($1::bigint[]) AND is_active = true
     `,
     [uniqueIds],
   );
   if (result.rows.length !== uniqueIds.length) {
-    throw new ApiError(422, 'TARGET_STATUS_NOT_FOUND', 'Целевой статус не найден или неактивен', {
-      actionType,
-      statusIds: uniqueIds,
-      statusKind: kind,
-    });
+    const isCondition = reference === 'conditions';
+    throw new ApiError(
+      422,
+      isCondition ? 'CONDITION_STATUS_NOT_FOUND' : 'TARGET_STATUS_NOT_FOUND',
+      isCondition
+        ? 'Статус условия не найден или неактивен'
+        : 'Целевой статус не найден или неактивен',
+      {
+        reference,
+        statusIds: uniqueIds,
+        statusKind: kind,
+      },
+    );
   }
 }
 
