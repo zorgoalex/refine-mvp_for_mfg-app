@@ -617,16 +617,28 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
         LIMIT 1
       ) latest_doweling ON true
       LEFT JOIN LATERAL (
-        SELECT ARRAY_AGG(events.production_status_code ORDER BY events.sort_order, events.production_status_code) AS passed_production_status_codes
+        SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code) AS passed_production_status_codes
         FROM (
           SELECT
             ps.production_status_code,
             MIN(COALESCE(ps.sort_order, 0)) AS sort_order
-          FROM production_status_events pse
-          INNER JOIN production_statuses ps ON ps.production_status_id = pse.production_status_id
-          WHERE pse.order_id = o.order_id
+          FROM (
+            SELECT pse.production_status_id
+            FROM production_status_events pse
+            WHERE pse.order_id = o.order_id
+            UNION
+            SELECT o.production_status_id
+            WHERE o.production_status_id IS NOT NULL
+            UNION
+            SELECT od.production_status_id
+            FROM order_details od
+            WHERE od.order_id = o.order_id
+              AND od.delete_flag = false
+              AND od.production_status_id IS NOT NULL
+          ) actual_statuses
+          INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id
           GROUP BY ps.production_status_code
-        ) events
+        ) statuses
       ) production_projection ON true
       LEFT JOIN LATERAL (
         SELECT COALESCE(
