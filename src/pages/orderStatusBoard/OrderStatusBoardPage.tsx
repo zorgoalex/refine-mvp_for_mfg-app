@@ -1851,6 +1851,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     }
     updateViewState({ cncOrderSearchPeriod: period });
   };
+  const toggleCncPlannedTodayFilter = useCallback(() => {
+    setCncBathsRequireMachineFiles(false);
+    setCncTerminalColumnsVisible(false);
+    updateViewState({
+      cncWorkday: todayCncWorkday,
+      cncOrderSearchPeriod: defaultCncOrderSearchPeriod,
+      cncOrderFilters: [],
+      cncPlannedTodayOnly: !viewState.cncPlannedTodayOnly,
+      hideEmpty: false,
+    });
+  }, [defaultCncOrderSearchPeriod, todayCncWorkday, updateViewState, viewState.cncPlannedTodayOnly]);
   const cardDisplayModeLabel = STATUS_BOARD_CARD_DISPLAY_OPTIONS.find(
     (option) => option.value === cardDisplayMode,
   )?.label ?? 'Компактный';
@@ -2351,9 +2362,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               active={viewState.cncPlannedTodayOnly}
               label="Плановая дата сегодня"
               icon={<ScheduleOutlined />}
-              onToggle={() =>
-                updateViewState({ cncPlannedTodayOnly: !viewState.cncPlannedTodayOnly })
-              }
+              onToggle={toggleCncPlannedTodayFilter}
             />
             <div
               className="status-board-toolbar__cnc-period"
@@ -5174,6 +5183,10 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   }, [activeAuxView, hasSheetPreview]);
 
   useEffect(() => {
+    if (displayMode !== 'screenshot') {
+      setActiveAuxView((current) => current === 'sheet' ? null : current);
+      return;
+    }
     if (displayMode === 'screenshot' && hasSheetPreview) {
       setActiveAuxView('sheet');
     }

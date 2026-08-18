@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-18",
+    title: "МДФ-работы: сброс фильтров и превью",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Фильтр «Плановая дата сегодня» очищает остальные фильтры МДФ-доски, а раскрытые превью файлов станка сворачиваются при выходе из режима «Скрин».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-18",
     title: "Автостатусы: связь заказа и деталей",
     services: ["ERP"],
     repositories: ["repo_erp"],

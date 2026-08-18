@@ -921,6 +921,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("cardDisplayMode === 'screenshot' ? 'status-board-columns--cnc-screenshot' : ''");
     expect(packetCard).toContain("displayMode === 'screenshot' && hasSheetPreview");
     expect(packetCard).toContain("setActiveAuxView('sheet')");
+    expect(packetCard).toContain("if (displayMode !== 'screenshot')");
+    expect(packetCard).toContain("current === 'sheet' ? null : current");
     expect(packetCard).toContain("data-cnc-card-view={displayMode === 'screenshot' ? 'screenshot' : summaryOnly ? 'compact' : 'standard'}");
   });
 
@@ -1358,7 +1360,14 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(cncToolbar).toContain('active={viewState.cncPlannedTodayOnly}');
     expect(cncToolbar).toContain('label="Плановая дата сегодня"');
     expect(cncToolbar).toContain('icon={<ScheduleOutlined />}');
-    expect(cncToolbar).toContain('updateViewState({ cncPlannedTodayOnly: !viewState.cncPlannedTodayOnly })');
+    expect(page).toContain('const toggleCncPlannedTodayFilter = useCallback(() => {');
+    expect(page).toContain('cncWorkday: todayCncWorkday');
+    expect(page).toContain('cncOrderSearchPeriod: defaultCncOrderSearchPeriod');
+    expect(page).toContain('cncOrderFilters: []');
+    expect(page).toContain('hideEmpty: false');
+    expect(page).toContain('setCncBathsRequireMachineFiles(false)');
+    expect(page).toContain('setCncTerminalColumnsVisible(false)');
+    expect(cncToolbar).toContain('onToggle={toggleCncPlannedTodayFilter}');
     expect(cncToolbar).not.toContain('Вчера');
     expect(cncToolbar).not.toContain('checked={viewState.hideEmpty}');
     expect(cncToolbar).not.toContain('<Typography.Text type="secondary">Период</Typography.Text>');
