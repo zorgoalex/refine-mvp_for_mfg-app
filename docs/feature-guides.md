@@ -351,6 +351,19 @@ outbox (`order.deleted`, `order.restored`).
 - `change_order_status`;
 - `change_production_status`;
 - `change_details_production_status`.
+- `map_order_status_to_details_production_status` для события `order.status_changed`;
+- `map_production_status_to_order_status` для события `order.production_status_changed`.
+
+Mapping-действия задают несколько исходных статусов для одного целевого.
+Например, несколько производственных статусов деталей могут соответствовать
+одному статусу заказа. Одиночный `targetStatusId` для таких правил не нужен:
+соответствия хранятся в `actionConfig.statusMapping.entries`.
+
+Когда пользователь меняет статус заказа, mapping может синхронно назначить
+целевой производственный статус всем активным деталям. При постепенном или
+пакетном изменении деталей обратное правило запускается после пересчёта
+итогового `orders.production_status_id`; как только все детали сходятся в
+новом статусе, заказ получает mapped-статус.
 
 При нескольких совпавших правилах на один target применяется правило с
 минимальным `priority`. Правило исполняется внутри транзакции source-command.
@@ -376,7 +389,8 @@ VITE_STATUS_AUTOMATION=true
 ```
 
 Миграция:
-`backend/db/migrations/066_status_automation_rules.sql`.
+`backend/db/migrations/066_status_automation_rules.sql`, mapping extension:
+`backend/db/migrations/134_status_automation_mapping_actions.sql`.
 
 ## Шаблоны бирок
 

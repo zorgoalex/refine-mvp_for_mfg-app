@@ -26,6 +26,22 @@ describe('orderStatusBoardApi MDF manual moves', () => {
     );
   });
 
+  it('can bypass browser cache when listing shared MDF manual moves', async () => {
+    const response = {
+      generatedAt: '2026-08-11T00:00:00.000Z',
+      moves: [],
+    };
+    const fetchMock = mockFetch(response);
+
+    await expect(
+      orderStatusBoardApi.listMdfManualMoves({ cache: 'no-store' }),
+    ).resolves.toEqual(response);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/orders/status-board/mdf-manual-moves',
+      expect.objectContaining({ method: 'GET', cache: 'no-store' }),
+    );
+  });
+
   it('saves and clears a card move with encoded card identity', async () => {
     const upsertResponse = {
       generatedAt: '2026-08-11T00:00:00.000Z',

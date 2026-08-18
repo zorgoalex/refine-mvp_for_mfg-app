@@ -24,4 +24,24 @@ describe('resolveCurrentProductionStatusCodes', () => {
       statusIdToCode: new Map([[7, 'laminated']]),
     })).toEqual([]);
   });
+
+  it('combines events, the order status, and unique detail statuses', () => {
+    expect(resolveCurrentProductionStatusCodes({
+      statusId: 2,
+      statusName: 'Распилен',
+      statusIdToCode: new Map([[1, 'drawn'], [2, 'cut']]),
+      passedCodes: ['drawn'],
+      detailStatuses: [
+        { statusId: 2, statusName: 'Распилен' },
+        { statusId: 2, statusName: 'Распилен' },
+      ],
+    })).toEqual(['drawn', 'cut']);
+  });
+
+  it('returns a shared detail status only once', () => {
+    expect(resolveCurrentProductionStatusCodes({
+      statusIdToCode: new Map([[2, 'cut']]),
+      detailStatuses: Array.from({ length: 4 }, () => ({ statusId: 2 })),
+    })).toEqual(['cut']);
+  });
 });

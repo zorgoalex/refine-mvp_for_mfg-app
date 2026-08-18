@@ -1,5 +1,5 @@
 import { apiRoutes } from './apiRoutes';
-import { httpClient } from './httpClient';
+import { httpClient, type RequestOptions } from './httpClient';
 import type {
   MdfBoardManualMoveCardKind,
   MdfBoardManualMoveDeleteResponse,
@@ -12,14 +12,19 @@ import type {
 import { withQuery } from './ordersApi';
 
 export const orderStatusBoardApi = {
-  get(query: OrderStatusBoardQuery): Promise<OrderStatusBoardResponse> {
+  get(
+    query: OrderStatusBoardQuery,
+    options?: RequestOptions,
+  ): Promise<OrderStatusBoardResponse> {
     return httpClient.get<OrderStatusBoardResponse>(
       withQuery(apiRoutes.orders.statusBoard, query),
+      options,
     );
   },
-  listMdfManualMoves(): Promise<MdfBoardManualMovesResponse> {
+  listMdfManualMoves(options?: RequestOptions): Promise<MdfBoardManualMovesResponse> {
     return httpClient.get<MdfBoardManualMovesResponse>(
       apiRoutes.orders.statusBoardMdfManualMoves,
+      options,
     );
   },
   upsertMdfManualMove(

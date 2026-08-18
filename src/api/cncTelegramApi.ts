@@ -1,5 +1,5 @@
 import { apiRoutes } from './apiRoutes';
-import { httpClient } from './httpClient';
+import { httpClient, type RequestOptions } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
   CncAutoCutStatusConfigureResponse,
@@ -28,9 +28,13 @@ export interface CncTelegramTodayQuery {
 }
 
 export const cncTelegramApi = {
-  today(query: CncTelegramTodayQuery = {}): Promise<CncTelegramTodayResponse> {
+  today(
+    query: CncTelegramTodayQuery = {},
+    options?: RequestOptions,
+  ): Promise<CncTelegramTodayResponse> {
     return httpClient.get<CncTelegramTodayResponse>(
       withQuery(apiRoutes.cncTelegram.today, query),
+      options,
     );
   },
   orderCuttingSequences(orderId: number): Promise<CncTelegramOrderCuttingSequencesResponse> {

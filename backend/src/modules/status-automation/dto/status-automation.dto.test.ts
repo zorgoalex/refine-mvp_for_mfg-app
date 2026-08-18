@@ -67,6 +67,26 @@ describe('status automation DTO', () => {
       ).toMatchObject({ conditions: {}, priority: 100, isEnabled: false });
     });
 
+    it('parses a many-to-one mapping rule without a single target status', () => {
+      expect(parseCreateStatusAutomationRuleRequest({
+        name: 'Производство → заказ',
+        eventType: 'order.production_status_changed',
+        actionType: 'map_production_status_to_order_status',
+        targetStatusId: null,
+        actionConfig: {
+          statusMapping: {
+            entries: [{ sourceStatusIds: [3, 4], targetStatusId: 8 }],
+          },
+        },
+      })).toMatchObject({
+        actionType: 'map_production_status_to_order_status',
+        targetStatusId: null,
+        actionConfig: {
+          statusMapping: { entries: [{ sourceStatusIds: [3, 4], targetStatusId: 8 }] },
+        },
+      });
+    });
+
     it.each([
       ['Файлы заказа на станке', 'mdf.order_machine_files_present'],
       ['МДФ-доска распилено', 'mdf.board.completed'],
@@ -107,6 +127,28 @@ describe('status automation DTO', () => {
       ['name is too long', { name: 'x'.repeat(201) }],
       ['priority is not an integer', { priority: 1.5 }],
       ['target status is not positive', { targetStatusId: 0 }],
+      ['single-target action without target status', { targetStatusId: null }],
+      ['mapping action without mapping entries', {
+        eventType: 'order.status_changed',
+        actionType: 'map_order_status_to_details_production_status',
+        targetStatusId: null,
+        actionConfig: {},
+      }],
+      ['mapping action on wrong event', {
+        eventType: 'order.created',
+        actionType: 'map_order_status_to_details_production_status',
+        targetStatusId: null,
+        actionConfig: { statusMapping: { entries: [{ sourceStatusIds: [1], targetStatusId: 2 }] } },
+      }],
+      ['duplicate mapping source', {
+        eventType: 'order.production_status_changed',
+        actionType: 'map_production_status_to_order_status',
+        targetStatusId: null,
+        actionConfig: { statusMapping: { entries: [
+          { sourceStatusIds: [1, 2], targetStatusId: 3 },
+          { sourceStatusIds: [2], targetStatusId: 4 },
+        ] } },
+      }],
       ['isEnabled is not boolean', { isEnabled: 'true' }],
       ['conditions is not an object', { conditions: null }],
     ] as const)('rejects %s with 422', (_caseName, overrides) => {

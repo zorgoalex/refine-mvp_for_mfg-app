@@ -1,5 +1,5 @@
 import { Table } from '../../../ui/tooltipDelay';
-import { DownloadOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import {
   Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Typography, Upload, message } from 'antd';
@@ -33,7 +33,9 @@ import {
   buildStatusAutomationRulesExportFile,
   buildCreatePayload,
   buildUpdatePayload,
+  describeAction,
   describeConditions,
+  isStatusMappingAction,
   planStatusAutomationRulesImport,
   readStatusAutomationRulesImportSource,
   type StatusAutomationImportIssue,
@@ -88,6 +90,8 @@ const ACTION_LABELS: Record<StatusAutomationActionType, string> = {
   change_order_status: 'Статус заказа',
   change_production_status: 'Статус производства',
   change_details_production_status: 'Статус деталей производства',
+  map_order_status_to_details_production_status: 'Маппинг заказа → детали',
+  map_production_status_to_order_status: 'Маппинг производства → заказ',
 };
 
 const SOURCE_OPTIONS: Array<{ value: StatusAutomationOrderSource; label: string }> = [
@@ -112,7 +116,8 @@ function emptyForm(eventType: StatusAutomationEventType = 'order.created'): Stat
     name: '',
     eventType,
     actionType: 'change_order_status',
-    targetStatusId: 0,
+    targetStatusId: null,
+    statusMappingEntries: [{ sourceStatusIds: [], targetStatusId: 0 }],
     currentOrderStatusIn: [],
     currentOrderStatusNotIn: [],
     currentPaymentStatusIn: [],
@@ -133,6 +138,10 @@ function formFromRule(rule: StatusAutomationRuleDto): StatusAutomationFormValues
     eventType: rule.eventType,
     actionType: rule.actionType,
     targetStatusId: rule.targetStatusId,
+    statusMappingEntries: rule.actionConfig?.statusMapping?.entries.map((entry) => ({
+      sourceStatusIds: [...entry.sourceStatusIds],
+      targetStatusId: entry.targetStatusId,
+    })) ?? [{ sourceStatusIds: [], targetStatusId: 0 }],
     currentOrderStatusIn: [...(rule.conditions.currentOrderStatusIn ?? [])],
     currentOrderStatusNotIn: [...(rule.conditions.currentOrderStatusNotIn ?? [])],
     currentPaymentStatusIn: [...(rule.conditions.currentPaymentStatusIn ?? [])],
@@ -254,6 +263,16 @@ export function StatusAutomationConfig() {
       })),
     [orderStatusesData],
   );
+  const activeOrderStatusOptions = useMemo(
+    () =>
+      (orderStatusesData?.data ?? [])
+        .filter((status) => status.is_active !== false)
+        .map((status) => ({
+          value: status.order_status_id,
+          label: status.order_status_name,
+        })),
+    [orderStatusesData],
+  );
   const paymentStatusOptions = useMemo(
     () =>
       (paymentStatusesData?.data ?? []).map((status) => ({
@@ -262,12 +281,32 @@ export function StatusAutomationConfig() {
       })),
     [paymentStatusesData],
   );
+  const activePaymentStatusOptions = useMemo(
+    () =>
+      (paymentStatusesData?.data ?? [])
+        .filter((status) => status.is_active !== false)
+        .map((status) => ({
+          value: status.payment_status_id,
+          label: status.payment_status_name,
+        })),
+    [paymentStatusesData],
+  );
   const productionStatusOptions = useMemo(
     () =>
       (productionStatusesData?.data ?? []).map((status) => ({
         value: status.production_status_id,
         label: status.production_status_name,
       })),
+    [productionStatusesData],
+  );
+  const activeProductionStatusOptions = useMemo(
+    () =>
+      (productionStatusesData?.data ?? [])
+        .filter((status) => status.is_active !== false)
+        .map((status) => ({
+          value: status.production_status_id,
+          label: status.production_status_name,
+        })),
     [productionStatusesData],
   );
   const cutProductionStatusAvailable = useMemo(
@@ -403,8 +442,19 @@ export function StatusAutomationConfig() {
   const selectedEvent = editor.kind === 'closed' ? null : eventTypeByName.get(form.eventType) ?? null;
   const allowedConditionKeys = allowedConditionKeysForEvent(selectedEvent);
   const allowedConditionSet = useMemo(() => new Set(allowedConditionKeys), [allowedConditionKeys]);
+  const mappingAction = isStatusMappingAction(form.actionType);
   const targetStatusOptions =
-    form.actionType === 'change_order_status' ? orderStatusOptions : productionStatusOptions;
+    form.actionType === 'change_order_status'
+      ? activeOrderStatusOptions
+      : activeProductionStatusOptions;
+  const mappingSourceOptions =
+    form.actionType === 'map_order_status_to_details_production_status'
+      ? activeOrderStatusOptions
+      : activeProductionStatusOptions;
+  const mappingTargetOptions =
+    form.actionType === 'map_order_status_to_details_production_status'
+      ? activeProductionStatusOptions
+      : activeOrderStatusOptions;
 
   const loadRules = useCallback(async () => {
     if (!canView) {
@@ -523,7 +573,41 @@ export function StatusAutomationConfig() {
   };
 
   const handleActionChange = (actionType: StatusAutomationActionType) => {
-    updateForm({ actionType, targetStatusId: 0 });
+    updateForm({
+      actionType,
+      targetStatusId: null,
+      statusMappingEntries: isStatusMappingAction(actionType)
+        ? [{ sourceStatusIds: [], targetStatusId: 0 }]
+        : form.statusMappingEntries,
+    });
+  };
+
+  const updateMappingEntry = (
+    index: number,
+    patch: Partial<{ sourceStatusIds: number[]; targetStatusId: number }>,
+  ) => {
+    setForm((current) => ({
+      ...current,
+      statusMappingEntries: (current.statusMappingEntries ?? []).map((entry, entryIndex) =>
+        entryIndex === index ? { ...entry, ...patch } : entry,
+      ),
+    }));
+  };
+
+  const addMappingEntry = () => {
+    setForm((current) => ({
+      ...current,
+      statusMappingEntries: [...(current.statusMappingEntries ?? []), { sourceStatusIds: [], targetStatusId: 0 }],
+    }));
+  };
+
+  const removeMappingEntry = (index: number) => {
+    setForm((current) => ({
+      ...current,
+      statusMappingEntries: (current.statusMappingEntries ?? []).length <= 1
+        ? [{ sourceStatusIds: [], targetStatusId: 0 }]
+        : (current.statusMappingEntries ?? []).filter((_, entryIndex) => entryIndex !== index),
+    }));
   };
 
   const handleSave = async () => {
@@ -531,9 +615,20 @@ export function StatusAutomationConfig() {
       message.warning('Укажите название правила');
       return;
     }
-    if (form.targetStatusId < 1) {
+    if (!mappingAction && (form.targetStatusId ?? 0) < 1) {
       message.warning('Выберите целевой статус');
       return;
+    }
+    if (mappingAction) {
+      if ((form.statusMappingEntries ?? []).some((entry) => entry.sourceStatusIds.length === 0 || entry.targetStatusId < 1)) {
+        message.warning('Заполните строки маппинга');
+        return;
+      }
+      const sourceIds = (form.statusMappingEntries ?? []).flatMap((entry) => entry.sourceStatusIds);
+      if (new Set(sourceIds).size !== sourceIds.length) {
+        message.warning('Один исходный статус нельзя маппить дважды');
+        return;
+      }
     }
     if (!selectedEvent || !selectedEvent.allowedActions.includes(form.actionType)) {
       message.warning('Выберите допустимое действие');
@@ -1032,16 +1127,7 @@ export function StatusAutomationConfig() {
               title: 'Действие → целевой статус',
               key: 'action',
               width: 250,
-              render: (_, rule) => {
-                const options =
-                  rule.actionType === 'change_order_status'
-                    ? orderStatusOptions
-                    : productionStatusOptions;
-                const target = options.find((option) => option.value === rule.targetStatusId)?.label;
-                return `${ACTION_LABELS[rule.actionType] ?? rule.actionType} → ${
-                  target ?? `#${rule.targetStatusId}`
-                }`;
-              },
+              render: (_, rule) => `${ACTION_LABELS[rule.actionType] ?? rule.actionType} → ${describeAction(rule, catalogs)}`,
             },
             {
               title: 'Приоритет',
@@ -1145,17 +1231,56 @@ export function StatusAutomationConfig() {
             </Form.Item>
           </Space>
 
-          <Form.Item label="Целевой статус" required>
-            <Select<number>
-              value={form.targetStatusId > 0 ? form.targetStatusId : undefined}
-              onChange={(value) => updateForm({ targetStatusId: value })}
-              options={targetStatusOptions}
-              style={{ width: '100%' }}
-              placeholder="Выберите статус"
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
+          {mappingAction ? (
+            <Form.Item label="Маппинг статусов" required>
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {(form.statusMappingEntries ?? []).map((entry, index) => (
+                  <Space key={index} align="start" style={{ width: '100%' }}>
+                    <Select<number[]>
+                      mode="multiple"
+                      value={entry.sourceStatusIds}
+                      onChange={(value) => updateMappingEntry(index, { sourceStatusIds: value })}
+                      options={mappingSourceOptions}
+                      style={{ flex: 1, minWidth: 280 }}
+                      placeholder="Исходные статусы"
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                    <Select<number>
+                      value={entry.targetStatusId > 0 ? entry.targetStatusId : undefined}
+                      onChange={(value) => updateMappingEntry(index, { targetStatusId: value })}
+                      options={mappingTargetOptions}
+                      style={{ flex: 1, minWidth: 220 }}
+                      placeholder="Целевой статус"
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                    <Button
+                      icon={<DeleteOutlined />}
+                      aria-label="Удалить строку маппинга"
+                      title="Удалить строку"
+                      onClick={() => removeMappingEntry(index)}
+                      disabled={(form.statusMappingEntries ?? []).length <= 1}
+                    />
+                  </Space>
+                ))}
+                <Button icon={<PlusOutlined />} onClick={addMappingEntry}>Добавить строку</Button>
+              </Space>
+            </Form.Item>
+          ) : (
+            <Form.Item label="Целевой статус" required>
+              <Select<number>
+                value={(form.targetStatusId ?? 0) > 0 ? form.targetStatusId ?? undefined : undefined}
+                onChange={(value) => updateForm({ targetStatusId: value })}
+                options={targetStatusOptions}
+                style={{ width: '100%' }}
+                placeholder="Выберите статус"
+                showSearch
+                optionFilterProp="label"
+              />
+            </Form.Item>
+          )}
 
           <Form.Item label="Условия">
             <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -1164,7 +1289,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentOrderStatusIn ?? []}
                   onChange={(value) => updateForm({ currentOrderStatusIn: value })}
-                  options={orderStatusOptions}
+                  options={activeOrderStatusOptions}
                   disabled={!allowedConditionSet.has('currentOrderStatusIn')}
                   placeholder="Статусы заказа"
                   style={{ width: '100%' }}
@@ -1178,7 +1303,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentOrderStatusNotIn ?? []}
                   onChange={(value) => updateForm({ currentOrderStatusNotIn: value })}
-                  options={orderStatusOptions}
+                  options={activeOrderStatusOptions}
                   disabled={!allowedConditionSet.has('currentOrderStatusNotIn')}
                   placeholder="Исключить статусы заказа"
                   style={{ width: '100%' }}
@@ -1192,7 +1317,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentPaymentStatusIn ?? []}
                   onChange={(value) => updateForm({ currentPaymentStatusIn: value })}
-                  options={paymentStatusOptions}
+                  options={activePaymentStatusOptions}
                   disabled={!allowedConditionSet.has('currentPaymentStatusIn')}
                   placeholder="Статусы оплаты"
                   style={{ width: '100%' }}
@@ -1206,7 +1331,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentPaymentStatusNotIn ?? []}
                   onChange={(value) => updateForm({ currentPaymentStatusNotIn: value })}
-                  options={paymentStatusOptions}
+                  options={activePaymentStatusOptions}
                   disabled={!allowedConditionSet.has('currentPaymentStatusNotIn')}
                   placeholder="Исключить статусы оплаты"
                   style={{ width: '100%' }}
@@ -1220,7 +1345,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentProductionStatusIn ?? []}
                   onChange={(value) => updateForm({ currentProductionStatusIn: value })}
-                  options={productionStatusOptions}
+                  options={activeProductionStatusOptions}
                   disabled={!allowedConditionSet.has('currentProductionStatusIn')}
                   placeholder="Статусы производства"
                   style={{ width: '100%' }}
@@ -1234,7 +1359,7 @@ export function StatusAutomationConfig() {
                   mode="multiple"
                   value={form.currentProductionStatusNotIn ?? []}
                   onChange={(value) => updateForm({ currentProductionStatusNotIn: value })}
-                  options={productionStatusOptions}
+                  options={activeProductionStatusOptions}
                   disabled={!allowedConditionSet.has('currentProductionStatusNotIn')}
                   placeholder="Исключить статусы производства"
                   style={{ width: '100%' }}

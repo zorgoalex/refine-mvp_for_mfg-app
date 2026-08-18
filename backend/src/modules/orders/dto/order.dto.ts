@@ -170,6 +170,7 @@ export type OrderHeaderDto = NormalizedSaveOrderHeaderDto & {
   paymentStatusId: number;
   paymentStatusName: string;
   productionStatusName: string | null;
+  passedProductionStatusCodes?: string[];
   totalAmount: number;
   finalAmount: number;
   paidAmount: number;

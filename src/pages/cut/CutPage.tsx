@@ -73,7 +73,6 @@ import type {
   CutJobItemDto,
   CutTextureDirection,
   CutResultSummary,
-  CutTextureDirection,
   EligibleDetailDto,
   SheetPlacements,
 } from '../../api/types/cutApi.types';

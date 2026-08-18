@@ -30,6 +30,16 @@ const ALLOWED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = [
   'change_details_production_status',
 ];
 
+const ORDER_STATUS_CHANGED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = [
+  ...ALLOWED_ACTIONS,
+  'map_order_status_to_details_production_status',
+];
+
+const PRODUCTION_STATUS_CHANGED_ACTIONS: ReadonlyArray<StatusAutomationActionType> = [
+  ...ALLOWED_ACTIONS,
+  'map_production_status_to_order_status',
+];
+
 export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescriptor> = [
   {
     eventType: 'payment.created',
@@ -77,7 +87,7 @@ export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescri
     group: 'statuses',
     description: 'Когда заказу назначен другой обычный статус.',
     allowedConditions: BASE_CONDITIONS,
-    allowedActions: ALLOWED_ACTIONS,
+    allowedActions: ORDER_STATUS_CHANGED_ACTIONS,
   },
   {
     eventType: 'order.production_status_changed',
@@ -85,7 +95,7 @@ export const STATUS_AUTOMATION_EVENTS: ReadonlyArray<StatusAutomationEventDescri
     group: 'statuses',
     description: 'Когда заказу назначен другой производственный статус.',
     allowedConditions: BASE_CONDITIONS,
-    allowedActions: ALLOWED_ACTIONS,
+    allowedActions: PRODUCTION_STATUS_CHANGED_ACTIONS,
   },
   {
     eventType: 'mdf.order_machine_files_present',

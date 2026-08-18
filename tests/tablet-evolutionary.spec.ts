@@ -471,7 +471,116 @@ test.describe('Evolutionary tablet UI', () => {
         await expect(page.locator('[data-status-board-order-id="15"]')).toBeVisible({ timeout: 30_000 });
         await expect(page.locator('.status-board-card__drag--touch')).toBeVisible();
     });
+
+    test('opens MDF machine-file preview without runtime errors', async ({ page }) => {
+        const db = createWorkflowMockDb();
+        seedTabletData(db);
+        const health = collectPageHealth(page);
+        await setupBoardTabletMocks(page, db);
+
+        await page.route(/\/api\/v1\/cnc-telegram\/today(?:\?.*)?$/, async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    workday: '2026-08-05',
+                    generatedAt: '2026-08-05T10:00:00.000Z',
+                    columns: [{
+                        key: 'parsed',
+                        title: 'Файлы на станке',
+                        total: 1,
+                        packets: [buildMdfPreviewPacket()],
+                        baths: [],
+                    }],
+                }),
+            });
+        });
+        await page.route(/\/api\/v1\/cnc-telegram\/media\/sheet\.png$/, async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'image/png',
+                body: Buffer.from(
+                    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+                    'base64',
+                ),
+            });
+        });
+
+        await page.goto('/mdf-work-board');
+        const card = page.locator('.cnc-packet-card').filter({ hasText: 'CNC#1_2701.TXT' });
+        await expect(card).toBeVisible({ timeout: 30_000 });
+        await card.getByRole('button', { name: 'Скрин' }).click();
+        await expect(card.getByAltText('Скрин листа CNC#1_2701.TXT')).toBeVisible({ timeout: 30_000 });
+        await card.getByRole('button', { name: 'Печать скрина листа CNC#1_2701.TXT' }).first().click();
+        const previewDialog = page.getByRole('dialog');
+        await expect(previewDialog).toBeVisible();
+        await expect(previewDialog.getByText('Скрин раскроя · CNC#1_2701.TXT')).toBeVisible();
+
+        expect(health.pageErrors, 'page errors').toEqual([]);
+        expect(health.consoleErrors, 'console errors').toEqual([]);
+        expect(health.serverErrors, 'HTTP 5xx responses').toEqual([]);
+    });
 });
+
+function buildMdfPreviewPacket() {
+    return {
+        packetId: 'packet-preview-1',
+        externalPacketKey: 'chat:1:message:1',
+        cuttingSequenceNo: 6,
+        sourceChatId: '1',
+        sourceMessageId: 1,
+        sourceThreadId: null,
+        sourceVersion: 1,
+        sourceCreatedAt: '2026-08-05T08:00:00.000Z',
+        sourceUpdatedAt: null,
+        workday: '2026-08-05',
+        machine: 'CNC#1',
+        programName: 'CNC#1_2701.TXT',
+        materialName: 'МДФ',
+        sheetImageUrl: '/api/v1/cnc-telegram/media/sheet.png',
+        sheetImageContentType: 'image/png',
+        sheetImageSizeBytes: 68,
+        parseStatus: 'parsed',
+        completionStatus: 'pending',
+        thumbsUp: false,
+        completedAt: null,
+        rework: false,
+        comments: [],
+        tools: [],
+        dowelingLinks: [],
+        analysisWarnings: [],
+        ocrEngine: null,
+        parserVersion: 'e2e',
+        cutLayout: null,
+        svgCutJobId: null,
+        svgCutResultId: null,
+        svgCutResultNo: null,
+        svgCutImportStatus: 'none',
+        svgCutImportNote: null,
+        allLinkedOrderDetailsPackedOrLater: false,
+        itemCount: 1,
+        itemQuantityTotal: 1,
+        updatedAt: '2026-08-05T08:00:00.000Z',
+        items: [{
+            packetItemId: 'packet-preview-item-1',
+            sourceItemKey: '2701:31:497x477',
+            orderName: '2701',
+            orderId: 15,
+            detailNumber: 31,
+            widthMm: 497,
+            heightMm: 477,
+            quantity: 1,
+            source: 'vector',
+            confidence: 1,
+            matchOrderId: 15,
+            matchDetailId: 1,
+            matchDetailQuantity: 1,
+            matchStatus: 'matched',
+            reviewNote: null,
+            laminatedOrLater: false,
+        }],
+    };
+}
 
 async function setupGeneralTabletMocks(page: Page, db: WorkflowMockDb) {
     assertLocalMockBaseUrl();
@@ -593,6 +702,13 @@ async function setupBoardTabletMocks(page: Page, db: WorkflowMockDb) {
 }
 
 async function setupSharedReadMocks(page: Page) {
+    await page.route(/\/api\/v1\/orders\/status-board\/mdf-manual-moves$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ generatedAt: '2026-08-05T10:00:00.000Z', moves: [] }),
+        });
+    });
     await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {
         await route.fulfill({
             status: 200,

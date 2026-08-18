@@ -100,6 +100,18 @@ describe('orderMapper inbound (OrderDto -> form values)', () => {
     expect(values.details[0].sheet_material_type_id).toBe(7);
   });
 
+  it('carries production history onto the order-show header', () => {
+    const values = mapOrderDtoToFormValues({
+      ...dto,
+      header: {
+        ...(dto.header as any),
+        passedProductionStatusCodes: ['drawn', 'cut'],
+      } as any,
+    });
+
+    expect(values.header.passed_production_status_codes).toEqual(['drawn', 'cut']);
+  });
+
   it('carries server-resolved materialName (COALESCE) onto header + detail for display', () => {
     const dtoWithNames: OrderDto = {
       ...dto,

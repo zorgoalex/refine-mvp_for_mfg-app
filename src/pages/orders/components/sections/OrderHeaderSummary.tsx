@@ -11,7 +11,7 @@ import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from '../../../../utils/materialDisplayName';
-import { ProductionStagesDisplay, getPassedCodesFromStatusName } from '../../../../components/ProductionStagesDisplay';
+import { ProductionStagesDisplay } from '../../../../components/ProductionStagesDisplay';
 import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
@@ -22,6 +22,7 @@ import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummary';
+import { resolveCurrentProductionStatusCodes } from '../../currentProductionStatus';
 
 const { Text } = Typography;
 
@@ -186,14 +187,6 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     return map;
   }, [allProductionStatusesData]);
 
-  const productionStatusIdToSortOrder = useMemo(() => {
-    const map = new Map<number, number>();
-    (allProductionStatusesData?.data || []).forEach((status: any) => {
-      map.set(status.production_status_id, status.sort_order);
-    });
-    return map;
-  }, [allProductionStatusesData]);
-
   const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
     return (allProductionStatusesData?.data || []).map((s: any) => ({
       production_status_id: s.production_status_id,
@@ -216,27 +209,24 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     }).display;
   }, [workflow, statusesForWorkflow]);
 
-  // Get passed production stage codes from events or fallback to current status
+  // Production stages are additive: keep every unique event/order/detail status.
   const passedProductionCodes = useMemo(() => {
-    // First try to get from events
     const events = productionEventsData?.data || [];
-    if (events.length > 0) {
-      const codes: string[] = [];
-      events.forEach((event: any) => {
-        const code = productionStatusIdToCode.get(event.production_status_id);
-        if (code) codes.push(code);
-      });
-      return codes;
-    }
-
-    // Fallback: use current status name to infer passed stages (legacy)
-    const statusName = productionStatusData?.data?.production_status_name;
-    if (statusName) {
-      return getPassedCodesFromStatusName(statusName);
-    }
-
-    return [];
-  }, [productionEventsData, productionStatusData, productionStatusIdToCode]);
+    return resolveCurrentProductionStatusCodes({
+      statusId: header.production_status_id,
+      statusName: productionStatusData?.data?.production_status_name,
+      statusIdToCode: productionStatusIdToCode,
+      passedCodes: events.map((event: any) => (
+        productionStatusIdToCode.get(event.production_status_id)
+      )),
+      detailStatuses: details
+        .filter((detail: any) => detail.delete_flag !== true)
+        .map((detail: any) => ({
+          statusId: detail.production_status_id,
+          statusName: detail.production_status_name,
+        })),
+    });
+  }, [details, header.production_status_id, productionEventsData, productionStatusData, productionStatusIdToCode]);
 
   // Load materials list
   const { data: materialsData } = useList({
