@@ -5619,36 +5619,6 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
           </Tooltip>
         </div>
         <div className="cnc-packet-card__sheet-body">
-          <div className="cnc-packet-card__sheet-toolbar" onClick={(event) => event.stopPropagation()}>
-            {cutJobId && labelSheet ? (
-              <CutSheetLabelGenerateAction
-                detailInstances={labelDetailInstances}
-                cutJobId={cutJobId}
-                cutGroupId={labelSheet.cutGroupId}
-                sheetIndex={labelSheet.sheetIndex}
-                labelCoverage={labelCoverage}
-              />
-            ) : (
-              <Tooltip title="Нет связанного листа раскроя для бирок">
-                <span>
-                  <Button className="app-hit-area-sm" size="small" icon={<TagsOutlined />} disabled>
-                    Бирки
-                  </Button>
-                </span>
-              </Tooltip>
-            )}
-            <Tooltip title="Печать скрина листа">
-              <Button
-                className="app-hit-area-sm"
-                size="small"
-                icon={<PrinterOutlined />}
-                disabled={!objectUrl}
-                aria-haspopup="dialog"
-                onClick={() => setPrintPreviewOpen(true)}
-                aria-label={`Печать скрина листа ${title}`}
-              />
-            </Tooltip>
-          </div>
           {loading && (
             <div className="cnc-packet-card__sheet-loading">
               <Spin size="small" />

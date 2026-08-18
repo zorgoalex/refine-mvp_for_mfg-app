@@ -2679,24 +2679,6 @@
   gap: 8px;
 }
 
-.cnc-packet-card__sheet-toolbar {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: nowrap;
-  gap: 6px;
-}
-
-.cnc-packet-card__sheet-toolbar .ant-btn {
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.cnc-packet-card__sheet-toolbar > span {
-  flex: 0 0 auto;
-}
-
 .cnc-packet-card__sheet-loading {
   min-height: 80px;
   display: grid;

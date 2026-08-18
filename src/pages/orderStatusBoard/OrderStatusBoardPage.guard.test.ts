@@ -1558,7 +1558,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).not.toContain('printSheetImage');
-    expect(sheetPreview.match(/onClick=\{\(\) => setPrintPreviewOpen\(true\)\}/g)).toHaveLength(2);
+    expect(sheetPreview.match(/<CutSheetLabelGenerateAction/g)).toHaveLength(1);
+    expect(sheetPreview.match(/onClick=\{\(\) => setPrintPreviewOpen\(true\)\}/g)).toHaveLength(1);
+    expect(sheetPreview).not.toContain('cnc-packet-card__sheet-toolbar');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
     expect(sheetPreview).toContain("status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}");
     expect(sheetPreview).toContain('printHeader={printHeader}');
