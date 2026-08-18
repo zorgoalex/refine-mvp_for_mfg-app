@@ -84,7 +84,7 @@ export interface RecordCncTelegramDeniedAuditCommand {
     | 'cnc.telegram_worker.audit_write_denied';
   requestId?: string;
   externalPacketKey?: string;
-  reason: 'PERMISSION_DENIED' | 'CNC_TELEGRAM_CHAT_DENIED';
+  reason: 'PERMISSION_DENIED' | 'CNC_TELEGRAM_CHAT_DENIED' | 'BACKGROUND_INGEST_DISABLED' | 'BACKGROUND_INGEST_APPROVAL_REQUIRED';
   requiredPermissions: ['cut.manage'] | ['status_automation.manage'];
 }
 

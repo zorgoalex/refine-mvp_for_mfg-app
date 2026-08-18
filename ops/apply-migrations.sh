@@ -1524,6 +1524,28 @@ probe_file() {
                      "$(q_col milling_type_extra_resources extra_resource_id)" \
                      "$(q_idx uq_extra_resources_active_kind_name)" \
                      "$(q_idx idx_milling_type_extra_resources_extra_resource)" ;;
+    135_cnc_telegram_worker_session_leases*) probe_all \
+                     "$(q_tbl cnc_telegram_worker_session_leases)" \
+                     "$(q_col cnc_telegram_worker_session_leases lease_token)" \
+                     "$(q_col cnc_telegram_worker_session_leases lease_generation)" \
+                     "$(q_col cnc_telegram_worker_session_leases worker_instance_id)" \
+                     "$(q_col cnc_telegram_worker_session_leases worker_image_revision)" \
+                     "$(q_col cnc_telegram_worker_session_leases heartbeat_at)" \
+                     "$(q_col cnc_telegram_worker_session_leases expires_at)" \
+                     "$(q_con_on cnc_telegram_worker_session_leases chk_cnc_tg_session_lease_expiry)" \
+                     "$(q_idx idx_cnc_tg_session_leases_expiry)" \
+                     "$(q_col cnc_telegram_media_restore_requests lease_token)" \
+                     "$(q_col cnc_telegram_media_restore_requests lease_generation)" \
+                     "$(q_col cnc_telegram_media_restore_requests lease_worker_instance_id)" \
+                     "$(q_col cnc_telegram_media_restore_requests lease_expires_at)" \
+                     "$(q_con_on cnc_telegram_media_restore_requests chk_cnc_tg_restore_item_lease_shape)" \
+                     "$(q_idx idx_cnc_tg_restore_item_lease_expiry)" \
+                     "$(q_col cnc_manual_svg_telegram_send_requests lease_token)" \
+                     "$(q_col cnc_manual_svg_telegram_send_requests lease_generation)" \
+                     "$(q_col cnc_manual_svg_telegram_send_requests lease_worker_instance_id)" \
+                     "$(q_col cnc_manual_svg_telegram_send_requests lease_expires_at)" \
+                     "$(q_con_on cnc_manual_svg_telegram_send_requests chk_cnc_tg_send_item_lease_shape)" \
+                     "$(q_idx idx_cnc_tg_send_item_lease_expiry)" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1535,7 +1557,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|135_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

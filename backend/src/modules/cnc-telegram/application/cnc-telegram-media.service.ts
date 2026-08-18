@@ -15,6 +15,8 @@ import type {
 } from '../dto/cnc-telegram-media.dto';
 import { openTelegramMedia, type OpenTelegramMedia } from './telegram-media-reader';
 import { openOrCreateTelegramPreview } from './telegram-thumbnail-store';
+import type { CncTelegramWorkerSessionLeaseContext } from './cnc-telegram-worker-session.types';
+import type { CncTelegramWorkerSessionService } from './cnc-telegram-worker-session.service';
 
 export class CncTelegramMediaService {
   private readonly permissions = new PermissionsService();
@@ -22,6 +24,7 @@ export class CncTelegramMediaService {
   constructor(
     private readonly repository: PgCncTelegramMediaRepository,
     private readonly config: ConfigService<BackendEnv, true>,
+    private readonly session?: CncTelegramWorkerSessionService,
   ) {}
 
   async listOrderScreenshots(
@@ -85,25 +88,31 @@ export class CncTelegramMediaService {
     });
   }
 
-  async claimRestores(currentUser: CurrentUser): Promise<CncTelegramMediaRestoreClaimResponseDto> {
-    const allowedChats = this.assertWorker(currentUser);
+  async claimRestores(currentUser: CurrentUser, lease?: CncTelegramWorkerSessionLeaseContext): Promise<CncTelegramMediaRestoreClaimResponseDto> {
+    this.assertWorker(currentUser);
+    await this.assertSession(currentUser, lease);
+    const sessionLease = this.requireLease(lease);
     return {
       capability: 'cnc_telegram_media_restore_v1',
-      tasks: await this.repository.claimRestores(allowedChats, 5),
+      tasks: await this.repository.claimRestores([sessionLease.sourceChatId], 5, sessionLease),
     };
   }
 
   async claimManualSvgTelegramSends(
     currentUser: CurrentUser,
     requestTraceId?: string,
+    lease?: CncTelegramWorkerSessionLeaseContext,
   ): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto> {
     this.assertWorker(currentUser);
+    await this.assertSession(currentUser, lease);
+    const sessionLease = this.requireLease(lease);
     return {
       capability: 'cnc_manual_svg_telegram_send_v1',
       tasks: await this.repository.claimManualSvgTelegramSends({
         currentUser,
         limit: 5,
         requestTraceId: requestTraceId || 'cnc-manual-svg-telegram-send-claim',
+        sessionLease,
       }),
     };
   }
@@ -113,10 +122,16 @@ export class CncTelegramMediaService {
     requestId: string;
     completion: CncTelegramManualSvgTelegramSendCompleteDto;
     requestTraceId?: string;
+    lease?: CncTelegramWorkerSessionLeaseContext;
   }): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
     this.assertWorker(input.currentUser);
+    await this.assertSession(input.currentUser, input.lease);
+    const sessionLease = this.requireLease(input.lease);
     return this.repository.completeManualSvgTelegramSend({
-      ...input,
+      currentUser: input.currentUser,
+      requestId: input.requestId,
+      completion: input.completion,
+      sessionLease,
       requestTraceId: input.requestTraceId || 'cnc-manual-svg-telegram-send-complete',
     });
   }
@@ -125,11 +140,23 @@ export class CncTelegramMediaService {
     currentUser: CurrentUser;
     requestId: string;
     error: string;
+    itemLeaseToken: string;
+    itemLeaseGeneration: number;
+    itemLeaseOwner: string;
     requestTraceId?: string;
+    lease?: CncTelegramWorkerSessionLeaseContext;
   }): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
     this.assertWorker(input.currentUser);
+    await this.assertSession(input.currentUser, input.lease);
+    const sessionLease = this.requireLease(input.lease);
     return this.repository.failManualSvgTelegramSend({
-      ...input,
+      currentUser: input.currentUser,
+      requestId: input.requestId,
+      error: input.error,
+      leaseToken: input.itemLeaseToken,
+      leaseGeneration: input.itemLeaseGeneration,
+      leaseOwner: input.itemLeaseOwner,
+      sessionLease,
       requestTraceId: input.requestTraceId || 'cnc-manual-svg-telegram-send-fail',
     });
   }
@@ -139,10 +166,16 @@ export class CncTelegramMediaService {
     requestId: string;
     media: CncTelegramMediaRestoreCompleteDto;
     requestTraceId?: string;
+    lease?: CncTelegramWorkerSessionLeaseContext;
   }): Promise<CncTelegramMediaRestoreResponseDto> {
     this.assertWorker(input.currentUser);
+    await this.assertSession(input.currentUser, input.lease);
+    const sessionLease = this.requireLease(input.lease);
     return this.repository.completeRestore({
-      ...input,
+      currentUser: input.currentUser,
+      requestId: input.requestId,
+      media: input.media,
+      sessionLease,
       requestTraceId: input.requestTraceId || 'cnc-telegram-media-restore-complete',
     });
   }
@@ -151,11 +184,23 @@ export class CncTelegramMediaService {
     currentUser: CurrentUser;
     requestId: string;
     error: string;
+    itemLeaseToken: string;
+    itemLeaseGeneration: number;
+    itemLeaseOwner: string;
     requestTraceId?: string;
+    lease?: CncTelegramWorkerSessionLeaseContext;
   }): Promise<CncTelegramMediaRestoreResponseDto> {
     this.assertWorker(input.currentUser);
+    await this.assertSession(input.currentUser, input.lease);
+    const sessionLease = this.requireLease(input.lease);
     return this.repository.failRestore({
-      ...input,
+      currentUser: input.currentUser,
+      requestId: input.requestId,
+      error: input.error,
+      leaseToken: input.itemLeaseToken,
+      leaseGeneration: input.itemLeaseGeneration,
+      leaseOwner: input.itemLeaseOwner,
+      sessionLease,
       requestTraceId: input.requestTraceId || 'cnc-telegram-media-restore-fail',
     });
   }
@@ -183,6 +228,23 @@ export class CncTelegramMediaService {
       });
     }
     return [...new Set(allowedChats)];
+  }
+
+  private async assertSession(
+    currentUser: CurrentUser,
+    lease: CncTelegramWorkerSessionLeaseContext | undefined,
+  ): Promise<void> {
+    if (!this.session) return;
+    if (!lease) throw new ApiError(401, 'CNC_TELEGRAM_SESSION_LEASE_REQUIRED', 'Требуется текущая сессия Telegram worker');
+    await this.session.assertCurrent(currentUser, lease);
+  }
+
+  private requireLease(lease: CncTelegramWorkerSessionLeaseContext | undefined): CncTelegramWorkerSessionLeaseContext {
+    if (!lease) {
+      throw new ApiError(401, 'CNC_TELEGRAM_SESSION_LEASE_REQUIRED', 'Требуется текущая сессия Telegram worker');
+    }
+    if (this.session) return { ...lease, sourceChatId: this.session.resolveChatId(lease.sourceChatId) };
+    return lease;
   }
 
   private mediaDirectory(): string {

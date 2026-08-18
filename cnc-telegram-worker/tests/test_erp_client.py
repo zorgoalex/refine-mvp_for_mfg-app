@@ -6,7 +6,14 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from cnc_telegram_worker.erp_client import BackendAuth, ErpClient
+from cnc_telegram_worker.erp_client import (
+    BackendAuth,
+    ErpClient,
+    ErpResponseError,
+    SessionLeaseLost,
+    WorkerItemLease,
+    WorkerSessionLease,
+)
 
 
 class FakeAsyncClient:
@@ -60,7 +67,7 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
             patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http),
             patch("cnc_telegram_worker.erp_client.asyncio.sleep", new=AsyncMock()) as sleep,
         ):
-            with self.assertRaises(httpx.HTTPStatusError):
+            with self.assertRaises(ErpResponseError):
                 await client.ingest_packet({"externalPacketKey": "packet-1"}, "idem-1")
 
         self.assertEqual(fake_http.post_calls, 1)
@@ -82,6 +89,73 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(fake_http.requests[0][0][0].endswith("/cnc-telegram/media-restores/claim"))
         self.assertTrue(fake_http.requests[1][0][0].endswith("/media-restores/request-1/complete"))
         self.assertEqual(fake_http.requests[1][1]["json"]["sizeBytes"], 123)
+
+    async def test_claim_and_heartbeat_fence_queue_requests(self) -> None:
+        fake_http = FakeAsyncClient([
+            response(200, {"leaseToken": "lease-1", "leaseGeneration": 4, "expiresAt": "2026-08-18T23:00:00Z"}),
+            response(200, {"leaseToken": "lease-1", "leaseGeneration": 4, "expiresAt": "2026-08-18T23:01:00Z"}),
+            response(200, {"capability": "cnc_telegram_media_restore_v1", "tasks": []}),
+        ])
+        client = ErpClient("http://backend/api/v1", BackendAuth(bearer_token="test-token"))
+        client.set_worker_identity("worker-1")
+
+        with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
+            lease = await client.claim_worker_session(
+                chat_id="-100", image_revision="image-abc", lease_ttl_seconds=90,
+            )
+            await client.heartbeat_worker_session()
+            await client.claim_media_restores()
+
+        self.assertEqual(lease, WorkerSessionLease("lease-1", 4, "2026-08-18T23:00:00Z"))
+        claim_headers = fake_http.requests[0][1]["headers"]
+        heartbeat_headers = fake_http.requests[1][1]["headers"]
+        queue_headers = fake_http.requests[2][1]["headers"]
+        self.assertNotIn("X-CNC-Telegram-Session-Token", claim_headers)
+        self.assertEqual(heartbeat_headers["X-CNC-Telegram-Session-Token"], "lease-1")
+        self.assertEqual(heartbeat_headers["X-CNC-Telegram-Session-Generation"], "4")
+        self.assertEqual(heartbeat_headers["X-CNC-Telegram-Chat-Id"], "-100")
+        self.assertEqual(queue_headers["X-CNC-Telegram-Worker-Instance"], "worker-1")
+
+    async def test_heartbeat_rejection_is_fatal_and_clears_lease(self) -> None:
+        fake_http = FakeAsyncClient([response(409, {"code": "CNC_TELEGRAM_SESSION_LEASE_LOST"})])
+        client = ErpClient("http://backend/api/v1", BackendAuth(bearer_token="test-token"))
+        client.set_worker_identity("worker-1")
+        client.set_session_lease(WorkerSessionLease("lease-1", 4))
+
+        with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
+            with self.assertRaises(SessionLeaseLost):
+                await client.heartbeat_worker_session()
+
+        self.assertIsNone(client.session_lease)
+
+    async def test_item_lease_is_sent_on_queue_completion_and_failure(self) -> None:
+        fake_http = FakeAsyncClient([
+            response(200, {"status": "completed"}),
+            response(200, {"status": "failed"}),
+        ])
+        client = ErpClient("http://backend/api/v1", BackendAuth(bearer_token="test-token"))
+        item_lease = WorkerItemLease("item-token", 7, "worker-instance")
+
+        with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
+            await client.complete_media_restore(
+                "request-1",
+                {"storageKey": "tg_100_10.jpg", "contentType": "image/jpeg", "sizeBytes": 123},
+                item_lease,
+            )
+            await client.fail_manual_svg_telegram_send("request-2", "bad media", item_lease)
+
+        self.assertEqual(fake_http.requests[0][1]["json"]["itemLeaseToken"], "item-token")
+        self.assertEqual(fake_http.requests[0][1]["json"]["itemLeaseGeneration"], 7)
+        self.assertEqual(fake_http.requests[0][1]["json"]["itemLeaseOwner"], "worker-instance")
+        self.assertEqual(fake_http.requests[1][1]["json"]["itemLeaseToken"], "item-token")
+
+    async def test_item_lease_stale_response_is_fatal(self) -> None:
+        fake_http = FakeAsyncClient([response(409, {"code": "CNC_TELEGRAM_ITEM_LEASE_STALE"})])
+        client = ErpClient("http://backend/api/v1", BackendAuth(bearer_token="test-token"))
+
+        with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
+            with self.assertRaises(SessionLeaseLost):
+                await client.fail_media_restore("request-1", "stale", WorkerItemLease("item-token", 7, "worker-instance"))
 
 
 if __name__ == "__main__":

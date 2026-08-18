@@ -20,7 +20,7 @@ Usage:
   repo_erp/ops/cnc-telegram-worker.sh up
   repo_erp/ops/cnc-telegram-worker.sh up-glm
   repo_erp/ops/cnc-telegram-worker.sh login
-  repo_erp/ops/cnc-telegram-worker.sh backfill [days]
+  repo_erp/ops/cnc-telegram-worker.sh backfill [days]  # disabled; use approved once directly
   repo_erp/ops/cnc-telegram-worker.sh svg-refresh-backfill [days] [--write] [--date YYYY-MM-DD]
   repo_erp/ops/cnc-telegram-worker.sh logs
   repo_erp/ops/cnc-telegram-worker.sh logs-glm
@@ -112,6 +112,48 @@ prepare_compose_file_args() {
   fi
 }
 
+assert_serve_command_source() {
+  local file
+  for file in "${COMPOSE_FILE_ARGS[@]}"; do
+    [[ "$file" == "-f" ]] && continue
+    if grep -Eq 'command:[[:space:]]*\["daemon"\]' "$file"; then
+      die "refusing worker deployment: Compose command daemon is forbidden after Phase A"
+    fi
+  done
+  grep -Eq 'command:[[:space:]]*\["serve"\]' "$VPS_FILE" \
+    || die "refusing worker deployment: Compose worker command must be serve"
+}
+
+ensure_worker_image_revision() {
+  local revision candidate
+  revision=""
+  for candidate in "$ROOT/repo_erp" "$SCRIPT_PATH/.."; do
+    if revision="$(git -C "$candidate" rev-parse --verify HEAD 2>/dev/null)" && [[ "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+      break
+    fi
+    revision=""
+  done
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+    revision="${CNC_TELEGRAM_WORKER_IMAGE_REVISION:-$(env_value CNC_TELEGRAM_WORKER_IMAGE_REVISION)}"
+  fi
+  [[ "$revision" =~ ^[0-9a-f]{7,64}$ ]] \
+    || die "refusing worker deployment: CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision"
+  export CNC_TELEGRAM_WORKER_IMAGE_REVISION="$revision"
+}
+
+assert_rendered_serve_command() {
+  local rendered
+  rendered="$(compose config --format json 2>/dev/null)" \
+    || die "refusing worker deployment: failed to render merged Compose config"
+  python3 -c 'import json, sys
+data = json.load(sys.stdin)
+command = data.get("services", {}).get("cnc-telegram-worker", {}).get("command")
+if command != ["serve"]:
+    raise SystemExit(f"rendered worker command must be exactly [serve], got {command!r}")
+' <<<"$rendered" \
+    || die "refusing worker deployment: rendered worker command must be exactly serve"
+}
+
 compose() {
   ( cd "$ROOT" && docker compose \
       --project-directory "$ROOT" \
@@ -159,6 +201,7 @@ PROJECT="${PROJECT:-$(env_value COMPOSE_PROJECT_NAME)}"
 PROJECT="${PROJECT:-erp_test}"
 prepare_compose_file_args
 load_profile
+assert_serve_command_source
 
 cmd="${1:-}"
 [[ -n "$cmd" ]] || { usage; exit 2; }
@@ -166,6 +209,8 @@ shift || true
 
 case "$cmd" in
   up)
+    ensure_worker_image_revision
+    assert_rendered_serve_command
     if ! profile_enabled cnc-telegram-glm; then
       stop_glm
     fi
@@ -177,6 +222,8 @@ case "$cmd" in
     fi
     ;;
   up-glm)
+    ensure_worker_image_revision
+    assert_rendered_serve_command
     preflight_worker_role || exit 0
     start_glm
     ;;
@@ -184,19 +231,10 @@ case "$cmd" in
     compose run --rm cnc-telegram-worker login
     ;;
   backfill)
-    preflight_worker_role || exit 0
-    days="${1:-7}"
-    compose run --rm cnc-telegram-worker once --days "$days"
+    die "backfill helper is disabled after Phase A; run `once --days 1..31 --scan-request-id <approved-id>` directly"
     ;;
   svg-refresh-backfill)
-    preflight_worker_role || exit 0
-    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
-      days="$1"
-      shift
-    else
-      days="7"
-    fi
-    compose run --rm cnc-telegram-worker svg-refresh-backfill --days "$days" "$@"
+    die "svg-refresh-backfill is disabled after Phase A; history reads require the Phase B persisted scan flow"
     ;;
   logs)
     compose logs -f cnc-telegram-worker

@@ -9,6 +9,8 @@ import type {
   WorkerAuditExportQueryDto,
   WorkerAuditListQueryDto,
 } from '../dto/cnc-telegram-worker-audit.dto';
+import type { CncTelegramWorkerSessionLeaseContext } from '../application/cnc-telegram-worker-session.types';
+import { assertCurrentWorkerSessionInTransaction } from './cnc-telegram-worker-session-fencing';
 
 type Writer = { id: string };
 const MAX_DETAILED_EXPORT_ROWS = 50_000;
@@ -113,8 +115,9 @@ export class PgCncTelegramWorkerAuditRepository {
     return Boolean(result.rows[0]?.ready);
   }
 
-  async writeTechnicalBatch(dto: TechnicalLogBatchDto, writer: Writer): Promise<{ accepted: number }> {
+  async writeTechnicalBatch(dto: TechnicalLogBatchDto, writer: Writer, sessionLease: CncTelegramWorkerSessionLeaseContext): Promise<{ accepted: number }> {
     return this.database.transaction(async (client) => {
+      await assertCurrentWorkerSessionInTransaction(client, sessionLease);
       let accepted = 0;
       for (const line of dto.lines) {
         const result = await client.query<{ log_id: string; inserted: boolean }>(`
@@ -198,8 +201,9 @@ export class PgCncTelegramWorkerAuditRepository {
     return rows.rows;
   }
 
-  async writeBatch(dto: WorkerAuditBatchDto, writer: Writer): Promise<{ accepted: number }> {
+  async writeBatch(dto: WorkerAuditBatchDto, writer: Writer, sessionLease: CncTelegramWorkerSessionLeaseContext): Promise<{ accepted: number }> {
     return this.database.transaction(async (client) => {
+      await assertCurrentWorkerSessionInTransaction(client, sessionLease);
       await this.upsertScan(client, dto, writer);
       const logIds = new Map<string, string>();
       for (const message of dto.messages) {

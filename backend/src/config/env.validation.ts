@@ -190,6 +190,10 @@ export const envSchema = z
     BACKEND_DEADLINE_NOTIFICATIONS_ENABLED: booleanFromEnv.default(false),
     BACKEND_ENABLE_CUT_JOBS: booleanFromEnv.default(false),
     BACKEND_ENABLE_CNC_TELEGRAM: booleanFromEnv.default(false),
+    // Phase A safety gate: legacy background Telegram ingest is fail-closed.
+    // The break-glass path remains unavailable until Phase B persists an
+    // approved bounded scan artifact.
+    CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED: booleanFromEnv.default(false),
     CNC_TELEGRAM_MEDIA_DIR: z.string().trim().min(1).default('/data/cnc-telegram-media'),
     CNC_TELEGRAM_WORKER_USERNAME: optionalTrimmedStringFromEnv,
     CNC_TELEGRAM_ALLOWED_CHAT_IDS: optionalTrimmedStringFromEnv,

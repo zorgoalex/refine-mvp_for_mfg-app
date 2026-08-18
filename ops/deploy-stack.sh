@@ -105,6 +105,30 @@ docker_compose() {
   docker compose --env-file "$ENV_FILE" "${COMPOSE_FILE_ARGS[@]}" "$@"
 }
 
+ensure_worker_image_revision() {
+  local revision
+  revision="$(git -C "$REPO_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
+  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
+    revision="${CNC_TELEGRAM_WORKER_IMAGE_REVISION:-$(env_file_value CNC_TELEGRAM_WORKER_IMAGE_REVISION)}"
+  fi
+  [[ "$revision" =~ ^[0-9a-f]{7,64}$ ]] \
+    || fail "CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision"
+  export CNC_TELEGRAM_WORKER_IMAGE_REVISION="$revision"
+}
+
+assert_rendered_worker_serve_command() {
+  local rendered
+  rendered="$(docker_compose config --format json 2>/dev/null)" \
+    || fail "failed to render merged Compose config"
+  python3 -c 'import json, sys
+data = json.load(sys.stdin)
+command = data.get("services", {}).get("cnc-telegram-worker", {}).get("command")
+if command != ["serve"]:
+    raise SystemExit(f"rendered worker command must be exactly [serve], got {command!r}")
+' <<<"$rendered" \
+    || fail "rendered CNC Telegram worker command must be exactly serve"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-dir) PROJECT_DIR="$2"; shift 2 ;;
@@ -134,6 +158,10 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
   log "Created $COMPOSE_FILE from template"
 fi
 prepare_compose_file_args
+if compose_profile_enabled cnc-telegram; then
+  ensure_worker_image_revision
+  assert_rendered_worker_serve_command
+fi
 
 mkdir -p \
   "$PROJECT_DIR/config/postgres" \

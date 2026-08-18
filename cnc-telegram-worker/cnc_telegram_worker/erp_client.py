@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,26 @@ class BackendAuth:
     password: str = ""
 
 
+@dataclass(frozen=True)
+class WorkerSessionLease:
+    token: str
+    generation: int
+    expires_at: str | None = None
+
+
+class SessionLeaseLost(RuntimeError):
+    """Raised when the backend fences this worker's global Telegram session."""
+
+
+@dataclass(frozen=True)
+class WorkerItemLease:
+    """Opaque lease fencing one claimed queue item."""
+
+    token: str
+    generation: int
+    owner: str
+
+
 class ErpResponseError(RuntimeError):
     def __init__(self, response: httpx.Response, action: str) -> None:
         self.response = response
@@ -38,12 +59,77 @@ class ErpClient:
         self.timeout_seconds = timeout_seconds
         self._access_token = ""
         self._access_token_expires_at = datetime.min.replace(tzinfo=timezone.utc)
+        self._session_lease: WorkerSessionLease | None = None
+        self.worker_instance_id = ""
+        self.session_chat_id = ""
+        self.approved_scan_request_id = ""
+
+    def set_worker_identity(self, worker_instance_id: str) -> None:
+        self.worker_instance_id = worker_instance_id.strip()
+
+    @property
+    def session_lease(self) -> WorkerSessionLease | None:
+        return self._session_lease
+
+    def set_session_lease(self, lease: WorkerSessionLease | None) -> None:
+        self._session_lease = lease
+        if lease is None:
+            self.session_chat_id = ""
+
+    def set_approved_scan_request(self, request_id: str | None) -> None:
+        self.approved_scan_request_id = (request_id or "").strip()
+
+    async def claim_worker_session(
+        self,
+        *,
+        chat_id: str,
+        image_revision: str,
+        lease_ttl_seconds: int,
+    ) -> WorkerSessionLease:
+        if not self.worker_instance_id:
+            raise RuntimeError("worker instance id is missing")
+        data = await self._authorized_post(
+            "/cnc-telegram/worker-session/claim",
+            payload={
+                "chatId": chat_id,
+                "workerInstanceId": self.worker_instance_id,
+                "imageRevision": image_revision,
+            },
+            session_bound=False,
+        )
+        lease = parse_session_lease(data)
+        self._session_lease = lease
+        self.session_chat_id = chat_id
+        return lease
+
+    async def heartbeat_worker_session(self) -> WorkerSessionLease:
+        lease = self._session_lease
+        if lease is None:
+            raise SessionLeaseLost("worker session lease is not claimed")
+        try:
+            data = await self._authorized_post(
+                "/cnc-telegram/worker-session/heartbeat",
+                payload={"workerInstanceId": self.worker_instance_id},
+                session_bound=True,
+            )
+        except ErpResponseError as exc:
+            if exc.response.status_code in {401, 403, 409, 410, 423}:
+                self._session_lease = None
+                raise SessionLeaseLost("worker session lease heartbeat was rejected") from exc
+            raise
+        updated = parse_session_lease(data)
+        if updated.generation != lease.generation or updated.token != lease.token:
+            self._session_lease = None
+            raise SessionLeaseLost("worker session lease generation changed")
+        self._session_lease = updated
+        return updated
 
     async def ingest_packet(self, packet: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
         headers = {
             "Idempotency-Key": idempotency_key,
             "Authorization": await self._authorization_header(),
         }
+        headers.update(self._session_headers())
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             for attempt in range(INGEST_MAX_ATTEMPTS):
                 response = await client.post(f"{self.api_url}/cnc-telegram/ingest", json=packet, headers=headers)
@@ -51,6 +137,7 @@ class ErpClient:
                     self._access_token = ""
                     headers["Authorization"] = await self._authorization_header(force=True)
                     response = await client.post(f"{self.api_url}/cnc-telegram/ingest", json=packet, headers=headers)
+                self._raise_if_session_lease_error(response, "ERP ingest")
                 if response.status_code < 500 or attempt + 1 >= INGEST_MAX_ATTEMPTS:
                     if response.is_error:
                         raise ErpResponseError(response, "ERP ingest")
@@ -68,14 +155,15 @@ class ErpClient:
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.get(
                 f"{self.api_url}/cnc-telegram/worker-logs/capabilities",
-                headers={"Authorization": await self._authorization_header()},
+                headers={"Authorization": await self._authorization_header(), **self._session_headers()},
             )
             if response.status_code == 401 and not self.auth.bearer_token:
                 self._access_token = ""
                 response = await client.get(
                     f"{self.api_url}/cnc-telegram/worker-logs/capabilities",
-                    headers={"Authorization": await self._authorization_header(force=True)},
+                    headers={"Authorization": await self._authorization_header(force=True), **self._session_headers()},
                 )
+            self._raise_if_session_lease_error(response, "ERP audit capabilities")
             if response.is_error:
                 raise ErpResponseError(response, "ERP audit capabilities")
             data = response.json()
@@ -88,15 +176,16 @@ class ErpClient:
             response = await client.post(
                 f"{self.api_url}/cnc-telegram/worker-logs/batch",
                 json=payload,
-                headers={"Authorization": await self._authorization_header()},
+                headers={"Authorization": await self._authorization_header(), **self._session_headers()},
             )
             if response.status_code == 401 and not self.auth.bearer_token:
                 self._access_token = ""
                 response = await client.post(
                     f"{self.api_url}/cnc-telegram/worker-logs/batch",
                     json=payload,
-                    headers={"Authorization": await self._authorization_header(force=True)},
+                    headers={"Authorization": await self._authorization_header(force=True), **self._session_headers()},
                 )
+            self._raise_if_session_lease_error(response, "ERP audit batch")
             if response.is_error:
                 raise ErpResponseError(response, "ERP audit batch")
             return response.json()
@@ -107,52 +196,101 @@ class ErpClient:
     async def claim_media_restores(self) -> dict[str, Any]:
         return await self._authorized_post("/cnc-telegram/media-restores/claim")
 
-    async def complete_media_restore(self, request_id: str, media: dict[str, Any]) -> dict[str, Any]:
+    async def complete_media_restore(
+        self,
+        request_id: str,
+        media: dict[str, Any],
+        item_lease: WorkerItemLease | None = None,
+    ) -> dict[str, Any]:
         if not request_id:
             raise RuntimeError("media restore request id is missing")
         return await self._authorized_post(
             f"/cnc-telegram/media-restores/{request_id}/complete",
-            payload=media,
+            payload=with_item_lease(media, item_lease),
         )
 
-    async def fail_media_restore(self, request_id: str, error: str) -> dict[str, Any]:
+    async def fail_media_restore(
+        self,
+        request_id: str,
+        error: str,
+        item_lease: WorkerItemLease | None = None,
+    ) -> dict[str, Any]:
         if not request_id:
             raise RuntimeError("media restore request id is missing")
         return await self._authorized_post(
             f"/cnc-telegram/media-restores/{request_id}/fail",
-            payload={"error": error[:500]},
+            payload=with_item_lease({"error": error[:500]}, item_lease),
         )
 
     async def claim_manual_svg_telegram_sends(self) -> dict[str, Any]:
         return await self._authorized_post("/cnc-telegram/manual-svg-telegram-sends/claim")
 
-    async def complete_manual_svg_telegram_send(self, request_id: str, media: dict[str, Any]) -> dict[str, Any]:
+    async def complete_manual_svg_telegram_send(
+        self,
+        request_id: str,
+        media: dict[str, Any],
+        item_lease: WorkerItemLease | None = None,
+    ) -> dict[str, Any]:
         if not request_id:
             raise RuntimeError("manual SVG Telegram send request id is missing")
         return await self._authorized_post(
             f"/cnc-telegram/manual-svg-telegram-sends/{request_id}/complete",
-            payload=media,
+            payload=with_item_lease(media, item_lease),
         )
 
-    async def fail_manual_svg_telegram_send(self, request_id: str, error: str) -> dict[str, Any]:
+    async def fail_manual_svg_telegram_send(
+        self,
+        request_id: str,
+        error: str,
+        item_lease: WorkerItemLease | None = None,
+    ) -> dict[str, Any]:
         if not request_id:
             raise RuntimeError("manual SVG Telegram send request id is missing")
         return await self._authorized_post(
             f"/cnc-telegram/manual-svg-telegram-sends/{request_id}/fail",
-            payload={"error": error[:500]},
+            payload=with_item_lease({"error": error[:500]}, item_lease),
         )
 
-    async def _authorized_post(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _authorized_post(
+        self,
+        path: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        session_bound: bool = True,
+    ) -> dict[str, Any]:
         headers = {"Authorization": await self._authorization_header()}
+        if session_bound:
+            headers.update(self._session_headers())
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.post(f"{self.api_url}{path}", json=payload, headers=headers)
             if response.status_code == 401 and not self.auth.bearer_token:
                 self._access_token = ""
                 headers["Authorization"] = await self._authorization_header(force=True)
                 response = await client.post(f"{self.api_url}{path}", json=payload, headers=headers)
+            if session_bound:
+                self._raise_if_session_lease_error(response, f"ERP POST {path}")
             if response.is_error:
                 raise ErpResponseError(response, f"ERP POST {path}")
             return response.json()
+
+    def _raise_if_session_lease_error(self, response: httpx.Response, action: str) -> None:
+        if response.status_code in {401, 403, 409, 410, 423} and response_is_session_lease_error(response):
+            self._session_lease = None
+            raise SessionLeaseLost(f"{action} rejected the worker session lease")
+
+    def _session_headers(self) -> dict[str, str]:
+        lease = self._session_lease
+        headers: dict[str, str] = {}
+        if self.worker_instance_id:
+            headers["X-CNC-Telegram-Worker-Instance"] = self.worker_instance_id
+        if self.session_chat_id:
+            headers["X-CNC-Telegram-Chat-Id"] = self.session_chat_id
+        if self.approved_scan_request_id:
+            headers["X-CNC-Telegram-Scan-Request-Id"] = self.approved_scan_request_id
+        if lease is not None:
+            headers["X-CNC-Telegram-Session-Token"] = lease.token
+            headers["X-CNC-Telegram-Session-Generation"] = str(lease.generation)
+        return headers
 
     async def _authorization_header(self, force: bool = False) -> str:
         if self.auth.bearer_token:
@@ -184,6 +322,74 @@ def parse_expires_at(value: Any) -> datetime:
         except ValueError:
             pass
     return datetime.now(timezone.utc) + timedelta(minutes=10)
+
+
+def parse_session_lease(value: Any) -> WorkerSessionLease:
+    if not isinstance(value, dict):
+        raise RuntimeError("backend session lease response is invalid")
+    token = value.get("leaseToken") or value.get("token")
+    generation = value.get("leaseGeneration") or value.get("generation")
+    if not isinstance(token, str) or not token:
+        raise RuntimeError("backend session lease response has no lease token")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation <= 0:
+        raise RuntimeError("backend session lease response has invalid generation")
+    expires_at = value.get("expiresAt")
+    return WorkerSessionLease(token=token, generation=generation, expires_at=expires_at if isinstance(expires_at, str) else None)
+
+
+def parse_item_lease(value: Any) -> WorkerItemLease:
+    if not isinstance(value, dict):
+        raise RuntimeError("backend queue item lease is missing")
+    nested = value.get("itemLease")
+    source = nested if isinstance(nested, dict) else value
+    token = source.get("itemLeaseToken") or source.get("leaseToken") or source.get("token")
+    generation = source.get("itemLeaseGeneration") or source.get("leaseGeneration") or source.get("generation")
+    owner = source.get("itemLeaseOwner") or source.get("leaseOwner") or source.get("owner") or source.get("workerInstanceId")
+    if not isinstance(token, str) or not token.strip():
+        raise RuntimeError("backend queue item lease has no token")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation <= 0:
+        raise RuntimeError("backend queue item lease has invalid generation")
+    if not isinstance(owner, str) or not owner.strip():
+        raise RuntimeError("backend queue item lease has no owner")
+    return WorkerItemLease(token=token.strip(), generation=generation, owner=owner.strip())
+
+
+def with_item_lease(payload: dict[str, Any], item_lease: WorkerItemLease | None) -> dict[str, Any]:
+    if item_lease is None:
+        return payload
+    return {
+        **payload,
+        "itemLeaseToken": item_lease.token,
+        "itemLeaseGeneration": item_lease.generation,
+        "itemLeaseOwner": item_lease.owner,
+    }
+
+
+def response_is_session_lease_error(response: httpx.Response) -> bool:
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    candidates = [payload.get("code"), payload.get("errorCode")]
+    nested = payload.get("error")
+    if isinstance(nested, dict):
+        candidates.extend([nested.get("code"), nested.get("errorCode")])
+    return any(
+        isinstance(candidate, str)
+        and candidate in {
+            "CNC_TELEGRAM_SESSION_LEASE_LOST",
+            "CNC_TELEGRAM_SESSION_LEASE_REQUIRED",
+            "CNC_TELEGRAM_SESSION_LEASE_STALE",
+            "CNC_TELEGRAM_ITEM_LEASE_LOST",
+            "CNC_TELEGRAM_ITEM_LEASE_REQUIRED",
+            "CNC_TELEGRAM_ITEM_LEASE_STALE",
+            "CNC_TELEGRAM_QUEUE_LEASE_STALE",
+            "SESSION_LEASE_LOST",
+        }
+        for candidate in candidates
+    )
 
 
 def response_error_message(response: httpx.Response, action: str) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 import json
 import sys
@@ -404,6 +405,108 @@ class WorkerDayHistoryTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([message.id for message in messages], [101])
         self.assertEqual(observed, [(101, 1)])
+
+
+class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
+    async def test_serve_never_scans_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp))
+            worker.config.enabled = True
+            worker.config.stack_env = "test"
+            worker.config.worker_role = "reader"
+            worker.config.telegram_session_path = Path(temp) / "session"
+            worker.config.telegram_api_id = 1
+            worker.config.telegram_api_hash = "hash"
+            worker.config.telegram_chat = "-100"
+            worker.config.telegram_allowed_chat_ids = ("-100",)
+            worker.config.erp_bearer_token = "token"
+            worker.config.erp_worker_login = ""
+            worker.config.erp_worker_password = ""
+            worker.config.audit_spool_path = Path(temp) / "audit.sqlite3"
+            worker.config.audit_allow_unsafe_path = True
+            worker.config.session_lease_ttl_seconds = 90
+            worker.config.session_lease_heartbeat_seconds = 30
+            worker.config.media_restore_poll_interval_seconds = 1
+            worker.config.manual_svg_send_poll_interval_seconds = 1
+            worker.config.temp_ttl_hours = 1
+            worker.config.attachment_ttl_hours = 1
+            worker.config.worker_image_revision = "test-image"
+            worker.config.worker_instance_id = "test-worker"
+            worker.config.can_send_manual_svg_uploads = True
+            worker.config.require_worker_enabled = lambda: None
+            worker.config.require_telegram = lambda: None
+            worker.config.require_backend_auth = lambda: None
+            worker.config.require_session_lease_timing = lambda: None
+            worker.erp.set_session_lease = lambda _lease: None
+            worker.erp.audit_capabilities = AsyncMock(return_value={})
+
+            class ServeClient:
+                async def connect(self) -> None:
+                    return None
+
+                async def is_user_authorized(self) -> bool:
+                    return True
+
+                async def get_entity(self, _chat: object) -> object:
+                    return object()
+
+                async def get_me(self) -> object:
+                    return types.SimpleNamespace(id=42)
+
+                async def disconnect(self) -> None:
+                    return None
+
+            async def stop_after_manual_poll(
+                _client: object,
+                _entity: object,
+                _chat_id: str,
+                stop_event: asyncio.Event,
+                **_kwargs: object,
+            ) -> None:
+                stop_event.set()
+
+            worker._claim_session_lease = AsyncMock()
+            worker._heartbeat_session = AsyncMock()
+            worker.process_media_restore_requests = AsyncMock()
+            worker.process_manual_svg_telegram_send_requests = AsyncMock()
+            worker.poll_manual_svg_telegram_send_requests = stop_after_manual_poll
+            worker.poll_media_restore_requests = AsyncMock()
+            worker.scan_workday = AsyncMock()
+
+            reconcile = AsyncMock()
+            with (
+                patch("cnc_telegram_worker.worker.TelegramClient", return_value=ServeClient()),
+                patch("cnc_telegram_worker.worker.assert_allowed_chat"),
+                patch("cnc_telegram_worker.worker.backfill_sheet_previews"),
+                patch("cnc_telegram_worker.worker.flush_audit_spool", new=AsyncMock()),
+                patch("cnc_telegram_worker.worker.reconcile_pending_processing_attempts", new=reconcile),
+            ):
+                await worker.run_serve()
+
+            worker.scan_workday.assert_not_awaited()
+            reconcile.assert_not_awaited()
+
+    async def test_heartbeat_failure_stops_serve_fail_closed(self) -> None:
+        worker = object.__new__(CncTelegramWorker)
+        worker.config = types.SimpleNamespace(session_lease_heartbeat_seconds=0.001)
+        worker.erp = types.SimpleNamespace(
+            heartbeat_worker_session=AsyncMock(side_effect=RuntimeError("backend unavailable")),
+        )
+        stop_event = asyncio.Event()
+        fatal_event = asyncio.Event()
+
+        await asyncio.wait_for(
+            worker._heartbeat_session(stop_event, fatal_event),
+            timeout=1,
+        )
+
+        self.assertTrue(stop_event.is_set())
+        self.assertTrue(fatal_event.is_set())
+
+    async def test_daemon_is_fail_closed(self) -> None:
+        worker = object.__new__(CncTelegramWorker)
+        with self.assertRaisesRegex(RuntimeError, "daemon is deprecated"):
+            await worker.run_daemon()
 
 
 class WorkerCuttingSequenceIndexTest(unittest.IsolatedAsyncioTestCase):

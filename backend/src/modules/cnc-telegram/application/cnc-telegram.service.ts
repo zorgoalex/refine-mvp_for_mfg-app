@@ -24,6 +24,7 @@ export interface CncTelegramServicePorts {
   packets: CncTelegramRepositoryPort;
   deniedAudit?: CncTelegramDeniedAuditPort;
   permissions?: PermissionsService;
+  backgroundIngestEnabled?: boolean;
 }
 
 export class CncTelegramService {
@@ -68,7 +69,19 @@ export class CncTelegramService {
         requiredPermissions: ['cut.manage'],
       });
     }
-    return this.ports.packets.ingest(command);
+    // Phase A deliberately has no approved bounded scan artifact. Keep this
+    // legacy endpoint fail-closed even if an operator enables the env switch;
+    // Phase B will add the persisted approval and explicit import path.
+    await this.recordBackgroundIngestDenied(command);
+    throw new ApiError(
+      503,
+      this.ports.backgroundIngestEnabled
+        ? 'CNC_TELEGRAM_BACKGROUND_INGEST_APPROVAL_REQUIRED'
+        : 'CNC_TELEGRAM_BACKGROUND_INGEST_DISABLED',
+      this.ports.backgroundIngestEnabled
+        ? 'Legacy CNC Telegram ingest requires an approved bounded scan request'
+        : 'Legacy CNC Telegram background ingest is disabled',
+    );
   }
 
   async manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
@@ -131,6 +144,23 @@ export class CncTelegramService {
       });
     } catch {
       // Deny response must not depend on the audit sink.
+    }
+  }
+
+  private async recordBackgroundIngestDenied(command: IngestCncTelegramPacketCommand): Promise<void> {
+    try {
+      await this.ports.deniedAudit?.recordIngestDenied({
+        currentUser: command.currentUser,
+        event: 'cnc.telegram_packet.ingest_denied',
+        requestId: command.requestId,
+        externalPacketKey: command.dto.externalPacketKey,
+        reason: this.ports.backgroundIngestEnabled
+          ? 'BACKGROUND_INGEST_APPROVAL_REQUIRED'
+          : 'BACKGROUND_INGEST_DISABLED',
+        requiredPermissions: ['cut.manage'],
+      });
+    } catch {
+      // Fail-closed response must not depend on the audit sink.
     }
   }
 

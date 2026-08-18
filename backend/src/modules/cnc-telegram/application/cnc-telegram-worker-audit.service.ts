@@ -5,6 +5,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { PermissionsService } from '../../../permissions/permissions.service';
 import { PgCncTelegramWorkerAuditRepository } from '../adapters/pg-cnc-telegram-worker-audit-repository';
 import type { CncTelegramDeniedAuditPort } from './cnc-telegram.types';
+import type { CncTelegramWorkerSessionLeaseContext } from './cnc-telegram-worker-session.types';
+import type { CncTelegramWorkerSessionService } from './cnc-telegram-worker-session.service';
 import {
   parseTechnicalLogBatch,
   parseWorkerAuditBatch,
@@ -46,6 +48,7 @@ export class CncTelegramWorkerAuditService {
     private readonly repository: PgCncTelegramWorkerAuditRepository,
     private readonly config: ConfigService<BackendEnv, true>,
     private readonly deniedAudit?: CncTelegramDeniedAuditPort,
+    private readonly session?: CncTelegramWorkerSessionService,
   ) {}
 
   async capabilities(currentUser: CurrentUser, requestId?: string): Promise<{ capability: string }> {
@@ -56,26 +59,29 @@ export class CncTelegramWorkerAuditService {
     return { capability: 'cnc_telegram_worker_audit_v1' };
   }
 
-  async writeBatch(currentUser: CurrentUser, dto: WorkerAuditBatchDto, requestId?: string): Promise<{ accepted: number }> {
+  async writeBatch(currentUser: CurrentUser, dto: WorkerAuditBatchDto, requestId?: string, lease?: CncTelegramWorkerSessionLeaseContext): Promise<{ accepted: number }> {
     await this.assertWriter(currentUser, requestId);
-    await this.assertChats(currentUser, dto, requestId);
-    return this.writeAuthorizedBatch(currentUser, dto);
+    const currentLease = await this.normalizeAndAssertSession(currentUser, lease);
+    await this.assertChats(currentUser, dto, requestId, currentLease);
+    return this.writeAuthorizedBatch(currentUser, dto, currentLease);
   }
 
-  async writeRawBatch(currentUser: CurrentUser, raw: unknown, requestId?: string): Promise<{ accepted: number }> {
+  async writeRawBatch(currentUser: CurrentUser, raw: unknown, requestId?: string, lease?: CncTelegramWorkerSessionLeaseContext): Promise<{ accepted: number }> {
     await this.assertWriter(currentUser, requestId);
-    await this.assertRawChats(currentUser, raw, requestId);
+    const currentLease = await this.normalizeAndAssertSession(currentUser, lease);
+    await this.assertRawChats(currentUser, raw, requestId, currentLease);
     const dto = parseWorkerAuditBatch(raw);
-    await this.assertChats(currentUser, dto, requestId);
-    return this.writeAuthorizedBatch(currentUser, dto);
+    await this.assertChats(currentUser, dto, requestId, currentLease);
+    return this.writeAuthorizedBatch(currentUser, dto, currentLease);
   }
 
-  private async writeAuthorizedBatch(currentUser: CurrentUser, dto: WorkerAuditBatchDto): Promise<{ accepted: number }> {
+  private async writeAuthorizedBatch(currentUser: CurrentUser, dto: WorkerAuditBatchDto, lease?: CncTelegramWorkerSessionLeaseContext): Promise<{ accepted: number }> {
     this.assertBatchReferences(dto);
     if (!await this.repository.capabilities()) {
       throw new ApiError(503, 'CNC_TELEGRAM_WORKER_AUDIT_UNAVAILABLE', 'Схема журнала Telegram-бота не готова');
     }
-    return this.repository.writeBatch(sanitizeWorkerAuditBatch(dto), { id: currentUser.id });
+    if (!lease) throw new ApiError(401, 'CNC_TELEGRAM_SESSION_LEASE_REQUIRED', 'Требуется текущая сессия Telegram worker');
+    return this.repository.writeBatch(sanitizeWorkerAuditBatch(dto), { id: currentUser.id }, lease);
   }
 
   list(currentUser: CurrentUser, query: WorkerAuditListQueryDto): Promise<Record<string, unknown>> {
@@ -142,13 +148,15 @@ export class CncTelegramWorkerAuditService {
     };
   }
 
-  async writeTechnicalRawBatch(currentUser: CurrentUser, raw: unknown, requestId?: string): Promise<{ accepted: number }> {
+  async writeTechnicalRawBatch(currentUser: CurrentUser, raw: unknown, requestId?: string, lease?: CncTelegramWorkerSessionLeaseContext): Promise<{ accepted: number }> {
     await this.assertWriter(currentUser, requestId);
+    const currentLease = await this.normalizeAndAssertSession(currentUser, lease);
     const dto = sanitizeTechnicalLogBatch(parseTechnicalLogBatch(raw));
     if (!await this.repository.technicalCapabilities()) {
       throw new ApiError(503, 'CNC_TELEGRAM_TECHNICAL_LOGS_UNAVAILABLE', 'Схема технических логов worker не готова');
     }
-    return this.repository.writeTechnicalBatch(dto, { id: currentUser.id });
+    if (!currentLease) throw new ApiError(401, 'CNC_TELEGRAM_SESSION_LEASE_REQUIRED', 'Требуется текущая сессия Telegram worker');
+    return this.repository.writeTechnicalBatch(dto, { id: currentUser.id }, currentLease);
   }
 
   listTechnical(currentUser: CurrentUser, query: TechnicalLogQueryDto): Promise<Record<string, unknown>> {
@@ -199,18 +207,33 @@ export class CncTelegramWorkerAuditService {
     }
   }
 
-  private async assertChats(currentUser: CurrentUser, dto: WorkerAuditBatchDto, requestId?: string): Promise<void> {
+  private async normalizeAndAssertSession(
+    currentUser: CurrentUser,
+    lease: CncTelegramWorkerSessionLeaseContext | undefined,
+  ): Promise<CncTelegramWorkerSessionLeaseContext | undefined> {
+    // The module injects a verifier for every HTTP instance. The optional
+    // dependency preserves the small application-service unit-test contract.
+    if (!this.session) return lease;
+    if (!lease) {
+      throw new ApiError(401, 'CNC_TELEGRAM_SESSION_LEASE_REQUIRED', 'Требуется текущая сессия Telegram worker');
+    }
+    const currentLease = { ...lease, sourceChatId: this.session.resolveChatId(lease.sourceChatId) };
+    await this.session.assertCurrent(currentUser, currentLease);
+    return currentLease;
+  }
+
+  private async assertChats(currentUser: CurrentUser, dto: WorkerAuditBatchDto, requestId?: string, lease?: CncTelegramWorkerSessionLeaseContext): Promise<void> {
     const allowed = this.allowedChats();
     const supplied = new Set([dto.scan.sourceChatId, ...dto.messages.map((message) => message.sourceChatId), ...dto.observations.map((observation) => observation.sourceChatId)]);
     for (const chatId of supplied) {
-      if (!allowed.has(chatId)) {
+      if (!allowed.has(chatId) || (lease && chatId !== this.resolvedLeaseChat(lease))) {
         await this.recordDenied(currentUser, requestId, 'CNC_TELEGRAM_CHAT_DENIED');
         throw new ApiError(403, 'CNC_TELEGRAM_CHAT_DENIED', 'Telegram-чат не разрешён политикой worker-аудита');
       }
     }
   }
 
-  private async assertRawChats(currentUser: CurrentUser, raw: unknown, requestId?: string): Promise<void> {
+  private async assertRawChats(currentUser: CurrentUser, raw: unknown, requestId?: string, lease?: CncTelegramWorkerSessionLeaseContext): Promise<void> {
     if (!isRecord(raw)) return;
     const supplied = new Set<string>();
     const scan = raw.scan;
@@ -223,10 +246,14 @@ export class CncTelegramWorkerAuditService {
       }
     }
     const allowed = this.allowedChats();
-    if ([...supplied].some((chatId) => !allowed.has(chatId))) {
+    if ([...supplied].some((chatId) => !allowed.has(chatId) || (lease && chatId !== this.resolvedLeaseChat(lease)))) {
       await this.recordDenied(currentUser, requestId, 'CNC_TELEGRAM_CHAT_DENIED');
       throw new ApiError(403, 'CNC_TELEGRAM_CHAT_DENIED', 'Telegram-чат не разрешён политикой worker-аудита');
     }
+  }
+
+  private resolvedLeaseChat(lease: CncTelegramWorkerSessionLeaseContext): string {
+    return this.session?.resolveChatId(lease.sourceChatId) ?? lease.sourceChatId;
   }
 
   private assertBatchReferences(dto: WorkerAuditBatchDto): void {

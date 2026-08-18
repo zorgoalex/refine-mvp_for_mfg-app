@@ -12,6 +12,7 @@ class DockerfileTest(unittest.TestCase):
         self.assertIn("chown -R worker:worker /app/cnc_telegram_worker", source)
         self.assertIn("find /app/cnc_telegram_worker -type d -exec chmod 0755", source)
         self.assertIn("find /app/cnc_telegram_worker -type f -exec chmod 0644", source)
+        self.assertIn('CMD ["serve"]', source)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .erp_client import SessionLeaseLost
+
 
 REDACTION_VERSION = "cnc-technical-redaction-v1"
 MAX_LINE_CHARS = 8192
@@ -289,6 +291,7 @@ async def deliver_technical_logs(
     stop_event: asyncio.Event,
     interval_seconds: int = 5,
     heartbeat_seconds: int = 30,
+    fatal_event: asyncio.Event | None = None,
 ) -> None:
     last_heartbeat = 0.0
     loop = asyncio.get_running_loop()
@@ -299,6 +302,11 @@ async def deliver_technical_logs(
             last_heartbeat = now
         try:
             await flush_technical_logs_once(spool, sender)
+        except SessionLeaseLost:
+            if fatal_event is not None:
+                fatal_event.set()
+            stop_event.set()
+            raise
         except Exception as exc:
             spool.internal_error(str(exc))
         try:

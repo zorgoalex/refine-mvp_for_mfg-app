@@ -21,6 +21,7 @@ function runCncWorker(
   allowNonProdWriter = 'false',
   args = ['up'],
   hasGlmContainer = false,
+  renderedCommand = 'serve',
 ) {
   const tempDir = mkdtempSync(resolve(tmpdir(), 'cnc-worker-test-'));
   const fakeBinDir = resolve(tempDir, 'bin');
@@ -35,6 +36,10 @@ function runCncWorker(
   ].join('\n'));
   writeFileSync(fakeDocker, [
     '#!/usr/bin/env bash',
+    'if [[ " $* " == *" config --format json "* ]]; then',
+    '  printf \'{"services":{"cnc-telegram-worker":{"command":["%s"]}}}\n\' "${FAKE_WORKER_COMMAND:-serve}"',
+    '  exit 0',
+    'fi',
     'if [[ " $* " == *" ps -aq glm-ocr-model-init "* ]]; then',
     '  [[ "${FAKE_GLM_CONTAINER:-false}" == "true" ]] && printf \'legacy-glm-container\\n\'',
     '  exit 0',
@@ -50,6 +55,7 @@ function runCncWorker(
         ENV_FILE: envFile,
         VPS_FILE: resolve(__dirname, 'templates/docker-compose.vps.yml'),
         FAKE_GLM_CONTAINER: String(hasGlmContainer),
+        FAKE_WORKER_COMMAND: renderedCommand,
         PATH: `${fakeBinDir}${delimiter}${process.env.PATH ?? ''}`,
       },
     });
@@ -181,6 +187,11 @@ describe('up-all.sh provision', () => {
       .toContain('profiles: !override ["cnc-telegram-glm"]');
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS=\(-f "\$COMPOSE_FILE"\)/);
     expect(deploySource).toMatch(/docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/);
+    expect(deploySource).toMatch(/git -C "\$REPO_DIR" rev-parse --verify HEAD/);
+    expect(deploySource).toMatch(/export CNC_TELEGRAM_WORKER_IMAGE_REVISION="\$revision"/);
+    expect(deploySource).toMatch(/docker_compose config --format json/);
+    expect(deploySource).toContain('command != ["serve"]');
+    expect(deploySource).toMatch(/ensure_worker_image_revision[\s\S]*assert_rendered_worker_serve_command/);
   });
 
   it('requires an explicit stack env and blocks non-prod Telegram writers', () => {
@@ -193,11 +204,12 @@ describe('up-all.sh provision', () => {
     expect(cncWorkerSource).toMatch(/refusing Telegram writer on ERP_STACK_ENV=\$stack_env/);
   });
 
-  it('runs Telegram reader backfill without chat-writer override', () => {
+  it('fails closed instead of exposing unrestricted Telegram backfill helper', () => {
     const result = runCncWorker('reader', 'test', 'false', ['backfill', '3']);
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(/cnc-telegram-worker once --days 3/);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/backfill helper is disabled after Phase A/);
+    expect(result.stdout).not.toMatch(/once --days/);
   });
 
   it('keeps disabled Telegram worker stopped without invoking Compose', () => {
@@ -232,6 +244,20 @@ describe('up-all.sh provision', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toMatch(/cnc-telegram-worker/);
+  });
+
+  it('refuses a daemon worker command in the deploy helper source', () => {
+    expect(cncWorkerSource).toContain('command daemon is forbidden after Phase A');
+    expect(composeSource).toContain('command: ["serve"]');
+    expect(composeSource).not.toContain('command: ["daemon"]');
+  });
+
+  it('refuses a daemon worker command in rendered Compose config', () => {
+    const result = runCncWorker('reader', 'test', 'false', ['up'], false, 'daemon');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/rendered worker command must be exactly serve/);
+    expect(result.stdout).not.toMatch(/up -d --build cnc-telegram-worker/);
   });
 
   it('keeps GLM stopped by default and starts it only through explicit fallback', () => {

@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CncTelegramMediaService } from '../application/cnc-telegram-media.service';
+import type { CncTelegramWorkerSessionLeaseContext } from '../application/cnc-telegram-worker-session.types';
 import type {
   CncTelegramManualSvgTelegramSendClaimResponseDto,
   CncTelegramManualSvgTelegramSendResponseDto,
@@ -11,6 +12,7 @@ import type {
   CncTelegramMediaRestoreResponseDto,
   CncTelegramOrderScreenshotsResponseDto,
 } from '../dto/cnc-telegram-media.dto';
+import { parseWorkerSessionLeaseHeaders } from '../dto/cnc-telegram-worker-session.dto';
 import {
   parseCncTelegramManualSvgFileId,
   parseCncTelegramManualSvgTelegramSendComplete,
@@ -128,9 +130,15 @@ export class CncTelegramMediaController {
   @ApiOperation({ operationId: 'claimTelegramScreenshotRestores', summary: 'Claim queued screenshot restores for the configured Telegram worker' })
   @Post('media-restores/claim')
   @HttpCode(200)
-  claim(@Req() request: RequestWithCurrentUser): Promise<CncTelegramMediaRestoreClaimResponseDto> {
+  claim(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
+  ): Promise<CncTelegramMediaRestoreClaimResponseDto> {
     this.assertEnabled();
-    return this.media.claimRestores(this.requireCurrentUser(request));
+    return this.media.claimRestores(this.requireCurrentUser(request), this.workerLease(token, generation, sourceChatId, workerInstanceId));
   }
 
   @ApiOperation({ operationId: 'completeTelegramScreenshotRestore', summary: 'Complete one worker screenshot restore' })
@@ -138,6 +146,10 @@ export class CncTelegramMediaController {
   @HttpCode(200)
   complete(
     @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
     @Param('requestId') requestId: string,
     @Body() body: unknown,
   ): Promise<CncTelegramMediaRestoreResponseDto> {
@@ -147,6 +159,7 @@ export class CncTelegramMediaController {
       requestId: parseCncTelegramMediaRestoreRequestId(requestId),
       media: parseCncTelegramMediaRestoreComplete(body),
       requestTraceId: request.requestId,
+      lease: this.workerLease(token, generation, sourceChatId, workerInstanceId),
     });
   }
 
@@ -155,15 +168,24 @@ export class CncTelegramMediaController {
   @HttpCode(200)
   fail(
     @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
     @Param('requestId') requestId: string,
     @Body() body: unknown,
   ): Promise<CncTelegramMediaRestoreResponseDto> {
     this.assertEnabled();
+    const failure = parseCncTelegramMediaRestoreFailure(body);
     return this.media.failRestore({
       currentUser: this.requireCurrentUser(request),
       requestId: parseCncTelegramMediaRestoreRequestId(requestId),
-      error: parseCncTelegramMediaRestoreFailure(body),
+      error: failure.error,
+      itemLeaseToken: failure.itemLeaseToken,
+      itemLeaseGeneration: failure.itemLeaseGeneration,
+      itemLeaseOwner: failure.itemLeaseOwner,
       requestTraceId: request.requestId,
+      lease: this.workerLease(token, generation, sourceChatId, workerInstanceId),
     });
   }
 
@@ -172,9 +194,13 @@ export class CncTelegramMediaController {
   @HttpCode(200)
   claimManualSvgTelegramSends(
     @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
   ): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto> {
     this.assertEnabled();
-    return this.media.claimManualSvgTelegramSends(this.requireCurrentUser(request), request.requestId);
+    return this.media.claimManualSvgTelegramSends(this.requireCurrentUser(request), request.requestId, this.workerLease(token, generation, sourceChatId, workerInstanceId));
   }
 
   @ApiOperation({ operationId: 'completeManualSvgTelegramSend', summary: 'Complete one manual SVG Telegram send request' })
@@ -182,6 +208,10 @@ export class CncTelegramMediaController {
   @HttpCode(200)
   completeManualSvgTelegramSend(
     @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
     @Param('requestId') requestId: string,
     @Body() body: unknown,
   ): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
@@ -191,6 +221,7 @@ export class CncTelegramMediaController {
       requestId: parseCncTelegramMediaRestoreRequestId(requestId),
       completion: parseCncTelegramManualSvgTelegramSendComplete(body),
       requestTraceId: request.requestId,
+      lease: this.workerLease(token, generation, sourceChatId, workerInstanceId),
     });
   }
 
@@ -199,15 +230,24 @@ export class CncTelegramMediaController {
   @HttpCode(200)
   failManualSvgTelegramSend(
     @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
     @Param('requestId') requestId: string,
     @Body() body: unknown,
   ): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
     this.assertEnabled();
+    const failure = parseCncTelegramMediaRestoreFailure(body);
     return this.media.failManualSvgTelegramSend({
       currentUser: this.requireCurrentUser(request),
       requestId: parseCncTelegramMediaRestoreRequestId(requestId),
-      error: parseCncTelegramMediaRestoreFailure(body),
+      error: failure.error,
+      itemLeaseToken: failure.itemLeaseToken,
+      itemLeaseGeneration: failure.itemLeaseGeneration,
+      itemLeaseOwner: failure.itemLeaseOwner,
       requestTraceId: request.requestId,
+      lease: this.workerLease(token, generation, sourceChatId, workerInstanceId),
     });
   }
 
@@ -222,6 +262,15 @@ export class CncTelegramMediaController {
   private requireCurrentUser(request: RequestWithCurrentUser) {
     if (!request.user) throw new ApiError(401, 'AUTH_REQUIRED', 'Authentication required');
     return request.user;
+  }
+
+  private workerLease(
+    token: string | string[] | undefined,
+    generation: string | string[] | undefined,
+    sourceChatId: string | string[] | undefined,
+    workerInstanceId: string | string[] | undefined,
+  ): CncTelegramWorkerSessionLeaseContext {
+    return parseWorkerSessionLeaseHeaders(token, generation, sourceChatId, workerInstanceId);
   }
 }
 

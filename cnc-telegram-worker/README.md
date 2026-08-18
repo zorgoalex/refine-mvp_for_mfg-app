@@ -16,15 +16,19 @@ written first to a durable SQLite WAL outbox (`CNC_AUDIT_SPOOL_PATH`, default
 
 ```bash
 python -m cnc_telegram_worker login
-python -m cnc_telegram_worker once --days 7
-python -m cnc_telegram_worker daemon
+python -m cnc_telegram_worker serve
 python -m cnc_telegram_worker cleanup
 ```
 
-`login` creates the Telethon `.session` file. Run it once before daemon mode.
-`once --days 10` scans oldest to newest, checks existing Telegram replies like
-`Раскрой №7` before storing a number, and only writes a new reply after ERP
-accepts the packet and returns a cutting sequence number.
+`login` creates the Telethon `.session` file. The production command is `serve`:
+it claims one ERP session lease before connecting Telethon, heartbeats that lease,
+and polls only manual outbound sends and media restores. It never scans Telegram
+history by itself. The deprecated `daemon` command is fail-closed.
+
+The legacy `once`, `daemon`, and `svg-refresh-backfill` commands are fail-closed.
+They remain named only to produce an explicit migration error; no arbitrary
+request id or history range is accepted before the Phase B persisted scan/import
+workflow exists. The standard ops `backfill` helper is also disabled after Phase A.
 
 ## Required Environment
 

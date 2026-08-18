@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -51,6 +53,11 @@ class WorkerConfig:
     technical_log_heartbeat_seconds: int
     resend_unchanged: bool
     backfill_on_start: bool
+    worker_instance_id: str
+    worker_image_revision: str
+    session_lease_ttl_seconds: int
+    session_lease_heartbeat_seconds: int
+    media_restore_poll_interval_seconds: int
 
     @property
     def business_timezone(self) -> ZoneInfo:
@@ -104,6 +111,11 @@ class WorkerConfig:
             technical_log_heartbeat_seconds=positive_int_env("CNC_TECHNICAL_LOG_HEARTBEAT_SECONDS", 30),
             resend_unchanged=bool_env("CNC_RESEND_UNCHANGED", False),
             backfill_on_start=bool_env("CNC_BACKFILL_ON_START", True),
+            worker_instance_id=worker_instance_id_env(),
+            worker_image_revision=env("CNC_TELEGRAM_WORKER_IMAGE_REVISION", ""),
+            session_lease_ttl_seconds=positive_int_env("CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS", 90),
+            session_lease_heartbeat_seconds=positive_int_env("CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS", 10),
+            media_restore_poll_interval_seconds=positive_int_env("CNC_MEDIA_RESTORE_POLL_INTERVAL_SECONDS", 15),
         )
 
     @property
@@ -128,6 +140,10 @@ class WorkerConfig:
             raise RuntimeError(
                 "CNC Telegram writer is allowed only with ERP_STACK_ENV=prod; "
                 "set CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=true only for a deliberate one-off run",
+            )
+        if re.fullmatch(r"[0-9a-f]{7,64}", self.worker_image_revision) is None:
+            raise RuntimeError(
+                "CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision",
             )
         if self.enable_glm_ocr:
             if "cnc_telegram_worker.glm_ocr_client" not in self.ocr_command:
@@ -161,6 +177,13 @@ class WorkerConfig:
         if self.erp_worker_login and self.erp_worker_password:
             return
         raise RuntimeError("missing backend auth: set ERP_BEARER_TOKEN or ERP_WORKER_LOGIN/ERP_WORKER_PASSWORD")
+
+    def require_session_lease_timing(self) -> None:
+        if self.session_lease_heartbeat_seconds >= self.session_lease_ttl_seconds:
+            raise RuntimeError(
+                "CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS must be less than "
+                "CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS",
+            )
 
 
 def env(name: str, default: str = "") -> str:
@@ -201,3 +224,12 @@ def bool_env(name: str, default: bool) -> bool:
     if not value:
         return default
     return value.lower() in {"1", "true", "yes", "y", "on"}
+
+
+def worker_instance_id_env() -> str:
+    value = env("CNC_TELEGRAM_WORKER_INSTANCE_ID") or str(uuid.uuid4())
+    try:
+        uuid.UUID(value)
+    except ValueError as exc:
+        raise RuntimeError("CNC_TELEGRAM_WORKER_INSTANCE_ID must be a UUID") from exc
+    return value

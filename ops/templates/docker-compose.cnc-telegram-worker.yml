@@ -121,7 +121,7 @@ services:
   cnc-telegram-worker:
     profiles: !override ["cnc-telegram"]
     build:
-      context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:-./repo_erp/cnc-telegram-worker}
+      context: ./repo_erp/cnc-telegram-worker
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
@@ -131,6 +131,11 @@ services:
       ERP_STACK_ENV: ${ERP_STACK_ENV:-test}
       CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}
       CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: ${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}
+      CNC_TELEGRAM_WORKER_INSTANCE_ID: ${CNC_TELEGRAM_WORKER_INSTANCE_ID:-}
+      CNC_TELEGRAM_WORKER_IMAGE_REVISION: ${CNC_TELEGRAM_WORKER_IMAGE_REVISION:?CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision}
+      CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS: ${CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS:-90}
+      CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS: ${CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS:-10}
+      CNC_MEDIA_RESTORE_POLL_INTERVAL_SECONDS: ${CNC_MEDIA_RESTORE_POLL_INTERVAL_SECONDS:-15}
       TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_SESSION_PATH: ${TELEGRAM_SESSION_PATH:-/data/session/cnc_telegram}
@@ -162,8 +167,11 @@ services:
       CNC_STATE_PATH: ${CNC_STATE_PATH:-/data/state.json}
       CNC_AUDIT_SPOOL_PATH: ${CNC_AUDIT_SPOOL_PATH:-/data/cnc-telegram-audit.sqlite3}
       CNC_RESEND_UNCHANGED: ${CNC_RESEND_UNCHANGED:-false}
-      CNC_BACKFILL_ON_START: ${CNC_BACKFILL_ON_START:-true}
-    command: ["daemon"]
+      CNC_BACKFILL_ON_START: ${CNC_BACKFILL_ON_START:-false}
+    labels:
+      com.mebelkz.cnc-telegram-worker.image-revision: ${CNC_TELEGRAM_WORKER_IMAGE_REVISION:?CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision}
+      com.mebelkz.cnc-telegram-worker.command: serve
+    command: ["serve"]
     volumes:
       - cnc-telegram-worker-data:/data
       - cnc-telegram-media:/data/cnc-telegram-media

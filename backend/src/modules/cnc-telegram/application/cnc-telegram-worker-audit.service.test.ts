@@ -8,6 +8,12 @@ import { CncTelegramWorkerAuditService } from './cnc-telegram-worker-audit.servi
 
 const scanId = '550e8400-e29b-41d4-a716-446655440000';
 const digest = 'a'.repeat(64);
+const sessionLease = {
+  sourceChatId: '-100123',
+  leaseToken: 't'.repeat(64),
+  leaseGeneration: 1,
+  workerInstanceId: scanId,
+};
 
 describe('CncTelegramWorkerAuditService', () => {
   it('authorizes and audits a spoofed writer before parsing malformed payload', async () => {
@@ -198,10 +204,47 @@ describe('CncTelegramWorkerAuditService', () => {
         redactionVersion: 'worker-v1', redacted: false, truncated: false,
         redactionCategories: [], droppedBefore: 0,
       }],
-    });
+    }, undefined, sessionLease);
     expect(writeTechnicalBatch).toHaveBeenCalledWith(expect.objectContaining({
       lines: [expect.objectContaining({ message: 'Authorization: [REDACTED]', redacted: true, redactionCategories: ['authorization'] })],
-    }), { id: '7' });
+    }), { id: '7' }, sessionLease);
+  });
+
+  it('passes the resolved single allowed chat to the technical repository', async () => {
+    const writeTechnicalBatch = vi.fn().mockResolvedValue({ accepted: 1 });
+    const repository = {
+      technicalCapabilities: vi.fn().mockResolvedValue(true), writeTechnicalBatch,
+    } as unknown as PgCncTelegramWorkerAuditRepository;
+    const config = {
+      get: vi.fn((key: keyof BackendEnv) => ({
+        CNC_TELEGRAM_WORKER_USERNAME: 'cnc-bot',
+        CNC_TELEGRAM_ALLOWED_CHAT_IDS: '-100123',
+      })[key]),
+    } as unknown as ConfigService<BackendEnv, true>;
+    const session = {
+      resolveChatId: vi.fn().mockReturnValue('-100123'),
+      assertCurrent: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = new CncTelegramWorkerAuditService(
+      repository,
+      config,
+      deniedAuditPort(),
+      session as never,
+    );
+    const leaseWithoutChat = { ...sessionLease, sourceChatId: '' };
+
+    await service.writeTechnicalRawBatch(user('cnc-bot', ['cut.manage']), {
+      batchId: '550e8400-e29b-41d4-a716-446655440001',
+      lines: [{
+        workerInstanceId: scanId, sequence: 1, observedAt: '2026-08-18T14:49:40+00:00',
+        stream: 'stdout', message: 'worker alive', redactionVersion: 'worker-v1',
+        redacted: false, truncated: false, redactionCategories: [], droppedBefore: 0,
+      }],
+    }, undefined, leaseWithoutChat);
+
+    const normalizedLease = { ...sessionLease, sourceChatId: '-100123' };
+    expect(session.assertCurrent).toHaveBeenCalledWith(user('cnc-bot', ['cut.manage']), normalizedLease);
+    expect(writeTechnicalBatch).toHaveBeenCalledWith(expect.any(Object), { id: '7' }, normalizedLease);
   });
 });
 

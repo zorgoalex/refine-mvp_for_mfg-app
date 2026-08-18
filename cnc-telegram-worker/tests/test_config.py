@@ -21,6 +21,9 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertEqual(config.glm_ocr_client_timeout_seconds, 660)
         self.assertFalse(config.enabled)
         self.assertFalse(config.can_send_manual_svg_uploads)
+        self.assertEqual(config.session_lease_ttl_seconds, 90)
+        self.assertEqual(config.session_lease_heartbeat_seconds, 10)
+        self.assertEqual(config.media_restore_poll_interval_seconds, 15)
 
     def test_glm_ocr_fallback_requires_explicit_enable(self) -> None:
         with patch.dict(os.environ, {
@@ -36,6 +39,7 @@ class WorkerConfigTest(unittest.TestCase):
         base = {
             "ERP_STACK_ENV": "test",
             "CNC_TELEGRAM_WORKER_ROLE": "reader",
+            "CNC_TELEGRAM_WORKER_IMAGE_REVISION": "d0e683b40744",
             "CNC_ENABLE_GLM_OCR": "true",
             "CNC_OCR_COMMAND": "python -m cnc_telegram_worker.rapid_ocr_client --image {image}",
             "CNC_OCR_ENGINE": "rapidocr",
@@ -69,6 +73,7 @@ class WorkerConfigTest(unittest.TestCase):
             "ERP_STACK_ENV": "test",
             "CNC_TELEGRAM_WORKER_ROLE": "reader",
             "CNC_TELEGRAM_ALLOW_NON_PROD_WRITER": "false",
+            "CNC_TELEGRAM_WORKER_IMAGE_REVISION": "d0e683b40744",
         }, clear=True):
             config = WorkerConfig.from_env()
 
@@ -83,6 +88,7 @@ class WorkerConfigTest(unittest.TestCase):
             "CNC_TELEGRAM_WORKER_ROLE": "reader",
             "CNC_TELEGRAM_ENABLE_MANUAL_UPLOAD_SENDS": "true",
             "CNC_MANUAL_SVG_SEND_POLL_INTERVAL_SECONDS": "7",
+            "CNC_TELEGRAM_WORKER_IMAGE_REVISION": "d0e683b40744",
         }, clear=True):
             config = WorkerConfig.from_env()
 
@@ -96,6 +102,7 @@ class WorkerConfigTest(unittest.TestCase):
         with patch.dict(os.environ, {
             "ERP_STACK_ENV": "prod",
             "CNC_TELEGRAM_WORKER_ROLE": "writer",
+            "CNC_TELEGRAM_WORKER_IMAGE_REVISION": "d0e683b40744",
         }, clear=True):
             config = WorkerConfig.from_env()
 
@@ -104,12 +111,33 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertTrue(config.can_send_manual_svg_uploads)
         config.require_worker_enabled()
 
+    def test_enabled_worker_rejects_mutable_or_missing_image_revision(self) -> None:
+        with patch.dict(os.environ, {
+            "ERP_STACK_ENV": "test",
+            "CNC_TELEGRAM_WORKER_ROLE": "reader",
+            "CNC_TELEGRAM_WORKER_IMAGE_REVISION": "unknown",
+        }, clear=True):
+            config = WorkerConfig.from_env()
+
+        with self.assertRaisesRegex(RuntimeError, "immutable git revision"):
+            config.require_worker_enabled()
+
     def test_invalid_worker_role_is_rejected(self) -> None:
         with patch.dict(os.environ, {
             "CNC_TELEGRAM_WORKER_ROLE": "observer",
         }, clear=True):
             with self.assertRaisesRegex(RuntimeError, "CNC_TELEGRAM_WORKER_ROLE"):
                 WorkerConfig.from_env()
+
+    def test_session_heartbeat_must_be_shorter_than_lease(self) -> None:
+        with patch.dict(os.environ, {
+            "CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS": "30",
+            "CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS": "30",
+        }, clear=True):
+            config = WorkerConfig.from_env()
+
+        with self.assertRaisesRegex(RuntimeError, "must be less than"):
+            config.require_session_lease_timing()
 
 
 if __name__ == "__main__":

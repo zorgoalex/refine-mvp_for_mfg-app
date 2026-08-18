@@ -92,6 +92,8 @@ describe('VPS compose backend runtime flags', () => {
         env: {
           ...process.env,
           ERP_BEARER_TOKEN: 'test-bearer-token',
+          CNC_TELEGRAM_WORKER_IMAGE_REVISION: 'd0e683b40744',
+          COMPOSE_PROFILES: 'cnc-telegram',
           ERP_WORKER_LOGIN: '',
           TELEGRAM_ALLOWED_CHAT_ID: '',
           CNC_TELEGRAM_WORKER_USERNAME: 'cnc-bearer-worker',
@@ -102,6 +104,9 @@ describe('VPS compose backend runtime flags', () => {
 
     expect(rendered.services.backend.environment.CNC_TELEGRAM_WORKER_USERNAME).toBe('cnc-bearer-worker');
     expect(rendered.services.backend.environment.CNC_TELEGRAM_ALLOWED_CHAT_IDS).toBe('-1009007199254740993');
+    expect(rendered.services['cnc-telegram-worker'].command).toEqual(['serve']);
+    expect(rendered.services['cnc-telegram-worker'].labels['com.mebelkz.cnc-telegram-worker.command']).toBe('serve');
+    expect(rendered.services['cnc-telegram-worker'].labels['com.mebelkz.cnc-telegram-worker.image-revision']).toBe('d0e683b40744');
   });
 
   it('defines the CNC Telegram Telethon worker as an internal profile service', () => {
@@ -147,10 +152,18 @@ describe('VPS compose backend runtime flags', () => {
     expect(glmRunnerSegment).toContain('profiles: ["cnc-telegram-glm"]');
     expect(compose).toContain('cnc-telegram-worker:');
     expect(workerSegment).toContain('profiles: ["cnc-telegram"]');
-    expect(compose).toContain('context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:-./repo_erp/cnc-telegram-worker}');
+    expect(compose).toContain('context: ./repo_erp/cnc-telegram-worker');
+    expect(compose).not.toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT');
     expect(compose).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
     expect(compose).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}');
     expect(compose).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER: ${CNC_TELEGRAM_ALLOW_NON_PROD_WRITER:-false}');
+    expect(workerSegment).toContain('command: ["serve"]');
+    expect(workerSegment).not.toContain('command: ["daemon"]');
+    expect(workerSegment).toContain('com.mebelkz.cnc-telegram-worker.image-revision');
+    expect(workerSegment).not.toContain(':-unknown');
+    expect(workerSegment).toContain('CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision');
+    expect(workerSegment).toContain('CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS');
+    expect(workerSegment).toContain('CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS');
     expect(compose).toContain('TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}');
     expect(compose).toContain('ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}');
     expect(compose).toContain('CNC_ENABLE_GLM_OCR: ${CNC_ENABLE_GLM_OCR:-false}');
@@ -172,13 +185,15 @@ describe('VPS compose backend runtime flags', () => {
     expect(overlayGlmSegment).toContain('profiles: !override ["cnc-telegram-glm"]');
     expect(overlayGlmSegment).not.toContain('profiles: !override ["cnc-telegram"]');
     expect(overlayWorkerSegment).toContain('profiles: !override ["cnc-telegram"]');
+    expect(overlayWorkerSegment).toContain('command: ["serve"]');
+    expect(overlayWorkerSegment).not.toContain('command: ["daemon"]');
     expect(overlay).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');
     expect(overlay).toContain('CNC_TELEGRAM_WORKER_ROLE: ${CNC_TELEGRAM_WORKER_ROLE:-reader}');
     expect(overlay).toContain('cnc-telegram-worker-data:/data');
     expect(envExample).toContain('ERP_STACK_ENV=test');
     expect(envExample).toContain('COMPOSE_PROFILES=');
     expect(envExample).toContain('# COMPOSE_PROFILES=cnc-telegram');
-    expect(envExample).toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT=./repo_erp/cnc-telegram-worker');
+    expect(envExample).not.toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT');
     expect(envExample).toContain('CNC_TELEGRAM_WORKER_ROLE=reader');
     expect(envExample).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=false');
     expect(envExample).toContain('CNC_POLL_INTERVAL_SECONDS=60');

@@ -28,7 +28,7 @@ from .audit import (
     utc_now,
 )
 from .config import WorkerConfig
-from .erp_client import BackendAuth, ErpClient
+from .erp_client import BackendAuth, ErpClient, SessionLeaseLost, WorkerItemLease, parse_item_lease
 from .gcode import extract_order_names, parse_gcode_text
 from .ocr import OcrResult, run_ocr_command
 from .packet import (
@@ -119,8 +119,30 @@ class CncTelegramWorker:
                 password=config.erp_worker_password,
             ),
         )
+        self.erp.set_worker_identity(config.worker_instance_id)
 
-    async def run_once(self, workday: date | None = None, days: int | None = None) -> None:
+    async def _claim_session_lease(self) -> None:
+        self.config.require_session_lease_timing()
+        configured_chat_id = self.config.telegram_chat
+        if not re.fullmatch(r"-?\d+", configured_chat_id):
+            if len(self.config.telegram_allowed_chat_ids) != 1:
+                raise RuntimeError(
+                    "Telegram session lease requires numeric TELEGRAM_CHAT when multiple allowed chats are configured",
+                )
+            configured_chat_id = self.config.telegram_allowed_chat_ids[0]
+        await self.erp.claim_worker_session(
+            chat_id=configured_chat_id,
+            image_revision=self.config.worker_image_revision,
+            lease_ttl_seconds=self.config.session_lease_ttl_seconds,
+        )
+
+    async def run_once(
+        self,
+        workday: date | None = None,
+        days: int | None = None,
+        *,
+        scan_request_id: str | None = None,
+    ) -> None:
         if not self.config.enabled:
             print(
                 f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
@@ -131,6 +153,11 @@ class CncTelegramWorker:
         self.config.require_worker_enabled()
         self.config.require_telegram()
         self.config.require_backend_auth()
+        if days is None or days < 1 or days > 31:
+            raise RuntimeError("break-glass once requires --days between 1 and 31")
+        if not scan_request_id or not scan_request_id.strip():
+            raise RuntimeError("break-glass once requires an approved --scan-request-id")
+        self.erp.set_approved_scan_request(scan_request_id)
         backfill_sheet_previews(self.config.media_dir)
         audit_spool = AuditSpool(
             self.config.audit_spool_path,
@@ -141,10 +168,13 @@ class CncTelegramWorker:
         workdays = [anchor - timedelta(days=offset) for offset in reversed(range(days_to_scan))]
 
         client: Any | None = None
+        session_claimed = False
         audit_flush_lock = asyncio.Lock()
         manual_svg_send_stop: asyncio.Event | None = None
         manual_svg_send_task: asyncio.Task[None] | None = None
         try:
+            await self._claim_session_lease()
+            session_claimed = True
             await self.erp.audit_capabilities()
             await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
             await reconcile_pending_processing_attempts(audit_spool, self.erp, self.state)
@@ -225,6 +255,9 @@ class CncTelegramWorker:
                     print(f"audit delivery deferred: {exc}", flush=True)
             finally:
                 audit_spool.close()
+            if session_claimed:
+                self.erp.set_session_lease(None)
+            self.erp.set_approved_scan_request(None)
             cleanup_temp_dir(
                 self.config.temp_dir,
                 min(self.config.temp_ttl_hours, self.config.attachment_ttl_hours),
@@ -235,13 +268,8 @@ class CncTelegramWorker:
                 excluded_relative_dirs=frozenset({SHEET_PREVIEW_DIRECTORY}),
             )
 
-    async def run_svg_refresh_backfill(
-        self,
-        workday: date | None = None,
-        days: int | None = None,
-        *,
-        write: bool = False,
-    ) -> None:
+    async def run_serve(self, *, technical_lease_lost_event: asyncio.Event | None = None) -> None:
+        """Run the long-lived queue worker without unsolicited Telegram scans."""
         if not self.config.enabled:
             print(
                 f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
@@ -251,22 +279,37 @@ class CncTelegramWorker:
             return
         self.config.require_worker_enabled()
         self.config.require_telegram()
-        if write:
-            self.config.require_backend_auth()
-        days_to_scan = days or self.config.history_days
-        anchor = workday or datetime.now(self.config.business_timezone).date()
-        workdays = [anchor - timedelta(days=offset) for offset in reversed(range(days_to_scan))]
-        parsed_count = 0
-        posted_count = 0
-        skipped_count = 0
+        self.config.require_backend_auth()
+        backfill_sheet_previews(self.config.media_dir)
+        audit_spool = AuditSpool(
+            self.config.audit_spool_path,
+            allow_unsafe_path=self.config.audit_allow_unsafe_path,
+        )
+        audit_flush_lock = asyncio.Lock()
         client: Any | None = None
+        stop_event = asyncio.Event()
+        lease_lost_event = asyncio.Event()
+        queue_tasks: list[asyncio.Task[None]] = []
+        heartbeat_task: asyncio.Task[None] | None = None
+        technical_lease_wait: asyncio.Task[bool] | None = None
         try:
+            # Claim the DB lease before connecting Telethon. This also fences
+            # crash-recovery ingest and all queue calls made below.
+            await self._claim_session_lease()
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
+            await self.erp.audit_capabilities()
+            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+            audit_spool.abandon_running_scans()
+            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
+
             client = TelegramClient(
                 str(self.config.telegram_session_path),
                 self.config.telegram_api_id,
                 self.config.telegram_api_hash,
             )
             await client.connect()
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
             if not await client.is_user_authorized():
                 raise RuntimeError("Telethon session is not authorized; run `cnc-telegram-worker login` first")
             entity = await client.get_entity(parse_chat_ref(self.config.telegram_chat))
@@ -274,65 +317,164 @@ class CncTelegramWorker:
             assert_allowed_chat(chat_id, self.config.telegram_allowed_chat_ids)
             me = await client.get_me()
             session_user_id = str(me.id) if getattr(me, "id", None) is not None else None
-            for day in workdays:
-                messages = await collect_day_messages(
+
+            heartbeat_task = asyncio.create_task(
+                self._heartbeat_session(stop_event, lease_lost_event),
+                name="cnc-telegram-session-heartbeat",
+            )
+            await self.process_media_restore_requests(client, entity, chat_id)
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
+            if self.config.can_send_manual_svg_uploads:
+                await self.process_manual_svg_telegram_send_requests(
                     client,
                     entity,
-                    day,
-                    self.config.business_timezone,
-                    self.config.max_messages_per_scan,
+                    chat_id,
+                    audit_spool=audit_spool,
+                    session_user_id=session_user_id,
+                    audit_flush_lock=audit_flush_lock,
                 )
-                groups = group_svg_messages(messages)
-                groups = [replace(group, cutting_sequence_no=None) for group in groups]
-                groups = apply_known_cutting_sequence_state(groups, chat_id, self.state)
-                source_message_ids = {int(group.source_message.id) for group in groups}
-                known_sequence_index = {
-                    int(group.source_message.id): group.cutting_sequence_no
-                    for group in groups
-                    if group.cutting_sequence_no is not None
-                }
-                if source_message_ids:
-                    sequence_index = await collect_cutting_sequence_reply_search_index(
+                self._raise_if_technical_lease_lost(technical_lease_lost_event)
+                queue_tasks.append(asyncio.create_task(
+                    self.poll_manual_svg_telegram_send_requests(
                         client,
                         entity,
-                        source_message_ids,
+                        chat_id,
+                        stop_event,
+                        audit_spool=audit_spool,
                         session_user_id=session_user_id,
-                        workday=day,
-                        business_timezone=self.config.business_timezone,
-                        known_sequence_index=known_sequence_index,
-                    )
-                    groups = apply_cutting_sequence_reply_index(groups, sequence_index)
-                print(f"svg refresh {day.isoformat()}: {len(groups)} SVG group(s), write={write}", flush=True)
-                for group in groups:
-                    try:
-                        result = await self.process_group(
-                            client,
-                            entity,
-                            group,
-                            chat_id,
-                            day,
-                            refresh_imported=write,
-                            dry_run=not write,
-                        )
-                    except Exception as exc:
-                        skipped_count += 1
-                        print(f"SVG message {group.vector_message.id} refresh failed: {exc}", flush=True)
-                        continue
-                    if result == "posted":
-                        posted_count += 1
-                    elif result == "parsed":
-                        parsed_count += 1
-                    else:
-                        skipped_count += 1
+                        audit_flush_lock=audit_flush_lock,
+                        fatal_event=lease_lost_event,
+                    ),
+                    name="cnc-telegram-manual-send-poll",
+                ))
+            queue_tasks.append(asyncio.create_task(
+                self.poll_media_restore_requests(
+                    client,
+                    entity,
+                    chat_id,
+                    stop_event,
+                    fatal_event=lease_lost_event,
+                ),
+                name="cnc-telegram-media-restore-poll",
+            ))
+
+            stop_wait = asyncio.create_task(stop_event.wait(), name="cnc-telegram-serve-stop")
+            lease_wait = asyncio.create_task(lease_lost_event.wait(), name="cnc-telegram-serve-lease-loss")
+            waiter_tasks: list[asyncio.Task[bool]] = [stop_wait, lease_wait]
+            if technical_lease_lost_event is not None:
+                technical_lease_wait = asyncio.create_task(
+                    technical_lease_lost_event.wait(),
+                    name="cnc-telegram-serve-technical-lease-loss",
+                )
+                waiter_tasks.append(technical_lease_wait)
+            try:
+                await asyncio.wait(set(waiter_tasks), return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for waiter in waiter_tasks:
+                    waiter.cancel()
+                await asyncio.gather(*waiter_tasks, return_exceptions=True)
+            if technical_lease_lost_event is not None and technical_lease_lost_event.is_set():
+                raise SessionLeaseLost("technical log delivery lost the worker session lease")
+            if lease_lost_event.is_set():
+                raise SessionLeaseLost("worker session lease was lost")
         finally:
+            stop_event.set()
+            for task in queue_tasks:
+                if not task.done():
+                    task.cancel()
+            if queue_tasks:
+                await asyncio.gather(*queue_tasks, return_exceptions=True)
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
             if client is not None:
                 try:
                     await client.disconnect()
                 except Exception as exc:
                     print(f"Telegram disconnect failed: {exc}", flush=True)
-        print(
-            f"svg refresh done: parsed={parsed_count}, posted={posted_count}, skipped={skipped_count}, write={write}",
-            flush=True,
+            try:
+                try:
+                    await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+                except Exception as exc:
+                    print(f"audit delivery deferred: {exc}", flush=True)
+            finally:
+                audit_spool.close()
+                self.erp.set_session_lease(None)
+            cleanup_temp_dir(
+                self.config.temp_dir,
+                min(self.config.temp_ttl_hours, self.config.attachment_ttl_hours),
+            )
+            cleanup_temp_dir(
+                self.config.media_dir,
+                self.config.attachment_ttl_hours,
+                excluded_relative_dirs=frozenset({SHEET_PREVIEW_DIRECTORY}),
+            )
+
+    @staticmethod
+    def _raise_if_technical_lease_lost(event: asyncio.Event | None) -> None:
+        if event is not None and event.is_set():
+            raise SessionLeaseLost("technical log delivery lost the worker session lease")
+
+    async def _heartbeat_session(self, stop_event: asyncio.Event, fatal_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=self.config.session_lease_heartbeat_seconds,
+                )
+            except asyncio.TimeoutError:
+                try:
+                    await self.erp.heartbeat_worker_session()
+                except SessionLeaseLost as exc:
+                    print(f"CNC Telegram session lease lost: {exc}", flush=True)
+                    fatal_event.set()
+                    stop_event.set()
+                    return
+                except Exception as exc:
+                    print(f"CNC Telegram session heartbeat failed: {exc}", flush=True)
+                    fatal_event.set()
+                    stop_event.set()
+                    return
+
+    async def poll_media_restore_requests(
+        self,
+        client: Any,
+        entity: Any,
+        chat_id: str,
+        stop_event: asyncio.Event,
+        *,
+        fatal_event: asyncio.Event | None = None,
+    ) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=self.config.media_restore_poll_interval_seconds,
+                )
+            except asyncio.TimeoutError:
+                pass
+            if stop_event.is_set():
+                break
+            try:
+                await self.process_media_restore_requests(client, entity, chat_id)
+            except SessionLeaseLost:
+                if fatal_event is not None:
+                    fatal_event.set()
+                stop_event.set()
+                return
+            except Exception as exc:
+                print(f"media restore polling failed: {exc}", flush=True)
+                traceback.print_exception(exc)
+
+    async def run_svg_refresh_backfill(
+        self,
+        workday: date | None = None,
+        days: int | None = None,
+        *,
+        write: bool = False,
+    ) -> None:
+        raise RuntimeError(
+            "svg-refresh-backfill is disabled after Phase A; history reads require the Phase B persisted scan flow",
         )
 
     async def process_media_restore_requests(self, client: Any, entity: Any, chat_id: str) -> None:
@@ -341,6 +483,9 @@ class CncTelegramWorker:
             raise RuntimeError("backend does not expose cnc_telegram_media_restore_v1")
         for task in claim.get("tasks") or []:
             request_id = str(task.get("requestId") or "")
+            item_lease = parse_optional_item_lease(task)
+            if item_lease is None:
+                raise SessionLeaseLost("backend restore task has no fenced item lease")
             try:
                 task_chat_id = str(task.get("sourceChatId") or "")
                 message_id = int(task.get("sourceMessageId") or 0)
@@ -365,11 +510,18 @@ class CncTelegramWorker:
                 )
                 if storage_key_identity(media["storageKey"]) != storage_key_identity(str(task.get("storageKey") or "")):
                     raise RuntimeError("restored screenshot storage key does not match packet")
-                await self.erp.complete_media_restore(request_id, media)
+                if item_lease is None:
+                    await self.erp.complete_media_restore(request_id, media)
+                else:
+                    await self.erp.complete_media_restore(request_id, media, item_lease)
+            except SessionLeaseLost:
+                raise
             except Exception as exc:
                 error_message = sanitize_text(str(exc), 500) or "Telegram screenshot restore failed"
                 try:
-                    await self.erp.fail_media_restore(request_id, error_message)
+                    await self.erp.fail_media_restore(request_id, error_message, item_lease)
+                except SessionLeaseLost:
+                    raise
                 except Exception as report_exc:
                     print(f"restore {request_id} failure delivery deferred: {report_exc}", flush=True)
                 print(f"restore {request_id} failed: {error_message}", flush=True)
@@ -389,6 +541,9 @@ class CncTelegramWorker:
             raise RuntimeError("backend does not expose cnc_manual_svg_telegram_send_v1")
         for task in claim.get("tasks") or []:
             request_id = str(task.get("requestId") or "")
+            item_lease = parse_optional_item_lease(task)
+            if item_lease is None:
+                raise SessionLeaseLost("backend manual send task has no fenced item lease")
             try:
                 files = task.get("files") or []
                 if not isinstance(files, list) or not files:
@@ -419,20 +574,28 @@ class CncTelegramWorker:
                         await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
                     except Exception as audit_exc:
                         print(f"manual SVG send audit delivery deferred: {audit_exc}", flush=True)
-                await self.erp.complete_manual_svg_telegram_send(request_id, {
+                completion = {
                     "sentChatId": chat_id,
                     "sentMessageIds": manual_svg_sent_message_ids(sent),
-                })
+                }
+                if item_lease is None:
+                    await self.erp.complete_manual_svg_telegram_send(request_id, completion)
+                else:
+                    await self.erp.complete_manual_svg_telegram_send(request_id, completion, item_lease)
                 if audit_spool is not None:
                     try:
                         await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
                     except Exception as audit_exc:
                         print(f"manual SVG send audit delivery deferred: {audit_exc}", flush=True)
+            except SessionLeaseLost:
+                raise
             except Exception as exc:
                 error_message = sanitize_text(str(exc), 500) or "Manual SVG Telegram send failed"
                 traceback.print_exception(exc)
                 try:
-                    await self.erp.fail_manual_svg_telegram_send(request_id, error_message)
+                    await self.erp.fail_manual_svg_telegram_send(request_id, error_message, item_lease)
+                except SessionLeaseLost:
+                    raise
                 except Exception as report_exc:
                     print(f"manual SVG send {request_id} failure delivery deferred: {report_exc}", flush=True)
                 print(f"manual SVG send {request_id} failed: {error_message}", flush=True)
@@ -447,6 +610,7 @@ class CncTelegramWorker:
         audit_spool: AuditSpool | None = None,
         session_user_id: str | None = None,
         audit_flush_lock: asyncio.Lock | None = None,
+        fatal_event: asyncio.Event | None = None,
     ) -> None:
         while not stop_event.is_set():
             try:
@@ -467,29 +631,17 @@ class CncTelegramWorker:
                     session_user_id=session_user_id,
                     audit_flush_lock=audit_flush_lock,
                 )
+            except SessionLeaseLost:
+                if fatal_event is not None:
+                    fatal_event.set()
+                stop_event.set()
+                return
             except Exception as exc:
                 print(f"manual SVG send polling failed: {exc}", flush=True)
                 traceback.print_exception(exc)
 
     async def run_daemon(self, days: int | None = None) -> None:
-        if not self.config.enabled:
-            print(
-                f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
-                f"CNC_TELEGRAM_WORKER_ROLE={self.config.worker_role}",
-                flush=True,
-            )
-            return
-        self.config.require_worker_enabled()
-        first = True
-        while True:
-            scan_days = days or (self.config.history_days if first and self.config.backfill_on_start else 1)
-            try:
-                await self.run_once(days=scan_days)
-            except Exception as exc:
-                print(f"scan failed: {exc}", flush=True)
-                traceback.print_exception(exc)
-            first = False
-            await asyncio.sleep(self.config.poll_interval_seconds)
+        raise RuntimeError("daemon is deprecated and fail-closed; use `serve`")
 
     async def scan_workday(
         self,
@@ -1801,6 +1953,29 @@ def parse_chat_ref(value: str) -> int | str:
     if stripped.lstrip("-").isdigit():
         return int(stripped)
     return stripped
+
+
+def parse_optional_item_lease(task: Any) -> WorkerItemLease | None:
+    """Read the additive item-lease contract when the backend exposes it.
+
+    Phase-A compatible backends may still return legacy queue tasks.  New
+    responses are carried through unchanged to complete/fail, where the
+    backend strictly fences token, generation and owner.
+    """
+    if not isinstance(task, dict):
+        raise RuntimeError("backend queue task is invalid")
+    lease_keys = {
+        "itemLease",
+        "itemLeaseToken",
+        "itemLeaseGeneration",
+        "itemLeaseOwner",
+        "leaseToken",
+        "leaseGeneration",
+        "leaseOwner",
+    }
+    if not lease_keys.intersection(task):
+        return None
+    return parse_item_lease(task)
 
 
 def assert_allowed_chat(actual_chat_id: str, allowed_chat_ids: tuple[str, ...]) -> None:
