@@ -63,7 +63,8 @@ describe('cut PDF sheet context fields', () => {
 
 describe('cut job display numbering', () => {
   it('loads backend-authoritative display numbers for list and card views', () => {
-    expect(repositorySource).toContain("allocateCutJobSourceDisplayNumber(tx, 'regular')");
+    expect(repositorySource).toContain('allocateCutJobSourceDisplayNumber(tx, cutJobDisplayNumberKindForParams(params))');
+    expect(repositorySource).toContain('VALUES ($1, \'manual\', $2::jsonb, $3::jsonb, $4, NULL)');
     expect(repositorySource).toContain('const currentDisplayKind = cutJobDisplayNumberKind(row.source_display_number)');
     expect(repositorySource).toContain('beforeKind !== afterKind');
     expect(repositorySource).toContain('cutJobEffectiveDisplayKind(jobRow.source_display_number, jobRow.profile_params, jobRow.last_calc_params)');
@@ -766,7 +767,9 @@ describe('PgCutRepository', () => {
     const jobInsert = db.queries.find((q) => normalize(q.text).startsWith('INSERT INTO cut_job ('));
     expect(jobInsert).toBeDefined();
     expect(jobInsert?.text).toContain('source_display_number');
-    expect(jobInsert?.params[4]).toBe('1');
+    expect(jobInsert?.text).toContain('NULL)');
+    expect(jobInsert?.params).toHaveLength(4);
+    expect(db.queries.some((q) => q.params[0] === 'cut_job_display_number:regular')).toBe(false);
     expect(sql.some((s) => s.startsWith('INSERT INTO cut_job_item ('))).toBe(true);
     const audit = db.queries.find((q) => /INSERT INTO audit_log/i.test(q.text));
     expect(audit?.params[0]).toBe('cut_job.created');
@@ -868,6 +871,61 @@ describe('PgCutRepository', () => {
       db.queries.some((q) => /INSERT INTO audit_log_related_entity/i.test(q.text) && q.params[1] === 'cut_result' && q.params[2] === 900),
     ).toBe(true);
     expect(db.queries.filter((q) => /INSERT INTO outbox_events/i.test(q.text))).toHaveLength(1);
+  });
+
+  it('calculate assigns unnumbered jobs from the resolved regular/vacuum display sequence', async () => {
+    const calcItems = [{
+      cut_job_item_id: 501,
+      order_detail_id: 1,
+      order_id: 9,
+      qty: 1,
+      width_mm: 600,
+      height_mm: 400,
+      sheet_material_type_id: 9,
+      film_id: null,
+      film_texture: null,
+      smt_width_mm: 2800,
+      smt_height_mm: 2070,
+    }];
+
+    const regularDb = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'Regular', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null, source_display_number: null },
+      calcItems,
+    });
+    await new PgCutRepository(regularDb.service, fakeFreecut(happyResponse)).calculate({
+      currentUser: currentUser(),
+      cutJobId: 42,
+      version: 0,
+      commandId: '66666666-6666-4666-8666-666666666666',
+      requestId: 'r-regular-number',
+    });
+
+    const regularUpdate = regularDb.queries.find((q) => normalize(q.text).startsWith('UPDATE cut_job SET source_display_number'));
+    expect(regularUpdate?.params[1]).toBe('1');
+    expect(regularDb.queries.some((q) => q.params[0] === 'cut_job_display_number:regular')).toBe(true);
+    expect(regularDb.queries.some((q) => q.params[0] === 'cut_job_display_number:vacuum')).toBe(false);
+
+    const defaultParams = await new StaticCutConfig().getDefaultParams();
+    const vacuumDb = createDatabase({
+      cutJob: { cut_job_id: 42, name: 'Vacuum', status: 'draft', source: 'manual', version: 0, pdf_prewarm_state: 'pending', params: null, param_profile_id: 5, source_display_number: null },
+      calcItems,
+    });
+    await new PgCutRepository(
+      vacuumDb.service,
+      fakeFreecut(happyResponse),
+      stubConfig({ getParamsByProfileId: async () => ({ ...defaultParams, layout_mode: 'vacuum_table' }) }),
+    ).calculate({
+      currentUser: currentUser(),
+      cutJobId: 42,
+      version: 0,
+      commandId: '77777777-7777-4777-8777-777777777777',
+      requestId: 'r-vacuum-number',
+    });
+
+    const vacuumUpdate = vacuumDb.queries.find((q) => normalize(q.text).startsWith('UPDATE cut_job SET source_display_number'));
+    expect(vacuumUpdate?.params[1]).toBe('В-1');
+    expect(vacuumDb.queries.some((q) => q.params[0] === 'cut_job_display_number:regular')).toBe(false);
+    expect(vacuumDb.queries.some((q) => q.params[0] === 'cut_job_display_number:vacuum')).toBe(true);
   });
 
   it('calculate snapshots optimizer unplaced instances without losing a successful result', async () => {
@@ -1688,9 +1746,9 @@ it('setProfile rejects a calculating job with 409 (status gate)', async () => {
     .rejects.toMatchObject({ statusCode: 409 });
 });
 
-it('setProfile gives a manual job a new vacuum display number when switching to a vacuum-table profile', async () => {
+it('setProfile gives an unnumbered manual job a vacuum display number from the vacuum sequence', async () => {
   const db = createDatabase({
-    cutJob: { cut_job_id: 42, status: 'draft', source: 'manual', version: 2, param_profile_id: null, source_display_number: '12' },
+    cutJob: { cut_job_id: 42, status: 'draft', source: 'manual', version: 2, param_profile_id: null, source_display_number: null },
     profileParams: { layout_mode: 'vacuum_table' },
   });
   const repo = new PgCutRepository(db.service, { optimize: vi.fn() } as never);
@@ -1698,6 +1756,7 @@ it('setProfile gives a manual job a new vacuum display number when switching to 
   const update = db.queries.find((q) => normalize(q.text).startsWith('UPDATE cut_job SET param_profile_id'));
   expect(update?.params[2]).toBe('В-1');
   expect(db.queries.some((q) => q.params[0] === 'cut_job_display_number:vacuum')).toBe(true);
+  expect(db.queries.some((q) => q.params[0] === 'cut_job_display_number:regular')).toBe(false);
 });
 
 it('calculate rejects an inactive chosen profile with 422 (no freecut call)', async () => {

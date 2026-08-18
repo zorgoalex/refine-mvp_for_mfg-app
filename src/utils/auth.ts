@@ -1,6 +1,7 @@
 import type { AuthTokens, UserIdentity } from '../types/auth';
 import { authApi } from '../api/authApi';
 import { authSession } from '../api/authSession';
+import { getJwtExpirationTime } from '../api/httpClient';
 import { legacyApiRoutes } from '../api/legacyApiRoutes';
 import { featureFlags } from '../config/featureFlags';
 
@@ -116,15 +117,8 @@ export const authStorage = {
  * @returns true если токен истек или невалиден
  */
 export function isTokenExpired(token: string): boolean {
-  try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
-
-    // exp в JWT указан в секундах, Date.now() возвращает миллисекунды
-    return payload.exp * 1000 < Date.now();
-  } catch (error) {
-    console.error('Token validation failed:', error);
-    return true;
-  }
+  const expiresAt = getJwtExpirationTime(token);
+  return expiresAt === null || expiresAt <= Date.now();
 }
 
 /**

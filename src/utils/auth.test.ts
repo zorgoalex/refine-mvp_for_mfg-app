@@ -10,6 +10,7 @@ describe('auth refresh cutover behavior', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.resetModules();
@@ -128,6 +129,31 @@ describe('auth refresh cutover behavior', () => {
     expect(authSession.getAccessToken()).toBeNull();
     expect(expiredListener).toHaveBeenCalledTimes(1);
   });
+
+  it('validates base64url JWT payloads without console validation noise', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { isTokenExpired } = await import('./auth');
+      const token = jwtWithPayload({ exp: Math.floor(Date.now() / 1000) + 60, filler: 'о' });
+
+      expect(isTokenExpired(token)).toBe(false);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('treats malformed JWTs as expired without console validation noise', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { isTokenExpired } = await import('./auth');
+
+      expect(isTokenExpired('not-a-jwt')).toBe(true);
+      expect(errorSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
 });
 
 function mockFetch(body: unknown) {
@@ -158,4 +184,8 @@ function createLocalStorageMock(): Storage {
       storage.set(key, String(value));
     }),
   };
+}
+
+function jwtWithPayload(payload: Record<string, unknown>): string {
+  return `header.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`;
 }

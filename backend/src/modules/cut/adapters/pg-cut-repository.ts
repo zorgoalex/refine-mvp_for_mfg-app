@@ -777,11 +777,10 @@ export class PgCutRepository implements CutRepositoryPort {
       // config edit after the draft exists must NOT retro-mutate this job. The
       // snapshot is the authoritative payload at calculate time.
       const paramsSnapshot = await this.config.getDefaultParams();
-      const sourceDisplayNumber = await allocateCutJobSourceDisplayNumber(tx, 'regular');
       const inserted = await tx.query<{ cut_job_id: string | number }>(
         `
         INSERT INTO cut_job (name, source, selection_criteria, params, created_by, source_display_number)
-        VALUES ($1, 'manual', $2::jsonb, $3::jsonb, $4, $5)
+        VALUES ($1, 'manual', $2::jsonb, $3::jsonb, $4, NULL)
         RETURNING cut_job_id
         `,
         [
@@ -789,7 +788,6 @@ export class PgCutRepository implements CutRepositoryPort {
           command.dto.criteria ? JSON.stringify(command.dto.criteria) : null,
           JSON.stringify(paramsSnapshot),
           numOrNull(command.currentUser.id),
-          sourceDisplayNumber,
         ],
       );
       const cutJobId = toNum(inserted.rows[0].cut_job_id);
@@ -821,7 +819,7 @@ export class PgCutRepository implements CutRepositoryPort {
         cutJobId,
         requestId: command.requestId,
         related: { orderIds: reservedOrderIds, sheetMaterialTypeIds: reservedSheetTypeIds },
-        metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount, displayNumber: sourceDisplayNumber },
+        metadata: { detailCount: insertedCount, hdfDetailCount: insertedHdfCount },
       });
 
       return loadJob(tx, cutJobId);
@@ -1090,6 +1088,9 @@ export class PgCutRepository implements CutRepositoryPort {
         profileParams,
         defaultParams: await this.config.getDefaultParams(),
       });
+      const sourceDisplayNumber = cutJobDisplayNumberKind(job.sourceDisplayNumber) === null
+        ? await allocateCutJobSourceDisplayNumber(tx, cutJobDisplayNumberKindForParams(params))
+        : null;
       const grainRules = await this.config.getGrainRules();
 
       const groupPreps = groups.map((group) => {
@@ -1137,11 +1138,12 @@ export class PgCutRepository implements CutRepositoryPort {
       // 'ready' from the previous version must not linger.
       await tx.query(
         `UPDATE cut_job
-         SET status = 'calculating', version = version + 1,
+         SET source_display_number = COALESCE($2, source_display_number),
+             status = 'calculating', version = version + 1,
              pdf_prewarm_state = 'pending', pdf_prewarm_failure_reason = NULL,
              failure_code = NULL, failure_reason = NULL, updated_at = now()
          WHERE cut_job_id = $1`,
-        [command.cutJobId],
+        [command.cutJobId, sourceDisplayNumber],
       );
 
       // Freeze the basis from the Phase-1 snapshot (Codex R16 BLOCKER #1):
@@ -5411,6 +5413,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   source: string;
   version: number;
   params: Record<string, unknown> | null;
+  sourceDisplayNumber: string | number | null;
   paramProfileId: number | null;
   sheetMaterialTypeId: number | null;
   combineFilms: boolean;
@@ -5418,7 +5421,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   rotationAllowed: boolean;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films, split_by_material, rotation_allowed, texture_direction FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, source_display_number, param_profile_id, sheet_material_type_id, combine_films, split_by_material, rotation_allowed, texture_direction FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -5432,6 +5435,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     source: row.source,
     version: toNum(row.version),
     params: row.params,
+    sourceDisplayNumber: row.source_display_number ?? null,
     paramProfileId: row.param_profile_id === null || row.param_profile_id === undefined ? null : toNum(row.param_profile_id),
     sheetMaterialTypeId: row.sheet_material_type_id === null || row.sheet_material_type_id === undefined ? null : toNum(row.sheet_material_type_id),
     combineFilms: row.combine_films === true,
@@ -5486,6 +5490,10 @@ function cutParamsUseVacuumTable(params: unknown): boolean {
     && params !== null
     && !Array.isArray(params)
     && (params as { layout_mode?: unknown }).layout_mode === 'vacuum_table';
+}
+
+function cutJobDisplayNumberKindForParams(params: unknown): CutJobDisplayNumberKind {
+  return cutParamsUseVacuumTable(params) ? 'vacuum' : 'regular';
 }
 
 function cutJobEffectiveDisplayKind(
