@@ -476,9 +476,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Прокрутить МДФ-доску наверх');
     expect(page).toContain('cncBoardScrollEdges.left');
     expect(page).toContain('className="cnc-board-scroll-edge cnc-board-scroll-edge--left"');
+    expect(page).toContain('style={{ insetInlineStart: cncBoardScrollButtonInsets.left }}');
     expect(page).toContain("onClick={() => scrollCncBoardHorizontally('left')}");
     expect(page).toContain('cncBoardScrollEdges.right');
     expect(page).toContain('className="cnc-board-scroll-edge cnc-board-scroll-edge--right"');
+    expect(page).toContain('style={{ insetInlineEnd: cncBoardScrollButtonInsets.right }}');
     expect(page).toContain("onClick={() => scrollCncBoardHorizontally('right')}");
     expect(page).not.toContain('cncBoardScrollDirection');
     expect(page).toContain('Прокрутить МДФ-доску влево');

@@ -90,6 +90,7 @@ import {
   isCncPreviewRequestCurrent,
   releaseCncPreviewLoadKey,
   reserveOrderStatusBoardMutation,
+  resolveStatusBoardEdgeButtonInsets,
   revealOrderStatusBoardCard,
   restoreOrderStatusBoardFocus,
   syncCncBathSelectedDetail,
@@ -620,6 +621,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncBoardScrollButtonScrollActiveRef = useRef(false);
   const [cncBoardScrollEdges, setCncBoardScrollEdges] =
     useState<CncBoardHorizontalScrollEdges>(CNC_BOARD_SCROLL_EDGES_HIDDEN);
+  const [cncBoardScrollButtonInsets, setCncBoardScrollButtonInsets] = useState({
+    left: 10,
+    right: 10,
+  });
   const [cncBoardScrollTopState, setCncBoardScrollTopState] = useState({
     visible: false,
     left: 0,
@@ -1718,6 +1723,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     });
   }, [isCncToday]);
 
+  const syncCncBoardScrollButtonInsets = useCallback((viewport: HTMLElement) => {
+    const next = resolveStatusBoardEdgeButtonInsets(
+      viewport.getBoundingClientRect(),
+      window.innerWidth,
+    );
+    setCncBoardScrollButtonInsets((current) =>
+      current.left === next.left && current.right === next.right ? current : next,
+    );
+  }, []);
+
   useEffect(() => {
     const topScrollbar = topScrollbarRef.current;
     const topScrollbarTrack = topScrollbarTrackRef.current;
@@ -1735,6 +1750,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             )
           : CNC_BOARD_SCROLL_EDGES_HIDDEN,
       );
+      syncCncBoardScrollButtonInsets(viewport);
       syncCncBoardScrollTopButton(viewport);
     };
     updateTrackWidth();
@@ -1752,6 +1768,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     datasetKey,
     isCncToday,
     loading,
+    syncCncBoardScrollButtonInsets,
     syncCncBoardScrollTopButton,
   ]);
 
@@ -2630,6 +2647,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             shape="circle"
             icon={<LeftOutlined />}
             aria-label="Прокрутить МДФ-доску влево"
+            style={{ insetInlineStart: cncBoardScrollButtonInsets.left }}
             onClick={() => scrollCncBoardHorizontally('left')}
           />
         )}
@@ -2640,6 +2658,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             shape="circle"
             icon={<RightOutlined />}
             aria-label="Прокрутить МДФ-доску вправо"
+            style={{ insetInlineEnd: cncBoardScrollButtonInsets.right }}
             onClick={() => scrollCncBoardHorizontally('right')}
           />
         )}

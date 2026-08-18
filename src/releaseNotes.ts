@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-18",
+    title: "МДФ-работы: левая кнопка прокрутки",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Левая полупрозрачная кнопка горизонтальной прокрутки теперь располагается у левой границы МДФ-доски и не скрывается под боковым меню.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-18",
     title: "МДФ-работы: сброс фильтров и превью",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
