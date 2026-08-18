@@ -51,7 +51,9 @@ export interface CalendarOrder {
   // Поля из orders_view
   client_id?: number;
   client_name?: string;
+  order_status_id?: number | null;
   order_status_name?: string;
+  payment_status_id?: number | null;
   payment_status_name?: string;
   production_status_name?: string;
 

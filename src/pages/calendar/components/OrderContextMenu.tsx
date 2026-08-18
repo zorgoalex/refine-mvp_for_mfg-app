@@ -61,6 +61,13 @@ export function isSameDateMove(order: CalendarOrder, pickedDate: Date): boolean 
   return resolveCurrentSourceDate(order) === formatDateKey(pickedDate);
 }
 
+export function isCurrentStatus(
+  currentStatusId: number | null | undefined,
+  candidateStatusId: number,
+): boolean {
+  return currentStatusId === candidateStatusId;
+}
+
 /**
  * Компонент контекстного меню для изменения статусов заказа и переноса даты
  * Появляется при правом клике / long-press на карточку заказа
@@ -148,24 +155,34 @@ export const OrderContextMenu: React.FC<OrderContextMenuProps> = ({
   };
 
   // Создаем пункты меню для статуса заказа
-  const orderStatusItems: MenuProps['items'] = statuses.orderStatuses.map((status) => ({
-    key: `order_status_${status.id}`,
-    label: status.name,
-    onClick: () => {
-      onStatusChange('order_status', status.id, status.name);
-      onClose();
-    },
-  }));
+  const orderStatusItems: MenuProps['items'] = statuses.orderStatuses.map((status) => {
+    const isActive = isCurrentStatus(order.order_status_id, status.id);
+    return {
+      key: `order_status_${status.id}`,
+      label: status.name,
+      icon: isActive ? <CheckOutlined style={{ color: '#52c41a' }} /> : null,
+      style: isActive ? { fontWeight: 600, backgroundColor: '#f6ffed' } : undefined,
+      onClick: () => {
+        onStatusChange('order_status', status.id, status.name);
+        onClose();
+      },
+    };
+  });
 
   // Создаем пункты меню для статуса оплаты
-  const paymentStatusItems: MenuProps['items'] = statuses.paymentStatuses.map((status) => ({
-    key: `payment_status_${status.id}`,
-    label: status.name,
-    onClick: () => {
-      onStatusChange('payment_status', status.id, status.name);
-      onClose();
-    },
-  }));
+  const paymentStatusItems: MenuProps['items'] = statuses.paymentStatuses.map((status) => {
+    const isActive = isCurrentStatus(order.payment_status_id, status.id);
+    return {
+      key: `payment_status_${status.id}`,
+      label: status.name,
+      icon: isActive ? <CheckOutlined style={{ color: '#52c41a' }} /> : null,
+      style: isActive ? { fontWeight: 600, backgroundColor: '#f6ffed' } : undefined,
+      onClick: () => {
+        onStatusChange('payment_status', status.id, status.name);
+        onClose();
+      },
+    };
+  });
 
   // Создаем пункты меню для статуса производства (с toggle и галочкой)
   const productionStatusItems: MenuProps['items'] = statuses.productionStatuses.map((status) => {

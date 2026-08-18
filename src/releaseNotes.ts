@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-18",
+    title: "Календарь: текущие статусы в меню",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "В контекстном меню карточки календаря текущие статусы заказа и оплаты теперь отмечаются галочкой и подсветкой, как статус производства.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-18",
     title: "МДФ-работы: левая кнопка прокрутки",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
