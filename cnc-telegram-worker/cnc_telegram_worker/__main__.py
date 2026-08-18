@@ -2,14 +2,27 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 from datetime import date, datetime
+from pathlib import Path
+from typing import Awaitable
 
 from .cleanup import cleanup_temp_dir
 from .config import WorkerConfig
+from .technical_logs import TechnicalLogCapture, deliver_technical_logs, flush_technical_logs_once
 from .worker import CncTelegramWorker, login_telegram_session
 
 
 def main() -> None:
+    capture = TechnicalLogCapture(Path(os.environ.get("CNC_TECHNICAL_LOG_SPOOL_PATH", "/data/technical-logs/spool.sqlite3")))
+    capture.install()
+    try:
+        _main(capture)
+    finally:
+        capture.close()
+
+
+def _main(capture: TechnicalLogCapture) -> None:
     parser = argparse.ArgumentParser(prog="cnc-telegram-worker")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -44,16 +57,42 @@ def main() -> None:
     worker = CncTelegramWorker(config)
     if args.command == "once":
         workday = parse_workday(args.workday) if args.workday else None
-        asyncio.run(worker.run_once(workday=workday, days=args.days))
+        asyncio.run(run_with_technical_delivery(worker, capture, worker.run_once(workday=workday, days=args.days)))
         return
 
     if args.command == "svg-refresh-backfill":
         workday = parse_workday(args.workday) if args.workday else None
-        asyncio.run(worker.run_svg_refresh_backfill(workday=workday, days=args.days, write=args.write))
+        asyncio.run(run_with_technical_delivery(worker, capture, worker.run_svg_refresh_backfill(workday=workday, days=args.days, write=args.write)))
         return
 
     if args.command == "daemon":
-        asyncio.run(worker.run_daemon(days=args.days))
+        asyncio.run(run_with_technical_delivery(worker, capture, worker.run_daemon(days=args.days)))
+
+
+async def run_with_technical_delivery(
+    worker: CncTelegramWorker,
+    capture: TechnicalLogCapture,
+    operation: Awaitable[None],
+) -> None:
+    stop_event = asyncio.Event()
+    delivery = asyncio.create_task(deliver_technical_logs(
+        capture.spool,
+        worker.erp.technical_log_batch,
+        stop_event,
+        interval_seconds=worker.config.technical_log_flush_interval_seconds,
+        heartbeat_seconds=worker.config.technical_log_heartbeat_seconds,
+    ))
+    try:
+        await operation
+    finally:
+        try:
+            for _ in range(3):
+                if await flush_technical_logs_once(capture.spool, worker.erp.technical_log_batch) == 0:
+                    break
+        except Exception as exc:
+            capture.spool.internal_error(str(exc))
+        stop_event.set()
+        await delivery
 
 
 def parse_workday(value: str) -> date:

@@ -39,6 +39,7 @@ export type PermissionName =
   | 'settings.view'
   | 'settings.manage'
   | 'audit.view'
+  | 'audit.technical.view'
   | 'cut.view'
   | 'cut.manage'
   | 'sheet_materials.view'

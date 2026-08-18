@@ -6,20 +6,38 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import { PgCncTelegramWorkerAuditRepository } from '../adapters/pg-cnc-telegram-worker-audit-repository';
 import type { CncTelegramDeniedAuditPort } from './cnc-telegram.types';
 import {
+  parseTechnicalLogBatch,
   parseWorkerAuditBatch,
+  type TechnicalLogBatchDto,
+  type TechnicalLogExportQueryDto,
+  type TechnicalLogQueryDto,
   type WorkerAuditBatchDto,
   type WorkerAuditExportQueryDto,
   type WorkerAuditListQueryDto,
 } from '../dto/cnc-telegram-worker-audit.dto';
 
 const SECRET_PATTERNS: readonly [RegExp, string][] = [
+  [/\bAuthorization\s*:\s*[^\r\n]+/gi, 'Authorization: [REDACTED]'],
   [/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]'],
+  [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[JWT_REDACTED]'],
   [/\b\d{6,12}:[A-Za-z0-9_-]{20,}\b/g, '[BOT_TOKEN_REDACTED]'],
-  [/\b(password|secret|api[_-]?hash)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]'],
+  [/\b(password|secret|api[_-]?hash|token|cookie)\b["']?\s*[:=]\s*["']?[^\s"',;}]+/gi, '$1=[REDACTED]'],
   [/(?:https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, 'https://[CREDENTIALS_REDACTED]@'],
   [/\/data\/session\/[A-Za-z0-9._/-]+/gi, '/data/session/[REDACTED]'],
   [/(?<!\d)\+?\d[\d ()-]{8,17}\d(?!\d)/g, '[PHONE_REDACTED]'],
 ];
+
+const TECHNICAL_SECRET_PATTERNS: readonly [string, RegExp, string][] = [
+  ['authorization', /\bAuthorization\s*:\s*[^\r\n]+/gi, 'Authorization: [REDACTED]'],
+  ['authorization', /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]'],
+  ['jwt', /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[JWT_REDACTED]'],
+  ['bot_token', /\b\d{6,12}:[A-Za-z0-9_-]{20,}\b/g, '[BOT_TOKEN_REDACTED]'],
+  ['credential', /\b(password|secret|api[_-]?hash|token|cookie)\b["']?\s*[:=]\s*["']?[^\s"',;}]+/gi, '$1=[REDACTED]'],
+  ['url_userinfo', /(?:https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, 'https://[CREDENTIALS_REDACTED]@'],
+  ['session_path', /\/data\/session\/[A-Za-z0-9._/-]+/gi, '/data/session/[REDACTED]'],
+  ['phone', /(?<!\d)\+?\d[\d ()-]{8,17}\d(?!\d)/g, '[PHONE_REDACTED]'],
+];
+const TECHNICAL_FORBIDDEN_PATTERN = /(?:\bBearer\s+[A-Za-z0-9._~+/=-]{12,}|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+|\b\d{6,12}:[A-Za-z0-9_-]{20,})\b/i;
 
 export class CncTelegramWorkerAuditService {
   private readonly permissions = new PermissionsService();
@@ -124,10 +142,45 @@ export class CncTelegramWorkerAuditService {
     };
   }
 
+  async writeTechnicalRawBatch(currentUser: CurrentUser, raw: unknown, requestId?: string): Promise<{ accepted: number }> {
+    await this.assertWriter(currentUser, requestId);
+    const dto = sanitizeTechnicalLogBatch(parseTechnicalLogBatch(raw));
+    if (!await this.repository.technicalCapabilities()) {
+      throw new ApiError(503, 'CNC_TELEGRAM_TECHNICAL_LOGS_UNAVAILABLE', 'Схема технических логов worker не готова');
+    }
+    return this.repository.writeTechnicalBatch(dto, { id: currentUser.id });
+  }
+
+  listTechnical(currentUser: CurrentUser, query: TechnicalLogQueryDto): Promise<Record<string, unknown>> {
+    this.assertTechnicalViewer(currentUser);
+    return this.repository.listTechnical(query);
+  }
+
+  async exportTechnical(
+    currentUser: CurrentUser,
+    query: TechnicalLogExportQueryDto,
+  ): Promise<{ fileName: string; content: string }> {
+    this.assertTechnicalViewer(currentUser);
+    const lines = await this.repository.exportTechnical(query);
+    const header = `# CNC Telegram worker raw technical logs\n# exportedAt=${new Date().toISOString()} exportedBy=${currentUser.username}\n`;
+    return {
+      fileName: `telegram-worker-technical_${query.dateFrom}_${query.dateTo}.log`,
+      content: `${header}${lines.map(formatTechnicalExportLine).join('\n')}\n`,
+    };
+  }
+
   private assertViewer(currentUser: CurrentUser): void {
     if (!this.permissions.canUser(currentUser, 'audit.view')) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для журнала Telegram-бота', {
         requiredPermissions: ['audit.view'],
+      });
+    }
+  }
+
+  private assertTechnicalViewer(currentUser: CurrentUser): void {
+    if (!this.permissions.canUser(currentUser, 'audit.technical.view')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для технических логов worker', {
+        requiredPermissions: ['audit.technical.view'],
       });
     }
   }
@@ -268,6 +321,44 @@ function sanitizeString(value: string): string {
 
 function sanitizeOptional(value: string | null | undefined): string | null | undefined {
   return typeof value === 'string' ? sanitizeString(value) : value;
+}
+
+export function sanitizeTechnicalLogBatch(dto: TechnicalLogBatchDto): TechnicalLogBatchDto {
+  return {
+    batchId: dto.batchId,
+    lines: dto.lines.map((line) => {
+      const sanitized = sanitizeTechnicalMessage(line.message);
+      return {
+        ...line,
+        message: sanitized.message,
+        redacted: line.redacted || sanitized.categories.length > 0,
+        truncated: line.truncated || sanitized.truncated,
+        redactionCategories: [...new Set([...line.redactionCategories, ...sanitized.categories])].slice(0, 16),
+      };
+    }),
+  };
+}
+
+function sanitizeTechnicalMessage(value: string): { message: string; categories: string[]; truncated: boolean } {
+  let message = value;
+  const categories: string[] = [];
+  for (const [category, pattern, replacement] of TECHNICAL_SECRET_PATTERNS) {
+    const next = message.replace(pattern, replacement);
+    if (next !== message) categories.push(category);
+    message = next;
+  }
+  if (TECHNICAL_FORBIDDEN_PATTERN.test(message)) {
+    message = '[QUARANTINED: possible credential remained after backend redaction]';
+    categories.push('quarantined');
+  }
+  const truncated = message.length > 8192;
+  return { message: message.slice(0, 8192), categories, truncated };
+}
+
+function formatTechnicalExportLine(line: Record<string, unknown>): string {
+  const markers = [line.redacted ? 'redacted' : null, line.truncated ? 'truncated' : null, Number(line.droppedBefore) > 0 ? `dropped=${line.droppedBefore}` : null]
+    .filter(Boolean).join(',');
+  return `${String(line.observedAt)} ${String(line.stream).toUpperCase()} ${String(line.workerInstanceId)}#${String(line.sequence)}${markers ? ` [${markers}]` : ''} ${String(line.message)}`;
 }
 
 function arrayField(value: Record<string, unknown>, key: string): Record<string, unknown>[] {

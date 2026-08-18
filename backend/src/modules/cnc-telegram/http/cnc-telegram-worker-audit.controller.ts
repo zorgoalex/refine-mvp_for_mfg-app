@@ -5,6 +5,8 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CncTelegramWorkerAuditService } from '../application/cnc-telegram-worker-audit.service';
 import {
+  parseTechnicalLogExportQuery,
+  parseTechnicalLogListQuery,
   parseWorkerAuditExportQuery,
   parseWorkerAuditListQuery,
 } from '../dto/cnc-telegram-worker-audit.dto';
@@ -32,6 +34,37 @@ export class CncTelegramWorkerAuditController {
   @Post('batch')
   writeBatch(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<{ accepted: number }> {
     return this.audit.writeRawBatch(this.requireCurrentUser(request), body, request.requestId);
+  }
+
+  @ApiOperation({ operationId: 'writeCncTelegramWorkerTechnicalLogBatch', summary: 'Persist raw stdout/stderr worker lines' })
+  @ApiResponse({ status: 201, description: 'Technical log lines persisted idempotently' })
+  @Post('technical/batch')
+  writeTechnicalBatch(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<{ accepted: number }> {
+    return this.audit.writeTechnicalRawBatch(this.requireCurrentUser(request), body, request.requestId);
+  }
+
+  @ApiOperation({ operationId: 'exportCncTelegramWorkerTechnicalLogs', summary: 'Export raw worker technical logs' })
+  @ApiProduces('text/plain')
+  @Get('technical/export')
+  async exportTechnical(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, unknown>,
+    @Res() response: Response,
+  ): Promise<void> {
+    const file = await this.audit.exportTechnical(
+      this.requireCurrentUser(request),
+      parseTechnicalLogExportQuery(query),
+    );
+    response.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    response.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.send(file.content);
+  }
+
+  @ApiOperation({ operationId: 'listCncTelegramWorkerTechnicalLogs', summary: 'List raw stdout/stderr worker lines' })
+  @Get('technical')
+  listTechnical(@Req() request: RequestWithCurrentUser, @Query() query: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.audit.listTechnical(this.requireCurrentUser(request), parseTechnicalLogListQuery(query));
   }
 
   @ApiOperation({ operationId: 'exportCncTelegramWorkerAudit', summary: 'Export full Telegram worker audit evidence as JSON' })

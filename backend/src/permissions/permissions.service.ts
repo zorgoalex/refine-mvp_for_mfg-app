@@ -58,6 +58,7 @@ const DANGEROUS_PERMISSIONS = new Set<PermissionName>([
   'orders.delete',
   'payments.delete',
   'settings.manage',
+  'audit.technical.view',
 ]);
 
 const REQUIRED_SUPERADMIN_PERMISSIONS: PermissionName[] = [
