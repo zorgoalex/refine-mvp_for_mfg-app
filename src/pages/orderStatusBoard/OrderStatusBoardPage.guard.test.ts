@@ -707,6 +707,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(mdfSheetPreview).toContain('CUT_RENDER_STYLE_MDF_BOARD_PREVIEW');
     expect(page).toContain('cutApi.fetchJobPdf');
     expect(page).toContain('CutSheetLabelGenerateAction');
+    expect(page).toContain('svgCutSheet && svgCutSheet.detailIds.length > 0');
     expect(page).toContain('buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)');
     expect(page).toContain('buildLabelDetailsFromPacketItems(packet.items)');
     expect(page).toContain('detailInstances={labelDetailInstances}');

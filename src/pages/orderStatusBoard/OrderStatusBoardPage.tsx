@@ -5164,7 +5164,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   const hasSheetPreview = hasSheetImage || hasSvgSheetPreview;
   const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);
   const labelDetailBuild = useMemo(
-    () => svgCutSheet
+    () => svgCutSheet && svgCutSheet.detailIds.length > 0
       ? buildLabelDetailsFromRepeatedDetailIds(svgCutSheet.detailIds, packet.items)
       : buildLabelDetailsFromPacketItems(packet.items),
     [packet.items, svgCutSheet],

@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-18",
+    title: "МДФ-работы: бирки текущего раскроя",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Карточки после повторного JSON-импорта заказов безопасно пересопоставляют детали по номеру заказа, позиции и размерам; для текущих листов кнопка бирок использует найденные актуальные детали и показывает неполное покрытие вместо полной блокировки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-18",
     title: "МДФ-работы: превью текущего раскроя",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
