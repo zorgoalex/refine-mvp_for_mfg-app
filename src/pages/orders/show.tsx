@@ -1275,7 +1275,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const [cutSelectMode, setCutSelectMode] = useState(false);
   const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
   const [cutModalOpen, setCutModalOpen] = useState(false);
-  const [cutSvgUploadOpen, setCutSvgUploadOpen] = useState(false);
   const [bazisCutModalOpen, setBazisCutModalOpen] = useState(false);
 
   useEffect(() => {
@@ -3521,15 +3520,6 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                 setCutSelectMode(false);
                 setCutSelectedDetailIds([]);
               }}
-            />
-          )}
-          {cutEnabled && record?.order_id && (
-            <CutSvgUploadModal
-              open={cutSvgUploadOpen}
-              defaultOrderIds={[record.order_id]}
-              defaultOrderNames={[record.order_name]}
-              onClose={() => setCutSvgUploadOpen(false)}
-              onDone={() => setCutSvgUploadOpen(false)}
             />
           )}
           {bazisCutVisible && record?.order_id && (
