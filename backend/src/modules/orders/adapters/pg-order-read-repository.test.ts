@@ -252,6 +252,7 @@ describe('PgOrderReadRepository', () => {
         paymentStatusId: 2,
         paymentStatusName: 'Частично оплачен',
         productionStatusName: null,
+        passedProductionStatusCodes: ['cut', 'paint'],
         createdBy: 15,
         editedBy: 16,
       },
@@ -302,7 +303,9 @@ describe('PgOrderReadRepository', () => {
       orderId: 100,
     });
 
-    const detailQuery = database.queries.find((query) => query.text.includes('FROM order_details od'))?.text ?? '';
+    const detailQuery = database.queries.find((query) => (
+      query.text.includes('WITH linked_bazis_project_candidates AS MATERIALIZED')
+    ))?.text ?? '';
     expect(detailQuery).toContain('FROM bazis_cut_set_details d');
     expect(detailQuery).toContain('d.source_order_detail_id = od.detail_id');
     expect(detailQuery).toContain('d.source_bazis_node_id = detail_map.node_id');
@@ -322,7 +325,9 @@ describe('PgOrderReadRepository', () => {
       orderId: 100,
     });
 
-    const detailQuery = database.queries.find((query) => query.text.includes('FROM order_details od'))?.text ?? '';
+    const detailQuery = database.queries.find((query) => (
+      query.text.includes('WITH linked_bazis_project_candidates AS MATERIALIZED')
+    ))?.text ?? '';
     expect(detailQuery).toContain('FROM bazis_node_order_detail_map map');
     expect(detailQuery).toContain('map.order_detail_id = od.detail_id');
     expect(detailQuery).toContain('revision.bazis_project_id');
@@ -337,7 +342,9 @@ describe('PgOrderReadRepository', () => {
       orderId: 100,
     });
 
-    const detailQuery = database.queries.find((query) => query.text.includes('FROM order_details od'))?.text ?? '';
+    const detailQuery = database.queries.find((query) => (
+      query.text.includes('WITH linked_bazis_project_candidates AS MATERIALIZED')
+    ))?.text ?? '';
     expect(detailQuery).toContain('linked_bazis_project_candidates AS MATERIALIZED');
     expect(detailQuery).toContain('FROM bazis_order_links link');
     expect(detailQuery).toContain('HAVING count(DISTINCT bazis_project_id) = 1');
@@ -1230,6 +1237,30 @@ function mergeBaseDefaultGetByIdSql(): string {
     '        o.payment_status_id, pay_s.payment_status_name,',
     '        o.production_status_id, prod_s.production_status_name,',
     '        o.production_status_from_details_enabled,',
+    '        (',
+    '          SELECT ARRAY_AGG(statuses.production_status_code ORDER BY statuses.sort_order, statuses.production_status_code)',
+    '          FROM (',
+    '            SELECT',
+    '              ps.production_status_code,',
+    '              MIN(COALESCE(ps.sort_order, 0)) AS sort_order',
+    '            FROM (',
+    '              SELECT pse.production_status_id',
+    '              FROM production_status_events pse',
+    '              WHERE pse.order_id = o.order_id',
+    '              UNION',
+    '              SELECT o.production_status_id',
+    '              WHERE o.production_status_id IS NOT NULL',
+    '              UNION',
+    '              SELECT od.production_status_id',
+    '              FROM order_details od',
+    '              WHERE od.order_id = o.order_id',
+    '                AND od.delete_flag = false',
+    '                AND od.production_status_id IS NOT NULL',
+    '            ) actual_statuses',
+    '            INNER JOIN production_statuses ps ON ps.production_status_id = actual_statuses.production_status_id',
+    '            GROUP BY ps.production_status_code',
+    '          ) statuses',
+    '        ) AS passed_production_status_codes,',
     '        o.planned_completion_date, o.completion_date, o.issue_date, o.payment_date,',
     '        o.discount, o.surcharge, o.notes, o.manager_id,',
     '        o.link_cutting_file, o.link_cutting_image_file, o.link_cad_file, o.link_pdf_file,',

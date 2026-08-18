@@ -554,6 +554,7 @@ export interface OrderHeaderDto {
   productionStatusId?: number | null;
   productionStatusName?: string | null;
   productionStatusFromDetailsEnabled?: boolean | null;
+  passedProductionStatusCodes?: string[];
   plannedCompletionDate?: DateOnlyString | null;
   completionDate?: DateOnlyString | null;
   issueDate?: DateOnlyString | null;
