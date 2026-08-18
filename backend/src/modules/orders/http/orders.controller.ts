@@ -1367,51 +1367,6 @@ export class OrdersController {
     return { order };
   }
 
-  @ApiParam({ name: 'orderId', type: Number, description: 'Source order ID' })
-  @ApiHeader({
-    name: 'If-Match',
-    required: true,
-    description: 'Source order version/ETag version is required.',
-    schema: { type: 'string' },
-  })
-  @ApiHeader({
-    name: 'Idempotency-Key',
-    required: true,
-    description: 'Idempotency key for safe retry of the detail transfer request.',
-    schema: { type: 'string', minLength: 8, maxLength: 200 },
-  })
-  @ApiBody({ schema: swaggerSchema(transferOrderDetailsRequestSwaggerSchema) })
-  @ApiResponse({ status: 200, description: 'Transferred order details', schema: swaggerSchema(transferOrderDetailsResponseSwaggerSchema) })
-  @ApiResponse({ status: 400, description: 'Missing or invalid transfer request headers' })
-  @ApiResponse({ status: 401, description: 'Authentication required' })
-  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
-  @ApiResponse({ status: 404, description: 'Source, target, or detail not found' })
-  @ApiResponse({ status: 409, description: 'Stale version, source-empty, duplicate name, or idempotency conflict' })
-  @ApiResponse({ status: 422, description: 'Invalid transfer payload' })
-  @ApiResponse({ status: 503, description: 'Orders API is disabled or read-only' })
-  @ApiOperation({ operationId: 'transferOrderDetails', summary: 'Transfer selected details to another or new order' })
-  @Post(':orderId/details/transfer')
-  @HttpCode(200)
-  async transferDetails(
-    @Req() request: RequestWithCurrentUser,
-    @Param('orderId') orderIdParam: string,
-    @Headers('if-match') ifMatchHeader: string | string[] | undefined,
-    @Headers('idempotency-key') idempotencyKeyHeader: string | string[] | undefined,
-    @Body() body: unknown,
-  ): Promise<TransferOrderDetailsResponseDto> {
-    this.assertOrdersWriteEnabled();
-
-    const currentUser = this.requireCurrentUser(request);
-    return this.detailTransfer.transfer({
-      currentUser,
-      sourceOrderId: parseOrderId(orderIdParam),
-      sourceVersion: parseIfMatchVersion(ifMatchHeader),
-      idempotencyKey: parseIdempotencyKeyHeader(idempotencyKeyHeader),
-      dto: parseTransferOrderDetailsRequest(body),
-      requestId: request.requestId,
-    });
-  }
-
   @ApiParam({ name: 'orderId', type: Number, description: 'Order ID' })
   @ApiHeader({
     name: 'If-Match',
