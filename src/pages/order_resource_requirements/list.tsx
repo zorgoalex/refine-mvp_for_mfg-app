@@ -99,6 +99,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
   const [reportFormat, setReportFormat] = useState<ResourceDemandReportFormat>('brief');
   const [reportFileFormat, setReportFileFormat] = useState<ResourceDemandReportFileFormat>('txt');
   const [headerFilters, setHeaderFilters] = useState<HeaderFilterState>(() => createDefaultHeaderFilters());
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
   const [sortState, setSortState] = useState<HeaderSortState>(DEFAULT_SORT_STATE);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const deferredSearch = useDeferredValue(searchInput.trim());
@@ -273,6 +274,12 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
 
         <Table
           rowKey="orderId"
+          rowSelection={{
+            selectedRowKeys,
+            onChange: setSelectedRowKeys,
+            preserveSelectedRowKeys: true,
+            columnWidth: 48,
+          }}
           dataSource={tableRows}
           loading={loading && !response}
           scroll={{ x: 1080 }}
@@ -303,7 +310,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             width={230}
             sorter
             sortOrder={sortState.columnKey === 'order' ? sortState.order : null}
-            {...filterProps('order', filterOptions.orders)}
+            {...filterProps('order', filterOptions.order)}
             render={(_, row: OrderResourceDemandRow) => (
               <Space direction="vertical" size={0}>
                 <Link to={`/orders/show/${row.orderId}`}>{orderDisplayNumber(row)}</Link>
@@ -319,7 +326,7 @@ export const OrderResourceRequirementList: React.FC<IResourceComponentsProps> = 
             width={125}
             sorter
             sortOrder={sortState.columnKey === 'date' ? sortState.order : null}
-            {...filterProps('date', filterOptions.dates)}
+            {...filterProps('date', filterOptions.date)}
             render={(_, row: OrderResourceDemandRow) => (
               <span style={numericStyle}>{row.orderDate ? formatDate(row.orderDate) : '—'}</span>
             )}

@@ -12,6 +12,17 @@ describe('order resource requirements list guards', () => {
     expect(source).toContain('Отключить все');
     expect(source).toContain('confirm({ closeDropdown: false })');
     expect(source).toContain('RESOURCE_FILTER_NONE');
+    expect(source).toContain("filterProps('order', filterOptions.order)");
+    expect(source).toContain("filterProps('date', filterOptions.date)");
+    expect(source).not.toContain('filterOptions.orders');
+    expect(source).not.toContain('filterOptions.dates');
+  });
+
+  it('позволяет независимо выбирать произвольные строки чекбоксами', () => {
+    expect(source).toContain('selectedRowKeys');
+    expect(source).toContain('setSelectedRowKeys');
+    expect(source).toContain('rowSelection={{');
+    expect(source).toContain('preserveSelectedRowKeys: true');
   });
 
   it('сортирует все видимые колонки списка', () => {

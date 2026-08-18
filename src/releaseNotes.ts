@@ -31,6 +31,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-18",
+    title: "Потребности заказов: выбор и фильтры",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "В начале списка потребностей добавлена колонка чекбоксов для произвольного выбора заказов.",
+    ],
+    fixed: [
+      "Фильтры в заголовках колонок снова открываются без ошибки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-18",
     title: "МДФ-работы: действия в превью раскроя",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
