@@ -531,6 +531,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
 }) => {
   const isOperational = useOperationalUi();
   const touchBoardDragEnabled = useCoarsePointer();
+  const finePointer = !touchBoardDragEnabled;
   const { canViewFinancials } = useOrderFinancialVisibility();
   const canViewCncCutMaps = can('cut.view');
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2507,7 +2508,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 onSelectDetailedBath={selectCncDetailedBath}
                 onCloseDetailedBath={closeCncDetailedBath}
                 onSelectDetailedDetail={selectCncDetailedDetail}
-                onMove={moveCncCard}
                 onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
                 onOpenBazisCut={(setId) => navigate(`/bazis-cut/${setId}`)}
                 onMove={moveCncCard}
@@ -2640,13 +2640,6 @@ interface CncTelegramTodayColumnsProps {
   onSelectDetailedBath: (bathId: string) => void;
   onCloseDetailedBath: (bathId: string) => void;
   onSelectDetailedDetail: (target: CncDetailedDetailTarget) => void;
-  onMove: (
-    kind: CncManualCardKind,
-    cardId: string,
-    targetColumn: CncTelegramTodayDisplayColumnKey,
-    targetTitle: string,
-    trigger: HTMLElement | null,
-  ) => void;
   onOpenOrder: (orderId: number) => void;
   onOpenBazisCut: (setId: number) => void;
   onMove: (
@@ -2885,7 +2878,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onSelectDetailedBath,
   onCloseDetailedBath,
   onSelectDetailedDetail,
-  onMove,
   onOpenOrder,
   onOpenBazisCut,
   onMove,
@@ -4876,7 +4868,6 @@ CncBazisCutSetCardView.displayName = 'CncBazisCutSetCardView';
 
 interface CncTelegramPacketCardProps {
   packet: CncTelegramPacket;
-  displayMode: StatusBoardCardDisplayMode;
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
   highlightEnabled: boolean;
@@ -5075,7 +5066,6 @@ function cncTelegramMediaStorageKey(imageUrl: string | null): string | null {
 
 const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
   packet,
-  displayMode,
   relationState,
   relationsEnabled,
   highlightEnabled,
@@ -5612,7 +5602,6 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
 
 interface CncTelegramBathCardViewProps {
   bath: CncTelegramBathCard;
-  displayMode: StatusBoardCardDisplayMode;
   relationState: CncRelationCardState;
   relationsEnabled: boolean;
   highlightEnabled: boolean;
@@ -5634,7 +5623,6 @@ interface CncTelegramBathCardViewProps {
 
 const CncTelegramBathCardView = memo<CncTelegramBathCardViewProps>(({
   bath,
-  displayMode,
   relationState,
   relationsEnabled,
   highlightEnabled,
@@ -7026,32 +7014,6 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
       onTouchCancelCapture={clearDragSuppression}
       {...touchDragHandleProps}
     >
-      <div
-        ref={(node) => {
-          cardRef.current = node;
-          dragRef(node);
-        }}
-        className={[
-          'status-board-card',
-          `status-board-card--${displayMode}`,
-          isDragging ? 'status-board-card--dragging' : '',
-          pending ? 'status-board-card--pending' : '',
-        ].filter(Boolean).join(' ')}
-        data-status-board-order-id={card.orderId}
-        tabIndex={moveAvailable ? 0 : -1}
-        aria-label={`Меню перемещения заказа ${orderNumber}`}
-        aria-busy={pending}
-        aria-haspopup={moveAvailable ? 'menu' : undefined}
-        aria-expanded={moveAvailable ? menuOpen : undefined}
-        aria-describedby={!moveAvailable ? readonlyReasonId : undefined}
-        aria-disabled={!moveAvailable}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget || !moveAvailable) return;
-          if (!isKeyboardMoveMenuTrigger(event)) return;
-          event.preventDefault();
-          setMenuOpen(true);
-        }}
-      >
       <div className="status-board-card__top">
         <div className="status-board-card__identity">
           <Button

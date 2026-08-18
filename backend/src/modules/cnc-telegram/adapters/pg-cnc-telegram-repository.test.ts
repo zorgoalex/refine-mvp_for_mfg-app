@@ -299,8 +299,8 @@ describe('PgCncTelegramRepository', () => {
             }],
           };
         }
-        if (/SELECT order_id\s+FROM orders/i.test(text)) {
-          return { rows: [{ order_id: 2689 }] };
+        if (/SELECT\s+order_id,\s+order_name\s+FROM orders/i.test(text)) {
+          return { rows: [{ order_id: 2689, order_name: '2689' }] };
         }
         if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
           return { rows: [] };
@@ -356,7 +356,7 @@ describe('PgCncTelegramRepository', () => {
       /INSERT INTO command_idempotency_keys/i.test(query.text),
     );
     expect(idempotencyInsert?.params[1]).toBe('cnc.manual_svg_upload');
-    expect(idempotencyInsert?.params[3]).toBe('cnc_manual_svg_upload');
+    expect(idempotencyInsert?.text).toContain("'cnc_manual_svg_upload'");
     const matchQuery = queries.find((query) => /FROM orders o\s+JOIN order_details od/i.test(query.text));
     expect(matchQuery?.text).toContain('o.order_id = ANY($2::bigint[])');
     expect(matchQuery?.params[1]).toEqual([2689]);
@@ -616,7 +616,7 @@ describe('PgCncTelegramRepository', () => {
           );
           return {
             rows: [{
-              request_hash: inserted?.params[4],
+              request_hash: inserted?.params[5],
               response_json: storedResponse,
               status: 'completed',
             }],
@@ -1589,7 +1589,7 @@ describe('PgCncTelegramRepository', () => {
           );
           return {
             rows: [{
-              request_hash: inserted?.params[4],
+              request_hash: inserted?.params[5],
               response_json: {
                 packet: { packetId: '00000000-0000-0000-0000-000000000001', cuttingSequenceNo: null },
                 requestId: 'request-cnc-1',
@@ -1655,7 +1655,7 @@ describe('PgCncTelegramRepository', () => {
           );
           return {
             rows: [{
-              request_hash: inserted?.params[4],
+              request_hash: inserted?.params[5],
               response_json: {
                 packet: { packetId: '00000000-0000-0000-0000-000000000001', cuttingSequenceNo: null },
                 requestId: 'request-cnc-1',
@@ -3407,6 +3407,47 @@ function ingestDto() {
         matchOrderId: 2689,
         matchDetailId: 3101,
         matchStatus: 'matched' as const,
+      },
+    ],
+  };
+}
+
+function manualSvgDto() {
+  return {
+    idempotencyKey: 'manual-svg:test:repo',
+    selectedOrderIds: [2689],
+    createMdfMachineFileCard: true,
+    matchMode: 'order_details' as const,
+    validationMode: 'strict' as const,
+    requestedCutJobId: null,
+    svgContentHash: 'a'.repeat(64),
+    workday: '2026-08-12',
+    machine: 'CNC#1',
+    programName: 'manual.svg',
+    materialName: 'МДФ 16мм',
+    rework: false,
+    comments: ['весь заказ: 2689'],
+    tools: [],
+    parserVersion: 'erp-manual-svg-upload-v1',
+    cutLayout: {
+      status: 'invalid' as const,
+      reasons: ['test skips reverse import'],
+      sheet: { widthMm: 2070, heightMm: 2800 },
+      rawCommentCount: 1,
+      partContourCount: 1,
+      acceptedItemCount: 0,
+      items: [],
+    },
+    items: [
+      {
+        sourceItemKey: '2689:31:497x477:part-1',
+        orderName: '2689',
+        detailNumber: 31,
+        widthMm: 497,
+        heightMm: 477,
+        quantity: 1,
+        source: 'vector' as const,
+        confidence: 0.99,
       },
     ],
   };

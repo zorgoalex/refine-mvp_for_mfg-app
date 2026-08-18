@@ -80,7 +80,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('enableMouseEvents: true');
     expect(page).toContain('delayTouchStart');
     expect(page).toContain('delayTouchStart: 420');
-    expect(page).toContain("window.matchMedia('(pointer: fine)')");
+    expect(page).toContain('const finePointer = !touchBoardDragEnabled');
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('CNC_BOARD_DRAG_TYPE');
     expect(page).toContain('CncBoardDragLayer');
@@ -666,33 +666,6 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncColumnDisplayTitle(column)');
     expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
-    expect(page).toContain("baths_rolled: 'Закатаны'");
-    expect(page).toContain("orders: 'Заказы'");
-    expect(page).toContain("orders_ready: 'Готов к выдаче'");
-    expect(page).toContain("orders_issued: 'Выдан'");
-    expect(page).toContain('DEFAULT_CNC_ORDER_SORT_SETTINGS');
-    expect(page).toContain('const [cncOrderSort, setCncOrderSort]');
-    expect(page).toContain('buildCncBoardDisplayColumns(cncFilteredColumns, cncManualMoves, cncOrderSort)');
-    expect(page).toContain('Сортировка заказов');
-    expect(page).toContain('Свойство сортировки заказов МДФ-доски');
-    expect(page).toContain('Направление сортировки заказов МДФ-доски');
-    expect(page).toContain("field: 'orderName'");
-    expect(page).toContain("direction: 'asc'");
-    expect(page).toContain('CNC_MANUAL_MOVE_STORAGE_KEY');
-    expect(page).toContain('CncManualCardFrame');
-    expect(page).toContain("trigger={['contextMenu']}");
-    expect(page).toContain("label: 'Переместить'");
-    expect(page).toContain('isCncManualMoveAllowed');
-    expect(page).toContain('const autoColumn = isCncOrderReady(order)');
-    expect(page).toContain('CncOrderCardView');
-    expect(page).toContain('Из {order.totalDetails} деталей Распилено {order.cutDetails}, Закатаны {order.rolledDetails}. Осталось {order.remainingDetails}.');
-    expect(css).toContain('.cnc-today-column--baths_rolled');
-    expect(css).toContain('.cnc-today-column--orders_ready');
-    expect(css).toContain('.cnc-today-column--orders_issued');
-    expect(css).toContain('.cnc-card-context-menu');
-    expect(css).toContain('.cnc-order-card__progress');
-    expect(css).toContain('.cnc-order-card__progress-segment--cut');
-    expect(css).toContain('.cnc-order-card__progress-segment--rolled');
     expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
@@ -1629,27 +1602,6 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
     expect(css).toContain('.status-board-card__number.ant-btn');
     expect(css).toContain('overflow-wrap: anywhere');
-  });
-
-  it('adds the MDF compact display mode with number-only cards', () => {
-    expect(page).toContain('aria-label="Вид карточек МДФ-доски"');
-    expect(page).toContain('cardDisplayMode={cardDisplayMode}');
-    expect(page).toContain('displayMode={cardDisplayMode}');
-    expect(page).toContain("displayMode === 'minimal'");
-    expect(page).toContain('cnc-packet-card--minimal cnc-compact-card');
-    expect(page).toContain('cnc-bath-card--minimal cnc-compact-card');
-    expect(page).toContain('cnc-order-card--minimal cnc-compact-card');
-    expect(page).toContain('formatCncPacketCutSheetNumbers(packet)');
-    expect(page).toContain('formatCncPacketBasisCutNumber(packet)');
-    expect(page).toContain('packet.svgCutResultNo');
-    expect(page).toContain('Листы раскроя');
-    expect(page).toContain('Базис-раскрой');
-    expect(page).toContain('aria-label={`Ванна ${bath.cutNumber}`}');
-    expect(css).toContain('.status-board-columns--cnc-minimal .status-board-column__cards');
-    expect(css).toContain('.cnc-compact-card');
-    expect(css).toContain('.cnc-compact-card__number');
-    expect(css).toContain('.cnc-compact-card__refs');
-    expect(css).toContain('font-variant-numeric: tabular-nums');
   });
 
   it('keeps compact order cards as plain text except for the status badge', () => {

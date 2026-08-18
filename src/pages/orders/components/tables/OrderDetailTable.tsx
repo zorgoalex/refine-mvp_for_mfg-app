@@ -408,9 +408,6 @@ const ORDER_DETAIL_EDITABLE_CELL_KEYS = new Set<React.Key>([
   'detail_name',
 ]);
 
-const orderDetailRowKey = (detail: OrderDetail): number | undefined =>
-  detail.temp_id ?? detail.detail_id;
-
 export function calculateOrderDetailTableBodyScrollY(
   filledDetailRowsCount: number,
   detailRowsCount: number,
@@ -424,15 +421,6 @@ export function calculateOrderDetailTableBodyScrollY(
     ORDER_DETAIL_TABLE_MAX_SCROLL_Y,
     bodyRows * ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT,
   );
-}
-
-export function isLastOrderDetailRow(
-  details: readonly OrderDetail[],
-  target: OrderDetail,
-): boolean {
-  const targetKey = orderDetailRowKey(target);
-  if (targetKey === undefined || details.length === 0) return false;
-  return orderDetailRowKey(details[details.length - 1]) === targetKey;
 }
 
 const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
@@ -883,7 +871,6 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     record: OrderDetail;
   } | null>(null);
   const pendingFocusFieldRef = useRef<OrderDetailEditorField | null>(null);
-  const arrowDownQuickAddInFlightRef = useRef(false);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
   const isEditingField = (record: OrderDetail, field: React.Key) =>
     isEditing(record) && editingField === field;

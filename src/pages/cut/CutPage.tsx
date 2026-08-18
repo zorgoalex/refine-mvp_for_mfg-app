@@ -685,32 +685,6 @@ function CutOrderReference({
 
 function CutJobOrderLinks({
   items,
-  onOpen,
-}: {
-  items: readonly CutJobItemDto[];
-  onOpen: (orderId: number) => void;
-}): JSX.Element {
-  const refs = cutJobOrderRefs(items);
-  if (refs.length === 0) return <Text type="secondary">—</Text>;
-  return (
-    <span className="cut-job-order-links">
-      {refs.map((ref, index) => (
-        <React.Fragment key={ref.orderId}>
-          {index > 0 ? <span className="cut-job-order-links__separator">, </span> : null}
-          <CutOrderReference
-            orderId={ref.orderId}
-            orderName={ref.orderName}
-            orderDeleted={ref.orderDeleted}
-            onOpen={() => onOpen(ref.orderId)}
-          />
-        </React.Fragment>
-      ))}
-    </span>
-  );
-}
-
-function CutJobOrderLinks({
-  items,
   refs,
   onOpen,
 }: {
@@ -1207,7 +1181,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [svgUploadOpen, setSvgUploadOpen] = useState(false);
   const listFiltersRef = useRef<CutJobListFilters>({});
   const [criteriaOpen, setCriteriaOpen] = useState(false);
-  const [svgUploadOpen, setSvgUploadOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const orderOptionsSeqRef = useRef(0);
@@ -3680,7 +3653,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               value={cutListDateRange ?? null}
               placeholder={['Создано от', 'Создано до']}
               onChange={(value) => setCutListDateRange(value)}
-              placeholder={['Создано от', 'Создано до']}
             />
           </label>
           <label className="cut-operational-filter cut-operational-filter--order">
@@ -4939,7 +4911,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   pieceSheetInfoByItemId={pieceSheetInfoByItemId}
                   showFilm={!job.combineFilms}
                   showBathMeterGuides={showBathMeterGuides}
-                  onRemoveSheet={removeEditorSheet}
                 />
               </div>
             )}
@@ -5095,16 +5066,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           </Button>
         </div>
       )}
-      {canManage && (
-        <CutSvgUploadModal
-          open={svgUploadOpen}
-          onClose={() => setSvgUploadOpen(false)}
-          onDone={() => {
-            setSvgUploadOpen(false);
-            void loadJobs();
-          }}
-        />
-      )}
       <Modal
         title={pdfPreview.title}
         open={pdfPreview.open}
@@ -5134,14 +5095,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           <CutPdfPreview blob={pdfPreview.blob} loading={pdfPreview.loading} />
         </div>
       </Modal>
-      <CutSvgUploadModal
-        open={svgUploadOpen}
-        onClose={() => setSvgUploadOpen(false)}
-        onDone={(cutJobId) => {
-          void loadJobs(listFiltersRef.current);
-          if (cutJobId) void openJob(cutJobId);
-        }}
-      />
+      {canManage && (
+        <CutSvgUploadModal
+          open={svgUploadOpen}
+          onClose={() => setSvgUploadOpen(false)}
+          onDone={(cutJobId) => {
+            setSvgUploadOpen(false);
+            void loadJobs(listFiltersRef.current);
+            if (cutJobId) void openJob(cutJobId);
+          }}
+        />
+      )}
     </>
   );
 };
