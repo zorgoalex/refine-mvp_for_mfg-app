@@ -372,6 +372,23 @@ describe('PgProductionActionRepository', () => {
     expect(completeIndex).toBeGreaterThan(outboxIndex);
   });
 
+  it('returns the post-automation order version after an order status change', async () => {
+    const database = createDatabase({ readOrderVersion: 6 });
+    const repository = new PgProductionActionRepository(database.service);
+
+    await expect(
+      repository.changeOrderStatus({
+        currentUser: currentUser(),
+        orderId: 15,
+        dto: {
+          orderStatusId: 7,
+          version: 3,
+          idempotencyKey: 'status-post-automation-version-key',
+        },
+      }),
+    ).resolves.toMatchObject({ order: { version: 6 } });
+  });
+
   it('does not emit order.status_changed for a same-status manual command', async () => {
     const database = createDatabase({ orderStatusId: 7 });
     const repository = new PgProductionActionRepository(database.service);

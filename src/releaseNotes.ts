@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-18",
+    title: "Автостатусы: актуальная версия заказа",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "После ручной смены статуса заказа форма получает финальную версию с учётом синхронных автостатусов деталей и больше не показывает ложный конфликт при следующем сохранении.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-18",
     title: "Календарь: текущие статусы в меню",
     services: ["ERP"],
     repositories: ["repo_erp"],

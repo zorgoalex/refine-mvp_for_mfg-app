@@ -469,12 +469,13 @@ export class PgProductionActionRepository implements ProductionActionRepositoryP
         requestId,
         sourceIdempotencyKey: command.dto.idempotencyKey,
       });
+      const responseVersion = await readOrderVersion(tx, order.orderId);
 
       const response = {
         order: {
           orderId: order.orderId,
           orderStatusId: status.orderStatusId,
-          version: nextVersion,
+          version: responseVersion,
         },
         auditId,
         requestId,
