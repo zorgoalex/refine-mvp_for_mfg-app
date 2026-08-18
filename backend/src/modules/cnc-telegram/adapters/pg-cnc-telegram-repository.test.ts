@@ -276,6 +276,150 @@ describe('PgCncTelegramRepository', () => {
     expect(packetInsert?.params[18]).toBe('2026-07-24T08:00:00.000Z');
   });
 
+  it('ingests manual SVG uploads with explicit command history, scope check, audit and outbox', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
+          return {
+            rows: [{
+              order_key: '2689',
+              order_id: 2689,
+              detail_id: 3101,
+              detail_number: 31,
+              width: 501,
+              height: 480,
+            }],
+          };
+        }
+        if (/SELECT order_id\s+FROM orders/i.test(text)) {
+          return { rows: [{ order_id: 2689 }] };
+        }
+        if (/FROM unnest\(\$1::bigint\[\], \$2::bigint\[\]\)/i.test(text)) {
+          return { rows: [] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              external_packet_key: 'erp-svg-upload:manual',
+              source_chat_id: 'erp-manual-svg-upload',
+              source_message_id: null,
+              source_created_at: null,
+              source_updated_at: null,
+              completion_status: 'completed',
+              thumbs_up: true,
+              parser_version: 'erp-manual-svg-upload-v1',
+            })],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-manual-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.manualSvgUpload({
+      currentUser: user(),
+      dto: manualSvgDto(),
+      requestId: 'request-manual-svg-1',
+    });
+
+    const sql = queries.map((query) => query.text).join('\n');
+    expect(result).toMatchObject({
+      applied: true,
+      auditId: 'audit-manual-1',
+      createdMdfMachineFileCard: true,
+      packet: {
+        sourceChatId: 'erp-manual-svg-upload',
+        completionStatus: 'completed',
+      },
+    });
+    const idempotencyInsert = queries.find((query) =>
+      /INSERT INTO command_idempotency_keys/i.test(query.text),
+    );
+    expect(idempotencyInsert?.params[1]).toBe('cnc.manual_svg_upload');
+    expect(idempotencyInsert?.params[3]).toBe('cnc_manual_svg_upload');
+    const matchQuery = queries.find((query) => /FROM orders o\s+JOIN order_details od/i.test(query.text));
+    expect(matchQuery?.text).toContain('o.order_id = ANY($2::bigint[])');
+    expect(matchQuery?.params[1]).toEqual([2689]);
+    expect(sql).toContain('SELECT order_id');
+    expect(sql).toContain('cnc_telegram_packets');
+    expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.manual_svg_upload.created'))).toBe(true);
+    expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.manual_svg_upload.mdf_card_created'))).toBe(true);
+  });
+
+  it('creates manual SVG comment presets with command idempotency, audit and outbox', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/INSERT INTO cnc_manual_svg_comment_presets/i.test(text)) {
+          return {
+            rows: [{
+              preset_id: 7,
+              label: 'Переделка',
+              comment_text: 'переделка',
+              category: 'rework',
+              is_active: true,
+              sort_order: 500,
+              version: 1,
+              created_at: '2026-08-12T00:00:00.000Z',
+              updated_at: '2026-08-12T00:00:00.000Z',
+            }],
+          };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) {
+          return { rows: [{ audit_id: 'audit-preset-1' }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = {
+      transaction: vi.fn((handler) => handler(tx)),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.createManualSvgCommentPreset({
+      currentUser: user(),
+      idempotencyKey: 'manual-svg-preset:test',
+      dto: {
+        label: 'Переделка',
+        commentText: 'переделка',
+        category: 'rework',
+      },
+      requestId: 'request-preset-1',
+    });
+
+    expect(result).toMatchObject({ presetId: 7, commentText: 'переделка' });
+    const idempotencyInsert = queries.find((query) =>
+      /INSERT INTO command_idempotency_keys/i.test(query.text),
+    );
+    expect(idempotencyInsert?.params[1]).toBe('cnc.manual_svg_comment_preset.create');
+    expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.manual_svg_comment_preset.created'))).toBe(true);
+    expect(queries.some((query) => /UPDATE command_idempotency_keys/i.test(query.text))).toBe(true);
+  });
+
   it('uses source creation time when Telegram update time is absent', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {

@@ -82,6 +82,39 @@ export interface CncTelegramPacketCutSheet {
   detailIds: number[];
 }
 
+export interface CncTelegramCutLayoutItem {
+  orderName: string;
+  detailNumber: number;
+  widthMm: number;
+  heightMm: number;
+  quantity: number;
+  confidence?: number | null;
+  sourceElementId?: string | null;
+  xMm: number;
+  yMm: number;
+  placedWidthMm: number;
+  placedHeightMm: number;
+  rotated: boolean;
+}
+
+export interface CncTelegramCutLayout {
+  status: 'valid' | 'invalid';
+  reasons: string[];
+  sheet: { widthMm: number; heightMm: number } | null;
+  rawCommentCount?: number | null;
+  partContourCount?: number | null;
+  acceptedItemCount?: number | null;
+  items: CncTelegramCutLayoutItem[];
+}
+
+export interface CncTelegramPacketCutSheet {
+  cutGroupId: number;
+  sheetIndex: number;
+  sheetNumber: number;
+  variant: 'auto' | 'manual';
+  detailIds: number[];
+}
+
 export interface CncTelegramPacket {
   packetId: string;
   externalPacketKey: string;

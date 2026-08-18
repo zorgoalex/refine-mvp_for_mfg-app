@@ -148,6 +148,41 @@ interface DetailSorterState {
   order: DetailSortOrder;
 }
 
+type OrderDetailEditorField =
+  | 'height'
+  | 'width'
+  | 'quantity'
+  | 'area'
+  | 'milling_type_id'
+  | 'edge_type_id'
+  | 'sheet_material_type_id'
+  | 'note'
+  | 'doweling'
+  | 'milling_cost_per_sqm'
+  | 'detail_cost'
+  | 'film_id'
+  | 'priority'
+  | 'production_status_id'
+  | 'basis_project'
+  | 'basis_product'
+  | 'basis_data'
+  | 'basis_designation'
+  | 'detail_name';
+
+const orderDetailEditorFieldClassName = (field: OrderDetailEditorField) =>
+  `order-detail-editor-field order-detail-editor-field-${field}`;
+
+const orderDetailRowKey = (detail: OrderDetail): number | undefined =>
+  detail.temp_id ?? detail.detail_id;
+
+const isOrderDetailSelectDropdownNavigation = (e: React.KeyboardEvent): boolean => {
+  const target = e.target;
+  if (!(target instanceof HTMLElement)) return false;
+
+  return target.closest('.ant-select-open') !== null ||
+    target.getAttribute('aria-expanded') === 'true';
+};
+
 export function sortOrderDetailsForPagination(
   details: readonly OrderDetail[],
   compare: ((left: OrderDetail, right: OrderDetail) => number) | undefined,
@@ -176,6 +211,16 @@ export function pageContainingOrderDetail(
     (detail.temp_id ?? detail.detail_id) === targetKey,
   );
   return index < 0 ? 1 : Math.floor(index / Math.max(1, pageSize)) + 1;
+}
+
+export function isLastOrderDetailRow(
+  details: readonly OrderDetail[],
+  target: OrderDetail,
+): boolean {
+  const targetKey = orderDetailRowKey(target);
+  if (targetKey == null || details.length === 0) return false;
+
+  return orderDetailRowKey(details[details.length - 1]) === targetKey;
 }
 
 const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -837,6 +882,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     y: number;
     record: OrderDetail;
   } | null>(null);
+  const pendingFocusFieldRef = useRef<OrderDetailEditorField | null>(null);
+  const arrowDownQuickAddInFlightRef = useRef(false);
   const isEditing = (record: OrderDetail) => (record.temp_id || record.detail_id) === editingKey;
   const isEditingField = (record: OrderDetail, field: React.Key) =>
     isEditing(record) && editingField === field;
@@ -1348,6 +1395,33 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     }
   };
 
+  const handleArrowDownFromEditableCell = useCallback(async (
+    e: React.KeyboardEvent,
+    record: OrderDetail,
+    field: OrderDetailEditorField,
+  ) => {
+    if (e.key !== 'ArrowDown') return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (isOrderDetailSelectDropdownNavigation(e)) return;
+    if (!onQuickAdd || !isLastOrderDetailRow(sortedDetails, record)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (arrowDownQuickAddInFlightRef.current) return;
+    arrowDownQuickAddInFlightRef.current = true;
+    pendingFocusFieldRef.current = field;
+
+    try {
+      const added = await onQuickAdd();
+      if (added === false) {
+        pendingFocusFieldRef.current = null;
+      }
+    } finally {
+      arrowDownQuickAddInFlightRef.current = false;
+    }
+  }, [onQuickAdd, sortedDetails]);
+
   // Expose methods via ref for external calls (e.g., quick add)
   useImperativeHandle(ref, () => ({
     startEditRow: (detail) => {
@@ -1542,7 +1616,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               precision={2}
               emptyWhenUnset
               onChange={handleHeightChange}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'height');
+              }}
             />
           </Form.Item>
         );
@@ -1587,7 +1664,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               precision={2}
               emptyWhenUnset
               onChange={handleWidthChange}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'width');
+              }}
             />
           </Form.Item>
         );
@@ -1621,7 +1701,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               min={1}
               precision={0}
               onChange={handleQuantityChange}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'quantity');
+              }}
             />
           </Form.Item>
         ) : (
@@ -1909,7 +1992,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                     setSumContextMenu({ x: e.clientX, y: e.clientY });
                   }
                 }}
-                onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.preventDefault();
+                  void handleArrowDownFromEditableCell(e, d, 'detail_cost');
+                }}
               />
             </Form.Item>
           );
@@ -2065,7 +2151,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               min={1}
               max={999}
               tabIndex={-1}
-              onKeyDown={(e) => { if (e.key==='Enter'){e.preventDefault();} }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'priority');
+              }}
             />
           </Form.Item>
         ) : (
@@ -2096,6 +2185,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               dropdownMatchSelectWidth={false}
               style={{ width: '100%', textAlign: 'left' }}
               tabIndex={-1}
+              onKeyDown={(e) => void handleArrowDownFromEditableCell(e, d, 'production_status_id')}
             />
           </Form.Item>
         ) : (
@@ -2205,7 +2295,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
             <Input
               placeholder="Название детали"
               tabIndex={-1}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); } }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+                void handleArrowDownFromEditableCell(e, d, 'detail_name');
+              }}
             />
           </Form.Item>
         ) : (
@@ -2705,6 +2798,30 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     };
   });
   const stableRenderedColumns = useStableOrderDetailColumns(renderedColumns, cellRuntime);
+
+  const focusEditorField = useCallback((
+    row: HTMLElement,
+    field: OrderDetailEditorField | null,
+  ) => {
+    const fieldContainer = field
+      ? row.querySelector<HTMLElement>(`.order-detail-editor-field-${field}`)
+      : null;
+    const focusScope = fieldContainer ?? row;
+    const target = focusScope.querySelector<HTMLElement>(
+      'input:not([disabled]), textarea:not([disabled]), .ant-select-selector, [role="combobox"], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+
+    target?.focus();
+
+    if (
+      target instanceof HTMLInputElement &&
+      ['text', 'number', 'search'].includes(target.type)
+    ) {
+      target.select();
+    } else if (target instanceof HTMLTextAreaElement) {
+      target.select();
+    }
+  }, []);
 
   useEffect(() => {
     if (groupingActive) return;

@@ -354,9 +354,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         message.warning('Сначала заполните обязательные поля текущей позиции');
         return false;
       }
+      return true;
     } else {
       // No row being edited, just start editing the new one
       tableRef.current.startEditRow(lastDetail);
+      return true;
     }
     return true;
   };

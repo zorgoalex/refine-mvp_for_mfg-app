@@ -1253,6 +1253,90 @@ describe('order status board model', () => {
     expect(filtered[2]?.baths.map((bath) => bath.bathCardId)).toEqual(['archived']);
   });
 
+  it('applies MDF manual moves only within card-specific column groups', () => {
+    expect(isCncManualMoveAllowed('packet', 'parsed')).toBe(true);
+    expect(isCncManualMoveAllowed('packet', 'completed')).toBe(true);
+    expect(isCncManualMoveAllowed('packet', 'baths_rolled')).toBe(false);
+    expect(isCncManualMoveAllowed('bath', 'baths')).toBe(true);
+    expect(isCncManualMoveAllowed('bath', 'baths_ready')).toBe(true);
+    expect(isCncManualMoveAllowed('bath', 'baths_rolled')).toBe(true);
+    expect(isCncManualMoveAllowed('bath', 'orders_ready')).toBe(false);
+    expect(isCncManualMoveAllowed('order', 'orders')).toBe(true);
+    expect(isCncManualMoveAllowed('order', 'orders_ready')).toBe(true);
+    expect(isCncManualMoveAllowed('order', 'orders_issued')).toBe(true);
+    expect(isCncManualMoveAllowed('order', 'completed')).toBe(false);
+  });
+
+  it('builds MDF display columns with manual packet, bath and order moves', () => {
+    const columns = [
+      cncTodayColumn('parsed', [
+        cncPacket('packet-pending', ['1001']),
+      ]),
+      cncTodayColumn('completed', [
+        cncPacket('packet-ready', ['2002'], { completionStatus: 'completed' }),
+      ]),
+      cncTodayColumn('baths', [], [
+        cncBath('bath-ready', ['3003'], { ready: true }),
+      ]),
+    ];
+    const manualMoves: CncBoardManualMoveState = {
+      [cncManualMoveStorageKey('packet', 'packet-pending')]: 'completed',
+      [cncManualMoveStorageKey('bath', 'bath-ready')]: 'baths_rolled',
+      [cncManualMoveStorageKey('order', 'id:2002')]: 'orders_issued',
+    };
+
+    const display = cncDisplayMap(buildCncBoardDisplayColumns(columns, manualMoves));
+
+    expect(display.get('completed')?.packets.map((packet) => packet.packetId)).toEqual([
+      'packet-pending',
+      'packet-ready',
+    ]);
+    expect(display.get('baths_rolled')?.baths.map((bath) => bath.bathCardId)).toEqual([
+      'bath-ready',
+    ]);
+    expect(display.get('orders_ready')?.orders.map((order) => ({
+      key: order.orderKey,
+      cut: order.cutDetails,
+      rolled: order.rolledDetails,
+      left: order.remainingDetails,
+    }))).toEqual([
+      { key: 'id:1001', cut: 1, rolled: 0, left: 0 },
+      { key: 'id:3003', cut: 0, rolled: 1, left: 0 },
+    ]);
+    expect(display.get('orders_issued')?.orders.map((order) => ({
+      key: order.orderKey,
+      cut: order.cutDetails,
+      rolled: order.rolledDetails,
+      left: order.remainingDetails,
+    }))).toEqual([
+      { key: 'id:2002', cut: 1, rolled: 0, left: 0 },
+    ]);
+  });
+
+  it('keeps completed packet-only MDF orders ready and ignores stale manual targets', () => {
+    const columns = [
+      cncTodayColumn('completed', [
+        cncPacket('packet-ready', ['2002'], { completionStatus: 'completed' }),
+      ]),
+    ];
+    const display = cncDisplayMap(buildCncBoardDisplayColumns(columns, {
+      [cncManualMoveStorageKey('packet', 'packet-ready')]: 'baths',
+    }));
+
+    expect(display.get('completed')?.packets.map((packet) => packet.packetId)).toEqual([
+      'packet-ready',
+    ]);
+    expect(display.get('orders_ready')?.orders.map((order) => ({
+      key: order.orderKey,
+      cut: order.cutDetails,
+      rolled: order.rolledDetails,
+      left: order.remainingDetails,
+    }))).toEqual([
+      { key: 'id:2002', cut: 1, rolled: 0, left: 0 },
+    ]);
+    expect(display.get('orders')?.orders).toEqual([]);
+  });
+
   it('drops impossible dates from a hand-edited shared URL', () => {
     const state = parseOrderStatusBoardViewState(
       new URLSearchParams('plannedFrom=2026-02-30&plannedTo=0000-01-01'),

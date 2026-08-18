@@ -73,6 +73,7 @@ import type {
   CutJobItemDto,
   CutTextureDirection,
   CutResultSummary,
+  CutTextureDirection,
   EligibleDetailDto,
   SheetPlacements,
 } from '../../api/types/cutApi.types';
@@ -673,12 +674,38 @@ function CutOrderReference({
 }): JSX.Element {
   const label = orderName?.trim() || `#${orderId}`;
   return (
-    <Space size={4} wrap>
+    <span className="cut-order-reference">
       <Button type="link" size="small" style={{ padding: 0 }} onClick={onOpen}>
         {label}
       </Button>
       <OrderDeletedTag deleted={orderDeleted} />
-    </Space>
+    </span>
+  );
+}
+
+function CutJobOrderLinks({
+  items,
+  onOpen,
+}: {
+  items: readonly CutJobItemDto[];
+  onOpen: (orderId: number) => void;
+}): JSX.Element {
+  const refs = cutJobOrderRefs(items);
+  if (refs.length === 0) return <Text type="secondary">—</Text>;
+  return (
+    <span className="cut-job-order-links">
+      {refs.map((ref, index) => (
+        <React.Fragment key={ref.orderId}>
+          {index > 0 ? <span className="cut-job-order-links__separator">, </span> : null}
+          <CutOrderReference
+            orderId={ref.orderId}
+            orderName={ref.orderName}
+            orderDeleted={ref.orderDeleted}
+            onOpen={() => onOpen(ref.orderId)}
+          />
+        </React.Fragment>
+      ))}
+    </span>
   );
 }
 
@@ -1180,6 +1207,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [svgUploadOpen, setSvgUploadOpen] = useState(false);
   const listFiltersRef = useRef<CutJobListFilters>({});
   const [criteriaOpen, setCriteriaOpen] = useState(false);
+  const [svgUploadOpen, setSvgUploadOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const orderOptionsSeqRef = useRef(0);
@@ -2754,6 +2782,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     jobSearch,
     jobKindTab,
     jobs,
+    cutListDateRange,
     operationalFilmFilter,
     operationalSheetFilter,
     profileFilter,
@@ -2888,6 +2917,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         render: (value: string) => (
           <Tooltip title={formatCutJobCreatedDateTime(value)}>
             <span>{formatCutJobCreatedDate(value)}</span>
+          </Tooltip>
+        ),
+      },
+      {
+        title: 'Дата',
+        dataIndex: 'createdAt',
+        key: 'createdAt',
+        width: 84,
+        sorter: (a, b) => cutJobCreatedAtSortValue(a.createdAt) - cutJobCreatedAtSortValue(b.createdAt),
+        render: (value: string | undefined) => (
+          <Tooltip title={formatCutJobCreatedDateTime(value)}>
+            <Text className="app-tabular">{formatCutJobCreatedDate(value)}</Text>
           </Tooltip>
         ),
       },
@@ -3558,6 +3599,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 </>
               ) : (
                 <>
+                  {canManage && (
+                    <Button
+                      icon={<UploadOutlined />}
+                      onClick={() => setSvgUploadOpen(true)}
+                    >
+                      Загрузить SVG
+                    </Button>
+                  )}
                   <Button icon={<DownloadOutlined />} onClick={exportJobs}>
                     Экспорт
                   </Button>
@@ -3631,6 +3680,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               value={cutListDateRange ?? null}
               placeholder={['Создано от', 'Создано до']}
               onChange={(value) => setCutListDateRange(value)}
+              placeholder={['Создано от', 'Создано до']}
             />
           </label>
           <label className="cut-operational-filter cut-operational-filter--order">
@@ -3957,6 +4007,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             <Button className="cut-operational-chip">Мои задания</Button>
             <span className="cut-operational-table-toolbar__grow" />
             <Typography.Text type="secondary">Найдено {filteredJobs.length}</Typography.Text>
+            {canManage && (
+              <Tooltip title="Загрузить SVG-раскрой">
+                <Button aria-label="Загрузить SVG-раскрой" icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)} />
+              </Tooltip>
+            )}
             <Tooltip title="Обновить">
               <Button aria-label="Обновить список" icon={<ReloadOutlined />} onClick={loadJobs} loading={jobsLoading} />
             </Tooltip>
@@ -4494,8 +4549,6 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         </Collapse>
       )}
 
-      {!isCreationPreview && noSheetMsg && <Alert type="warning" showIcon message={noSheetMsg} />}
-
       {eligible && !isCreationPreview && (
         <Card
           className="cut-page-modern__eligible"
@@ -4804,6 +4857,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             {isEditingGroup && job.editorParams && !groupInvariantError && (
               <div style={{ marginTop: 12 }}>
                 <Space style={{ marginBottom: 8 }}>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined />}
+                    onClick={addEditorSheet}
+                    disabled={busy}
+                    data-testid="add-manual-sheet-btn"
+                  >
+                    Добавить лист
+                  </Button>
                   <Tooltip title={violations.length > 0 ? `${violations.length} нарушений геометрии` : undefined}>
                     <Button
                       type="primary"
@@ -4877,6 +4939,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   pieceSheetInfoByItemId={pieceSheetInfoByItemId}
                   showFilm={!job.combineFilms}
                   showBathMeterGuides={showBathMeterGuides}
+                  onRemoveSheet={removeEditorSheet}
                 />
               </div>
             )}
@@ -5031,6 +5094,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             Наверх
           </Button>
         </div>
+      )}
+      {canManage && (
+        <CutSvgUploadModal
+          open={svgUploadOpen}
+          onClose={() => setSvgUploadOpen(false)}
+          onDone={() => {
+            setSvgUploadOpen(false);
+            void loadJobs();
+          }}
+        />
       )}
       <Modal
         title={pdfPreview.title}

@@ -1,5 +1,5 @@
 {
-  "apiUrl": "https://backend-test.mebelkz.app",
+  "apiUrl": "https://backend-test.example.com",
   "features": {
     "backendAuth": true,
     "backendPermissions": true,

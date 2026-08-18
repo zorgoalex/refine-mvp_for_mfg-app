@@ -58,6 +58,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('aria-describedby');
     expect(page).toContain('restoreOrderStatusBoardFocus');
     expect(page).toContain('data-status-board-order-id');
+    expect(page).toContain('cardRef.current');
+    expect(page).toContain('function isKeyboardMoveMenuTrigger');
+    expect(page).toContain('onKeyDown={(event) =>');
+    expect(page).toContain("aria-haspopup={moveAvailable ? 'menu' : undefined}");
+    expect(page).toContain('aria-expanded={moveAvailable ? menuOpen : undefined}');
+    expect(page).toContain('setMenuOpen(true)');
   });
 
   it('moves production cards without the obsolete manual-mode confirmation', () => {
@@ -155,6 +161,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toMatch(/\.status-board-viewport--touch-dragging\s*\{[^}]*touch-action: none !important;/s);
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     expect(css).toContain('scroll-snap-type: x mandatory');
+    expect(css).toContain('touch-action: pan-y');
   });
 
   it('keeps order status badge in the header and overdue as a clock icon', () => {
@@ -489,6 +496,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).not.toContain('paymentStatusName ||');
   });
 
+  it('keeps order status badge in the order header and overdue as a clock icon', () => {
+    expect(page).toContain('status-board-card__identity');
+    expect(page).toContain('status-board-card__status-badge');
+    expect(page).toContain('status-board-card__overdue-icon');
+    expect(page).toContain('aria-label="Плановая дата прошла"');
+    expect(page).not.toContain("<Tag color=\"blue\">Авто</Tag>");
+    expect(page).not.toContain("<Tag color=\"volcano\">Плановая дата прошла</Tag>");
+    expect(css).toContain('.status-board-card__identity');
+    expect(css).toContain('.status-board-card__overdue-icon');
+    expect(css).toContain('color: #cf1322');
+  });
+
   it('shows the completed-status opt-in only on the production tab with a usable hit area', () => {
     expect(page).toContain("viewState.view === 'production'");
     expect(page).toContain('Показывать завершённые');
@@ -614,6 +633,33 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cncColumnDisplayTitle(column)');
     expect(page).toContain("baths: 'Карты ванн'");
     expect(page).toContain("baths_ready: 'Готовы к закатке'");
+    expect(page).toContain("baths_rolled: 'Закатаны'");
+    expect(page).toContain("orders: 'Заказы'");
+    expect(page).toContain("orders_ready: 'Готов к выдаче'");
+    expect(page).toContain("orders_issued: 'Выдан'");
+    expect(page).toContain('DEFAULT_CNC_ORDER_SORT_SETTINGS');
+    expect(page).toContain('const [cncOrderSort, setCncOrderSort]');
+    expect(page).toContain('buildCncBoardDisplayColumns(cncFilteredColumns, cncManualMoves, cncOrderSort)');
+    expect(page).toContain('Сортировка заказов');
+    expect(page).toContain('Свойство сортировки заказов МДФ-доски');
+    expect(page).toContain('Направление сортировки заказов МДФ-доски');
+    expect(page).toContain("field: 'orderName'");
+    expect(page).toContain("direction: 'asc'");
+    expect(page).toContain('CNC_MANUAL_MOVE_STORAGE_KEY');
+    expect(page).toContain('CncManualCardFrame');
+    expect(page).toContain("trigger={['contextMenu']}");
+    expect(page).toContain("label: 'Переместить'");
+    expect(page).toContain('isCncManualMoveAllowed');
+    expect(page).toContain('const autoColumn = isCncOrderReady(order)');
+    expect(page).toContain('CncOrderCardView');
+    expect(page).toContain('Из {order.totalDetails} деталей Распилено {order.cutDetails}, Закатаны {order.rolledDetails}. Осталось {order.remainingDetails}.');
+    expect(css).toContain('.cnc-today-column--baths_rolled');
+    expect(css).toContain('.cnc-today-column--orders_ready');
+    expect(css).toContain('.cnc-today-column--orders_issued');
+    expect(css).toContain('.cnc-card-context-menu');
+    expect(css).toContain('.cnc-order-card__progress');
+    expect(css).toContain('.cnc-order-card__progress-segment--cut');
+    expect(css).toContain('.cnc-order-card__progress-segment--rolled');
     expect(page).not.toContain('Строка не сопоставлена с ERP');
     expect(page).not.toContain('items={[{');
     expect(page).not.toContain("board: 'cnc");
@@ -1504,8 +1550,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('STATUS_BOARD_CARD_DISPLAY_OPTIONS');
     expect(page).toContain('Вид карточек заказов');
     expect(page).toContain('Стандартный');
+    expect(page).toContain('Средний');
     expect(page).toContain('Компактный');
-    expect(page).toContain('Минимальный');
+    expect(page).not.toContain('Минимальный');
     expect(page).toContain('formatStatusBoardOrderNumber(card)');
     expect(page).toContain('trimmedText(card.orderName) || String(card.orderId)');
     expect(page).not.toContain('card.orderName.trim() || String(card.orderId)');
@@ -1549,6 +1596,27 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
     expect(css).toContain('.status-board-card__number.ant-btn');
     expect(css).toContain('overflow-wrap: anywhere');
+  });
+
+  it('adds the MDF compact display mode with number-only cards', () => {
+    expect(page).toContain('aria-label="Вид карточек МДФ-доски"');
+    expect(page).toContain('cardDisplayMode={cardDisplayMode}');
+    expect(page).toContain('displayMode={cardDisplayMode}');
+    expect(page).toContain("displayMode === 'minimal'");
+    expect(page).toContain('cnc-packet-card--minimal cnc-compact-card');
+    expect(page).toContain('cnc-bath-card--minimal cnc-compact-card');
+    expect(page).toContain('cnc-order-card--minimal cnc-compact-card');
+    expect(page).toContain('formatCncPacketCutSheetNumbers(packet)');
+    expect(page).toContain('formatCncPacketBasisCutNumber(packet)');
+    expect(page).toContain('packet.svgCutResultNo');
+    expect(page).toContain('Листы раскроя');
+    expect(page).toContain('Базис-раскрой');
+    expect(page).toContain('aria-label={`Ванна ${bath.cutNumber}`}');
+    expect(css).toContain('.status-board-columns--cnc-minimal .status-board-column__cards');
+    expect(css).toContain('.cnc-compact-card');
+    expect(css).toContain('.cnc-compact-card__number');
+    expect(css).toContain('.cnc-compact-card__refs');
+    expect(css).toContain('font-variant-numeric: tabular-nums');
   });
 
   it('keeps compact order cards as plain text except for the status badge', () => {

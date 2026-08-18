@@ -84,6 +84,7 @@ import {
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
+import { CutSvgUploadModal } from "../cut/CutSvgUploadModal";
 import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
 import {
   isTabletTier,
@@ -240,6 +241,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const useBackendCut = featureFlags.useBackendCut;
   const [selectedCutOrderIds, setSelectedCutOrderIds] = useState<number[]>([]);
   const [addToCutOpen, setAddToCutOpen] = useState(false);
+  const [cutSvgUploadOpen, setCutSvgUploadOpen] = useState(false);
   const canViewUsers = canQueryUsersResource(currentUser);
   const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
   const { canViewFinancials } = useOrderFinancialVisibility(currentUser);

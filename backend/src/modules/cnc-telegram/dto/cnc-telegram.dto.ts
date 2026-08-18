@@ -90,6 +90,42 @@ export interface CncTelegramPacketCutSheetDto {
   detailIds: number[];
 }
 
+export interface CncTelegramCutLayoutItemDto {
+  orderName: string;
+  detailNumber: number;
+  widthMm: number;
+  heightMm: number;
+  quantity: number;
+  confidence?: number | null;
+  sourceElementId?: string | null;
+  xMm: number;
+  yMm: number;
+  placedWidthMm: number;
+  placedHeightMm: number;
+  rotated: boolean;
+}
+
+export interface CncTelegramCutLayoutDto {
+  status: 'valid' | 'invalid';
+  reasons: string[];
+  sheet: {
+    widthMm: number;
+    heightMm: number;
+  } | null;
+  rawCommentCount?: number | null;
+  partContourCount?: number | null;
+  acceptedItemCount?: number | null;
+  items: CncTelegramCutLayoutItemDto[];
+}
+
+export interface CncTelegramPacketCutSheetDto {
+  cutGroupId: number;
+  sheetIndex: number;
+  sheetNumber: number;
+  variant: 'auto' | 'manual';
+  detailIds: number[];
+}
+
 export interface CncTelegramPacketDto {
   packetId: string;
   externalPacketKey: string;
@@ -330,6 +366,49 @@ export interface CncTelegramManualSvgUploadDto {
   sourceFiles?: CncTelegramManualSvgUploadFileDto[];
   generatedScreenshot?: CncTelegramManualSvgGeneratedScreenshotDto;
   telegramSend?: CncTelegramManualSvgTelegramSendDto;
+}
+
+export interface CncTelegramManualSvgCommentPresetDto {
+  presetId: number;
+  label: string;
+  commentText: string;
+  category: 'general' | 'order' | 'tool' | 'material' | 'rework' | 'custom';
+  isActive: boolean;
+  sortOrder: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCncTelegramManualSvgCommentPresetDto {
+  label: string;
+  commentText: string;
+  category?: CncTelegramManualSvgCommentPresetDto['category'];
+  sortOrder?: number;
+}
+
+export interface CncTelegramManualSvgUploadResponseDto extends CncTelegramIngestResponseDto {
+  cutJobId: number | null;
+  cutResultId: number | null;
+  cutJobPath: string | null;
+  createdMdfMachineFileCard: boolean;
+}
+
+export interface CncTelegramManualSvgUploadDto {
+  idempotencyKey: string;
+  selectedOrderIds: number[];
+  createMdfMachineFileCard: boolean;
+  svgContentHash: string;
+  workday?: string;
+  machine?: string | null;
+  programName?: string | null;
+  materialName?: string | null;
+  rework?: boolean;
+  comments?: string[];
+  tools?: CncTelegramToolDto[];
+  parserVersion?: string | null;
+  cutLayout: CncTelegramCutLayoutDto;
+  items: CncTelegramStructuredIngestDto['items'];
 }
 
 export interface CncTelegramManualSvgCommentPresetDto {
