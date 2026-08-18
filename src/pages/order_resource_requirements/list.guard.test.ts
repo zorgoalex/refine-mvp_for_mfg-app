@@ -57,6 +57,10 @@ describe('order resource requirements list guards', () => {
     expect(source).toContain('readyCutsOnly');
     expect(source).toContain('rowHasReadyCut');
     expect(source).toContain('film.hasCutData');
+    expect(source).toContain('handleReadyCutsOnlyChange');
+    expect(source).toContain('if (checked)');
+    expect(source).toContain('setSelectedRowKeys([])');
+    expect(source).toContain('setSelectedRowsByKey(new Map())');
   });
 
   it('в колонке «Заказ» показывает номер заказа без кода проекта', () => {
