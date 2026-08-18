@@ -11,6 +11,7 @@ WRITABLE_DIRS = (
     Path("/data/tmp"),
     Path("/data/session"),
     Path("/data/cnc-telegram-media"),
+    Path("/data/technical-logs"),
 )
 
 

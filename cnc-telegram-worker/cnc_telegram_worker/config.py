@@ -46,6 +46,9 @@ class WorkerConfig:
     state_path: Path
     audit_spool_path: Path
     audit_allow_unsafe_path: bool
+    technical_log_spool_path: Path
+    technical_log_flush_interval_seconds: int
+    technical_log_heartbeat_seconds: int
     resend_unchanged: bool
     backfill_on_start: bool
 
@@ -96,6 +99,9 @@ class WorkerConfig:
             state_path=Path(env("CNC_STATE_PATH", "/data/state.json")),
             audit_spool_path=Path(env("CNC_AUDIT_SPOOL_PATH", "/data/cnc-telegram-audit.sqlite3")),
             audit_allow_unsafe_path=bool_env("CNC_AUDIT_ALLOW_UNSAFE_PATH", False),
+            technical_log_spool_path=Path(env("CNC_TECHNICAL_LOG_SPOOL_PATH", "/data/technical-logs/spool.sqlite3")),
+            technical_log_flush_interval_seconds=positive_int_env("CNC_TECHNICAL_LOG_FLUSH_INTERVAL_SECONDS", 5),
+            technical_log_heartbeat_seconds=positive_int_env("CNC_TECHNICAL_LOG_HEARTBEAT_SECONDS", 30),
             resend_unchanged=bool_env("CNC_RESEND_UNCHANGED", False),
             backfill_on_start=bool_env("CNC_BACKFILL_ON_START", True),
         )

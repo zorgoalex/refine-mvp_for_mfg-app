@@ -188,6 +188,8 @@ export const apiRoutes = {
       backendApiPath(`/cnc-telegram/orders/${orderId}/screenshots/${encodeURIComponent(packetId)}/restore`),
     workerLogs: backendApiPath('/cnc-telegram/worker-logs'),
     workerLogsExport: backendApiPath('/cnc-telegram/worker-logs/export'),
+    workerTechnicalLogs: backendApiPath('/cnc-telegram/worker-logs/technical'),
+    workerTechnicalLogsExport: backendApiPath('/cnc-telegram/worker-logs/technical/export'),
   },
   sheetMaterials: {
     list: backendApiPath('/sheet-material-types'),

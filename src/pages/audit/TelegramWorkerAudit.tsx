@@ -1,11 +1,13 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, message, Row, Select, Space, Statistic, Tag, Timeline, Typography } from 'antd';
+import { Alert, Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, message, Row, Select, Space, Statistic, Tabs, Tag, Timeline, Typography } from 'antd';
 import { DownloadOutlined, ReloadOutlined, RobotOutlined, SearchOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
 import type { TelegramWorkerAuditExportQuery, TelegramWorkerAuditQuery, TelegramWorkerMessageLog, TelegramWorkerMessageStatus, TelegramWorkerMessageType, TelegramWorkerOperation, TelegramWorkerScan } from '../../api/types/cncTelegramWorkerAudit.types';
 import { ApiError } from '../../api/httpClient';
+import { TelegramWorkerTechnicalLogs } from './TelegramWorkerTechnicalLogs';
+import { can } from '../../utils/permissions';
 
 const { Text } = Typography;
 const STATUS_LABELS: Record<string, string> = {
@@ -127,7 +129,7 @@ function ExpandedEvidence({ record }: { record: TelegramWorkerMessageLog }) {
   );
 }
 
-export const TelegramWorkerAudit: React.FC = () => {
+const TelegramWorkerStructuredAudit: React.FC = () => {
   const [form] = Form.useForm<FilterValues>();
   const [query, setQuery] = useState<TelegramWorkerAuditQuery>(() => buildTelegramWorkerAuditQuery({}));
   const [data, setData] = useState<TelegramWorkerMessageLog[]>([]);
@@ -228,6 +230,18 @@ export const TelegramWorkerAudit: React.FC = () => {
     </div>
   );
 };
+
+export const TelegramWorkerAudit: React.FC = () => (
+  <Tabs
+    defaultActiveKey="events"
+    items={[
+      { key: 'events', label: 'Зарегистрированные события', children: <TelegramWorkerStructuredAudit /> },
+      ...(can('audit.technical.view')
+        ? [{ key: 'technical', label: 'Технические raw-логи', children: <TelegramWorkerTechnicalLogs /> }]
+        : []),
+    ]}
+  />
+);
 
 function saveBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);

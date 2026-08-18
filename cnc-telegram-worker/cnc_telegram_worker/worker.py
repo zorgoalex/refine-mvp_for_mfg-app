@@ -8,6 +8,7 @@ import mimetypes
 import re
 import shutil
 import os
+import traceback
 import uuid
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -211,6 +212,7 @@ class CncTelegramWorker:
                     await manual_svg_send_task
                 except Exception as exc:
                     print(f"manual SVG send polling stopped with error: {exc}", flush=True)
+                    traceback.print_exception(exc)
             if client is not None:
                 try:
                     await client.disconnect()
@@ -428,6 +430,7 @@ class CncTelegramWorker:
                         print(f"manual SVG send audit delivery deferred: {audit_exc}", flush=True)
             except Exception as exc:
                 error_message = sanitize_text(str(exc), 500) or "Manual SVG Telegram send failed"
+                traceback.print_exception(exc)
                 try:
                     await self.erp.fail_manual_svg_telegram_send(request_id, error_message)
                 except Exception as report_exc:
@@ -466,6 +469,7 @@ class CncTelegramWorker:
                 )
             except Exception as exc:
                 print(f"manual SVG send polling failed: {exc}", flush=True)
+                traceback.print_exception(exc)
 
     async def run_daemon(self, days: int | None = None) -> None:
         if not self.config.enabled:
@@ -483,6 +487,7 @@ class CncTelegramWorker:
                 await self.run_once(days=scan_days)
             except Exception as exc:
                 print(f"scan failed: {exc}", flush=True)
+                traceback.print_exception(exc)
             first = False
             await asyncio.sleep(self.config.poll_interval_seconds)
 
