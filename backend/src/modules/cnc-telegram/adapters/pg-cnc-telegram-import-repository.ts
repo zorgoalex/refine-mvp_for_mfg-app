@@ -391,7 +391,6 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
     if (text(scan, 'status') !== 'ready') throw new ApiError(409, 'CNC_TELEGRAM_SCAN_NOT_READY', 'Scan is not ready');
     const candidates = await tx.query<Row>('SELECT * FROM cnc_telegram_import_candidates WHERE scan_id=$1 AND candidate_id=ANY($2::uuid[]) FOR UPDATE', [text(scan, 'scan_id'), input.candidateIds]);
     if (candidates.rowCount !== input.candidateIds.length || candidates.rows.some((row) => text(row, 'eligibility_status') !== 'valid' || new Date(text(row, 'expires_at')).getTime() <= Date.now())) throw new ApiError(422, 'INVALID_CNC_TELEGRAM_CANDIDATES', 'Selection contains an expired or ineligible candidate');
-    for (const candidate of candidates.rows) await this.refreshMatches(tx, candidate);
     const selectionHash = digest(JSON.stringify([text(scan, 'scan_id'), input.currentUser.id, [...input.candidateIds].sort(), input.repeatOfImportRequestId ?? null]));
     const requestHash = digest(JSON.stringify({ selectionHash, actor: input.currentUser.id, repeat: input.repeatOfImportRequestId ?? null }));
     const prior = await tx.query<Row>('SELECT * FROM cnc_telegram_import_requests WHERE requested_by=$1 AND idempotency_key=$2 FOR UPDATE', [input.currentUser.id, input.idempotencyKey]);
@@ -399,6 +398,8 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       if (text(prior.rows[0], 'request_hash') !== requestHash) throw idempotencyConflict();
       return this.loadRequest(tx, prior.rows[0]);
     }
+    for (const candidate of candidates.rows) await assertTelegramImportCandidateOrdersResolvable(tx, candidate);
+    for (const candidate of candidates.rows) await this.refreshMatches(tx, candidate);
     if (!input.repeatOfImportRequestId) {
       const terminal = await tx.query<Row>(`SELECT import_request_id FROM cnc_telegram_import_requests WHERE scan_id=$1 AND requested_by=$2 AND selection_hash=$3 AND status IN ('completed','partial','failed') LIMIT 1`, [text(scan, 'scan_id'), input.currentUser.id, selectionHash]);
       if (terminal.rows[0]) throw new ApiError(409, 'CNC_TELEGRAM_REPEAT_REQUIRED', 'An explicit repeat relation is required for an already imported selection');
@@ -533,6 +534,27 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       await auditService.record(tx, { event: 'cnc.telegram_import.scan_completed', actorUserId: input.currentUser.id, entityType: 'cnc_telegram_import_scan', entityId: text(row, 'scan_id'), source: 'cnc.telegram_import_worker', requestId, metadata: { candidatesFound: number(row, 'candidates_found') } });
       return scanDto(requiredRow(updated.rows[0], 'scan completion'));
     });
+  }
+}
+
+export async function assertTelegramImportCandidateOrdersResolvable(tx: TransactionClient, candidate: Row): Promise<void> {
+  const layout = toCutLayout(json(candidate, 'cut_layout_json'));
+  const items = telegramImportItemsFromLayout(layout);
+  const selectedOrderIds = await inferTelegramImportSelectedOrderIds(tx, items);
+  if (selectedOrderIds.length === 0) {
+    const orderNames = [...new Set(items.map((item) => item.orderName.trim()).filter(Boolean))];
+    const orderLabel = orderNames.slice(0, 10).join(', ') || 'не распознан';
+    throw new ApiError(
+      422,
+      'CNC_TELEGRAM_IMPORT_ORDERS_UNRESOLVED',
+      `Нельзя создать раскрой из ${text(candidate, 'svg_file_name')}: ERP-заказ «${orderLabel}» не найден или неоднозначен. Проверьте заказ в ERP.`,
+      {
+        candidateId: text(candidate, 'candidate_id'),
+        svgFileName: text(candidate, 'svg_file_name'),
+        orderNames,
+        reason: 'missing_or_ambiguous_active_order',
+      },
+    );
   }
 }
 

@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import { canonicalLayoutFingerprint } from './pg-cnc-telegram-repository';
 import {
   PgCncTelegramImportRepository,
+  assertTelegramImportCandidateOrdersResolvable,
   assertCncTelegramScanMessageCount,
   assertTerminalItemLeaseReplay,
   inferTelegramImportSelectedOrderIds,
@@ -184,6 +186,80 @@ describe('explicit Telegram import backend contracts', () => {
     expect(tx.query.mock.calls[2]?.[1]).toEqual(['candidate-1', '-1001', sourceMessageId]);
     expect(tx.query.mock.calls[3]?.[1]).toEqual(['candidate-1', sourceMessageId, '-1001']);
     expect(tx.query.mock.calls[2]?.[0]).toContain('p.source_message_id=$3::bigint');
+  });
+
+  it('rejects an unresolved ERP order before creating request or item rows', async () => {
+    const candidate = {
+      candidate_id: 'candidate-2812', scan_id: 'scan-1', source_chat_id: '-1001',
+      eligibility_status: 'valid', expires_at: new Date(Date.now() + 60_000).toISOString(),
+      svg_file_name: 'CNC#1_2812-8MM.svg', cut_layout_json: {
+        status: 'valid', reasons: [], sheet: { widthMm: 2800, heightMm: 2070 },
+        items: [{ orderName: '2812', detailNumber: 1, widthMm: 400, heightMm: 600, quantity: 1 }],
+      },
+    };
+    const tx = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ scan_id: 'scan-1', requested_by: 'user-1', status: 'ready' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [candidate], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // same-hash prior request lookup
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) };
+    const database = {
+      transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => handler(tx),
+    } as unknown as DatabaseService;
+    const repository = new PgCncTelegramImportRepository(database, {} as never);
+
+    await expect(repository.prepare({
+      currentUser: { id: 'user-1', username: 'tester', role: 'manager', roleId: 1, permissions: [] },
+      scanId: 'scan-1', candidateIds: ['candidate-2812'], requestId: 'request-1', idempotencyKey: 'key-1',
+    })).rejects.toMatchObject({
+      code: 'CNC_TELEGRAM_IMPORT_ORDERS_UNRESOLVED',
+      message: expect.stringContaining('ERP-заказ «2812»'),
+      details: expect.objectContaining({ candidateId: 'candidate-2812', svgFileName: 'CNC#1_2812-8MM.svg', orderNames: ['2812'] }),
+    });
+    expect(tx.query.mock.calls.some(([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO cnc_telegram_import_requests'))).toBe(false);
+    expect(tx.query.mock.calls.some(([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO cnc_telegram_import_items'))).toBe(false);
+  });
+
+  it('accepts a candidate when exactly one active ERP order matches its SVG order name', async () => {
+    const tx = { query: vi.fn().mockResolvedValue({ rows: [{ order_id: '2812' }], rowCount: 1 }) };
+    await expect(assertTelegramImportCandidateOrdersResolvable(tx as never, {
+      candidate_id: 'candidate-2812', svg_file_name: 'CNC#1_2812-8MM.svg', cut_layout_json: {
+        status: 'valid', reasons: [], sheet: { widthMm: 2800, heightMm: 2070 },
+        items: [{ orderName: '2812', detailNumber: 1, widthMm: 400, heightMm: 600, quantity: 1 }],
+      },
+    })).resolves.toBeUndefined();
+  });
+
+  it('returns an idempotent same-hash request before revalidating ERP orders', async () => {
+    const candidateId = 'candidate-2812';
+    const selectionHash = createHash('sha256').update(JSON.stringify(['scan-1', 'user-1', [candidateId], null])).digest('hex');
+    const requestHash = createHash('sha256').update(JSON.stringify({ selectionHash, actor: 'user-1', repeat: null })).digest('hex');
+    const prior = {
+      import_request_id: 'request-1', scan_id: 'scan-1', requested_by: 'user-1', request_hash: requestHash,
+      status: 'draft', confirmation_id: 'confirmation-1', selected_count: 1, imported_count: 0,
+      failed_count: 0, error_message: null, selection_hash: selectionHash, duplicate_match_version: 1,
+      repeat_of_import_request_id: null,
+    };
+    const candidate = {
+      candidate_id: candidateId, scan_id: 'scan-1', eligibility_status: 'valid',
+      expires_at: new Date(Date.now() + 60_000).toISOString(), cut_layout_json: null,
+    };
+    const tx = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ scan_id: 'scan-1', requested_by: 'user-1', status: 'ready' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [candidate], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [prior], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) };
+    const database = {
+      transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => handler(tx),
+    } as unknown as DatabaseService;
+    const repository = new PgCncTelegramImportRepository(database, {} as never);
+
+    await expect(repository.prepare({
+      currentUser: { id: 'user-1', username: 'tester', role: 'manager', roleId: 1, permissions: [] },
+      scanId: 'scan-1', candidateIds: [candidateId], requestId: 'request-retry', idempotencyKey: 'key-1',
+    })).resolves.toMatchObject({ importRequestId: 'request-1' });
+    expect(tx.query.mock.calls.some(([sql]) => typeof sql === 'string' && sql.includes('FROM orders'))).toBe(false);
+    expect(tx.query.mock.calls.some(([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO cnc_telegram_import_requests'))).toBe(false);
+    expect(tx.query.mock.calls.some(([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO cnc_telegram_import_items'))).toBe(false);
   });
 
   it('keeps completion source bytes bounded and hash-verifiable by the ingest path', () => {
