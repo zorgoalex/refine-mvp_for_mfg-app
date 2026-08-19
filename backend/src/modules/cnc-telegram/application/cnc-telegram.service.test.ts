@@ -92,6 +92,44 @@ describe('CncTelegramService', () => {
     );
   });
 
+  it.each([
+    [false, 'CNC_TELEGRAM_BACKGROUND_INGEST_DISABLED', 'BACKGROUND_INGEST_DISABLED'],
+    [true, 'CNC_TELEGRAM_BACKGROUND_INGEST_APPROVAL_REQUIRED', 'BACKGROUND_INGEST_APPROVAL_REQUIRED'],
+  ] as const)('keeps legacy background ingest fail-closed (enabled=%s)', async (
+    backgroundIngestEnabled,
+    code,
+    reason,
+  ) => {
+    const ingest = vi.fn();
+    const deniedAudit = {
+      recordIngestDenied: vi.fn().mockResolvedValue(undefined),
+      recordAutoCutStatusConfigureDenied: vi.fn().mockResolvedValue(undefined),
+    };
+    const service = new CncTelegramService({
+      packets: {
+        listToday: vi.fn(),
+        listOrderCuttingSequences: vi.fn(),
+        ingest,
+        manualSvgUpload: vi.fn(),
+        listManualSvgCommentPresets: vi.fn(),
+        createManualSvgCommentPreset: vi.fn(),
+        configureAutoCutStatus: vi.fn(),
+      },
+      deniedAudit,
+      backgroundIngestEnabled,
+    });
+
+    await expect(service.ingest({
+      currentUser: user(['cut.manage']),
+      dto: ingestDto(),
+      requestId: 'request-background-ingest',
+    })).rejects.toMatchObject({ code, statusCode: 503 });
+    expect(ingest).not.toHaveBeenCalled();
+    expect(deniedAudit.recordIngestDenied).toHaveBeenCalledWith(
+      expect.objectContaining({ reason }),
+    );
+  });
+
   it('requires orders.view for order cutting sequence numbers', async () => {
     const service = new CncTelegramService({
       packets: {

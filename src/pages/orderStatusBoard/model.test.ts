@@ -227,7 +227,7 @@ describe('order status board model', () => {
   it('keeps CNC today as visual flow without changing status-board API type', () => {
     const disabled = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc'));
     const state = parseOrderStatusBoardViewState(
-      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712&plannedToday=1'),
+      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712&plannedToday=1&cardKind=bath&cardId=cut-result%3A42'),
       {
         cncTelegram: true,
       },
@@ -239,11 +239,15 @@ describe('order status board model', () => {
     expect(state.cncOrderSearchPeriod).toBe('2w');
     expect(state.cncOrderFilters).toEqual(['2706', '2712']);
     expect(state.cncPlannedTodayOnly).toBe(true);
+    expect(state.cncCardKind).toBe('bath');
+    expect(state.cncCardId).toBe('cut-result:42');
     const serialized = serializeOrderStatusBoardViewState(state);
     expect(serialized.toString()).toContain('flow=cnc');
     expect(serialized.toString()).toContain('date=2026-07-23');
     expect(serialized.toString()).toContain('period=2w');
     expect(serialized.toString()).toContain('plannedToday=1');
+    expect(serialized.get('cardKind')).toBe('bath');
+    expect(serialized.get('cardId')).toBe('cut-result:42');
     expect(serialized.getAll('order')).toEqual(['2706', '2712']);
     expect(toOrderStatusBoardQuery(state)).toMatchObject({ board: 'order' });
 

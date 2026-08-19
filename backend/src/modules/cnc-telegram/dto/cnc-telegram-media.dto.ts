@@ -75,6 +75,9 @@ export interface CncTelegramMediaRestoreTaskDto {
   sourceMessageId: number;
   storageKey: string;
   attempt: number;
+  itemLeaseToken: string;
+  itemLeaseGeneration: number;
+  itemLeaseOwner: string;
 }
 
 export interface CncTelegramMediaRestoreClaimResponseDto {
@@ -100,6 +103,9 @@ export interface CncTelegramManualSvgTelegramSendTaskDto {
   messageText: string;
   attempt: number;
   files: CncTelegramManualSvgTelegramFileTaskDto[];
+  itemLeaseToken: string;
+  itemLeaseGeneration: number;
+  itemLeaseOwner: string;
 }
 
 export interface CncTelegramManualSvgTelegramSendClaimResponseDto {
@@ -121,18 +127,34 @@ export interface CncTelegramManualSvgTelegramSendResponseDto {
 export interface CncTelegramManualSvgTelegramSendCompleteDto {
   sentChatId: string;
   sentMessageIds: string[];
+  itemLeaseToken: string;
+  itemLeaseGeneration: number;
+  itemLeaseOwner: string;
 }
 
 export interface CncTelegramMediaRestoreCompleteDto {
   storageKey: string;
   contentType: 'image/jpeg' | 'image/png' | 'image/webp';
   sizeBytes: number;
+  itemLeaseToken: string;
+  itemLeaseGeneration: number;
+  itemLeaseOwner: string;
+}
+
+export interface CncTelegramMediaRestoreFailureDto {
+  error: string;
+  itemLeaseToken: string;
+  itemLeaseGeneration: number;
+  itemLeaseOwner: string;
 }
 
 const completeSchema = z.object({
   storageKey: z.string().trim().regex(/^[A-Za-z0-9_-][A-Za-z0-9._-]{0,214}\.(?:jpe?g|png|webp)$/i),
   contentType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
   sizeBytes: z.number().int().positive().max(12 * 1024 * 1024),
+  itemLeaseToken: z.string().trim().min(32).max(240),
+  itemLeaseGeneration: z.number().int().positive(),
+  itemLeaseOwner: z.string().uuid(),
 }).strict().superRefine((value, context) => {
   const extension = value.storageKey.split('.').pop()?.toLowerCase();
   const expectedContentType = extension === 'png'
@@ -151,11 +173,17 @@ const completeSchema = z.object({
 
 const failSchema = z.object({
   error: z.string().trim().min(1).max(500),
+  itemLeaseToken: z.string().trim().min(32).max(240),
+  itemLeaseGeneration: z.number().int().positive(),
+  itemLeaseOwner: z.string().uuid(),
 }).strict();
 
 const telegramSendCompleteSchema = z.object({
   sentChatId: z.string().trim().min(1).max(120),
   sentMessageIds: z.array(z.string().trim().min(1).max(80)).min(1).max(10),
+  itemLeaseToken: z.string().trim().min(32).max(240),
+  itemLeaseGeneration: z.number().int().positive(),
+  itemLeaseOwner: z.string().uuid(),
 }).strict();
 
 const uuidSchema = z.string().trim().uuid();
@@ -164,8 +192,8 @@ export function parseCncTelegramMediaRestoreComplete(value: unknown): CncTelegra
   return parse(completeSchema, value, 'body') as CncTelegramMediaRestoreCompleteDto;
 }
 
-export function parseCncTelegramMediaRestoreFailure(value: unknown): string {
-  return (parse(failSchema, value, 'body') as { error: string }).error;
+export function parseCncTelegramMediaRestoreFailure(value: unknown): CncTelegramMediaRestoreFailureDto {
+  return parse(failSchema, value, 'body') as CncTelegramMediaRestoreFailureDto;
 }
 
 export function parseCncTelegramManualSvgTelegramSendComplete(

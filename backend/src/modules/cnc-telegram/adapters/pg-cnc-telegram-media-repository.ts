@@ -11,10 +11,13 @@ import type {
   CncTelegramManualSvgTelegramSendCompleteDto,
   CncTelegramManualSvgTelegramSendResponseDto,
   CncTelegramMediaRestoreCompleteDto,
+  CncTelegramMediaRestoreFailureDto,
   CncTelegramMediaRestoreResponseDto,
   CncTelegramMediaRestoreTaskDto,
   CncTelegramOrderScreenshotDto,
 } from '../dto/cnc-telegram-media.dto';
+import type { CncTelegramWorkerSessionLeaseContext } from '../application/cnc-telegram-worker-session.types';
+import { assertCurrentWorkerSessionInTransaction } from './cnc-telegram-worker-session-fencing';
 
 const SOURCE = 'backend-cnc-telegram-media';
 const ORIGINAL_RETENTION_SQL = "interval '30 days'";
@@ -54,6 +57,11 @@ interface RestoreRow extends QueryResultRow {
   status: 'pending' | 'processing' | 'completed' | 'failed';
   requested_at: string | Date;
   available_until: string | Date | null;
+  lease_token?: string | null;
+  lease_generation?: string | number | null;
+  lease_worker_instance_id?: string | null;
+  lease_expires_at?: string | Date | null;
+  lease_valid?: boolean;
 }
 
 interface RestoreTaskRow extends QueryResultRow {
@@ -63,12 +71,16 @@ interface RestoreTaskRow extends QueryResultRow {
   source_message_id: string | number;
   sheet_image_storage_key: string;
   attempt_count: string | number;
+  lease_token: string;
+  lease_generation: string | number;
+  lease_worker_instance_id: string;
 }
 
 interface RestoreStateRow extends RestoreRow {
   source_chat_id: string;
   source_message_id: string | number;
   sheet_image_storage_key: string;
+  lease_worker_instance_id: string | null;
 }
 
 interface ManualSvgOrderFileRow extends QueryResultRow {
@@ -101,6 +113,9 @@ interface ManualSvgTelegramSendTaskRow extends QueryResultRow {
   message_text: string;
   attempt_count: string | number;
   files_json: unknown;
+  lease_token: string;
+  lease_generation: string | number;
+  lease_worker_instance_id: string;
 }
 
 interface ManualSvgTelegramSendRow extends QueryResultRow {
@@ -112,6 +127,11 @@ interface ManualSvgTelegramSendRow extends QueryResultRow {
   sent_chat_id: string | null;
   sent_message_ids_json: unknown;
   last_error: string | null;
+  lease_token?: string | null;
+  lease_generation?: string | number | null;
+  lease_worker_instance_id?: string | null;
+  lease_expires_at?: string | Date | null;
+  lease_valid?: boolean;
 }
 
 interface ManualSvgTelegramSendUnknownRow extends QueryResultRow {
@@ -283,19 +303,29 @@ export class PgCncTelegramMediaRepository {
     });
   }
 
-  async claimRestores(allowedChatIds: readonly string[], limit: number): Promise<CncTelegramMediaRestoreTaskDto[]> {
-    const result = await this.database.transaction(async (tx) => tx.query<RestoreTaskRow>(
-      `WITH candidates AS (
+  async claimRestores(
+    allowedChatIds: readonly string[],
+    limit: number,
+    sessionLease: CncTelegramWorkerSessionLeaseContext,
+  ): Promise<CncTelegramMediaRestoreTaskDto[]> {
+    const sourceChatId = sessionLease.sourceChatId;
+    if (allowedChatIds.length !== 1 || allowedChatIds[0] !== sourceChatId) {
+      throw new ApiError(403, 'CNC_TELEGRAM_CHAT_DENIED', 'Worker claim chat must equal the current session lease chat');
+    }
+    const result = await this.database.transaction(async (tx) => {
+      await assertCurrentWorkerSessionInTransaction(tx, sessionLease);
+      return tx.query<RestoreTaskRow>(
+        `WITH candidates AS (
          SELECT request.restore_request_id
          FROM cnc_telegram_media_restore_requests request
          JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id
-         WHERE packet.source_chat_id=ANY($1::text[])
+         WHERE packet.source_chat_id=$1
            AND packet.source_message_id IS NOT NULL
            AND packet.sheet_image_storage_key IS NOT NULL
            AND request.attempt_count < 5
            AND (
              request.status='pending'
-             OR (request.status='processing' AND request.claimed_at < now() - ${RESTORE_LEASE_SQL})
+             OR (request.status='processing' AND request.lease_expires_at IS NOT NULL AND request.lease_expires_at <= now())
            )
          ORDER BY request.requested_at, request.restore_request_id
          FOR UPDATE OF request SKIP LOCKED
@@ -305,21 +335,28 @@ export class PgCncTelegramMediaRepository {
          SET status='processing',
              attempt_count=request.attempt_count+1,
              claimed_at=now(),
+             lease_token=gen_random_uuid()::text || gen_random_uuid()::text,
+             lease_generation=request.lease_generation+1,
+             lease_worker_instance_id=$3::uuid,
+             lease_expires_at=now() + ${RESTORE_LEASE_SQL},
              finished_at=NULL,
              available_until=NULL,
              last_error=NULL,
              updated_at=now()
          FROM candidates
          WHERE request.restore_request_id=candidates.restore_request_id
-         RETURNING request.restore_request_id, request.packet_id, request.attempt_count
+         RETURNING request.restore_request_id, request.packet_id, request.attempt_count,
+                   request.lease_token, request.lease_generation, request.lease_worker_instance_id
        )
        SELECT claimed.restore_request_id, claimed.packet_id, claimed.attempt_count,
+              claimed.lease_token, claimed.lease_generation, claimed.lease_worker_instance_id,
               packet.source_chat_id, packet.source_message_id, packet.sheet_image_storage_key
        FROM claimed
        JOIN cnc_telegram_packets packet ON packet.packet_id=claimed.packet_id
        ORDER BY claimed.restore_request_id`,
-      [[...allowedChatIds], limit],
-    ));
+        [sourceChatId, limit, sessionLease.workerInstanceId],
+      );
+    });
     return result.rows.map((row) => ({
       requestId: row.restore_request_id,
       packetId: row.packet_id,
@@ -327,6 +364,9 @@ export class PgCncTelegramMediaRepository {
       sourceMessageId: Number(row.source_message_id),
       storageKey: row.sheet_image_storage_key,
       attempt: Number(row.attempt_count),
+      itemLeaseToken: row.lease_token,
+      itemLeaseGeneration: Number(row.lease_generation),
+      itemLeaseOwner: row.lease_worker_instance_id,
     }));
   }
 
@@ -334,8 +374,10 @@ export class PgCncTelegramMediaRepository {
     currentUser: CurrentUser;
     limit: number;
     requestTraceId: string;
+    sessionLease: CncTelegramWorkerSessionLeaseContext;
   }): Promise<CncTelegramManualSvgTelegramSendClaimResponseDto['tasks']> {
     const result = await this.database.transaction(async (tx) => {
+      await assertCurrentWorkerSessionInTransaction(tx, input.sessionLease);
       await markStaleManualSvgTelegramSendsUnknown(tx, input);
       return tx.query<ManualSvgTelegramSendTaskRow>(
          `WITH candidates AS (
@@ -344,6 +386,7 @@ export class PgCncTelegramMediaRepository {
            JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id
            JOIN cut_job svg_job ON svg_job.cut_job_id=packet.svg_cut_job_id
            WHERE request.status='pending'
+             AND packet.source_chat_id=$2
              AND request.attempt_count < 5
              AND packet.svg_cut_import_status='imported'
              AND packet.svg_cut_job_id IS NOT NULL
@@ -372,16 +415,22 @@ export class PgCncTelegramMediaRepository {
                finished_at=NULL,
                sent_chat_id=NULL,
                sent_message_ids_json='[]'::jsonb,
+               lease_token=gen_random_uuid()::text || gen_random_uuid()::text,
+               lease_generation=request.lease_generation+1,
+               lease_worker_instance_id=$3::uuid,
+               lease_expires_at=now() + ${RESTORE_LEASE_SQL},
                last_error=NULL,
                updated_at=now()
            FROM candidates
            WHERE request.request_id=candidates.request_id
-           RETURNING request.request_id, request.packet_id, request.message_text, request.attempt_count
+           RETURNING request.request_id, request.packet_id, request.message_text, request.attempt_count,
+                     request.lease_token, request.lease_generation, request.lease_worker_instance_id
          )
          SELECT claimed.request_id, claimed.packet_id,
                 packet.svg_cut_job_id AS cut_job_id,
                 svg_job.source_display_number AS cut_job_display_number,
                 claimed.message_text, claimed.attempt_count,
+                claimed.lease_token, claimed.lease_generation, claimed.lease_worker_instance_id,
                 COALESCE(jsonb_agg(
                   jsonb_build_object(
                     'fileId', file.file_id,
@@ -401,9 +450,10 @@ export class PgCncTelegramMediaRepository {
          JOIN cnc_manual_svg_upload_files file ON file.file_id=request_file.file_id
           AND file.expires_at > now()
          GROUP BY claimed.request_id, claimed.packet_id, packet.svg_cut_job_id,
-                  svg_job.source_display_number, claimed.message_text, claimed.attempt_count
+                  svg_job.source_display_number, claimed.message_text, claimed.attempt_count,
+                  claimed.lease_token, claimed.lease_generation, claimed.lease_worker_instance_id
          ORDER BY claimed.request_id`,
-        [input.limit],
+        [input.limit, input.sessionLease.sourceChatId, input.sessionLease.workerInstanceId],
       );
     });
     return result.rows.map(mapManualSvgTelegramSendTaskRow).filter((task) => task.files.length > 0);
@@ -414,9 +464,19 @@ export class PgCncTelegramMediaRepository {
     currentUser: CurrentUser;
     completion: CncTelegramManualSvgTelegramSendCompleteDto;
     requestTraceId: string;
+    sessionLease: CncTelegramWorkerSessionLeaseContext;
   }): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
     return this.database.transaction(async (tx) => {
-      const current = await lockManualSvgTelegramSend(tx, input.requestId);
+      await assertCurrentWorkerSessionInTransaction(tx, input.sessionLease);
+      const current = await lockManualSvgTelegramSend(tx, input.requestId, input.sessionLease.sourceChatId);
+      assertItemLeaseIdentity(
+        current,
+        input.completion.itemLeaseToken,
+        input.completion.itemLeaseGeneration,
+        input.completion.itemLeaseOwner,
+        input.sessionLease.workerInstanceId,
+        current.status === 'processing',
+      );
       if (current.status === 'sent') return mapManualSvgTelegramSendResponse(current);
       if (current.status !== 'processing') {
         throw new ApiError(409, 'CONFLICT', 'Запрос отправки SVG-файлов не находится в обработке');
@@ -462,9 +522,22 @@ export class PgCncTelegramMediaRepository {
     currentUser: CurrentUser;
     error: string;
     requestTraceId: string;
+    sessionLease: CncTelegramWorkerSessionLeaseContext;
+    leaseToken: string;
+    leaseGeneration: number;
+    leaseOwner: string;
   }): Promise<CncTelegramManualSvgTelegramSendResponseDto> {
     return this.database.transaction(async (tx) => {
-      const current = await lockManualSvgTelegramSend(tx, input.requestId);
+      await assertCurrentWorkerSessionInTransaction(tx, input.sessionLease);
+      const current = await lockManualSvgTelegramSend(tx, input.requestId, input.sessionLease.sourceChatId);
+      assertItemLeaseIdentity(
+        current,
+        input.leaseToken,
+        input.leaseGeneration,
+        input.leaseOwner,
+        input.sessionLease.workerInstanceId,
+        current.status === 'processing',
+      );
       if (current.status === 'failed' || current.status === 'unknown') return mapManualSvgTelegramSendResponse(current);
       if (current.status !== 'processing') {
         throw new ApiError(409, 'CONFLICT', 'Запрос отправки SVG-файлов не находится в обработке');
@@ -507,20 +580,33 @@ export class PgCncTelegramMediaRepository {
     media: CncTelegramMediaRestoreCompleteDto;
     currentUser: CurrentUser;
     requestTraceId: string;
+    sessionLease: CncTelegramWorkerSessionLeaseContext;
   }): Promise<CncTelegramMediaRestoreResponseDto> {
     return this.database.transaction(async (tx) => {
+      await assertCurrentWorkerSessionInTransaction(tx, input.sessionLease);
       const locked = await tx.query<RestoreStateRow>(
         `SELECT request.restore_request_id, request.packet_id, request.status,
                 request.requested_at, request.available_until,
-                packet.source_chat_id, packet.source_message_id, packet.sheet_image_storage_key
+                packet.source_chat_id, packet.source_message_id, packet.sheet_image_storage_key,
+                request.lease_token, request.lease_generation, request.lease_worker_instance_id,
+                request.lease_expires_at, (request.lease_expires_at > now()) AS lease_valid
          FROM cnc_telegram_media_restore_requests request
          JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id
          WHERE request.restore_request_id=$1::uuid
+           AND packet.source_chat_id=$2
          FOR UPDATE OF request, packet`,
-        [input.requestId],
+        [input.requestId, input.sessionLease.sourceChatId],
       );
       const current = locked.rows[0];
       if (!current) throw new ApiError(404, 'NOT_FOUND', 'Запрос восстановления не найден');
+      assertItemLeaseIdentity(
+        current,
+        input.media.itemLeaseToken,
+        input.media.itemLeaseGeneration,
+        input.media.itemLeaseOwner,
+        input.sessionLease.workerInstanceId,
+        current.status === 'processing',
+      );
       if (current.status === 'completed') return mapRestoreResponse(current);
       if (current.status !== 'processing') {
         throw new ApiError(409, 'CONFLICT', 'Запрос восстановления не находится в обработке');
@@ -572,17 +658,34 @@ export class PgCncTelegramMediaRepository {
     error: string;
     currentUser: CurrentUser;
     requestTraceId: string;
+    sessionLease: CncTelegramWorkerSessionLeaseContext;
+    leaseToken: string;
+    leaseGeneration: number;
+    leaseOwner: string;
   }): Promise<CncTelegramMediaRestoreResponseDto> {
     return this.database.transaction(async (tx) => {
+      await assertCurrentWorkerSessionInTransaction(tx, input.sessionLease);
       const locked = await tx.query<RestoreRow>(
-        `SELECT restore_request_id, packet_id, status, requested_at, available_until
-         FROM cnc_telegram_media_restore_requests
-         WHERE restore_request_id=$1::uuid
-         FOR UPDATE`,
-        [input.requestId],
+        `SELECT request.restore_request_id, request.packet_id, request.status, request.requested_at, request.available_until,
+                request.lease_token, request.lease_generation, request.lease_worker_instance_id,
+                request.lease_expires_at, (request.lease_expires_at > now()) AS lease_valid
+         FROM cnc_telegram_media_restore_requests request
+         JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id
+         WHERE request.restore_request_id=$1::uuid
+           AND packet.source_chat_id=$2
+           FOR UPDATE OF request`,
+        [input.requestId, input.sessionLease.sourceChatId],
       );
       const current = locked.rows[0];
       if (!current) throw new ApiError(404, 'NOT_FOUND', 'Запрос восстановления не найден');
+      assertItemLeaseIdentity(
+        current,
+        input.leaseToken,
+        input.leaseGeneration,
+        input.leaseOwner,
+        input.sessionLease.workerInstanceId,
+        current.status === 'processing',
+      );
       if (current.status === 'failed') return mapRestoreResponse(current);
       if (current.status !== 'processing') {
         throw new ApiError(409, 'CONFLICT', 'Запрос восстановления не находится в обработке');
@@ -651,17 +754,22 @@ async function markStaleManualSvgTelegramSendsUnknown(
   input: {
     currentUser: CurrentUser;
     requestTraceId: string;
+    sessionLease: CncTelegramWorkerSessionLeaseContext;
   },
 ): Promise<void> {
   const staleProcessing = await tx.query<ManualSvgTelegramSendUnknownRow>(
-    `UPDATE cnc_manual_svg_telegram_send_requests
+    `UPDATE cnc_manual_svg_telegram_send_requests AS request
      SET status='unknown',
          finished_at=now(),
          last_error='Статус отправки неизвестен: воркер не завершил запрос после отправки/начала отправки',
          updated_at=now()
-     WHERE status='processing'
+     FROM cnc_telegram_packets packet
+     WHERE request.packet_id=packet.packet_id
+       AND packet.source_chat_id=$1
+       AND request.status='processing'
        AND claimed_at < now() - ${MANUAL_SVG_SEND_UNKNOWN_AFTER_SQL}
-     RETURNING request_id, packet_id, 'processing'::text AS previous_status, claimed_at AS state_at, attempt_count, last_error`,
+     RETURNING request.request_id, request.packet_id, 'processing'::text AS previous_status, request.claimed_at AS state_at, request.attempt_count, request.last_error`,
+    [input.sessionLease.sourceChatId],
   );
   await writeManualSvgTelegramSendUnknownAudits(tx, input, staleProcessing.rows);
 
@@ -675,7 +783,10 @@ async function markStaleManualSvgTelegramSendsUnknown(
          sent_message_ids_json='[]'::jsonb,
          last_error='Статус отправки неизвестен: в заявке нет доступных файлов для отправки в Telegram',
          updated_at=now()
-     WHERE request.status='pending'
+     FROM cnc_telegram_packets packet
+     WHERE request.packet_id=packet.packet_id
+       AND packet.source_chat_id=$1
+       AND request.status='pending'
        AND request.requested_at < now() - ${MANUAL_SVG_SEND_UNKNOWN_AFTER_SQL}
        AND NOT EXISTS (
          SELECT 1
@@ -684,7 +795,8 @@ async function markStaleManualSvgTelegramSendsUnknown(
          WHERE request_file.request_id=request.request_id
            AND file.expires_at > now()
        )
-     RETURNING request_id, packet_id, 'pending'::text AS previous_status, requested_at AS state_at, attempt_count, last_error`,
+     RETURNING request.request_id, request.packet_id, 'pending'::text AS previous_status, request.requested_at AS state_at, request.attempt_count, request.last_error`,
+    [input.sessionLease.sourceChatId],
   );
   await writeManualSvgTelegramSendUnknownAudits(tx, input, stalePendingWithoutFiles.rows);
 }
@@ -724,18 +836,45 @@ async function writeManualSvgTelegramSendUnknownAudits(
 async function lockManualSvgTelegramSend(
   tx: TransactionClient,
   requestId: string,
+  sourceChatId: string,
 ): Promise<ManualSvgTelegramSendRow> {
   const result = await tx.query<ManualSvgTelegramSendRow>(
-    `SELECT request_id, packet_id, status, requested_at, finished_at, sent_chat_id,
-            sent_message_ids_json, last_error
-     FROM cnc_manual_svg_telegram_send_requests
-     WHERE request_id=$1::uuid
-     FOR UPDATE`,
-    [requestId],
+    `SELECT request.request_id, request.packet_id, request.status, request.requested_at, request.finished_at,
+            request.sent_chat_id, request.sent_message_ids_json, request.last_error,
+            request.lease_token, request.lease_generation, request.lease_worker_instance_id,
+            request.lease_expires_at, (request.lease_expires_at > now()) AS lease_valid
+     FROM cnc_manual_svg_telegram_send_requests request
+     JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id
+     WHERE request.request_id=$1::uuid
+       AND packet.source_chat_id=$2
+     FOR UPDATE OF request`,
+    [requestId, sourceChatId],
   );
   const row = result.rows[0];
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'Запрос отправки SVG-файлов не найден');
   return row;
+}
+
+function assertItemLeaseIdentity(
+  row: {
+    lease_token?: string | null;
+    lease_generation?: string | number | null;
+    lease_worker_instance_id?: string | null;
+    lease_valid?: boolean;
+  },
+  leaseToken: string,
+  leaseGeneration: number,
+  leaseOwner: string,
+  sessionWorkerInstanceId: string,
+  requireUnexpired: boolean,
+): void {
+  if (!row.lease_token || row.lease_token !== leaseToken
+    || Number(row.lease_generation) !== leaseGeneration
+    || row.lease_worker_instance_id !== leaseOwner
+    || leaseOwner !== sessionWorkerInstanceId
+    || (requireUnexpired && row.lease_valid !== true)) {
+    throw new ApiError(409, 'CNC_TELEGRAM_ITEM_LEASE_STALE', 'Worker item lease is stale, expired, or owned by another worker');
+  }
 }
 
 function screenshotSelectSql(extraWhere: string): string {
@@ -902,6 +1041,9 @@ function mapManualSvgTelegramSendTaskRow(
     cutJobDisplayNumber: String(row.cut_job_display_number).trim(),
     messageText: row.message_text,
     attempt: Number(row.attempt_count),
+    itemLeaseToken: row.lease_token,
+    itemLeaseGeneration: Number(row.lease_generation),
+    itemLeaseOwner: row.lease_worker_instance_id,
     files: parseManualSvgTelegramSendFiles(row.files_json),
   };
 }

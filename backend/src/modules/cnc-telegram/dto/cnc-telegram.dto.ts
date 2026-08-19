@@ -366,6 +366,11 @@ export interface CncTelegramManualSvgUploadDto {
   sourceFiles?: CncTelegramManualSvgUploadFileDto[];
   generatedScreenshot?: CncTelegramManualSvgGeneratedScreenshotDto;
   telegramSend?: CncTelegramManualSvgTelegramSendDto;
+  /** Only the persisted explicit Telegram-import path may set this policy. */
+  duplicatePolicy?: {
+    kind: 'intentional_copy';
+    approvedByImportItemId: string;
+  };
 }
 
 export interface CncTelegramManualSvgCommentPresetDto {

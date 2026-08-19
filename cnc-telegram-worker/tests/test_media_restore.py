@@ -156,6 +156,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                         "sourceChatId": "-100",
                         "sourceMessageId": 10847,
                         "storageKey": "tg_100_10847.png",
+                        **item_lease_fields(),
                     }],
                 }),
                 complete_media_restore=AsyncMock(return_value={}),
@@ -181,6 +182,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                         "sourceChatId": "-100",
                         "sourceMessageId": 10847,
                         "storageKey": "tg_100_10847.png",
+                        **item_lease_fields(),
                     }],
                 }),
                 complete_media_restore=AsyncMock(return_value={}),
@@ -208,6 +210,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                         "cutJobId": 98,
                         "cutJobDisplayNumber": "104",
                         "messageText": "Фрезы для ХДФ: 8",
+                        **item_lease_fields(),
                         "files": [
                             svg_payload,
                             manual_svg_send_file("screenshot", "CNC#1_2777+2723-HDF.jpg", png_bytes()),
@@ -251,6 +254,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                         "cutJobId": 97,
                         "cutJobDisplayNumber": "102",
                         "messageText": "Черновой",
+                        **item_lease_fields(),
                         "files": [
                             manual_svg_send_file("svg", "CNC#2_2769-HDF.svg", b"<svg></svg>"),
                             manual_svg_send_file("screenshot", "CNC#2_2769-HDF.png", png_bytes()),
@@ -290,7 +294,11 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
             )
             events: list[str] = []
 
-            async def complete_manual_svg_telegram_send(_request_id: str, _payload: dict[str, object]) -> dict[str, object]:
+            async def complete_manual_svg_telegram_send(
+                _request_id: str,
+                _payload: dict[str, object],
+                _item_lease: object,
+            ) -> dict[str, object]:
                 events.append("complete")
                 return {}
 
@@ -314,6 +322,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                         "cutJobId": 97,
                         "cutJobDisplayNumber": "102",
                         "messageText": "ХДФ!!!\nФрезы для ХДФ: 8",
+                        **item_lease_fields(),
                         "files": [
                             manual_svg_send_file("gcode", "CNC#2_2769-HDF.nc", b"G01 X1"),
                             manual_svg_send_file("svg", "CNC#2_2769-HDF.svg", b"<svg></svg>"),
@@ -371,6 +380,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                     "tasks": [{
                         "requestId": "00000000-0000-4000-8000-000000000004",
                         "messageText": "",
+                        **item_lease_fields(),
                         "files": [payload],
                     }],
                 }),
@@ -410,6 +420,14 @@ def png_bytes() -> bytes:
     stream = io.BytesIO()
     Image.new("RGB", (1200, 800), "#2f6fed").save(stream, format="PNG")
     return stream.getvalue()
+
+
+def item_lease_fields() -> dict[str, object]:
+    return {
+        "itemLeaseToken": "i" * 64,
+        "itemLeaseGeneration": 1,
+        "itemLeaseOwner": "00000000-0000-4000-8000-000000000005",
+    }
 
 
 def manual_svg_send_file(kind: str, file_name: str, body: bytes) -> dict[str, object]:

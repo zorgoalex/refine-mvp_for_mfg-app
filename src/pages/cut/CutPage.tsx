@@ -17,6 +17,7 @@ import {
   ReloadOutlined,
   SaveOutlined,
   SearchOutlined,
+  SendOutlined,
   UndoOutlined,
   UpOutlined,
   UploadOutlined,
@@ -62,6 +63,7 @@ import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from './CutSheetLabelGenerateAction';
 import { CutSvgUploadModal } from './CutSvgUploadModal';
+import { CutTelegramImportModal } from './CutTelegramImportModal';
 import { authSession } from '../../api/authSession';
 import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
 import { CutJobVersionLines } from '../orders/CutJobVersionLines';
@@ -110,6 +112,7 @@ import {
 } from './cutPageHelpers';
 import { filmUsageTooltip, formatFilmLinearMeters, totalFilmUsageMeters } from './cutFilmUsage';
 import { can } from '../../utils/permissions';
+import { featureFlags } from '../../config/featureFlags';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import { useTabStore } from '../../stores/tabStore';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
@@ -138,6 +141,21 @@ type CutJobKindTab = 'vacuum' | 'regular';
 
 const CUT_JOB_KIND_TAB_VACUUM: CutJobKindTab = 'vacuum';
 const CUT_JOB_KIND_TAB_REGULAR: CutJobKindTab = 'regular';
+
+const CutImportActionGroup: React.FC<{
+  canManage: boolean;
+  canTelegramImport: boolean;
+  onUpload: () => void;
+  onTelegramImport: () => void;
+}> = ({ canManage, canTelegramImport, onUpload, onTelegramImport }) => {
+  if (!canManage) return null;
+  return (
+    <Space.Compact>
+      <Button type="primary" icon={<UploadOutlined />} onClick={onUpload}>Загрузить SVG</Button>
+      {canTelegramImport && <Button icon={<SendOutlined />} onClick={onTelegramImport} style={{ minHeight: 40 }}>Импорт из Telegram</Button>}
+    </Space.Compact>
+  );
+};
 
 const CUT_TEXTURE_DIRECTION_LABELS: Record<CutTextureDirection, string> = {
   vertical: 'вдоль полотна',
@@ -437,14 +455,61 @@ function cutJobMdfBoardTooltip(status: CutJobDto['mdfBoardStatus']): string {
   return packets ? `${status.reason}\n${packets}` : status.reason;
 }
 
-const CutJobMdfBoardCell: React.FC<{ job: CutJobDto }> = ({ job }) => {
+export function cutJobMdfBoardLink(target: NonNullable<NonNullable<CutJobDto['mdfBoardStatus']>['target']>): string {
+  const params = new URLSearchParams({
+    flow: 'cnc',
+    date: target.workday,
+    period: '1w',
+    cardKind: target.kind === 'bath' ? 'bath' : 'packet',
+    cardId: target.cardId,
+  });
+  return `/mdf-work-board?${params.toString()}`;
+}
+
+const CutJobMdfBoardCell: React.FC<{
+  job: CutJobDto;
+  canOpenBoard: boolean;
+  canCreate: boolean;
+  creating: boolean;
+  onCreate: (job: CutJobDto) => void;
+}> = ({ job, canOpenBoard, canCreate, creating, onCreate }) => {
+  const { push } = useNavigation();
   const status = job.mdfBoardStatus;
   const state = status?.state ?? 'unknown';
   const reason = status?.reason ?? 'Backend не вернул состояние МДФ-доски.';
+  const statusTag = <Tag color={cutJobMdfBoardStatusColor(state)}>{cutJobMdfBoardStatusLabel(state)}</Tag>;
+  const linkedStatus = state === 'created' && status?.target && canOpenBoard ? (
+    <a
+      className="cut-job-mdf-board-cell__link"
+      href={cutJobMdfBoardLink(status.target)}
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        push(cutJobMdfBoardLink(status.target!));
+      }}
+      aria-label={`Открыть ${status.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'} на МДФ-доске`}
+    >
+      {statusTag}
+    </a>
+  ) : statusTag;
+  const tooltip = state === 'created' && !canOpenBoard
+    ? `${cutJobMdfBoardTooltip(status)}\nДля перехода на МДФ-доску требуется право orders.view.`
+    : cutJobMdfBoardTooltip(status);
   return (
-    <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{cutJobMdfBoardTooltip(status)}</span>}>
+    <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{tooltip}</span>}>
       <span className="cut-job-mdf-board-cell">
-        <Tag color={cutJobMdfBoardStatusColor(state)}>{cutJobMdfBoardStatusLabel(state)}</Tag>
+        {linkedStatus}
+        {state === 'not_created' && canCreate ? (
+          <Button
+            size="small"
+            className="cut-job-mdf-board-cell__create"
+            loading={creating}
+            disabled={creating}
+            onClick={() => onCreate(job)}
+          >
+            Создать карточку
+          </Button>
+        ) : null}
         <Text type="secondary" className="cut-job-mdf-board-cell__reason">{reason}</Text>
       </span>
     </Tooltip>
@@ -1178,6 +1243,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [operationalFilmFilter, setOperationalFilmFilter] = useState<number | undefined>();
   const [cutListDateRange, setCutListDateRange] = useState<CutOrderDateRangeValue>(undefined);
   const [svgUploadOpen, setSvgUploadOpen] = useState(false);
+  const [telegramImportOpen, setTelegramImportOpen] = useState(false);
+  const canTelegramImport = canManage && featureFlags.cncTelegram && !isEmbeddedOrder;
   const listFiltersRef = useRef<CutJobListFilters>({});
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
@@ -2186,19 +2253,22 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [applyPdfTemplateState, emitCutJobUpdate, job, loadJobs, handleError],
   );
 
-  const createMdfBoardCard = useCallback(async () => {
-    if (!job) return;
+  const createMdfBoardCard = useCallback(async (targetJob: CutJobDto) => {
     setBusy(true);
     setCreatingMdfBoardCard(true);
     try {
-      const updated = await cutApi.createMdfBoardCard(job.cutJobId);
-      setJob(updated);
-      applyPdfTemplateState(updated);
-      emitCutJobUpdate(updated, job);
-      message.success('Карточка файла станка создана на МДФ-доске');
+      const updated = await cutApi.createMdfBoardCard(targetJob.cutJobId);
+      if (job?.cutJobId === targetJob.cutJobId) {
+        setJob(updated);
+        applyPdfTemplateState(updated);
+        emitCutJobUpdate(updated, job);
+      }
+      message.success(updated.mdfBoardStatus?.cardKind === 'bath'
+        ? 'Карточка ванны создана на МДФ-доске'
+        : 'Карточка файла станка создана на МДФ-доске');
       await loadJobs();
     } catch (error) {
-      handleError(error, 'Не удалось создать карточку файла станка для МДФ-доски');
+      handleError(error, 'Не удалось создать карточку на МДФ-доске');
     } finally {
       setCreatingMdfBoardCard(false);
       setBusy(false);
@@ -2942,7 +3012,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'МДФ-доска',
         key: 'mdfBoard',
         width: 132,
-        render: (_: unknown, row: CutJobDto) => <CutJobMdfBoardCell job={row} />,
+        render: (_: unknown, row: CutJobDto) => (
+          <CutJobMdfBoardCell
+            job={row}
+            canOpenBoard={canViewOrders}
+            canCreate={canManage && row.mdfBoardStatus?.canCreateCard === true}
+            creating={creatingMdfBoardCard && row.cutJobId === job?.cutJobId}
+            onCreate={createMdfBoardCard}
+          />
+        ),
       },
       {
         title: 'Позиции',
@@ -3051,7 +3129,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ),
       },
     ],
-    [busy, canManage, openJob, deleteJob, profiles, cutSettings, isOperational, show],
+    [busy, canManage, canViewOrders, createMdfBoardCard, creatingMdfBoardCard, job?.cutJobId, openJob, deleteJob, profiles, cutSettings, isOperational, show],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
@@ -3506,7 +3584,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     </Space>
   )) : undefined;
   const jobCardExtra = job ? (
-    <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
+    <Space>
+      {canTelegramImport && (
+        <Button
+          icon={<SendOutlined />}
+          onClick={() => setTelegramImportOpen(true)}
+          style={{ minHeight: 40 }}
+        >
+          Импорт из Telegram
+        </Button>
+      )}
+      <Tag color={STATUS_TAG_COLORS[job.status] ?? 'default'}>{cutJobStatusLabel(job.status)}</Tag>
+    </Space>
   ) : undefined;
 
   if (!can('cut.view')) {
@@ -3552,6 +3641,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                   >
                     Загрузить SVG
                   </Button>
+                  {canTelegramImport && (
+                    <Button
+                      icon={<SendOutlined />}
+                      onClick={() => setTelegramImportOpen(true)}
+                      style={{ minHeight: 40 }}
+                    >
+                      Импорт из Telegram
+                    </Button>
+                  )}
                   <Button
                     icon={<PrinterOutlined />}
                     onClick={() => void openJobPdfPreview()}
@@ -3571,23 +3669,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 </>
               ) : (
                 <>
-                  {canManage && (
-                    <Button
-                      icon={<UploadOutlined />}
-                      onClick={() => setSvgUploadOpen(true)}
-                    >
-                      Загрузить SVG
-                    </Button>
-                  )}
+                  <CutImportActionGroup
+                    canManage={canManage}
+                    canTelegramImport={canTelegramImport}
+                    onUpload={() => setSvgUploadOpen(true)}
+                    onTelegramImport={() => setTelegramImportOpen(true)}
+                  />
                   <Button icon={<DownloadOutlined />} onClick={exportJobs}>
                     Экспорт
-                  </Button>
-                  <Button
-                    icon={<UploadOutlined />}
-                    onClick={() => setSvgUploadOpen(true)}
-                    disabled={!canManage}
-                  >
-                    SVG раскрой
                   </Button>
                   <Button
                     type="primary"
@@ -3922,6 +4011,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 SVG
               </Button>
             )}
+            {canTelegramImport && (
+              <Button
+                icon={<SendOutlined />}
+                onClick={() => setTelegramImportOpen(true)}
+                style={{ minHeight: 40 }}
+              >
+                Импорт из Telegram
+              </Button>
+            )}
             <Button onClick={loadJobs} loading={jobsLoading}>
               Обновить
             </Button>
@@ -3979,9 +4077,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             <span className="cut-operational-table-toolbar__grow" />
             <Typography.Text type="secondary">Найдено {filteredJobs.length}</Typography.Text>
             {canManage && (
-              <Tooltip title="Загрузить SVG-раскрой">
-                <Button aria-label="Загрузить SVG-раскрой" icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)} />
-              </Tooltip>
+              <Space.Compact>
+                <Tooltip title="Загрузить SVG-раскрой">
+                  <Button aria-label="Загрузить SVG-раскрой" icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)} />
+                </Tooltip>
+              </Space.Compact>
             )}
             <Tooltip title="Обновить">
               <Button aria-label="Обновить список" icon={<ReloadOutlined />} onClick={loadJobs} loading={jobsLoading} />
@@ -4057,7 +4157,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <Button
                 size="small"
                 icon={<PlusOutlined />}
-                onClick={() => void createMdfBoardCard()}
+                onClick={() => void createMdfBoardCard(job)}
                 loading={creatingMdfBoardCard}
                 disabled={
                   !canManage ||
@@ -4069,7 +4169,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 style={{ height: 'auto', minHeight: 32, whiteSpace: 'normal', textAlign: 'left' }}
                 data-testid="cut-job-create-mdf-board-card"
               >
-                Создать карточку файла станка для МДФ-доски
+                Создать {job.mdfBoardStatus?.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'} для МДФ-доски
               </Button>
             </Tooltip>
           </Space>
@@ -5102,6 +5202,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             setSvgUploadOpen(false);
             void loadJobs(listFiltersRef.current);
             if (cutJobId) void openJob(cutJobId);
+          }}
+        />
+      )}
+      {canTelegramImport && (
+        <CutTelegramImportModal
+          open={telegramImportOpen}
+          onClose={() => setTelegramImportOpen(false)}
+          onDone={() => {
+            void loadJobs(listFiltersRef.current);
           }}
         />
       )}

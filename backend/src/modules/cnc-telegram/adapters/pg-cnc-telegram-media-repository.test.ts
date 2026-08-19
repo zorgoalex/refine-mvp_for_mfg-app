@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PgCncTelegramMediaRepository } from './pg-cnc-telegram-media-repository';
 
+const sessionLease = { sourceChatId: '-100', leaseToken: 'session-token', leaseGeneration: 1, workerInstanceId: '00000000-0000-4000-8000-000000000005' };
+
 describe('PgCncTelegramMediaRepository', () => {
   it('lists only order-linked screenshot packets and calculates 30-day availability', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
@@ -110,22 +112,28 @@ describe('PgCncTelegramMediaRepository', () => {
       transaction: vi.fn((handler) => handler({
         query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
           queries.push({ text, params });
+          if (text.includes('FROM cnc_telegram_worker_session_leases')) return { rows: [{ lease_token: sessionLease.leaseToken }] };
           return { rows: [{
             restore_request_id: restoreId(), packet_id: packetId(), source_chat_id: '-100',
             source_message_id: 10847, sheet_image_storage_key: 'tg_100_10847.jpg', attempt_count: 2,
+            lease_token: 'item-token', lease_generation: 1,
+            lease_worker_instance_id: sessionLease.workerInstanceId,
           }] };
         }),
       })),
     };
     const repository = new PgCncTelegramMediaRepository(database as never);
 
-    await expect(repository.claimRestores(['-100'], 5)).resolves.toEqual([{
+    await expect(repository.claimRestores(['-100'], 5, sessionLease)).resolves.toEqual([{
       requestId: restoreId(), packetId: packetId(), sourceChatId: '-100',
       sourceMessageId: 10847, storageKey: 'tg_100_10847.jpg', attempt: 2,
+      itemLeaseToken: 'item-token', itemLeaseGeneration: 1,
+      itemLeaseOwner: sessionLease.workerInstanceId,
     }]);
-    expect(queries[0]?.params).toEqual([['-100'], 5]);
-    expect(queries[0]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
-    expect(queries[0]?.text).toContain("request.claimed_at < now() - interval '5 minutes'");
+    const claimQuery = queries.find(({ text }) => text.includes('WITH candidates AS'));
+    expect(claimQuery?.params).toEqual(['-100', 5, sessionLease.workerInstanceId]);
+    expect(claimQuery?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
+    expect(claimQuery?.text).toContain('request.lease_expires_at <= now()');
   });
 
   it('lists manual SVG files linked to an order with download URLs', async () => {
@@ -157,7 +165,8 @@ describe('PgCncTelegramMediaRepository', () => {
     const tx = {
       query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
         queries.push({ text, params });
-        if (text.includes('UPDATE cnc_manual_svg_telegram_send_requests') && text.includes("WHERE status='processing'")) {
+        if (text.includes('FROM cnc_telegram_worker_session_leases')) return { rows: [{ lease_token: sessionLease.leaseToken }] };
+        if (text.includes('UPDATE cnc_manual_svg_telegram_send_requests') && text.includes("request.status='processing'")) {
           return { rows: [{
             request_id: manualSvgSendRequestId(),
             packet_id: packetId(),
@@ -184,6 +193,8 @@ describe('PgCncTelegramMediaRepository', () => {
             message_text: 'Фрезы для ХДФ: 8',
             attempt_count: 1,
             files_json: [manualSvgClaimFile()],
+            lease_token: 'item-token', lease_generation: 1,
+            lease_worker_instance_id: sessionLease.workerInstanceId,
           }] };
         }
         return { rows: [] };
@@ -196,6 +207,7 @@ describe('PgCncTelegramMediaRepository', () => {
       currentUser: user(),
       limit: 5,
       requestTraceId: 'claim-request-1',
+      sessionLease,
     })).resolves.toEqual([{
       requestId: manualSvgSendRequestId(),
       packetId: packetId(),
@@ -203,27 +215,135 @@ describe('PgCncTelegramMediaRepository', () => {
       cutJobDisplayNumber: '67',
       messageText: 'Фрезы для ХДФ: 8',
       attempt: 1,
-      files: [manualSvgClaimFile()],
+      files: [manualSvgClaimFile()], itemLeaseToken: 'item-token', itemLeaseGeneration: 1,
+      itemLeaseOwner: sessionLease.workerInstanceId,
     }]);
-    expect(queries[0]?.text).toContain("SET status='unknown'");
-    expect(queries[0]?.text).toContain("WHERE status='processing'");
-    expect(queries[1]?.text).toContain('INSERT INTO audit_log');
-    expect(queries[1]?.params).toContain('cnc.manual_svg_upload.telegram_send_unknown');
-    expect(queries[1]?.params).toContain('claim-request-1');
-    expect(queries[2]?.text).toContain("request.status='pending'");
-    expect(queries[2]?.text).toContain('NOT EXISTS');
-    expect(queries[2]?.text).toContain('claimed_at=COALESCE(claimed_at, now())');
-    expect(queries[2]?.text).toContain('attempt_count=GREATEST(attempt_count, 1)');
-    expect(queries[2]?.text).toContain("sent_message_ids_json='[]'::jsonb");
-    expect(queries[3]?.params).toEqual([5]);
-    expect(queries[3]?.text).toContain("WHERE request.status='pending'");
-    expect(queries[3]?.text).toContain('JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id');
-    expect(queries[3]?.text).toContain('JOIN cut_job svg_job ON svg_job.cut_job_id=packet.svg_cut_job_id');
-    expect(queries[3]?.text).toContain("packet.svg_cut_import_status='imported'");
-    expect(queries[3]?.text).toContain("NULLIF(trim(svg_job.source_display_number::text), '') IS NOT NULL");
-    expect(queries[3]?.text).toContain("':mdf-card-created'");
-    expect(queries[3]?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
-    expect(queries[3]?.text).toContain("encode(file.content_bytes, 'base64')");
+    const staleQuery = queries.find(({ text }) => text.includes("SET status='unknown'"));
+    const auditQuery = queries.find(({ text }) => text.includes('INSERT INTO audit_log'));
+    const reconcileQuery = queries.find(({ text }) => text.includes("request.status='pending'") && text.includes('NOT EXISTS'));
+    expect(staleQuery?.text).toContain("request.status='processing'");
+    expect(auditQuery?.params).toContain('cnc.manual_svg_upload.telegram_send_unknown');
+    expect(auditQuery?.params).toContain('claim-request-1');
+    expect(reconcileQuery?.text).toContain('claimed_at=COALESCE(claimed_at, now())');
+    expect(reconcileQuery?.text).toContain('attempt_count=GREATEST(attempt_count, 1)');
+    expect(reconcileQuery?.text).toContain("sent_message_ids_json='[]'::jsonb");
+    const claimQuery = queries.find(({ text }) => text.includes('WITH candidates AS'));
+    expect(claimQuery?.params).toEqual([5, '-100', sessionLease.workerInstanceId]);
+    expect(claimQuery?.text).toContain('packet.source_chat_id=$2');
+    expect(claimQuery?.text).toContain('LIMIT $1::integer');
+    expect(claimQuery?.text).toContain("WHERE request.status='pending'");
+    expect(claimQuery?.text).toContain('JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id');
+    expect(claimQuery?.text).toContain('JOIN cut_job svg_job ON svg_job.cut_job_id=packet.svg_cut_job_id');
+    expect(claimQuery?.text).toContain("packet.svg_cut_import_status='imported'");
+    expect(claimQuery?.text).toContain("NULLIF(trim(svg_job.source_display_number::text), '') IS NOT NULL");
+    expect(claimQuery?.text).toContain("':mdf-card-created'");
+    expect(claimQuery?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
+    expect(claimQuery?.text).toContain("encode(file.content_bytes, 'base64')");
+    expect(staleQuery?.params).toEqual(['-100']);
+    expect(staleQuery?.text).toContain('packet.source_chat_id=$1');
+    expect(reconcileQuery?.params).toEqual(['-100']);
+    expect(reconcileQuery?.text).toContain('packet.source_chat_id=$1');
+  });
+
+  it('rejects manual-send completion from a stale item lease inside the fenced transaction', async () => {
+    const queries: string[] = [];
+    const tx = {
+      query: vi.fn(async (text: string) => {
+        queries.push(text);
+        if (text.includes('FROM cnc_telegram_worker_session_leases')) {
+          return { rows: [{ lease_token: sessionLease.leaseToken }] };
+        }
+        if (text.includes('FROM cnc_manual_svg_telegram_send_requests')) {
+          return { rows: [manualSendState({ status: 'processing', lease_valid: true })] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repository = new PgCncTelegramMediaRepository({
+      transaction: vi.fn((handler) => handler(tx)),
+    } as never);
+
+    await expect(repository.completeManualSvgTelegramSend({
+      requestId: manualSvgSendRequestId(),
+      currentUser: user(),
+      requestTraceId: 'complete-1',
+      sessionLease,
+      completion: {
+        sentChatId: '-100',
+        sentMessageIds: ['101'],
+        itemLeaseToken: 'x'.repeat(64),
+        itemLeaseGeneration: 1,
+        itemLeaseOwner: sessionLease.workerInstanceId,
+      },
+    })).rejects.toMatchObject({ code: 'CNC_TELEGRAM_ITEM_LEASE_STALE', statusCode: 409 });
+    expect(queries.some((text) => text.includes("SET status='sent'"))).toBe(false);
+  });
+
+  it('replays an exact terminal completion after item expiry without mutating again', async () => {
+    const tx = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes('FROM cnc_telegram_worker_session_leases')) {
+          return { rows: [{ lease_token: sessionLease.leaseToken }] };
+        }
+        if (text.includes('FROM cnc_manual_svg_telegram_send_requests')) {
+          return { rows: [manualSendState({ status: 'sent', lease_valid: false })] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repository = new PgCncTelegramMediaRepository({
+      transaction: vi.fn((handler) => handler(tx)),
+    } as never);
+
+    await expect(repository.completeManualSvgTelegramSend({
+      requestId: manualSvgSendRequestId(),
+      currentUser: user(),
+      requestTraceId: 'complete-retry',
+      sessionLease,
+      completion: {
+        sentChatId: '-100',
+        sentMessageIds: ['101'],
+        itemLeaseToken: 'i'.repeat(64),
+        itemLeaseGeneration: 2,
+        itemLeaseOwner: sessionLease.workerInstanceId,
+      },
+    })).resolves.toMatchObject({ status: 'sent', sentMessageIds: ['101'] });
+    expect(tx.query.mock.calls.some(([text]) => String(text).includes("SET status='sent'"))).toBe(false);
+  });
+
+  it('replays an exact expired restore completion only for the lease chat', async () => {
+    const tx = {
+      query: vi.fn(async (text: string) => {
+        if (text.includes('FROM cnc_telegram_worker_session_leases')) {
+          return { rows: [{ lease_token: sessionLease.leaseToken }] };
+        }
+        if (text.includes('JOIN cnc_telegram_packets')) {
+          return { rows: [restoreTerminalState()] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repository = new PgCncTelegramMediaRepository({
+      transaction: vi.fn((handler) => handler(tx)),
+    } as never);
+
+    await expect(repository.completeRestore({
+      requestId: restoreId(),
+      currentUser: user(),
+      requestTraceId: 'restore-retry',
+      sessionLease,
+      media: {
+        storageKey: 'tg_100_10847.jpg',
+        contentType: 'image/jpeg',
+        sizeBytes: 1200,
+        itemLeaseToken: 'r'.repeat(64),
+        itemLeaseGeneration: 3,
+        itemLeaseOwner: sessionLease.workerInstanceId,
+      },
+    })).resolves.toMatchObject({ status: 'completed' });
+    const restoreQuery = tx.query.mock.calls.find(([text]) => String(text).includes('JOIN cnc_telegram_packets'))?.[0];
+    expect(String(restoreQuery)).toContain('packet.source_chat_id=$2');
+    expect(tx.query.mock.calls.some(([text]) => String(text).includes('UPDATE cnc_telegram_packets'))).toBe(false);
   });
 });
 
@@ -284,6 +404,43 @@ function manualSvgClaimFile() {
     sizeBytes: 11,
     sha256: 'b'.repeat(64),
     base64Content: 'PHN2Zz48L3N2Zz4=',
+  };
+}
+
+function manualSendState(overrides: Record<string, unknown> = {}) {
+  return {
+    request_id: manualSvgSendRequestId(),
+    packet_id: packetId(),
+    status: 'processing',
+    requested_at: '2026-08-18T10:00:00.000Z',
+    finished_at: '2026-08-18T10:01:00.000Z',
+    sent_chat_id: '-100',
+    sent_message_ids_json: ['101'],
+    last_error: null,
+    lease_token: 'i'.repeat(64),
+    lease_generation: 2,
+    lease_worker_instance_id: sessionLease.workerInstanceId,
+    lease_expires_at: '2026-08-18T10:05:00.000Z',
+    lease_valid: true,
+    ...overrides,
+  };
+}
+
+function restoreTerminalState() {
+  return {
+    restore_request_id: restoreId(),
+    packet_id: packetId(),
+    status: 'completed',
+    requested_at: '2026-08-18T10:00:00.000Z',
+    available_until: '2026-08-19T10:00:00.000Z',
+    source_chat_id: sessionLease.sourceChatId,
+    source_message_id: 10847,
+    sheet_image_storage_key: 'tg_100_10847.jpg',
+    lease_token: 'r'.repeat(64),
+    lease_generation: 3,
+    lease_worker_instance_id: sessionLease.workerInstanceId,
+    lease_expires_at: '2026-08-18T10:05:00.000Z',
+    lease_valid: false,
   };
 }
 

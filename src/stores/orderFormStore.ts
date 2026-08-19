@@ -16,6 +16,7 @@ import {
   OrderTotals,
 } from '../types/orders';
 import { calculateOrderTotalArea } from '../utils/orderArea';
+import { businessOrderDetails } from '../utils/orderDetailRows';
 
 // ============================================================================
 // UNIQUE ID GENERATOR
@@ -77,6 +78,7 @@ const generateTempId = (): number => {
   // ========== ACTIONS: DETAILS ==========
   addDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
   addPdfImportedDetail: (detail: Omit<OrderDetail, 'temp_id'>) => void;
+  ensureMinimumDetailRows: (minimum: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   insertDetailAfter: (afterTempId: number, detail: Omit<OrderDetail, 'temp_id'>) => void;
   updateDetail: (tempId: number, data: Partial<OrderDetail>) => void;
   updateDetailId: (tempId: number, detailId: number) => void; // Update detail_id after DB create
@@ -267,6 +269,36 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
           get().recalculateFinancials();
         },
 
+        ensureMinimumDetailRows: (minimum, detail) =>
+          set(
+            (state) => {
+              const missing = Math.max(0, Math.floor(minimum) - state.details.length);
+              if (missing === 0) return state;
+
+              const maxDetailNumber = state.details.reduce(
+                (max, current) => Math.max(max, current.detail_number || 0),
+                0,
+              );
+              const placeholders = Array.from({ length: missing }, (_, index) => ({
+                ...detail,
+                temp_id: generateTempId(),
+                detail_number: maxDetailNumber + index + 1,
+                priority: detail.priority || 100,
+                quantity: detail.quantity,
+                delete_flag: false,
+                is_placeholder: true,
+              }));
+
+              return {
+                details: [...state.details, ...placeholders],
+                // Grid padding is presentation state, not a business edit.
+                isDirty: state.isDirty,
+              };
+            },
+            false,
+            'ensureMinimumDetailRows',
+          ),
+
         insertDetailAfter: (afterTempId, detail) => {
           set(
             (state) => {
@@ -342,7 +374,7 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
             (state) => ({
               details: state.details.map((detail) => ({
                 ...detail,
-                production_status_id: productionStatusId,
+                ...(detail.is_placeholder ? {} : { production_status_id: productionStatusId }),
               })),
               originalDetails: Object.fromEntries(
                 Object.entries(state.originalDetails).map(([detailId, detail]) => [
@@ -603,12 +635,13 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
         // ========== COMPUTED ==========
         calculatedTotals: () => {
           const state = get();
+          const businessDetails = businessOrderDetails(state.details);
           return {
-            positions_count: state.details.length, // Количество позиций (записей)
-            parts_count: state.details.reduce((sum, d) => sum + (d.quantity || 0), 0), // Количество деталей (сумма quantity)
-            total_area: calculateOrderTotalArea(state.details),
+            positions_count: businessDetails.length, // Количество позиций (записей)
+            parts_count: businessDetails.reduce((sum, d) => sum + (d.quantity || 0), 0), // Количество деталей (сумма quantity)
+            total_area: calculateOrderTotalArea(businessDetails),
             total_paid: state.payments.reduce((sum, p) => sum + (p.amount || 0), 0),
-            total_amount: state.details.reduce((sum, d) => sum + (d.detail_cost || 0), 0), // Сумма всех detail_cost
+            total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0), // Сумма всех detail_cost
           };
         },
 
@@ -618,7 +651,8 @@ const createOrderDraftStore = (orderKey: string): OrderDraftStore =>
         recalculateFinancials: () =>
           set(
             (state) => {
-              const totalAmount = state.details.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
+              const totalAmount = businessOrderDetails(state.details)
+                .reduce((sum, d) => sum + (d.detail_cost || 0), 0);
               const discount = state.header.discount || 0;
               const surcharge = state.header.surcharge || 0;
               // Formula: final_amount = total_amount - discount + surcharge

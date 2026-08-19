@@ -4,6 +4,8 @@ import type { BackendEnv } from '../../../config/env.validation';
 
 export interface CncTelegramFeatureFlags {
   cncTelegramEnabled: boolean;
+  backgroundIngestEnabled: boolean;
+  manualImportEnabled: boolean;
 }
 
 @Injectable()
@@ -13,6 +15,8 @@ export class CncTelegramRuntimeConfigService {
   getFeatureFlags(): CncTelegramFeatureFlags {
     return {
       cncTelegramEnabled: this.config.get('BACKEND_ENABLE_CNC_TELEGRAM', { infer: true }),
+      backgroundIngestEnabled: this.config.get('CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED', { infer: true }),
+      manualImportEnabled: this.config.get('CNC_TELEGRAM_MANUAL_IMPORT_ENABLED', { infer: true }),
     };
   }
 }

@@ -14,6 +14,7 @@ import {
   type CutRenderStyleRef,
   type CutRenderStylesSetting,
 } from '@shared/cut-render-style';
+import type { CncTelegramCutLayout } from '../../api/types/cncTelegramApi.types';
 import type { ParsedSvgUpload } from './svgCutUploadParser';
 
 export function createStyledSvgUploadPreviewBlob(
@@ -28,13 +29,20 @@ export function buildStyledSvgUploadPreview(
   parsed: ParsedSvgUpload,
   renderStylesSetting?: CutRenderStylesSetting | null,
 ): string | null {
-  const sheet = parsed.cutLayout.sheet;
-  if (!sheet || parsed.cutLayout.items.length === 0) return null;
+  return buildStyledCutLayoutPreview(parsed.cutLayout, renderStylesSetting);
+}
+
+export function buildStyledCutLayoutPreview(
+  layout: CncTelegramCutLayout,
+  renderStylesSetting?: CutRenderStylesSetting | null,
+): string | null {
+  const sheet = layout.sheet;
+  if (!sheet || layout.items.length === 0) return null;
   const style = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, renderStylesSetting);
   const palette = cutRenderOrderFillPalette(style);
   const orderIndexByName = new Map<string, number>();
   const fontMm = Math.max(24, Math.round(Math.min(sheet.widthMm, sheet.heightMm) / 40));
-  const pieces = parsed.cutLayout.items.map((item) => {
+  const pieces = layout.items.map((item) => {
     const fill = fillForOrderName(item.orderName, orderIndexByName, palette, style.piece.defaultFill);
     const cx = item.xMm + item.placedWidthMm / 2;
     const cy = item.yMm + item.placedHeightMm / 2;
@@ -76,7 +84,7 @@ export function buildStyledSvgUploadPreview(
   ].join('');
 }
 
-function itemLabelLines(item: ParsedSvgUpload['cutLayout']['items'][number]): string[] {
+function itemLabelLines(item: CncTelegramCutLayout['items'][number]): string[] {
   const rawLines = cutRenderNormalizeLabelLines(item.visualLabel?.rawLines ?? []);
   if (rawLines.length >= 3) return rawLines;
   if (rawLines.length > 0) return [...rawLines, cutRenderPieceSizeLine(item.widthMm, item.heightMm)];
@@ -135,7 +143,7 @@ function fillForOrderName(
 }
 
 function renderSourceSvg(
-  sourceSvg: ParsedSvgUpload['cutLayout']['items'][number]['sourceSvg'],
+  sourceSvg: CncTelegramCutLayout['items'][number]['sourceSvg'],
   x: number,
   y: number,
   width: number,

@@ -1742,6 +1742,12 @@
   flex: 0 0 auto;
 }
 
+.cnc-board-card-shell--deep-linked > .status-board-card {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, #7c3aed 76%, transparent),
+    0 8px 24px color-mix(in srgb, #7c3aed 24%, transparent);
+}
+
 .cnc-board-card-shell--dragging > .status-board-card {
   opacity: 0.46;
   transform: rotate(1deg);
@@ -3459,12 +3465,7 @@
   }
 
   .status-board-toolbar__tablet-refresh.ant-btn,
-  .status-board-toolbar__mobile-add-bath.ant-btn {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
+  .status-board-toolbar__mobile-add-bath.ant-btn,
 
   .status-board-toolbar__tablet-refresh.ant-btn {
     width: 44px;

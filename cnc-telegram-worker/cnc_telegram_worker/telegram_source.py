@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, time, timezone
+import time as monotonic_time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
@@ -27,6 +29,7 @@ async def collect_day_messages(
     end_utc = end_local.astimezone(timezone.utc)
     messages: list[Any] = []
     ordinal = 0
+    page_started = monotonic_time.monotonic()
     async for message in client.iter_messages(entity, offset_date=end_utc, limit=max_messages):
         message_date = message_datetime(message).astimezone(tz)
         if message_date.date() < workday:
@@ -36,6 +39,9 @@ async def collect_day_messages(
             if observer is not None:
                 await observer(message, ordinal)
             messages.append(message)
+            if ordinal % 50 == 0 or monotonic_time.monotonic() - page_started >= 2.0:
+                await asyncio.sleep(0)
+                page_started = monotonic_time.monotonic()
     return list(reversed(messages))
 
 
@@ -76,6 +82,23 @@ def message_reply_to_id(message: Any) -> int | None:
     return int(reply_to) if isinstance(reply_to, int) and not isinstance(reply_to, bool) and reply_to > 0 else None
 
 
+def message_sender_id(message: Any) -> int | None:
+    value = getattr(message, "sender_id", None)
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    sender = getattr(message, "sender", None)
+    value = getattr(sender, "id", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def message_outgoing(message: Any) -> bool:
+    value = getattr(message, "out", None)
+    if isinstance(value, bool):
+        return value
+    value = getattr(message, "outgoing", None)
+    return value is True
+
+
 def message_filename(message: Any) -> str | None:
     file = getattr(message, "file", None)
     name = getattr(file, "name", None)
@@ -103,6 +126,27 @@ def is_gcode_message(message: Any) -> bool:
 def is_vector_message(message: Any) -> bool:
     filename = message_filename(message)
     return filename is not None and Path(filename).suffix.lower() in VECTOR_EXTENSIONS
+
+
+def message_mime_type(message: Any) -> str | None:
+    file = getattr(message, "file", None)
+    value = getattr(file, "mime_type", None)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def classify_import_message(message: Any) -> str:
+    suffix = Path(message_filename(message) or "").suffix.lower()
+    if suffix == ".svg":
+        return "svg"
+    if suffix == ".dxf":
+        return "dxf"
+    if is_image_message(message):
+        return "image"
+    if is_gcode_message(message):
+        return "gcode"
+    if message_text(message):
+        return "text"
+    return "other"
 
 
 def has_thumbs_up(message: Any) -> bool:

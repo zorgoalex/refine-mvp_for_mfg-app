@@ -12,7 +12,7 @@ describe('CncTelegramWorkerAuditController detailed export', () => {
     });
     const controller = new CncTelegramWorkerAuditController({
       exportDetailed,
-    } as unknown as CncTelegramWorkerAuditService);
+    } as unknown as CncTelegramWorkerAuditService, runtimeConfig(true));
     const response = {
       setHeader: vi.fn(),
       send: vi.fn(),
@@ -41,4 +41,27 @@ describe('CncTelegramWorkerAuditController detailed export', () => {
     expect(response.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
     expect(response.send).toHaveBeenCalledWith('{"schemaVersion":1}\n');
   });
+
+  it.each(['writeBatch', 'writeTechnicalBatch'] as const)('blocks %s before a worker write when disabled', async (method) => {
+    const audit = {
+      writeRawBatch: vi.fn(),
+      writeTechnicalRawBatch: vi.fn(),
+    } as unknown as CncTelegramWorkerAuditService;
+    const controller = new CncTelegramWorkerAuditController(audit, runtimeConfig(false));
+    const request = {
+      user: { id: '7', username: 'worker', role: 'worker', roleId: 4, permissions: [] },
+      requestId: 'request-write',
+    } as RequestWithCurrentUser;
+
+    await expect(controller[method](request, undefined, undefined, undefined, undefined, {}))
+      .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', statusCode: 503 });
+    expect(audit.writeRawBatch).not.toHaveBeenCalled();
+    expect(audit.writeTechnicalRawBatch).not.toHaveBeenCalled();
+  });
 });
+
+function runtimeConfig(enabled: boolean) {
+  return {
+    getFeatureFlags: () => ({ cncTelegramEnabled: enabled, backgroundIngestEnabled: false }),
+  } as never;
+}

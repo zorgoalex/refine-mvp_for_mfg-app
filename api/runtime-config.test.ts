@@ -25,6 +25,8 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_ENABLE_LEGACY_HASURA',
   'RUNTIME_CONFIG_UI_EVOLUTION',
   'RUNTIME_CONFIG_UI_FORCE_LEGACY',
+  'VERCEL_ENV',
+  'VERCEL_GIT_COMMIT_REF',
 ];
 
 describe('runtime-config handler', () => {
@@ -104,6 +106,31 @@ describe('runtime-config handler', () => {
         enableLegacyHasura: false,
       },
     });
+  });
+
+  it('uses the stage backend when stage runtime env is missing', () => {
+    const res = createResponse();
+
+    handler(
+      { method: 'GET', headers: { host: 'app-test.mebelkz.app' } } as VercelRequest,
+      res as unknown as VercelResponse,
+    );
+
+    expect(res.body).toMatchObject({
+      apiUrl: 'https://backend-test.mebelkz.app',
+    });
+  });
+
+  it('uses the stage backend for Vercel previews without overriding explicit env', () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    const previewRes = createResponse();
+    handler({ method: 'GET', headers: {} } as VercelRequest, previewRes as unknown as VercelResponse);
+    expect(previewRes.body).toMatchObject({ apiUrl: 'https://backend-test.mebelkz.app' });
+
+    vi.stubEnv('RUNTIME_CONFIG_API_URL', 'https://explicit.example.test/');
+    const explicitRes = createResponse();
+    handler({ method: 'GET', headers: {} } as VercelRequest, explicitRes as unknown as VercelResponse);
+    expect(explicitRes.body).toMatchObject({ apiUrl: 'https://explicit.example.test' });
   });
 
   it('supports HEAD and rejects unsupported methods', () => {

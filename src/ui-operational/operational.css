@@ -22,6 +22,355 @@
   -webkit-font-smoothing: antialiased;
 }
 
+.cut-telegram-import-modal .ant-modal-body {
+  max-height: min(72vh, 760px);
+  overflow: auto;
+}
+
+.cut-telegram-import__step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 24px;
+}
+
+.cut-telegram-import__presets,
+.cut-telegram-import__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cut-telegram-import__summary {
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+
+.cut-telegram-import__message-browser,
+.cut-telegram-import__candidate-picker {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.cut-telegram-import__message-browser-header,
+.cut-telegram-import__candidate-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cut-telegram-import__message-feed {
+  display: flex;
+  min-height: 96px;
+  max-height: 440px;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 8px 4px;
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary, #f5f5f5) 62%, transparent);
+  border-radius: 10px;
+}
+
+.cut-telegram-import__message-day {
+  align-self: center;
+  padding: 3px 10px;
+  color: var(--ant-color-text-secondary, #666);
+  font-size: 12px;
+  border-radius: 999px;
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.cut-telegram-import__message-bubble {
+  display: flex;
+  max-width: min(82%, 620px);
+  align-items: flex-end;
+  align-self: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 12px 12px 12px 4px;
+  background: var(--ant-color-bg-container, #fff);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.cut-telegram-import__message-bubble.is-outgoing {
+  align-self: flex-end;
+  border-radius: 12px 12px 4px 12px;
+  background: color-mix(in srgb, var(--operational-brand-soft, #e8f2ff) 72%, var(--ant-color-bg-container, #fff));
+}
+
+.cut-telegram-import__message-content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+
+.cut-telegram-import__message-content .ant-typography,
+.cut-telegram-import__message-caption,
+.cut-telegram-import__technical-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cut-telegram-import__message-time {
+  flex: 0 0 auto;
+  color: var(--ant-color-text-tertiary, #999);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cut-telegram-import__message-selection {
+  min-height: 40px;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  padding-block: 7px;
+}
+
+.cut-telegram-import__message-pagination {
+  align-self: flex-end;
+  margin: 0;
+}
+
+.cut-telegram-import__message-loading {
+  display: grid;
+  min-height: 96px;
+  place-items: center;
+}
+
+.cut-telegram-import__technical-table-desktop {
+  min-width: 0;
+}
+
+.cut-telegram-import__technical-table-desktop .ant-table-cell {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.cut-telegram-import__technical-table-desktop .cut-telegram-import__message-selection {
+  margin-top: 6px;
+}
+
+.cut-telegram-import__technical-cards {
+  display: none;
+}
+
+.cut-telegram-import__technical-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 9px;
+  overflow-wrap: anywhere;
+}
+
+.cut-telegram-import__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary, #f5f5f5) 70%, transparent);
+}
+
+.cut-telegram-import__candidate-details,
+.cut-telegram-import__result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-wrap: pretty;
+}
+
+.cut-telegram-import__file-line,
+.cut-telegram-import__result-item > .ant-space {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cut-telegram-import__matches {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ant-color-warning-bg, #fffbe6) 82%, transparent);
+}
+
+.cut-telegram-import__preview {
+  display: block;
+  width: 132px;
+  height: 82px;
+  object-fit: contain;
+  border-radius: 8px;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.cut-telegram-import__preview-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.cut-telegram-import__preview {
+  cursor: zoom-in;
+  transition-property: transform, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.cut-telegram-import__preview:hover {
+  transform: scale(1.02);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+}
+
+.cut-telegram-import__preview-action {
+  min-height: 40px;
+  padding-inline: 4px;
+}
+
+.cut-telegram-import__preview-action:active,
+.cut-telegram-import__lightbox-close:active {
+  transform: scale(0.96);
+}
+
+.cut-telegram-import__lightbox .ant-modal-content {
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.cut-telegram-import__lightbox .ant-modal-header {
+  background: transparent;
+}
+
+.cut-telegram-import__lightbox .ant-modal-title {
+  color: #fff;
+}
+
+.cut-telegram-import__lightbox-content {
+  position: relative;
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.cut-telegram-import__lightbox-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(72vh, 760px);
+  object-fit: contain;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  outline-offset: -1px;
+}
+
+[data-theme="dark"] .cut-telegram-import__lightbox-image {
+  outline-color: rgba(255, 255, 255, 0.1);
+}
+
+.cut-telegram-import__lightbox-close {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  color: #fff;
+}
+
+.cut-telegram-import__lightbox-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .cut-telegram-import__preview {
+  outline-color: rgba(255, 255, 255, 0.1);
+}
+
+.cut-telegram-import__result-list,
+.cut-telegram-import__confirm-list {
+  width: 100%;
+}
+
+.cut-telegram-import__result-item {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+}
+
+.cut-telegram-import-modal .ant-btn {
+  transition-property: transform, box-shadow, background-color, border-color;
+}
+
+.cut-telegram-import-modal .ant-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+@media (max-width: 720px) {
+  .cut-telegram-import-modal .ant-modal {
+    max-width: calc(100vw - 20px);
+    margin: 10px auto;
+  }
+
+  .cut-telegram-import-modal .ant-modal-body {
+    max-height: calc(100vh - 220px);
+  }
+
+  .cut-telegram-import-modal .ant-table {
+    font-size: 12px;
+  }
+
+  .cut-telegram-import__message-browser,
+  .cut-telegram-import__candidate-picker {
+    padding: 10px;
+  }
+
+  .cut-telegram-import__message-feed {
+    max-height: 46vh;
+  }
+
+  .cut-telegram-import__message-bubble {
+    max-width: 100%;
+  }
+
+  .cut-telegram-import__technical-table-desktop {
+    display: none;
+  }
+
+  .cut-telegram-import__technical-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .cut-telegram-import__message-pagination {
+    align-self: center;
+  }
+
+  .cut-telegram-import__preview {
+    width: 96px;
+    height: 64px;
+  }
+}
+
 :root[data-ui-variant="air"] {
   --operational-radius: 16px;
   --operational-radius-lg: 22px;

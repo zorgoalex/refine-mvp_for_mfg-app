@@ -4,14 +4,40 @@ import asyncio
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
+import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from cnc_telegram_worker.technical_logs import TechnicalLogSpool, flush_technical_logs_once, sanitize_line
+from cnc_telegram_worker.__main__ import run_with_technical_delivery
+from cnc_telegram_worker.erp_client import SessionLeaseLost
+from cnc_telegram_worker.technical_logs import (
+    TechnicalLogCapture,
+    TechnicalLogSpool,
+    deliver_technical_logs,
+    flush_technical_logs_once,
+    sanitize_line,
+)
 
 
 class TechnicalLogsTest(unittest.TestCase):
+    def test_capture_identity_matches_explicit_session_identity(self) -> None:
+        worker_instance_id = str(uuid.uuid4())
+        with tempfile.TemporaryDirectory() as directory:
+            capture = TechnicalLogCapture(Path(directory, "spool.sqlite3"), worker_instance_id=worker_instance_id)
+            try:
+                capture.spool.capture("stdout", "correlated\n")
+                for _ in range(20):
+                    if capture.spool.pending_batch():
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(capture.spool.worker_instance_id, worker_instance_id)
+                self.assertEqual(capture.spool.pending_batch()[0]["workerInstanceId"], worker_instance_id)
+            finally:
+                capture.close()
+
     def test_redacts_credentials_paths_and_phone_before_spooling(self) -> None:
         message, redacted, truncated, categories = sanitize_line(
             "Bearer abcdefghijklmnop password=hunter2 /data/session/live.session +7 777 123 45 67",
@@ -59,6 +85,54 @@ class TechnicalLogsTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "backend offline"):
                 asyncio.run(flush_technical_logs_once(spool, sender))
             self.assertEqual(len(spool.pending_batch()), 1)
+
+    def test_delivery_propagates_session_lease_loss_and_sets_fatal_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spool = TechnicalLogSpool(Path(directory, "spool.sqlite3"))
+            spool.capture("stderr", "lease must fence delivery")
+            spool.close()
+            stop_event = asyncio.Event()
+            fatal_event = asyncio.Event()
+
+            async def sender(_payload):
+                raise SessionLeaseLost("stale technical delivery")
+
+            with self.assertRaises(SessionLeaseLost):
+                asyncio.run(deliver_technical_logs(
+                    spool,
+                    sender,
+                    stop_event,
+                    interval_seconds=1,
+                    heartbeat_seconds=60,
+                    fatal_event=fatal_event,
+                ))
+            self.assertTrue(stop_event.is_set())
+            self.assertTrue(fatal_event.is_set())
+
+    def test_run_with_technical_delivery_propagates_lease_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spool = TechnicalLogSpool(Path(directory, "spool.sqlite3"))
+            spool.capture("stderr", "lease must stop serve")
+            spool.close()
+            capture = SimpleNamespace(spool=spool)
+
+            async def sender(_payload):
+                raise SessionLeaseLost("stale technical delivery")
+
+            worker = SimpleNamespace(
+                erp=SimpleNamespace(technical_log_batch=sender),
+                config=SimpleNamespace(
+                    technical_log_flush_interval_seconds=1,
+                    technical_log_heartbeat_seconds=60,
+                ),
+            )
+
+            async def operation(fatal_event: asyncio.Event) -> None:
+                await fatal_event.wait()
+                raise SessionLeaseLost("serve stopped after technical lease loss")
+
+            with self.assertRaises(SessionLeaseLost):
+                asyncio.run(run_with_technical_delivery(worker, capture, operation))
 
     def test_recovers_after_transient_sqlite_writer_error_without_losing_line(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

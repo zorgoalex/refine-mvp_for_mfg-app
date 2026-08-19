@@ -59,9 +59,9 @@ describe('OrderDetailTable interaction performance guards', () => {
   it('keeps the rc-table data source stable during local form state changes', () => {
     expect(source).toContain('const paginatedDetails = useMemo(');
     expect(source).toContain(
-      '() => sortOrderDetailsForPagination(sortedDetails, activeCompare, activeSorter.order)',
+      '() => sortOrderDetailsForPagination(realSortedDetails, activeCompare, activeSorter.order)',
     );
-    expect(source).toContain('[activeCompare, activeSorter.order, sortedDetails]');
+    expect(source).toContain('[activeCompare, activeSorter.order, realSortedDetails]');
     expect(source).toContain("activeSorter.key === 'sheet_material_type_id'");
     expect(source).toContain('[activeSheetMaterialNames, activeSorter.key]');
   });

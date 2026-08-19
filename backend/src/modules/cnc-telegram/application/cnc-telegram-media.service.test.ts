@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { CncTelegramMediaService } from './cnc-telegram-media.service';
 
+const lease = { sourceChatId: '-1001996415689', leaseToken: 'session-token', leaseGeneration: 1, workerInstanceId: '00000000-0000-4000-8000-000000000005' };
+
 describe('CncTelegramMediaService', () => {
   it('requires orders.view for order screenshot metadata and restore requests', async () => {
     const repository = repositoryMock();
@@ -48,17 +50,18 @@ describe('CncTelegramMediaService', () => {
     const service = new CncTelegramMediaService(repository as never, config() as never);
 
     await expect(service.claimRestores(user(['cut.manage']))).rejects.toMatchObject({ statusCode: 403 });
-    await expect(service.claimRestores(user(['cut.manage'], 'cnc-worker'))).resolves.toMatchObject({
+    await expect(service.claimRestores(user(['cut.manage'], 'cnc-worker'), lease)).resolves.toMatchObject({
       capability: 'cnc_telegram_media_restore_v1',
     });
-    await expect(service.claimManualSvgTelegramSends(user(['cut.manage'], 'cnc-worker'), 'manual-claim-1')).resolves.toMatchObject({
+    await expect(service.claimManualSvgTelegramSends(user(['cut.manage'], 'cnc-worker'), 'manual-claim-1', lease)).resolves.toMatchObject({
       capability: 'cnc_manual_svg_telegram_send_v1',
     });
-    expect(repository.claimRestores).toHaveBeenCalledWith(['-1001996415689'], 5);
+    expect(repository.claimRestores).toHaveBeenCalledWith(['-1001996415689'], 5, lease);
     expect(repository.claimManualSvgTelegramSends).toHaveBeenCalledWith({
       currentUser: user(['cut.manage'], 'cnc-worker'),
       limit: 5,
       requestTraceId: 'manual-claim-1',
+      sessionLease: lease,
     });
   });
 

@@ -447,6 +447,7 @@ export class PgCncTelegramRepository
       packetSelectSql(`
         p.workday BETWEEN $1::date AND $2::date
         AND p.mdf_board_hidden_at IS NULL
+        AND p.mdf_board_card_kind = 'machine_file'
         AND (
           p.source_chat_id IS DISTINCT FROM $3
           OR EXISTS (
@@ -760,8 +761,28 @@ export class PgCncTelegramRepository
   }
 
   async manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
-    return this.database.transaction(async (tx) => {
+    return this.database.transaction(async (tx) => this.manualSvgUploadInTransaction(tx, command));
+  }
+
+  /** Used by explicit Telegram import so packet/job/result/card and its audit/outbox
+   * share the item/session transaction. It is intentionally not part of the public port. */
+  async manualSvgUploadInTransaction(tx: TransactionClient, command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
       await setSessionUser(tx, command.currentUser.id);
+      if (command.dto.duplicatePolicy?.kind === 'intentional_copy') {
+        const approval = await tx.query<{ import_item_id: string; requested_by: string; duplicate_acknowledged: boolean; has_duplicate_matches: boolean; status: string }>(`
+          SELECT i.import_item_id, r.requested_by, i.duplicate_acknowledged, i.status,
+                 jsonb_array_length(i.duplicate_snapshot_json) > 0 AS has_duplicate_matches
+            FROM cnc_telegram_import_items i
+            JOIN cnc_telegram_import_requests r USING (import_request_id)
+           WHERE i.import_item_id=$1
+           FOR UPDATE
+        `, [command.dto.duplicatePolicy.approvedByImportItemId]);
+        const row = approval.rows[0];
+        if (!row || row.status !== 'processing' || row.requested_by !== command.currentUser.id
+          || (row.has_duplicate_matches && !row.duplicate_acknowledged)) {
+          throw new ApiError(409, 'CNC_TELEGRAM_DUPLICATE_APPROVAL_INVALID', 'Intentional duplicate approval is not valid for this import item');
+        }
+      }
       const requestId = command.requestId || 'cnc-manual-svg-upload';
       const dto = buildManualSvgStructuredDto(command.dto);
       await lockSvgSourceFileIfPresent(tx, dto);
@@ -983,7 +1004,6 @@ export class PgCncTelegramRepository
       }, mdfCardCreatedNow, filePersistence);
       await completeIdempotency(tx, dto.idempotencyKey, response);
       return response;
-    });
   }
 
   async listManualSvgCommentPresets(
@@ -1286,6 +1306,9 @@ function manualSvgAnalysisWarnings(dto: ManualSvgUploadCommand['dto']): string[]
 }
 
 function manualSvgExternalPacketKey(dto: ManualSvgUploadCommand['dto']): string {
+  if (dto.duplicatePolicy?.kind === 'intentional_copy') {
+    return `telegram-import:${dto.duplicatePolicy.approvedByImportItemId}`;
+  }
   const identityHash = sha256Json({
     kind: 'erp-manual-svg-upload-v1',
     matchMode: dto.matchMode,
@@ -1355,7 +1378,9 @@ async function prepareManualSvgUploadDto(
     tolerantSizeMm: 8,
   });
   if (manualDto.validationMode === 'lenient') {
-    await assertManualSvgSelectedOrdersExist(tx, manualDto.selectedOrderIds);
+    if (manualDto.selectedOrderIds.length > 0) {
+      await assertManualSvgSelectedOrdersExist(tx, manualDto.selectedOrderIds);
+    }
     return { resolvedDto: matchedDto, matchSourceDto: matchedDto };
   }
   await assertManualSvgOrderScope(tx, manualDto.selectedOrderIds, matchedDto);
@@ -3207,6 +3232,8 @@ async function insertPacket(
   if (!packetId) {
     throw new ApiError(500, 'CNC_TELEGRAM_PACKET_INSERT_FAILED', 'CNC packet insert failed');
   }
+  await persistPacketLayoutFingerprint(tx, packetId, dto);
+  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
   return packetId;
 }
 
@@ -3252,6 +3279,45 @@ async function updatePacket(
     WHERE packet_id = $1::uuid
     `,
     [packetId, ...packetParams(dto, payloadHash, command.currentUser.id).slice(1)],
+  );
+  await persistPacketLayoutFingerprint(tx, packetId, dto);
+  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
+}
+
+async function replaceWholeOrderKeys(
+  tx: TransactionClient,
+  packetId: string,
+  comments: readonly string[],
+): Promise<void> {
+  const orderKeys = wholeOrderKeysFromComments(comments);
+  await tx.query('DELETE FROM cnc_telegram_packet_whole_order_keys WHERE packet_id = $1::uuid', [packetId]);
+  if (orderKeys.length === 0) return;
+  await tx.query(
+    `INSERT INTO cnc_telegram_packet_whole_order_keys (packet_id, order_key)
+     SELECT $1::uuid, order_key
+     FROM unnest($2::text[]) AS order_key
+     ON CONFLICT (packet_id, order_key) DO NOTHING`,
+    [packetId, orderKeys],
+  );
+}
+
+export function wholeOrderKeysFromComments(comments: readonly string[]): string[] {
+  return Array.from(new Set(
+    comments.flatMap((comment) => {
+      if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return [];
+      return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g), (match) => match[2]);
+    }),
+  ));
+}
+
+async function persistPacketLayoutFingerprint(
+  tx: TransactionClient,
+  packetId: string,
+  dto: CncTelegramStructuredIngestDto,
+): Promise<void> {
+  await tx.query(
+    'UPDATE cnc_telegram_packets SET layout_fingerprint=$2 WHERE packet_id=$1::uuid',
+    [packetId, canonicalLayoutFingerprint(dto.cutLayout)],
   );
 }
 
@@ -3589,7 +3655,18 @@ async function syncSvgCutImport(
     }
     throw error;
   }
-  await setSvgCutImportState(tx, packetId, 'imported', 'SVG layout imported into cut job', imported.cutJobId, imported.cutResultId);
+  const linkedOrderCount = plan.placements.filter((placement) => placement.orderId !== null).length;
+  const informationalNote = linkedOrderCount === 0
+    ? 'Предупреждение: раскрой создан без привязки к ERP-заказу; проверьте заказ вручную'
+    : 'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная';
+  await setSvgCutImportState(
+    tx,
+    packetId,
+    'imported',
+    plan.informational ? informationalNote : 'SVG layout imported into cut job',
+    imported.cutJobId,
+    imported.cutResultId,
+  );
 }
 
 function svgImportOptionsFromDto(dto: CncTelegramStructuredIngestDto): {
@@ -4138,11 +4215,18 @@ async function buildLenientSvgCutImportPlan(
     const match = key ? matchedItems.get(key) : null;
     const matchedOrderId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchOrderId) : null;
     const matchedDetailId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchDetailId) : null;
-    const fallbackOrder = informationalOrderForLayoutItem(item, index, selectedOrders);
-    const orderId = matchedOrderId ?? fallbackOrder.orderId;
+    // Explicit manual selections may use the selected order as a fallback.
+    // Telegram's empty selection is an inferred scope: never attach an
+    // unresolved layout item to a different matched order by position.
+    const fallbackOrder = selectedOrderIds.length > 0
+      ? informationalOrderForLayoutItem(item, index, selectedOrders)
+      : null;
+    const orderId = matchedOrderId ?? fallbackOrder?.orderId ?? null;
     const orderName = matchedOrderId !== null
       ? item.orderName || match?.orderName || String(matchedOrderId)
-      : informationalLayoutOrderName(item, fallbackOrder);
+      : fallbackOrder
+        ? informationalLayoutOrderName(item, fallbackOrder)
+        : normalizeOptional(item.orderName) ?? 'SVG';
     const orderDetailId = matchedDetailId;
     placements.push({
       ...item,
@@ -4241,7 +4325,8 @@ function buildTelegramInformationalSvgCutImportPlan(
   layout: CncTelegramCutLayoutDto,
   strictFailureReason: string,
 ): SvgCutImportPlan {
-  if (dto.source.chatId === MANUAL_SVG_CHAT_ID || !isTelegramSvgDetailMatchFailure(strictFailureReason)) {
+  const isTelegramImportCopy = dto.externalPacketKey.startsWith('telegram-import:');
+  if ((!isTelegramImportCopy && dto.source.chatId === MANUAL_SVG_CHAT_ID) || !isTelegramSvgDetailMatchFailure(strictFailureReason)) {
     return { ok: false, reason: strictFailureReason };
   }
   const sheet = layout.sheet;
@@ -4280,7 +4365,8 @@ function buildTelegramInformationalSvgCutImportPlan(
 }
 
 function isTelegramSvgDetailMatchFailure(reason: string): boolean {
-  return reason.includes('is not uniquely matched to an order detail');
+  return reason.includes('is not uniquely matched to an order detail')
+    || reason === 'Для нестрогой загрузки SVG не выбраны заказы';
 }
 
 function informationalOrderForLayoutItem(
@@ -7114,18 +7200,13 @@ async function loadBathCards(
       HAVING COUNT(*) = 1
     ),
     completed_whole_order_keys AS (
-      SELECT DISTINCT lower(trim(order_match.match[2])) AS order_key
+      SELECT DISTINCT whole_order.order_key
       FROM cnc_telegram_packets p
-      CROSS JOIN LATERAL jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
-      CROSS JOIN LATERAL regexp_matches(
-        packet_comment.comment_text,
-        '(^|[^0-9])([0-9]{4,})([^0-9]|$)',
-        'g'
-      ) AS order_match(match)
+      JOIN cnc_telegram_packet_whole_order_keys whole_order
+        ON whole_order.packet_id = p.packet_id
       WHERE p.workday BETWEEN $1::date AND $2::date
         AND p.mdf_board_hidden_at IS NULL
         AND (p.completion_status = 'completed' OR p.thumbs_up = true)
-        AND lower(packet_comment.comment_text) LIKE '%весь%'
         AND NOT EXISTS (
           SELECT 1
           FROM jsonb_array_elements_text(p.comments_json) AS material_comment(comment_text)
@@ -7846,6 +7927,33 @@ function hashPayload(dto: CncTelegramStructuredIngestDto): string {
 
 function hashRequest(value: Record<string, unknown>): string {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+export function canonicalLayoutFingerprint(layout: CncTelegramStructuredIngestDto['cutLayout']): string | null {
+  if (!layout) return null;
+  const rounded = (value: number | null | undefined): number | null => (
+    typeof value === 'number' && Number.isFinite(value) ? Number(value.toFixed(3)) : null
+  );
+  const items = layout.items.map((item) => ({
+    widthMm: rounded(item.widthMm),
+    heightMm: rounded(item.heightMm),
+    xMm: rounded(item.xMm),
+    yMm: rounded(item.yMm),
+    placedWidthMm: rounded(item.placedWidthMm),
+    placedHeightMm: rounded(item.placedHeightMm),
+    rotated: item.rotated === true,
+    quantity: Number.isInteger(item.quantity) ? item.quantity : 1,
+  })).sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+  const canonical = {
+    version: 'cnc-layout-fingerprint-v1',
+    material: null,
+    sheet: {
+      widthMm: rounded(layout.sheet?.widthMm),
+      heightMm: rounded(layout.sheet?.heightMm),
+    },
+    items,
+  };
+  return createHash('sha256').update(stableStringify(canonical)).digest('hex');
 }
 
 function stableStringify(value: unknown): string {

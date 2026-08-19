@@ -32,6 +32,19 @@ const FEATURE_KEYS = [
   'enableLegacyHasura',
 ];
 
+const OPTIONAL_FEATURE_KEYS = [
+  'backendGroups',
+  'projects',
+  'bazisImport',
+  'pdfImportLayoutPatterns',
+  'statusAutomation',
+];
+
+const KNOWN_FEATURE_KEYS = [
+  ...FEATURE_KEYS,
+  ...OPTIONAL_FEATURE_KEYS,
+];
+
 const STAGED_CANARY_FILES = [
   { file: '00-all-off.json', enabled: [] },
   { file: '01-backend-auth.json', enabled: ['backendAuth'] },
@@ -203,7 +216,7 @@ function validateRuntimeConfig(config, options = {}) {
   }
 
   for (const key of Object.keys(features)) {
-    if (!FEATURE_KEYS.includes(key)) {
+    if (!KNOWN_FEATURE_KEYS.includes(key)) {
       errors.push(`${label}: unknown features.${key}`);
       continue;
     }

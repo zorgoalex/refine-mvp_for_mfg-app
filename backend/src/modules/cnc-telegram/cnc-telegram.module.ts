@@ -14,22 +14,52 @@ import { CncTelegramWorkerAuditController } from './http/cnc-telegram-worker-aud
 import { PgCncTelegramMediaRepository } from './adapters/pg-cnc-telegram-media-repository';
 import { CncTelegramMediaService } from './application/cnc-telegram-media.service';
 import { CncTelegramMediaController } from './http/cnc-telegram-media.controller';
+import { CncTelegramWorkerSessionController } from './http/cnc-telegram-worker-session.controller';
+import { CncTelegramWorkerSessionService } from './application/cnc-telegram-worker-session.service';
+import { PgCncTelegramWorkerSessionRepository } from './adapters/pg-cnc-telegram-worker-session-repository';
+import { PgCncTelegramImportRepository } from './adapters/pg-cnc-telegram-import-repository';
+import { CncTelegramImportService } from './application/cnc-telegram-import.service';
+import { CncTelegramImportController } from './http/cnc-telegram-import.controller';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [CncTelegramController, CncTelegramWorkerAuditController, CncTelegramMediaController],
+  controllers: [
+    CncTelegramController,
+    CncTelegramWorkerAuditController,
+    CncTelegramMediaController,
+    CncTelegramWorkerSessionController,
+    CncTelegramImportController,
+  ],
   providers: [
     CncTelegramRuntimeConfigService,
     {
-      provide: CncTelegramMediaService,
+      provide: CncTelegramWorkerSessionService,
       useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) => (
-        new CncTelegramMediaService(new PgCncTelegramMediaRepository(database), config)
+        new CncTelegramWorkerSessionService(
+          new PgCncTelegramWorkerSessionRepository(database),
+          config,
+        )
       ),
       inject: [DatabaseService, ConfigService],
     },
     {
+      provide: CncTelegramMediaService,
+      useFactory: (
+        database: DatabaseService,
+        config: ConfigService<BackendEnv, true>,
+        session: CncTelegramWorkerSessionService,
+      ) => (
+        new CncTelegramMediaService(new PgCncTelegramMediaRepository(database), config, session)
+      ),
+      inject: [DatabaseService, ConfigService, CncTelegramWorkerSessionService],
+    },
+    {
       provide: CncTelegramWorkerAuditService,
-      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) => {
+      useFactory: (
+        database: DatabaseService,
+        config: ConfigService<BackendEnv, true>,
+        session: CncTelegramWorkerSessionService,
+      ) => {
         const deniedAudit = database.isConfigured
           ? new PgCncTelegramRepository(database)
           : new UnavailableCncTelegramRepository();
@@ -37,22 +67,35 @@ import { CncTelegramMediaController } from './http/cnc-telegram-media.controller
           new PgCncTelegramWorkerAuditRepository(database),
           config,
           deniedAudit,
+          session,
         );
       },
-      inject: [DatabaseService, ConfigService],
+      inject: [DatabaseService, ConfigService, CncTelegramWorkerSessionService],
     },
     {
       provide: CncTelegramService,
-      useFactory: (database: DatabaseService) => {
+      useFactory: (
+        database: DatabaseService,
+        config: ConfigService<BackendEnv, true>,
+      ) => {
         const repository = database.isConfigured
           ? new PgCncTelegramRepository(database)
           : new UnavailableCncTelegramRepository();
         return new CncTelegramService({
           packets: repository,
           deniedAudit: repository,
+          backgroundIngestEnabled: config.get('CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED', { infer: true }),
         });
       },
-      inject: [DatabaseService],
+      inject: [DatabaseService, ConfigService],
+    },
+    {
+      provide: CncTelegramImportService,
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>, session: CncTelegramWorkerSessionService) => {
+        const packetRepository = database.isConfigured ? new PgCncTelegramRepository(database) : new UnavailableCncTelegramRepository();
+        return new CncTelegramImportService(new PgCncTelegramImportRepository(database, packetRepository), config, session);
+      },
+      inject: [DatabaseService, ConfigService, CncTelegramWorkerSessionService],
     },
   ],
 })

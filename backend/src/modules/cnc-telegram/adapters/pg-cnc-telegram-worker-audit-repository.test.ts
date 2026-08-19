@@ -8,6 +8,7 @@ import { PgCncTelegramWorkerAuditRepository } from './pg-cnc-telegram-worker-aud
 const scanId = '550e8400-e29b-41d4-a716-446655440000';
 const digest = 'a'.repeat(64);
 const logKey = `tglog:raw-v1:${digest}`;
+const lease = { sourceChatId: '-100123', leaseToken: 'session-token', leaseGeneration: 1, workerInstanceId: scanId };
 
 describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
   it('fails closed unless every required schema definition matches', async () => {
@@ -34,7 +35,7 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     const database = fakeDatabase((sql) => sql.includes('INSERT INTO cnc_telegram_worker_message_logs') ? [] : defaultRows(sql));
     const repository = new PgCncTelegramWorkerAuditRepository(database.service);
 
-    await expect(repository.writeBatch(batch(), { id: '77' })).rejects.toMatchObject({
+    await expect(repository.writeBatch(batch(), { id: '77' }, lease)).rejects.toMatchObject({
       statusCode: 409,
       code: 'AUDIT_LOG_CONFLICT',
     });
@@ -47,7 +48,7 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     const database = fakeDatabase((sql) => defaultRows(sql));
     const repository = new PgCncTelegramWorkerAuditRepository(database.service);
 
-    await repository.writeBatch(batch(), { id: '77' });
+    await repository.writeBatch(batch(), { id: '77' }, lease);
 
     const messageSql = database.sql.find((sql) => sql.includes('INSERT INTO cnc_telegram_worker_message_logs')) ?? '';
     expect(messageSql).toContain("WHEN EXCLUDED.status='observed' AND cnc_telegram_worker_message_logs.status<>'observed'");
@@ -59,7 +60,7 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     const database = fakeDatabase((sql) => sql.includes('INSERT INTO cnc_telegram_worker_operations') ? [] : defaultRows(sql));
     const repository = new PgCncTelegramWorkerAuditRepository(database.service);
 
-    await expect(repository.writeBatch(batch({ operation: true }), { id: '77' })).rejects.toMatchObject({
+    await expect(repository.writeBatch(batch({ operation: true }), { id: '77' }, lease)).rejects.toMatchObject({
       statusCode: 409,
       code: 'AUDIT_OPERATION_CONFLICT',
     });
@@ -77,7 +78,7 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     const database = fakeDatabase((sql) => defaultRows(sql));
     const repository = new PgCncTelegramWorkerAuditRepository(database.service);
 
-    await repository.writeBatch(batch({ plannedOperation: true }), { id: '77' });
+    await repository.writeBatch(batch({ plannedOperation: true }), { id: '77' }, lease);
 
     const operationIndex = database.sql.findIndex((sql) => sql.includes('INSERT INTO cnc_telegram_worker_operations'));
     const operationSql = database.sql[operationIndex] ?? '';
@@ -98,7 +99,7 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     });
     const repository = new PgCncTelegramWorkerAuditRepository(database.service);
 
-    await expect(repository.writeBatch(batch({ observation: true }), { id: '77' })).rejects.toMatchObject({
+    await expect(repository.writeBatch(batch({ observation: true }), { id: '77' }, lease)).rejects.toMatchObject({
       statusCode: 409,
       code: 'AUDIT_OBSERVATION_CONFLICT',
     });
@@ -163,12 +164,15 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
   });
 
   it('accepts an exact technical-line replay idempotently without counting a new row', async () => {
-    const database = fakeDatabase((sql) => sql.includes('INSERT INTO cnc_telegram_worker_technical_logs')
-      ? [{ log_id: '44444444-4444-4444-8444-444444444444', inserted: false }]
-      : []);
+    const database = fakeDatabase((sql) => {
+      if (sql.includes('INSERT INTO cnc_telegram_worker_technical_logs')) {
+        return [{ log_id: '44444444-4444-4444-8444-444444444444', inserted: false }];
+      }
+      return defaultRows(sql);
+    });
     const repository = new PgCncTelegramWorkerAuditRepository(database.service);
 
-    await expect(repository.writeTechnicalBatch(technicalBatch(), { id: '77' })).resolves.toEqual({ accepted: 0 });
+    await expect(repository.writeTechnicalBatch(technicalBatch(), { id: '77' }, lease)).resolves.toEqual({ accepted: 0 });
     const insertSql = database.sql.find((sql) => sql.includes('INSERT INTO cnc_telegram_worker_technical_logs')) ?? '';
     expect(insertSql).toContain('ON CONFLICT (worker_instance_id, sequence)');
     expect(insertSql).toContain('message=EXCLUDED.message');
@@ -176,9 +180,9 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
   });
 
   it('rejects a conflicting technical-line replay', async () => {
-    const database = fakeDatabase(() => []);
+    const database = fakeDatabase((sql) => defaultRows(sql));
     const repository = new PgCncTelegramWorkerAuditRepository(database.service);
-    await expect(repository.writeTechnicalBatch(technicalBatch(), { id: '77' }))
+    await expect(repository.writeTechnicalBatch(technicalBatch(), { id: '77' }, lease))
       .rejects.toMatchObject({ code: 'TECHNICAL_LOG_IDENTITY_CONFLICT', statusCode: 409 });
   });
 });
@@ -232,6 +236,7 @@ function batch(options: { operation?: boolean; observation?: boolean; plannedOpe
 }
 
 function defaultRows(sql: string): QueryResultRow[] {
+  if (sql.includes('FROM cnc_telegram_worker_session_leases')) return [{ lease_token: lease.leaseToken }];
   if (sql.includes('INSERT INTO cnc_telegram_worker_scans')) return [{ scan_id: scanId }];
   if (sql.includes('INSERT INTO cnc_telegram_worker_message_logs')) return [{ log_id: '11111111-1111-4111-8111-111111111111' }];
   if (sql.includes('INSERT INTO cnc_telegram_worker_operations')) return [{ operation_id: '22222222-2222-4222-8222-222222222222' }];

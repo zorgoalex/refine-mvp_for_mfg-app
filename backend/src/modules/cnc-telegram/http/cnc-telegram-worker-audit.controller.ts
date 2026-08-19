@@ -1,15 +1,17 @@
-import { Body, Controller, Get, Inject, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Inject, Post, Query, Req, Res } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ApiError } from '../../../common/errors/api-error';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CncTelegramWorkerAuditService } from '../application/cnc-telegram-worker-audit.service';
+import { parseWorkerSessionLeaseHeaders } from '../dto/cnc-telegram-worker-session.dto';
 import {
   parseTechnicalLogExportQuery,
   parseTechnicalLogListQuery,
   parseWorkerAuditExportQuery,
   parseWorkerAuditListQuery,
 } from '../dto/cnc-telegram-worker-audit.dto';
+import { CncTelegramRuntimeConfigService } from './cnc-telegram-runtime-config.service';
 
 @ApiTags('CncTelegramWorkerAudit')
 @ApiBearerAuth()
@@ -18,6 +20,8 @@ export class CncTelegramWorkerAuditController {
   constructor(
     @Inject(CncTelegramWorkerAuditService)
     private readonly audit: CncTelegramWorkerAuditService,
+    @Inject(CncTelegramRuntimeConfigService)
+    private readonly runtimeConfig: CncTelegramRuntimeConfigService,
   ) {}
 
   @ApiOperation({ operationId: 'getCncTelegramWorkerAuditCapabilities', summary: 'Verify complete worker-audit storage capability' })
@@ -32,15 +36,33 @@ export class CncTelegramWorkerAuditController {
   @ApiResponse({ status: 201, description: 'Audit batch persisted atomically' })
   @ApiResponse({ status: 422, description: 'Invalid bounded audit payload' })
   @Post('batch')
-  writeBatch(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<{ accepted: number }> {
-    return this.audit.writeRawBatch(this.requireCurrentUser(request), body, request.requestId);
+  async writeBatch(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
+    @Body() body: unknown,
+  ): Promise<{ accepted: number }> {
+    this.assertEnabled();
+    const lease = parseWorkerSessionLeaseHeaders(token, generation, sourceChatId, workerInstanceId);
+    return this.audit.writeRawBatch(this.requireCurrentUser(request), body, request.requestId, lease);
   }
 
   @ApiOperation({ operationId: 'writeCncTelegramWorkerTechnicalLogBatch', summary: 'Persist raw stdout/stderr worker lines' })
   @ApiResponse({ status: 201, description: 'Technical log lines persisted idempotently' })
   @Post('technical/batch')
-  writeTechnicalBatch(@Req() request: RequestWithCurrentUser, @Body() body: unknown): Promise<{ accepted: number }> {
-    return this.audit.writeTechnicalRawBatch(this.requireCurrentUser(request), body, request.requestId);
+  async writeTechnicalBatch(
+    @Req() request: RequestWithCurrentUser,
+    @Headers('x-cnc-telegram-session-token') token: string | string[] | undefined,
+    @Headers('x-cnc-telegram-session-generation') generation: string | string[] | undefined,
+    @Headers('x-cnc-telegram-chat-id') sourceChatId: string | string[] | undefined,
+    @Headers('x-cnc-telegram-worker-instance') workerInstanceId: string | string[] | undefined,
+    @Body() body: unknown,
+  ): Promise<{ accepted: number }> {
+    this.assertEnabled();
+    const lease = parseWorkerSessionLeaseHeaders(token, generation, sourceChatId, workerInstanceId);
+    return this.audit.writeTechnicalRawBatch(this.requireCurrentUser(request), body, request.requestId, lease);
   }
 
   @ApiOperation({ operationId: 'exportCncTelegramWorkerTechnicalLogs', summary: 'Export raw worker technical logs' })
@@ -93,6 +115,14 @@ export class CncTelegramWorkerAuditController {
   @Get()
   list(@Req() request: RequestWithCurrentUser, @Query() query: Record<string, unknown>): Promise<Record<string, unknown>> {
     return this.audit.list(this.requireCurrentUser(request), parseWorkerAuditListQuery(query));
+  }
+
+  private assertEnabled(): void {
+    if (!this.runtimeConfig.getFeatureFlags().cncTelegramEnabled) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'CNC Telegram API is disabled', {
+        feature: 'cnc_telegram',
+      });
+    }
   }
 
   private requireCurrentUser(request: RequestWithCurrentUser) {

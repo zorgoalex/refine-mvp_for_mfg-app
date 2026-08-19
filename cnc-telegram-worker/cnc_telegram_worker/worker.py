@@ -4,16 +4,18 @@ import asyncio
 import base64
 import hashlib
 import json
+import math
 import mimetypes
 import re
 import shutil
 import os
+import time
 import traceback
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from telethon import TelegramClient
 from PIL import Image, ImageOps
@@ -28,7 +30,7 @@ from .audit import (
     utc_now,
 )
 from .config import WorkerConfig
-from .erp_client import BackendAuth, ErpClient
+from .erp_client import BackendAuth, ErpClient, ErpResponseError, SessionLeaseLost, WorkerItemLease, parse_item_lease
 from .gcode import extract_order_names, parse_gcode_text
 from .ocr import OcrResult, run_ocr_command
 from .packet import (
@@ -42,6 +44,7 @@ from .packet import (
 )
 from .state import StateStore
 from .telegram_source import (
+    classify_import_message,
     collect_day_messages,
     has_thumbs_up,
     is_gcode_message,
@@ -50,7 +53,10 @@ from .telegram_source import (
     message_datetime,
     message_edited_datetime,
     message_filename,
+    message_mime_type,
+    message_outgoing,
     message_reply_to_id,
+    message_sender_id,
     message_text,
     message_thread_id,
     peer_id,
@@ -68,6 +74,11 @@ CUTTING_SEQUENCE_REPLY_RE = re.compile(
     re.IGNORECASE,
 )
 CUTTING_SEQUENCE_REPLY_TEXT = "Раскрой №{number}"
+IMPORT_MAX_FILE_BYTES = 15 * 1024 * 1024
+IMPORT_MAX_TOTAL_BYTES = 36 * 1024 * 1024
+TELEGRAM_MEDIA_TIMEOUT_SECONDS = 30.0
+DISCOVERY_PAGE_MESSAGES = 50
+DISCOVERY_PAGE_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -96,6 +107,41 @@ class ManualSvgSentItem:
     message: Any
 
 
+class WeightedQueueScheduler:
+    """Small deterministic weighted round-robin dispatcher for queue fairness."""
+
+    weights = {"manual": 4, "import": 2, "restore": 1, "discovery": 1}
+
+    def __init__(self, *, aging_seconds: float = 60.0) -> None:
+        self.aging_seconds = aging_seconds
+        self._slots = [name for name, weight in self.weights.items() for _ in range(weight)]
+        self._cursor = 0
+
+    def choose(self, ready: dict[str, bool], ready_since: dict[str, float], now: float | None = None) -> str | None:
+        now = time.monotonic() if now is None else now
+        aged = [
+            name for name, is_ready in ready.items()
+            if is_ready and name in self.weights and now - ready_since.get(name, now) >= self.aging_seconds
+        ]
+        if aged:
+            # An aged queue gets the next slot, with stable order for tests.
+            name = min(aged, key=lambda name: (ready_since.get(name, now), self._slots.index(name)))
+            # Aging is a wait-time bonus, not a permanent priority. Reset it
+            # after service so one continuously ready queue cannot starve the
+            # other queues forever.
+            ready_since[name] = now
+            index = self._slots.index(name)
+            self._cursor = (index + 1) % len(self._slots)
+            return name
+        for offset in range(len(self._slots)):
+            index = (self._cursor + offset) % len(self._slots)
+            name = self._slots[index]
+            if ready.get(name, False):
+                self._cursor = (index + 1) % len(self._slots)
+                return name
+        return None
+
+
 async def flush_audit_spool(
     audit_spool: AuditSpool,
     sender: Any,
@@ -119,8 +165,68 @@ class CncTelegramWorker:
                 password=config.erp_worker_password,
             ),
         )
+        self.erp.set_worker_identity(config.worker_instance_id)
 
-    async def run_once(self, workday: date | None = None, days: int | None = None) -> None:
+    async def _claim_session_lease(self) -> None:
+        self.config.require_session_lease_timing()
+        configured_chat_id = self.config.telegram_chat
+        if not re.fullmatch(r"-?\d+", configured_chat_id):
+            if len(self.config.telegram_allowed_chat_ids) != 1:
+                raise RuntimeError(
+                    "Telegram session lease requires numeric TELEGRAM_CHAT when multiple allowed chats are configured",
+                )
+            configured_chat_id = self.config.telegram_allowed_chat_ids[0]
+        max_attempts, retry_delay_seconds = self._session_claim_retry_policy()
+        for attempt in range(max_attempts):
+            try:
+                await self.erp.claim_worker_session(
+                    chat_id=configured_chat_id,
+                    image_revision=self.config.worker_image_revision,
+                    lease_ttl_seconds=self.config.session_lease_ttl_seconds,
+                )
+                return
+            except ErpResponseError as exc:
+                if not self._is_busy_session_claim_error(exc) or attempt + 1 >= max_attempts:
+                    raise
+                print(
+                    "CNC Telegram session lease is busy; "
+                    f"retry {attempt + 2}/{max_attempts} in {retry_delay_seconds:g}s",
+                    flush=True,
+                )
+                await asyncio.sleep(retry_delay_seconds)
+
+    def _session_claim_retry_policy(self) -> tuple[int, float]:
+        lease_ttl_seconds = max(1.0, float(self.config.session_lease_ttl_seconds))
+        poll_interval_seconds = max(0.01, float(self.config.poll_interval_seconds))
+        # One extra poll beyond the advertised TTL avoids racing a lease that
+        # expires between backend/database clock ticks during rolling restart.
+        max_attempts = max(2, math.ceil(lease_ttl_seconds / poll_interval_seconds) + 2)
+        return max_attempts, min(lease_ttl_seconds, poll_interval_seconds)
+
+    @staticmethod
+    def _is_busy_session_claim_error(exc: ErpResponseError) -> bool:
+        response = exc.response
+        if response.status_code != 409:
+            return False
+        try:
+            payload = response.json()
+        except (ValueError, json.JSONDecodeError):
+            return False
+        if not isinstance(payload, dict):
+            return False
+        candidates: list[Any] = [payload.get("code"), payload.get("errorCode")]
+        nested_error = payload.get("error")
+        if isinstance(nested_error, dict):
+            candidates.extend([nested_error.get("code"), nested_error.get("errorCode")])
+        return any(candidate == "CNC_TELEGRAM_SESSION_LEASE_BUSY" for candidate in candidates)
+
+    async def run_once(
+        self,
+        workday: date | None = None,
+        days: int | None = None,
+        *,
+        scan_request_id: str | None = None,
+    ) -> None:
         if not self.config.enabled:
             print(
                 f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
@@ -131,6 +237,11 @@ class CncTelegramWorker:
         self.config.require_worker_enabled()
         self.config.require_telegram()
         self.config.require_backend_auth()
+        if days is None or days < 1 or days > 31:
+            raise RuntimeError("break-glass once requires --days between 1 and 31")
+        if not scan_request_id or not scan_request_id.strip():
+            raise RuntimeError("break-glass once requires an approved --scan-request-id")
+        self.erp.set_approved_scan_request(scan_request_id)
         backfill_sheet_previews(self.config.media_dir)
         audit_spool = AuditSpool(
             self.config.audit_spool_path,
@@ -141,10 +252,13 @@ class CncTelegramWorker:
         workdays = [anchor - timedelta(days=offset) for offset in reversed(range(days_to_scan))]
 
         client: Any | None = None
+        session_claimed = False
         audit_flush_lock = asyncio.Lock()
         manual_svg_send_stop: asyncio.Event | None = None
         manual_svg_send_task: asyncio.Task[None] | None = None
         try:
+            await self._claim_session_lease()
+            session_claimed = True
             await self.erp.audit_capabilities()
             await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
             await reconcile_pending_processing_attempts(audit_spool, self.erp, self.state)
@@ -225,6 +339,9 @@ class CncTelegramWorker:
                     print(f"audit delivery deferred: {exc}", flush=True)
             finally:
                 audit_spool.close()
+            if session_claimed:
+                self.erp.set_session_lease(None)
+            self.erp.set_approved_scan_request(None)
             cleanup_temp_dir(
                 self.config.temp_dir,
                 min(self.config.temp_ttl_hours, self.config.attachment_ttl_hours),
@@ -235,13 +352,8 @@ class CncTelegramWorker:
                 excluded_relative_dirs=frozenset({SHEET_PREVIEW_DIRECTORY}),
             )
 
-    async def run_svg_refresh_backfill(
-        self,
-        workday: date | None = None,
-        days: int | None = None,
-        *,
-        write: bool = False,
-    ) -> None:
+    async def run_serve(self, *, technical_lease_lost_event: asyncio.Event | None = None) -> None:
+        """Run the long-lived queue worker without unsolicited Telegram scans."""
         if not self.config.enabled:
             print(
                 f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
@@ -251,22 +363,37 @@ class CncTelegramWorker:
             return
         self.config.require_worker_enabled()
         self.config.require_telegram()
-        if write:
-            self.config.require_backend_auth()
-        days_to_scan = days or self.config.history_days
-        anchor = workday or datetime.now(self.config.business_timezone).date()
-        workdays = [anchor - timedelta(days=offset) for offset in reversed(range(days_to_scan))]
-        parsed_count = 0
-        posted_count = 0
-        skipped_count = 0
+        self.config.require_backend_auth()
+        backfill_sheet_previews(self.config.media_dir)
+        audit_spool = AuditSpool(
+            self.config.audit_spool_path,
+            allow_unsafe_path=self.config.audit_allow_unsafe_path,
+        )
+        audit_flush_lock = asyncio.Lock()
         client: Any | None = None
+        stop_event = asyncio.Event()
+        lease_lost_event = asyncio.Event()
+        queue_tasks: list[asyncio.Task[None]] = []
+        heartbeat_task: asyncio.Task[None] | None = None
+        technical_lease_wait: asyncio.Task[bool] | None = None
         try:
+            # Claim the DB lease before connecting Telethon. This also fences
+            # crash-recovery ingest and all queue calls made below.
+            await self._claim_session_lease()
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
+            await self.erp.audit_capabilities()
+            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+            audit_spool.abandon_running_scans()
+            await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
+
             client = TelegramClient(
                 str(self.config.telegram_session_path),
                 self.config.telegram_api_id,
                 self.config.telegram_api_hash,
             )
             await client.connect()
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
             if not await client.is_user_authorized():
                 raise RuntimeError("Telethon session is not authorized; run `cnc-telegram-worker login` first")
             entity = await client.get_entity(parse_chat_ref(self.config.telegram_chat))
@@ -274,73 +401,193 @@ class CncTelegramWorker:
             assert_allowed_chat(chat_id, self.config.telegram_allowed_chat_ids)
             me = await client.get_me()
             session_user_id = str(me.id) if getattr(me, "id", None) is not None else None
-            for day in workdays:
-                messages = await collect_day_messages(
+
+            heartbeat_task = asyncio.create_task(
+                self._heartbeat_session(stop_event, lease_lost_event),
+                name="cnc-telegram-session-heartbeat",
+            )
+            import_scheduler_enabled = bool(getattr(self.config, "manual_import_enabled", False))
+            await self.process_media_restore_requests(client, entity, chat_id)
+            self._raise_if_technical_lease_lost(technical_lease_lost_event)
+            if self.config.can_send_manual_svg_uploads:
+                await self.process_manual_svg_telegram_send_requests(
                     client,
                     entity,
-                    day,
-                    self.config.business_timezone,
-                    self.config.max_messages_per_scan,
+                    chat_id,
+                    audit_spool=audit_spool,
+                    session_user_id=session_user_id,
+                    audit_flush_lock=audit_flush_lock,
                 )
-                groups = group_svg_messages(messages)
-                groups = [replace(group, cutting_sequence_no=None) for group in groups]
-                groups = apply_known_cutting_sequence_state(groups, chat_id, self.state)
-                source_message_ids = {int(group.source_message.id) for group in groups}
-                known_sequence_index = {
-                    int(group.source_message.id): group.cutting_sequence_no
-                    for group in groups
-                    if group.cutting_sequence_no is not None
-                }
-                if source_message_ids:
-                    sequence_index = await collect_cutting_sequence_reply_search_index(
+                self._raise_if_technical_lease_lost(technical_lease_lost_event)
+            if self.config.can_send_manual_svg_uploads and not import_scheduler_enabled:
+                queue_tasks.append(asyncio.create_task(
+                    self.poll_manual_svg_telegram_send_requests(
                         client,
                         entity,
-                        source_message_ids,
+                        chat_id,
+                        stop_event,
+                        audit_spool=audit_spool,
                         session_user_id=session_user_id,
-                        workday=day,
-                        business_timezone=self.config.business_timezone,
-                        known_sequence_index=known_sequence_index,
-                    )
-                    groups = apply_cutting_sequence_reply_index(groups, sequence_index)
-                print(f"svg refresh {day.isoformat()}: {len(groups)} SVG group(s), write={write}", flush=True)
-                for group in groups:
-                    try:
-                        result = await self.process_group(
-                            client,
-                            entity,
-                            group,
-                            chat_id,
-                            day,
-                            refresh_imported=write,
-                            dry_run=not write,
-                        )
-                    except Exception as exc:
-                        skipped_count += 1
-                        print(f"SVG message {group.vector_message.id} refresh failed: {exc}", flush=True)
-                        continue
-                    if result == "posted":
-                        posted_count += 1
-                    elif result == "parsed":
-                        parsed_count += 1
-                    else:
-                        skipped_count += 1
+                        audit_flush_lock=audit_flush_lock,
+                        fatal_event=lease_lost_event,
+                    ),
+                    name="cnc-telegram-manual-send-poll",
+                ))
+            if import_scheduler_enabled:
+                queue_tasks.append(asyncio.create_task(
+                    self.poll_queue_scheduler(
+                        client,
+                        entity,
+                        chat_id,
+                        stop_event,
+                        audit_spool=audit_spool,
+                        session_user_id=session_user_id,
+                        audit_flush_lock=audit_flush_lock,
+                        fatal_event=lease_lost_event,
+                    ),
+                    name="cnc-telegram-import-queue-scheduler",
+                ))
+            else:
+                queue_tasks.append(asyncio.create_task(
+                    self.poll_media_restore_requests(
+                        client,
+                        entity,
+                        chat_id,
+                        stop_event,
+                        fatal_event=lease_lost_event,
+                    ),
+                    name="cnc-telegram-media-restore-poll",
+                ))
+
+            stop_wait = asyncio.create_task(stop_event.wait(), name="cnc-telegram-serve-stop")
+            lease_wait = asyncio.create_task(lease_lost_event.wait(), name="cnc-telegram-serve-lease-loss")
+            waiter_tasks: list[asyncio.Task[bool]] = [stop_wait, lease_wait]
+            if technical_lease_lost_event is not None:
+                technical_lease_wait = asyncio.create_task(
+                    technical_lease_lost_event.wait(),
+                    name="cnc-telegram-serve-technical-lease-loss",
+                )
+                waiter_tasks.append(technical_lease_wait)
+            try:
+                await asyncio.wait(set(waiter_tasks), return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for waiter in waiter_tasks:
+                    waiter.cancel()
+                await asyncio.gather(*waiter_tasks, return_exceptions=True)
+            if technical_lease_lost_event is not None and technical_lease_lost_event.is_set():
+                raise SessionLeaseLost("technical log delivery lost the worker session lease")
+            if lease_lost_event.is_set():
+                raise SessionLeaseLost("worker session lease was lost")
         finally:
+            stop_event.set()
+            for task in queue_tasks:
+                if not task.done():
+                    task.cancel()
+            if queue_tasks:
+                await asyncio.gather(*queue_tasks, return_exceptions=True)
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
             if client is not None:
                 try:
                     await client.disconnect()
                 except Exception as exc:
                     print(f"Telegram disconnect failed: {exc}", flush=True)
-        print(
-            f"svg refresh done: parsed={parsed_count}, posted={posted_count}, skipped={skipped_count}, write={write}",
-            flush=True,
+            try:
+                try:
+                    await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
+                except Exception as exc:
+                    print(f"audit delivery deferred: {exc}", flush=True)
+            finally:
+                audit_spool.close()
+                self.erp.set_session_lease(None)
+            cleanup_temp_dir(
+                self.config.temp_dir,
+                min(self.config.temp_ttl_hours, self.config.attachment_ttl_hours),
+            )
+            cleanup_temp_dir(
+                self.config.media_dir,
+                self.config.attachment_ttl_hours,
+                excluded_relative_dirs=frozenset({SHEET_PREVIEW_DIRECTORY}),
+            )
+
+    @staticmethod
+    def _raise_if_technical_lease_lost(event: asyncio.Event | None) -> None:
+        if event is not None and event.is_set():
+            raise SessionLeaseLost("technical log delivery lost the worker session lease")
+
+    async def _heartbeat_session(self, stop_event: asyncio.Event, fatal_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=self.config.session_lease_heartbeat_seconds,
+                )
+            except asyncio.TimeoutError:
+                try:
+                    await self.erp.heartbeat_worker_session()
+                except SessionLeaseLost as exc:
+                    print(f"CNC Telegram session lease lost: {exc}", flush=True)
+                    fatal_event.set()
+                    stop_event.set()
+                    return
+                except Exception as exc:
+                    print(f"CNC Telegram session heartbeat failed: {exc}", flush=True)
+                    fatal_event.set()
+                    stop_event.set()
+                    return
+
+    async def poll_media_restore_requests(
+        self,
+        client: Any,
+        entity: Any,
+        chat_id: str,
+        stop_event: asyncio.Event,
+        *,
+        fatal_event: asyncio.Event | None = None,
+    ) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=self.config.media_restore_poll_interval_seconds,
+                )
+            except asyncio.TimeoutError:
+                pass
+            if stop_event.is_set():
+                break
+            try:
+                await self.process_media_restore_requests(client, entity, chat_id)
+            except SessionLeaseLost:
+                if fatal_event is not None:
+                    fatal_event.set()
+                stop_event.set()
+                return
+            except Exception as exc:
+                print(f"media restore polling failed: {exc}", flush=True)
+                traceback.print_exception(exc)
+
+    async def run_svg_refresh_backfill(
+        self,
+        workday: date | None = None,
+        days: int | None = None,
+        *,
+        write: bool = False,
+    ) -> None:
+        raise RuntimeError(
+            "svg-refresh-backfill is disabled after Phase A; history reads require the Phase B persisted scan flow",
         )
 
-    async def process_media_restore_requests(self, client: Any, entity: Any, chat_id: str) -> None:
+    async def process_media_restore_requests(self, client: Any, entity: Any, chat_id: str) -> int:
         claim = await self.erp.claim_media_restores()
         if claim.get("capability") != "cnc_telegram_media_restore_v1":
             raise RuntimeError("backend does not expose cnc_telegram_media_restore_v1")
-        for task in claim.get("tasks") or []:
+        tasks = (claim.get("tasks") or [])[:1]
+        for task in tasks:
             request_id = str(task.get("requestId") or "")
+            item_lease = parse_optional_item_lease(task)
+            if item_lease is None:
+                raise SessionLeaseLost("backend restore task has no fenced item lease")
             try:
                 task_chat_id = str(task.get("sourceChatId") or "")
                 message_id = int(task.get("sourceMessageId") or 0)
@@ -365,14 +612,22 @@ class CncTelegramWorker:
                 )
                 if storage_key_identity(media["storageKey"]) != storage_key_identity(str(task.get("storageKey") or "")):
                     raise RuntimeError("restored screenshot storage key does not match packet")
-                await self.erp.complete_media_restore(request_id, media)
+                if item_lease is None:
+                    await self.erp.complete_media_restore(request_id, media)
+                else:
+                    await self.erp.complete_media_restore(request_id, media, item_lease)
+            except SessionLeaseLost:
+                raise
             except Exception as exc:
                 error_message = sanitize_text(str(exc), 500) or "Telegram screenshot restore failed"
                 try:
-                    await self.erp.fail_media_restore(request_id, error_message)
+                    await self.erp.fail_media_restore(request_id, error_message, item_lease)
+                except SessionLeaseLost:
+                    raise
                 except Exception as report_exc:
                     print(f"restore {request_id} failure delivery deferred: {report_exc}", flush=True)
                 print(f"restore {request_id} failed: {error_message}", flush=True)
+        return len(tasks)
 
     async def process_manual_svg_telegram_send_requests(
         self,
@@ -383,12 +638,17 @@ class CncTelegramWorker:
         audit_spool: AuditSpool | None = None,
         session_user_id: str | None = None,
         audit_flush_lock: asyncio.Lock | None = None,
-    ) -> None:
+    ) -> int:
         claim = await self.erp.claim_manual_svg_telegram_sends()
         if claim.get("capability") != "cnc_manual_svg_telegram_send_v1":
             raise RuntimeError("backend does not expose cnc_manual_svg_telegram_send_v1")
-        for task in claim.get("tasks") or []:
+        processed = 0
+        for task in (claim.get("tasks") or [])[:1]:
+            processed += 1
             request_id = str(task.get("requestId") or "")
+            item_lease = parse_optional_item_lease(task)
+            if item_lease is None:
+                raise SessionLeaseLost("backend manual send task has no fenced item lease")
             try:
                 files = task.get("files") or []
                 if not isinstance(files, list) or not files:
@@ -419,23 +679,32 @@ class CncTelegramWorker:
                         await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
                     except Exception as audit_exc:
                         print(f"manual SVG send audit delivery deferred: {audit_exc}", flush=True)
-                await self.erp.complete_manual_svg_telegram_send(request_id, {
+                completion = {
                     "sentChatId": chat_id,
                     "sentMessageIds": manual_svg_sent_message_ids(sent),
-                })
+                }
+                if item_lease is None:
+                    await self.erp.complete_manual_svg_telegram_send(request_id, completion)
+                else:
+                    await self.erp.complete_manual_svg_telegram_send(request_id, completion, item_lease)
                 if audit_spool is not None:
                     try:
                         await flush_audit_spool(audit_spool, self.erp.audit_batch, audit_flush_lock)
                     except Exception as audit_exc:
                         print(f"manual SVG send audit delivery deferred: {audit_exc}", flush=True)
+            except SessionLeaseLost:
+                raise
             except Exception as exc:
                 error_message = sanitize_text(str(exc), 500) or "Manual SVG Telegram send failed"
                 traceback.print_exception(exc)
                 try:
-                    await self.erp.fail_manual_svg_telegram_send(request_id, error_message)
+                    await self.erp.fail_manual_svg_telegram_send(request_id, error_message, item_lease)
+                except SessionLeaseLost:
+                    raise
                 except Exception as report_exc:
                     print(f"manual SVG send {request_id} failure delivery deferred: {report_exc}", flush=True)
                 print(f"manual SVG send {request_id} failed: {error_message}", flush=True)
+        return processed
 
     async def poll_manual_svg_telegram_send_requests(
         self,
@@ -447,6 +716,7 @@ class CncTelegramWorker:
         audit_spool: AuditSpool | None = None,
         session_user_id: str | None = None,
         audit_flush_lock: asyncio.Lock | None = None,
+        fatal_event: asyncio.Event | None = None,
     ) -> None:
         while not stop_event.is_set():
             try:
@@ -467,29 +737,516 @@ class CncTelegramWorker:
                     session_user_id=session_user_id,
                     audit_flush_lock=audit_flush_lock,
                 )
+            except SessionLeaseLost:
+                if fatal_event is not None:
+                    fatal_event.set()
+                stop_event.set()
+                return
             except Exception as exc:
                 print(f"manual SVG send polling failed: {exc}", flush=True)
                 traceback.print_exception(exc)
 
-    async def run_daemon(self, days: int | None = None) -> None:
-        if not self.config.enabled:
-            print(
-                f"CNC Telegram worker disabled: ERP_STACK_ENV={self.config.stack_env} "
-                f"CNC_TELEGRAM_WORKER_ROLE={self.config.worker_role}",
-                flush=True,
-            )
-            return
-        self.config.require_worker_enabled()
-        first = True
-        while True:
-            scan_days = days or (self.config.history_days if first and self.config.backfill_on_start else 1)
+    async def poll_queue_scheduler(
+        self,
+        client: Any,
+        entity: Any,
+        chat_id: str,
+        stop_event: asyncio.Event,
+        *,
+        audit_spool: AuditSpool | None = None,
+        session_user_id: str | None = None,
+        audit_flush_lock: asyncio.Lock | None = None,
+        fatal_event: asyncio.Event | None = None,
+    ) -> None:
+        scheduler = WeightedQueueScheduler()
+        ready_since: dict[str, float] = {}
+        next_probe_at: dict[str, float] = {}
+        import_poll_interval = getattr(self.config, "import_queue_poll_interval_seconds", 5)
+        poll_intervals = {
+            "manual": self.config.poll_interval_seconds,
+            "import": import_poll_interval,
+            "restore": self.config.poll_interval_seconds,
+            "discovery": import_poll_interval,
+        }
+        while not stop_event.is_set():
+            now = time.monotonic()
+            enabled = {
+                "manual": self.config.can_send_manual_svg_uploads,
+                "import": True,
+                "restore": True,
+                "discovery": True,
+            }
+            ready: dict[str, bool] = {}
+            for name, is_enabled in enabled.items():
+                if not is_enabled:
+                    ready[name] = False
+                    ready_since.pop(name, None)
+                    next_probe_at.pop(name, None)
+                elif now >= next_probe_at.get(name, 0.0):
+                    ready[name] = True
+                    ready_since.setdefault(name, now)
+                else:
+                    # A queue that was just found empty is cooling down. It
+                    # must not age while it is not being probed.
+                    ready[name] = False
+                    ready_since.pop(name, None)
+            queue_name = scheduler.choose(ready, ready_since, now)
+            if queue_name is None:
+                cooling = [
+                    next_probe_at[name]
+                    for name, is_enabled in enabled.items()
+                    if is_enabled and name in next_probe_at
+                ]
+                timeout = min(poll_intervals.values())
+                if cooling:
+                    timeout = min(timeout, max(min(cooling) - now, 0.0))
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(),
+                        timeout=timeout,
+                    )
+                except asyncio.TimeoutError:
+                    pass
+                continue
+            processed = 0
             try:
-                await self.run_once(days=scan_days)
+                if queue_name == "manual":
+                    processed = await self.process_manual_svg_telegram_send_requests(
+                        client, entity, chat_id,
+                        audit_spool=audit_spool,
+                        session_user_id=session_user_id,
+                        audit_flush_lock=audit_flush_lock,
+                    )
+                elif queue_name == "restore":
+                    processed = await self.process_media_restore_requests(client, entity, chat_id)
+                elif queue_name == "discovery":
+                    processed = await self.process_import_scan_queue(
+                        client,
+                        entity,
+                        chat_id,
+                        between_days=(
+                            lambda: self.process_manual_svg_telegram_send_requests(
+                                client,
+                                entity,
+                                chat_id,
+                                audit_spool=audit_spool,
+                                session_user_id=session_user_id,
+                                audit_flush_lock=audit_flush_lock,
+                            )
+                            if self.config.can_send_manual_svg_uploads
+                            else asyncio.sleep(0)
+                        ),
+                    )
+                else:
+                    processed = await self.process_import_item_queue(client, entity, chat_id)
+            except SessionLeaseLost:
+                if fatal_event is not None:
+                    fatal_event.set()
+                stop_event.set()
+                return
             except Exception as exc:
-                print(f"scan failed: {exc}", flush=True)
+                print(f"CNC Telegram {queue_name} queue failed: {exc}", flush=True)
                 traceback.print_exception(exc)
-            first = False
-            await asyncio.sleep(self.config.poll_interval_seconds)
+            if processed == 0:
+                # Cool down only this empty queue. Other queues remain eligible
+                # and are probed immediately, so an empty manual queue cannot
+                # delay an available import queue by its weighted slots.
+                ready_since.pop(queue_name, None)
+                next_probe_at[queue_name] = time.monotonic() + poll_intervals[queue_name]
+                await asyncio.sleep(0)
+            else:
+                next_probe_at.pop(queue_name, None)
+                await asyncio.sleep(0)
+
+    async def process_import_scan_queue(
+        self,
+        client: Any,
+        entity: Any,
+        chat_id: str,
+        *,
+        between_days: Callable[[], Awaitable[None]] | None = None,
+    ) -> int:
+        claim = await self.erp.claim_import_scans()
+        tasks = claim if isinstance(claim, list) else (claim.get("tasks") or [])
+        if not isinstance(tasks, list):
+            raise RuntimeError("import scan claim response has invalid tasks")
+        for task in tasks[:1]:
+            if not isinstance(task, dict):
+                raise RuntimeError("import scan task is invalid")
+            scan_id = str(task.get("scanId") or "")
+            lease = parse_optional_item_lease(task)
+            if lease is None:
+                raise SessionLeaseLost("backend import scan has no fenced lease")
+            if str(task.get("sourceChatId") or chat_id) != chat_id:
+                raise RuntimeError("import scan targets a different Telegram chat")
+            try:
+                start = parse_iso_date(task.get("dateFrom"))
+                end = parse_iso_date(task.get("dateTo"))
+                if end < start or (end - start).days > 30:
+                    raise RuntimeError("import scan date range is outside the 31-day bound")
+                day_offset = int(task.get("daysProcessed") or 0)
+                total_days = (end - start).days + 1
+                if day_offset < 0 or day_offset > total_days:
+                    raise RuntimeError("import scan progress is invalid")
+                scan_progress = task.get("progress") if isinstance(task.get("progress"), dict) else {}
+                messages_seen = max(int(scan_progress.get("messagesProcessed") or 0), int(task.get("messagesScanned") or 0))
+                candidates_seen = max(int(scan_progress.get("candidatesTotal") or 0), int(task.get("candidatesFound") or 0))
+                truncated = bool(task.get("truncated") or scan_progress.get("truncated"))
+                days_scanned = day_offset
+                for current_offset in range(day_offset, total_days):
+                    remaining_messages = max(5000 - messages_seen, 0)
+                    remaining_candidates = max(500 - candidates_seen, 0)
+                    # Candidate rows have a separate bound, but reaching it
+                    # must not stop the raw-message view: continue reading
+                    # remaining days until the 5000-message scan bound.
+                    if remaining_messages == 0:
+                        truncated = True
+                        break
+                    day = start + timedelta(days=current_offset)
+                    candidates, page = await self.discover_workday(
+                        client,
+                        entity,
+                        chat_id,
+                        day,
+                        scan_id=scan_id,
+                        max_messages=remaining_messages,
+                        max_candidates=remaining_candidates,
+                    )
+                    messages_seen += int(page["messagesProcessed"])
+                    candidates_seen += int(page["candidatesFound"])
+                    truncated = truncated or bool(page["truncated"])
+                    days_scanned = current_offset + 1
+                    # One fenced batch is the atomic checkpoint for one day.
+                    # Never advance days_scanned before every bounded message
+                    # from that day is persisted.
+                    await self.erp.submit_import_scan_candidates(
+                        scan_id,
+                        candidates,
+                        lease,
+                        messages=page.get("messages", []),
+                        days_scanned=current_offset + 1,
+                        messages_scanned=messages_seen,
+                        truncated=truncated,
+                    )
+                    if between_days is not None and current_offset + 1 < total_days:
+                        await between_days()
+                    await asyncio.sleep(0)
+                await self.erp.complete_import_scan(
+                    scan_id,
+                    {
+                        "daysScanned": days_scanned,
+                        "messagesScanned": messages_seen,
+                        "truncated": truncated,
+                    },
+                    lease,
+                )
+            except SessionLeaseLost:
+                raise
+            except Exception as exc:
+                await self.erp.fail_import_scan(
+                    scan_id,
+                    "DISCOVERY_FAILED",
+                    sanitize_text(str(exc), 500) or "Telegram discovery failed",
+                    lease,
+                )
+        return len(tasks[:1])
+
+    async def process_import_item_queue(self, client: Any, entity: Any, chat_id: str) -> int:
+        claim = await self.erp.claim_import_items()
+        tasks = claim if isinstance(claim, list) else (claim.get("tasks") or [])
+        if not isinstance(tasks, list):
+            raise RuntimeError("import item claim response has invalid tasks")
+        for task in tasks[:1]:
+            if not isinstance(task, dict):
+                raise RuntimeError("import item task is invalid")
+            item_id = str(task.get("importItemId") or task.get("itemId") or "")
+            lease = parse_optional_item_lease(task)
+            if lease is None:
+                raise SessionLeaseLost("backend import item has no fenced lease")
+            try:
+                result = await self.import_candidate(client, entity, chat_id, task)
+                await self.erp.complete_import_item(item_id, result, lease)
+            except SessionLeaseLost:
+                raise
+            except SourceChangedError as exc:
+                await self.erp.fail_import_item(item_id, "SOURCE_CHANGED_RESCAN_REQUIRED", str(exc), lease)
+            except Exception as exc:
+                await self.erp.fail_import_item(
+                    item_id,
+                    "IMPORT_FAILED",
+                    sanitize_text(str(exc), 500) or "Telegram import failed",
+                    lease,
+                )
+        return len(tasks[:1])
+
+    async def discover_workday(
+        self,
+        client: Any,
+        entity: Any,
+        chat_id: str,
+        workday: date,
+        *,
+        scan_id: str = "discovery",
+        max_messages: int | None = None,
+        max_candidates: int = 500,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Read one bounded history page and return candidates plus all messages.
+
+        This deliberately does not instantiate ``ScanAudit``, ingest a packet,
+        enqueue outbound work, or send a Telegram reply.  Bytes exist only in
+        the per-page temporary directory and are removed in ``finally``.
+        """
+        max_messages = min(max(int(max_messages or self.config.max_messages_per_scan), 1), 5000)
+        messages = await asyncio.wait_for(
+            collect_day_messages(
+                client, entity, workday, self.config.business_timezone, max_messages,
+            ),
+            timeout=TELEGRAM_MEDIA_TIMEOUT_SECONDS,
+        )
+        truncated = len(messages) >= max_messages
+        groups = group_svg_messages(messages)
+        candidates: list[dict[str, Any]] = []
+        page_dir = self.config.temp_dir / f"import-discovery-{safe_path_component(scan_id)}-{workday.isoformat()}"
+        try:
+            bounded_candidates = min(len(groups), max(max_candidates, 0))
+            page_started = time.monotonic()
+            for page_start in range(0, bounded_candidates, 50):
+                for group_index, group in enumerate(groups[page_start:page_start + 50]):
+                    candidate_dir = page_dir / f"candidate-{page_start + group_index}"
+                    try:
+                        candidate = await self._discover_group_candidate(
+                            client, group, chat_id, workday, candidate_dir, related_messages=messages,
+                        )
+                        # Current backend strict DTO requires a non-null SVG
+                        # SHA-256 even for invalid layout candidates.  Do not
+                        # emit a DTO-rejected incomplete row when bytes are gone;
+                        # the scan truncation/warning counters remain visible.
+                        if candidate.get("svgContentSha256"):
+                            candidates.append(candidate)
+                    finally:
+                        shutil.rmtree(candidate_dir, ignore_errors=True)
+                    if (group_index + 1) % DISCOVERY_PAGE_MESSAGES == 0 or time.monotonic() - page_started >= DISCOVERY_PAGE_SECONDS:
+                        await asyncio.sleep(0)
+                        page_started = time.monotonic()
+                # Parsing is explicitly paged so a 31-day/1000-message read
+                # yields to outbound work between every bounded page.
+                await asyncio.sleep(0)
+                page_started = time.monotonic()
+        finally:
+            shutil.rmtree(page_dir, ignore_errors=True)
+        candidate_links: dict[int, tuple[int, str]] = {}
+        for candidate in candidates:
+            candidate_source_id = int(candidate["sourceMessageId"])
+            for link in candidate.get("messageLinks", []):
+                try:
+                    candidate_links[int(link["sourceMessageId"])] = (candidate_source_id, str(link["candidateRole"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        serialized_messages = [
+            serialize_import_scan_message(message, chat_id, workday, ordinal, candidate_links)
+            for ordinal, message in enumerate(messages, start=1)
+        ]
+        warnings = sum(len(candidate.get("warnings") or []) for candidate in candidates)
+        return candidates, {
+            "messagesProcessed": len(messages),
+            "candidatesFound": len(candidates),
+            "warningsCount": warnings,
+            "truncated": truncated or len(groups) > bounded_candidates,
+            "messages": serialized_messages,
+        }
+
+    async def _discover_group_candidate(
+        self,
+        client: Any,
+        group: SvgGroup,
+        chat_id: str,
+        workday: date,
+        page_dir: Path,
+        *,
+        related_messages: list[Any] | None = None,
+        include_content: bool = False,
+    ) -> dict[str, Any]:
+        page_dir.mkdir(parents=True, exist_ok=True)
+        files: list[dict[str, Any]] = []
+        cut_layout: dict[str, Any] | None = None
+        warnings: list[str] = []
+        gcode_analysis: Any | None = None
+        svg_path = await asyncio.wait_for(
+            download_media(group.vector_message, page_dir, "svg"),
+            timeout=TELEGRAM_MEDIA_TIMEOUT_SECONDS,
+        )
+        if svg_path is None:
+            warnings.append("SVG source is unavailable")
+        else:
+            files.append(source_file_identity(svg_path, group.vector_message, "svg"))
+            try:
+                cut_layout = layout_to_dict(
+                    parse_svg_cut_layout(
+                        svg_path,
+                        mode=getattr(self.config, "svg_validation_mode", "lenient"),
+                    ),
+                )
+                if cut_layout.get("status") != "valid":
+                    warnings.extend(sanitize_text(str(reason), 200) for reason in cut_layout.get("reasons") or [])
+            except Exception as exc:
+                warnings.append(sanitize_text(str(exc), 200) or "SVG parse failed")
+        if group.gcode_message is not None:
+            gcode_path = await asyncio.wait_for(
+                download_media(group.gcode_message, page_dir, "gcode"),
+                timeout=TELEGRAM_MEDIA_TIMEOUT_SECONDS,
+            )
+            if gcode_path is None:
+                warnings.append("G-code source is unavailable")
+            else:
+                files.append(source_file_identity(gcode_path, group.gcode_message, "gcode"))
+                gcode_text = gcode_path.read_text(encoding="utf-8", errors="replace")
+                gcode_analysis = parse_gcode_text(gcode_text, message_filename(group.gcode_message) or gcode_path.name)
+        if group.image_message is not None:
+            screenshot_path = await asyncio.wait_for(
+                download_media(group.image_message, page_dir, "screenshot"),
+                timeout=TELEGRAM_MEDIA_TIMEOUT_SECONDS,
+            )
+            if screenshot_path is not None:
+                files.append(source_file_identity(screenshot_path, group.image_message, "screenshot"))
+        comment_messages = [
+            message for message in (related_messages or [])
+            if message not in (group.vector_message, group.image_message, group.gcode_message)
+            and message_text(message) in group.comments
+            and not is_cutting_sequence_reply_text(message_text(message))
+        ]
+        source_ids = [
+            int(message.id)
+            for message in (group.vector_message, group.image_message, group.gcode_message, *comment_messages)
+            if message is not None
+        ]
+        message_links = [
+            {"sourceMessageId": int(group.vector_message.id), "candidateRole": "svg"},
+            *([{"sourceMessageId": int(group.gcode_message.id), "candidateRole": "gcode"}] if group.gcode_message is not None else []),
+            *([{"sourceMessageId": int(group.image_message.id), "candidateRole": "screenshot"}] if group.image_message is not None else []),
+            *({"sourceMessageId": int(message.id), "candidateRole": "comment"} for message in comment_messages),
+        ]
+        if include_content:
+            total_size = 0
+            for source_file in files:
+                path = page_dir / f"{source_file['kind']}-{source_file.get('fileName') or ''}"
+                # Resolve the actual downloaded file by its identity hash; do
+                # not trust Telegram-provided names for filesystem lookup.
+                matches = [candidate for candidate in page_dir.iterdir() if candidate.is_file() and file_sha256(candidate) == source_file["sha256"]]
+                if len(matches) != 1:
+                    raise RuntimeError("revalidated source file is unavailable")
+                raw = matches[0].read_bytes()
+                if not raw or len(raw) > IMPORT_MAX_FILE_BYTES:
+                    raise RuntimeError("revalidated source file exceeds import size bounds")
+                total_size += len(raw)
+                source_file.update({
+                    "contentType": source_file.get("contentType") or "application/octet-stream",
+                    "sizeBytes": len(raw),
+                    "base64Content": base64.b64encode(raw).decode("ascii"),
+                })
+            if total_size > IMPORT_MAX_TOTAL_BYTES or len(files) > 3:
+                raise RuntimeError("revalidated source set exceeds import size bounds")
+        source_set_fingerprint = import_source_set_fingerprint(
+            group, chat_id, workday, files, self.config.parser_version, comment_messages=comment_messages,
+        )
+        layout_fingerprint = canonical_layout_fingerprint(cut_layout) if cut_layout is not None else None
+        snapshot: dict[str, Any] = {
+            "externalPacketKey": external_packet_key(chat_id, int(group.source_message.id)),
+            "sourceMessageIds": [str(source_id) for source_id in source_ids],
+            "comments": [sanitize_text(comment, 500) for comment in group.comments[:50]],
+            "items": (cut_layout or {}).get("items", [])[:2000],
+            "cutLayout": cut_layout,
+            "gcodeAnalysis": asdict(gcode_analysis) if gcode_analysis is not None else None,
+            "parserVersion": self.config.parser_version,
+        }
+        eligible = bool(files and cut_layout and cut_layout.get("status") == "valid")
+        if not eligible and not warnings:
+            warnings.append("candidate has no valid complete SVG source")
+        return {
+            "sourceChatId": chat_id,
+            "sourceMessageId": str(int(group.source_message.id)),
+            "sourceThreadId": str(thread_id) if (thread_id := message_thread_id(group.source_message)) is not None else None,
+            "sourceCreatedAt": message_datetime(group.source_message).isoformat(),
+            "sourceUpdatedAt": message_edited_datetime(group.source_message).isoformat() if message_edited_datetime(group.source_message) else None,
+            "workday": workday.isoformat(),
+            "svgMessageId": str(int(group.vector_message.id)),
+            "gcodeMessageId": str(int(group.gcode_message.id)) if group.gcode_message is not None else None,
+            "screenshotMessageId": str(int(group.image_message.id)) if group.image_message is not None else None,
+            "svgFileName": message_filename(group.vector_message) or f"{group.vector_message.id}.svg",
+            "gcodeFileName": message_filename(group.gcode_message) if group.gcode_message is not None else None,
+            "screenshotFileName": message_filename(group.image_message) if group.image_message is not None else None,
+            "svgContentSha256": next((item["sha256"] for item in files if item["kind"] == "svg"), None),
+            "gcodeContentSha256": next((item["sha256"] for item in files if item["kind"] == "gcode"), None),
+            "screenshotContentSha256": next((item["sha256"] for item in files if item["kind"] == "screenshot"), None),
+            "sourceSetFingerprint": source_set_fingerprint,
+            "parserVersion": self.config.parser_version,
+            "layoutFingerprint": layout_fingerprint,
+            "parsedSnapshot": snapshot,
+            "cutLayout": cut_layout,
+            "sourceFiles": files,
+            "messageLinks": message_links,
+            "warnings": [warning for warning in warnings if warning],
+            "eligibilityStatus": "valid" if eligible else "incomplete",
+        }
+
+    async def import_candidate(self, client: Any, entity: Any, chat_id: str, task: dict[str, Any]) -> dict[str, Any]:
+        """Re-read and validate the complete source set before backend completion."""
+        candidate = task.get("candidate") if isinstance(task.get("candidate"), dict) else task
+        snapshot = candidate.get("parsedSnapshot") if isinstance(candidate.get("parsedSnapshot"), dict) else {}
+        expected_ids = [int(value) for value in snapshot.get("sourceMessageIds", []) if str(value).isdigit()]
+        if not expected_ids:
+            expected_ids = [
+                int(value) for value in (
+                    candidate.get("svgMessageId"), candidate.get("gcodeMessageId"), candidate.get("screenshotMessageId"),
+                ) if value is not None and str(value).isdigit()
+            ]
+        if not expected_ids:
+            raise RuntimeError("import candidate has no source message ids")
+        fetched = await client.get_messages(entity, ids=expected_ids)
+        messages = fetched if isinstance(fetched, list) else [fetched]
+        messages = [message for message in messages if message is not None]
+        if {int(message.id) for message in messages} != set(expected_ids):
+            raise SourceChangedError("one or more Telegram source messages were deleted")
+        groups = group_svg_messages(messages)
+        source_id = int(candidate.get("sourceMessageId") or candidate.get("svgMessageId") or 0)
+        group = next((item for item in groups if int(item.source_message.id) == source_id), None)
+        if group is None:
+            raise SourceChangedError("Telegram source grouping changed")
+        temp_dir = self.config.temp_dir / f"import-selected-{safe_path_component(str(task.get('importItemId') or source_id))}"
+        try:
+            current = await self._discover_group_candidate(
+                client, group, chat_id, parse_iso_date(candidate.get("workday") or candidate.get("sourceCreatedAt")), temp_dir,
+                related_messages=messages,
+                include_content=True,
+            )
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        expected_fingerprint = str(candidate.get("sourceSetFingerprint") or "")
+        if not expected_fingerprint or current["sourceSetFingerprint"] != expected_fingerprint:
+            raise SourceChangedError("Telegram source set changed since discovery")
+        if current.get("eligibilityStatus") != "valid":
+            raise RuntimeError("import candidate is not eligible")
+        source = {
+            key: current[key]
+            for key in (
+                "sourceChatId", "sourceMessageId", "svgMessageId", "gcodeMessageId", "screenshotMessageId",
+                "svgFileName", "gcodeFileName", "screenshotFileName", "svgContentSha256",
+                "gcodeContentSha256", "screenshotContentSha256",
+            )
+        }
+        return {
+            "sourceSetFingerprint": current["sourceSetFingerprint"],
+            "source": source,
+            "sourceFiles": [
+                {
+                    key: file[key]
+                    for key in ("kind", "fileName", "contentType", "sizeBytes", "sha256", "base64Content")
+                }
+                for file in current.get("sourceFiles", [])
+            ],
+        }
+
+    async def run_daemon(self, days: int | None = None) -> None:
+        raise RuntimeError("daemon is deprecated and fail-closed; use `serve`")
 
     async def scan_workday(
         self,
@@ -1021,6 +1778,42 @@ async def login_telegram_session(config: WorkerConfig) -> None:
     print(f"Telethon session ready: {config.telegram_session_path}")
 
 
+def serialize_import_scan_message(
+    message: Any,
+    chat_id: str,
+    workday: date,
+    read_ordinal: int,
+    candidate_links: dict[int, tuple[int, str]],
+) -> dict[str, Any]:
+    """Build the bounded, non-media raw message row for an import scan."""
+    message_id = int(message.id)
+    candidate_link = candidate_links.get(message_id)
+    raw_text = message_text(message)
+    filename = message_filename(message)
+    edited_at = message_edited_datetime(message)
+    row: dict[str, Any] = {
+        "sourceChatId": chat_id,
+        "sourceMessageId": str(message_id),
+        "sourceThreadId": str(thread_id) if (thread_id := message_thread_id(message)) is not None else None,
+        "replyToMessageId": str(reply_id) if (reply_id := message_reply_to_id(message)) is not None else None,
+        "senderUserId": str(sender_id) if (sender_id := message_sender_id(message)) is not None else None,
+        "sourceCreatedAt": message_datetime(message).isoformat(),
+        "sourceUpdatedAt": edited_at.isoformat() if edited_at is not None else None,
+        "workday": workday.isoformat(),
+        "messageType": classify_import_message(message),
+        "filename": sanitize_text(filename, 255) if filename else None,
+        "mimeType": sanitize_text(message_mime_type(message), 120) if message_mime_type(message) else None,
+        "messageText": sanitize_text(raw_text, 2000) if raw_text else None,
+        "outgoing": message_outgoing(message),
+        "readOrdinal": read_ordinal,
+    }
+    if candidate_link is not None:
+        candidate_source_id, candidate_role = candidate_link
+        row["candidateSourceMessageId"] = str(candidate_source_id)
+        row["candidateRole"] = candidate_role
+    return row
+
+
 def group_svg_messages(messages: list[Any]) -> list[SvgGroup]:
     image_messages = [message for message in messages if is_image_message(message)]
     gcode_messages = [message for message in messages if is_gcode_message(message)]
@@ -1235,6 +2028,122 @@ def group_source_fingerprint(
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+class SourceChangedError(RuntimeError):
+    """The selected Telegram source no longer matches discovery provenance."""
+
+
+def parse_iso_date(value: Any) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError("date value is missing")
+    raw = value.strip().split("T", 1)[0]
+    try:
+        return date.fromisoformat(raw)
+    except ValueError as exc:
+        raise RuntimeError("date value is invalid") from exc
+
+
+def safe_path_component(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip(".-")
+    return cleaned[:100] or "item"
+
+
+def source_file_payload(source: dict[str, Any]) -> list[dict[str, Any]]:
+    files: list[dict[str, Any]] = []
+    for kind, name_key, sha_key in (
+        ("svg", "svgFileName", "svgContentSha256"),
+        ("gcode", "gcodeFileName", "gcodeContentSha256"),
+        ("screenshot", "screenshotFileName", "screenshotContentSha256"),
+    ):
+        if source.get(sha_key):
+            files.append({"kind": kind, "fileName": source.get(name_key), "sha256": source.get(sha_key)})
+    return files
+
+
+def fingerprint_json(value: Any) -> str:
+    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def canonical_layout_fingerprint(layout: dict[str, Any] | None) -> str | None:
+    """Return the bare SHA-256 of geometry, excluding semantic labels/IDs."""
+    if not isinstance(layout, dict):
+        return None
+
+    def rounded(value: Any) -> float | int | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        normalized = round(float(value), 3)
+        # Match TypeScript JSON.stringify: integral numbers serialize as 2800,
+        # not Python's 2800.0.  This is part of the cross-language hash
+        # contract, not merely a display normalization.
+        return int(normalized) if normalized.is_integer() else normalized
+
+    sheet = layout.get("sheet") if isinstance(layout.get("sheet"), dict) else {}
+    geometry_items: list[dict[str, Any]] = []
+    for item in layout.get("items") if isinstance(layout.get("items"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        geometry_items.append({
+            "widthMm": rounded(item.get("widthMm")),
+            "heightMm": rounded(item.get("heightMm")),
+            "xMm": rounded(item.get("xMm")),
+            "yMm": rounded(item.get("yMm")),
+            "placedWidthMm": rounded(item.get("placedWidthMm")),
+            "placedHeightMm": rounded(item.get("placedHeightMm")),
+            "rotated": bool(item.get("rotated", False)),
+            "quantity": int(item.get("quantity", 1)) if isinstance(item.get("quantity", 1), int) else 1,
+        })
+    canonical = {
+        "version": "cnc-layout-fingerprint-v1",
+        # The persisted layout DTO has no material field in this contract.
+        "material": None,
+        "sheet": {
+            "widthMm": rounded(sheet.get("widthMm")),
+            "heightMm": rounded(sheet.get("heightMm")),
+        },
+        "items": sorted(geometry_items, key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"))),
+    }
+    return fingerprint_json(canonical)
+
+
+def import_source_set_fingerprint(
+    group: SvgGroup,
+    chat_id: str,
+    workday: date,
+    source_files: list[dict[str, Any]],
+    parser_version: str,
+    *,
+    comment_messages: list[Any] | None = None,
+) -> str:
+    """Hash every discovery dimension needed to fence a later import."""
+    payload = {
+        "version": "cnc-telegram-import-source-set-v1",
+        "chatId": chat_id,
+        "workday": workday.isoformat(),
+        "groupingVersion": "group-svg-messages-v1",
+        "parserVersion": parser_version,
+        "layoutFingerprintVersion": "cnc-layout-fingerprint-v1",
+        "vector": message_identity(group.vector_message, include_reactions=True),
+        "image": message_identity(group.image_message, include_reactions=True) if group.image_message is not None else None,
+        "gcode": message_identity(group.gcode_message, include_reactions=True) if group.gcode_message is not None else None,
+        "comments": [sanitize_text(comment, 500) for comment in group.comments[:50]],
+        "commentMessages": [message_identity(message, include_reactions=True) for message in (comment_messages or [])],
+        "sourceFiles": sorted(
+            [
+                {
+                    key: item.get(key)
+                    for key in ("kind", "fileName", "contentType", "sizeBytes", "sha256")
+                }
+                for item in source_files
+            ],
+            key=lambda item: str(item.get("kind") or ""),
+        ),
+    }
+    return fingerprint_json(payload)
 
 
 def svg_refresh_idempotency_key(external_key: str, source_version: int, payload_hash: str) -> str:
@@ -1587,8 +2496,52 @@ async def download_media(message: Any, run_dir: Path, prefix: str) -> Path | Non
     filename = message_filename(message)
     suffix = Path(filename).suffix if filename else ""
     target = run_dir / f"{prefix}-{int(message.id)}{suffix}"
-    result = await message.download_media(file=str(target))
-    return Path(result) if result else None
+    declared_size = getattr(getattr(message, "file", None), "size", None)
+    if isinstance(declared_size, int) and declared_size > IMPORT_MAX_FILE_BYTES:
+        raise ValueError(f"Telegram media exceeds {IMPORT_MAX_FILE_BYTES} byte limit")
+    run_dir.mkdir(parents=True, exist_ok=True)
+    sink = BoundedMediaWriter(target, IMPORT_MAX_FILE_BYTES)
+    try:
+        result = await message.download_media(file=sink)
+        sink.close()
+        if not target.exists() or target.stat().st_size <= 0:
+            return None
+        if target.stat().st_size > IMPORT_MAX_FILE_BYTES:
+            raise ValueError(f"Telegram media exceeds {IMPORT_MAX_FILE_BYTES} byte limit")
+        return Path(result) if result else target
+    except Exception:
+        sink.close()
+        target.unlink(missing_ok=True)
+        raise
+
+
+class BoundedMediaWriter:
+    """File-like Telethon sink that rejects oversized media while writing."""
+
+    def __init__(self, path: Path, limit: int) -> None:
+        self.path = path
+        self.name = str(path)
+        self.limit = limit
+        self.size = 0
+        self._file = path.open("wb")
+
+    def write(self, data: bytes) -> int:
+        if self.size + len(data) > self.limit:
+            raise ValueError(f"Telegram media exceeds {self.limit} byte limit")
+        written = self._file.write(data)
+        self.size += written
+        return written
+
+    def flush(self) -> None:
+        self._file.flush()
+
+    def close(self) -> None:
+        if not self._file.closed:
+            self._file.close()
+
+    def __fspath__(self) -> str:
+        # Keeps lightweight test doubles and Telethon path handling compatible.
+        return str(self.path)
 
 
 def source_file_identity(path: Path, message: Any, kind: str) -> dict[str, Any]:
@@ -1801,6 +2754,29 @@ def parse_chat_ref(value: str) -> int | str:
     if stripped.lstrip("-").isdigit():
         return int(stripped)
     return stripped
+
+
+def parse_optional_item_lease(task: Any) -> WorkerItemLease | None:
+    """Read the additive item-lease contract when the backend exposes it.
+
+    Phase-A compatible backends may still return legacy queue tasks.  New
+    responses are carried through unchanged to complete/fail, where the
+    backend strictly fences token, generation and owner.
+    """
+    if not isinstance(task, dict):
+        raise RuntimeError("backend queue task is invalid")
+    lease_keys = {
+        "itemLease",
+        "itemLeaseToken",
+        "itemLeaseGeneration",
+        "itemLeaseOwner",
+        "leaseToken",
+        "leaseGeneration",
+        "leaseOwner",
+    }
+    if not lease_keys.intersection(task):
+        return None
+    return parse_item_lease(task)
 
 
 def assert_allowed_chat(actual_chat_id: str, allowed_chat_ids: tuple[str, ...]) -> None:

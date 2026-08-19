@@ -1285,6 +1285,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
   });
 
+  it('keeps Telegram import off the MDF board source', () => {
+    expect(page).not.toContain("import { CutTelegramImportModal } from '../cut/CutTelegramImportModal';");
+    expect(page).not.toContain('CutTelegramImportModal');
+    expect(page).not.toContain('Импорт из Telegram');
+    expect(page).not.toContain('telegramImportOpen');
+    expect(page).not.toContain('canImportTelegram');
+    expect(css).not.toContain('status-board-toolbar__telegram-import');
+  });
+
   it('forces the fifth orders column compact and half-width in detailed mode', () => {
     expect(page).toContain('const summaryOnly = detailedBathActive || isCncCardSummaryOnly(');
     expect(page).toContain("displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}");
