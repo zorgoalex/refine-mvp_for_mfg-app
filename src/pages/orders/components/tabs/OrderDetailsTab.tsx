@@ -52,6 +52,10 @@ import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 import type { TransferOrderDetailsResponse } from '../../../../api/types/orderApi.types';
 import { ordersApi } from '../../../../api/ordersApi';
 import { formatOrderRefreshSuccessMessage, mergeOrderRefreshDetails } from '../../orderRefresh';
+import {
+  businessOrderDetails,
+  isOrderDetailPlaceholder,
+} from '../../../../utils/orderDetailRows';
 
 // Exposed methods via ref
 export interface OrderDetailsTabRef {
@@ -64,6 +68,7 @@ const QUICK_ADD_DEFAULTS_BASE = {
   milling_type_id: 1,  // Модерн
   edge_type_id: 1,     // р-1
   priority: 100,
+  is_placeholder: true,
 };
 
 // Drag selection confirmation state
@@ -134,6 +139,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     [defaultSheetMaterialTypeId],
   );
 
+  const businessDetails = useMemo(
+    () => businessOrderDetails(details),
+    [details],
+  );
+
   const [modalOpen, setModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -143,6 +153,22 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
   const [dragSelectionState, setDragSelectionState] = useState<DragSelectionState | null>(null);
   const tableRef = useRef<OrderDetailTableRef>(null);
+  const didFocusInitialPlaceholderRef = useRef(false);
+
+  React.useEffect(() => {
+    if (didFocusInitialPlaceholderRef.current || header?.order_id != null) return;
+    const firstDetail = [...details].sort(
+      (left, right) => (left.detail_number || 0) - (right.detail_number || 0),
+    )[0];
+    if (!firstDetail || !isOrderDetailPlaceholder(firstDetail)) return;
+
+    const frame = requestAnimationFrame(() => {
+      if (!tableRef.current || tableRef.current.isEditing()) return;
+      didFocusInitialPlaceholderRef.current = true;
+      tableRef.current.startInitialHeightEdit(firstDetail);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [details, header?.order_id]);
 
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
   const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view');
@@ -331,35 +357,21 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   };
 
   // Handle quick inline add
-  const handleQuickAdd = async (): Promise<boolean> => {
-    // Add new detail with defaults
-    addDetail(QUICK_ADD_DEFAULTS as Omit<OrderDetail, 'temp_id'>);
-
-    // Get the newly added detail
-    await new Promise(resolve => setTimeout(resolve, 50));
-    const updatedDetails = storeApi.getState().details;
-    const lastDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
-
-    if (!lastDetail || !tableRef.current) return false;
-
-    // If currently editing another row, save it first then start new
-    if (tableRef.current.isEditing()) {
-      const saved = await tableRef.current.saveCurrentAndStartNew(lastDetail);
+  const handleQuickAdd = async (skipCurrentSave = false): Promise<boolean> => {
+    if (!tableRef.current) return false;
+    if (!skipCurrentSave && tableRef.current.isEditing()) {
+      const saved = await tableRef.current.applyCurrentEdits();
       if (!saved) {
-        // Validation failed - remove the just-added detail
-        const tempId = lastDetail.temp_id || lastDetail.detail_id;
-        if (tempId) {
-          deleteDetail(tempId, lastDetail.detail_id);
-        }
         message.warning('Сначала заполните обязательные поля текущей позиции');
         return false;
       }
-      return true;
-    } else {
-      // No row being edited, just start editing the new one
-      tableRef.current.startEditRow(lastDetail);
-      return true;
     }
+
+    addDetail(QUICK_ADD_DEFAULTS as Omit<OrderDetail, 'temp_id'>);
+    const updatedDetails = storeApi.getState().details;
+    const lastDetail = [...updatedDetails].sort((a, b) => (b.temp_id || 0) - (a.temp_id || 0))[0];
+    if (!lastDetail || !tableRef.current) return false;
+    tableRef.current.startEditRow(lastDetail);
     return true;
   };
 
@@ -568,7 +580,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
 
   // Handle recalculate all areas and sums
   const recalculateSums = () => {
-    if (details.length === 0) {
+    if (businessDetails.length === 0) {
       message.warning('Нет позиций для пересчёта');
       return;
     }
@@ -578,7 +590,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     let totalAmount = 0;
 
     // First pass: recalculate area for each detail, then cost
-    details.forEach((detail, index) => {
+    businessDetails.forEach((detail, index) => {
       const height = Number(detail.height) || 0;
       const width = Number(detail.width) || 0;
       const quantity = Number(detail.quantity) || 0;
@@ -618,7 +630,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     });
 
     // Round totals
-    const totalArea = calculateOrderTotalArea(details);
+    const totalArea = calculateOrderTotalArea(businessDetails);
     totalAmount = Number(totalAmount.toFixed(2));
 
     // Update total_amount in header
@@ -646,7 +658,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   };
 
   const handleRefresh = async () => {
-    if (details.length === 0) {
+    if (businessDetails.length === 0) {
       message.warning('Нет позиций для обновления');
       return;
     }
@@ -690,7 +702,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const handleBulkEditApply = (changes: Partial<OrderDetail>, applyToAll: boolean) => {
     // Determine which details to update
     const detailsToUpdate = applyToAll
-      ? details
+      ? businessDetails
       : details.filter((d) => selectedRowKeys.includes(d.temp_id || d.detail_id || 0));
 
     if (detailsToUpdate.length === 0) {
@@ -738,7 +750,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     // Recalculate totals if cost could have changed
     if (dimensionsChanged || priceChanged) {
       // Update total_amount in header
-      const updatedDetails = storeApi.getState().details;
+      const updatedDetails = businessOrderDetails(storeApi.getState().details);
       const totalAmount = updatedDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0);
       updateHeaderField('total_amount', Number(totalAmount.toFixed(2)));
 
@@ -811,7 +823,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                 <Button
                   type="primary"
                   icon={<ThunderboltOutlined />}
-                  onClick={handleQuickAdd}
+                  onClick={() => void handleQuickAdd()}
                   aria-label="Быстрое добавление"
                 >
                   <OrderToolbarLabel>Быстро добавить</OrderToolbarLabel>
@@ -832,11 +844,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                   Перенести
                 </Button>
               </AccessibleToolbarTooltip>
-              <AccessibleToolbarTooltip title="Групповые действия" disabled={details.length === 0}>
+              <AccessibleToolbarTooltip title="Групповые действия" disabled={businessDetails.length === 0}>
                 <Button
                   icon={<EditOutlined />}
                   onClick={() => setBulkEditModalOpen(true)}
-                  disabled={details.length === 0}
+                  disabled={businessDetails.length === 0}
                   aria-label="Групповые действия"
                 >
                   <OrderToolbarLabel>Групповые действия</OrderToolbarLabel>
@@ -899,11 +911,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                   </AccessibleToolbarTooltip>
                 );
               })()}
-              <AccessibleToolbarTooltip title="Обновить" disabled={details.length === 0 || isSaving || isRefreshing || !canRefreshOrder}>
+              <AccessibleToolbarTooltip title="Обновить" disabled={businessDetails.length === 0 || isSaving || isRefreshing || !canRefreshOrder}>
                 <Button
                   icon={<ReloadOutlined />}
                   onClick={() => void handleRefresh()}
-                  disabled={details.length === 0 || isSaving || isRefreshing || !canRefreshOrder}
+                  disabled={businessDetails.length === 0 || isSaving || isRefreshing || !canRefreshOrder}
                   loading={isRefreshing}
                   aria-label="Обновить"
                 >
@@ -934,7 +946,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
                 </>
               )}
               <span className="order-details-toolbar__summary">
-                Всего: {details.length}
+                Всего: {businessDetails.length}
                 {selectedRowKeys.length > 0 ? ` · выбрано: ${selectedRowKeys.length}` : ''}
               </span>
             </>
@@ -964,7 +976,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         <BulkEditModal
           open={bulkEditModalOpen}
           selectedCount={selectedRowKeys.length}
-          totalCount={details.length}
+          totalCount={businessDetails.length}
           onApply={handleBulkEditApply}
           onCancel={() => setBulkEditModalOpen(false)}
         />

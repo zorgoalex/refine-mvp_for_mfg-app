@@ -12,6 +12,8 @@ export interface UseSheetMaterialOptionsResult {
   // backend orders WRITE on AND the current user has sheet_materials.view.
   enabled: boolean;
   canViewSheetMaterials: boolean;
+  /** Catalog order without cross-order user recency; use for order-local ranking. */
+  catalogOptions: SheetMaterialTypeOption[];
   options: SheetMaterialTypeOption[];
   byId: Map<number, SheetMaterialTypeOption>;
   isLoading: boolean;
@@ -100,6 +102,7 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
   return {
     enabled,
     canViewSheetMaterials,
+    catalogOptions,
     options,
     byId,
     isLoading,

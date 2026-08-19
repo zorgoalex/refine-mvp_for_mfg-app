@@ -26,7 +26,10 @@ import type {
   SaveOrderWorkshopDto,
 } from '../types/orderApi.types';
 import { calculateOrderDetailArea } from '../../utils/orderArea';
-import { prepareOrderDetailsForSave } from '../../utils/orderDetailRows';
+import {
+  isOrderDetailPlaceholder,
+  prepareOrderDetailsForSave,
+} from '../../utils/orderDetailRows';
 
 type DateLike = {
   format: (format: string) => string;
@@ -63,6 +66,7 @@ const FRONTEND_ONLY_FIELDS = new Set([
   'debt_amount',
   'parts_count',
   'total_area',
+  'is_placeholder',
 ]);
 
 export function mapOrderFormToSaveOrderDto(values: OrderFormValues): SaveOrderDto {
@@ -415,7 +419,9 @@ export function stripFrontendOnlyFields<T extends object>(value: T): Partial<T> 
 }
 
 function normalizeDetails(details: OrderDetail[]): SaveOrderDetailDto[] {
-  return prepareOrderDetailsForSave(details).detailsForSave
+  return prepareOrderDetailsForSave(
+    details.filter((detail) => !isOrderDetailPlaceholder(detail)),
+  ).detailsForSave
     .map((detail, index) => ({ detail, index }))
     .sort((left, right) => {
       const byDetailNumber =

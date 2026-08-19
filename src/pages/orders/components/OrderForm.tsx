@@ -27,7 +27,7 @@ import { OrderSaveValidationContext } from '../../../hooks/orderSaveValidation';
 import { useOrderExport } from '../../../hooks/useOrderExport';
 import { useIsMobile } from '../../../hooks/useDeviceTier';
 import { projectsApi, type ProjectDto } from '../../../api/projectsApi';
-import { OrderFormMode } from '../../../types/orders';
+import { OrderDetail, OrderFormMode } from '../../../types/orders';
 import { orderFormSchema } from '../../../schemas/orderSchema';
 import { featureFlags } from '../../../config/featureFlags';
 import { can } from '../../../utils/permissions';
@@ -70,10 +70,24 @@ import {
 import { OperationalPageHeader, useOperationalUi } from '../../../ui-operational/OperationalPrimitives';
 import {
   appendOrderDetailEmptyTailRowsForDisplay,
+  businessOrderDetails,
   collectOrderDetailEmptyTailRowsForDisplay,
+  MIN_ORDER_DETAIL_GRID_ROWS,
   orderDetailIdentityKey,
   prepareOrderDetailsForSave,
 } from '../../../utils/orderDetailRows';
+
+const INITIAL_ORDER_DETAIL_DEFAULTS: Omit<OrderDetail, 'temp_id'> = {
+  detail_number: 0,
+  height: 0,
+  width: 0,
+  quantity: 0,
+  area: 0,
+  material_id: null,
+  milling_type_id: 1,
+  edge_type_id: 1,
+  priority: 100,
+};
 
 interface OrderFormProps {
   mode: OrderFormMode;
@@ -197,12 +211,27 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     reset,
     loadOrder,
     getFormValues,
+    ensureMinimumDetailRows,
     updateDetail,
     setDirty,
     setInitializing,
     finalizeInitialization,
     isTotalAmountManual,
   } = useOrderDraftStore(orderKey);
+  const businessDetails = useMemo(
+    () => businessOrderDetails(details),
+    [details],
+  );
+
+  // Seed create drafts before any tab or reference catalog mounts. Placeholder
+  // rows are excluded from save and UI totals by the shared business filter.
+  useEffect(() => {
+    if (mode !== 'create' || details.length >= MIN_ORDER_DETAIL_GRID_ROWS) return;
+
+    const wasDirty = getOrderDraftStore(orderKey).getState().isDirty;
+    ensureMinimumDetailRows(MIN_ORDER_DETAIL_GRID_ROWS, INITIAL_ORDER_DETAIL_DEFAULTS);
+    if (!wasDirty) setDirty(false);
+  }, [details.length, ensureMinimumDetailRows, mode, orderKey, setDirty]);
 
   // Refs for tabs to apply current edits before save
   const detailsTabRef = useRef<OrderDetailsTabRef>(null);
@@ -1061,7 +1090,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     const store = getOrderDraftStore(orderKey).getState();
     let patchedCount = 0;
 
-    details.forEach((detail) => {
+    businessDetails.forEach((detail) => {
       const hasCost = detail.detail_cost !== undefined && detail.detail_cost !== null;
       const hasArea = typeof detail.area === 'number';
       const hasPrice = typeof detail.milling_cost_per_sqm === 'number';
@@ -1079,7 +1108,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     if (patchedCount > 0) {
       console.log(`[OrderForm] Auto-filled detail_cost for ${patchedCount} legacy detail(s)`);
     }
-  }, [details]);
+  }, [businessDetails, orderKey]);
 
   // Auto-recalculate total_amount from details (unless overridden manually)
   useEffect(() => {
@@ -1087,7 +1116,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       return;
     }
 
-    if (!details || details.length === 0) {
+    if (!businessDetails || businessDetails.length === 0) {
       if (header.total_amount === undefined || header.total_amount === null) {
         return;
       }
@@ -1097,7 +1126,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       return;
     }
 
-    const autoTotalRaw = details.reduce((sum, detail) => {
+    const autoTotalRaw = businessDetails.reduce((sum, detail) => {
       if (detail?.detail_cost !== undefined && detail?.detail_cost !== null) {
         return sum + Number(detail.detail_cost);
       }
@@ -1125,7 +1154,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       updateHeaderField('total_amount', autoTotal);
     }
   }, [
-    details,
+    businessDetails,
     header.total_amount,
     isTotalAmountManual,
     isOrderDataLoading,
@@ -1253,19 +1282,21 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - formValues:', formValues);
       console.log('[OrderForm] handleSave - details count:', formValues.details?.length || 0);
 
-      const preparedDetails = prepareOrderDetailsForSave(formValues.details ?? []);
       const emptyTailRowsForDisplay = collectOrderDetailEmptyTailRowsForDisplay(formValues.details ?? []);
+      const businessFormDetails = businessOrderDetails(formValues.details ?? []);
+      const preparedDetails = prepareOrderDetailsForSave(businessFormDetails);
       if (preparedDetails.emptyTailCount > 0) {
-        (formValues.details ?? []).forEach((detail, index) => {
+        businessFormDetails.forEach((detail, index) => {
           if (!preparedDetails.emptyTailKeys.has(orderDetailIdentityKey(detail, index))) return;
           const rowKey = detail.temp_id ?? detail.detail_id;
           if (rowKey != null) {
             updateDetail(rowKey, preparedDetails.detailsForDisplay[index]);
           }
         });
-        formValues.details = preparedDetails.detailsForSave;
         console.log(`[OrderForm] handleSave - cleared ${preparedDetails.emptyTailCount} empty tail detail row(s)`);
       }
+      // UI placeholders never cross validation or persistence boundaries.
+      formValues.details = preparedDetails.detailsForSave;
 
       // Normalize detail_numbers: sort by current number and renumber sequentially 1, 2, 3...
       // This fixes any duplicates or gaps in numbering before validation

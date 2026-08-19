@@ -191,6 +191,32 @@ describe('orderFormStore version sync', () => {
 
     expect(useOrderFormStore.getState().details[0].temp_id).toBe(44);
   });
+
+  it('pads the grid to 20 UI rows without dirtying totals', () => {
+    const state = useOrderFormStore.getState();
+    state.ensureMinimumDetailRows(20, {
+      detail_number: 0,
+      height: 0,
+      width: 0,
+      quantity: 0,
+      area: 0,
+      material_id: null,
+      milling_type_id: 1,
+      edge_type_id: 1,
+      priority: 100,
+    });
+
+    const padded = useOrderFormStore.getState();
+    expect(padded.details).toHaveLength(20);
+    expect(padded.details.every((row) => row.is_placeholder === true)).toBe(true);
+    expect(padded.isDirty).toBe(false);
+    expect(padded.calculatedTotals()).toMatchObject({
+      positions_count: 0,
+      parts_count: 0,
+      total_area: 0,
+      total_amount: 0,
+    });
+  });
 });
 
 describe('orderFormStore per-order isolation', () => {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 const table = readFileSync(join(__dirname, 'OrderDetailTable.tsx'), 'utf8');
 const tab = readFileSync(join(__dirname, '../tabs/OrderDetailsTab.tsx'), 'utf8');
+const form = readFileSync(join(__dirname, '../OrderForm.tsx'), 'utf8');
 
 describe('edit-form detail grouping', () => {
   it('tab owns grouping state and renders controls', () => {
@@ -18,8 +19,8 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain("'summary'");
     expect(table).toContain('details-grouped');
   });
-  it('uses raw sortedDetails when separation is off (no clustering)', () => {
-    expect(table).toMatch(/groupingActive\s*\?\s*[^:]*buildGroupedRows[\s\S]*?:\s*sortedDetails/);
+  it('uses the paginated detail grid when separation is off (no clustering)', () => {
+    expect(table).toMatch(/groupingActive\s*\?\s*[^:]*buildGroupedRows[\s\S]*?:\s*paginatedDetails/);
   });
   it('disables column sorters when grouping is active', () => {
     expect(table).toMatch(/groupingActive[\s\S]{0,80}(sorter|defaultSortOrder)/);
@@ -115,10 +116,43 @@ describe('edit-form detail grouping', () => {
   });
   it('quick-adds a new detail row on ArrowDown from the last row and preserves the target column', () => {
     expect(table).toContain('requestQuickAddFromLastRow');
-    expect(table).toContain("direction === 'down' && isLastOrderDetailRow(sortedDetails, record)");
+    expect(table).toContain("direction === 'down' && isLastOrderDetailRow(realSortedDetails, record)");
     expect(table).toContain("editorDirection === 'down'");
     expect(table).toContain('pendingQuickAddFocusFieldRef.current = columnKey');
     expect(table).toContain('focusSpreadsheetCoordinate({');
-    expect(tab).toContain('const handleQuickAdd = async (): Promise<boolean>');
+    expect(tab).toContain('const handleQuickAdd = async (skipCurrentSave = false): Promise<boolean>');
+  });
+  it('leaves ArrowDown to all five native Select controls and keeps virtualization enabled', () => {
+    expect(table).not.toMatch(/onKeyDown=.*handleArrowDownFromEditableCell.*milling_type_id/);
+    expect(table).not.toMatch(/onKeyDown=.*handleArrowDownFromEditableCell.*edge_type_id/);
+    expect(table).not.toMatch(/onKeyDown=.*handleArrowDownFromEditableCell.*sheet_material_type_id/);
+    expect(table).not.toMatch(/handleArrowDownFromEditableCell\(e, d, 'film_id'\)/);
+    expect(table).not.toMatch(/onKeyDown=.*handleArrowDownFromEditableCell.*production_status_id/);
+    expect(table.match(/\bvirtual\b/g)?.length ?? 0).toBeGreaterThanOrEqual(5);
+    expect(table).not.toContain('dropdownMatchSelectWidth={false}');
+  });
+  it('ranks detail references by current-order history over catalog order', () => {
+    for (const field of [
+      'milling_type_id',
+      'edge_type_id',
+      'sheet_material_type_id',
+      'film_id',
+      'production_status_id',
+    ]) {
+      expect(table).toContain(`'${field}'`);
+    }
+    expect(table).toContain('sheetMaterials.catalogOptions');
+    expect(table).toContain('promoteOrderDetailOptions');
+  });
+  it('keeps placeholders out of business selection but in keyboard navigation', () => {
+    expect(table).toContain('realSortedDetails');
+    expect(table).toContain('placeholderDetails');
+    expect(table).toContain('isOrderDetailPlaceholder');
+    expect(table).toContain('sortedDetails[currentIndex + 1]');
+    expect(form).toContain('ensureMinimumDetailRows(MIN_ORDER_DETAIL_GRID_ROWS');
+    expect(form).toContain('businessOrderDetails(formValues.details ?? [])');
+    expect(table).toContain('{ ...values, is_placeholder: false }');
+    expect(table).toContain('startInitialHeightEdit');
+    expect(tab).toContain('tableRef.current.startInitialHeightEdit(firstDetail)');
   });
 });

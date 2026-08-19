@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../types/orders';
 import {
   appendOrderDetailEmptyTailRowsForDisplay,
+  businessOrderDetails,
   clearOrderDetailTailRowValues,
   collectOrderDetailEmptyTailRowsForDisplay,
   collectNewEmptyTailDetailKeys,
   countOrderDetailsWithRequiredEntryValues,
   hasOrderDetailRequiredEntryValues,
   prepareOrderDetailsForSave,
+  promoteOrderDetailOptions,
+  recentOrderDetailReferenceIds,
 } from './orderDetailRows';
 
 const validDetail = (overrides: Partial<OrderDetail> = {}): OrderDetail => ({
@@ -230,5 +233,55 @@ describe('order detail tail row preparation', () => {
     ];
 
     expect([...collectNewEmptyTailDetailKeys(rows)]).toEqual(['temp:3']);
+  });
+});
+
+const uiDetail = (overrides: Partial<OrderDetail> = {}): OrderDetail => ({
+  ...validDetail(),
+  ...overrides,
+});
+
+describe('order detail UI rows', () => {
+  it('excludes placeholders from business rows', () => {
+    const rows = [uiDetail({ temp_id: 1 }), uiDetail({ temp_id: 2, is_placeholder: true })];
+    expect(businessOrderDetails(rows).map((row) => row.temp_id)).toEqual([1]);
+  });
+
+  it('collects unique prior order values newest-first and skips placeholders', () => {
+    const rows = [
+      uiDetail({ temp_id: 1, detail_number: 1, film_id: 10 }),
+      uiDetail({ temp_id: 2, detail_number: 2, film_id: 20 }),
+      uiDetail({ temp_id: 3, detail_number: 3, film_id: 10 }),
+      uiDetail({ temp_id: 4, detail_number: 4, film_id: 30, is_placeholder: true }),
+      uiDetail({ temp_id: 5, detail_number: 5, film_id: null }),
+    ];
+
+    expect(recentOrderDetailReferenceIds(rows, rows[4], 'film_id')).toEqual([10, 20]);
+  });
+
+  it('keeps catalog order after available recent values', () => {
+    const catalog = [
+      { value: 1, label: 'A', metadata: 'a' },
+      { value: 2, label: 'B', metadata: 'b' },
+      { value: 3, label: 'C', metadata: 'c' },
+    ];
+
+    expect(promoteOrderDetailOptions(catalog, [2, 1, 999]).map((option) => option.value))
+      .toEqual([2, 1, 3]);
+    expect(promoteOrderDetailOptions(catalog, [])).toEqual(catalog);
+  });
+
+  it('caps prior values at twenty', () => {
+    const rows = Array.from({ length: 25 }, (_, index) => uiDetail({
+      temp_id: index + 1,
+      detail_number: index + 1,
+      production_status_id: index + 1,
+    }));
+    const current = uiDetail({ temp_id: 100, detail_number: 26 });
+    rows.push(current);
+
+    const ids = recentOrderDetailReferenceIds(rows, current, 'production_status_id');
+    expect(ids).toHaveLength(20);
+    expect(ids.slice(0, 2)).toEqual([25, 24]);
   });
 });

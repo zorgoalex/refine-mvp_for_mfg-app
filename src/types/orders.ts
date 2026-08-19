@@ -197,6 +197,8 @@ export interface OrderDetail {
 
   // Client-side only (for new records)
   temp_id?: number;
+  /** UI-only empty grid row; never persisted or included in business totals. */
+  is_placeholder?: boolean;
 }
 
 // ============================================================================
