@@ -63,6 +63,8 @@ describe('order detail controlled pagination', () => {
     expect(calculateOrderDetailTableBodyScrollY(0, 0)).toBe(39);
     expect(calculateOrderDetailTableBodyScrollY(0, 1)).toBe(78);
     expect(calculateOrderDetailTableBodyScrollY(5, 5)).toBe(234);
+    expect(calculateOrderDetailTableBodyScrollY(0, 20)).toBe(819);
+    expect(calculateOrderDetailTableBodyScrollY(0, 21)).toBe(560);
     expect(calculateOrderDetailTableBodyScrollY(100, 100)).toBe(560);
   });
 });

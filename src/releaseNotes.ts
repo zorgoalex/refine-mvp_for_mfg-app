@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-19",
+    title: "Заказы: видимые строки новой детали",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "При создании заказа все 20 подготовленных строк деталей теперь видны сразу, без внутренней вертикальной прокрутки таблицы.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-19",
     title: "Раскрой: переход к карточкам МДФ-доски",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
