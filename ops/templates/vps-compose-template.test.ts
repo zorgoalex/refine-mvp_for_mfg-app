@@ -104,6 +104,7 @@ describe('VPS compose backend runtime flags', () => {
 
     expect(rendered.services.backend.environment.CNC_TELEGRAM_WORKER_USERNAME).toBe('cnc-bearer-worker');
     expect(rendered.services.backend.environment.CNC_TELEGRAM_ALLOWED_CHAT_IDS).toBe('-1009007199254740993');
+    expect(rendered.services.backend.environment.CNC_TELEGRAM_MANUAL_IMPORT_ENABLED).toBe('false');
     expect(rendered.services['cnc-telegram-worker'].command).toEqual(['serve']);
     expect(rendered.services['cnc-telegram-worker'].labels['com.mebelkz.cnc-telegram-worker.command']).toBe('serve');
     expect(rendered.services['cnc-telegram-worker'].labels['com.mebelkz.cnc-telegram-worker.image-revision']).toBe('d0e683b40744');
@@ -164,6 +165,7 @@ describe('VPS compose backend runtime flags', () => {
     expect(workerSegment).toContain('CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision');
     expect(workerSegment).toContain('CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS');
     expect(workerSegment).toContain('CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS');
+    expect(workerSegment).toContain('CNC_TELEGRAM_MANUAL_IMPORT_ENABLED');
     expect(compose).toContain('TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}');
     expect(compose).toContain('ERP_API_URL: ${CNC_TELEGRAM_ERP_API_URL:-http://backend:3000/api/v1}');
     expect(compose).toContain('CNC_ENABLE_GLM_OCR: ${CNC_ENABLE_GLM_OCR:-false}');
@@ -196,6 +198,7 @@ describe('VPS compose backend runtime flags', () => {
     expect(envExample).not.toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT');
     expect(envExample).toContain('CNC_TELEGRAM_WORKER_ROLE=reader');
     expect(envExample).toContain('CNC_TELEGRAM_ALLOW_NON_PROD_WRITER=false');
+    expect(envExample).toContain('CNC_TELEGRAM_MANUAL_IMPORT_ENABLED=false');
     expect(envExample).toContain('CNC_POLL_INTERVAL_SECONDS=60');
     expect(envExample).toContain('CNC_OCR_ENGINE=rapidocr-ppocrv5-eslav');
     expect(envExample).toContain('COMPOSE_PROFILES=cnc-telegram,cnc-telegram-glm');

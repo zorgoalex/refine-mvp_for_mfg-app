@@ -42,6 +42,7 @@ export type PermissionName =
   | 'audit.technical.view'
   | 'cut.view'
   | 'cut.manage'
+  | 'cnc.telegram_import.manage_all'
   | 'sheet_materials.view'
   | 'sheet_materials.manage'
   | 'labels.view'

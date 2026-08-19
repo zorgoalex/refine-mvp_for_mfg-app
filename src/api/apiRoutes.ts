@@ -190,6 +190,13 @@ export const apiRoutes = {
     workerLogsExport: backendApiPath('/cnc-telegram/worker-logs/export'),
     workerTechnicalLogs: backendApiPath('/cnc-telegram/worker-logs/technical'),
     workerTechnicalLogsExport: backendApiPath('/cnc-telegram/worker-logs/technical/export'),
+    importScans: backendApiPath('/cnc-telegram/import-scans'),
+    importScan: (scanId: string) => backendApiPath(`/cnc-telegram/import-scans/${encodeURIComponent(scanId)}`),
+    importScanCandidates: (scanId: string) => backendApiPath(`/cnc-telegram/import-scans/${encodeURIComponent(scanId)}/candidates`),
+    importPrepare: (scanId: string) => backendApiPath(`/cnc-telegram/import-scans/${encodeURIComponent(scanId)}/imports/prepare`),
+    importConfirm: (importRequestId: string) => backendApiPath(`/cnc-telegram/imports/${encodeURIComponent(importRequestId)}/confirm`),
+    importRepeatPrepare: (importRequestId: string) => backendApiPath(`/cnc-telegram/imports/${encodeURIComponent(importRequestId)}/repeat/prepare`),
+    importRequest: (importRequestId: string) => backendApiPath(`/cnc-telegram/imports/${encodeURIComponent(importRequestId)}`),
   },
   sheetMaterials: {
     list: backendApiPath('/sheet-material-types'),

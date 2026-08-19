@@ -10699,6 +10699,238 @@ paths:
         '503':
           $ref: '#/components/responses/FeatureDisabled'
 
+  /api/v1/cnc-telegram/worker-logs/technical:
+    get:
+      tags: [CncTelegramWorkerAudit]
+      operationId: listCncTelegramWorkerTechnicalLogs
+      summary: List raw Telegram worker stdout and stderr lines
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      responses:
+        '200': { description: Paginated technical log lines }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cnc-telegram/worker-logs/technical/export:
+    get:
+      tags: [CncTelegramWorkerAudit]
+      operationId: exportCncTelegramWorkerTechnicalLogs
+      summary: Export raw Telegram worker technical logs
+      security: [{ bearerAuth: [] }]
+      x-permission: audit.view
+      responses:
+        '200': { description: Plain-text technical log export }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cnc-telegram/worker-logs/technical/batch:
+    post:
+      tags: [CncTelegramWorkerAudit]
+      operationId: writeCncTelegramWorkerTechnicalLogBatch
+      summary: Persist a fenced bounded batch of raw worker lines
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '201': { description: Technical log batch persisted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cnc-telegram/worker-session/claim:
+    post:
+      tags: [CncTelegramWorkerSession]
+      operationId: claimCncTelegramWorkerSession
+      summary: Claim the single global Telegram worker session lease
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: Session lease claimed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/cnc-telegram/worker-session/heartbeat:
+    post:
+      tags: [CncTelegramWorkerSession]
+      operationId: heartbeatCncTelegramWorkerSession
+      summary: Renew the current Telegram worker session lease
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: Session lease renewed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/cnc-telegram/import-scans:
+    post:
+      tags: [CncTelegramImport]
+      operationId: createCncTelegramImportScan
+      summary: Queue an explicit bounded Telegram history scan
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '202': { description: Scan accepted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cnc-telegram/import-scans/{scanId}:
+    get:
+      tags: [CncTelegramImport]
+      operationId: getCncTelegramImportScan
+      summary: Get explicit Telegram scan progress
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: Scan state }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cnc-telegram/import-scans/{scanId}/candidates:
+    get:
+      tags: [CncTelegramImport]
+      operationId: listCncTelegramImportCandidates
+      summary: List candidates discovered by an explicit scan
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: Paginated candidates and duplicate warnings }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cnc-telegram/import-scans/{scanId}/imports/prepare:
+    post:
+      tags: [CncTelegramImport]
+      operationId: prepareCncTelegramImport
+      summary: Prepare an explicit candidate selection
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '201': { description: Selection prepared for confirmation }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cnc-telegram/imports/{importRequestId}/confirm:
+    post:
+      tags: [CncTelegramImport]
+      operationId: confirmCncTelegramImport
+      summary: Confirm creation including acknowledged duplicate warnings
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '202': { description: Import accepted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cnc-telegram/imports/{importRequestId}/repeat/prepare:
+    post:
+      tags: [CncTelegramImport]
+      operationId: prepareRepeatedCncTelegramImport
+      summary: Prepare an intentional repeat of a terminal import
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '201': { description: Repeat prepared for confirmation }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/cnc-telegram/imports/{importRequestId}:
+    get:
+      tags: [CncTelegramImport]
+      operationId: getCncTelegramImport
+      summary: Get explicit import progress and result links
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      responses:
+        '200': { description: Import state and item results }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/cnc-telegram/import-worker/scans/claim:
+    post:
+      tags: [CncTelegramImportWorker]
+      operationId: claimCncTelegramImportScans
+      summary: Claim one fenced explicit scan task
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: Claimed scan tasks }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/cnc-telegram/import-worker/scans/{scanId}/candidates/batch:
+    post:
+      tags: [CncTelegramImportWorker]
+      operationId: writeCncTelegramImportCandidates
+      summary: Persist a fenced bounded discovery batch
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: Candidate batch persisted }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cnc-telegram/import-worker/scans/{scanId}/complete:
+    post:
+      tags: [CncTelegramImportWorker]
+      operationId: completeCncTelegramImportScan
+      summary: Complete a fenced explicit scan task
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { description: Scan completed }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/cnc-telegram/import-worker/scans/{scanId}/fail:
+    post:
+      tags: [CncTelegramImportWorker]
+      operationId: failCncTelegramImportScan
+      summary: Fail a fenced explicit scan task
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: Scan failure recorded }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/cnc-telegram/import-worker/imports/claim:
+    post:
+      tags: [CncTelegramImportWorker]
+      operationId: claimCncTelegramImportItems
+      summary: Claim one fenced explicit import item
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: Claimed import tasks }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/v1/cnc-telegram/import-worker/imports/{itemId}/complete:
+    post:
+      tags: [CncTelegramImportWorker]
+      operationId: completeCncTelegramImportItem
+      summary: Atomically persist one verified explicit import
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: Import item completed }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/v1/cnc-telegram/import-worker/imports/{itemId}/fail:
+    post:
+      tags: [CncTelegramImportWorker]
+      operationId: failCncTelegramImportItem
+      summary: Fail one fenced explicit import item
+      security: [{ bearerAuth: [] }]
+      responses:
+        '201': { description: Import item failure recorded }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/v1/cnc-telegram/today:
     get:
       tags:

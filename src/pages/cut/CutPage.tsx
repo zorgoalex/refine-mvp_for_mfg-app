@@ -1,6 +1,6 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
+import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Dropdown, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
@@ -17,6 +17,7 @@ import {
   ReloadOutlined,
   SaveOutlined,
   SearchOutlined,
+  SendOutlined,
   UndoOutlined,
   UpOutlined,
   UploadOutlined,
@@ -62,6 +63,7 @@ import { buildPieceMetaByItemId } from './cutPieceMeta';
 import { pushHistory } from './editorHistory';
 import { CutSheetLabelGenerateAction, type CutSheetLabelDetailInstance } from './CutSheetLabelGenerateAction';
 import { CutSvgUploadModal } from './CutSvgUploadModal';
+import { CutTelegramImportModal } from './CutTelegramImportModal';
 import { authSession } from '../../api/authSession';
 import { useCutDetailLastReady } from '../orders/useCutDetailLastReady';
 import { CutJobVersionLines } from '../orders/CutJobVersionLines';
@@ -110,9 +112,11 @@ import {
 } from './cutPageHelpers';
 import { filmUsageTooltip, formatFilmLinearMeters, totalFilmUsageMeters } from './cutFilmUsage';
 import { can } from '../../utils/permissions';
+import { featureFlags } from '../../config/featureFlags';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import { useTabStore } from '../../stores/tabStore';
 import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { emitCutJobReady } from './cutJobEvents';
 import {
   OperationalKpi,
@@ -138,6 +142,37 @@ type CutJobKindTab = 'vacuum' | 'regular';
 
 const CUT_JOB_KIND_TAB_VACUUM: CutJobKindTab = 'vacuum';
 const CUT_JOB_KIND_TAB_REGULAR: CutJobKindTab = 'regular';
+
+const CUT_ACTION_COMPACT_QUERY = '(max-width: 720px)';
+
+const CutImportActionGroup: React.FC<{
+  canManage: boolean;
+  canTelegramImport: boolean;
+  onUpload: () => void;
+  onTelegramImport: () => void;
+}> = ({ canManage, canTelegramImport, onUpload, onTelegramImport }) => {
+  const compact = useMediaQuery(CUT_ACTION_COMPACT_QUERY);
+  if (!canManage) return null;
+  if (compact) {
+    return (
+      <Space.Compact>
+        <Button icon={<UploadOutlined />} onClick={onUpload}>Загрузить SVG</Button>
+        {canTelegramImport && <Dropdown
+          menu={{ items: [{ key: 'telegram-import', icon: <SendOutlined />, label: 'Импорт из Telegram', onClick: onTelegramImport }] }}
+          trigger={['click']}
+        >
+          <Button aria-label="Дополнительные действия раскроя" icon={<MoreOutlined />} />
+        </Dropdown>}
+      </Space.Compact>
+    );
+  }
+  return (
+    <Space.Compact>
+      <Button type="primary" icon={<UploadOutlined />} onClick={onUpload}>Загрузить SVG</Button>
+      {canTelegramImport && <Button icon={<SendOutlined />} onClick={onTelegramImport}>Импорт из Telegram</Button>}
+    </Space.Compact>
+  );
+};
 
 const CUT_TEXTURE_DIRECTION_LABELS: Record<CutTextureDirection, string> = {
   vertical: 'вдоль полотна',
@@ -1178,6 +1213,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [operationalFilmFilter, setOperationalFilmFilter] = useState<number | undefined>();
   const [cutListDateRange, setCutListDateRange] = useState<CutOrderDateRangeValue>(undefined);
   const [svgUploadOpen, setSvgUploadOpen] = useState(false);
+  const [telegramImportOpen, setTelegramImportOpen] = useState(false);
   const listFiltersRef = useRef<CutJobListFilters>({});
   const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [orderOptions, setOrderOptions] = useState<CutOrderSelectOption[]>([]);
@@ -3571,23 +3607,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 </>
               ) : (
                 <>
-                  {canManage && (
-                    <Button
-                      icon={<UploadOutlined />}
-                      onClick={() => setSvgUploadOpen(true)}
-                    >
-                      Загрузить SVG
-                    </Button>
-                  )}
+                  <CutImportActionGroup
+                    canManage={canManage}
+                    canTelegramImport={canManage && featureFlags.cncTelegram}
+                    onUpload={() => setSvgUploadOpen(true)}
+                    onTelegramImport={() => setTelegramImportOpen(true)}
+                  />
                   <Button icon={<DownloadOutlined />} onClick={exportJobs}>
                     Экспорт
-                  </Button>
-                  <Button
-                    icon={<UploadOutlined />}
-                    onClick={() => setSvgUploadOpen(true)}
-                    disabled={!canManage}
-                  >
-                    SVG раскрой
                   </Button>
                   <Button
                     type="primary"
@@ -3979,9 +4006,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             <span className="cut-operational-table-toolbar__grow" />
             <Typography.Text type="secondary">Найдено {filteredJobs.length}</Typography.Text>
             {canManage && (
-              <Tooltip title="Загрузить SVG-раскрой">
-                <Button aria-label="Загрузить SVG-раскрой" icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)} />
-              </Tooltip>
+              <Space.Compact>
+                <Tooltip title="Загрузить SVG-раскрой">
+                  <Button aria-label="Загрузить SVG-раскрой" icon={<UploadOutlined />} onClick={() => setSvgUploadOpen(true)} />
+                </Tooltip>
+                {featureFlags.cncTelegram && <Tooltip title="Импорт из Telegram">
+                  <Button aria-label="Импорт из Telegram" icon={<SendOutlined />} onClick={() => setTelegramImportOpen(true)} />
+                </Tooltip>}
+              </Space.Compact>
             )}
             <Tooltip title="Обновить">
               <Button aria-label="Обновить список" icon={<ReloadOutlined />} onClick={loadJobs} loading={jobsLoading} />
@@ -5102,6 +5134,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             setSvgUploadOpen(false);
             void loadJobs(listFiltersRef.current);
             if (cutJobId) void openJob(cutJobId);
+          }}
+        />
+      )}
+      {canManage && featureFlags.cncTelegram && (
+        <CutTelegramImportModal
+          open={telegramImportOpen}
+          onClose={() => setTelegramImportOpen(false)}
+          onDone={() => {
+            void loadJobs(listFiltersRef.current);
           }}
         />
       )}

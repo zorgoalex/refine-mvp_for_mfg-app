@@ -22,6 +22,114 @@
   -webkit-font-smoothing: antialiased;
 }
 
+.cut-telegram-import-modal .ant-modal-body {
+  max-height: min(72vh, 760px);
+  overflow: auto;
+}
+
+.cut-telegram-import__step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 24px;
+}
+
+.cut-telegram-import__presets,
+.cut-telegram-import__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cut-telegram-import__summary {
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+
+.cut-telegram-import__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary, #f5f5f5) 70%, transparent);
+}
+
+.cut-telegram-import__candidate-details,
+.cut-telegram-import__result-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-wrap: pretty;
+}
+
+.cut-telegram-import__file-line,
+.cut-telegram-import__result-item > .ant-space {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cut-telegram-import__matches {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ant-color-warning-bg, #fffbe6) 82%, transparent);
+}
+
+.cut-telegram-import__preview {
+  display: block;
+  width: 132px;
+  height: 82px;
+  object-fit: contain;
+  border-radius: 8px;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  background: var(--ant-color-bg-container, #fff);
+}
+
+.cut-telegram-import__result-list,
+.cut-telegram-import__confirm-list {
+  width: 100%;
+}
+
+.cut-telegram-import__result-item {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+}
+
+.cut-telegram-import-modal .ant-btn {
+  transition-property: transform, box-shadow, background-color, border-color;
+}
+
+.cut-telegram-import-modal .ant-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+@media (max-width: 720px) {
+  .cut-telegram-import-modal .ant-modal {
+    max-width: calc(100vw - 20px);
+    margin: 10px auto;
+  }
+
+  .cut-telegram-import-modal .ant-modal-body {
+    max-height: calc(100vh - 220px);
+  }
+
+  .cut-telegram-import-modal .ant-table {
+    font-size: 12px;
+  }
+
+  .cut-telegram-import__preview {
+    width: 96px;
+    height: 64px;
+  }
+}
+
 :root[data-ui-variant="air"] {
   --operational-radius: 16px;
   --operational-radius-lg: 22px;

@@ -760,8 +760,28 @@ export class PgCncTelegramRepository
   }
 
   async manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
-    return this.database.transaction(async (tx) => {
+    return this.database.transaction(async (tx) => this.manualSvgUploadInTransaction(tx, command));
+  }
+
+  /** Used by explicit Telegram import so packet/job/result/card and its audit/outbox
+   * share the item/session transaction. It is intentionally not part of the public port. */
+  async manualSvgUploadInTransaction(tx: TransactionClient, command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
       await setSessionUser(tx, command.currentUser.id);
+      if (command.dto.duplicatePolicy?.kind === 'intentional_copy') {
+        const approval = await tx.query<{ import_item_id: string; requested_by: string; duplicate_acknowledged: boolean; has_duplicate_matches: boolean; status: string }>(`
+          SELECT i.import_item_id, r.requested_by, i.duplicate_acknowledged, i.status,
+                 jsonb_array_length(i.duplicate_snapshot_json) > 0 AS has_duplicate_matches
+            FROM cnc_telegram_import_items i
+            JOIN cnc_telegram_import_requests r USING (import_request_id)
+           WHERE i.import_item_id=$1
+           FOR UPDATE
+        `, [command.dto.duplicatePolicy.approvedByImportItemId]);
+        const row = approval.rows[0];
+        if (!row || row.status !== 'processing' || row.requested_by !== command.currentUser.id
+          || (row.has_duplicate_matches && !row.duplicate_acknowledged)) {
+          throw new ApiError(409, 'CNC_TELEGRAM_DUPLICATE_APPROVAL_INVALID', 'Intentional duplicate approval is not valid for this import item');
+        }
+      }
       const requestId = command.requestId || 'cnc-manual-svg-upload';
       const dto = buildManualSvgStructuredDto(command.dto);
       await lockSvgSourceFileIfPresent(tx, dto);
@@ -983,7 +1003,6 @@ export class PgCncTelegramRepository
       }, mdfCardCreatedNow, filePersistence);
       await completeIdempotency(tx, dto.idempotencyKey, response);
       return response;
-    });
   }
 
   async listManualSvgCommentPresets(
@@ -1286,6 +1305,9 @@ function manualSvgAnalysisWarnings(dto: ManualSvgUploadCommand['dto']): string[]
 }
 
 function manualSvgExternalPacketKey(dto: ManualSvgUploadCommand['dto']): string {
+  if (dto.duplicatePolicy?.kind === 'intentional_copy') {
+    return `telegram-import:${dto.duplicatePolicy.approvedByImportItemId}`;
+  }
   const identityHash = sha256Json({
     kind: 'erp-manual-svg-upload-v1',
     matchMode: dto.matchMode,
@@ -3207,6 +3229,7 @@ async function insertPacket(
   if (!packetId) {
     throw new ApiError(500, 'CNC_TELEGRAM_PACKET_INSERT_FAILED', 'CNC packet insert failed');
   }
+  await persistPacketLayoutFingerprint(tx, packetId, dto);
   return packetId;
 }
 
@@ -3252,6 +3275,18 @@ async function updatePacket(
     WHERE packet_id = $1::uuid
     `,
     [packetId, ...packetParams(dto, payloadHash, command.currentUser.id).slice(1)],
+  );
+  await persistPacketLayoutFingerprint(tx, packetId, dto);
+}
+
+async function persistPacketLayoutFingerprint(
+  tx: TransactionClient,
+  packetId: string,
+  dto: CncTelegramStructuredIngestDto,
+): Promise<void> {
+  await tx.query(
+    'UPDATE cnc_telegram_packets SET layout_fingerprint=$2 WHERE packet_id=$1::uuid',
+    [packetId, canonicalLayoutFingerprint(dto.cutLayout)],
   );
 }
 
@@ -7846,6 +7881,33 @@ function hashPayload(dto: CncTelegramStructuredIngestDto): string {
 
 function hashRequest(value: Record<string, unknown>): string {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
+
+export function canonicalLayoutFingerprint(layout: CncTelegramStructuredIngestDto['cutLayout']): string | null {
+  if (!layout) return null;
+  const rounded = (value: number | null | undefined): number | null => (
+    typeof value === 'number' && Number.isFinite(value) ? Number(value.toFixed(3)) : null
+  );
+  const items = layout.items.map((item) => ({
+    widthMm: rounded(item.widthMm),
+    heightMm: rounded(item.heightMm),
+    xMm: rounded(item.xMm),
+    yMm: rounded(item.yMm),
+    placedWidthMm: rounded(item.placedWidthMm),
+    placedHeightMm: rounded(item.placedHeightMm),
+    rotated: item.rotated === true,
+    quantity: Number.isInteger(item.quantity) ? item.quantity : 1,
+  })).sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+  const canonical = {
+    version: 'cnc-layout-fingerprint-v1',
+    material: null,
+    sheet: {
+      widthMm: rounded(layout.sheet?.widthMm),
+      heightMm: rounded(layout.sheet?.heightMm),
+    },
+    items,
+  };
+  return createHash('sha256').update(stableStringify(canonical)).digest('hex');
 }
 
 function stableStringify(value: unknown): string {

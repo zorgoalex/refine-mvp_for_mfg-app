@@ -1,4 +1,5 @@
 import { ApiError } from '../../../common/errors/api-error';
+import type { TransactionClient } from '../../../database/database.types';
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
@@ -38,6 +39,10 @@ export class UnavailableCncTelegramRepository
   }
 
   async manualSvgUpload(_command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
+    throw unavailable();
+  }
+
+  async manualSvgUploadInTransaction(_tx: TransactionClient, _command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
     throw unavailable();
   }
 

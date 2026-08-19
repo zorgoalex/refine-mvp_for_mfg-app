@@ -141,7 +141,7 @@ GLM-OCR не запускается и не вызывается автомат�
 и runner находятся в отдельном opt-in profile `cnc-telegram-glm`, а вызов OCR
 защищён отдельным `CNC_ENABLE_GLM_OCR` gate.
 
-Перед daemon нужен один интерактивный Telethon login:
+Перед первым запуском `serve` нужен один интерактивный Telethon login:
 
 ```bash
 repo_erp/ops/cnc-telegram-worker.sh login
@@ -173,11 +173,11 @@ repo_erp/ops/cnc-telegram-worker.sh up
 `CNC_OCR_ENGINE=glm-ocr-0.9b-q8` для корректного source fingerprint. Outer
 timeout обязан быть больше `GLM_OCR_CLIENT_TIMEOUT_SECONDS` (default 660).
 
-Backfill за неделю:
-
-```bash
-repo_erp/ops/cnc-telegram-worker.sh backfill 7
-```
+История Telegram больше не сканируется через daemon/backfill. Пользователь
+задаёт период 1–31 день в модалке «Импорт из Telegram»; worker читает историю
+только после получения persisted scan claim. Для Phase B одновременно задайте
+`CNC_TELEGRAM_MANUAL_IMPORT_ENABLED=true` backend и worker. Rollback: верните
+flag в `false`, но не возвращайте старый daemon image.
 
 Worker internal-only: без ports/traefik. `/data` хранит только Telethon session,
 state, durable audit spool и temp; temp hard-delete ограничен `CNC_TEMP_TTL_HOURS<=24`.

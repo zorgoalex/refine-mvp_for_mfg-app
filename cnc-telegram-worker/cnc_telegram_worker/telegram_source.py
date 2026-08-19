@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, time, timezone
+import time as monotonic_time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
@@ -27,6 +29,7 @@ async def collect_day_messages(
     end_utc = end_local.astimezone(timezone.utc)
     messages: list[Any] = []
     ordinal = 0
+    page_started = monotonic_time.monotonic()
     async for message in client.iter_messages(entity, offset_date=end_utc, limit=max_messages):
         message_date = message_datetime(message).astimezone(tz)
         if message_date.date() < workday:
@@ -36,6 +39,9 @@ async def collect_day_messages(
             if observer is not None:
                 await observer(message, ordinal)
             messages.append(message)
+            if ordinal % 50 == 0 or monotonic_time.monotonic() - page_started >= 2.0:
+                await asyncio.sleep(0)
+                page_started = monotonic_time.monotonic()
     return list(reversed(messages))
 
 

@@ -1,8 +1,9 @@
 # CNC Telegram Worker
 
-Telethon worker for CNC cutting sheets. Each valid SVG message becomes one ERP
-cut job/sheet. Screenshots and G-code files are optional context and never create
-a job without a valid SVG.
+Telethon queue worker for CNC files. Normal `serve` operation sends ERP-uploaded
+files to Telegram and restores requested media. Telegram history is read only for
+a persisted scan explicitly requested by a user in the ERP application; discovery
+alone never creates a cut job or MDF card.
 
 Raw screenshots, G-code text and OCR raw text are never sent to the ERP backend.
 
@@ -22,8 +23,10 @@ python -m cnc_telegram_worker cleanup
 
 `login` creates the Telethon `.session` file. The production command is `serve`:
 it claims one ERP session lease before connecting Telethon, heartbeats that lease,
-and polls only manual outbound sends and media restores. It never scans Telegram
-history by itself. The deprecated `daemon` command is fail-closed.
+and polls manual outbound sends and media restores. With
+`CNC_TELEGRAM_MANUAL_IMPORT_ENABLED=true` it also claims persisted discovery and
+confirmed-import queues. It never scans Telegram history without such a claim.
+The deprecated `daemon` command is fail-closed.
 
 The legacy `once`, `daemon`, and `svg-refresh-backfill` commands are fail-closed.
 They remain named only to produce an explicit migration error; no arbitrary
@@ -41,6 +44,7 @@ ERP_API_URL=http://backend:3000/api/v1
 ERP_WORKER_LOGIN=cnc-worker
 ERP_WORKER_PASSWORD=...
 CNC_AUDIT_SPOOL_PATH=/data/cnc-telegram-audit.sqlite3
+CNC_TELEGRAM_MANUAL_IMPORT_ENABLED=false
 ```
 
 `ERP_BEARER_TOKEN` can replace `ERP_WORKER_LOGIN/PASSWORD`.
@@ -49,6 +53,11 @@ Backend must also set `CNC_TELEGRAM_WORKER_USERNAME` to the exact ERP login and
 `CNC_TELEGRAM_ALLOWED_CHAT_IDS` to the comma-separated allowed chat ids. Audit
 payloads contain only sanitized bounded text and identifiers; raw SVG, image and
 G-code bodies are never stored.
+
+Enable manual import only after migration 136 and the matching backend are live.
+The same `CNC_TELEGRAM_MANUAL_IMPORT_ENABLED=true` value must reach backend and
+worker containers. To roll Phase B back, set it to `false` and redeploy; keep the
+`serve` image so unsolicited legacy scanning cannot return.
 
 Telegram access mode is explicit:
 

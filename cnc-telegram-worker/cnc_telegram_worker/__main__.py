@@ -8,14 +8,18 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from .cleanup import cleanup_temp_dir
-from .config import WorkerConfig
+from .config import WorkerConfig, ensure_worker_instance_id
 from .erp_client import SessionLeaseLost
 from .technical_logs import TechnicalLogCapture, deliver_technical_logs, flush_technical_logs_once
 from .worker import CncTelegramWorker, login_telegram_session
 
 
 def main() -> None:
-    capture = TechnicalLogCapture(Path(os.environ.get("CNC_TECHNICAL_LOG_SPOOL_PATH", "/data/technical-logs/spool.sqlite3")))
+    worker_instance_id = ensure_worker_instance_id()
+    capture = TechnicalLogCapture(
+        Path(os.environ.get("CNC_TECHNICAL_LOG_SPOOL_PATH", "/data/technical-logs/spool.sqlite3")),
+        worker_instance_id=worker_instance_id,
+    )
     capture.install()
     try:
         _main(capture)
@@ -56,6 +60,8 @@ def _main(capture: TechnicalLogCapture) -> None:
             "svg-refresh-backfill is disabled after Phase A; history reads require the Phase B persisted scan flow",
         )
     config = WorkerConfig.from_env()
+    if capture.spool.worker_instance_id != config.worker_instance_id:
+        raise RuntimeError("technical-log and session worker identities do not match")
 
     if args.command == "login":
         asyncio.run(login_telegram_session(config))

@@ -64,9 +64,13 @@ def sanitize_line(value: str) -> tuple[str, bool, bool, list[str]]:
 
 
 class TechnicalLogSpool:
-    def __init__(self, path: Path, queue_size: int = 10_000) -> None:
+    def __init__(self, path: Path, queue_size: int = 10_000, worker_instance_id: str | None = None) -> None:
         self.path = path
-        self.worker_instance_id = str(uuid.uuid4())
+        self.worker_instance_id = worker_instance_id or str(uuid.uuid4())
+        try:
+            uuid.UUID(self.worker_instance_id)
+        except ValueError as exc:
+            raise ValueError("technical log worker_instance_id must be a UUID") from exc
         self._sequence = 0
         self._dropped = 0
         self._capture_lock = threading.Lock()
@@ -266,8 +270,8 @@ class TeeStream(io.TextIOBase):
 
 
 class TechnicalLogCapture:
-    def __init__(self, path: Path) -> None:
-        self.spool = TechnicalLogSpool(path)
+    def __init__(self, path: Path, worker_instance_id: str | None = None) -> None:
+        self.spool = TechnicalLogSpool(path, worker_instance_id=worker_instance_id)
         self._stdout = sys.stdout
         self._stderr = sys.stderr
         self._stdout_tee = TeeStream(self._stdout, "stdout", self.spool)

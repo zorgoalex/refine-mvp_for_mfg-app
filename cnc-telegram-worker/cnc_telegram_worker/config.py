@@ -58,6 +58,7 @@ class WorkerConfig:
     session_lease_ttl_seconds: int
     session_lease_heartbeat_seconds: int
     media_restore_poll_interval_seconds: int
+    manual_import_enabled: bool = False
 
     @property
     def business_timezone(self) -> ZoneInfo:
@@ -116,6 +117,7 @@ class WorkerConfig:
             session_lease_ttl_seconds=positive_int_env("CNC_TELEGRAM_SESSION_LEASE_TTL_SECONDS", 90),
             session_lease_heartbeat_seconds=positive_int_env("CNC_TELEGRAM_SESSION_HEARTBEAT_SECONDS", 10),
             media_restore_poll_interval_seconds=positive_int_env("CNC_MEDIA_RESTORE_POLL_INTERVAL_SECONDS", 15),
+            manual_import_enabled=bool_env("CNC_TELEGRAM_MANUAL_IMPORT_ENABLED", False),
         )
 
     @property
@@ -228,6 +230,19 @@ def bool_env(name: str, default: bool) -> bool:
 
 def worker_instance_id_env() -> str:
     value = env("CNC_TELEGRAM_WORKER_INSTANCE_ID") or str(uuid.uuid4())
+    try:
+        uuid.UUID(value)
+    except ValueError as exc:
+        raise RuntimeError("CNC_TELEGRAM_WORKER_INSTANCE_ID must be a UUID") from exc
+    return value
+
+
+def ensure_worker_instance_id() -> str:
+    """Establish one process-wide identity before logs and worker config start."""
+    value = os.environ.get("CNC_TELEGRAM_WORKER_INSTANCE_ID", "").strip()
+    if not value:
+        value = str(uuid.uuid4())
+        os.environ["CNC_TELEGRAM_WORKER_INSTANCE_ID"] = value
     try:
         uuid.UUID(value)
     except ValueError as exc:

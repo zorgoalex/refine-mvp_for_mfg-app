@@ -4,7 +4,9 @@ import asyncio
 import sqlite3
 import tempfile
 import threading
+import time
 import unittest
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -12,6 +14,7 @@ from unittest.mock import patch
 from cnc_telegram_worker.__main__ import run_with_technical_delivery
 from cnc_telegram_worker.erp_client import SessionLeaseLost
 from cnc_telegram_worker.technical_logs import (
+    TechnicalLogCapture,
     TechnicalLogSpool,
     deliver_technical_logs,
     flush_technical_logs_once,
@@ -20,6 +23,21 @@ from cnc_telegram_worker.technical_logs import (
 
 
 class TechnicalLogsTest(unittest.TestCase):
+    def test_capture_identity_matches_explicit_session_identity(self) -> None:
+        worker_instance_id = str(uuid.uuid4())
+        with tempfile.TemporaryDirectory() as directory:
+            capture = TechnicalLogCapture(Path(directory, "spool.sqlite3"), worker_instance_id=worker_instance_id)
+            try:
+                capture.spool.capture("stdout", "correlated\n")
+                for _ in range(20):
+                    if capture.spool.pending_batch():
+                        break
+                    time.sleep(0.01)
+                self.assertEqual(capture.spool.worker_instance_id, worker_instance_id)
+                self.assertEqual(capture.spool.pending_batch()[0]["workerInstanceId"], worker_instance_id)
+            finally:
+                capture.close()
+
     def test_redacts_credentials_paths_and_phone_before_spooling(self) -> None:
         message, redacted, truncated, categories = sanitize_line(
             "Bearer abcdefghijklmnop password=hunter2 /data/session/live.session +7 777 123 45 67",

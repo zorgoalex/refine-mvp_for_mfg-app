@@ -144,6 +144,7 @@ export const PERMISSIONS = [
 
   'cut.view',
   'cut.manage',
+  'cnc.telegram_import.manage_all',
 
   'labels.view',
   'projects.view',

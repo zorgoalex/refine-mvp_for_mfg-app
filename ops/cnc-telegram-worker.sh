@@ -20,7 +20,7 @@ Usage:
   repo_erp/ops/cnc-telegram-worker.sh up
   repo_erp/ops/cnc-telegram-worker.sh up-glm
   repo_erp/ops/cnc-telegram-worker.sh login
-  repo_erp/ops/cnc-telegram-worker.sh backfill [days]  # disabled; use approved once directly
+  repo_erp/ops/cnc-telegram-worker.sh backfill [days]  # disabled; use the ERP import modal
   repo_erp/ops/cnc-telegram-worker.sh svg-refresh-backfill [days] [--write] [--date YYYY-MM-DD]
   repo_erp/ops/cnc-telegram-worker.sh logs
   repo_erp/ops/cnc-telegram-worker.sh logs-glm
@@ -231,7 +231,7 @@ case "$cmd" in
     compose run --rm cnc-telegram-worker login
     ;;
   backfill)
-    die "backfill helper is disabled after Phase A; run `once --days 1..31 --scan-request-id <approved-id>` directly"
+    die "backfill helper is disabled after Phase A; request a bounded scan in the ERP import modal"
     ;;
   svg-refresh-backfill)
     die "svg-refresh-backfill is disabled after Phase A; history reads require the Phase B persisted scan flow"

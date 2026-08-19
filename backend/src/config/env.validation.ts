@@ -194,6 +194,7 @@ export const envSchema = z
     // The break-glass path remains unavailable until Phase B persists an
     // approved bounded scan artifact.
     CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED: booleanFromEnv.default(false),
+    CNC_TELEGRAM_MANUAL_IMPORT_ENABLED: booleanFromEnv.default(false),
     CNC_TELEGRAM_MEDIA_DIR: z.string().trim().min(1).default('/data/cnc-telegram-media'),
     CNC_TELEGRAM_WORKER_USERNAME: optionalTrimmedStringFromEnv,
     CNC_TELEGRAM_ALLOWED_CHAT_IDS: optionalTrimmedStringFromEnv,

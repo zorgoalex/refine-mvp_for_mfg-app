@@ -251,6 +251,97 @@ class ErpClient:
             payload=with_item_lease({"error": error[:500]}, item_lease),
         )
 
+    async def claim_import_scans(self) -> dict[str, Any]:
+        return await self._authorized_post("/cnc-telegram/import-worker/scans/claim")
+
+    async def submit_import_scan_candidates(
+        self,
+        scan_id: str,
+        candidates: list[dict[str, Any]],
+        scan_lease: WorkerItemLease,
+        *,
+        days_scanned: int | None = None,
+        messages_scanned: int | None = None,
+        truncated: bool | None = None,
+    ) -> dict[str, Any]:
+        if not scan_id:
+            raise RuntimeError("import scan id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/import-worker/scans/{scan_id}/candidates/batch",
+            payload=with_item_lease(
+                {
+                    "candidates": candidates,
+                    **({"daysScanned": days_scanned} if days_scanned is not None else {}),
+                    **({"messagesScanned": messages_scanned} if messages_scanned is not None else {}),
+                    **({"truncated": truncated} if truncated is not None else {}),
+                },
+                scan_lease,
+            ),
+        )
+
+    async def complete_import_scan(
+        self,
+        scan_id: str,
+        progress: dict[str, Any] | None,
+        scan_lease: WorkerItemLease,
+    ) -> dict[str, Any]:
+        if not scan_id:
+            raise RuntimeError("import scan id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/import-worker/scans/{scan_id}/complete",
+            payload=with_item_lease(progress or {}, scan_lease),
+        )
+
+    async def fail_import_scan(
+        self,
+        scan_id: str,
+        error_code: str,
+        error_message: str,
+        scan_lease: WorkerItemLease,
+    ) -> dict[str, Any]:
+        if not scan_id:
+            raise RuntimeError("import scan id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/import-worker/scans/{scan_id}/fail",
+            payload=with_item_lease(
+                {"errorCode": error_code[:80], "errorMessage": error_message[:500]},
+                scan_lease,
+            ),
+        )
+
+    async def claim_import_items(self) -> dict[str, Any]:
+        return await self._authorized_post("/cnc-telegram/import-worker/imports/claim")
+
+    async def complete_import_item(
+        self,
+        item_id: str,
+        result: dict[str, Any],
+        item_lease: WorkerItemLease,
+    ) -> dict[str, Any]:
+        if not item_id:
+            raise RuntimeError("import item id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/import-worker/imports/{item_id}/complete",
+            payload=with_item_lease(result, item_lease),
+        )
+
+    async def fail_import_item(
+        self,
+        item_id: str,
+        error_code: str,
+        error_message: str,
+        item_lease: WorkerItemLease,
+    ) -> dict[str, Any]:
+        if not item_id:
+            raise RuntimeError("import item id is missing")
+        return await self._authorized_post(
+            f"/cnc-telegram/import-worker/imports/{item_id}/fail",
+            payload=with_item_lease(
+                {"errorCode": error_code[:80], "errorMessage": error_message[:500]},
+                item_lease,
+            ),
+        )
+
     async def _authorized_post(
         self,
         path: str,

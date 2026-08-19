@@ -1152,6 +1152,28 @@ probe_file() {
     114_production_status_always_from_details*) probe_all \
                      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='recalc_order_production_status' AND prosrc LIKE '%erp.order_status_to_details_sync%' AND prosrc NOT LIKE '%v_enabled%');" \
                      "SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname='trg_orders_sync_details_status' AND prosrc LIKE '%erp.detail_status_to_order_recalc%' AND prosrc NOT LIKE '%NEW.production_status_from_details_enabled%');" ;;
+    114_cnc_manual_svg_comment_presets*) probe_all \
+                     "$(q_tbl cnc_manual_svg_comment_presets)" \
+                     "$(q_con_on cnc_manual_svg_comment_presets cnc_manual_svg_comment_presets_pkey)" \
+                     "$(q_con_on cnc_manual_svg_comment_presets chk_cnc_manual_svg_comment_presets_label)" \
+                     "$(q_con_on cnc_manual_svg_comment_presets chk_cnc_manual_svg_comment_presets_comment)" \
+                     "$(q_con_on cnc_manual_svg_comment_presets chk_cnc_manual_svg_comment_presets_category)" \
+                     "$(q_idx uq_cnc_manual_svg_comment_presets_active_text)" \
+                     "$(q_idx idx_cnc_manual_svg_comment_presets_active_order)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM cnc_manual_svg_comment_presets
+                        WHERE label = 'Весь заказ'
+                          AND comment_text = 'весь заказ'
+                          AND category = 'order'
+                     );" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM cnc_manual_svg_comment_presets
+                        WHERE label = 'Переделка'
+                          AND comment_text = 'переделка'
+                          AND category = 'rework'
+                     );" ;;
     115_cnc_telegram_packet_mdf_board_hidden*) probe_all \
                      "$(q_col cnc_telegram_packets mdf_board_hidden_at)" \
                      "$(q_col cnc_telegram_packets mdf_board_hidden_by)" \
@@ -1524,6 +1546,39 @@ probe_file() {
                      "$(q_col milling_type_extra_resources extra_resource_id)" \
                      "$(q_idx uq_extra_resources_active_kind_name)" \
                      "$(q_idx idx_milling_type_extra_resources_extra_resource)" ;;
+    134_cnc_telegram_worker_technical_logs*) probe_all \
+                     "$(q_tbl cnc_telegram_worker_technical_logs)" \
+                     "$(q_col cnc_telegram_worker_technical_logs worker_instance_id)" \
+                     "$(q_col cnc_telegram_worker_technical_logs sequence)" \
+                     "$(q_col cnc_telegram_worker_technical_logs observed_at)" \
+                     "$(q_col cnc_telegram_worker_technical_logs stream)" \
+                     "$(q_col cnc_telegram_worker_technical_logs message)" \
+                     "$(q_col cnc_telegram_worker_technical_logs redaction_categories)" \
+                     "$(q_con_on cnc_telegram_worker_technical_logs uq_cnc_tg_technical_instance_sequence)" \
+                     "$(q_con_on cnc_telegram_worker_technical_logs chk_cnc_tg_technical_stream)" \
+                     "$(q_con_on cnc_telegram_worker_technical_logs chk_cnc_tg_technical_message)" \
+                     "$(q_idx idx_cnc_tg_technical_observed)" \
+                     "$(q_idx idx_cnc_tg_technical_instance_observed)" \
+                     "$(q_idx idx_cnc_tg_technical_stream_observed)" \
+                     "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name='audit.technical.view' AND is_active=true AND is_dangerous=true);" ;;
+    134_status_automation_mapping_actions*) probe_all \
+                     "$(q_col status_automation_rules action_config_json)" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM information_schema.columns
+                        WHERE table_schema='public'
+                          AND table_name='status_automation_rules'
+                          AND column_name='target_status_id'
+                          AND is_nullable='YES'
+                     );" \
+                     "SELECT EXISTS (
+                       SELECT 1
+                         FROM pg_constraint
+                        WHERE conname='status_automation_rules_action_type_check'
+                          AND conrelid='public.status_automation_rules'::regclass
+                          AND pg_get_constraintdef(oid) LIKE '%map_order_status_to_details_production_status%'
+                          AND pg_get_constraintdef(oid) LIKE '%map_production_status_to_order_status%'
+                     );" ;;
     135_cnc_telegram_worker_session_leases*) probe_all \
                      "$(q_tbl cnc_telegram_worker_session_leases)" \
                      "$(q_col cnc_telegram_worker_session_leases lease_token)" \
@@ -1546,6 +1601,17 @@ probe_file() {
                      "$(q_col cnc_manual_svg_telegram_send_requests lease_expires_at)" \
                      "$(q_con_on cnc_manual_svg_telegram_send_requests chk_cnc_tg_send_item_lease_shape)" \
                      "$(q_idx idx_cnc_tg_send_item_lease_expiry)" ;;
+    136_cnc_telegram_manual_import*) probe_all \
+                     "$(q_tbl cnc_telegram_import_scans)" \
+                     "$(q_tbl cnc_telegram_import_candidates)" \
+                     "$(q_tbl cnc_telegram_import_candidate_matches)" \
+                     "$(q_tbl cnc_telegram_import_requests)" \
+                     "$(q_tbl cnc_telegram_import_items)" \
+                     "$(q_con_on cnc_telegram_import_scans chk_cnc_tg_import_scan_range)" \
+                     "$(q_con_on cnc_telegram_import_items chk_cnc_tg_import_item_lease)" \
+                     "$(q_idx uq_cnc_tg_import_request_active_selection)" \
+                     "$(q_idx idx_cnc_tg_import_item_claim)" \
+                     "SELECT EXISTS (SELECT 1 FROM permissions_catalog WHERE permission_name='cnc.telegram_import.manage_all' AND is_active=true);" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1557,7 +1623,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|135_*)
+  073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
