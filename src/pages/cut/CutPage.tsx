@@ -459,7 +459,7 @@ export function cutJobMdfBoardLink(target: NonNullable<NonNullable<CutJobDto['md
   const params = new URLSearchParams({
     flow: 'cnc',
     date: target.workday,
-    period: '1w',
+    period: '1m',
     cardKind: target.kind === 'bath' ? 'bath' : 'packet',
     cardId: target.cardId,
   });

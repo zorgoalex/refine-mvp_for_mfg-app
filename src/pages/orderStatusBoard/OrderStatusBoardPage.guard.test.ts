@@ -176,9 +176,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('touch-action: pan-y');
   });
 
-  it('opens the dedicated MDF work board on today before loading data', () => {
+  it('opens the dedicated MDF work board on today unless a card deep-link provides its workday', () => {
     expect(page).toContain("const todayCncWorkday = dayjs().format('YYYY-MM-DD');");
     expect(page).toContain("fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current");
+    expect(page).toContain('const hasExplicitMdfCardDeepLink = Boolean(');
+    expect(page).toMatch(/mdfWorkdayTodayOpenPatchNeeded\s*=\s*[\s\S]*?!hasExplicitMdfCardDeepLink/);
     expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
