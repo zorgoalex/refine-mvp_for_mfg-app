@@ -344,19 +344,15 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
         tx,
         parsedItems,
       );
-      if (selectedOrderIds.length === 0) {
-        throw new ApiError(
-          422,
-          'CNC_TELEGRAM_IMPORT_ORDERS_UNRESOLVED',
-          'Telegram SVG details do not identify a unique active ERP order',
-        );
-      }
       const sourceFiles = input.completion.sourceFiles;
       if (!sourceFiles || sourceFiles.length === 0) throw new ApiError(422, 'CNC_TELEGRAM_SOURCE_FILES_REQUIRED', 'Selected Telegram files must be re-downloaded and verified before import');
       const dto: CncTelegramManualSvgUploadDto = {
         idempotencyKey: `cnc-telegram-import:${text(item, 'import_item_id')}`,
         selectedOrderIds, createMdfMachineFileCard: true,
-        matchMode: 'order_details', validationMode: 'strict', svgContentHash: text(item, 'svg_content_sha256'),
+        // Telegram imports are intentionally lenient: unresolved/ambiguous ERP
+        // names remain informational, while uniquely matched names still link
+        // to their active orders and details.
+        matchMode: 'order_details', validationMode: 'lenient', svgContentHash: text(item, 'svg_content_sha256'),
         cutLayout: layout, items: parsedItems, sourceFiles,
         duplicatePolicy: { kind: 'intentional_copy', approvedByImportItemId: text(item, 'import_item_id') },
       };
@@ -398,7 +394,6 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       if (text(prior.rows[0], 'request_hash') !== requestHash) throw idempotencyConflict();
       return this.loadRequest(tx, prior.rows[0]);
     }
-    for (const candidate of candidates.rows) await assertTelegramImportCandidateOrdersResolvable(tx, candidate);
     for (const candidate of candidates.rows) await this.refreshMatches(tx, candidate);
     if (!input.repeatOfImportRequestId) {
       const terminal = await tx.query<Row>(`SELECT import_request_id FROM cnc_telegram_import_requests WHERE scan_id=$1 AND requested_by=$2 AND selection_hash=$3 AND status IN ('completed','partial','failed') LIMIT 1`, [text(scan, 'scan_id'), input.currentUser.id, selectionHash]);
@@ -534,27 +529,6 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       await auditService.record(tx, { event: 'cnc.telegram_import.scan_completed', actorUserId: input.currentUser.id, entityType: 'cnc_telegram_import_scan', entityId: text(row, 'scan_id'), source: 'cnc.telegram_import_worker', requestId, metadata: { candidatesFound: number(row, 'candidates_found') } });
       return scanDto(requiredRow(updated.rows[0], 'scan completion'));
     });
-  }
-}
-
-export async function assertTelegramImportCandidateOrdersResolvable(tx: TransactionClient, candidate: Row): Promise<void> {
-  const layout = toCutLayout(json(candidate, 'cut_layout_json'));
-  const items = telegramImportItemsFromLayout(layout);
-  const selectedOrderIds = await inferTelegramImportSelectedOrderIds(tx, items);
-  if (selectedOrderIds.length === 0) {
-    const orderNames = [...new Set(items.map((item) => item.orderName.trim()).filter(Boolean))];
-    const orderLabel = orderNames.slice(0, 10).join(', ') || 'не распознан';
-    throw new ApiError(
-      422,
-      'CNC_TELEGRAM_IMPORT_ORDERS_UNRESOLVED',
-      `Нельзя создать раскрой из ${text(candidate, 'svg_file_name')}: ERP-заказ «${orderLabel}» не найден или неоднозначен. Проверьте заказ в ERP.`,
-      {
-        candidateId: text(candidate, 'candidate_id'),
-        svgFileName: text(candidate, 'svg_file_name'),
-        orderNames,
-        reason: 'missing_or_ambiguous_active_order',
-      },
-    );
   }
 }
 

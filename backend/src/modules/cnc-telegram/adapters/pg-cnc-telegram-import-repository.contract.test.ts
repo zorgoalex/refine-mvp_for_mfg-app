@@ -5,7 +5,6 @@ import type { DatabaseService } from '../../../database/database.service';
 import { canonicalLayoutFingerprint } from './pg-cnc-telegram-repository';
 import {
   PgCncTelegramImportRepository,
-  assertTelegramImportCandidateOrdersResolvable,
   assertCncTelegramScanMessageCount,
   assertTerminalItemLeaseReplay,
   inferTelegramImportSelectedOrderIds,
@@ -14,6 +13,7 @@ import {
 import { parseImportComplete } from '../dto/cnc-telegram-import.dto';
 
 const source = readFileSync(new URL('./pg-cnc-telegram-import-repository.ts', import.meta.url), 'utf8');
+const svgRepositorySource = readFileSync(new URL('../adapters/pg-cnc-telegram-repository.ts', import.meta.url), 'utf8');
 const dto = readFileSync(new URL('../dto/cnc-telegram-import.dto.ts', import.meta.url), 'utf8');
 
 describe('explicit Telegram import backend contracts', () => {
@@ -188,45 +188,99 @@ describe('explicit Telegram import backend contracts', () => {
     expect(tx.query.mock.calls[2]?.[0]).toContain('p.source_message_id=$3::bigint');
   });
 
-  it('rejects an unresolved ERP order before creating request or item rows', async () => {
+  it('keeps unresolved Telegram orders informational while preserving matched-order linking', () => {
+    expect(source).not.toContain('assertTelegramImportCandidateOrdersResolvable');
+    expect(source).toContain("matchMode: 'order_details', validationMode: 'lenient'");
+    expect(svgRepositorySource).toContain('if (manualDto.selectedOrderIds.length > 0)');
+    expect(svgRepositorySource).toContain('buildTelegramInformationalSvgCutImportPlan');
+  });
+
+  it('prepares an unresolved Telegram candidate instead of rejecting it before the worker', async () => {
+    const queries: string[] = [];
     const candidate = {
-      candidate_id: 'candidate-2812', scan_id: 'scan-1', source_chat_id: '-1001',
+      candidate_id: 'candidate-2808', scan_id: 'scan-1', source_chat_id: '-1001',
+      source_message_id: 42, svg_content_sha256: 'a'.repeat(64), layout_fingerprint: null,
+      source_set_fingerprint: 'b'.repeat(64), duplicate_match_version: 1,
       eligibility_status: 'valid', expires_at: new Date(Date.now() + 60_000).toISOString(),
-      svg_file_name: 'CNC#1_2812-8MM.svg', cut_layout_json: {
-        status: 'valid', reasons: [], sheet: { widthMm: 2800, heightMm: 2070 },
-        items: [{ orderName: '2812', detailNumber: 1, widthMm: 400, heightMm: 600, quantity: 1 }],
-      },
     };
-    const tx = { query: vi.fn()
-      .mockResolvedValueOnce({ rows: [{ scan_id: 'scan-1', requested_by: 'user-1', status: 'ready' }], rowCount: 1 })
-      .mockResolvedValueOnce({ rows: [candidate], rowCount: 1 })
-      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // same-hash prior request lookup
-      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) };
-    const database = {
-      transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => handler(tx),
-    } as unknown as DatabaseService;
+    const request = {
+      import_request_id: 'request-1', scan_id: 'scan-1', requested_by: 'user-1',
+      request_hash: 'hash', selection_hash: 'selection', status: 'draft', confirmation_id: 'confirmation-1',
+      selected_count: 1, imported_count: 0, failed_count: 0, error_message: null, duplicate_match_version: 1,
+      repeat_of_import_request_id: null,
+    };
+    const tx = { query: vi.fn(async (sql: string) => {
+      queries.push(sql);
+      if (sql.includes('FROM cnc_telegram_import_scans')) return { rows: [{ scan_id: 'scan-1', requested_by: 'user-1', status: 'ready' }], rowCount: 1 };
+      if (sql.includes('FROM cnc_telegram_import_candidates WHERE scan_id')) return { rows: [candidate], rowCount: 1 };
+      if (sql.includes('FROM cnc_telegram_import_requests WHERE requested_by')) return { rows: [], rowCount: 0 };
+      if (sql.includes('INSERT INTO cnc_telegram_import_requests')) return { rows: [request], rowCount: 1 };
+      if (sql.includes('FROM cnc_telegram_import_items WHERE import_request_id')) return { rows: [], rowCount: 0 };
+      if (sql.includes('INSERT INTO audit_log')) return { rows: [{ audit_id: 'audit-1' }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    }) };
+    const database = { transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => handler(tx) } as unknown as DatabaseService;
     const repository = new PgCncTelegramImportRepository(database, {} as never);
 
     await expect(repository.prepare({
       currentUser: { id: 'user-1', username: 'tester', role: 'manager', roleId: 1, permissions: [] },
-      scanId: 'scan-1', candidateIds: ['candidate-2812'], requestId: 'request-1', idempotencyKey: 'key-1',
-    })).rejects.toMatchObject({
-      code: 'CNC_TELEGRAM_IMPORT_ORDERS_UNRESOLVED',
-      message: expect.stringContaining('ERP-заказ «2812»'),
-      details: expect.objectContaining({ candidateId: 'candidate-2812', svgFileName: 'CNC#1_2812-8MM.svg', orderNames: ['2812'] }),
-    });
-    expect(tx.query.mock.calls.some(([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO cnc_telegram_import_requests'))).toBe(false);
-    expect(tx.query.mock.calls.some(([sql]) => typeof sql === 'string' && sql.includes('INSERT INTO cnc_telegram_import_items'))).toBe(false);
+      scanId: 'scan-1', candidateIds: ['candidate-2808'], requestId: 'request-1', idempotencyKey: 'key-1',
+    })).resolves.toMatchObject({ importRequestId: 'request-1' });
+    expect(queries.some((sql) => sql.includes('FROM orders'))).toBe(false);
+    expect(queries.some((sql) => sql.includes('INSERT INTO cnc_telegram_import_requests'))).toBe(true);
+    expect(queries.some((sql) => sql.includes('INSERT INTO cnc_telegram_import_items'))).toBe(true);
   });
 
-  it('accepts a candidate when exactly one active ERP order matches its SVG order name', async () => {
-    const tx = { query: vi.fn().mockResolvedValue({ rows: [{ order_id: '2812' }], rowCount: 1 }) };
-    await expect(assertTelegramImportCandidateOrdersResolvable(tx as never, {
-      candidate_id: 'candidate-2812', svg_file_name: 'CNC#1_2812-8MM.svg', cut_layout_json: {
+  it('completes an unresolved Telegram SVG through the importer in lenient mode without selected orders', async () => {
+    const candidate = {
+      import_item_id: 'item-1', import_request_id: 'request-1', requested_by: 'user-1', scan_id: 'scan-1',
+      source_chat_id: '-1001', source_message_id: 42, source_thread_id: null,
+      source_created_at: '2026-08-19T10:00:00.000Z', source_updated_at: null, workday: '2026-08-19',
+      svg_message_id: 42, gcode_message_id: null, screenshot_message_id: null,
+      svg_file_name: 'CNC#1_2808+2807.svg', gcode_file_name: null, screenshot_file_name: null,
+      svg_content_sha256: 'a'.repeat(64), gcode_content_sha256: null, screenshot_content_sha256: null,
+      source_set_fingerprint: 'b'.repeat(64), parser_version: 'test', layout_fingerprint: null,
+      parsed_snapshot_json: {}, cut_layout_json: {
         status: 'valid', reasons: [], sheet: { widthMm: 2800, heightMm: 2070 },
-        items: [{ orderName: '2812', detailNumber: 1, widthMm: 400, heightMm: 600, quantity: 1 }],
+        items: [{ orderName: '2808', detailNumber: 1, widthMm: 400, heightMm: 600, quantity: 1, xMm: 0, yMm: 0, placedWidthMm: 400, placedHeightMm: 600, rotated: false }],
+      }, warnings_json: [], eligibility_status: 'valid', duplicate_match_version: 1,
+      duplicate_snapshot_json: [], status: 'processing', duplicate_acknowledged: true,
+      lease_token: 'l'.repeat(32), lease_generation: 1, lease_worker_instance_id: '00000000-0000-4000-8000-000000000001',
+    };
+    const queries: string[] = [];
+    const tx = { query: vi.fn(async (sql: string) => {
+      queries.push(sql);
+      if (sql.includes('FROM cnc_telegram_worker_session_leases')) return { rows: [{ lease_token: 's' }], rowCount: 1 };
+      if (sql.includes('FROM cnc_telegram_import_items i JOIN cnc_telegram_import_requests')) return { rows: [candidate], rowCount: 1 };
+      if (sql.includes('WHERE i.import_item_id=$1 AND c.source_chat_id')) return { rows: [candidate], rowCount: 1 };
+      if (sql.includes('FROM users u JOIN roles')) return { rows: [{ user_id: 'user-1', username: 'requester', role_id: 1, role_code: 'manager' }], rowCount: 1 };
+      if (sql.includes('FROM orders o')) return { rows: [], rowCount: 0 };
+      if (sql.includes('UPDATE cnc_telegram_import_items SET status=\'imported\'')) return { rows: [candidate], rowCount: 1 };
+      if (sql.includes('SELECT match_kind')) return { rows: [], rowCount: 0 };
+      if (sql.includes('INSERT INTO audit_log')) return { rows: [{ audit_id: 'audit-1' }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    }) };
+    const importer = { manualSvgUploadInTransaction: vi.fn().mockResolvedValue({ packet: { packetId: 'packet-1' }, cutJobId: 800, cutResultId: null }) };
+    const database = { transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => handler(tx) } as unknown as DatabaseService;
+    const repository = new PgCncTelegramImportRepository(database, importer as never);
+
+    await repository.completeImport({
+      currentUser: { id: 'worker-1', username: 'worker', role: 'worker', roleId: 1, permissions: [] },
+      importItemId: 'item-1',
+      lease: { sourceChatId: '-1001', leaseToken: 's', leaseGeneration: 1, workerInstanceId: '00000000-0000-4000-8000-000000000002' },
+      completion: {
+        itemLeaseToken: 'l'.repeat(32), itemLeaseGeneration: 1, itemLeaseOwner: '00000000-0000-4000-8000-000000000001',
+        sourceSetFingerprint: 'b'.repeat(64),
+        source: { sourceChatId: '-1001', sourceMessageId: '42', svgMessageId: '42', gcodeMessageId: null, screenshotMessageId: null, svgFileName: 'CNC#1_2808+2807.svg', gcodeFileName: null, screenshotFileName: null, svgContentSha256: 'a'.repeat(64), gcodeContentSha256: null, screenshotContentSha256: null },
+        sourceFiles: [{ kind: 'svg', fileName: 'CNC#1_2808+2807.svg', contentType: 'image/svg+xml', sizeBytes: 1, sha256: 'a'.repeat(64), base64Content: 'YQ==' }],
       },
-    })).resolves.toBeUndefined();
+      requestId: 'request-1',
+    });
+
+    expect(importer.manualSvgUploadInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      dto: expect.objectContaining({ matchMode: 'order_details', validationMode: 'lenient', selectedOrderIds: [] }),
+    }));
+    expect(queries.some((sql) => sql.includes('INSERT INTO cut_job'))).toBe(false); // importer owns cut-job creation
   });
 
   it('returns an idempotent same-hash request before revalidating ERP orders', async () => {

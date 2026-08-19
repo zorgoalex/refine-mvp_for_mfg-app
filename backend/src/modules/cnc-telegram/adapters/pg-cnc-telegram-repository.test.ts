@@ -2582,8 +2582,48 @@ describe('PgCncTelegramRepository', () => {
     const tx = {
       query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
         queries.push({ text, params });
-        if (/FROM orders o\s+JOIN order_details od/i.test(text)) {
-          return { rows: [] };
+        if (/FROM orders o/i.test(text) && /JOIN order_details od/i.test(text)) {
+          return { rows: [{ order_key: '2808', order_id: 2808, detail_id: 8801, detail_number: 6, width: 95, height: 720 }] };
+        }
+        if (/FROM order_details od/i.test(text) && /od\.detail_id = ANY/i.test(text)) {
+          return {
+            rows: [{
+              detail_id: 8801,
+              order_id: 2808,
+              order_name: '2808',
+              order_delete_flag: false,
+              detail_number: 6,
+              detail_name: 'Detail 6',
+              height: 720,
+              width: 95,
+              order_quantity: 1,
+              area: 0.0684,
+              material_id: 10,
+              sheet_material_type_id: 77,
+              sheet_material_width_mm: 2070,
+              sheet_material_height_mm: 2800,
+              material_name: 'MDF 16',
+              doweling: false,
+              milling_type_id: null,
+              milling_type_name: null,
+              edge_type_id: null,
+              edge_type_name: null,
+              film_id: null,
+              film_name: null,
+              priority: null,
+              production_status_id: null,
+              production_status_name: null,
+              joint_order_id: null,
+              note: null,
+              link_cutting_file: null,
+              link_cutting_image_file: null,
+              link_cad_file: null,
+              link_pdf_file: null,
+            }],
+          };
+        }
+        if (/SELECT\s+order_id,\s+order_name\s+FROM orders/i.test(text)) {
+          return { rows: [{ order_id: 2808, order_name: '2808' }] };
         }
         if (/INSERT INTO command_idempotency_keys/i.test(text)) {
           return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
@@ -2602,6 +2642,9 @@ describe('PgCncTelegramRepository', () => {
         }
         if (/INSERT INTO cut_group\s*\(/i.test(text)) {
           return { rows: [{ cut_group_id: 801 }] };
+        }
+        if (/INSERT INTO cut_job_item\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_item_id: 802 }] };
         }
         if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) {
           return { rows: [{ cut_group_sheet_id: 803 }] };
@@ -2634,18 +2677,29 @@ describe('PgCncTelegramRepository', () => {
         idempotencyKey: 'cnc:test:repo:svg-informational-ambiguous-match',
         cuttingSequenceNo: 104,
         materialName: 'МДФ 16мм',
+        svgImportMode: { validationMode: 'lenient' as const },
         items: [
           {
-            sourceItemKey: '2800:6:95x720',
-            orderName: '2800',
+            sourceItemKey: '2808:6:95x720',
+            orderName: '2808',
             detailNumber: 6,
             widthMm: 95,
             heightMm: 720,
             quantity: 1,
             source: 'vector' as const,
             confidence: 1,
-            matchStatus: 'needs_review' as const,
-            reviewNote: 'not unique',
+            matchStatus: 'unmatched' as const,
+          },
+          {
+            sourceItemKey: '2807:7:100x700',
+            orderName: '2807',
+            detailNumber: 7,
+            widthMm: 100,
+            heightMm: 700,
+            quantity: 1,
+            source: 'vector' as const,
+            confidence: 1,
+            matchStatus: 'unmatched' as const,
           },
         ],
         cutLayout: {
@@ -2653,10 +2707,10 @@ describe('PgCncTelegramRepository', () => {
           reasons: [],
           sheet: { widthMm: 2070, heightMm: 2800 },
           partContourCount: 1,
-          acceptedItemCount: 1,
+          acceptedItemCount: 2,
           items: [
             {
-              orderName: '2800',
+              orderName: '2808',
               detailNumber: 6,
               widthMm: 95,
               heightMm: 720,
@@ -2667,6 +2721,20 @@ describe('PgCncTelegramRepository', () => {
               yMm: 20,
               placedWidthMm: 95,
               placedHeightMm: 720,
+              rotated: false,
+            },
+            {
+              orderName: '2807',
+              detailNumber: 7,
+              widthMm: 100,
+              heightMm: 700,
+              quantity: 1,
+              confidence: 1,
+              sourceElementId: 'PartContour-2',
+              xMm: 20,
+              yMm: 30,
+              placedWidthMm: 100,
+              placedHeightMm: 700,
               rotated: false,
             },
           ],
@@ -2682,16 +2750,19 @@ describe('PgCncTelegramRepository', () => {
       /svg_cut_import_status = \$2/i.test(query.text),
     );
 
+    expect(queries.some((query) => /FROM orders o/i.test(query.text) && /JOIN order_details od/i.test(query.text))).toBe(true);
     expect(jobInsert?.params[7]).toBe('1');
-    expect(queries.some((query) => /INSERT INTO cut_job_item\s*\(/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /INSERT INTO cut_result_command/i.test(query.text))).toBe(false);
     expect(queries.some((query) => /INSERT INTO cut_result\s*\(/i.test(query.text))).toBe(false);
     expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
-      pieces: [{ label: { orderId: null, orderName: '2800', detailId: null } }],
+      pieces: [
+        { label: { orderId: 2808, orderName: '2808', detailId: 8801 } },
+        { label: { orderId: null, orderName: '2807', detailId: null } },
+      ],
     });
     expect(importUpdate?.params.slice(1, 5)).toEqual([
       'imported',
-      'SVG layout imported into cut job',
+      'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная',
       800,
       null,
     ]);

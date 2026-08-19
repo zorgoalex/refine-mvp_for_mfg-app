@@ -1378,7 +1378,9 @@ async function prepareManualSvgUploadDto(
     tolerantSizeMm: 8,
   });
   if (manualDto.validationMode === 'lenient') {
-    await assertManualSvgSelectedOrdersExist(tx, manualDto.selectedOrderIds);
+    if (manualDto.selectedOrderIds.length > 0) {
+      await assertManualSvgSelectedOrdersExist(tx, manualDto.selectedOrderIds);
+    }
     return { resolvedDto: matchedDto, matchSourceDto: matchedDto };
   }
   await assertManualSvgOrderScope(tx, manualDto.selectedOrderIds, matchedDto);
@@ -3653,7 +3655,18 @@ async function syncSvgCutImport(
     }
     throw error;
   }
-  await setSvgCutImportState(tx, packetId, 'imported', 'SVG layout imported into cut job', imported.cutJobId, imported.cutResultId);
+  const linkedOrderCount = plan.placements.filter((placement) => placement.orderId !== null).length;
+  const informationalNote = linkedOrderCount === 0
+    ? 'Предупреждение: раскрой создан без привязки к ERP-заказу; проверьте заказ вручную'
+    : 'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная';
+  await setSvgCutImportState(
+    tx,
+    packetId,
+    'imported',
+    plan.informational ? informationalNote : 'SVG layout imported into cut job',
+    imported.cutJobId,
+    imported.cutResultId,
+  );
 }
 
 function svgImportOptionsFromDto(dto: CncTelegramStructuredIngestDto): {
@@ -4202,11 +4215,18 @@ async function buildLenientSvgCutImportPlan(
     const match = key ? matchedItems.get(key) : null;
     const matchedOrderId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchOrderId) : null;
     const matchedDetailId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchDetailId) : null;
-    const fallbackOrder = informationalOrderForLayoutItem(item, index, selectedOrders);
-    const orderId = matchedOrderId ?? fallbackOrder.orderId;
+    // Explicit manual selections may use the selected order as a fallback.
+    // Telegram's empty selection is an inferred scope: never attach an
+    // unresolved layout item to a different matched order by position.
+    const fallbackOrder = selectedOrderIds.length > 0
+      ? informationalOrderForLayoutItem(item, index, selectedOrders)
+      : null;
+    const orderId = matchedOrderId ?? fallbackOrder?.orderId ?? null;
     const orderName = matchedOrderId !== null
       ? item.orderName || match?.orderName || String(matchedOrderId)
-      : informationalLayoutOrderName(item, fallbackOrder);
+      : fallbackOrder
+        ? informationalLayoutOrderName(item, fallbackOrder)
+        : normalizeOptional(item.orderName) ?? 'SVG';
     const orderDetailId = matchedDetailId;
     placements.push({
       ...item,
@@ -4344,7 +4364,8 @@ function buildTelegramInformationalSvgCutImportPlan(
 }
 
 function isTelegramSvgDetailMatchFailure(reason: string): boolean {
-  return reason.includes('is not uniquely matched to an order detail');
+  return reason.includes('is not uniquely matched to an order detail')
+    || reason === 'Для нестрогой загрузки SVG не выбраны заказы';
 }
 
 function informationalOrderForLayoutItem(
