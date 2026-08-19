@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-19",
+    title: "Раскрой: переход к карточкам МДФ-доски",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В колонке «МДФ-доска» отметка созданной карточки открывает непосредственно файл станка или ванну, а для отметки «Нет» доступна команда «Создать карточку».",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-19",
     title: "Раскрой: ручной импорт комплектов из Telegram",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

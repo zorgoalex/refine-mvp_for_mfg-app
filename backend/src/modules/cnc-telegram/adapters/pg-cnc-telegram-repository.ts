@@ -447,6 +447,7 @@ export class PgCncTelegramRepository
       packetSelectSql(`
         p.workday BETWEEN $1::date AND $2::date
         AND p.mdf_board_hidden_at IS NULL
+        AND p.mdf_board_card_kind = 'machine_file'
         AND (
           p.source_chat_id IS DISTINCT FROM $3
           OR EXISTS (
@@ -3230,6 +3231,7 @@ async function insertPacket(
     throw new ApiError(500, 'CNC_TELEGRAM_PACKET_INSERT_FAILED', 'CNC packet insert failed');
   }
   await persistPacketLayoutFingerprint(tx, packetId, dto);
+  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
   return packetId;
 }
 
@@ -3277,6 +3279,33 @@ async function updatePacket(
     [packetId, ...packetParams(dto, payloadHash, command.currentUser.id).slice(1)],
   );
   await persistPacketLayoutFingerprint(tx, packetId, dto);
+  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
+}
+
+async function replaceWholeOrderKeys(
+  tx: TransactionClient,
+  packetId: string,
+  comments: readonly string[],
+): Promise<void> {
+  const orderKeys = wholeOrderKeysFromComments(comments);
+  await tx.query('DELETE FROM cnc_telegram_packet_whole_order_keys WHERE packet_id = $1::uuid', [packetId]);
+  if (orderKeys.length === 0) return;
+  await tx.query(
+    `INSERT INTO cnc_telegram_packet_whole_order_keys (packet_id, order_key)
+     SELECT $1::uuid, order_key
+     FROM unnest($2::text[]) AS order_key
+     ON CONFLICT (packet_id, order_key) DO NOTHING`,
+    [packetId, orderKeys],
+  );
+}
+
+export function wholeOrderKeysFromComments(comments: readonly string[]): string[] {
+  return Array.from(new Set(
+    comments.flatMap((comment) => {
+      if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return [];
+      return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g), (match) => match[2]);
+    }),
+  ));
 }
 
 async function persistPacketLayoutFingerprint(
@@ -7149,18 +7178,13 @@ async function loadBathCards(
       HAVING COUNT(*) = 1
     ),
     completed_whole_order_keys AS (
-      SELECT DISTINCT lower(trim(order_match.match[2])) AS order_key
+      SELECT DISTINCT whole_order.order_key
       FROM cnc_telegram_packets p
-      CROSS JOIN LATERAL jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
-      CROSS JOIN LATERAL regexp_matches(
-        packet_comment.comment_text,
-        '(^|[^0-9])([0-9]{4,})([^0-9]|$)',
-        'g'
-      ) AS order_match(match)
+      JOIN cnc_telegram_packet_whole_order_keys whole_order
+        ON whole_order.packet_id = p.packet_id
       WHERE p.workday BETWEEN $1::date AND $2::date
         AND p.mdf_board_hidden_at IS NULL
         AND (p.completion_status = 'completed' OR p.thumbs_up = true)
-        AND lower(packet_comment.comment_text) LIKE '%весь%'
         AND NOT EXISTS (
           SELECT 1
           FROM jsonb_array_elements_text(p.comments_json) AS material_comment(comment_text)

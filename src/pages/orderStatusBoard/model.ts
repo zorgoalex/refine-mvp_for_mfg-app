@@ -96,6 +96,8 @@ export interface OrderStatusBoardViewState {
   cncOrderSearchPeriod?: CncOrderSearchPeriod;
   cncOrderFilters: string[];
   cncPlannedTodayOnly: boolean;
+  cncCardKind?: 'packet' | 'bath';
+  cncCardId?: string;
   hideEmpty: boolean;
   sortBy: OrderStatusBoardSortBy;
   sortOrder: OrderStatusBoardSortOrder;
@@ -184,6 +186,13 @@ export function parseOrderStatusBoardViewState(
     ...(view === 'cnc_today' && cncOrderSearchPeriod ? { cncOrderSearchPeriod } : {}),
     cncOrderFilters: normalizeCncOrderFilterValues(params.getAll('order')),
     cncPlannedTodayOnly: view === 'cnc_today' && params.get('plannedToday') === '1',
+    ...(view === 'cnc_today' && (params.get('cardKind') === 'packet' || params.get('cardKind') === 'bath')
+      && params.get('cardId')?.trim()
+      ? {
+          cncCardKind: params.get('cardKind') as 'packet' | 'bath',
+          cncCardId: params.get('cardId')!.trim(),
+        }
+      : {}),
     hideEmpty: params.get('hideEmpty') === '1',
     sortBy,
     sortOrder,
@@ -198,6 +207,10 @@ export function serializeOrderStatusBoardViewState(
     params.set('flow', 'cnc');
   } else if (state.view !== 'order') {
     params.set('board', state.view);
+  }
+  if (state.view === 'cnc_today' && state.cncCardKind && state.cncCardId) {
+    params.set('cardKind', state.cncCardKind);
+    params.set('cardId', state.cncCardId);
   }
   if (state.search.trim()) params.set('q', state.search.trim());
   if (state.onlyMyOrders) params.set('mine', '1');

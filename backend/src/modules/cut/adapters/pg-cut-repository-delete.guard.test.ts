@@ -34,7 +34,9 @@ describe('PgCutRepository delete cut job contract', () => {
     expect(source).toContain('SELECT pg_advisory_xact_lock(hashtext($1))');
     expect(source).toContain('MDF_BOARD_CARD_CREATED_EVENT');
     expect(source).toContain('evaluateMdfOrderMachineFilesPresentAutomation');
-    expect(source).toContain('canCreateCard: manualPendingPacketCount === 1');
+    expect(source).toContain("canCreateCard: row.status === 'ready'");
+    expect(source).toContain('ON CONFLICT (external_packet_key) DO NOTHING');
+    expect(source).toContain("return cardKind === 'bath' ? 'bath_seed' : 'machine_file'");
   });
 
   it('records cut-job deletion as a deletion audit event with affected entities', () => {
