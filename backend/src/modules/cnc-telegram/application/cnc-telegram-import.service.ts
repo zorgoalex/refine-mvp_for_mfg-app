@@ -29,6 +29,7 @@ export class CncTelegramImportService {
   }
   async getScan(currentUser: CurrentUser, scanId: string) { this.requireEnabled(); this.requireUserRead(currentUser); return this.repository.getScan({ currentUser, scanId }); }
   async listCandidates(input: { currentUser: CurrentUser; scanId: string; page: number; pageSize: number }) { this.requireEnabled(); this.requireUserRead(input.currentUser); return this.repository.listCandidates(input); }
+  async listMessages(input: { currentUser: CurrentUser; scanId: string; page: number; pageSize: number }) { this.requireEnabled(); this.requireUserRead(input.currentUser); return this.repository.listMessages(input); }
   async prepare(input: { currentUser: CurrentUser; scanId: string; candidateIds: string[]; repeatOfImportRequestId?: string | null; requestId?: string; idempotencyKey: string }) {
     this.requireEnabled(); this.requireUserManage(input.currentUser);
     return this.repository.prepare({ ...input, requestId: input.requestId ?? 'cnc-telegram-import-prepare' });

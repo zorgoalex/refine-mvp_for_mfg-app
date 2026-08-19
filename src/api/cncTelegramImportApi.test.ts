@@ -29,6 +29,40 @@ describe('cncTelegramImportApi', () => {
     expect(result).toMatchObject({ scanId, candidates: [], pagination: { total: 0, totalPages: 0 } });
   });
 
+  it('normalizes scan messages without renaming the backend filename contract', async () => {
+    const rawMessage = {
+      scanMessageId: '44444444-4444-4444-8444-444444444444',
+      scanId,
+      sourceChatId: '-100123',
+      sourceMessageId: '11118',
+      sourceThreadId: null,
+      replyToMessageId: null,
+      senderUserId: '77',
+      sourceCreatedAt: '2026-08-19T10:00:00.000Z',
+      sourceUpdatedAt: null,
+      workday: '2026-08-19',
+      messageType: 'image',
+      filename: null,
+      mimeType: 'image/jpeg',
+      messageText: 'Скрин раскроя',
+      outgoing: false,
+      candidateId: candidateId,
+      candidateRole: 'screenshot',
+      readOrdinal: 1,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [rawMessage], total: 1 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await cncTelegramImportApi.listMessages(scanId);
+
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/v1/cnc-telegram/import-scans/${scanId}/messages?page=1&pageSize=100`);
+    expect(result).toMatchObject({
+      scanId,
+      messages: [{ scanMessageId: rawMessage.scanMessageId, filename: null, messageText: 'Скрин раскроя' }],
+      pagination: { total: 1, totalPages: 1 },
+    });
+  });
+
   it('sends explicit duplicate acknowledgements on confirm', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ importRequestId: requestId, items: [] }), { status: 202 }));
     vi.stubGlobal('fetch', fetchMock);

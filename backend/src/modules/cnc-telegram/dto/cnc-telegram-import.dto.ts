@@ -6,6 +6,20 @@ const sha256 = z.string().trim().regex(/^[a-f0-9]{64}$/i).transform((v) => v.toL
 const sourceFingerprint = z.string().trim().regex(/^[a-f0-9]{64}$/i).transform((v) => v.toLowerCase());
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const leaseToken = z.string().trim().min(32).max(240);
+const MAX_POSTGRES_BIGINT = '9223372036854775807';
+/**
+ * Telegram ids cross a JavaScript HTTP boundary.  Keep the canonical form as
+ * a decimal string, while accepting legacy safe integers during the rollout.
+ * Unsafe JSON numbers are rejected because their original digits are already
+ * unrecoverable by the time Zod sees them.
+ */
+const telegramId = z.union([
+  z.string().trim().regex(/^[1-9]\d*$/).max(19),
+  z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+]).transform((value) => String(value)).refine(
+  (value) => value.length < MAX_POSTGRES_BIGINT.length || (value.length === MAX_POSTGRES_BIGINT.length && value <= MAX_POSTGRES_BIGINT),
+  { message: 'Telegram id must fit PostgreSQL BIGINT' },
+);
 const workerItemLease = z.object({
   itemLeaseToken: leaseToken,
   itemLeaseGeneration: z.number().int().positive(),
@@ -45,14 +59,14 @@ export interface CncTelegramImportCandidateDto {
   candidateId: string;
   scanId: string;
   sourceChatId: string;
-  sourceMessageId: number;
-  sourceThreadId?: number | null;
+  sourceMessageId: string;
+  sourceThreadId?: string | null;
   sourceCreatedAt: string;
   sourceUpdatedAt?: string | null;
   workday: string;
-  svgMessageId?: number | null;
-  gcodeMessageId: number | null;
-  screenshotMessageId: number | null;
+  svgMessageId?: string | null;
+  gcodeMessageId: string | null;
+  screenshotMessageId: string | null;
   svgFileName: string;
   gcodeFileName: string | null;
   screenshotFileName: string | null;
@@ -77,6 +91,35 @@ export interface CncTelegramImportCandidateDto {
   cutLayout?: Record<string, unknown> | null;
   matches: CncTelegramImportMatchDto[];
   duplicateMatchVersion?: number;
+}
+
+export type CncTelegramImportMessageType = 'svg' | 'dxf' | 'image' | 'gcode' | 'text' | 'other';
+export type CncTelegramImportMessageCandidateRole = 'svg' | 'gcode' | 'screenshot' | 'comment';
+
+/**
+ * A raw message observed by one explicit import scan. Telegram identifiers are
+ * strings at the HTTP boundary so that large channel/message ids cannot lose
+ * precision in JavaScript clients.
+ */
+export interface CncTelegramImportMessageDto {
+  scanMessageId: string;
+  scanId: string;
+  sourceChatId: string;
+  sourceMessageId: string;
+  sourceThreadId: string | null;
+  replyToMessageId: string | null;
+  senderUserId: string | null;
+  sourceCreatedAt: string;
+  sourceUpdatedAt: string | null;
+  workday: string;
+  messageType: CncTelegramImportMessageType;
+  filename: string | null;
+  mimeType: string | null;
+  messageText: string | null;
+  outgoing: boolean;
+  candidateId: string | null;
+  candidateRole: CncTelegramImportMessageCandidateRole | null;
+  readOrdinal: number;
 }
 
 export interface CncTelegramImportMatchDto {
@@ -131,14 +174,14 @@ export interface CncTelegramImportCandidateBatchDto {
   itemLeaseOwner: string;
   candidates: Array<{
     sourceChatId: string;
-    sourceMessageId: number;
-    sourceThreadId?: number | null;
+    sourceMessageId: string;
+    sourceThreadId?: string | null;
     sourceCreatedAt?: string | null;
     sourceUpdatedAt?: string | null;
     workday: string;
-    svgMessageId: number;
-    gcodeMessageId?: number | null;
-    screenshotMessageId?: number | null;
+    svgMessageId: string;
+    gcodeMessageId?: string | null;
+    screenshotMessageId?: string | null;
     svgFileName: string;
     gcodeFileName?: string | null;
     screenshotFileName?: string | null;
@@ -153,6 +196,24 @@ export interface CncTelegramImportCandidateBatchDto {
     warnings?: string[];
     eligibilityStatus: 'valid' | 'invalid' | 'incomplete';
   }>;
+  messages: Array<{
+    sourceChatId: string;
+    sourceMessageId: string;
+    sourceThreadId?: string | null;
+    replyToMessageId?: string | null;
+    senderUserId?: string | null;
+    sourceCreatedAt: string;
+    sourceUpdatedAt?: string | null;
+    workday: string;
+    messageType: CncTelegramImportMessageType;
+    filename?: string | null;
+    mimeType?: string | null;
+    messageText?: string | null;
+    outgoing?: boolean;
+    candidateSourceMessageId?: string | null;
+    candidateRole?: CncTelegramImportMessageCandidateRole | null;
+    readOrdinal: number;
+  }>;
   daysScanned?: number;
   messagesScanned?: number;
   truncated?: boolean;
@@ -164,10 +225,10 @@ export interface CncTelegramImportCompleteDto extends z.infer<typeof workerItemL
   sourceSetFingerprint: string;
   source: {
     sourceChatId: string;
-    sourceMessageId: number;
-    svgMessageId?: number | null;
-    gcodeMessageId?: number | null;
-    screenshotMessageId?: number | null;
+    sourceMessageId: string;
+    svgMessageId?: string | null;
+    gcodeMessageId?: string | null;
+    screenshotMessageId?: string | null;
     svgFileName: string;
     gcodeFileName?: string | null;
     screenshotFileName?: string | null;
@@ -196,24 +257,54 @@ const confirmSchema = z.object({
   duplicateAcknowledgements: z.array(z.object({ candidateId: uuid, duplicateAcknowledged: z.boolean() }).strict()).min(1).max(500),
 }).strict();
 const candidateSchema = z.object({
-  sourceChatId: z.string().trim().min(1).max(120), sourceMessageId: z.number().int().positive(),
-  sourceThreadId: z.number().int().positive().nullable().optional(), sourceCreatedAt: z.string().datetime({ offset: true }).nullable().optional(), sourceUpdatedAt: z.string().datetime({ offset: true }).nullable().optional(),
+  sourceChatId: z.string().trim().min(1).max(120), sourceMessageId: telegramId,
+  sourceThreadId: telegramId.nullable().optional(), sourceCreatedAt: z.string().datetime({ offset: true }).nullable().optional(), sourceUpdatedAt: z.string().datetime({ offset: true }).nullable().optional(),
   workday: dateOnly,
-  svgMessageId: z.number().int().positive(), gcodeMessageId: z.number().int().positive().nullable().optional(), screenshotMessageId: z.number().int().positive().nullable().optional(),
+  svgMessageId: telegramId, gcodeMessageId: telegramId.nullable().optional(), screenshotMessageId: telegramId.nullable().optional(),
   svgFileName: z.string().trim().min(1).max(240), gcodeFileName: z.string().trim().max(240).nullable().optional(), screenshotFileName: z.string().trim().max(240).nullable().optional(),
   svgContentSha256: sha256, gcodeContentSha256: sha256.nullable().optional(), screenshotContentSha256: sha256.nullable().optional(),
   sourceSetFingerprint: sourceFingerprint, parserVersion: z.string().trim().min(1).max(120), layoutFingerprint: sha256.nullable().optional(),
   parsedSnapshot: z.record(z.string(), z.unknown()).default({}), cutLayout: z.record(z.string(), z.unknown()).nullable().optional(),
   warnings: z.array(z.string().trim().min(1).max(500)).max(100).default([]), eligibilityStatus: z.enum(['valid','invalid','incomplete']),
 }).strict();
-const candidateBatchSchema = workerItemLease.extend({ candidates: z.array(candidateSchema).max(500), daysScanned: z.number().int().min(0).max(31).optional(), messagesScanned: z.number().int().min(0).max(5000).optional(), truncated: z.boolean().optional() }).strict();
+const importMessageSchema = z.object({
+  sourceChatId: z.string().trim().min(1).max(120),
+  sourceMessageId: telegramId,
+  sourceThreadId: telegramId.nullable().optional(),
+  replyToMessageId: telegramId.nullable().optional(),
+  senderUserId: telegramId.nullable().optional(),
+  sourceCreatedAt: z.string().datetime({ offset: true }),
+  sourceUpdatedAt: z.string().datetime({ offset: true }).nullable().optional(),
+  workday: dateOnly,
+  messageType: z.enum(['svg', 'dxf', 'image', 'gcode', 'text', 'other']),
+  filename: z.string().trim().max(255).nullable().optional(),
+  mimeType: z.string().trim().max(120).nullable().optional(),
+  messageText: z.string().max(2000).nullable().optional(),
+  outgoing: z.boolean().optional().default(false),
+  candidateSourceMessageId: telegramId.nullable().optional(),
+  candidateRole: z.enum(['svg', 'gcode', 'screenshot', 'comment']).nullable().optional(),
+  readOrdinal: z.number().int().positive().max(5000),
+}).strict().superRefine((value, context) => {
+  const hasCandidate = value.candidateSourceMessageId != null;
+  const hasRole = value.candidateRole != null;
+  if (hasCandidate !== hasRole) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['candidateRole'], message: 'candidateSourceMessageId and candidateRole must be provided together' });
+  }
+});
+const candidateBatchSchema = workerItemLease.extend({
+  candidates: z.array(candidateSchema).max(500),
+  messages: z.array(importMessageSchema).max(5000).default([]),
+  daysScanned: z.number().int().min(0).max(31).optional(),
+  messagesScanned: z.number().int().min(0).max(5000).optional(),
+  truncated: z.boolean().optional(),
+}).strict();
 const failureSchema = workerItemLease.extend({ errorCode: z.string().trim().min(1).max(80), errorMessage: z.string().trim().min(1).max(500) }).strict();
 const scanCompleteSchema = workerItemLease.extend({ daysScanned: z.number().int().min(0).max(31).optional(), messagesScanned: z.number().int().min(0).max(5000).optional(), truncated: z.boolean().optional() }).strict();
 const completeSchema = workerItemLease.extend({
   sourceSetFingerprint: sourceFingerprint,
   source: z.object({
-    sourceChatId: z.string().trim().min(1).max(120), sourceMessageId: z.number().int().positive(),
-    svgMessageId: z.number().int().positive().nullable().optional(), gcodeMessageId: z.number().int().positive().nullable().optional(), screenshotMessageId: z.number().int().positive().nullable().optional(),
+    sourceChatId: z.string().trim().min(1).max(120), sourceMessageId: telegramId,
+    svgMessageId: telegramId.nullable().optional(), gcodeMessageId: telegramId.nullable().optional(), screenshotMessageId: telegramId.nullable().optional(),
     svgFileName: z.string().trim().min(1).max(240), gcodeFileName: z.string().trim().max(240).nullable().optional(), screenshotFileName: z.string().trim().max(240).nullable().optional(),
     svgContentSha256: sha256, gcodeContentSha256: sha256.nullable().optional(), screenshotContentSha256: sha256.nullable().optional(),
   }).strict(),

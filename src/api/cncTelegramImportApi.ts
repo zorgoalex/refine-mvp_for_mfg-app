@@ -3,6 +3,8 @@ import { httpClient } from './httpClient';
 import type {
   CncTelegramImportCandidatesResponse,
   CncTelegramImportConfirmRequest,
+  CncTelegramImportMessage,
+  CncTelegramImportMessagesResponse,
   CncTelegramImportPrepareRequest,
   CncTelegramImportPrepareResponse,
   CncTelegramImportMatch,
@@ -80,6 +82,23 @@ export const cncTelegramImportApi = {
       : {
         scanId,
         candidates: response.items,
+        pagination: { page, pageSize, total: response.total, totalPages: Math.ceil(response.total / pageSize) },
+      });
+  },
+
+  listMessages(scanId: string, page = 1, pageSize = 100): Promise<CncTelegramImportMessagesResponse> {
+    assertUuid(scanId, 'scanId');
+    if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+      throw new Error('Invalid pagination');
+    }
+    const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    return httpClient.get<CncTelegramImportMessagesResponse | { items: CncTelegramImportMessage[]; total: number }>(
+      `${apiRoutes.cncTelegram.importScanMessages(scanId)}?${query.toString()}`,
+    ).then((response) => 'messages' in response
+      ? response
+      : {
+        scanId,
+        messages: response.items,
         pagination: { page, pageSize, total: response.total, totalPages: Math.ceil(response.total / pageSize) },
       });
   },

@@ -44,6 +44,7 @@ from .packet import (
 )
 from .state import StateStore
 from .telegram_source import (
+    classify_import_message,
     collect_day_messages,
     has_thumbs_up,
     is_gcode_message,
@@ -52,7 +53,10 @@ from .telegram_source import (
     message_datetime,
     message_edited_datetime,
     message_filename,
+    message_mime_type,
+    message_outgoing,
     message_reply_to_id,
+    message_sender_id,
     message_text,
     message_thread_id,
     peer_id,
@@ -885,7 +889,10 @@ class CncTelegramWorker:
                 for current_offset in range(day_offset, total_days):
                     remaining_messages = max(5000 - messages_seen, 0)
                     remaining_candidates = max(500 - candidates_seen, 0)
-                    if remaining_messages == 0 or remaining_candidates == 0:
+                    # Candidate rows have a separate bound, but reaching it
+                    # must not stop the raw-message view: continue reading
+                    # remaining days until the 5000-message scan bound.
+                    if remaining_messages == 0:
                         truncated = True
                         break
                     day = start + timedelta(days=current_offset)
@@ -895,20 +902,21 @@ class CncTelegramWorker:
                         chat_id,
                         day,
                         scan_id=scan_id,
-                        max_messages=min(1000, remaining_messages),
+                        max_messages=remaining_messages,
                         max_candidates=remaining_candidates,
                     )
                     messages_seen += int(page["messagesProcessed"])
                     candidates_seen += int(page["candidatesFound"])
                     truncated = truncated or bool(page["truncated"])
                     days_scanned = current_offset + 1
-                    # Candidate batch is both progress commit and lease
-                    # heartbeat.  It prevents one 31-day claim from burning
-                    # one attempt per day or expiring between writes.
+                    # One fenced batch is the atomic checkpoint for one day.
+                    # Never advance days_scanned before every bounded message
+                    # from that day is persisted.
                     await self.erp.submit_import_scan_candidates(
                         scan_id,
                         candidates,
                         lease,
+                        messages=page.get("messages", []),
                         days_scanned=current_offset + 1,
                         messages_scanned=messages_seen,
                         truncated=truncated,
@@ -974,14 +982,14 @@ class CncTelegramWorker:
         scan_id: str = "discovery",
         max_messages: int | None = None,
         max_candidates: int = 500,
-    ) -> tuple[list[dict[str, Any]], dict[str, int | bool]]:
-        """Read one bounded history page and return candidates only.
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Read one bounded history page and return candidates plus all messages.
 
         This deliberately does not instantiate ``ScanAudit``, ingest a packet,
         enqueue outbound work, or send a Telegram reply.  Bytes exist only in
         the per-page temporary directory and are removed in ``finally``.
         """
-        max_messages = min(max(int(max_messages or self.config.max_messages_per_scan), 1), 1000)
+        max_messages = min(max(int(max_messages or self.config.max_messages_per_scan), 1), 5000)
         messages = await asyncio.wait_for(
             collect_day_messages(
                 client, entity, workday, self.config.business_timezone, max_messages,
@@ -1019,12 +1027,25 @@ class CncTelegramWorker:
                 page_started = time.monotonic()
         finally:
             shutil.rmtree(page_dir, ignore_errors=True)
+        candidate_links: dict[int, tuple[int, str]] = {}
+        for candidate in candidates:
+            candidate_source_id = int(candidate["sourceMessageId"])
+            for link in candidate.get("messageLinks", []):
+                try:
+                    candidate_links[int(link["sourceMessageId"])] = (candidate_source_id, str(link["candidateRole"]))
+                except (KeyError, TypeError, ValueError):
+                    continue
+        serialized_messages = [
+            serialize_import_scan_message(message, chat_id, workday, ordinal, candidate_links)
+            for ordinal, message in enumerate(messages, start=1)
+        ]
         warnings = sum(len(candidate.get("warnings") or []) for candidate in candidates)
         return candidates, {
             "messagesProcessed": len(messages),
             "candidatesFound": len(candidates),
             "warningsCount": warnings,
             "truncated": truncated or len(groups) > bounded_candidates,
+            "messages": serialized_messages,
         }
 
     async def _discover_group_candidate(
@@ -1091,6 +1112,12 @@ class CncTelegramWorker:
             for message in (group.vector_message, group.image_message, group.gcode_message, *comment_messages)
             if message is not None
         ]
+        message_links = [
+            {"sourceMessageId": int(group.vector_message.id), "candidateRole": "svg"},
+            *([{"sourceMessageId": int(group.gcode_message.id), "candidateRole": "gcode"}] if group.gcode_message is not None else []),
+            *([{"sourceMessageId": int(group.image_message.id), "candidateRole": "screenshot"}] if group.image_message is not None else []),
+            *({"sourceMessageId": int(message.id), "candidateRole": "comment"} for message in comment_messages),
+        ]
         if include_content:
             total_size = 0
             for source_file in files:
@@ -1117,7 +1144,7 @@ class CncTelegramWorker:
         layout_fingerprint = canonical_layout_fingerprint(cut_layout) if cut_layout is not None else None
         snapshot: dict[str, Any] = {
             "externalPacketKey": external_packet_key(chat_id, int(group.source_message.id)),
-            "sourceMessageIds": source_ids,
+            "sourceMessageIds": [str(source_id) for source_id in source_ids],
             "comments": [sanitize_text(comment, 500) for comment in group.comments[:50]],
             "items": (cut_layout or {}).get("items", [])[:2000],
             "cutLayout": cut_layout,
@@ -1129,14 +1156,14 @@ class CncTelegramWorker:
             warnings.append("candidate has no valid complete SVG source")
         return {
             "sourceChatId": chat_id,
-            "sourceMessageId": int(group.source_message.id),
-            "sourceThreadId": message_thread_id(group.source_message),
+            "sourceMessageId": str(int(group.source_message.id)),
+            "sourceThreadId": str(thread_id) if (thread_id := message_thread_id(group.source_message)) is not None else None,
             "sourceCreatedAt": message_datetime(group.source_message).isoformat(),
             "sourceUpdatedAt": message_edited_datetime(group.source_message).isoformat() if message_edited_datetime(group.source_message) else None,
             "workday": workday.isoformat(),
-            "svgMessageId": int(group.vector_message.id),
-            "gcodeMessageId": int(group.gcode_message.id) if group.gcode_message is not None else None,
-            "screenshotMessageId": int(group.image_message.id) if group.image_message is not None else None,
+            "svgMessageId": str(int(group.vector_message.id)),
+            "gcodeMessageId": str(int(group.gcode_message.id)) if group.gcode_message is not None else None,
+            "screenshotMessageId": str(int(group.image_message.id)) if group.image_message is not None else None,
             "svgFileName": message_filename(group.vector_message) or f"{group.vector_message.id}.svg",
             "gcodeFileName": message_filename(group.gcode_message) if group.gcode_message is not None else None,
             "screenshotFileName": message_filename(group.image_message) if group.image_message is not None else None,
@@ -1149,6 +1176,7 @@ class CncTelegramWorker:
             "parsedSnapshot": snapshot,
             "cutLayout": cut_layout,
             "sourceFiles": files,
+            "messageLinks": message_links,
             "warnings": [warning for warning in warnings if warning],
             "eligibilityStatus": "valid" if eligible else "incomplete",
         }
@@ -1741,6 +1769,42 @@ async def login_telegram_session(config: WorkerConfig) -> None:
     await client.start()
     await client.disconnect()
     print(f"Telethon session ready: {config.telegram_session_path}")
+
+
+def serialize_import_scan_message(
+    message: Any,
+    chat_id: str,
+    workday: date,
+    read_ordinal: int,
+    candidate_links: dict[int, tuple[int, str]],
+) -> dict[str, Any]:
+    """Build the bounded, non-media raw message row for an import scan."""
+    message_id = int(message.id)
+    candidate_link = candidate_links.get(message_id)
+    raw_text = message_text(message)
+    filename = message_filename(message)
+    edited_at = message_edited_datetime(message)
+    row: dict[str, Any] = {
+        "sourceChatId": chat_id,
+        "sourceMessageId": str(message_id),
+        "sourceThreadId": str(thread_id) if (thread_id := message_thread_id(message)) is not None else None,
+        "replyToMessageId": str(reply_id) if (reply_id := message_reply_to_id(message)) is not None else None,
+        "senderUserId": str(sender_id) if (sender_id := message_sender_id(message)) is not None else None,
+        "sourceCreatedAt": message_datetime(message).isoformat(),
+        "sourceUpdatedAt": edited_at.isoformat() if edited_at is not None else None,
+        "workday": workday.isoformat(),
+        "messageType": classify_import_message(message),
+        "filename": sanitize_text(filename, 255) if filename else None,
+        "mimeType": sanitize_text(message_mime_type(message), 120) if message_mime_type(message) else None,
+        "messageText": sanitize_text(raw_text, 2000) if raw_text else None,
+        "outgoing": message_outgoing(message),
+        "readOrdinal": read_ordinal,
+    }
+    if candidate_link is not None:
+        candidate_source_id, candidate_role = candidate_link
+        row["candidateSourceMessageId"] = str(candidate_source_id)
+        row["candidateRole"] = candidate_role
+    return row
 
 
 def group_svg_messages(messages: list[Any]) -> list[SvgGroup]:

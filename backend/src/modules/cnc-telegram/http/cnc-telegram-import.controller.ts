@@ -19,6 +19,8 @@ export class CncTelegramImportController {
   @Get('import-scans/:scanId') getScan(@Req() req: RequestWithCurrentUser, @Param('scanId') scanId: string) { this.enabled(); return this.imports.getScan(this.user(req), scanId); }
   @ApiOperation({ operationId: 'listCncTelegramImportCandidates', summary: 'List candidates discovered by an explicit scan' })
   @Get('import-scans/:scanId/candidates') candidates(@Req() req: RequestWithCurrentUser, @Param('scanId') scanId: string, @Query() query: Record<string, unknown>) { this.enabled(); const p = parseImportListQuery(query); return this.imports.listCandidates({ currentUser: this.user(req), scanId, ...p }); }
+  @ApiOperation({ operationId: 'listCncTelegramImportMessages', summary: 'List all messages observed by an explicit scan' })
+  @Get('import-scans/:scanId/messages') messages(@Req() req: RequestWithCurrentUser, @Param('scanId') scanId: string, @Query() query: Record<string, unknown>) { this.enabled(); const p = parseImportListQuery(query); return this.imports.listMessages({ currentUser: this.user(req), scanId, ...p }); }
   @ApiOperation({ operationId: 'prepareCncTelegramImport', summary: 'Prepare an explicit candidate selection' })
   @Post('import-scans/:scanId/imports/prepare') prepare(@Req() req: RequestWithCurrentUser, @Param('scanId') scanId: string, @Headers('idempotency-key') key: string | undefined, @Body() body: unknown) { this.enabled(); return this.imports.prepare({ currentUser: this.user(req), scanId, ...parseImportPrepare(body), idempotencyKey: requiredHeader(key, 'Idempotency-Key'), requestId: req.requestId }); }
   @ApiOperation({ operationId: 'confirmCncTelegramImport', summary: 'Confirm creation, including acknowledged duplicates' })

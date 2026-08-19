@@ -6,6 +6,7 @@ import type {
   CncTelegramImportCompleteDto,
   CncTelegramImportFailDto,
   CncTelegramImportItemDto,
+  CncTelegramImportMessageDto,
   CncTelegramImportRequestDto,
   CncTelegramImportScanDto,
   CncTelegramImportScanFailureDto,
@@ -17,6 +18,7 @@ export interface CncTelegramImportRepositoryPort {
   createScan(input: { currentUser: CurrentUser; sourceChatId: string; dateFrom: string; dateTo: string; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportScanDto>;
   getScan(input: { currentUser: CurrentUser; scanId: string }): Promise<CncTelegramImportScanDto>;
   listCandidates(input: { currentUser: CurrentUser; scanId: string; page: number; pageSize: number }): Promise<{ items: CncTelegramImportCandidateDto[]; total: number }>;
+  listMessages(input: { currentUser: CurrentUser; scanId: string; page: number; pageSize: number }): Promise<{ items: CncTelegramImportMessageDto[]; total: number }>;
   prepare(input: { currentUser: CurrentUser; scanId: string; candidateIds: string[]; repeatOfImportRequestId?: string | null; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportRequestDto>;
   confirm(input: { currentUser: CurrentUser; importRequestId: string; confirmationId: string; duplicateAcknowledgements: Array<{ candidateId: string; duplicateAcknowledged: boolean }>; requestId: string }): Promise<CncTelegramImportRequestDto>;
   repeatPrepare(input: { currentUser: CurrentUser; importRequestId: string; candidateIds: string[]; requestId: string; idempotencyKey: string }): Promise<CncTelegramImportRequestDto>;

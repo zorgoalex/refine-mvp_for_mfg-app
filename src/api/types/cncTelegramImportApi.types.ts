@@ -2,6 +2,8 @@ export type CncTelegramImportScanStatus = 'pending' | 'processing' | 'ready' | '
 export type CncTelegramImportRequestStatus = 'draft' | 'pending' | 'processing' | 'completed' | 'partial' | 'failed';
 export type CncTelegramImportItemStatus = 'pending' | 'processing' | 'confirmation_required' | 'imported' | 'failed' | 'unknown';
 
+import type { CncTelegramCutLayout } from './cncTelegramApi.types';
+
 export interface CncTelegramImportScanRequest {
   dateFrom: string;
   dateTo: string;
@@ -49,17 +51,19 @@ export interface CncTelegramImportMatch {
 export interface CncTelegramImportCandidate {
   candidateId: string;
   sourceChatId: string;
-  sourceMessageId: number;
+  sourceMessageId: string;
   sourceCreatedAt: string;
   sourceUpdatedAt?: string | null;
   workday: string;
   svgFileName: string;
   svgContentSha256?: string | null;
-  svgMessageId?: number | null;
+  svgMessageId?: string | null;
   gcodeFileName?: string | null;
-  gcodeMessageId?: number | null;
+  gcodeMessageId?: string | null;
   screenshotFileName?: string | null;
-  screenshotMessageId?: number | null;
+  screenshotMessageId?: string | null;
+  screenshotContentSha256?: string | null;
+  cutLayout?: CncTelegramCutLayout | null;
   previewUrl?: string | null;
   sheetWidthMm?: number | null;
   sheetHeightMm?: number | null;
@@ -76,6 +80,37 @@ export interface CncTelegramImportCandidate {
 export interface CncTelegramImportCandidatesResponse {
   scanId: string;
   candidates: CncTelegramImportCandidate[];
+  pagination?: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export type CncTelegramImportMessageType = 'svg' | 'dxf' | 'image' | 'gcode' | 'text' | 'other';
+export type CncTelegramImportCandidateRole = 'svg' | 'gcode' | 'screenshot' | 'comment';
+
+/** Sanitized message metadata/text owned by an explicit import scan. */
+export interface CncTelegramImportMessage {
+  scanMessageId: string;
+  scanId: string;
+  sourceChatId: string;
+  sourceMessageId: string;
+  sourceThreadId?: string | null;
+  replyToMessageId?: string | null;
+  senderUserId?: string | null;
+  sourceCreatedAt: string;
+  sourceUpdatedAt?: string | null;
+  workday: string;
+  messageType: CncTelegramImportMessageType;
+  filename?: string | null;
+  mimeType?: string | null;
+  messageText?: string | null;
+  outgoing: boolean;
+  candidateId?: string | null;
+  candidateRole?: CncTelegramImportCandidateRole | null;
+  readOrdinal: number;
+}
+
+export interface CncTelegramImportMessagesResponse {
+  scanId: string;
+  messages: CncTelegramImportMessage[];
   pagination?: { page: number; pageSize: number; total: number; totalPages: number };
 }
 

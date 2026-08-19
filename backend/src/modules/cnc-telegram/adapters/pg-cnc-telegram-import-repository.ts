@@ -15,6 +15,8 @@ import type {
   CncTelegramImportCompleteDto,
   CncTelegramImportFailDto,
   CncTelegramImportItemDto,
+  CncTelegramImportMessageDto,
+  CncTelegramImportMessageCandidateRole,
   CncTelegramImportMatchDto,
   CncTelegramImportRequestDto,
   CncTelegramImportScanCompleteDto,
@@ -84,6 +86,23 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
       `, [text(scan, 'scan_id'), input.pageSize, (input.page - 1) * input.pageSize]);
       const items = await Promise.all(result.rows.map(async (row) => candidateDto(row, await this.matches(tx, text(row, 'candidate_id')))));
       return { items, total: result.rows[0] ? number(result.rows[0], 'total') : 0 };
+    });
+  }
+
+  async listMessages(input: { currentUser: CurrentUser; scanId: string; page: number; pageSize: number }): Promise<{ items: CncTelegramImportMessageDto[]; total: number }> {
+    return this.database.transaction(async (tx) => {
+      const scan = await this.owned(tx, 'cnc_telegram_import_scans', 'scan_id', input.scanId, input.currentUser);
+      const result = await tx.query<Row>(`
+        SELECT m.*, count(*) OVER() AS total
+          FROM cnc_telegram_import_scan_messages m
+         WHERE m.scan_id=$1
+         ORDER BY m.source_created_at ASC, m.source_message_id ASC, m.scan_message_id ASC
+         LIMIT $2 OFFSET $3
+      `, [text(scan, 'scan_id'), input.pageSize, (input.page - 1) * input.pageSize]);
+      return {
+        items: result.rows.map(messageDto),
+        total: result.rows[0] ? number(result.rows[0], 'total') : 0,
+      };
     });
   }
 
@@ -208,6 +227,47 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
         const row = requiredRow(result.rows[0], 'candidate batch');
         await this.refreshMatches(tx, row);
         accepted += 1;
+      }
+      for (const message of input.batch.messages) {
+        if (message.sourceChatId !== input.lease.sourceChatId) throw new ApiError(403, 'CNC_TELEGRAM_CHAT_DENIED', 'Message chat differs from the session chat');
+        if ((message.candidateSourceMessageId == null) !== (message.candidateRole == null)) {
+          throw new ApiError(422, 'CNC_TELEGRAM_MESSAGE_LINK_INVALID', 'candidateSourceMessageId and candidateRole must be provided together');
+        }
+        let candidateId: string | null = null;
+        if (message.candidateSourceMessageId != null) {
+          const candidate = await tx.query<Row>(`
+            SELECT candidate_id
+              FROM cnc_telegram_import_candidates
+             WHERE scan_id=$1 AND source_chat_id=$2 AND source_message_id=$3
+          `, [text(scan, 'scan_id'), message.sourceChatId, message.candidateSourceMessageId]);
+          if (!candidate.rows[0]) throw new ApiError(422, 'CNC_TELEGRAM_MESSAGE_LINK_MISSING', 'Message candidate link does not resolve within this scan');
+          candidateId = text(candidate.rows[0], 'candidate_id');
+        }
+        await tx.query(`
+          INSERT INTO cnc_telegram_import_scan_messages
+            (scan_id,source_chat_id,source_message_id,source_thread_id,reply_to_message_id,sender_user_id,
+             source_created_at,source_updated_at,workday,message_type,filename,mime_type,message_text,outgoing,
+             candidate_id,candidate_role,read_ordinal)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+          ON CONFLICT (scan_id,source_chat_id,source_message_id) DO UPDATE SET
+            source_thread_id=EXCLUDED.source_thread_id, reply_to_message_id=EXCLUDED.reply_to_message_id,
+            sender_user_id=EXCLUDED.sender_user_id, source_created_at=EXCLUDED.source_created_at,
+            source_updated_at=EXCLUDED.source_updated_at, workday=EXCLUDED.workday,
+            message_type=EXCLUDED.message_type, filename=EXCLUDED.filename, mime_type=EXCLUDED.mime_type,
+            message_text=EXCLUDED.message_text, outgoing=EXCLUDED.outgoing, candidate_id=EXCLUDED.candidate_id,
+            candidate_role=EXCLUDED.candidate_role, read_ordinal=EXCLUDED.read_ordinal, updated_at=now()
+        `, [text(scan, 'scan_id'), message.sourceChatId, message.sourceMessageId, message.sourceThreadId ?? null,
+          message.replyToMessageId ?? null, message.senderUserId ?? null, message.sourceCreatedAt, message.sourceUpdatedAt ?? null,
+          message.workday, message.messageType, message.filename ?? null, message.mimeType ?? null,
+          message.messageText ?? null, message.outgoing ?? false, candidateId, message.candidateRole ?? null, message.readOrdinal]);
+      }
+      if (input.batch.messages.length > 0) {
+        const messageCount = await tx.query<Row>(`
+          SELECT count(*) AS total
+            FROM cnc_telegram_import_scan_messages
+           WHERE scan_id=$1
+        `, [text(scan, 'scan_id')]);
+        assertCncTelegramScanMessageCount(number(requiredRow(messageCount.rows[0], 'scan message count'), 'total'));
       }
       await tx.query(`UPDATE cnc_telegram_import_scans SET days_scanned=GREATEST(days_scanned,$2), messages_scanned=GREATEST(messages_scanned,$3), truncated=truncated OR $4, candidates_found=(SELECT count(*) FROM cnc_telegram_import_candidates WHERE scan_id=$1), warnings_count=(SELECT count(*) FROM cnc_telegram_import_candidates WHERE scan_id=$1 AND jsonb_array_length(warnings_json)>0), lease_expires_at=GREATEST(lease_expires_at, now()+interval '${LEASE_MINUTES} minutes'), updated_at=now() WHERE scan_id=$1`, [text(scan, 'scan_id'), input.batch.daysScanned ?? 0, input.batch.messagesScanned ?? 0, input.batch.truncated ?? false]);
       return { accepted };
@@ -423,8 +483,9 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
     const candidateId = text(candidate, 'candidate_id');
     const before = await this.matches(tx, candidateId);
     await tx.query('DELETE FROM cnc_telegram_import_candidate_matches WHERE candidate_id=$1', [candidateId]);
-    await tx.query(`INSERT INTO cnc_telegram_import_candidate_matches (candidate_id,match_kind,packet_id,cut_job_id,cut_result_id) SELECT $1,'same_telegram_source',p.packet_id,p.svg_cut_job_id,p.svg_cut_result_id FROM cnc_telegram_packets p WHERE p.source_chat_id=$2 AND p.source_message_id=$3 AND (p.packet_id IS NOT NULL)`, [candidateId, text(candidate, 'source_chat_id'), number(candidate, 'source_message_id')]);
-    await tx.query(`INSERT INTO cnc_telegram_import_candidate_matches (candidate_id,match_kind,packet_id,cut_job_id,cut_result_id) SELECT $1,'sent_by_erp_manual_upload',p.packet_id,p.svg_cut_job_id,p.svg_cut_result_id FROM cnc_manual_svg_telegram_send_requests s JOIN cnc_telegram_packets p ON p.packet_id=s.packet_id JOIN LATERAL jsonb_array_elements_text(s.sent_message_ids_json) sent(message_id) ON sent.message_id=$2 WHERE s.sent_chat_id=$3 AND s.status='sent'`, [candidateId, String(number(candidate, 'source_message_id')), text(candidate, 'source_chat_id')]);
+    const sourceMessageId = text(candidate, 'source_message_id');
+    await tx.query(`INSERT INTO cnc_telegram_import_candidate_matches (candidate_id,match_kind,packet_id,cut_job_id,cut_result_id) SELECT $1,'same_telegram_source',p.packet_id,p.svg_cut_job_id,p.svg_cut_result_id FROM cnc_telegram_packets p WHERE p.source_chat_id=$2 AND p.source_message_id=$3::bigint AND (p.packet_id IS NOT NULL)`, [candidateId, text(candidate, 'source_chat_id'), sourceMessageId]);
+    await tx.query(`INSERT INTO cnc_telegram_import_candidate_matches (candidate_id,match_kind,packet_id,cut_job_id,cut_result_id) SELECT $1,'sent_by_erp_manual_upload',p.packet_id,p.svg_cut_job_id,p.svg_cut_result_id FROM cnc_manual_svg_telegram_send_requests s JOIN cnc_telegram_packets p ON p.packet_id=s.packet_id JOIN LATERAL jsonb_array_elements_text(s.sent_message_ids_json) sent(message_id) ON sent.message_id=$2 WHERE s.sent_chat_id=$3 AND s.status='sent'`, [candidateId, sourceMessageId, text(candidate, 'source_chat_id')]);
     await tx.query(`INSERT INTO cnc_telegram_import_candidate_matches (candidate_id,match_kind,packet_id,cut_job_id,cut_result_id) SELECT $1,'exact_svg_content',p.packet_id,p.svg_cut_job_id,p.svg_cut_result_id FROM cnc_manual_svg_upload_files f JOIN cnc_telegram_packets p ON p.packet_id=f.packet_id WHERE f.file_kind='svg' AND f.content_sha256=$2`, [candidateId, text(candidate, 'svg_content_sha256')]);
     if (nullableText(candidate, 'layout_fingerprint')) {
       await tx.query(`INSERT INTO cnc_telegram_import_candidate_matches (candidate_id,match_kind,packet_id,cut_job_id,cut_result_id) SELECT $1,'same_layout',p.packet_id,p.svg_cut_job_id,p.svg_cut_result_id FROM cnc_telegram_packets p WHERE p.layout_fingerprint=$2`, [candidateId, text(candidate, 'layout_fingerprint')]);
@@ -497,6 +558,7 @@ function dateOnly(row: Row, key: string): string {
 function nullableText(row: Row, key: string): string | null { const value = row[key]; return value === null || value === undefined ? null : text(row, key); }
 function number(row: Row, key: string): number { const value = row[key]; const parsed = typeof value === 'number' ? value : Number(value); return Number.isFinite(parsed) ? parsed : 0; }
 function nullableNumber(row: Row, key: string): number | null { const value = row[key]; return value === null || value === undefined ? null : number(row, key); }
+function nullableTelegramId(row: Row, key: string): string | null { const value = row[key]; return value === null || value === undefined ? null : text(row, key); }
 function bool(row: Row, key: string): boolean { return row[key] === true || row[key] === 'true'; }
 function json(row: Row, key: string): unknown { return row[key] ?? null; }
 function object(value: unknown): Record<string, unknown> { return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
@@ -505,7 +567,30 @@ function parseMatches(value: unknown): CncTelegramImportMatchDto[] { return Arra
 function sameMatches(left: CncTelegramImportMatchDto[], right: CncTelegramImportMatchDto[]): boolean { const key = (item: CncTelegramImportMatchDto) => `${item.kind}|${item.packetId ?? ''}|${item.cutJobId ?? ''}|${item.cutResultId ?? ''}`; return left.map(key).sort().join(',') === right.map(key).sort().join(','); }
 function digest(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 function scanDto(row: Row): CncTelegramImportScanDto { const from = dateOnly(row, 'date_from'); const to = dateOnly(row, 'date_to'); const daysProcessed = number(row, 'days_scanned'); const messagesScanned = number(row, 'messages_scanned'); const candidatesFound = number(row, 'candidates_found'); const warningsCount = number(row, 'warnings_count'); const truncated = bool(row, 'truncated'); return { scanId: text(row, 'scan_id'), sourceChatId: text(row, 'source_chat_id'), dateFrom: from, dateTo: to, businessTimezone: text(row, 'business_timezone'), status: text(row, 'status') as CncTelegramImportScanDto['status'], requestedAt: iso(row, 'created_at'), finishedAt: nullableIso(row, 'completed_at'), progress: { daysTotal: dateRangeDays(from, to), daysProcessed, messagesTotal: 5000, messagesProcessed: messagesScanned, candidatesTotal: candidatesFound, warningsTotal: warningsCount, truncated }, error: nullableText(row, 'error_message'), itemLeaseToken: nullableText(row, 'lease_token') ?? undefined, itemLeaseGeneration: number(row, 'lease_generation') || undefined, itemLeaseOwner: nullableText(row, 'worker_instance_id') ?? undefined, daysProcessed, messagesScanned, candidatesFound, warningsCount, truncated }; }
-function candidateDto(row: Row, matches: CncTelegramImportMatchDto[]): CncTelegramImportCandidateDto { return { candidateId: text(row, 'candidate_id'), scanId: text(row, 'scan_id'), sourceChatId: text(row, 'source_chat_id'), sourceMessageId: number(row, 'source_message_id'), sourceThreadId: nullableNumber(row, 'source_thread_id'), sourceCreatedAt: nullableIso(row, 'source_created_at') ?? new Date(0).toISOString(), sourceUpdatedAt: nullableIso(row, 'source_updated_at'), workday: dateOnly(row, 'workday'), svgMessageId: nullableNumber(row, 'svg_message_id'), gcodeMessageId: nullableNumber(row, 'gcode_message_id'), screenshotMessageId: nullableNumber(row, 'screenshot_message_id'), svgFileName: text(row, 'svg_file_name'), gcodeFileName: nullableText(row, 'gcode_file_name'), screenshotFileName: nullableText(row, 'screenshot_file_name'), svgContentSha256: text(row, 'svg_content_sha256'), gcodeContentSha256: nullableText(row, 'gcode_content_sha256'), screenshotContentSha256: nullableText(row, 'screenshot_content_sha256'), sourceSetFingerprint: text(row, 'source_set_fingerprint'), parserVersion: text(row, 'parser_version'), layoutFingerprint: nullableText(row, 'layout_fingerprint'), parsedSnapshot: object(json(row, 'parsed_snapshot_json')), cutLayout: objectOrNull(json(row, 'cut_layout_json')), parserWarnings: arrayStrings(json(row, 'warnings_json')), sourceStatus: matches.length > 0 ? 'similar' : 'new', eligibility: text(row, 'eligibility_status') === 'valid' ? 'eligible' : 'ineligible', eligibilityReason: text(row, 'eligibility_status') === 'valid' ? null : text(row, 'eligibility_status'), duplicateMatchVersion: number(row, 'duplicate_match_version'), matches }; }
+function candidateDto(row: Row, matches: CncTelegramImportMatchDto[]): CncTelegramImportCandidateDto { return { candidateId: text(row, 'candidate_id'), scanId: text(row, 'scan_id'), sourceChatId: text(row, 'source_chat_id'), sourceMessageId: text(row, 'source_message_id'), sourceThreadId: nullableTelegramId(row, 'source_thread_id'), sourceCreatedAt: nullableIso(row, 'source_created_at') ?? new Date(0).toISOString(), sourceUpdatedAt: nullableIso(row, 'source_updated_at'), workday: dateOnly(row, 'workday'), svgMessageId: nullableTelegramId(row, 'svg_message_id'), gcodeMessageId: nullableTelegramId(row, 'gcode_message_id'), screenshotMessageId: nullableTelegramId(row, 'screenshot_message_id'), svgFileName: text(row, 'svg_file_name'), gcodeFileName: nullableText(row, 'gcode_file_name'), screenshotFileName: nullableText(row, 'screenshot_file_name'), svgContentSha256: text(row, 'svg_content_sha256'), gcodeContentSha256: nullableText(row, 'gcode_content_sha256'), screenshotContentSha256: nullableText(row, 'screenshot_content_sha256'), sourceSetFingerprint: text(row, 'source_set_fingerprint'), parserVersion: text(row, 'parser_version'), layoutFingerprint: nullableText(row, 'layout_fingerprint'), parsedSnapshot: object(json(row, 'parsed_snapshot_json')), cutLayout: objectOrNull(json(row, 'cut_layout_json')), parserWarnings: arrayStrings(json(row, 'warnings_json')), sourceStatus: matches.length > 0 ? 'similar' : 'new', eligibility: text(row, 'eligibility_status') === 'valid' ? 'eligible' : 'ineligible', eligibilityReason: text(row, 'eligibility_status') === 'valid' ? null : text(row, 'eligibility_status'), duplicateMatchVersion: number(row, 'duplicate_match_version'), matches }; }
+function messageDto(row: Row): CncTelegramImportMessageDto {
+  const role = nullableText(row, 'candidate_role');
+  return {
+    scanMessageId: text(row, 'scan_message_id'),
+    scanId: text(row, 'scan_id'),
+    sourceChatId: text(row, 'source_chat_id'),
+    sourceMessageId: text(row, 'source_message_id'),
+    sourceThreadId: nullableTelegramId(row, 'source_thread_id'),
+    replyToMessageId: nullableTelegramId(row, 'reply_to_message_id'),
+    senderUserId: nullableTelegramId(row, 'sender_user_id'),
+    sourceCreatedAt: iso(row, 'source_created_at'),
+    sourceUpdatedAt: nullableIso(row, 'source_updated_at'),
+    workday: dateOnly(row, 'workday'),
+    messageType: text(row, 'message_type') as CncTelegramImportMessageDto['messageType'],
+    filename: nullableText(row, 'filename'),
+    mimeType: nullableText(row, 'mime_type'),
+    messageText: nullableText(row, 'message_text'),
+    outgoing: bool(row, 'outgoing'),
+    candidateId: nullableText(row, 'candidate_id'),
+    candidateRole: role as CncTelegramImportMessageCandidateRole | null,
+    readOrdinal: number(row, 'read_ordinal'),
+  };
+}
 function requestDto(row: Row): CncTelegramImportRequestDto { return { importRequestId: text(row, 'import_request_id'), scanId: text(row, 'scan_id'), requestedBy: text(row, 'requested_by'), status: text(row, 'status') as CncTelegramImportRequestDto['status'], confirmationId: text(row, 'confirmation_id'), repeatOfImportRequestId: nullableText(row, 'repeat_of_import_request_id'), totalCount: number(row, 'selected_count'), importedCount: number(row, 'imported_count'), failedCount: number(row, 'failed_count'), items: [], error: nullableText(row, 'error_message'), selectionHash: text(row, 'selection_hash'), duplicateMatchVersion: number(row, 'duplicate_match_version') }; }
 function itemDto(row: Row, matches: CncTelegramImportMatchDto[] = parseMatches(json(row, 'duplicate_snapshot_json'))): CncTelegramImportItemDto { const candidate = typeof row['svg_file_name'] === 'string' ? candidateDto({ ...row, duplicate_match_version: row['candidate_duplicate_match_version'] ?? row['duplicate_match_version'] }, matches) : undefined; return { importItemId: text(row, 'import_item_id'), candidateId: text(row, 'candidate_id'), status: text(row, 'status') as CncTelegramImportItemDto['status'], duplicateAcknowledged: bool(row, 'duplicate_acknowledged'), duplicateMatchVersion: number(row, 'duplicate_match_version'), duplicateSnapshot: matches, matches, packetId: nullableText(row, 'packet_id'), cutJobId: nullableNumber(row, 'cut_job_id'), cutResultId: nullableNumber(row, 'cut_result_id'), errorCode: nullableText(row, 'error_code'), errorMessage: nullableText(row, 'error_message'), itemLeaseToken: nullableText(row, 'lease_token') ?? undefined, itemLeaseGeneration: number(row, 'lease_generation'), itemLeaseOwner: nullableText(row, 'lease_worker_instance_id') ?? undefined, candidate }; }
 function iso(row: Row, key: string): string { return new Date(text(row, key)).toISOString(); }
@@ -592,6 +677,11 @@ export function assertTerminalItemLeaseReplay(row: Row, replay: { itemLeaseToken
     text(row, 'lease_worker_instance_id') !== replay.itemLeaseOwner
   ) throw new ApiError(409, 'CNC_TELEGRAM_ITEM_LEASE_STALE', 'Terminal import replay does not match the original item lease');
 }
-function assertSourceMatches(row: Row, completion: CncTelegramImportCompleteDto): void { const source = completion.source; const checks: Array<[unknown, unknown]> = [[source.sourceChatId, text(row, 'source_chat_id')], [source.sourceMessageId, number(row, 'source_message_id')], [source.svgMessageId ?? null, nullableNumber(row, 'svg_message_id')], [source.gcodeMessageId ?? null, nullableNumber(row, 'gcode_message_id')], [source.screenshotMessageId ?? null, nullableNumber(row, 'screenshot_message_id')], [source.svgFileName, text(row, 'svg_file_name')], [source.gcodeFileName ?? null, nullableText(row, 'gcode_file_name')], [source.screenshotFileName ?? null, nullableText(row, 'screenshot_file_name')], [source.svgContentSha256, text(row, 'svg_content_sha256')], [source.gcodeContentSha256 ?? null, nullableText(row, 'gcode_content_sha256')], [source.screenshotContentSha256 ?? null, nullableText(row, 'screenshot_content_sha256')], [completion.sourceSetFingerprint, text(row, 'source_set_fingerprint')]]; if (checks.some(([left, right]) => left !== right)) throw new ApiError(409, 'CNC_TELEGRAM_SOURCE_CHANGED', 'Candidate source no longer matches the persisted source set'); }
+export function assertCncTelegramScanMessageCount(total: number): void {
+  if (!Number.isInteger(total) || total < 0 || total > 5000) {
+    throw new ApiError(422, 'CNC_TELEGRAM_SCAN_MESSAGE_LIMIT', 'Import scan cannot persist more than 5000 distinct Telegram messages');
+  }
+}
+function assertSourceMatches(row: Row, completion: CncTelegramImportCompleteDto): void { const source = completion.source; const checks: Array<[unknown, unknown]> = [[source.sourceChatId, text(row, 'source_chat_id')], [source.sourceMessageId, text(row, 'source_message_id')], [source.svgMessageId ?? null, nullableTelegramId(row, 'svg_message_id')], [source.gcodeMessageId ?? null, nullableTelegramId(row, 'gcode_message_id')], [source.screenshotMessageId ?? null, nullableTelegramId(row, 'screenshot_message_id')], [source.svgFileName, text(row, 'svg_file_name')], [source.gcodeFileName ?? null, nullableText(row, 'gcode_file_name')], [source.screenshotFileName ?? null, nullableText(row, 'screenshot_file_name')], [source.svgContentSha256, text(row, 'svg_content_sha256')], [source.gcodeContentSha256 ?? null, nullableText(row, 'gcode_content_sha256')], [source.screenshotContentSha256 ?? null, nullableText(row, 'screenshot_content_sha256')], [completion.sourceSetFingerprint, text(row, 'source_set_fingerprint')]]; if (checks.some(([left, right]) => left !== right)) throw new ApiError(409, 'CNC_TELEGRAM_SOURCE_CHANGED', 'Candidate source no longer matches the persisted source set'); }
 async function updateRequestCounts(tx: TransactionClient, requestId: string): Promise<void> { await tx.query(`UPDATE cnc_telegram_import_requests r SET imported_count=(SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status='imported'), failed_count=(SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status='failed'), status=CASE WHEN (SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status IN ('pending','processing','confirmation_required','unknown'))=0 THEN CASE WHEN (SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status='imported')=r.selected_count THEN 'completed' ELSE 'partial' END ELSE 'processing' END, completed_at=CASE WHEN (SELECT count(*) FROM cnc_telegram_import_items WHERE import_request_id=r.import_request_id AND status IN ('pending','processing','confirmation_required','unknown'))=0 THEN COALESCE(completed_at,now()) ELSE completed_at END WHERE r.import_request_id=$1`, [requestId]); }
 async function enqueueImportOutbox(tx: TransactionClient, eventType: string, aggregateId: string, requestId: string, payload: Record<string, unknown>): Promise<void> { await tx.query(`INSERT INTO outbox_events (event_type,aggregate_type,aggregate_id,payload_json,idempotency_key) VALUES ($1,'cnc_telegram_import',$2,$3::jsonb,$4) ON CONFLICT (idempotency_key) DO NOTHING`, [eventType, aggregateId, JSON.stringify({ ...payload, requestId }), `${eventType}:${aggregateId}:${requestId}`]); }

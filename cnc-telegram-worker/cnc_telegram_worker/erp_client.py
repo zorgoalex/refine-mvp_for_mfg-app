@@ -42,6 +42,24 @@ _IMPORT_SCAN_CANDIDATE_FIELDS = (
     "warnings",
     "eligibilityStatus",
 )
+_IMPORT_SCAN_MESSAGE_FIELDS = (
+    "sourceChatId",
+    "sourceMessageId",
+    "sourceThreadId",
+    "replyToMessageId",
+    "senderUserId",
+    "sourceCreatedAt",
+    "sourceUpdatedAt",
+    "workday",
+    "messageType",
+    "filename",
+    "mimeType",
+    "messageText",
+    "outgoing",
+    "candidateSourceMessageId",
+    "candidateRole",
+    "readOrdinal",
+)
 _SECRET_PATTERNS = (
     (re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I), "Bearer [REDACTED]"),
     (re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{20,}\b"), "[BOT_TOKEN_REDACTED]"),
@@ -290,6 +308,7 @@ class ErpClient:
         candidates: list[dict[str, Any]],
         scan_lease: WorkerItemLease,
         *,
+        messages: list[dict[str, Any]] | None = None,
         days_scanned: int | None = None,
         messages_scanned: int | None = None,
         truncated: bool | None = None,
@@ -301,6 +320,7 @@ class ErpClient:
             payload=with_item_lease(
                 {
                     "candidates": [serialize_import_scan_candidate(candidate) for candidate in candidates],
+                    "messages": [serialize_import_scan_message(message) for message in (messages or [])],
                     **({"daysScanned": days_scanned} if days_scanned is not None else {}),
                     **({"messagesScanned": messages_scanned} if messages_scanned is not None else {}),
                     **({"truncated": truncated} if truncated is not None else {}),
@@ -564,6 +584,15 @@ def serialize_import_scan_candidate(candidate: dict[str, Any]) -> dict[str, Any]
         field: candidate[field]
         for field in _IMPORT_SCAN_CANDIDATE_FIELDS
         if field in candidate
+    }
+
+
+def serialize_import_scan_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Serialize only the bounded raw-message contract fields."""
+    return {
+        field: message[field]
+        for field in _IMPORT_SCAN_MESSAGE_FIELDS
+        if field in message
     }
 
 

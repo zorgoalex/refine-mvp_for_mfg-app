@@ -4,6 +4,7 @@ import { useInvalidate } from '@refinedev/core';
 import { cncTelegramImportApi, createCncTelegramImportIdempotencyKey } from '../api/cncTelegramImportApi';
 import type {
   CncTelegramImportCandidate,
+  CncTelegramImportMessage,
   CncTelegramImportPrepareResponse,
   CncTelegramImportRequest,
   CncTelegramImportScan,
@@ -39,9 +40,12 @@ export function useCncTelegramImport(open: boolean) {
   const invalidate = useInvalidate();
   const [scan, setScan] = useState<CncTelegramImportScan | null>(null);
   const [candidates, setCandidates] = useState<CncTelegramImportCandidate[]>([]);
+  const [messages, setMessages] = useState<CncTelegramImportMessage[]>([]);
+  const [messagePagination, setMessagePagination] = useState({ page: 1, pageSize: 100, total: 0, totalPages: 0 });
   const [importRequest, setImportRequest] = useState<CncTelegramImportRequest | null>(null);
   const [prepared, setPrepared] = useState<CncTelegramImportPrepareResponse | null>(null);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const scanPollRef = useRef<number | null>(null);
   const importPollRef = useRef<number | null>(null);
@@ -53,6 +57,7 @@ export function useCncTelegramImport(open: boolean) {
 
   const loadCandidates = useCallback(async (scanId: string) => {
     setLoadingCandidates(true);
+    setError(null);
     try {
       const all: CncTelegramImportCandidate[] = [];
       let page = 1;
@@ -64,11 +69,29 @@ export function useCncTelegramImport(open: boolean) {
         page += 1;
       } while (page <= totalPages && all.length < 500);
       setCandidates(all);
-      setError(null);
     } catch (nextError) {
       setError(nextError);
     } finally {
       setLoadingCandidates(false);
+    }
+  }, []);
+
+  const loadMessages = useCallback(async (scanId: string, page = 1) => {
+    setLoadingMessages(true);
+    setError(null);
+    try {
+      const response = await cncTelegramImportApi.listMessages(scanId, page, 100);
+      setMessages(response.messages);
+      setMessagePagination(response.pagination ?? {
+        page,
+        pageSize: 100,
+        total: response.messages.length,
+        totalPages: response.messages.length > 0 ? 1 : 0,
+      });
+    } catch (nextError) {
+      setError(nextError);
+    } finally {
+      setLoadingMessages(false);
     }
   }, []);
 
@@ -77,12 +100,12 @@ export function useCncTelegramImport(open: boolean) {
     setScan(next);
     if (next.status === 'ready') {
       writeStoredId(ACTIVE_SCAN_STORAGE_KEY, null);
-      await loadCandidates(next.scanId);
+      await Promise.all([loadCandidates(next.scanId), loadMessages(next.scanId, 1)]);
     } else if (next.status === 'failed' || next.status === 'expired') {
       writeStoredId(ACTIVE_SCAN_STORAGE_KEY, null);
     }
     return next;
-  }, [loadCandidates]);
+  }, [loadCandidates, loadMessages]);
 
   const refreshImport = useCallback(async (importRequestId: string) => {
     const next = await cncTelegramImportApi.getRequest(importRequestId);
@@ -149,6 +172,8 @@ export function useCncTelegramImport(open: boolean) {
   const startScan = useCallback(async (body: CncTelegramImportScanRequest) => {
     setError(null);
     setCandidates([]);
+    setMessages([]);
+    setMessagePagination({ page: 1, pageSize: 100, total: 0, totalPages: 0 });
     setPrepared(null);
     setImportRequest(null);
     const next = await cncTelegramImportApi.createScan(body, createCncTelegramImportIdempotencyKey('cnc-telegram-scan'));
@@ -207,6 +232,9 @@ export function useCncTelegramImport(open: boolean) {
   return {
     scan,
     candidates,
+    messages,
+    messagePagination,
+    loadingMessages,
     importRequest,
     prepared,
     loadingCandidates,
@@ -216,6 +244,7 @@ export function useCncTelegramImport(open: boolean) {
     confirmImport,
     reconfirmImport,
     prepareRepeat,
+    loadMessages,
     refreshScan,
     refreshImport,
   };

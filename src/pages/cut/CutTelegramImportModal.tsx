@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, DatePicker, Empty, Modal, Progress, Space, Spin, Steps, Tag, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, DatePicker, Empty, Modal, Pagination, Progress, Space, Spin, Steps, Tabs, Tag, Typography, message } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import { CheckCircleOutlined, ExclamationCircleOutlined, LinkOutlined, SearchOutlined, SendOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -7,8 +7,9 @@ import { ApiError } from '../../api/httpClient';
 import { can } from '../../utils/permissions';
 import { featureFlags } from '../../config/featureFlags';
 import { useCncTelegramImport } from '../../hooks/useCncTelegramImport';
-import type { CncTelegramImportCandidate, CncTelegramImportItem, CncTelegramImportMatch, CncTelegramImportScan } from '../../api/types/cncTelegramImportApi.types';
-import { needsDuplicateReconfirmation, repeatableItems } from './cutTelegramImportHelpers';
+import type { CncTelegramImportCandidate, CncTelegramImportItem, CncTelegramImportMatch, CncTelegramImportMessage, CncTelegramImportScan } from '../../api/types/cncTelegramImportApi.types';
+import { buildStyledCutLayoutPreview } from './svgCutRenderPreview';
+import { candidateLayoutSummary, candidateScreenshotLabel, eligibleCandidateIdForMessage, importMessageAttachmentLabel, importMessageHumanContent, importMessageTimeLabel, needsDuplicateReconfirmation, repeatableItems, sortImportMessages } from './cutTelegramImportHelpers';
 import { Table } from '../../ui/tooltipDelay';
 
 const { Text, Paragraph } = Typography;
@@ -22,6 +23,7 @@ interface CutTelegramImportModalProps {
 }
 
 type ImportStep = 0 | 1 | 2;
+type MessageViewMode = 'original' | 'technical';
 
 function defaultRange(now: Dayjs = dayjs()): [Dayjs, Dayjs] {
   return [now.subtract(DEFAULT_SCAN_DAYS - 1, 'day').startOf('day'), now.endOf('day')];
@@ -96,29 +98,204 @@ const DuplicateMatches: React.FC<{ matches: CncTelegramImportMatch[] }> = ({ mat
   );
 };
 
-const CandidateDetails: React.FC<{ candidate: CncTelegramImportCandidate }> = ({ candidate }) => (
-  <div className="cut-telegram-import__candidate-details">
-    <div className="cut-telegram-import__file-line">
-      <Text strong>{candidate.svgFileName}</Text>
-      <Tag color={candidateDuplicate(candidate) ? 'warning' : 'default'}>{sourceStatusLabel(candidate.sourceStatus)}</Tag>
+const CandidateDetails: React.FC<{ candidate: CncTelegramImportCandidate }> = ({ candidate }) => {
+  const summary = candidateLayoutSummary(candidate);
+  return (
+    <div className="cut-telegram-import__candidate-details">
+      <div className="cut-telegram-import__file-line">
+        <Text strong>{candidate.svgFileName}</Text>
+        <Tag color={candidateDuplicate(candidate) ? 'warning' : 'default'}>{sourceStatusLabel(candidate.sourceStatus)}</Tag>
+      </div>
+      <Text type="secondary">{formatDate(candidate.sourceCreatedAt)} · {summary.sheetCount ?? '—'} листов · {summary.positionCount ?? '—'} позиций</Text>
+      <Text type="secondary">
+        G-code: {candidate.gcodeFileName ?? 'нет'} · скриншот: {candidateScreenshotLabel(candidate)}
+      </Text>
+      {(summary.sheetWidthMm != null || summary.sheetHeightMm != null) && (
+        <Text type="secondary">Лист: {summary.sheetWidthMm ?? '—'} × {summary.sheetHeightMm ?? '—'} мм</Text>
+      )}
+      {summary.orderLabels.length > 0 && <Text type="secondary">Заказы: {summary.orderLabels.join(', ')}</Text>}
+      {candidate.parserWarnings.length > 0 && <Text type="warning">Предупреждения парсера: {candidate.parserWarnings.join('; ')}</Text>}
+      <DuplicateMatches matches={candidate.matches} />
     </div>
-    <Text type="secondary">{formatDate(candidate.sourceCreatedAt)} · {candidate.sheetCount ?? '—'} листов · {candidate.positionCount ?? '—'} позиций</Text>
-    <Text type="secondary">
-      G-code: {candidate.gcodeFileName ?? 'нет'} · скриншот: {candidate.screenshotFileName ?? 'нет'}
-    </Text>
-    {(candidate.sheetWidthMm || candidate.sheetHeightMm) && (
-      <Text type="secondary">Лист: {candidate.sheetWidthMm ?? '—'} × {candidate.sheetHeightMm ?? '—'} мм</Text>
+  );
+};
+
+const CandidatePreview: React.FC<{ candidate: CncTelegramImportCandidate }> = ({ candidate }) => {
+  const previewUrl = useMemo(() => {
+    if (candidate.previewUrl) return candidate.previewUrl;
+    const layout = candidate.cutLayout;
+    if (!layout || layout.status !== 'valid' || !layout.sheet || layout.items.length === 0) return null;
+    try {
+      const svg = buildStyledCutLayoutPreview(layout);
+      return svg ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` : null;
+    } catch {
+      return null;
+    }
+  }, [candidate.cutLayout, candidate.previewUrl]);
+
+  if (previewUrl) return <img className="cut-telegram-import__preview" src={previewUrl} alt={`Превью раскроя ${candidate.svgFileName}`} />;
+  return <Text type="secondary">{candidateScreenshotLabel(candidate) === 'нет' ? 'Нет превью' : 'Скриншот найден, превью раскроя недоступно'}</Text>;
+};
+
+interface MessageSelectionProps {
+  candidate: CncTelegramImportCandidate;
+  selected: boolean;
+  onChange: (candidateId: string, checked: boolean) => void;
+}
+
+const MessageSelection: React.FC<MessageSelectionProps> = ({ candidate, selected, onChange }) => {
+  const disabled = candidate.eligibility !== 'eligible' || candidate.sourceStatus === 'expired';
+  return (
+    <Checkbox
+      className="cut-telegram-import__message-selection"
+      checked={selected}
+      disabled={disabled}
+      onChange={(event) => onChange(candidate.candidateId, event.target.checked)}
+      aria-label={`Выбрать SVG-комплект ${candidate.svgFileName || candidate.candidateId}`}
+    >
+      Выбрать комплект SVG
+    </Checkbox>
+  );
+};
+
+interface MessageBrowserProps {
+  messages: CncTelegramImportMessage[];
+  candidates: CncTelegramImportCandidate[];
+  selectedIds: string[];
+  viewMode: MessageViewMode;
+  loading: boolean;
+  onToggleCandidate: (candidateId: string, checked: boolean) => void;
+  onViewModeChange: (mode: MessageViewMode) => void;
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+  onPageChange: (page: number) => void;
+}
+
+const messageTypeLabel: Record<CncTelegramImportMessage['messageType'], string> = {
+  svg: 'SVG',
+  dxf: 'DXF',
+  image: 'Фото',
+  gcode: 'G-code',
+  text: 'Текст',
+  other: 'Вложение',
+};
+
+function messageCandidate(candidates: CncTelegramImportCandidate[], message: CncTelegramImportMessage): CncTelegramImportCandidate | null {
+  return message.candidateId ? candidates.find((candidate) => candidate.candidateId === message.candidateId) ?? null : null;
+}
+
+function messageDateLabel(value: string): string {
+  return new Date(value).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+const OriginalMessageFeed: React.FC<{ messages: CncTelegramImportMessage[] }> = ({ messages }) => {
+  const orderedMessages = useMemo(() => sortImportMessages(messages), [messages]);
+  let lastDay: string | null = null;
+  return (
+    <div className="cut-telegram-import__message-feed" role="list" aria-label="Сообщения Telegram в оригинальном виде">
+      {orderedMessages.map((entry) => {
+        const day = entry.workday || entry.sourceCreatedAt.slice(0, 10);
+        const showDay = day !== lastDay;
+        lastDay = day;
+        const attachment = entry.messageType !== 'text';
+        const content = importMessageHumanContent(entry);
+        const caption = entry.messageText?.trim();
+        return (
+          <React.Fragment key={entry.scanMessageId}>
+            {showDay && <div className="cut-telegram-import__message-day" role="presentation">{messageDateLabel(entry.sourceCreatedAt)}</div>}
+            <article className={`cut-telegram-import__message-bubble ${entry.outgoing ? 'is-outgoing' : ''}`} role="listitem">
+              <div className="cut-telegram-import__message-content">
+                {attachment ? <Text strong>{importMessageAttachmentLabel(entry)}</Text> : <Text>{content}</Text>}
+                {attachment && caption && <Text className="cut-telegram-import__message-caption">{caption}</Text>}
+              </div>
+              <time className="cut-telegram-import__message-time" dateTime={entry.sourceCreatedAt}>{importMessageTimeLabel(entry.sourceCreatedAt)}</time>
+            </article>
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+};
+
+const TechnicalMessageCards: React.FC<Omit<MessageBrowserProps, 'viewMode' | 'onViewModeChange' | 'pagination' | 'onPageChange' | 'loading'>> = ({ messages, candidates, selectedIds, onToggleCandidate }) => {
+  const orderedMessages = useMemo(() => sortImportMessages(messages), [messages]);
+  return (
+    <div className="cut-telegram-import__technical-cards" aria-label="Технические данные сообщений Telegram">
+      {orderedMessages.map((entry) => {
+        const candidate = messageCandidate(candidates, entry);
+        const candidateSelectionId = eligibleCandidateIdForMessage(entry, candidates);
+        return (
+          <article className="cut-telegram-import__technical-card" key={entry.scanMessageId}>
+            <div><Text strong>{messageTypeLabel[entry.messageType]}</Text><Text type="secondary"> · {importMessageTimeLabel(entry.sourceCreatedAt)}</Text></div>
+            <Text type="secondary">ID: {entry.scanMessageId} · source: {entry.sourceMessageId}</Text>
+            <Text type="secondary">Чат: {entry.sourceChatId} · thread: {entry.sourceThreadId || '—'} · ordinal: {entry.readOrdinal}</Text>
+            <Text type="secondary">Файл: {entry.filename || '—'} · MIME: {entry.mimeType || '—'}</Text>
+            <Text type="secondary">Ответ: {entry.replyToMessageId || '—'} · отправитель: {entry.senderUserId || '—'} · исходящее: {entry.outgoing ? 'да' : 'нет'}</Text>
+            <Text type="secondary">Рабочая дата: {entry.workday} · изменено: {entry.sourceUpdatedAt ? formatDate(entry.sourceUpdatedAt) : '—'}</Text>
+            <Text type="secondary">Кандидат: {entry.candidateId || '—'} · роль: {entry.candidateRole || '—'}</Text>
+            {entry.messageText && <Text className="cut-telegram-import__technical-text">Текст: {entry.messageText}</Text>}
+            {candidateSelectionId && candidate && <MessageSelection candidate={candidate} selected={selectedIds.includes(candidateSelectionId)} onChange={onToggleCandidate} />}
+          </article>
+        );
+      })}
+    </div>
+  );
+};
+
+const TechnicalMessageTable: React.FC<Omit<MessageBrowserProps, 'viewMode' | 'onViewModeChange' | 'pagination' | 'onPageChange' | 'loading'>> = ({ messages, candidates, selectedIds, onToggleCandidate }) => {
+  const orderedMessages = useMemo(() => sortImportMessages(messages), [messages]);
+  const columns: ColumnsType<CncTelegramImportMessage> = [
+    { title: 'Время', key: 'time', width: 150, render: (_value, entry) => <time dateTime={entry.sourceCreatedAt}>{formatDate(entry.sourceCreatedAt)}</time> },
+    { title: 'ID', key: 'id', width: 180, render: (_value, entry) => <Text copyable={{ text: entry.scanMessageId }}>{entry.scanMessageId}</Text> },
+    { title: 'Тип', key: 'type', width: 90, render: (_value, entry) => messageTypeLabel[entry.messageType] },
+    { title: 'Файл / MIME', key: 'file', width: 220, render: (_value, entry) => <span>{entry.filename || '—'}<br /><Text type="secondary">{entry.mimeType || '—'}</Text></span> },
+    { title: 'Текст', key: 'text', width: 240, render: (_value, entry) => <span className="cut-telegram-import__technical-text">{entry.messageText || '—'}</span> },
+    { title: 'Источник и связи', key: 'links', width: 310, render: (_value, entry) => <span>chat: {entry.sourceChatId} · source: {entry.sourceMessageId}<br />thread: {entry.sourceThreadId || '—'} · reply: {entry.replyToMessageId || '—'}<br />sender: {entry.senderUserId || '—'} · outgoing: {entry.outgoing ? 'да' : 'нет'} · ordinal: {entry.readOrdinal}<br />workday: {entry.workday} · updated: {entry.sourceUpdatedAt ? formatDate(entry.sourceUpdatedAt) : '—'}</span> },
+    { title: 'Кандидат', key: 'candidate', width: 220, render: (_value, entry) => {
+      const candidate = messageCandidate(candidates, entry);
+      const candidateSelectionId = eligibleCandidateIdForMessage(entry, candidates);
+      return <span>{entry.candidateId || '—'} · {entry.candidateRole || '—'}{candidateSelectionId && candidate ? <MessageSelection candidate={candidate} selected={selectedIds.includes(candidateSelectionId)} onChange={onToggleCandidate} /> : null}</span>;
+    } },
+  ];
+  return (
+    <>
+      <div className="cut-telegram-import__technical-table-desktop">
+        <Table<CncTelegramImportMessage> rowKey="scanMessageId" size="small" columns={columns} dataSource={orderedMessages} pagination={false} scroll={{ x: 1310 }} />
+      </div>
+      <TechnicalMessageCards messages={orderedMessages} candidates={candidates} selectedIds={selectedIds} onToggleCandidate={onToggleCandidate} />
+    </>
+  );
+};
+
+const MessageBrowser: React.FC<MessageBrowserProps> = ({ messages, candidates, selectedIds, viewMode, loading, onToggleCandidate, onViewModeChange, pagination, onPageChange }) => (
+  <section className="cut-telegram-import__message-browser" aria-live="polite">
+    <div className="cut-telegram-import__message-browser-header">
+      <div>
+        <Text strong>Все сообщения выбранного периода</Text>
+        <Text type="secondary"> · {pagination.total || messages.length}</Text>
+      </div>
+      <div aria-label="Режим просмотра сообщений Telegram">
+        <Tabs
+          className="cut-telegram-import__message-tabs"
+          activeKey={viewMode}
+          onChange={(value) => { if (value === 'original' || value === 'technical') onViewModeChange(value); }}
+          items={[{ key: 'original', label: 'Оригинальный' }, { key: 'technical', label: 'Технический' }]}
+        />
+      </div>
+    </div>
+    {loading ? <div className="cut-telegram-import__message-loading"><Spin /></div> : messages.length === 0 ? <Empty description="Сообщений за период не найдено" /> : viewMode === 'original' ? (
+      <OriginalMessageFeed messages={messages} />
+    ) : (
+      <TechnicalMessageTable messages={messages} candidates={candidates} selectedIds={selectedIds} onToggleCandidate={onToggleCandidate} />
     )}
-    {candidate.orderLabels && candidate.orderLabels.length > 0 && <Text type="secondary">Заказы: {candidate.orderLabels.join(', ')}</Text>}
-    {candidate.parserWarnings.length > 0 && <Text type="warning">Предупреждения парсера: {candidate.parserWarnings.join('; ')}</Text>}
-    <DuplicateMatches matches={candidate.matches} />
-  </div>
+    {pagination.total > pagination.pageSize && <Pagination className="cut-telegram-import__message-pagination" current={pagination.page} pageSize={pagination.pageSize} total={pagination.total} showSizeChanger={false} showTotal={(total) => `Всего: ${total}`} onChange={onPageChange} aria-label="Страницы сообщений Telegram" />}
+  </section>
 );
 
 export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ open, onClose, onDone }) => {
   const [step, setStep] = useState<ImportStep>(0);
   const [range, setRange] = useState<[Dayjs, Dayjs]>(defaultRange);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [messageView, setMessageView] = useState<MessageViewMode>('original');
   const [preparing, setPreparing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [repeatPreparing, setRepeatPreparing] = useState(false);
@@ -127,17 +304,28 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
   const {
     scan,
     candidates,
+    messages,
+    messagePagination,
     importRequest,
     prepared,
     loadingCandidates,
+    loadingMessages,
     error,
     startScan,
     prepareImport,
     confirmImport,
     reconfirmImport,
     prepareRepeat,
+    loadMessages,
   } = useCncTelegramImport(open);
   const canImport = featureFlags.cncTelegram && can('cut.manage');
+
+  useEffect(() => {
+    if (!open) return;
+    // The readable chat view is always the safe default for a fresh open or scan.
+    // Deliberately do not persist this preference alongside active scan state.
+    setMessageView('original');
+  }, [open, scan?.scanId]);
 
   useEffect(() => {
     if (!open) return;
@@ -173,8 +361,14 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
 
   const tableRowSelection: TableProps<CncTelegramImportCandidate>['rowSelection'] = {
     selectedRowKeys: selectedIds,
-    onChange: (keys) => setSelectedIds(keys as string[]),
+    onChange: (keys) => setSelectedIds(Array.from(new Set(keys.map(String)))),
     getCheckboxProps: (record) => ({ disabled: record.eligibility !== 'eligible' || record.sourceStatus === 'expired' }),
+  };
+
+  const toggleCandidateSelection = (candidateId: string, checked: boolean) => {
+    setSelectedIds((current) => checked
+      ? (current.includes(candidateId) ? current : [...current, candidateId])
+      : current.filter((id) => id !== candidateId));
   };
 
   const columns: ColumnsType<CncTelegramImportCandidate> = [
@@ -187,9 +381,7 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
       title: 'Превью',
       key: 'preview',
       width: 150,
-      render: (_value, candidate) => candidate.previewUrl ? (
-        <img className="cut-telegram-import__preview" src={candidate.previewUrl} alt={`Превью ${candidate.svgFileName}`} />
-      ) : <Text type="secondary">Нет превью</Text>,
+      render: (_value, candidate) => <CandidatePreview candidate={candidate} />,
     },
   ];
 
@@ -208,6 +400,7 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
     }
     try {
       setSelectedIds([]);
+      setMessageView('original');
       await startScan({ dateFrom: range[0].format('YYYY-MM-DD'), dateTo: range[1].format('YYYY-MM-DD') });
     } catch (nextError) {
       message.error(nextError instanceof ApiError ? nextError.message : 'Не удалось запустить поиск в Telegram');
@@ -259,6 +452,7 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
     try {
       const next = await prepareRepeat(importRequest.importRequestId, items.map((item) => item.candidateId));
       setSelectedIds(items.map((item) => item.candidateId));
+      setMessageView('original');
       setStep(2);
       if (next.duplicateCount > 0) message.warning('Появились совпадения. Подтвердите создание копии ещё раз.');
     } catch (nextError) {
@@ -266,6 +460,10 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
     } finally {
       setRepeatPreparing(false);
     }
+  };
+
+  const handleMessagePageChange = (page: number) => {
+    if (scan) void loadMessages(scan.scanId, page);
   };
 
   const handleReconfirm = async () => {
@@ -339,18 +537,43 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
 
       {step === 1 && (
         <div className="cut-telegram-import__step">
-          <div className="cut-telegram-import__summary"><Text strong>Найдено: {candidates.length}</Text><Text type="secondary">Выбрано: {selectedIds.length}</Text><Text type="warning">С предупреждением: {candidates.filter(candidateDuplicate).length}</Text></div>
-          {scan?.progress.truncated && <Alert type="warning" showIcon message="Результат ограничен" description="Telegram вернул больше сообщений, чем разрешено для одного поиска. Уточните период для полного результата." />}
-          {loadingCandidates ? <Spin /> : candidates.length === 0 ? <Empty description="Подходящих SVG-комплектов не найдено" /> : (
-            <Table<CncTelegramImportCandidate>
-              rowKey="candidateId"
-              rowSelection={tableRowSelection}
-              columns={columns}
-              dataSource={candidates}
-              pagination={{ pageSize: 20, showSizeChanger: false }}
-              scroll={{ x: 760 }}
-            />
-          )}
+          <div className="cut-telegram-import__summary">
+            <Text strong>Сообщений: {messagePagination.total || messages.length}</Text>
+            <Text>SVG-комплектов: {candidates.length}</Text>
+            <Text type="secondary">Выбрано: {selectedIds.length}</Text>
+            <Text type="warning">С предупреждением: {candidates.filter(candidateDuplicate).length}</Text>
+          </div>
+          {scan?.progress.truncated && <Alert type="warning" showIcon message="Результат ограничен" description="Достигнут лимит сообщений или SVG-комплектов. Уточните период для полного результата." />}
+          <MessageBrowser
+            messages={messages}
+            candidates={candidates}
+            selectedIds={selectedIds}
+            viewMode={messageView}
+            loading={loadingMessages}
+            onToggleCandidate={toggleCandidateSelection}
+            onViewModeChange={setMessageView}
+            pagination={messagePagination}
+            onPageChange={handleMessagePageChange}
+          />
+          <section className="cut-telegram-import__candidate-picker" aria-label="Выбор SVG-комплектов">
+            <div className="cut-telegram-import__candidate-picker-header">
+              <div>
+                <Text strong>Комплекты для создания</Text>
+                <Text type="secondary"> · отметьте SVG-комплекты, которые нужно импортировать</Text>
+              </div>
+              {loadingCandidates && <Spin size="small" />}
+            </div>
+            {candidates.length === 0 ? <Empty description="Подходящих SVG-комплектов не найдено" /> : (
+              <Table<CncTelegramImportCandidate>
+                rowKey="candidateId"
+                rowSelection={tableRowSelection}
+                columns={columns}
+                dataSource={candidates}
+                pagination={{ pageSize: 20, showSizeChanger: false }}
+                scroll={{ x: 760 }}
+              />
+            )}
+          </section>
         </div>
       )}
 

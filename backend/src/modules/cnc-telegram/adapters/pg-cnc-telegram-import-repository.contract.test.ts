@@ -4,6 +4,7 @@ import type { DatabaseService } from '../../../database/database.service';
 import { canonicalLayoutFingerprint } from './pg-cnc-telegram-repository';
 import {
   PgCncTelegramImportRepository,
+  assertCncTelegramScanMessageCount,
   assertTerminalItemLeaseReplay,
   inferTelegramImportSelectedOrderIds,
   telegramImportItemsFromLayout,
@@ -106,6 +107,83 @@ describe('explicit Telegram import backend contracts', () => {
     });
 
     expect(result.items[0]?.workday).toBe('2026-08-18');
+    expect(result.items[0]?.sourceMessageId).toBe('42');
+    expect(result.items[0]?.svgMessageId).toBe('42');
+  });
+
+  it('fails the transaction path when a scan exceeds 5000 distinct messages', () => {
+    expect(() => assertCncTelegramScanMessageCount(5000)).not.toThrow();
+    expect(() => assertCncTelegramScanMessageCount(5001)).toThrow('cannot persist more than 5000');
+    expect(source.indexOf('INSERT INTO cnc_telegram_import_scan_messages')).toBeLessThan(source.indexOf('SELECT count(*) AS total'));
+    expect(source.indexOf('SELECT count(*) AS total')).toBeLessThan(source.indexOf('assertCncTelegramScanMessageCount'));
+  });
+
+  it('returns scan-owned messages in chronological order without coercing BIGINT ids to JS numbers', async () => {
+    const message = {
+      scan_message_id: 'message-1', scan_id: 'scan-1', source_chat_id: '-1001',
+      source_message_id: '9007199254740993', source_thread_id: '9007199254740994',
+      reply_to_message_id: null, sender_user_id: '9007199254740995',
+      source_created_at: '2026-08-18T10:00:00.000Z', source_updated_at: null,
+      workday: new Date(2026, 7, 18), message_type: 'image', filename: null,
+      mime_type: 'image/jpeg', message_text: 'Раскрой', outgoing: false,
+      candidate_id: 'candidate-1', candidate_role: 'screenshot', read_ordinal: 1,
+    };
+    const tx = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [{ scan_id: 'scan-1', requested_by: 'user-1' }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ ...message, total: '1' }], rowCount: 1 }) };
+    const database = {
+      transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => handler(tx),
+    } as unknown as DatabaseService;
+    const repository = new PgCncTelegramImportRepository(database, {} as never);
+
+    const result = await repository.listMessages({
+      currentUser: { id: 'user-1', username: 'tester', role: 'manager', roleId: 1, permissions: [] },
+      scanId: 'scan-1', page: 2, pageSize: 10,
+    });
+
+    expect(result).toMatchObject({ total: 1, items: [{
+      sourceMessageId: '9007199254740993',
+      sourceThreadId: '9007199254740994',
+      senderUserId: '9007199254740995',
+      workday: '2026-08-18', candidateRole: 'screenshot',
+    }] });
+    expect(tx.query).toHaveBeenLastCalledWith(expect.stringContaining('ORDER BY m.source_created_at ASC'), ['scan-1', 10, 10]);
+  });
+
+  it('keeps exact BIGINT source id through duplicate-match refresh queries', async () => {
+    const sourceMessageId = '9007199254740993';
+    const candidate = {
+      candidate_id: 'candidate-1', source_chat_id: '-1001', source_message_id: sourceMessageId,
+      svg_content_sha256: 'a'.repeat(64), layout_fingerprint: null,
+    };
+    const tx = { query: vi.fn()
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // matches before refresh
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // delete old matches
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // same Telegram source
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // manual upload source
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // exact SVG source
+      .mockResolvedValueOnce({ rows: [{ match_kind: 'same_telegram_source', packet_id: 'packet-1', cut_job_id: null, cut_result_id: null }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // duplicate version bump
+      .mockResolvedValueOnce({ rows: [{ ...candidate, duplicate_match_version: 2 }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [{ match_kind: 'same_telegram_source', packet_id: 'packet-1', cut_job_id: null, cut_result_id: null }], rowCount: 1 }) };
+    const database = {
+      transaction: async <T>(handler: (client: typeof tx) => Promise<T>): Promise<T> => handler(tx),
+    } as unknown as DatabaseService;
+    const repository = new PgCncTelegramImportRepository(database, {} as never);
+
+    const refreshed = await (repository as unknown as {
+      refreshMatches: (client: typeof tx, row: typeof candidate) => Promise<typeof candidate>;
+      matches: (client: typeof tx, candidateId: string) => Promise<unknown>;
+    }).refreshMatches(tx, candidate);
+    const duplicateMatches = await (repository as unknown as {
+      matches: (client: typeof tx, candidateId: string) => Promise<unknown>;
+    }).matches(tx, 'candidate-1');
+
+    expect(refreshed).toMatchObject({ candidate_id: 'candidate-1', duplicate_match_version: 2 });
+    expect(duplicateMatches).toEqual([{ kind: 'same_telegram_source', packetId: 'packet-1', cutJobId: null, cutResultId: null }]);
+    expect(tx.query.mock.calls[2]?.[1]).toEqual(['candidate-1', '-1001', sourceMessageId]);
+    expect(tx.query.mock.calls[3]?.[1]).toEqual(['candidate-1', sourceMessageId, '-1001']);
+    expect(tx.query.mock.calls[2]?.[0]).toContain('p.source_message_id=$3::bigint');
   });
 
   it('keeps completion source bytes bounded and hash-verifiable by the ingest path', () => {
@@ -201,6 +279,9 @@ describe('explicit Telegram import backend contracts', () => {
     };
     expect(() => parseImportComplete(completion)).toThrow();
     expect(() => parseImportComplete({ ...completion, sourceFiles: completion.sourceFiles.slice(0, 1), sourceSetFingerprint: `sha256:${'a'.repeat(64)}` })).toThrow();
-    expect(parseImportComplete({ ...completion, sourceFiles: completion.sourceFiles.slice(0, 1) }).sourceFiles).toHaveLength(1);
+    const parsed = parseImportComplete({ ...completion, sourceFiles: completion.sourceFiles.slice(0, 1) });
+    expect(parsed.sourceFiles).toHaveLength(1);
+    expect(parsed.source.sourceMessageId).toBe('1');
+    expect(parsed.source.svgMessageId).toBe('1');
   });
 });

@@ -25,4 +25,23 @@ describe('manual Telegram import UI safety guards', () => {
     expect(hook).toContain("resource: 'orders_status_board'");
     expect(hook).toContain("resource: 'cnc-telegram'");
   });
+
+  it('defaults every modal open and every scan to the original message view', () => {
+    expect(source).toContain("useState<MessageViewMode>('original')");
+    expect(source).toContain("setMessageView('original');");
+    expect(source).toContain("items={[{ key: 'original', label: 'Оригинальный' }, { key: 'technical', label: 'Технический' }]}");
+  });
+
+  it('keeps technical identifiers out of the original Telegram feed', () => {
+    const originalStart = source.indexOf('const OriginalMessageFeed');
+    const technicalStart = source.indexOf('const TechnicalMessageCards');
+    const original = source.slice(originalStart, technicalStart);
+    expect(originalStart).toBeGreaterThanOrEqual(0);
+    expect(technicalStart).toBeGreaterThan(originalStart);
+    expect(original).toContain('importMessageHumanContent(entry)');
+    expect(original).toContain('importMessageTimeLabel(entry.sourceCreatedAt)');
+    expect(original).not.toContain('MessageSelection');
+    expect(original).not.toContain('sourceMessageId');
+    expect(original).not.toContain('senderUserId');
+  });
 });

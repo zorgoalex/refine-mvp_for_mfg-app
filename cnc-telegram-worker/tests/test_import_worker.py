@@ -21,6 +21,7 @@ from cnc_telegram_worker.worker import (
     CncTelegramWorker,
     WeightedQueueScheduler,
     canonical_layout_fingerprint,
+    serialize_import_scan_message,
 )
 
 
@@ -32,7 +33,7 @@ SVG = """
 
 
 class File:
-    def __init__(self, name: str, mime: str) -> None:
+    def __init__(self, name: str | None, mime: str | None) -> None:
         self.name = name
         self.mime_type = mime
 
@@ -51,6 +52,44 @@ class Message:
         return file
 
 
+class ImportMessage:
+    """Small Telethon-shaped message fixture for raw import snapshots."""
+
+    def __init__(
+        self,
+        message_id: int,
+        *,
+        name: str | None = None,
+        mime: str | None = None,
+        text: str = "",
+        media: bytes | str | None = None,
+        photo: object | None = None,
+        sender_id: int | None = None,
+        date_value: datetime | None = None,
+    ) -> None:
+        self.id = message_id
+        self.date = date_value or datetime(2026, 8, 18, 5, 0, tzinfo=timezone.utc)
+        self.edit_date = None
+        self.raw_text = text
+        self.file = File(name, mime) if name is not None or mime is not None else None
+        self.photo = photo
+        self.sender_id = sender_id
+        self.out = False
+        self.media = media
+
+    async def download_media(self, *, file: object) -> str:
+        payload = self.media
+        if payload is None:
+            return ""
+        if isinstance(payload, str):
+            payload = payload.encode("utf-8")
+        if hasattr(file, "write"):
+            file.write(payload)
+            return getattr(file, "name", "")
+        Path(file).write_bytes(payload)
+        return str(file)
+
+
 class Telegram:
     def __init__(self, message: Message) -> None:
         self.message = message
@@ -63,6 +102,18 @@ class Telegram:
 
     async def get_messages(self, entity: object, *, ids: list[int]):
         return [self.message] if self.message.id in ids else []
+
+
+class HistoryTelegram:
+    def __init__(self, messages: list[ImportMessage]) -> None:
+        self.messages = messages
+
+    def iter_messages(self, entity: object, **kwargs: object):
+        async def iterator():
+            for message in reversed(self.messages):
+                yield message
+
+        return iterator()
 
 
 class ScanErp:
@@ -129,6 +180,52 @@ class ImportWorkerTest(unittest.TestCase):
                 self.assertEqual(erp.completed[0]["daysScanned"], 7)
                 self.assertEqual([batch["days_scanned"] for batch in erp.batches], list(range(1, 8)))
                 self.assertEqual(erp.failed, [])
+
+        asyncio.run(scenario())
+
+    def test_scan_submits_raw_messages_even_when_candidate_list_is_empty(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as root_name:
+                worker = make_worker(Path(root_name))
+                erp = ScanErp(self._scan_task("2026-08-18", "2026-08-18"))
+                worker.erp = erp
+                telegram = HistoryTelegram([
+                    ImportMessage(51, text="обычное сообщение"),
+                    ImportMessage(52, mime="image/png", media=b"image", photo=object()),
+                ])
+                await worker.process_import_scan_queue(telegram, object(), "-100")
+                self.assertEqual(len(erp.batches), 1)
+                self.assertEqual(erp.batches[0]["candidates"], [])
+                self.assertEqual(
+                    [row["sourceMessageId"] for row in erp.batches[0]["messages"]],
+                    ["51", "52"],
+                )
+                self.assertEqual(erp.completed[0]["messagesScanned"], 2)
+
+        asyncio.run(scenario())
+
+    def test_scan_supports_more_than_one_thousand_messages_in_one_atomic_day_batch(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as root_name:
+                worker = make_worker(Path(root_name))
+                erp = ScanErp(self._scan_task("2026-08-18", "2026-08-18"))
+                worker.erp = erp
+                raw_messages = [{"sourceMessageId": str(message_id)} for message_id in range(1, 1501)]
+                worker.discover_workday = AsyncMock(return_value=([], {
+                    "messagesProcessed": 1500,
+                    "candidatesFound": 0,
+                    "warningsCount": 0,
+                    "truncated": False,
+                    "messages": raw_messages,
+                }))
+
+                await worker.process_import_scan_queue(object(), object(), "-100")
+
+                self.assertEqual(worker.discover_workday.await_args.kwargs["max_messages"], 5000)
+                self.assertEqual(len(erp.batches), 1)
+                self.assertEqual(len(erp.batches[0]["messages"]), 1500)
+                self.assertEqual(erp.batches[0]["days_scanned"], 1)
+                self.assertFalse(erp.batches[0]["truncated"])
 
         asyncio.run(scenario())
 
@@ -304,7 +401,7 @@ class ImportWorkerTest(unittest.TestCase):
                     telegram, object(), "-100", date(2026, 8, 18),
                 )
                 self.assertEqual(len(candidates), 1)
-                self.assertEqual(candidates[0]["sourceMessageId"], 42)
+                self.assertEqual(candidates[0]["sourceMessageId"], "42")
                 self.assertEqual(candidates[0]["eligibilityStatus"], "valid")
                 self.assertRegex(candidates[0]["sourceSetFingerprint"], r"^[0-9a-f]{64}$")
                 self.assertRegex(candidates[0]["layoutFingerprint"], r"^[0-9a-f]{64}$")
@@ -312,6 +409,106 @@ class ImportWorkerTest(unittest.TestCase):
                 self.assertEqual(telegram.sent, 0)
 
         asyncio.run(scenario())
+
+    def test_discovery_persists_all_messages_and_candidate_roles(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as root_name:
+                root = Path(root_name)
+                worker = make_worker(root)
+                image = ImportMessage(
+                    10,
+                    mime="image/png",
+                    text="Заказ 1234",
+                    media=b"fake-png",
+                    photo=object(),
+                    sender_id=101,
+                )
+                svg = ImportMessage(11, name="1234.svg", mime="image/svg+xml", media=SVG)
+                gcode = ImportMessage(12, name="1234.gcode", mime="text/plain", media="G1 X1 Y1")
+                comment = ImportMessage(13, text="MDF 16 мм")
+                unrelated = ImportMessage(
+                    20,
+                    text="Сообщение вне комплекта",
+                    date_value=datetime(2026, 8, 18, 10, 0, tzinfo=timezone.utc),
+                )
+
+                candidates, progress = await worker.discover_workday(
+                    HistoryTelegram([image, svg, gcode, comment, unrelated]),
+                    object(),
+                    "-100",
+                    date(2026, 8, 18),
+                )
+
+                self.assertEqual(len(candidates), 1)
+                self.assertEqual(progress["messagesProcessed"], 5)
+                messages = progress["messages"]
+                self.assertEqual([row["sourceMessageId"] for row in messages], ["10", "11", "12", "13", "20"])
+                by_id = {row["sourceMessageId"]: row for row in messages}
+                self.assertEqual(by_id["10"]["messageType"], "image")
+                self.assertIsNone(by_id["10"]["filename"])
+                self.assertEqual(by_id["10"]["mimeType"], "image/png")
+                self.assertEqual(by_id["10"]["candidateSourceMessageId"], "11")
+                self.assertEqual(by_id["10"]["candidateRole"], "screenshot")
+                self.assertEqual(by_id["11"]["candidateRole"], "svg")
+                self.assertEqual(by_id["12"]["candidateRole"], "gcode")
+                self.assertEqual(by_id["13"]["candidateRole"], "comment")
+                self.assertNotIn("candidateSourceMessageId", by_id["20"])
+                self.assertNotIn("candidateRole", by_id["20"])
+
+        asyncio.run(scenario())
+
+    def test_discovery_with_no_candidates_still_returns_unrelated_messages(self) -> None:
+        async def scenario() -> None:
+            with tempfile.TemporaryDirectory() as root_name:
+                worker = make_worker(Path(root_name))
+                messages = [
+                    ImportMessage(31, text="Обычный текст"),
+                    ImportMessage(32, mime="image/jpeg", media=b"fake-jpeg", photo=object()),
+                ]
+                candidates, progress = await worker.discover_workday(
+                    HistoryTelegram(messages), object(), "-100", date(2026, 8, 18),
+                )
+                self.assertEqual(candidates, [])
+                self.assertEqual(progress["candidatesFound"], 0)
+                self.assertEqual(progress["messagesProcessed"], 2)
+                self.assertEqual([row["sourceMessageId"] for row in progress["messages"]], ["31", "32"])
+                self.assertEqual(progress["messages"][1]["messageType"], "image")
+                self.assertIsNone(progress["messages"][1]["filename"])
+
+        asyncio.run(scenario())
+
+    def test_raw_message_serializer_preserves_text_and_time_without_media_name(self) -> None:
+        message = ImportMessage(
+            99,
+            mime="image/jpeg",
+            text="Подпись скрина",
+            photo=object(),
+            sender_id=123,
+        )
+        row = serialize_import_scan_message(
+            message,
+            "-100",
+            date(2026, 8, 18),
+            7,
+            {},
+        )
+        self.assertEqual(row["sourceMessageId"], "99")
+        self.assertEqual(row["sourceCreatedAt"], "2026-08-18T05:00:00+00:00")
+        self.assertEqual(row["messageText"], "Подпись скрина")
+        self.assertEqual(row["messageType"], "image")
+        self.assertIsNone(row["filename"])
+        self.assertEqual(row["readOrdinal"], 7)
+        self.assertEqual(row["senderUserId"], "123")
+
+    def test_raw_message_serializer_omits_invalid_non_positive_sender_id(self) -> None:
+        row = serialize_import_scan_message(
+            ImportMessage(100, sender_id=-100),
+            "-100",
+            date(2026, 8, 18),
+            1,
+            {},
+        )
+        self.assertIsNone(row["senderUserId"])
 
     def test_import_rejects_changed_source_before_completion_payload(self) -> None:
         async def scenario() -> None:
@@ -341,7 +538,7 @@ class ImportWorkerTest(unittest.TestCase):
                 self.assertEqual(candidates[0]["sourceCreatedAt"], "2026-08-17T20:00:00+00:00")
                 result = await worker.import_candidate(telegram, object(), "-100", {"candidate": candidates[0]})
                 self.assertEqual(set(result), {"sourceSetFingerprint", "source", "sourceFiles"})
-                self.assertEqual(result["source"]["sourceMessageId"], 42)
+                self.assertEqual(result["source"]["sourceMessageId"], "42")
                 self.assertNotIn("packetId", result["source"])
                 self.assertEqual(len(result["sourceFiles"]), 1)
                 self.assertEqual(result["sourceFiles"][0]["sizeBytes"], len(SVG.encode()))

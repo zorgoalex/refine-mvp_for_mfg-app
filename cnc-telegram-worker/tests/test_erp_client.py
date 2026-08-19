@@ -290,12 +290,32 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
             "eligibilityStatus": "valid",
             "sourceFiles": [{"kind": "svg", "sha256": "a" * 64}],
         }
+        messages = [{
+            "sourceChatId": "-100",
+            "sourceMessageId": 43,
+            "sourceThreadId": None,
+            "replyToMessageId": None,
+            "senderUserId": 101,
+            "sourceCreatedAt": "2026-08-18T12:01:00+00:00",
+            "sourceUpdatedAt": None,
+            "workday": "2026-08-18",
+            "messageType": "image",
+            "filename": None,
+            "mimeType": "image/png",
+            "messageText": "Скрин",
+            "outgoing": False,
+            "candidateSourceMessageId": 42,
+            "candidateRole": "screenshot",
+            "readOrdinal": 2,
+            "sourceFiles": [{"kind": "screenshot", "sha256": "d" * 64}],
+        }]
 
         with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
             await client.submit_import_scan_candidates(
                 "scan-1",
                 [candidate],
                 lease,
+                messages=messages,
                 days_scanned=3,
                 messages_scanned=42,
                 truncated=False,
@@ -308,6 +328,8 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outbound_candidate["sourceMessageId"], 42)
         self.assertEqual(outbound_candidate["sourceSetFingerprint"], "b" * 64)
         self.assertEqual(outbound_candidate["parsedSnapshot"], {"items": []})
+        self.assertEqual(payload["messages"], [{key: value for key, value in messages[0].items() if key != "sourceFiles"}])
+        self.assertNotIn("sourceFiles", payload["messages"][0])
         self.assertEqual(payload["itemLeaseToken"], "item-token")
         self.assertEqual(payload["itemLeaseGeneration"], 7)
         self.assertEqual(payload["itemLeaseOwner"], "worker-instance")

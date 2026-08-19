@@ -10805,6 +10805,26 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/v1/cnc-telegram/import-scans/{scanId}/messages:
+    get:
+      tags: [CncTelegramImport]
+      operationId: listCncTelegramImportMessages
+      summary: List all messages observed by an explicit scan in chronological order
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.view
+      parameters:
+        - name: scanId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+      responses:
+        '200': { description: Paginated raw Telegram messages and candidate links }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/cnc-telegram/import-scans/{scanId}/imports/prepare:
     post:
       tags: [CncTelegramImport]

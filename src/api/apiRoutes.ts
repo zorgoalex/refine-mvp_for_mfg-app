@@ -193,6 +193,7 @@ export const apiRoutes = {
     importScans: backendApiPath('/cnc-telegram/import-scans'),
     importScan: (scanId: string) => backendApiPath(`/cnc-telegram/import-scans/${encodeURIComponent(scanId)}`),
     importScanCandidates: (scanId: string) => backendApiPath(`/cnc-telegram/import-scans/${encodeURIComponent(scanId)}/candidates`),
+    importScanMessages: (scanId: string) => backendApiPath(`/cnc-telegram/import-scans/${encodeURIComponent(scanId)}/messages`),
     importPrepare: (scanId: string) => backendApiPath(`/cnc-telegram/import-scans/${encodeURIComponent(scanId)}/imports/prepare`),
     importConfirm: (importRequestId: string) => backendApiPath(`/cnc-telegram/imports/${encodeURIComponent(importRequestId)}/confirm`),
     importRepeatPrepare: (importRequestId: string) => backendApiPath(`/cnc-telegram/imports/${encodeURIComponent(importRequestId)}/repeat/prepare`),
