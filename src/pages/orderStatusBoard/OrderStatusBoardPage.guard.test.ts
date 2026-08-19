@@ -1285,6 +1285,29 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
   });
 
+  it('offers gated Telegram import on the fixed MDF board and refreshes after completion', () => {
+    expect(page).toContain("import { CutTelegramImportModal } from '../cut/CutTelegramImportModal';");
+    expect(page).toContain("const canImportTelegram = fixedView === 'cnc_today' && isCncToday && featureFlags.cncTelegram && can('cut.manage');");
+    expect(page).toContain('const telegramImportAction = canImportTelegram ? (');
+    expect(page).toContain('aria-label="Импорт из Telegram"');
+    expect(page).toContain('onClick={() => setTelegramImportOpen(true)}');
+    expect(page).toContain('actions={(');
+    expect(page).toContain('{telegramImportAction}');
+    expect(page).toContain('<CutTelegramImportModal');
+    expect(page).toContain('onDone={() => {');
+    expect(page).toContain('void fetchInitial({ preserveLoading: true });');
+    const telegramActionStart = page.indexOf('const telegramImportAction =');
+    const telegramActionEnd = page.indexOf('\n  const shouldApplyMdfWorkdayTodayOnOpen', telegramActionStart);
+    const telegramAction = page.slice(telegramActionStart, telegramActionEnd);
+    expect(telegramAction).toContain('type="default"');
+    expect(telegramAction).toContain('className="status-board-toolbar__telegram-import"');
+    const cncToolbarStart = page.indexOf('<div className="status-board-toolbar status-board-toolbar--cnc"');
+    const cncToolbarEnd = page.indexOf('\n          </div>', cncToolbarStart);
+    expect(page.slice(cncToolbarStart, cncToolbarEnd)).toContain('{telegramImportAction}');
+    expect(css).toMatch(/\.status-board-toolbar--cnc \.status-board-toolbar__telegram-import\.ant-btn\s*\{[^}]*display: none;/s);
+    expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.status-board-toolbar--cnc \.status-board-toolbar__telegram-import\.ant-btn\s*\{[^}]*min-height: 44px;[^}]*display: inline-flex;/s);
+  });
+
   it('forces the fifth orders column compact and half-width in detailed mode', () => {
     expect(page).toContain('const summaryOnly = detailedBathActive || isCncCardSummaryOnly(');
     expect(page).toContain("displayToggleVisible={!detailedBathActive && cardDisplayMode === 'compact'}");
