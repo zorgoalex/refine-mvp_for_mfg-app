@@ -463,7 +463,7 @@ export function cutJobMdfBoardLink(target: NonNullable<NonNullable<CutJobDto['md
     cardKind: target.kind === 'bath' ? 'bath' : 'packet',
     cardId: target.cardId,
   });
-  return `/order-status-board?${params.toString()}`;
+  return `/mdf-work-board?${params.toString()}`;
 }
 
 const CutJobMdfBoardCell: React.FC<{
@@ -473,6 +473,7 @@ const CutJobMdfBoardCell: React.FC<{
   creating: boolean;
   onCreate: (job: CutJobDto) => void;
 }> = ({ job, canOpenBoard, canCreate, creating, onCreate }) => {
+  const { push } = useNavigation();
   const status = job.mdfBoardStatus;
   const state = status?.state ?? 'unknown';
   const reason = status?.reason ?? 'Backend не вернул состояние МДФ-доски.';
@@ -481,6 +482,11 @@ const CutJobMdfBoardCell: React.FC<{
     <a
       className="cut-job-mdf-board-cell__link"
       href={cutJobMdfBoardLink(status.target)}
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        push(cutJobMdfBoardLink(status.target!));
+      }}
       aria-label={`Открыть ${status.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'} на МДФ-доске`}
     >
       {statusTag}

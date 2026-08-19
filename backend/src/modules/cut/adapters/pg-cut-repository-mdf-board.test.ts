@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildMdfBoardStatus, forcedMdfCardStorageKind } from './pg-cut-repository';
 
@@ -16,6 +17,17 @@ const row = (overrides: Record<string, unknown> = {}) => ({
 }) as never;
 
 describe('MDF board status projection', () => {
+  it('materializes unique order keys once instead of rescanning orders per bath candidate', () => {
+    const source = readFileSync(new URL('./pg-cut-repository.ts', import.meta.url), 'utf8');
+    const statusQuery = source.slice(
+      source.indexOf('async function loadMdfBoardStatuses'),
+      source.indexOf('export function buildMdfBoardStatus'),
+    );
+    expect(statusQuery).toContain('unique_order_keys AS MATERIALIZED');
+    expect(statusQuery.match(/JOIN unique_order_keys unique_order/g)).toHaveLength(2);
+    expect(statusQuery).not.toContain('FROM orders duplicate_order');
+  });
+
   it('maps a machine-file packet to a clickable target', () => {
     const status = buildMdfBoardStatus(row({
       active_packet_count: 1,

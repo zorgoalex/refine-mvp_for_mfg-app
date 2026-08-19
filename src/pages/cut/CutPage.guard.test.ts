@@ -578,6 +578,9 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain('onCreate={createMdfBoardCard}');
     expect(source).toContain('cutJobMdfBoardExportValue(candidate)');
     expect(source).toContain('cutApi.createMdfBoardCard(targetJob.cutJobId)');
+    expect(source).toContain('return `/mdf-work-board?${params.toString()}`');
+    expect(source).toContain('event.preventDefault();');
+    expect(source).toContain('push(cutJobMdfBoardLink(status.target!));');
     expect(source).toContain('job.mdfBoardStatus?.canCreateCard !== true');
     expect(source).toContain("job.mdfBoardStatus?.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'");
     expect(source).toContain('для МДФ-доски');

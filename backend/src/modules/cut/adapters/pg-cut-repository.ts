@@ -7036,7 +7036,15 @@ async function loadMdfBoardStatuses(
 
   const result = await client.query<MdfBoardStatusRow>(
     `
-    WITH packet_summary AS (
+    WITH unique_order_keys AS MATERIALIZED (
+      SELECT lower(trim(order_name)) AS order_key
+      FROM orders
+      WHERE delete_flag = false
+        AND order_name IS NOT NULL
+      GROUP BY lower(trim(order_name))
+      HAVING COUNT(*) = 1
+    ),
+    packet_summary AS (
       SELECT
         p.svg_cut_job_id::bigint AS cut_job_id,
         COUNT(*) FILTER (
@@ -7148,6 +7156,7 @@ async function loadMdfBoardStatuses(
           ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
          AND sheet.is_effective = true
         JOIN orders target_order ON target_order.order_id = placement.order_id AND target_order.delete_flag = false
+        JOIN unique_order_keys unique_order ON unique_order.order_key = lower(trim(target_order.order_name))
         JOIN order_details target_detail ON target_detail.detail_id = placement.order_detail_id AND target_detail.delete_flag = false
         JOIN cnc_telegram_packet_items item
           ON item.match_order_id IS NULL
@@ -7168,12 +7177,6 @@ async function loadMdfBoardStatuses(
           ON packet.packet_id = item.packet_id
          AND packet.mdf_board_hidden_at IS NULL
         WHERE placement.cut_result_id = j.current_cut_result_id
-          AND NOT EXISTS (
-            SELECT 1 FROM orders duplicate_order
-            WHERE duplicate_order.delete_flag = false
-              AND duplicate_order.order_id <> target_order.order_id
-              AND lower(trim(duplicate_order.order_name)) = lower(trim(target_order.order_name))
-          )
 
         UNION ALL
 
@@ -7183,6 +7186,7 @@ async function loadMdfBoardStatuses(
           ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
          AND sheet.is_effective = true
         JOIN orders target_order ON target_order.order_id = placement.order_id AND target_order.delete_flag = false
+        JOIN unique_order_keys unique_order ON unique_order.order_key = lower(trim(target_order.order_name))
         JOIN cnc_telegram_packet_whole_order_keys whole_order
           ON whole_order.order_key = lower(trim(target_order.order_name))
         JOIN cnc_telegram_packets packet
@@ -7196,12 +7200,6 @@ async function loadMdfBoardStatuses(
             WHERE lower(material_comment.comment_text) LIKE ANY (
               ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
             )
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM orders duplicate_order
-            WHERE duplicate_order.delete_flag = false
-              AND duplicate_order.order_id <> target_order.order_id
-              AND lower(trim(duplicate_order.order_name)) = lower(trim(target_order.order_name))
           )
       ) source
       WHERE COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
