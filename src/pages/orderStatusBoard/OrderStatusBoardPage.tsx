@@ -31,7 +31,6 @@ import {
   RightOutlined,
   ScheduleOutlined,
   SearchOutlined,
-  SendOutlined,
   ToolOutlined,
   TagsOutlined,
   UserOutlined,
@@ -79,7 +78,6 @@ import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
-import { CutTelegramImportModal } from '../cut/CutTelegramImportModal';
 import {
   CutSheetLabelGenerateAction,
   type CutSheetLabelCoverage,
@@ -571,19 +569,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     return parsed;
   }, [defaultCncOrderSearchPeriod, defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
-  const canImportTelegram = fixedView === 'cnc_today' && isCncToday && featureFlags.cncTelegram && can('cut.manage');
-  const [telegramImportOpen, setTelegramImportOpen] = useState(false);
-  const telegramImportAction = canImportTelegram ? (
-    <Button
-      type="default"
-      className="status-board-toolbar__telegram-import"
-      icon={<SendOutlined />}
-      aria-label="Импорт из Telegram"
-      onClick={() => setTelegramImportOpen(true)}
-    >
-      Импорт из Telegram
-    </Button>
-  ) : null;
   const shouldApplyMdfWorkdayTodayOnOpen =
     fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
   const mdfWorkdayTodayOpenPatchNeeded =
@@ -2097,7 +2082,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               <>
                 {isCncToday ? (
                   <>
-                    {telegramImportAction}
                     <Button
                       icon={<FilterOutlined />}
                       onClick={focusCncOrderSearch}
@@ -2144,7 +2128,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                   Обновлено {formatDateTime(generatedAt)}
                 </Typography.Text>
               )}
-              {telegramImportAction}
               <Tooltip title="Обновить доску">
                 <Button
                   aria-label="Обновить доску"
@@ -2383,7 +2366,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             >
               Добавить карту ванны
             </Button>
-            {telegramImportAction}
             <Select
               size="small"
               allowClear
@@ -2684,15 +2666,6 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             aria-label="Прокрутить МДФ-доску вправо"
             style={{ insetInlineEnd: cncBoardScrollButtonInsets.right }}
             onClick={() => scrollCncBoardHorizontally('right')}
-          />
-        )}
-        {canImportTelegram && (
-          <CutTelegramImportModal
-            open={telegramImportOpen}
-            onClose={() => setTelegramImportOpen(false)}
-            onDone={() => {
-              void fetchInitial({ preserveLoading: true });
-            }}
           />
         )}
       </main>

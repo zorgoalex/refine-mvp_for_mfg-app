@@ -80,6 +80,24 @@ describe('CutPage source guards', () => {
     expect(source).toContain("can('cut.view')");
   });
 
+  it('keeps Telegram import as a visible standalone Раскрой action in every page state', () => {
+    expect(source).toContain("import { CutTelegramImportModal } from './CutTelegramImportModal';");
+    expect(source).toContain("const canTelegramImport = canManage && featureFlags.cncTelegram && !isEmbeddedOrder;");
+    expect(source).toContain('const CutImportActionGroup: React.FC');
+    expect(source).toContain('onClick={onTelegramImport} style={{ minHeight: 40 }}>Импорт из Telegram</Button>');
+    expect(source).toContain('actions={job ? (');
+    expect(source).toContain('onClick={() => setTelegramImportOpen(true)}');
+    expect(source).toContain('<CutTelegramImportModal');
+    expect(source).toContain('{canTelegramImport && (\n        <CutTelegramImportModal');
+    expect(source).toContain('open={telegramImportOpen}');
+    expect(source).toContain('Импорт из Telegram');
+
+    const operationalToolbarStart = source.indexOf('<div className="cut-operational-table-toolbar">');
+    const operationalToolbarEnd = source.indexOf('\n          </div>', operationalToolbarStart);
+    expect(operationalToolbarStart).toBeGreaterThan(-1);
+    expect(source.slice(operationalToolbarStart, operationalToolbarEnd)).not.toContain('Импорт из Telegram');
+  });
+
   it('uses a stable React element key for sheet previews (decoupled from the cache key) to avoid scroll-jump on re-render', () => {
     // elemKey is per (group, sheet) — NOT the renderVersion-bearing cache key — so a
     // version bump (profile/material change) refreshes in place instead of remounting.

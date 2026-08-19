@@ -1285,27 +1285,13 @@ describe('OrderStatusBoardPage UX guards', () => {
     );
   });
 
-  it('offers gated Telegram import on the fixed MDF board and refreshes after completion', () => {
-    expect(page).toContain("import { CutTelegramImportModal } from '../cut/CutTelegramImportModal';");
-    expect(page).toContain("const canImportTelegram = fixedView === 'cnc_today' && isCncToday && featureFlags.cncTelegram && can('cut.manage');");
-    expect(page).toContain('const telegramImportAction = canImportTelegram ? (');
-    expect(page).toContain('aria-label="Импорт из Telegram"');
-    expect(page).toContain('onClick={() => setTelegramImportOpen(true)}');
-    expect(page).toContain('actions={(');
-    expect(page).toContain('{telegramImportAction}');
-    expect(page).toContain('<CutTelegramImportModal');
-    expect(page).toContain('onDone={() => {');
-    expect(page).toContain('void fetchInitial({ preserveLoading: true });');
-    const telegramActionStart = page.indexOf('const telegramImportAction =');
-    const telegramActionEnd = page.indexOf('\n  const shouldApplyMdfWorkdayTodayOnOpen', telegramActionStart);
-    const telegramAction = page.slice(telegramActionStart, telegramActionEnd);
-    expect(telegramAction).toContain('type="default"');
-    expect(telegramAction).toContain('className="status-board-toolbar__telegram-import"');
-    const cncToolbarStart = page.indexOf('<div className="status-board-toolbar status-board-toolbar--cnc"');
-    const cncToolbarEnd = page.indexOf('\n          </div>', cncToolbarStart);
-    expect(page.slice(cncToolbarStart, cncToolbarEnd)).toContain('{telegramImportAction}');
-    expect(css).toMatch(/\.status-board-toolbar--cnc \.status-board-toolbar__telegram-import\.ant-btn\s*\{[^}]*display: none;/s);
-    expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.status-board-toolbar--cnc \.status-board-toolbar__telegram-import\.ant-btn\s*\{[^}]*min-height: 44px;[^}]*display: inline-flex;/s);
+  it('keeps Telegram import off the MDF board source', () => {
+    expect(page).not.toContain("import { CutTelegramImportModal } from '../cut/CutTelegramImportModal';");
+    expect(page).not.toContain('CutTelegramImportModal');
+    expect(page).not.toContain('Импорт из Telegram');
+    expect(page).not.toContain('telegramImportOpen');
+    expect(page).not.toContain('canImportTelegram');
+    expect(css).not.toContain('status-board-toolbar__telegram-import');
   });
 
   it('forces the fifth orders column compact and half-width in detailed mode', () => {

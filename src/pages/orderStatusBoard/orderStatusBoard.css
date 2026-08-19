@@ -102,14 +102,6 @@
   display: none;
 }
 
-.status-board-toolbar__telegram-import.ant-btn {
-  min-height: 40px;
-}
-
-.status-board-toolbar--cnc .status-board-toolbar__telegram-import.ant-btn {
-  display: none;
-}
-
 .status-board-toolbar__date-range {
   width: 224px;
   flex: 0 0 224px;
@@ -3468,12 +3460,6 @@
 
   .status-board-toolbar__tablet-refresh.ant-btn,
   .status-board-toolbar__mobile-add-bath.ant-btn,
-  .status-board-toolbar--cnc .status-board-toolbar__telegram-import.ant-btn {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
 
   .status-board-toolbar__tablet-refresh.ant-btn {
     width: 44px;
