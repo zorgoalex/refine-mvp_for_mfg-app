@@ -569,10 +569,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     return parsed;
   }, [defaultCncOrderSearchPeriod, defaultSort, fixedView, searchParams]);
   const isCncToday = viewState.view === 'cnc_today';
+  const hasExplicitMdfCardDeepLink = Boolean(
+    viewState.cncCardKind && viewState.cncCardId && viewState.cncWorkday,
+  );
   const shouldApplyMdfWorkdayTodayOnOpen =
     fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
   const mdfWorkdayTodayOpenPatchNeeded =
     shouldApplyMdfWorkdayTodayOnOpen &&
+    !hasExplicitMdfCardDeepLink &&
     (viewState.cncWorkday !== todayCncWorkday || viewState.cncOrderFilters.length > 0);
   const {
     getSetting: getAppSetting,
