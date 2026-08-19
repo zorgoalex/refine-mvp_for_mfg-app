@@ -51,7 +51,10 @@ import {
   clearOrderDetailTailRowValues,
   countOrderDetailsWithRequiredEntryValues,
   orderDetailIdentityKey,
+  promoteOrderDetailOptions,
   prepareOrderDetailsForSave,
+  recentOrderDetailReferenceIds,
+  isOrderDetailPlaceholder,
 } from '../../../../utils/orderDetailRows';
 import { OrderDetailsToolbar } from '../OrderDetailsToolbar';
 import type { CutDetailLastReadyJobRef } from '../../../../api/types/cutApi.types';
@@ -84,7 +87,7 @@ import { BasisProjectLink } from '../BasisProjectLink';
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
   onDelete: (tempId: number, detailId?: number) => void;
-  onQuickAdd?: () => boolean | Promise<boolean>;
+  onQuickAdd?: (skipCurrentSave?: boolean) => boolean | Promise<boolean>;
   onInsertAfter?: (detail: OrderDetail) => void;
   onCopyRow?: (detail: OrderDetail) => void;
   onTransferRows?: (rowKeys: React.Key[]) => void;
@@ -108,6 +111,7 @@ interface OrderDetailTableProps {
 // Exposed methods via ref
 export interface OrderDetailTableRef {
   startEditRow: (detail: OrderDetail) => void;
+  startInitialHeightEdit: (detail: OrderDetail) => void;
   saveCurrentAndStartNew: (newDetail: OrderDetail) => Promise<boolean>;
   isEditing: () => boolean;
   applyCurrentEdits: () => Promise<boolean>;
@@ -179,7 +183,8 @@ const isOrderDetailSelectDropdownNavigation = (e: React.KeyboardEvent): boolean 
   const target = e.target;
   if (!(target instanceof HTMLElement)) return false;
 
-  return target.closest('.ant-select-open') !== null ||
+  return target.closest('.ant-select') !== null ||
+    target.closest('[role="combobox"]') !== null ||
     target.getAttribute('aria-expanded') === 'true';
 };
 
@@ -780,6 +785,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     () => [...details].sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0)),
     [details]
   );
+  const realSortedDetails = useMemo(
+    () => sortedDetails.filter((detail) => !isOrderDetailPlaceholder(detail)),
+    [sortedDetails],
+  );
+  const placeholderDetails = useMemo(
+    () => sortedDetails.filter(isOrderDetailPlaceholder),
+    [sortedDetails],
+  );
   const hdfDisplayBySourceDetailId = useMemo(
     () => buildOrderDetailHdfDisplayBySourceDetailId(hdfDetails),
     [hdfDetails],
@@ -806,7 +819,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }, [onSelectChange]);
 
   const dragSelection = useDragSelection({
-    items: sortedDetails,
+    items: realSortedDetails,
     getRowKey,
     selectedKeys: selectedRowKeys,
     onSelectionChange: handleDragSelectionChange,
@@ -1083,6 +1096,54 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const resolvedProductionStatusSelectProps = useBackendReferences
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
     : productionStatusSelectProps;
+
+  const editingDetailForOptions = useMemo(
+    () => sortedDetails.find((detail) => orderDetailRowKey(detail) === editingKey),
+    [editingKey, sortedDetails],
+  );
+  const localRecentIds = useMemo(() => {
+    if (!editingDetailForOptions) {
+      return { milling: [], edge: [], material: [], film: [], status: [] };
+    }
+    return {
+      milling: recentOrderDetailReferenceIds(sortedDetails, editingDetailForOptions, 'milling_type_id'),
+      edge: recentOrderDetailReferenceIds(sortedDetails, editingDetailForOptions, 'edge_type_id'),
+      material: recentOrderDetailReferenceIds(sortedDetails, editingDetailForOptions, 'sheet_material_type_id'),
+      film: recentOrderDetailReferenceIds(sortedDetails, editingDetailForOptions, 'film_id'),
+      status: recentOrderDetailReferenceIds(sortedDetails, editingDetailForOptions, 'production_status_id'),
+    };
+  }, [editingDetailForOptions, sortedDetails]);
+  const orderedMillingOptions = useMemo(
+    () => promoteOrderDetailOptions((resolvedMillingTypeSelectProps.options ?? []) as any[], localRecentIds.milling),
+    [localRecentIds.milling, resolvedMillingTypeSelectProps.options],
+  );
+  const orderedEdgeOptions = useMemo(
+    () => promoteOrderDetailOptions((resolvedEdgeTypeSelectProps.options ?? []) as any[], localRecentIds.edge),
+    [localRecentIds.edge, resolvedEdgeTypeSelectProps.options],
+  );
+  const catalogSheetOptions = useMemo(
+    () => toSheetSelectOptions(
+      filterCuttableOptions(sheetMaterials.catalogOptions)
+        .filter((option) => option.isActive !== false || option.value === watchedSheetId),
+      watchedSheetId,
+    ),
+    [sheetMaterials.catalogOptions, watchedSheetId],
+  );
+  const orderedSheetOptions = useMemo(
+    () => promoteOrderDetailOptions(catalogSheetOptions, localRecentIds.material),
+    [catalogSheetOptions, localRecentIds.material],
+  );
+  const orderedFilmOptions = useMemo(
+    () => promoteOrderDetailOptions((resolvedFilmSelectProps.options ?? []) as any[], localRecentIds.film),
+    [localRecentIds.film, resolvedFilmSelectProps.options],
+  );
+  const orderedProductionStatusOptions = useMemo(
+    () => promoteOrderDetailOptions(
+      (resolvedProductionStatusSelectProps.options ?? []) as any[],
+      localRecentIds.status,
+    ),
+    [localRecentIds.status, resolvedProductionStatusSelectProps.options],
+  );
   const referenceCellVersion = [
     orderFormData.isLoading ? 'loading' : 'ready',
     sheetMaterials.options.length,
@@ -1210,6 +1271,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     scrollToRow = false,
     requestedField?: React.Key,
     initialValue?: string | number,
+    markDirty = true,
   ) => {
     if (!groupingActive) {
       setCurrentPage(pageContainingOrderDetail(paginatedDetails, record, pageSize));
@@ -1234,7 +1296,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     // unlocked earlier would leak the editable state into the next edited row.
     setIsSumEditable(false);
     setSumContextMenu(null);
-    setDetailEditing(true); // Mark form as dirty when editing starts
+    if (markDirty) setDetailEditing(true);
 
     // FIX: Инициализируем ref значениями из записи
     fieldValuesRef.current = {
@@ -1338,7 +1400,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     try {
       const values = await validateInlineForm();
       const tempId = record.temp_id || record.detail_id!;
-      updateDetail(tempId, values);
+      updateDetail(tempId, { ...values, is_placeholder: false });
       if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
         sheetMaterials.promoteUsage(values.sheet_material_type_id);
       }
@@ -1354,7 +1416,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const finishInlineEditOnTab = async (record: OrderDetail) => {
     return await finishOrderDetailInlineTab({
       saveCurrentRow,
-      isLastRow: isLastOrderDetailRow(sortedDetails, record),
+      isLastRow: isLastOrderDetailRow(realSortedDetails, record),
       onQuickAdd,
     });
   };
@@ -1363,7 +1425,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     record: OrderDetail,
     columnKey: React.Key,
   ): Promise<boolean> => {
-    if (!onQuickAdd || !isLastOrderDetailRow(sortedDetails, record)) return false;
+    if (!onQuickAdd || !isLastOrderDetailRow(realSortedDetails, record)) return false;
     if (arrowDownQuickAddInFlightRef.current) return true;
     arrowDownQuickAddInFlightRef.current = true;
     pendingQuickAddFocusFieldRef.current = columnKey;
@@ -1390,7 +1452,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     if (e.key !== 'ArrowDown') return;
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (isOrderDetailSelectDropdownNavigation(e)) return;
-    if (!onQuickAdd || !isLastOrderDetailRow(sortedDetails, record)) return;
+    const currentIndex = sortedDetails.findIndex(
+      (detail) => orderDetailRowKey(detail) === orderDetailRowKey(record),
+    );
+    if (currentIndex < 0) return;
 
     e.preventDefault();
     e.stopPropagation();
@@ -1400,7 +1465,19 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     pendingFocusFieldRef.current = field;
 
     try {
-      const added = await onQuickAdd();
+      const saved = await saveCurrentRow();
+      if (!saved) {
+        pendingFocusFieldRef.current = null;
+        return;
+      }
+
+      const nextDetail = sortedDetails[currentIndex + 1];
+      if (nextDetail) {
+        startEdit(nextDetail, false, field);
+        return;
+      }
+
+      const added = await onQuickAdd?.(true);
       if (added === false) {
         pendingFocusFieldRef.current = null;
       }
@@ -1425,6 +1502,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         }
       }
       startEdit(detail, true);
+    },
+    startInitialHeightEdit: (detail) => {
+      pendingFocusFieldRef.current = 'height';
+      startEdit(detail, false, 'height', undefined, false);
     },
     isEditing: () => editingKey !== null,
     saveCurrentAndStartNew: async (newDetail: OrderDetail) => {
@@ -1504,7 +1585,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     try {
       const values = await validateInlineForm();
       const tempId = record.temp_id || record.detail_id!;
-      updateDetail(tempId, values);
+      updateDetail(tempId, { ...values, is_placeholder: false });
       if (Number.isSafeInteger(values.sheet_material_type_id) && values.sheet_material_type_id > 0) {
         sheetMaterials.promoteUsage(values.sheet_material_type_id);
       }
@@ -1740,10 +1821,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           <Form.Item name="milling_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               {...resolvedMillingTypeSelectProps}
+              options={orderedMillingOptions}
               placeholder="Тип фрезеровки"
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
-              dropdownMatchSelectWidth={false}
+              dropdownMatchSelectWidth={280}
+              virtual
+              listHeight={256}
               style={{ width: '100%', textAlign: 'left', ...getRequiredFieldStyle(watchedMillingTypeId) }}
             />
           </Form.Item>
@@ -1806,10 +1890,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           <Form.Item name="edge_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
               {...resolvedEdgeTypeSelectProps}
+              options={orderedEdgeOptions}
               placeholder="Тип кромки"
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
-              dropdownMatchSelectWidth={false}
+              dropdownMatchSelectWidth={240}
+              virtual
+              listHeight={256}
               style={{ width: '100%', textAlign: 'left', ...getRequiredFieldStyle(watchedEdgeTypeId) }}
             />
           </Form.Item>
@@ -1840,7 +1927,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         return isEditingField(d, 'sheet_material_type_id') ? (
           <Form.Item name="sheet_material_type_id" style={{ margin: 0, padding: '0 4px' }} rules={[{ required: true }]}>
             <Select
-              options={toSheetSelectOptions(filterCuttableOptions(sheetMaterials.options).filter(o => o.isActive !== false || o.value === watchedSheetId), watchedSheetId)}
+              options={orderedSheetOptions}
               loading={sheetMaterials.isLoading}
               placeholder="Материал"
               allowClear={
@@ -1849,7 +1936,9 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
               }
               showSearch
               optionFilterProp="label"
-              dropdownMatchSelectWidth={false}
+              dropdownMatchSelectWidth={320}
+              virtual
+              listHeight={256}
               onChange={(value) => queueMicrotask(() => validateDimensions(value))}
               style={{ width: '100%', textAlign: 'left' }}
             />
@@ -2028,11 +2117,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           <Form.Item name="film_id" style={{ margin: 0, padding: '0 4px' }}>
             <Select
               {...resolvedFilmSelectProps}
+              options={orderedFilmOptions}
               allowClear
               placeholder="Плёнка"
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
-              dropdownMatchSelectWidth={false}
+              dropdownMatchSelectWidth={360}
+              virtual
+              listHeight={256}
               style={{ width: '100%', textAlign: 'left' }}
               dropdownRender={(menu) => (
                 <>
@@ -2165,14 +2257,15 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           <Form.Item name="production_status_id" style={{ margin: 0, padding: '0 4px' }}>
             <Select
               {...resolvedProductionStatusSelectProps}
+              options={orderedProductionStatusOptions}
               allowClear
               placeholder="Статус"
               showSearch
               filterOption={(input, option) => ((option?.label as string) || '').toLowerCase().includes((input as string).toLowerCase())}
-              dropdownMatchSelectWidth={false}
+              dropdownMatchSelectWidth={280}
+              virtual
+              listHeight={256}
               style={{ width: '100%', textAlign: 'left' }}
-              tabIndex={-1}
-              onKeyDown={(e) => void handleArrowDownFromEditableCell(e, d, 'production_status_id')}
             />
           </Form.Item>
         ) : (
@@ -2434,7 +2527,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const direction = directionByKey[event.key];
     if (direction) {
       event.preventDefault();
-      if (direction === 'down' && isLastOrderDetailRow(sortedDetails, record)) {
+      if (direction === 'down' && isLastOrderDetailRow(realSortedDetails, record)) {
         void requestQuickAddFromLastRow(record, columnKey);
         return;
       }
@@ -2482,6 +2575,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     const currentField = String(editingField);
     const currentCell = { rowKey: String(editingKey), columnKey: currentField };
+    if (event.key === 'ArrowDown' && isOrderDetailSelectDropdownNavigation(event)) return;
     const selectIsOpen = !!target.closest('.ant-select-open')
       || target.getAttribute('aria-expanded') === 'true';
     if (event.key === 'Escape') {
@@ -2506,7 +2600,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const currentRecord = details.find((detail) =>
           (detail.temp_id || detail.detail_id) === editingKey,
         );
-        if (currentRecord && isLastOrderDetailRow(sortedDetails, currentRecord)) {
+        if (currentRecord && isLastOrderDetailRow(realSortedDetails, currentRecord)) {
           void requestQuickAddFromLastRow(currentRecord, currentField);
           return;
         }
@@ -2672,8 +2766,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     [activeSheetMaterialNames, activeSorter.key],
   );
   const paginatedDetails = useMemo(
-    () => sortOrderDetailsForPagination(sortedDetails, activeCompare, activeSorter.order),
-    [activeCompare, activeSorter.order, sortedDetails],
+    () => sortOrderDetailsForPagination(realSortedDetails, activeCompare, activeSorter.order),
+    [activeCompare, activeSorter.order, realSortedDetails],
   );
 
   const summaryAwareColumns = controlledColumns.map((column: any) => {
@@ -2896,7 +2990,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           ),
         columnWidth: 24,
         getCheckboxProps: (row: any) =>
-          row?.kind === 'separator' || row?.kind === 'summary'
+          row?.kind === 'separator' || row?.kind === 'summary' || isOrderDetailPlaceholder(asDetail(row)!)
             ? { disabled: true, style: { display: 'none' } }
             : {},
         renderCell: (_c: boolean, row: any, _i: number, node: React.ReactNode) => {
@@ -3085,22 +3179,22 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   const tableRows = useMemo(
     () => (groupingActive
-      ? buildGroupedRows(sortedDetails, groupField!, {
+      ? buildGroupedRows(realSortedDetails, groupField!, {
           includeLeadingSeparator: cutSelectable,
           groupKeyOf: (dd: any) => (dd.detail_id != null ? (dd.temp_id ?? dd.detail_id) : null),
           groupValueOf,
           groupLabelOf,
-        })
-      : paginatedDetails),
-    [groupingActive, sortedDetails, paginatedDetails, groupField, cutSelectable, groupValueOf, groupLabelOf],
+        }).concat(placeholderDetails as any[])
+      : paginatedDetails.concat(placeholderDetails)),
+    [groupingActive, realSortedDetails, placeholderDetails, paginatedDetails, groupField, cutSelectable, groupValueOf, groupLabelOf],
   );
 
   const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {
     if (!onSelectChange) return;
-    const keys = sortedDetails.filter(predicate).map(getRowKey);
+    const keys = realSortedDetails.filter(predicate).map(getRowKey);
     onSelectChange(keys);
     closeRowContextMenu();
-  }, [closeRowContextMenu, getRowKey, onSelectChange, sortedDetails]);
+  }, [closeRowContextMenu, getRowKey, onSelectChange, realSortedDetails]);
 
   const uniqueIds = useCallback((items: OrderDetail[], getId: (d: OrderDetail) => number | null | undefined) => {
     const set = new Set<number>();
@@ -3137,12 +3231,12 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }, []);
 
   const selectionAggregates = useMemo(() => {
-    const millingIds = uniqueIds(sortedDetails, d => d.milling_type_id);
-    const sheetTypeIds = uniqueIds(sortedDetails, d => d.sheet_material_type_id);
-    const filmIds = uniqueIds(sortedDetails, d => d.film_id ?? null);
-    const edgeIds = uniqueIds(sortedDetails, d => d.edge_type_id);
-    const prices = uniquePrices(sortedDetails);
-    const noteValues = uniqueStrings(sortedDetails, d => d.note ?? null).sort((a, b) => a.localeCompare(b, 'ru'));
+    const millingIds = uniqueIds(realSortedDetails, d => d.milling_type_id);
+    const sheetTypeIds = uniqueIds(realSortedDetails, d => d.sheet_material_type_id);
+    const filmIds = uniqueIds(realSortedDetails, d => d.film_id ?? null);
+    const edgeIds = uniqueIds(realSortedDetails, d => d.edge_type_id);
+    const prices = uniquePrices(realSortedDetails);
+    const noteValues = uniqueStrings(realSortedDetails, d => d.note ?? null).sort((a, b) => a.localeCompare(b, 'ru'));
 
     return {
       millingIds,
@@ -3151,42 +3245,42 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       edgeIds,
       prices,
       noteValues,
-      hasEmptyMilling: sortedDetails.some(d => {
+      hasEmptyMilling: realSortedDetails.some(d => {
         const value = d.milling_type_id;
         if (value === null || value === undefined) return true;
         const num = Number(value);
         return !Number.isFinite(num) || num <= 0;
       }),
-      hasEmptyMaterial: sortedDetails.some(d => {
+      hasEmptyMaterial: realSortedDetails.some(d => {
         const value = d.sheet_material_type_id;
         if (value === null || value === undefined) return true;
         const num = Number(value);
         return !Number.isFinite(num) || num <= 0;
       }),
-      hasEmptyFilm: sortedDetails.some(d => {
+      hasEmptyFilm: realSortedDetails.some(d => {
         const value = d.film_id;
         if (value === null || value === undefined) return true;
         const num = Number(value);
         return !Number.isFinite(num) || num <= 0;
       }),
-      hasEmptyEdge: sortedDetails.some(d => {
+      hasEmptyEdge: realSortedDetails.some(d => {
         const value = d.edge_type_id;
         if (value === null || value === undefined) return true;
         const num = Number(value);
         return !Number.isFinite(num) || num <= 0;
       }),
-      hasEmptyPrice: sortedDetails.some(d => {
+      hasEmptyPrice: realSortedDetails.some(d => {
         const value = d.milling_cost_per_sqm;
         if (value === null || value === undefined) return true;
         const num = Number(value);
         return !Number.isFinite(num);
       }),
-      hasEmptyNote: sortedDetails.some(d => !(d.note || '').trim()),
-      hasDoweling: sortedDetails.some(d => d.doweling === true),
-      hasPrisadka: sortedDetails.some(d => (d.note || '').includes('Присадка')),
-      hasChernovoy: sortedDetails.some(d => (d.note || '').includes('Черновой')),
+      hasEmptyNote: realSortedDetails.some(d => !(d.note || '').trim()),
+      hasDoweling: realSortedDetails.some(d => d.doweling === true),
+      hasPrisadka: realSortedDetails.some(d => (d.note || '').includes('Присадка')),
+      hasChernovoy: realSortedDetails.some(d => (d.note || '').includes('Черновой')),
     };
-  }, [sortedDetails, uniqueIds, uniquePrices, uniqueStrings]);
+  }, [realSortedDetails, uniqueIds, uniquePrices, uniqueStrings]);
 
   const noteValueKeyToValue = useMemo(() => {
     const map = new Map<string, string>();
@@ -3316,7 +3410,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         disabled: !!contextTransferDisabledReason,
       },
       { type: 'divider' as const },
-      { key: 'select', label: 'Выделить', children: categories, disabled: !onSelectChange || sortedDetails.length === 0 },
+      { key: 'select', label: 'Выделить', children: categories, disabled: !onSelectChange || realSortedDetails.length === 0 },
       { type: 'divider' as const },
       { key: 'action:delete', label: 'Удалить строку', icon: <DeleteOutlined />, danger: true },
     ];
@@ -3343,7 +3437,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     selectionAggregates.materialIds,
     selectionAggregates.millingIds,
     selectionAggregates.prices,
-    sortedDetails.length,
+    realSortedDetails.length,
   ]);
 
   const handleContextMenuClick: MenuProps['onClick'] = useCallback((info) => {
@@ -3533,7 +3627,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
   return (
     <>
-    <Form form={form} component={false}>
+    <Form form={form} component={false} onValuesChange={() => setDetailEditing(true)}>
       <div
         ref={tableContainerRef}
         className={dragSelection.isDragging ? 'drag-selection-active' : ''}
@@ -3609,6 +3703,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           if (row?.kind === 'summary') return 'detail-group-summary';
           const record = asDetail(row)!;
           const rowKey = record.temp_id || record.detail_id || 0;
+          if (isOrderDetailPlaceholder(record)) return 'order-detail-row-placeholder';
           if (!groupingActive) {
             const classes: string[] = [];
             if (dragSelection.isInPendingSelection(rowKey)) classes.push('drag-selection-pending');
@@ -3680,6 +3775,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           const isHighlighted = highlightedRowKey !== null && rowKey === highlightedRowKey;
           const isCurrentlyEditing = isEditing(record);
           const isValidationError = isValidationInvalid(record);
+          const isPlaceholder = isOrderDetailPlaceholder(record);
 
           return {
             ref: isHighlighted ? highlightedRowRef : undefined,
@@ -3691,7 +3787,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                 return;
               }
               // Only start drag if not editing and not clicking interactive elements
-              if (!isCurrentlyEditing) {
+              if (!isCurrentlyEditing && !isPlaceholder) {
                 dragSelection.handleMouseDown(rowKey, e);
               }
              },
@@ -3699,12 +3795,14 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                if ((e.target as HTMLElement).closest('[data-order-detail-spreadsheet-cell="true"]')) {
                  return;
                }
-               startEdit(record);
+               if (!isPlaceholder) startEdit(record);
              },
              onContextMenu: (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setRowContextMenu({ x: e.clientX, y: e.clientY, record });
+                if (!isPlaceholder) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setRowContextMenu({ x: e.clientX, y: e.clientY, record });
+                }
               },
             };
           }}

@@ -1,5 +1,78 @@
 import type { OrderDetail } from '../types/orders';
 
+export const MIN_ORDER_DETAIL_GRID_ROWS = 20;
+export const MAX_ORDER_DETAIL_RECENT_VALUES = 20;
+
+export type OrderDetailReferenceField =
+  | 'milling_type_id'
+  | 'edge_type_id'
+  | 'sheet_material_type_id'
+  | 'film_id'
+  | 'production_status_id';
+
+export interface OrderDetailReferenceOption {
+  value: number;
+  label?: unknown;
+}
+
+export function isOrderDetailPlaceholder(
+  detail: Pick<OrderDetail, 'is_placeholder'> | null | undefined,
+): boolean {
+  return detail?.is_placeholder === true;
+}
+
+export function businessOrderDetails(details: readonly OrderDetail[]): OrderDetail[] {
+  return details.filter((detail) => !isOrderDetailPlaceholder(detail));
+}
+
+export function recentOrderDetailReferenceIds(
+  details: readonly OrderDetail[],
+  currentDetail: OrderDetail,
+  field: OrderDetailReferenceField,
+  limit = MAX_ORDER_DETAIL_RECENT_VALUES,
+): number[] {
+  const currentKey = currentDetail.temp_id ?? currentDetail.detail_id;
+  const currentIndex = details.findIndex(
+    (detail) => (detail.temp_id ?? detail.detail_id) === currentKey,
+  );
+  if (currentIndex <= 0 || limit <= 0) return [];
+
+  const recentIds: number[] = [];
+  const seen = new Set<number>();
+  for (let index = currentIndex - 1; index >= 0 && recentIds.length < limit; index -= 1) {
+    const detail = details[index];
+    if (isOrderDetailPlaceholder(detail)) continue;
+    const value = Number(detail[field]);
+    if (!Number.isSafeInteger(value) || value <= 0 || seen.has(value)) continue;
+    seen.add(value);
+    recentIds.push(value);
+  }
+  return recentIds;
+}
+
+/** Promote order-local recent values while preserving catalog order for the remainder. */
+export function promoteOrderDetailOptions<T extends OrderDetailReferenceOption>(
+  options: readonly T[],
+  recentIds: readonly number[],
+): T[] {
+  if (recentIds.length === 0) return [...options];
+  const byId = new Map(options.map((option) => [Number(option.value), option]));
+  const promoted: T[] = [];
+  const promotedIds = new Set<number>();
+
+  recentIds.forEach((id) => {
+    const option = byId.get(id);
+    if (!option || promotedIds.has(id)) return;
+    promoted.push(option);
+    promotedIds.add(id);
+  });
+
+  options.forEach((option) => {
+    if (!promotedIds.has(Number(option.value))) promoted.push(option);
+  });
+  return promoted;
+}
+
 const DETAIL_FIELDS_CLEARED_FOR_EMPTY_TAIL: Partial<Record<keyof OrderDetail, null | false>> = {
   height: null,
   width: null,

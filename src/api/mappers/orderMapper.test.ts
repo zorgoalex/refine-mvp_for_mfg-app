@@ -643,6 +643,22 @@ describe('orderMapper', () => {
     expect(dto.header.materialId).toBeNull();
   });
 
+  it('never emits frontend-only placeholder details', () => {
+    const form = createFormValues();
+    const baselineCount = mapOrderFormToSaveOrderDto(form).details.length;
+    form.details.push({
+      ...form.details[0],
+      detail_id: undefined,
+      temp_id: 999,
+      detail_number: 99,
+      is_placeholder: true,
+    });
+
+    const dto = mapOrderFormToSaveOrderDto(form);
+    expect(dto.details).toHaveLength(baselineCount);
+    expect(dto.details.some((row) => row.clientKey === '999')).toBe(false);
+  });
+
   it('normalizes dayjs-like dates and strips frontend-only fields', () => {
     expect(normalizeDateOnly({ format: () => '2026-04-30' })).toBe('2026-04-30');
     expect(
