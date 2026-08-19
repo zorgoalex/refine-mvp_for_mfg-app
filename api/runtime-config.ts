@@ -15,6 +15,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   const baseConfig = buildFrontendRuntimeConfig();
   const config = {
     ...baseConfig,
+    apiUrl: baseConfig.apiUrl || inferRuntimeApiUrl(req),
     features: {
       ...baseConfig.features,
       statusAutomation: readBooleanEnv(process.env.RUNTIME_CONFIG_STATUS_AUTOMATION, false),
@@ -29,4 +30,19 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   return res.status(200).json(config);
+}
+
+function inferRuntimeApiUrl(req: VercelRequest): string {
+  const rawHost = Array.isArray(req.headers?.host) ? req.headers.host[0] : req.headers?.host;
+  const host = rawHost?.trim().toLowerCase().replace(/:\d+$/, '') ?? '';
+
+  if (
+    host === 'stage.mebelkz.app' ||
+    process.env.VERCEL_ENV === 'preview' ||
+    process.env.VERCEL_GIT_COMMIT_REF === 'feat/backend-erp-stage1'
+  ) {
+    return 'https://backend.dev.mebelkz.app';
+  }
+
+  return '';
 }

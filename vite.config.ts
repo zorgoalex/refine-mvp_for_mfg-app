@@ -2,14 +2,69 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
 
+const FRONTEND_PUBLIC_ENV_KEYS = [
+  "VITE_API_URL",
+  "VITE_BITRIX24_LABEL",
+  "VITE_BITRIX24_URL",
+  "VITE_CURRENCY_CODE",
+  "VITE_CURRENCY_NAME",
+  "VITE_CURRENCY_SYMBOL",
+  "VITE_ENABLE_LEGACY_HASURA",
+  "VITE_HASURA_GRAPHQL_URL",
+  "VITE_ORDER_REALTIME",
+  "VITE_ORDER_STATUS_BOARD",
+  "VITE_PDF_IMPORT_LAYOUT_PATTERNS",
+  "VITE_RUNTIME_CONFIG_URL",
+  "VITE_SHEET_MATERIALS_READS",
+  "VITE_STATUS_AUTOMATION",
+  "VITE_UI_EVOLUTION",
+  "VITE_USE_BACKEND_AUTH",
+  "VITE_USE_BACKEND_BAZIS",
+  "VITE_USE_BACKEND_BAZIS_CUT",
+  "VITE_USE_BACKEND_CLIENT_PHONES",
+  "VITE_USE_BACKEND_CNC_TELEGRAM",
+  "VITE_USE_BACKEND_CUT",
+  "VITE_USE_BACKEND_DEADLINES",
+  "VITE_USE_BACKEND_GROUPS",
+  "VITE_USE_BACKEND_LABELS",
+  "VITE_USE_BACKEND_ORDERS",
+  "VITE_USE_BACKEND_ORDERS_READ",
+  "VITE_USE_BACKEND_ORDERS_WRITE",
+  "VITE_USE_BACKEND_ORDER_EXPORT",
+  "VITE_USE_BACKEND_PAYMENTS",
+  "VITE_USE_BACKEND_PERMISSIONS",
+  "VITE_USE_BACKEND_PRODUCTION_ACTIONS",
+  "VITE_USE_BACKEND_REFERENCES",
+  "VITE_USE_BACKEND_USERS",
+  "VITE_USE_BACKEND_VLM",
+  "VITE_USE_PROJECTS",
+  "VITE_WORKOS_AUTH",
+] as const;
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const backendApiTarget = env.VITE_API_URL || env.VITE_BACKEND_URL || "http://localhost:3000";
   const legacyApiTarget = env.VITE_LEGACY_API_URL || "http://localhost:3001";
+  const publicEnv = Object.fromEntries(
+    FRONTEND_PUBLIC_ENV_KEYS.flatMap((key) => env[key] === undefined ? [] : [[key, env[key]]]),
+  );
 
   return {
     plugins: [react()],
+    // VITE_* is not a security boundary. Disable Vite's broad automatic exposure
+    // and inject only explicitly approved browser-safe values.
+    envPrefix: "ERP_PUBLIC_",
+    define: {
+      "import.meta.env": JSON.stringify({
+        BASE_URL: "/",
+        MODE: mode,
+        DEV: mode !== "production",
+        PROD: mode === "production",
+        SSR: false,
+        ...publicEnv,
+      }),
+    },
     worker: {
       format: "es",
     },
