@@ -4325,7 +4325,8 @@ function buildTelegramInformationalSvgCutImportPlan(
   layout: CncTelegramCutLayoutDto,
   strictFailureReason: string,
 ): SvgCutImportPlan {
-  if (dto.source.chatId === MANUAL_SVG_CHAT_ID || !isTelegramSvgDetailMatchFailure(strictFailureReason)) {
+  const isTelegramImportCopy = dto.externalPacketKey.startsWith('telegram-import:');
+  if ((!isTelegramImportCopy && dto.source.chatId === MANUAL_SVG_CHAT_ID) || !isTelegramSvgDetailMatchFailure(strictFailureReason)) {
     return { ok: false, reason: strictFailureReason };
   }
   const sheet = layout.sheet;

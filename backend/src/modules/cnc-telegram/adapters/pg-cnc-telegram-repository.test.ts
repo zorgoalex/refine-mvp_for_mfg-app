@@ -2771,6 +2771,80 @@ describe('PgCncTelegramRepository', () => {
     expect(result.packet.svgCutImportStatus).toBe('imported');
   });
 
+  it('allows the no-order informational fallback for a transformed Telegram import copy', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM orders o\s+JOIN order_details od/i.test(text)) return { rows: [] };
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/FROM cnc_telegram_packets\s+WHERE external_packet_key/i.test(text)) return { rows: [] };
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/SELECT svg_cut_job_id, svg_cut_result_id, svg_cut_import_status, cutting_sequence_no/i.test(text)) {
+          return { rows: [{ svg_cut_job_id: null, svg_cut_result_id: null, svg_cut_import_status: 'none', cutting_sequence_no: 105 }] };
+        }
+        if (/INSERT INTO cut_job\s*\(/i.test(text)) {
+          return { rows: [{ cut_job_id: 810, created_at: '2026-08-19T10:00:00.000Z' }] };
+        }
+        if (/INSERT INTO cut_group\s*\(/i.test(text)) return { rows: [{ cut_group_id: 811 }] };
+        if (/INSERT INTO cut_group_sheet\s*\(/i.test(text)) return { rows: [{ cut_group_sheet_id: 812 }] };
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow({ cutting_sequence_no: 105, svg_cut_job_id: 810, svg_cut_result_id: null, svg_cut_import_status: 'imported' })] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) return { rows: [{ audit_id: 'audit-1' }] };
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository({ transaction: vi.fn((handler) => handler(tx)) } as never);
+
+    const result = await repo.ingest({
+      currentUser: user(),
+      dto: {
+        ...ingestDto(),
+        idempotencyKey: 'cnc:test:repo:telegram-copy-no-order',
+        externalPacketKey: 'telegram-import:import-item-1',
+        source: { chatId: 'erp-manual-svg-upload', version: 1 },
+        cuttingSequenceNo: 105,
+        svgImportMode: { validationMode: 'lenient' as const },
+        items: [{
+          sourceItemKey: '2808:6:95x720', orderName: '2808', detailNumber: 6,
+          widthMm: 95, heightMm: 720, quantity: 1, source: 'vector' as const,
+          confidence: 1, matchStatus: 'unmatched' as const,
+        }],
+        cutLayout: {
+          status: 'valid' as const,
+          reasons: [],
+          sheet: { widthMm: 2070, heightMm: 2800 },
+          items: [{
+            orderName: '2808', detailNumber: 6, widthMm: 95, heightMm: 720,
+            quantity: 1, confidence: 1, sourceElementId: 'PartContour-1',
+            xMm: 10, yMm: 20, placedWidthMm: 95, placedHeightMm: 720, rotated: false,
+          }],
+        },
+      },
+      requestId: 'request-telegram-copy-no-order',
+    });
+
+    const sheetInsert = queries.find((query) => /INSERT INTO cut_group_sheet\s*\(/i.test(query.text));
+    const importUpdate = queries.find((query) =>
+      /UPDATE cnc_telegram_packets/i.test(query.text) && /svg_cut_import_status = \$2/i.test(query.text));
+    expect(queries.some((query) => /INSERT INTO cut_job\s*\(/i.test(query.text))).toBe(true);
+    expect(JSON.parse(String(sheetInsert?.params[2]))).toMatchObject({
+      pieces: [{ label: { orderId: null, orderName: '2808', detailId: null } }],
+    });
+    expect(importUpdate?.params.slice(1, 5)).toEqual([
+      'imported',
+      'Предупреждение: раскрой создан без привязки к ERP-заказу; проверьте заказ вручную',
+      810,
+      null,
+    ]);
+    expect(result.packet).toMatchObject({ svgCutJobId: 810, svgCutResultId: null, svgCutImportStatus: 'imported' });
+  });
+
   it('keeps ERP detail matches when manual SVG upload uses lenient validation', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
