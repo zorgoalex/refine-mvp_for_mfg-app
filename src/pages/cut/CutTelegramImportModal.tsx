@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, Checkbox, DatePicker, Empty, Modal, Progress, Space, Spin, Steps, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Checkbox, DatePicker, Empty, Modal, Progress, Space, Spin, Steps, Tag, Typography, message } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
 import { CheckCircleOutlined, ExclamationCircleOutlined, LinkOutlined, SearchOutlined, SendOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -9,6 +9,7 @@ import { featureFlags } from '../../config/featureFlags';
 import { useCncTelegramImport } from '../../hooks/useCncTelegramImport';
 import type { CncTelegramImportCandidate, CncTelegramImportItem, CncTelegramImportMatch, CncTelegramImportScan } from '../../api/types/cncTelegramImportApi.types';
 import { needsDuplicateReconfirmation, repeatableItems } from './cutTelegramImportHelpers';
+import { Table } from '../../ui/tooltipDelay';
 
 const { Text, Paragraph } = Typography;
 const MAX_SCAN_DAYS = 31;
