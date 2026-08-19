@@ -6,6 +6,7 @@ import type {
   CncTelegramManualSvgUploadRequest,
   CncTelegramManualSvgUploadResponse,
   CncTelegramTodayResponse,
+  CreateCncMdfCardResponse,
 } from './types/cncTelegramApi.types';
 
 export interface CncTelegramTodayQuery {
@@ -30,6 +31,13 @@ export const cncTelegramApi = {
     return httpClient.post<CncTelegramManualSvgUploadResponse>(
       apiRoutes.cncTelegram.manualSvgUpload,
       body,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+  },
+  createMdfCard(cutJobId: number, idempotencyKey: string): Promise<CreateCncMdfCardResponse> {
+    return httpClient.post<CreateCncMdfCardResponse>(
+      apiRoutes.cncTelegram.createMdfCard(cutJobId),
+      {},
       { headers: { 'Idempotency-Key': idempotencyKey } },
     );
   },

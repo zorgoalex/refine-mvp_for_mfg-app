@@ -1157,6 +1157,83 @@ html {
   overflow-wrap: anywhere;
 }
 
+.cut-jobs-table .cut-job-mdf-board-cell {
+  display: grid;
+  max-width: 168px;
+  justify-items: center;
+  gap: 2px;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell__link,
+.cut-jobs-table .cut-job-mdf-board-cell__create {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  transition-property: transform, opacity;
+  transition-duration: 150ms;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell__link:active,
+.cut-jobs-table .cut-job-mdf-board-cell__create:active {
+  transform: scale(0.96);
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell__link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell .ant-tag {
+  margin-inline-end: 0;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell__reason {
+  display: -webkit-box;
+  max-width: 124px;
+  overflow: hidden;
+  font-size: 0.9em;
+  line-height: 1.15;
+  text-align: center;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.cut-job-order-links {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  max-width: 100%;
+  line-height: 1.15;
+}
+
+.cut-order-reference {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.cut-order-reference .ant-btn-link {
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  font-size: inherit !important;
+  line-height: 1.15 !important;
+  white-space: normal;
+  text-align: left;
+}
+
+.cut-job-order-links__separator {
+  margin-right: 4px;
+}
+
+.cut-job-operational-stats__orders .cut-job-order-links {
+  margin-left: 4px;
+  justify-content: flex-start;
+}
+
 .cut-jobs-table .cut-jobs-actions {
   align-items: center;
   justify-content: center;

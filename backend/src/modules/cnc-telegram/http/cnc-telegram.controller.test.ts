@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import {
   parseDateQuery,
+  parseCutJobId,
   parseIdempotencyKey,
   parseManualSvgCommentPreset,
   parseManualSvgUpload,
@@ -39,6 +40,12 @@ describe('CncTelegramController parsing', () => {
     expect(parseIdempotencyKey(['cnc:test:first', 'cnc:test:second'])).toBe('cnc:test:first');
     expect(() => parseIdempotencyKey(undefined)).toThrow(ApiError);
     expect(() => parseIdempotencyKey('short')).toThrow(ApiError);
+  });
+
+  it('accepts only positive integer cut-job route ids', () => {
+    expect(parseCutJobId('42')).toBe(42);
+    expect(() => parseCutJobId('0')).toThrow(ApiError);
+    expect(() => parseCutJobId('4.2')).toThrow(ApiError);
   });
 
   it('keeps match ids coherent in structured rows', () => {

@@ -107,6 +107,30 @@ describe('cncTelegramApi', () => {
     });
   });
 
+  it('creates a cut-job MDF card with idempotency header', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          cutJobId: 42,
+          cutResultId: 100,
+          cardKind: 'bath',
+          cardId: 'cut-result:100',
+          workday: '2026-08-19',
+          created: true,
+        }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.createMdfCard(42, 'cut-mdf-card:test-42');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cnc-telegram/cut-jobs/42/mdf-card');
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect(new Headers(init.headers).get('Idempotency-Key')).toBe('cut-mdf-card:test-42');
+  });
+
   it('creates manual SVG comment presets with idempotency header', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

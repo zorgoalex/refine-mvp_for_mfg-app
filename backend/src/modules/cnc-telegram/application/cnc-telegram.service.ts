@@ -3,6 +3,7 @@ import { PermissionsService } from '../../../permissions/permissions.service';
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
+  CreateCncMdfCardCommand,
   CreateManualSvgCommentPresetCommand,
   IngestCncTelegramPacketCommand,
   ListManualSvgCommentPresetsCommand,
@@ -14,6 +15,7 @@ import type {
   CncTelegramManualSvgCommentPresetDto,
   CncTelegramManualSvgUploadResponseDto,
   CncTelegramTodayResponseDto,
+  CreateCncMdfCardResponseDto,
 } from '../dto/cnc-telegram.dto';
 
 export interface CncTelegramServicePorts {
@@ -56,6 +58,16 @@ export class CncTelegramService {
       });
     }
     return this.ports.packets.manualSvgUpload(command);
+  }
+
+  async createMdfCard(command: CreateCncMdfCardCommand): Promise<CreateCncMdfCardResponseDto> {
+    if (!this.permissions.canUser(command.currentUser, 'cut.manage')) {
+      await this.recordMdfCardDenied(command);
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для создания карточки МДФ-доски', {
+        requiredPermissions: ['cut.manage'],
+      });
+    }
+    return this.ports.packets.createMdfCard(command);
   }
 
   async listManualSvgCommentPresets(
@@ -118,6 +130,21 @@ export class CncTelegramService {
         event: 'cnc.manual_svg_comment_preset.create_denied',
         requestId: command.requestId,
         externalPacketKey: command.dto.label,
+        reason: 'PERMISSION_DENIED',
+        requiredPermissions: ['cut.manage'],
+      });
+    } catch {
+      // Deny response must not depend on the audit sink.
+    }
+  }
+
+  private async recordMdfCardDenied(command: CreateCncMdfCardCommand): Promise<void> {
+    try {
+      await this.ports.deniedAudit?.recordIngestDenied({
+        currentUser: command.currentUser,
+        event: 'cnc.mdf_card.create_denied',
+        requestId: command.requestId,
+        externalPacketKey: String(command.cutJobId),
         reason: 'PERMISSION_DENIED',
         requiredPermissions: ['cut.manage'],
       });

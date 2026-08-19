@@ -77,6 +77,8 @@ import type {
   SetCutJobPdfTemplateCommand,
   SetCutJobNameCommand,
   SetCutJobSplitByMaterialCommand,
+  SetCutJobRotationAllowedCommand,
+  SetCutJobTextureDirectionCommand,
   SetCutGroupPdfTemplateCommand,
   SetPdfPrewarmStateQuery,
 } from '../application/cut-command.types';
@@ -90,10 +92,12 @@ import type {
   CutGroupDto,
   CutJobDeleteImpactDto,
   CutJobLinkedMdfPacketDto,
+  CutJobMdfBoardStatusDto,
   CutJobItemDto,
   CutJobDto,
   CutJobRefDto,
   CutJobTotals,
+  CutTextureDirection,
   CutResultDto,
   CutResultKind,
   CutResultSummaryDto,
@@ -203,6 +207,11 @@ interface PdfRenderIdentity {
   cutNumber: string | null;
 }
 
+interface PdfRenderJobFields {
+  jobName: string;
+  textureDirection: string;
+}
+
 /** Related audit dimensions when a Phase 1 failure has not yet resolved groups. */
 interface CalcRelatedDimensions {
   orderIds: number[];
@@ -230,6 +239,8 @@ interface CutJobLockRow extends QueryResultRow {
   pdf_template_code: string | null;
   combine_films: boolean | null;
   split_by_material: boolean | null;
+  rotation_allowed: boolean | null;
+  texture_direction: string | null;
 }
 
 interface CutResultRow extends QueryResultRow {
@@ -268,6 +279,18 @@ interface DeleteImpactPacketRow extends QueryResultRow {
   machine: string | null;
   program_name: string | null;
   item_count: string | number;
+}
+
+interface MdfBoardStatusRow extends QueryResultRow {
+  cut_job_id: string | number;
+  status: string;
+  selection_criteria: Record<string, unknown> | null;
+  active_packet_count: string | number | null;
+  hidden_packet_count: string | number | null;
+  active_packets_json: unknown;
+  card_kind: 'machine_file' | 'bath';
+  card_id: string | null;
+  target_workday: string | Date | null;
 }
 
 const CUT_RESULT_LEASE_MS = 15 * 60 * 1000;
@@ -331,6 +354,7 @@ interface BasisInputs {
   grainRules: import('../application/cut-config').CutGrainRules;
   combineFilms: boolean;
   splitByMaterial: boolean;
+  rotationAllowed: boolean;
   sheetOverride: { sheetMaterialTypeId: number; widthMm: number; heightMm: number } | null;
   items: BasisInputItem[];
   sheetTypes: BasisSheetType[];
@@ -362,6 +386,7 @@ function basisOf(inputs: BasisInputs): string {
     g: inputs.grainRules,
     cf: inputs.combineFilms,
     sbm: inputs.splitByMaterial,
+    ra: inputs.rotationAllowed,
     so: inputs.sheetOverride,
     items: [...inputs.items]
       .sort((a, b) => a.orderDetailId - b.orderDetailId)
@@ -396,6 +421,18 @@ export function combineFilmsChangedOutboxKey(cutJobId: number, requestId: string
  *  rule: stable per (job, request), version fallback. */
 export function splitByMaterialChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
   return `${CUT_AUDIT_EVENTS.splitByMaterialChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for the rotation-allowed-changed outbox event. Same stability
+ *  rule: stable per (job, request), version fallback. */
+export function rotationAllowedChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.rotationAllowedChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
+}
+
+/** Idempotency key for the texture-direction-changed outbox event. Same
+ *  stability rule: stable per (job, request), version fallback. */
+export function textureDirectionChangedOutboxKey(cutJobId: number, requestId: string | undefined, version: number): string {
+  return `${CUT_AUDIT_EVENTS.textureDirectionChanged}:${cutJobId}:${requestId ?? `v${version}`}`;
 }
 
 /** Idempotency key for cut-job rename events. Stable per (job, request), version fallback. */
@@ -993,6 +1030,9 @@ export class PgCutRepository implements CutRepositoryPort {
           includeSvg: false,
           nativePortrait: this.nativePortraitWriter,
         });
+        if (!job.rotationAllowed) {
+          request.items = request.items.map((item) => ({ ...item, rotation: 'forbid' }));
+        }
         // Per-group pre-call guards (a fan-out group can independently exceed limits).
         assertWithinInstanceLimit(freecutItems);
         assertWithinBodyLimit(request);
@@ -1043,6 +1083,7 @@ export class PgCutRepository implements CutRepositoryPort {
         grainRules,
         combineFilms: job.combineFilms,
         splitByMaterial: job.splitByMaterial,
+        rotationAllowed: job.rotationAllowed,
         sheetOverride: sheetOverrideForBasis,
         items: basisItems,
         sheetTypes: basisSheetTypes,
@@ -1248,6 +1289,7 @@ export class PgCutRepository implements CutRepositoryPort {
           ...(prep.params as unknown as Record<string, unknown>),
           combineFilms: job.combineFilms,
           splitByMaterial: job.splitByMaterial,
+          rotationAllowed: job.rotationAllowed,
           ...(this.nativePortraitWriter ? { coordinateContract: NATIVE_PORTRAIT_COORDINATE_CONTRACT } : {}),
         },
       });
@@ -1670,6 +1712,8 @@ export class PgCutRepository implements CutRepositoryPort {
       ...summary,
       job: {
         ...row.snapshot_job,
+        rotationAllowed: row.snapshot_job.rotationAllowed ?? true,
+        textureDirection: row.snapshot_job.textureDirection ?? 'none',
         totals: normalizeCutJobTotals(row.snapshot_job.totals),
         currentCutResult: summary,
         cutResults: undefined,
@@ -2355,8 +2399,9 @@ export class PgCutRepository implements CutRepositoryPort {
       sheet_material_type_id: string | number | null;
       combine_films: boolean | null;
       split_by_material: boolean | null;
+      rotation_allowed: boolean | null;
     }>(
-      `SELECT params, param_profile_id, sheet_material_type_id, combine_films, split_by_material
+      `SELECT params, param_profile_id, sheet_material_type_id, combine_films, split_by_material, rotation_allowed
        FROM cut_job WHERE cut_job_id = $1`,
       [cutJobId],
     );
@@ -2365,6 +2410,7 @@ export class PgCutRepository implements CutRepositoryPort {
 
     const combineFilms = job.combine_films === true;
     const splitByMaterial = job.split_by_material !== false;
+    const rotationAllowed = job.rotation_allowed !== false;
 
     let items = await loadCalcItems(this.database, cutJobId);
 
@@ -2447,7 +2493,7 @@ export class PgCutRepository implements CutRepositoryPort {
       })),
     );
 
-    return { params, grainRules, combineFilms, splitByMaterial, sheetOverride, items: basisItems, sheetTypes };
+    return { params, grainRules, combineFilms, splitByMaterial, rotationAllowed, sheetOverride, items: basisItems, sheetTypes };
   }
 
   async listJobs(query: ListCutJobsQuery): Promise<CutJobDto[]> {
@@ -2472,10 +2518,19 @@ export class PgCutRepository implements CutRepositoryPort {
     const ids = result.rows.map((row) => toNum(row.cut_job_id));
     const totalsById = await computeTotals(this.database, ids);
     const materialNamesById = await computeMaterialNames(this.database, ids);
+    const mdfBoardStatusById = await loadMdfBoardStatuses(this.database, ids);
     const jobs: CutJobDto[] = [];
     for (const id of ids) {
       // List only renders item/group counts -> skip the per-item detail joins.
-      jobs.push(await loadJob(this.database, id, false, totalsById.get(id), materialNamesById.get(id) ?? []));
+      jobs.push(await loadJob(
+        this.database,
+        id,
+        false,
+        totalsById.get(id),
+        materialNamesById.get(id) ?? [],
+        false,
+        mdfBoardStatusById.get(id),
+      ));
     }
     return jobs;
   }
@@ -2963,6 +3018,7 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, 0);
     }
     const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
+    const pdfJobFields = await this.loadPdfRenderJobFields(query.cutJobId, query.cutGroupId);
     const pdfSheets = printableSheets.map((s, index) => ({
         svg: s.svg,
         bathSvg: s.bathSvg,
@@ -2976,6 +3032,8 @@ export class PgCutRepository implements CutRepositoryPort {
         detailRows: s.pdfDetailRows,
         cutJobId: pdfIdentity.cutJobId ?? undefined,
         cutNumber: pdfIdentity.cutNumber ?? undefined,
+        jobName: pdfJobFields.jobName,
+        textureDirection: pdfJobFields.textureDirection,
         filmRequirementLinearMeters: s.filmRequirementLinearMeters,
       }));
     return frozenContext
@@ -3016,6 +3074,7 @@ export class PgCutRepository implements CutRepositoryPort {
     if (templateSelection.requiresActiveCheck) await this.assertPdfTemplateActive(pdfTemplate);
     const templateLayout = frozen ? null : await this.loadPdfTemplateLayout(pdfTemplate);
     const pdfIdentity = await this.loadPdfRenderIdentity(query.cutJobId, query.resultNo);
+    const pdfJobFields = await this.loadPdfRenderJobFields(query.cutJobId);
     const groupIds = frozen
       ? frozen.job.groups.map((group) => group.cutGroupId)
       : (await this.database.query<{ cut_group_id: string | number }>(
@@ -3077,6 +3136,8 @@ export class PgCutRepository implements CutRepositoryPort {
           detailRows: sheet.pdfDetailRows,
           cutJobId: pdfIdentity.cutJobId ?? undefined,
           cutNumber: pdfIdentity.cutNumber ?? undefined,
+          jobName: pdfJobFields.jobName,
+          textureDirection: pdfJobFields.textureDirection,
           filmRequirementLinearMeters: sheet.filmRequirementLinearMeters,
         });
         sheetNumber += 1;
@@ -3110,6 +3171,31 @@ export class PgCutRepository implements CutRepositoryPort {
     return {
       cutJobId,
       cutNumber: resultNo === null ? null : `${cutJobId}-${resultNo}`,
+    };
+  }
+
+  private async loadPdfRenderJobFields(cutJobId: number | undefined, cutGroupId?: number): Promise<PdfRenderJobFields> {
+    const fallback: PdfRenderJobFields = { jobName: '', textureDirection: '' };
+    if (cutJobId === undefined && cutGroupId === undefined) return fallback;
+    const row = await this.database.query<{ name: string; texture_direction: string | null }>(
+      cutJobId === undefined
+        ? `SELECT j.name, j.texture_direction
+           FROM cut_group g
+           JOIN cut_job j ON j.cut_job_id = g.cut_job_id
+           WHERE g.cut_group_id = $1`
+        : `SELECT name, texture_direction
+           FROM cut_job
+           WHERE cut_job_id = $1`,
+      [cutJobId ?? cutGroupId],
+    );
+    const job = row.rows[0];
+    if (!job) {
+      if (cutJobId !== undefined) throw new CutJobNotFoundError(cutJobId);
+      return fallback;
+    }
+    return {
+      jobName: job.name,
+      textureDirection: cutTextureDirectionLabel(job.texture_direction),
     };
   }
 
@@ -4022,6 +4108,127 @@ export class PgCutRepository implements CutRepositoryPort {
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
   }
 
+  async setRotationAllowed(command: SetCutJobRotationAllowedCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; rotation_allowed: boolean | null }>(
+        `SELECT status, version, rotation_allowed FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      const before = row.rotation_allowed !== false;
+
+      if (before === command.rotationAllowed) {
+        return;
+      }
+
+      await tx.query(
+        `UPDATE cut_job SET rotation_allowed = $2, version = version + 1, updated_at = now() WHERE cut_job_id = $1`,
+        [command.cutJobId, command.rotationAllowed],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.rotationAllowedChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { rotationAllowed: before },
+        after: { rotationAllowed: command.rotationAllowed },
+        metadata: { beforeRotationAllowed: before, afterRotationAllowed: command.rotationAllowed },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.rotationAllowedChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeRotationAllowed: before,
+            afterRotationAllowed: command.rotationAllowed,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          rotationAllowedChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
+  async setTextureDirection(command: SetCutJobTextureDirectionCommand): Promise<CutJobDto> {
+    await this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const jobRes = await tx.query<{ status: string; version: string | number; texture_direction: string | null }>(
+        `SELECT status, version, texture_direction FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+        [command.cutJobId],
+      );
+      const row = jobRes.rows[0];
+      if (!row) throw new CutJobNotFoundError(command.cutJobId);
+      assertVersion({ cutJobId: command.cutJobId, version: toNum(row.version) }, command.version);
+      if (!PROFILE_EDITABLE_STATUSES.has(row.status)) {
+        throw new CutJobNotMutableError(command.cutJobId, row.status);
+      }
+      const before = normalizeCutTextureDirection(row.texture_direction);
+      const after = command.textureDirection;
+
+      if (before === after) {
+        return;
+      }
+
+      await tx.query(
+        `UPDATE cut_job
+            SET texture_direction = $2,
+                version = version + 1,
+                pdf_prewarm_state = 'pending',
+                pdf_prewarm_failure_reason = NULL,
+                updated_at = now()
+          WHERE cut_job_id = $1`,
+        [command.cutJobId, after],
+      );
+
+      await this.audit(tx, command.currentUser, {
+        event: CUT_AUDIT_EVENTS.textureDirectionChanged,
+        cutJobId: command.cutJobId,
+        requestId: command.requestId,
+        before: { textureDirection: before },
+        after: { textureDirection: after },
+        metadata: { beforeTextureDirection: before, afterTextureDirection: after },
+      });
+
+      await tx.query(
+        `
+        INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+        VALUES ($1, $2, $3, $4::jsonb, $5)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        `,
+        [
+          CUT_AUDIT_EVENTS.textureDirectionChanged,
+          'cut_job',
+          String(command.cutJobId),
+          JSON.stringify({
+            cutJobId: command.cutJobId,
+            beforeTextureDirection: before,
+            afterTextureDirection: after,
+            actorUserId: command.currentUser.id,
+            requestId: command.requestId ?? null,
+          }),
+          textureDirectionChangedOutboxKey(command.cutJobId, command.requestId, command.version),
+        ],
+      );
+    });
+    return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
   async setJobPdfTemplate(command: SetCutJobPdfTemplateCommand): Promise<CutJobDto> {
     await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
@@ -4689,9 +4896,10 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
   sheetMaterialTypeId: number | null;
   combineFilms: boolean;
   splitByMaterial: boolean;
+  rotationAllowed: boolean;
 }> {
   const result = await tx.query<CutJobLockRow>(
-    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films, split_by_material FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
+    `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, params, param_profile_id, sheet_material_type_id, combine_films, split_by_material, rotation_allowed, texture_direction FROM cut_job WHERE cut_job_id = $1 FOR UPDATE`,
     [cutJobId],
   );
   const row = result.rows[0];
@@ -4709,6 +4917,7 @@ async function loadJobForUpdate(tx: TransactionClient, cutJobId: number): Promis
     sheetMaterialTypeId: row.sheet_material_type_id === null || row.sheet_material_type_id === undefined ? null : toNum(row.sheet_material_type_id),
     combineFilms: row.combine_films === true,
     splitByMaterial: row.split_by_material !== false,
+    rotationAllowed: row.rotation_allowed !== false,
   };
 }
 
@@ -4736,6 +4945,7 @@ interface JobRow extends QueryResultRow {
   name: string;
   status: string;
   source: string;
+  created_at: Date | string;
   version: string | number;
   pdf_prewarm_state: string;
   failure_code: string | null;
@@ -4745,6 +4955,8 @@ interface JobRow extends QueryResultRow {
   pdf_template_code: string | null;
   combine_films: boolean | null;
   split_by_material: boolean | null;
+  rotation_allowed: boolean | null;
+  texture_direction: string | null;
   last_calc_params: FreecutParams | null;
 }
 
@@ -5046,10 +5258,20 @@ const ENRICHED_FROZEN_ITEMS_QUERY = ENRICHED_ITEMS_QUERY.replace(
     )`,
 );
 
-const LIGHT_ITEMS_QUERY = `SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id FROM cut_job_item WHERE cut_job_id = $1 AND is_active = true ORDER BY cut_job_item_id`;
-const LIGHT_FROZEN_ITEMS_QUERY = `
-  SELECT cut_job_item_id, order_detail_id, order_id, qty, cut_group_id
+const LIGHT_ITEMS_QUERY = `
+  SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
+         o.order_name AS order_name,
+         o.delete_flag AS order_delete_flag
   FROM cut_job_item i
+  LEFT JOIN orders o ON o.order_id = i.order_id
+  WHERE i.cut_job_id = $1 AND i.is_active = true
+  ORDER BY i.cut_job_item_id`;
+const LIGHT_FROZEN_ITEMS_QUERY = `
+  SELECT i.cut_job_item_id, i.order_detail_id, i.order_id, i.qty, i.cut_group_id,
+         o.order_name AS order_name,
+         o.delete_flag AS order_delete_flag
+  FROM cut_job_item i
+  LEFT JOIN orders o ON o.order_id = i.order_id
   WHERE cut_job_id = $1
     AND (
       i.is_active = true
@@ -5324,11 +5546,12 @@ async function loadJob(
   totals?: CutJobTotals,
   materialNames?: string[],
   frozenItems = false,
+  mdfBoardStatus?: CutJobMdfBoardStatusDto,
 ): Promise<CutJobDto> {
   const jobResult = await client.query<JobRow>(
     `SELECT cut_job_id, name, status, source, version, pdf_prewarm_state, failure_code, failure_reason,
-            param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material,
-            last_calc_params
+            param_profile_id, sheet_material_type_id, pdf_template_code, combine_films, split_by_material, rotation_allowed, texture_direction,
+            created_at, last_calc_params
        FROM cut_job WHERE cut_job_id = $1`,
     [cutJobId],
   );
@@ -5379,8 +5602,11 @@ async function loadJob(
     qty: toNum(row.qty),
     cutGroupId: row.cut_group_id === null ? null : toNum(row.cut_group_id),
     detail: includeItemDetails ? mapItemDetail(row) : null,
-    // orderName/orderDeleted are only present on the enriched (single-job) path; undefined on the light/list path.
-    ...(includeItemDetails ? { orderName: row.order_name ?? null, orderDeleted: row.order_delete_flag === true } : {}),
+    // orderName/orderDeleted are present on both list and enriched paths so
+    // list/card order references can show names and stale deleted markers.
+    ...(row.order_name !== undefined || row.order_delete_flag !== undefined
+      ? { orderName: row.order_name ?? null, orderDeleted: row.order_delete_flag === true }
+      : {}),
   }));
   const resolvedMaterialNames = materialNames ?? uniqueSorted(
     itemDtos.map((item) => item.detail?.materialName ?? null),
@@ -5427,6 +5653,7 @@ async function loadJob(
     name: jobRow.name,
     status: jobRow.status,
     source: jobRow.source,
+    createdAt: jobRow.created_at instanceof Date ? jobRow.created_at.toISOString() : String(jobRow.created_at),
     version: toNum(jobRow.version),
     pdfPrewarmState: jobRow.pdf_prewarm_state,
     failureCode: jobRow.failure_code,
@@ -5436,7 +5663,10 @@ async function loadJob(
     pdfTemplate: jobRow.pdf_template_code ?? 'standard',
     combineFilms: jobRow.combine_films === true,
     splitByMaterial: jobRow.split_by_material !== false,
+    rotationAllowed: jobRow.rotation_allowed !== false,
+    textureDirection: normalizeCutTextureDirection(jobRow.texture_direction),
     materialNames: resolvedMaterialNames,
+    ...(mdfBoardStatus ? { mdfBoardStatus } : {}),
     totals: resolvedTotals,
     items: itemDtos,
     groups,
@@ -5687,10 +5917,11 @@ async function hasMdfBoardHiddenColumns(client: DatabaseClient): Promise<boolean
             'mdf_board_hidden_at',
             'mdf_board_hidden_by',
             'mdf_board_hidden_reason',
-            'mdf_board_hidden_cut_job_id'
+            'mdf_board_hidden_cut_job_id',
+            'mdf_board_card_kind'
           )
         GROUP BY table_name
-        HAVING COUNT(DISTINCT column_name) = 4
+        HAVING COUNT(DISTINCT column_name) = 5
       ) AS exists
     `,
   );
@@ -5748,6 +5979,333 @@ async function loadCutJobDeleteImpact(client: DatabaseClient, cutJobId: number):
   };
 }
 
+async function loadMdfBoardStatuses(
+  client: DatabaseClient,
+  cutJobIds: number[],
+): Promise<Map<number, CutJobMdfBoardStatusDto>> {
+  const ids = [...new Set(cutJobIds.filter((id) => Number.isInteger(id) && id > 0))];
+  const out = new Map<number, CutJobMdfBoardStatusDto>();
+  if (ids.length === 0) return out;
+
+  if (!(await hasMdfBoardHiddenColumns(client))) {
+    for (const id of ids) {
+      out.set(id, {
+        state: 'unknown',
+        cardKind: 'machine_file',
+        reason: 'Схема МДФ-доски недоступна: нельзя проверить связанные карточки.',
+        activePacketCount: 0,
+        hiddenPacketCount: 0,
+        packets: [],
+        target: null,
+      });
+    }
+    return out;
+  }
+
+  const result = await client.query<MdfBoardStatusRow>(
+    `
+    WITH job_context AS (
+      SELECT
+        j.cut_job_id,
+        j.status,
+        j.selection_criteria,
+        j.current_cut_result_id,
+        CASE
+          WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+            THEN 'bath'
+          ELSE 'machine_file'
+        END AS card_kind
+      FROM cut_job j
+      LEFT JOIN cut_param_profiles profile ON profile.cut_param_profile_id = j.param_profile_id
+      WHERE j.cut_job_id = ANY($1::bigint[])
+    ),
+    candidate_details AS (
+      SELECT DISTINCT
+        context.cut_job_id,
+        placement.order_id::bigint AS order_id,
+        placement.order_detail_id::bigint AS detail_id,
+        lower(trim(o.order_name)) AS order_key,
+        od.detail_number,
+        COALESCE(od.width, placement.detail_width_mm)::numeric AS width_mm,
+        COALESCE(od.height, placement.detail_height_mm)::numeric AS height_mm,
+        NOT EXISTS (
+          SELECT 1
+          FROM orders duplicate_order
+          WHERE duplicate_order.delete_flag = false
+            AND duplicate_order.order_id <> o.order_id
+            AND lower(trim(duplicate_order.order_name)) = lower(trim(o.order_name))
+        ) AS unique_order_key
+      FROM job_context context
+      JOIN cut_result_placement placement
+        ON placement.cut_result_id = context.current_cut_result_id
+      JOIN cut_result_sheet_map sheet
+        ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+       AND sheet.is_effective = true
+      JOIN orders o ON o.order_id = placement.order_id AND o.delete_flag = false
+      JOIN order_details od ON od.detail_id = placement.order_detail_id AND od.delete_flag = false
+      WHERE context.card_kind = 'bath'
+    ),
+    matched_bath_sources AS (
+      SELECT candidate.cut_job_id, packet.workday
+      FROM candidate_details candidate
+      JOIN cnc_telegram_packet_items item
+        ON item.match_order_id = candidate.order_id
+       AND item.match_detail_id = candidate.detail_id
+      JOIN cnc_telegram_packets packet
+        ON packet.packet_id = item.packet_id
+       AND packet.mdf_board_hidden_at IS NULL
+      GROUP BY candidate.cut_job_id, packet.workday
+    ),
+    fallback_bath_sources AS (
+      SELECT candidate.cut_job_id, packet.workday
+      FROM candidate_details candidate
+      JOIN cnc_telegram_packet_items item
+        ON candidate.unique_order_key
+       AND item.match_order_id IS NULL
+       AND item.match_detail_id IS NULL
+       AND lower(trim(item.order_name)) = candidate.order_key
+       AND item.detail_number = candidate.detail_number
+       AND item.width_mm IS NOT NULL
+       AND item.height_mm IS NOT NULL
+       AND candidate.width_mm IS NOT NULL
+       AND candidate.height_mm IS NOT NULL
+       AND (
+         (
+           item.source <> 'ocr'
+           AND (
+             (item.width_mm::numeric = candidate.width_mm AND item.height_mm::numeric = candidate.height_mm)
+             OR (item.width_mm::numeric = candidate.height_mm AND item.height_mm::numeric = candidate.width_mm)
+           )
+         )
+         OR (
+           item.source = 'ocr'
+           AND (
+             (ABS(item.width_mm::numeric - candidate.width_mm) <= 3 AND ABS(item.height_mm::numeric - candidate.height_mm) <= 3)
+             OR (ABS(item.width_mm::numeric - candidate.height_mm) <= 3 AND ABS(item.height_mm::numeric - candidate.width_mm) <= 3)
+           )
+         )
+       )
+      JOIN cnc_telegram_packets packet
+        ON packet.packet_id = item.packet_id
+       AND packet.mdf_board_hidden_at IS NULL
+      GROUP BY candidate.cut_job_id, packet.workday
+    ),
+    whole_order_bath_sources AS (
+      SELECT candidate.cut_job_id, packet.workday
+      FROM candidate_details candidate
+      JOIN cnc_telegram_packet_whole_order_keys whole_order
+        ON candidate.unique_order_key
+       AND whole_order.order_key = candidate.order_key
+      JOIN cnc_telegram_packets packet
+        ON packet.packet_id = whole_order.packet_id
+       AND packet.mdf_board_hidden_at IS NULL
+       AND (packet.completion_status = 'completed' OR packet.thumbs_up = true)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(packet.comments_json) AS material_comment(comment_text)
+          WHERE lower(material_comment.comment_text) LIKE ANY (
+            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+          )
+        )
+      GROUP BY candidate.cut_job_id, packet.workday
+    ),
+    bath_sources AS (
+      SELECT * FROM matched_bath_sources
+      UNION ALL
+      SELECT * FROM fallback_bath_sources
+      UNION ALL
+      SELECT * FROM whole_order_bath_sources
+    ),
+    packet_summary AS (
+      SELECT
+        p.svg_cut_job_id::bigint AS cut_job_id,
+        COUNT(*) FILTER (WHERE p.mdf_board_hidden_at IS NULL)::integer AS active_packet_count,
+        COUNT(*) FILTER (WHERE p.mdf_board_hidden_at IS NOT NULL)::integer AS hidden_packet_count,
+        COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'packetId', p.packet_id::text,
+              'externalPacketKey', p.external_packet_key,
+              'workday', p.workday,
+              'machine', p.machine,
+              'programName', p.program_name,
+              'itemCount', packet_items.item_count
+            )
+            ORDER BY p.workday DESC, p.updated_at DESC, p.external_packet_key
+          ) FILTER (WHERE p.mdf_board_hidden_at IS NULL),
+          '[]'::jsonb
+        ) AS active_packets_json
+      FROM cnc_telegram_packets p
+      LEFT JOIN LATERAL (
+        SELECT COUNT(i.packet_item_id)::integer AS item_count
+        FROM cnc_telegram_packet_items i
+        WHERE i.packet_id = p.packet_id
+      ) packet_items ON true
+      WHERE p.svg_cut_job_id = ANY($1::bigint[])
+        AND p.mdf_board_card_kind = 'machine_file'
+      GROUP BY p.svg_cut_job_id
+    ),
+    bath_summary AS (
+      SELECT
+        context.cut_job_id,
+        MAX(source.workday) AS target_workday
+      FROM bath_sources source
+      JOIN job_context context ON context.cut_job_id = source.cut_job_id
+      GROUP BY context.cut_job_id
+    ),
+    hidden_bath_summary AS (
+      SELECT
+        context.cut_job_id,
+        COUNT(packet.packet_id)::integer AS hidden_packet_count
+      FROM job_context context
+      JOIN cnc_telegram_packets packet
+        ON packet.svg_cut_result_id = context.current_cut_result_id
+       AND packet.mdf_board_card_kind = 'bath_seed'
+       AND packet.mdf_board_hidden_at IS NOT NULL
+      GROUP BY context.cut_job_id
+    )
+    SELECT
+      context.cut_job_id,
+      context.status,
+      context.selection_criteria,
+      context.card_kind,
+      CASE
+        WHEN context.card_kind = 'bath' AND bath_summary.target_workday IS NOT NULL
+          THEN 'cut-result:' || context.current_cut_result_id::text
+        ELSE NULL
+      END AS card_id,
+      CASE WHEN context.card_kind = 'bath' THEN bath_summary.target_workday ELSE NULL END AS target_workday,
+      CASE
+        WHEN context.card_kind = 'bath' THEN CASE WHEN bath_summary.target_workday IS NULL THEN 0 ELSE 1 END
+        ELSE COALESCE(packet_summary.active_packet_count, 0)
+      END::integer AS active_packet_count,
+      CASE
+        WHEN context.card_kind = 'bath' THEN COALESCE(hidden_bath_summary.hidden_packet_count, 0)
+        ELSE COALESCE(packet_summary.hidden_packet_count, 0)
+      END::integer AS hidden_packet_count,
+      CASE
+        WHEN context.card_kind = 'machine_file' THEN COALESCE(packet_summary.active_packets_json, '[]'::jsonb)
+        ELSE '[]'::jsonb
+      END AS active_packets_json
+    FROM job_context context
+    LEFT JOIN packet_summary ON packet_summary.cut_job_id = context.cut_job_id
+    LEFT JOIN bath_summary ON bath_summary.cut_job_id = context.cut_job_id
+    LEFT JOIN hidden_bath_summary ON hidden_bath_summary.cut_job_id = context.cut_job_id
+    `,
+    [ids],
+  );
+
+  for (const row of result.rows) {
+    out.set(toNum(row.cut_job_id), buildMdfBoardStatus(row));
+  }
+  return out;
+}
+
+function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatusDto {
+  const activePacketCount = toNum(row.active_packet_count ?? 0);
+  const hiddenPacketCount = toNum(row.hidden_packet_count ?? 0);
+  const packets = cutJobLinkedMdfPacketsFromJson(row.active_packets_json);
+  const cardKind = row.card_kind;
+  const packetTarget = packets[0]
+    ? { kind: 'machine_file' as const, cardId: packets[0].packetId, workday: packets[0].workday }
+    : null;
+  const bathTarget = row.card_id && row.target_workday
+    ? { kind: 'bath' as const, cardId: row.card_id, workday: mdfPacketWorkday(row.target_workday) }
+    : null;
+  const target = cardKind === 'bath' ? bathTarget : packetTarget;
+
+  if (activePacketCount > 0 && target) {
+    return {
+      state: 'created',
+      cardKind,
+      reason: activePacketCount === 1
+        ? cardKind === 'bath'
+          ? 'Карточка ванны создана и видна на МДФ-доске.'
+          : 'Карточка файла станка создана и видна на МДФ-доске.'
+        : `Создано ${activePacketCount} карточек, видимых на МДФ-доске.`,
+      activePacketCount,
+      hiddenPacketCount,
+      packets,
+      target,
+    };
+  }
+
+  if (hiddenPacketCount > 0) {
+    return {
+      state: 'hidden',
+      cardKind,
+      reason: hiddenPacketCount === 1
+        ? 'Связанная карточка была скрыта с МДФ-доски.'
+        : `Связанные карточки скрыты с МДФ-доски: ${hiddenPacketCount}.`,
+      activePacketCount,
+      hiddenPacketCount,
+      packets,
+      target: null,
+    };
+  }
+
+  const source = cutJobSelectionSource(row.selection_criteria);
+  return {
+    state: 'not_created',
+    cardKind,
+    reason: mdfBoardNotCreatedReason(source, row.status, cardKind),
+    activePacketCount,
+    hiddenPacketCount,
+    packets,
+    target: null,
+  };
+}
+
+function cutJobLinkedMdfPacketsFromJson(value: unknown): CutJobLinkedMdfPacketDto[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const row = item as Record<string, unknown>;
+    return {
+      packetId: String(row.packetId ?? ''),
+      externalPacketKey: String(row.externalPacketKey ?? ''),
+      workday: mdfPacketWorkday(row.workday),
+      machine: typeof row.machine === 'string' ? row.machine : null,
+      programName: typeof row.programName === 'string' ? row.programName : null,
+      itemCount: typeof row.itemCount === 'number' || typeof row.itemCount === 'string'
+        ? toNum(row.itemCount)
+        : 0,
+    };
+  }).filter((packet) => packet.packetId.length > 0);
+}
+
+function mdfPacketWorkday(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date || typeof value === 'string') return dateOnly(value) ?? String(value);
+  return String(value);
+}
+
+function cutJobSelectionSource(selectionCriteria: Record<string, unknown> | null): string | null {
+  const source = selectionCriteria?.source;
+  return typeof source === 'string' && source.trim() ? source.trim() : null;
+}
+
+function mdfBoardNotCreatedReason(
+  source: string | null,
+  status: string,
+  cardKind: CutJobMdfBoardStatusDto['cardKind'],
+): string {
+  if (cardKind === 'bath') {
+    return status === 'ready'
+      ? 'Для текущего результата карточка ванны на МДФ-доске не создана.'
+      : 'Задание ещё не готово; карточку ванны можно создать после расчёта.';
+  }
+  if (source === 'manual_svg_upload') {
+    return 'Задание импортировано из SVG, но связанная карточка МДФ-доски не найдена.';
+  }
+  if (source === 'cnc_telegram_svg') {
+    return 'Задание импортировано из Telegram SVG, но карточка МДФ-доски не найдена.';
+  }
+  if (status !== 'ready') {
+    return 'Задание ещё не готово; карточка МДФ-доски создаётся только для импортированного SVG-раскроя.';
+  }
+  return 'Задание создано обычным способом, без карточки файла станка на МДФ-доске.';
+}
+
 async function hideLinkedMdfPacketsForCutJob(
   client: DatabaseClient,
   cutJobId: number,
@@ -5781,6 +6339,22 @@ function cleanIds(values: Array<number | null> | undefined): number[] {
 
 function toNum(value: string | number): number {
   return Number(value);
+}
+
+function normalizeCutTextureDirection(value: unknown): CutTextureDirection {
+  return value === 'vertical' || value === 'horizontal' || value === 'none' ? value : 'none';
+}
+
+function cutTextureDirectionLabel(value: unknown): string {
+  switch (normalizeCutTextureDirection(value)) {
+    case 'vertical':
+      return 'Вертикальное';
+    case 'horizontal':
+      return 'Горизонтальное';
+    case 'none':
+    default:
+      return 'Отсутствует';
+  }
 }
 
 function numOrNull(value: string | number | null | undefined): number | null {

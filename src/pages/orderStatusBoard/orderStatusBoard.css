@@ -744,6 +744,14 @@
   flex: 0 0 auto;
 }
 
+.cnc-board-card-shell--deep-linked > .status-board-card {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, #7c3aed 76%, transparent),
+    0 8px 24px color-mix(in srgb, #7c3aed 24%, transparent);
+  transition-property: box-shadow, transform;
+  transition-duration: 180ms;
+}
+
 .cnc-board-card-shell--dragging > .status-board-card {
   opacity: 0.46;
   transform: rotate(1deg);

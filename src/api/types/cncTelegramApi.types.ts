@@ -135,6 +135,7 @@ export interface CncTelegramBathCard {
   cutNumber: string;
   cutJobName: string;
   createdAt: string;
+  forced: boolean;
   ready: boolean;
   orderCount: number;
   positionCount: number;
@@ -155,6 +156,15 @@ export interface CncTelegramTodayResponse {
   workday: string;
   generatedAt: string;
   columns: CncTelegramTodayColumn[];
+}
+
+export interface CreateCncMdfCardResponse {
+  cutJobId: number;
+  cutResultId: number;
+  cardKind: 'machine_file' | 'bath';
+  cardId: string;
+  workday: string;
+  created: boolean;
 }
 
 export interface CncTelegramManualSvgUploadRequest {

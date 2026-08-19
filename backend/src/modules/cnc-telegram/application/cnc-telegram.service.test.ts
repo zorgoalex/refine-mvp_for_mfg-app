@@ -15,6 +15,9 @@ describe('CncTelegramService', () => {
         async manualSvgUpload() {
           throw new Error('unused');
         },
+        async createMdfCard() {
+          throw new Error('unused');
+        },
         async listManualSvgCommentPresets() {
           throw new Error('unused');
         },
@@ -46,6 +49,9 @@ describe('CncTelegramService', () => {
           throw new Error('repository must not be called');
         },
         async manualSvgUpload() {
+          throw new Error('unused');
+        },
+        async createMdfCard() {
           throw new Error('unused');
         },
         async listManualSvgCommentPresets() {
@@ -90,6 +96,9 @@ describe('CncTelegramService', () => {
         async manualSvgUpload() {
           throw new Error('repository must not be called');
         },
+        async createMdfCard() {
+          throw new Error('unused');
+        },
         async listManualSvgCommentPresets() {
           throw new Error('unused');
         },
@@ -117,6 +126,46 @@ describe('CncTelegramService', () => {
         requiredPermissions: ['cut.manage'],
       }),
     );
+  });
+
+  it('requires cut.manage for forced MDF cards and delegates an authorized command', async () => {
+    const createMdfCard = vi.fn().mockResolvedValue({
+      cutJobId: 42,
+      cutResultId: 100,
+      cardKind: 'bath',
+      cardId: 'cut-result:100',
+      workday: '2026-08-19',
+      created: true,
+    });
+    const deniedAudit = { recordIngestDenied: vi.fn().mockResolvedValue(undefined) };
+    const packets = {
+      listToday: vi.fn(),
+      ingest: vi.fn(),
+      manualSvgUpload: vi.fn(),
+      createMdfCard,
+      listManualSvgCommentPresets: vi.fn(),
+      createManualSvgCommentPreset: vi.fn(),
+    };
+    const service = new CncTelegramService({ packets, deniedAudit });
+
+    await expect(service.createMdfCard({
+      currentUser: user(['cut.view']),
+      cutJobId: 42,
+      idempotencyKey: 'cut-mdf-card:test',
+      requestId: 'request-denied',
+    })).rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(deniedAudit.recordIngestDenied).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'cnc.mdf_card.create_denied',
+      externalPacketKey: '42',
+    }));
+
+    await service.createMdfCard({
+      currentUser: user(['cut.manage']),
+      cutJobId: 42,
+      idempotencyKey: 'cut-mdf-card:test-authorized',
+      requestId: 'request-authorized',
+    });
+    expect(createMdfCard).toHaveBeenCalledOnce();
   });
 });
 

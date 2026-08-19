@@ -138,6 +138,7 @@ export interface CncTelegramBathCardDto {
   cutNumber: string;
   cutJobName: string;
   createdAt: string;
+  forced: boolean;
   ready: boolean;
   orderCount: number;
   positionCount: number;
@@ -158,6 +159,17 @@ export interface CncTelegramTodayResponseDto {
   workday: string;
   generatedAt: string;
   columns: CncTelegramTodayColumnDto[];
+}
+
+export type CncMdfCardKindDto = 'machine_file' | 'bath';
+
+export interface CreateCncMdfCardResponseDto {
+  cutJobId: number;
+  cutResultId: number;
+  cardKind: CncMdfCardKindDto;
+  cardId: string;
+  workday: string;
+  created: boolean;
 }
 
 export interface CncTelegramIngestResponseDto {

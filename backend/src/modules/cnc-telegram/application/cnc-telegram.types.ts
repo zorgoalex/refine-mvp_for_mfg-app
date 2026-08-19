@@ -7,6 +7,7 @@ import type {
   CncTelegramIngestResponseDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayResponseDto,
+  CreateCncMdfCardResponseDto,
 } from '../dto/cnc-telegram.dto';
 
 export interface ListCncTelegramTodayCommand {
@@ -29,6 +30,13 @@ export interface ManualSvgUploadCommand {
   requestId?: string;
 }
 
+export interface CreateCncMdfCardCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  idempotencyKey: string;
+  requestId?: string;
+}
+
 export interface CreateManualSvgCommentPresetCommand {
   currentUser: CurrentUser;
   dto: CreateCncTelegramManualSvgCommentPresetDto;
@@ -45,6 +53,7 @@ export interface CncTelegramRepositoryPort {
   listToday(command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto>;
   ingest(command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto>;
   manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto>;
+  createMdfCard(command: CreateCncMdfCardCommand): Promise<CreateCncMdfCardResponseDto>;
   listManualSvgCommentPresets(command: ListManualSvgCommentPresetsCommand): Promise<CncTelegramManualSvgCommentPresetDto[]>;
   createManualSvgCommentPreset(command: CreateManualSvgCommentPresetCommand): Promise<CncTelegramManualSvgCommentPresetDto>;
 }
@@ -54,6 +63,7 @@ export interface RecordCncTelegramDeniedAuditCommand {
   event:
     | 'cnc.telegram_packet.ingest_denied'
     | 'cnc.manual_svg_upload.denied'
+    | 'cnc.mdf_card.create_denied'
     | 'cnc.manual_svg_comment_preset.create_denied';
   requestId?: string;
   externalPacketKey?: string;

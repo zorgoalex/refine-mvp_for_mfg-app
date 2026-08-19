@@ -269,6 +269,7 @@ export const OrderStatusBoardPage: React.FC = () => {
   const topScrollbarRef = useRef<HTMLDivElement | null>(null);
   const topScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const boardViewportRef = useRef<HTMLElement | null>(null);
+  const deepLinkWarningRef = useRef<string | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const viewStateRef = useRef(viewState);
   viewStateRef.current = viewState;
@@ -662,6 +663,37 @@ export const OrderStatusBoardPage: React.FC = () => {
     [cncDisplayColumns, viewState.hideEmpty],
   );
   const isCncToday = viewState.view === 'cnc_today';
+
+  useEffect(() => {
+    const kind = viewState.cncCardKind;
+    const cardId = viewState.cncCardId;
+    if (!isCncToday || loading || !kind || !cardId) return undefined;
+    const key = `${kind}:${cardId}`;
+    const root = boardViewportRef.current;
+    const target = root
+      ? Array.from(root.querySelectorAll<HTMLElement>('[data-cnc-card-id]')).find(
+          (element) => element.dataset.cncCardKind === kind && element.dataset.cncCardId === cardId,
+        ) ?? null
+      : null;
+    if (!target) {
+      if (deepLinkWarningRef.current !== key) {
+        deepLinkWarningRef.current = key;
+        message.warning('Карточка не найдена в выбранном периоде МДФ-доски.');
+      }
+      return undefined;
+    }
+    deepLinkWarningRef.current = null;
+    target.classList.add('cnc-board-card-shell--deep-linked');
+    const frame = window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      target.focus({ preventScroll: true });
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      target.classList.remove('cnc-board-card-shell--deep-linked');
+    };
+  }, [cncVisibleColumns, isCncToday, loading, viewState.cncCardId, viewState.cncCardKind]);
+
   const activeBoard: OrderStatusBoardType =
     viewState.view === 'production' ? 'production' : 'order';
   const generatedAt = isCncToday
@@ -1812,6 +1844,8 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
           isDragging ? 'cnc-board-card-shell--dragging' : '',
         ].filter(Boolean).join(' ')}
         data-cnc-drag-kind={kind}
+        data-cnc-card-kind={kind}
+        data-cnc-card-id={cardId}
         tabIndex={moveAvailable ? 0 : -1}
         aria-label={ariaLabel}
         aria-haspopup={moveAvailable ? 'menu' : undefined}

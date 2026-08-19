@@ -2,6 +2,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
+  CreateCncMdfCardCommand,
   CreateManualSvgCommentPresetCommand,
   IngestCncTelegramPacketCommand,
   ListManualSvgCommentPresetsCommand,
@@ -14,6 +15,7 @@ import type {
   CncTelegramManualSvgCommentPresetDto,
   CncTelegramManualSvgUploadResponseDto,
   CncTelegramTodayResponseDto,
+  CreateCncMdfCardResponseDto,
 } from '../dto/cnc-telegram.dto';
 
 export class UnavailableCncTelegramRepository
@@ -28,6 +30,10 @@ export class UnavailableCncTelegramRepository
   }
 
   async manualSvgUpload(_command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto> {
+    throw unavailable();
+  }
+
+  async createMdfCard(_command: CreateCncMdfCardCommand): Promise<CreateCncMdfCardResponseDto> {
     throw unavailable();
   }
 

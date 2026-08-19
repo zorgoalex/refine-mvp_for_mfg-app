@@ -10,6 +10,7 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 import {
   buildCncBoardDisplayColumns,
+  buildCncPacketLabelCoverage,
   cncManualMoveStorageKey,
   isCncManualMoveAllowed,
   type CncBoardManualMoveState,
@@ -97,7 +98,7 @@ describe('order status board model', () => {
   it('keeps CNC today as visual flow without changing status-board API type', () => {
     const disabled = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc'));
     const state = parseOrderStatusBoardViewState(
-      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712'),
+      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712&cardKind=bath&cardId=cut-result%3A42'),
       {
         cncTelegram: true,
       },
@@ -108,11 +109,15 @@ describe('order status board model', () => {
     expect(state.cncWorkday).toBe('2026-07-23');
     expect(state.cncOrderSearchPeriod).toBe('2w');
     expect(state.cncOrderFilters).toEqual(['2706', '2712']);
+    expect(state.cncCardKind).toBe('bath');
+    expect(state.cncCardId).toBe('cut-result:42');
     const serialized = serializeOrderStatusBoardViewState(state);
     expect(serialized.toString()).toContain('flow=cnc');
     expect(serialized.toString()).toContain('date=2026-07-23');
     expect(serialized.toString()).toContain('period=2w');
     expect(serialized.getAll('order')).toEqual(['2706', '2712']);
+    expect(serialized.get('cardKind')).toBe('bath');
+    expect(serialized.get('cardId')).toBe('cut-result:42');
     expect(toOrderStatusBoardQuery(state)).toMatchObject({ board: 'order' });
 
     const defaultPeriodState = parseOrderStatusBoardViewState(
@@ -190,6 +195,56 @@ describe('order status board model', () => {
     expect(partial[1]?.total).toBe(0);
   });
 
+  it('explains incomplete CNC packet label coverage without blocking generation', () => {
+    const packet = cncPacket('p-labels', ['2706'], {
+      itemCount: 3,
+      itemQuantityTotal: 11,
+      items: [
+        cncPacketItem('p-labels-1', {
+          orderName: '2706',
+          detailNumber: 1,
+          matchDetailId: 101,
+          quantity: 6,
+        }),
+        cncPacketItem('p-labels-2', {
+          orderName: '2706',
+          detailNumber: 2,
+          matchDetailId: 102,
+          quantity: 3,
+        }),
+        cncPacketItem('p-labels-3', {
+          orderName: '2706',
+          detailNumber: 3,
+          matchDetailId: 103,
+          quantity: 2,
+        }),
+      ],
+    });
+
+    const coverage = buildCncPacketLabelCoverage(packet, {
+      cutGroupId: 1,
+      sheetIndex: 0,
+      sheetNumber: 1,
+      variant: 'auto',
+      detailIds: [
+        101, 101, 101, 101, 101, 101,
+        102, 102, 102,
+      ],
+    });
+
+    expect(coverage.expectedCount).toBe(11);
+    expect(coverage.includedCount).toBe(9);
+    expect(coverage.issues).toEqual([
+      expect.objectContaining({
+        label: '2706 #3 450×300',
+        expectedQuantity: 2,
+        includedQuantity: 0,
+        missingQuantity: 2,
+        reason: 'в импортированном SVG-листе нет размещения этой детали',
+      }),
+    ]);
+  });
+
   it('keeps only bath cards with order numbers present in machine file cards', () => {
     const columns = [
       {
@@ -242,6 +297,19 @@ describe('order status board model', () => {
     expect(isCncManualMoveAllowed('order', 'completed')).toBe(false);
   });
 
+  it('keeps an explicitly created bath when machine-file matching is required', () => {
+    const columns = [{
+      key: 'baths',
+      title: 'Карты ванн',
+      total: 1,
+      packets: [],
+      baths: [cncBath('forced-bath', ['9999'], { forced: true })],
+    }] as CncTelegramTodayColumn[];
+
+    const filtered = filterCncBathColumnsByMachineOrderMatches(columns);
+    expect(filtered[0]?.baths.map((bath) => bath.bathCardId)).toEqual(['forced-bath']);
+  });
+
   it('builds MDF display columns with manual packet, bath and order moves', () => {
     const columns = [
       cncTodayColumn('parsed', [
@@ -285,6 +353,35 @@ describe('order status board model', () => {
       left: order.remainingDetails,
     }))).toEqual([
       { key: 'id:2002', cut: 1, rolled: 0, left: 0 },
+    ]);
+  });
+
+  it('sorts MDF order cards by order number by default and supports sort settings', () => {
+    const columns = [
+      cncTodayColumn('parsed', [
+        cncPacket('packet-10', ['10'], { sourceUpdatedAt: '2026-07-19T09:00:00.000Z' }),
+        cncPacket('packet-2', ['2'], { sourceUpdatedAt: '2026-07-19T11:00:00.000Z' }),
+        cncPacket('packet-1', ['1'], { sourceUpdatedAt: '2026-07-19T10:00:00.000Z' }),
+      ]),
+    ];
+
+    const defaultDisplay = cncDisplayMap(buildCncBoardDisplayColumns(columns, {}));
+    expect(defaultDisplay.get('orders')?.orders.map((order) => order.orderName)).toEqual([
+      '1',
+      '2',
+      '10',
+    ]);
+
+    const updatedDescDisplay = cncDisplayMap(
+      buildCncBoardDisplayColumns(columns, {}, {
+        field: 'sourceUpdatedAt',
+        direction: 'desc',
+      }),
+    );
+    expect(updatedDescDisplay.get('orders')?.orders.map((order) => order.orderName)).toEqual([
+      '2',
+      '1',
+      '10',
     ]);
   });
 
@@ -492,6 +589,29 @@ function cncPacket(
   };
 }
 
+function cncPacketItem(
+  packetItemId: string,
+  overrides: Partial<CncTelegramPacket['items'][number]> = {},
+): CncTelegramPacket['items'][number] {
+  return {
+    packetItemId,
+    sourceItemKey: packetItemId,
+    orderName: '2706',
+    orderId: 2706,
+    detailNumber: 1,
+    widthMm: 450,
+    heightMm: 300,
+    quantity: 1,
+    source: 'manual',
+    confidence: 1,
+    matchOrderId: 2706,
+    matchDetailId: 1,
+    matchStatus: 'matched',
+    reviewNote: null,
+    ...overrides,
+  };
+}
+
 function cncBath(
   bathCardId: string,
   orderNames: string[],
@@ -518,6 +638,7 @@ function cncBath(
     cutNumber: bathCardId,
     cutJobName: bathCardId,
     createdAt: '2026-07-19T00:00:00.000Z',
+    forced: false,
     ready: false,
     orderCount: orderNames.length,
     positionCount: items.length,

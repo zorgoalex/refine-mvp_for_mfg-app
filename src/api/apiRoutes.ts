@@ -149,6 +149,7 @@ export const apiRoutes = {
     today: backendApiPath('/cnc-telegram/today'),
     ingest: backendApiPath('/cnc-telegram/ingest'),
     manualSvgUpload: backendApiPath('/cnc-telegram/manual-svg-upload'),
+    createMdfCard: (cutJobId: number) => backendApiPath(`/cnc-telegram/cut-jobs/${cutJobId}/mdf-card`),
     manualSvgCommentPresets: backendApiPath('/cnc-telegram/manual-svg-comment-presets'),
   },
   sheetMaterials: {
@@ -237,6 +238,11 @@ export const apiRoutes = {
     list: backendApiPath('/notification-rules'),
     byId: (ruleId: string) => backendApiPath(`/notification-rules/${encodeURIComponent(ruleId)}`),
     eventTypes: backendApiPath('/notification-event-types'),
+  },
+  permissions: {
+    rolesMatrix: backendApiPath('/permissions/roles-matrix'),
+    resetRoleToDefaults: (roleId: number) =>
+      backendApiPath(`/permissions/roles/${roleId}/reset-to-defaults`),
   },
   statusAutomation: {
     rules: backendApiPath('/status-automation/rules'),

@@ -25,6 +25,8 @@ export interface OrderStatusBoardViewState {
   cncWorkday?: string;
   cncOrderSearchPeriod?: CncOrderSearchPeriod;
   cncOrderFilters: string[];
+  cncCardKind?: 'packet' | 'bath';
+  cncCardId?: string;
   hideEmpty: boolean;
 }
 
@@ -72,6 +74,13 @@ export function parseOrderStatusBoardViewState(
     ...(cncWorkday ? { cncWorkday } : {}),
     ...(view === 'cnc_today' && cncOrderSearchPeriod ? { cncOrderSearchPeriod } : {}),
     cncOrderFilters: normalizeCncOrderFilterValues(params.getAll('order')),
+    ...(view === 'cnc_today' && (params.get('cardKind') === 'packet' || params.get('cardKind') === 'bath')
+      && params.get('cardId')?.trim()
+      ? {
+          cncCardKind: params.get('cardKind') as 'packet' | 'bath',
+          cncCardId: params.get('cardId')!.trim(),
+        }
+      : {}),
     hideEmpty: params.get('hideEmpty') === '1',
   };
 }
@@ -84,6 +93,10 @@ export function serializeOrderStatusBoardViewState(
     params.set('flow', 'cnc');
   } else if (state.view !== 'order') {
     params.set('board', state.view);
+  }
+  if (state.view === 'cnc_today' && state.cncCardKind && state.cncCardId) {
+    params.set('cardKind', state.cncCardKind);
+    params.set('cardId', state.cncCardId);
   }
   if (state.search.trim()) params.set('q', state.search.trim());
   if (state.onlyMyOrders) params.set('mine', '1');
@@ -184,7 +197,8 @@ export function filterCncBathColumnsByMachineOrderMatches(
   return columns.map((column) => {
     if (column.key !== 'baths' && column.key !== 'baths_ready') return column;
     const baths = (column.baths ?? []).filter((bath) =>
-      bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
+      bath.forced
+      || bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
     );
     return { ...column, baths, total: baths.length };
   });

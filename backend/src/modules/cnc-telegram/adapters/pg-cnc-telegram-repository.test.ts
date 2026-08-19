@@ -200,8 +200,201 @@ describe('PgCncTelegramRepository', () => {
     expect(matchQuery?.params[1]).toEqual([2689]);
     expect(sql).toContain('SELECT order_id');
     expect(sql).toContain('cnc_telegram_packets');
+    const wholeOrderProjection = queries.find((query) =>
+      /INSERT INTO cnc_telegram_packet_whole_order_keys/i.test(query.text),
+    );
+    expect(wholeOrderProjection?.params[1]).toEqual(['2689', '2690']);
     expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.manual_svg_upload.created'))).toBe(true);
     expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.manual_svg_upload.mdf_card_created'))).toBe(true);
+  });
+
+  it('creates a result-scoped forced bath card with idempotency, audit and outbox', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const tx = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/FROM cut_job j[\s\S]*FOR UPDATE OF j/i.test(text)) {
+          return { rows: [{
+            name: 'Ванна 2706',
+            status: 'ready',
+            current_cut_result_id: 100,
+            current_result_no: 3,
+            layout_mode: 'vacuum_table',
+          }] };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) {
+          return { rows: [{ request_hash: 'hash', response_json: null, status: 'processing' }] };
+        }
+        if (/SELECT packet_id::text AS packet_id, workday/i.test(text)) return { rows: [] };
+        if (/COUNT\(\*\)::integer AS quantity[\s\S]*FROM cut_result_placement placement/i.test(text)) {
+          return { rows: [{
+            order_id: 2706,
+            order_detail_id: 3101,
+            order_name: '2706',
+            detail_number: 31,
+            width_mm: 497,
+            height_mm: 477,
+            quantity: 2,
+          }] };
+        }
+        if (/INSERT INTO cnc_telegram_packets/i.test(text)) {
+          return { rows: [{ packet_id: '00000000-0000-0000-0000-000000000001' }] };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return { rows: [packetRow({
+            external_packet_key: 'erp-cut-mdf-card:bath_seed:42:100',
+            source_chat_id: 'erp-cut-mdf-card',
+            workday: '2026-08-19',
+            svg_cut_job_id: 42,
+            svg_cut_result_id: 100,
+          })] };
+        }
+        if (/INSERT INTO audit_log/i.test(text)) return { rows: [{ audit_id: 'audit-mdf-card-1' }] };
+        return { rows: [] };
+      }),
+    };
+    const database = { transaction: vi.fn((handler) => handler(tx)) };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.createMdfCard({
+      currentUser: user(),
+      cutJobId: 42,
+      idempotencyKey: 'cut-mdf-card:test-42-100',
+      requestId: 'request-mdf-card-1',
+    });
+
+    expect(result).toMatchObject({
+      cutJobId: 42,
+      cutResultId: 100,
+      cardKind: 'bath',
+      cardId: 'cut-result:100',
+      workday: '2026-08-19',
+      created: true,
+    });
+    const sql = queries.map((query) => query.text).join('\n');
+    expect(sql).toContain("mdf_board_card_kind = $4");
+    expect(sql).toContain('INSERT INTO audit_log');
+    expect(sql).toContain('INSERT INTO outbox_events');
+    expect(queries.some((query) => query.params.includes('erp-cut-mdf-card:bath_seed:42:100'))).toBe(true);
+    expect(queries.some((query) => JSON.stringify(query.params).includes('cnc.mdf_card.created'))).toBe(true);
+  });
+
+  it('rejects a completed MDF-card replay after the current cut result changes', async () => {
+    const tx = {
+      query: vi.fn(async (text: string) => {
+        if (/FROM cut_job j[\s\S]*FOR UPDATE OF j/i.test(text)) {
+          return { rows: [{
+            name: 'Ванна 2706',
+            status: 'ready',
+            current_cut_result_id: 101,
+            current_result_no: 4,
+            layout_mode: 'vacuum_table',
+          }] };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) return { rows: [] };
+        if (/FROM command_idempotency_keys/i.test(text)) {
+          return { rows: [{
+            request_hash: 'old-result-hash',
+            status: 'completed',
+            command_name: 'cnc.mdf_card.create',
+            actor_user_id: 42,
+            entity_type: 'cut_job',
+            entity_id: '42',
+            response_json: {
+              cutJobId: 42,
+              cutResultId: 100,
+              cardKind: 'bath',
+              cardId: 'cut-result:100',
+              workday: '2026-08-19',
+              created: true,
+            },
+          }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = { transaction: vi.fn((handler) => handler(tx)) };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    await expect(repo.createMdfCard({
+      currentUser: user(),
+      cutJobId: 42,
+      idempotencyKey: 'cut-mdf-card:stale-result',
+      requestId: 'request-mdf-card-stale-result',
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'MDF_CARD_CURRENT_RESULT_CHANGED',
+    });
+  });
+
+  it('rejects a completed MDF-card idempotency key owned by another actor', async () => {
+    const tx = {
+      query: vi.fn(async (text: string) => {
+        if (/FROM cut_job j[\s\S]*FOR UPDATE OF j/i.test(text)) {
+          return { rows: [{
+            name: 'Раскрой 2706',
+            status: 'ready',
+            current_cut_result_id: 100,
+            current_result_no: 3,
+            layout_mode: 'standard',
+          }] };
+        }
+        if (/INSERT INTO command_idempotency_keys/i.test(text)) return { rows: [] };
+        if (/FROM command_idempotency_keys/i.test(text)) {
+          return { rows: [{
+            request_hash: 'another-actor-hash',
+            status: 'completed',
+            command_name: 'cnc.mdf_card.create',
+            actor_user_id: 999,
+            entity_type: 'cut_job',
+            entity_id: '42',
+            response_json: {
+              cutJobId: 42,
+              cutResultId: 100,
+              cardKind: 'machine_file',
+              cardId: '00000000-0000-0000-0000-000000000001',
+              workday: '2026-08-19',
+              created: true,
+            },
+          }] };
+        }
+        return { rows: [] };
+      }),
+    };
+    const database = { transaction: vi.fn((handler) => handler(tx)) };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    await expect(repo.createMdfCard({
+      currentUser: user(),
+      cutJobId: 42,
+      idempotencyKey: 'cut-mdf-card:another-actor',
+      requestId: 'request-mdf-card-another-actor',
+    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
+  });
+
+  it('records denied MDF-card creation against the cut job', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        return { rows: [{ audit_id: 'audit-mdf-denied' }] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    await repo.recordIngestDenied({
+      currentUser: user(),
+      event: 'cnc.mdf_card.create_denied',
+      requestId: 'request-mdf-denied',
+      externalPacketKey: '42',
+      reason: 'PERMISSION_DENIED',
+      requiredPermissions: ['cut.manage'],
+    });
+
+    const audit = queries.find((query) => /INSERT INTO audit_log/i.test(query.text));
+    expect(audit?.params[0]).toBe('cnc.mdf_card.create_denied');
+    expect(audit?.params[1]).toBe('cut_job');
+    expect(audit?.params[2]).toBe('42');
   });
 
   it('creates manual SVG comment presets with command idempotency, audit and outbox', async () => {
@@ -490,11 +683,10 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('cut_result_placement');
     expect(sql).toContain('cut_result_sheet_map');
     expect(sql).toContain('cut_result_label_map_projection');
-    expect(sql).toContain('fallback_target_details');
+    expect(sql).toContain('fallback_target_detail_sources');
     expect(sql).toContain('completed_whole_order_keys');
-    expect(sql).toContain('whole_order_target_details');
-    expect(sql).toContain("lower(packet_comment.comment_text) LIKE '%весь%'");
-    expect(sql).toContain("regexp_matches(\n        packet_comment.comment_text,\n        '(^|[^0-9])([0-9]{4,})([^0-9]|$)'");
+    expect(sql).toContain('whole_order_target_detail_sources');
+    expect(sql).toContain('cnc_telegram_packet_whole_order_keys');
     expect(sql).toContain('1000000000::integer AS completed_quantity');
     expect(sql).toContain('LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer');
     expect(sql).toContain('candidate_vacuum_results AS (');
@@ -1325,7 +1517,7 @@ function manualSvgDto() {
     svgContentHash: 'a'.repeat(64),
     programName: 'manual.svg',
     materialName: 'МДФ 16мм',
-    comments: ['весь заказ: 2689'],
+    comments: ['весь заказ: 2689/2690'],
     cutLayout: {
       status: 'invalid' as const,
       reasons: ['test skips reverse import'],

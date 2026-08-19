@@ -24,6 +24,7 @@ import type {
   CncTelegramIngestResponseDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayResponseDto,
+  CreateCncMdfCardResponseDto,
   CreateCncTelegramManualSvgCommentPresetDto,
 } from '../dto/cnc-telegram.dto';
 import { CncTelegramRuntimeConfigService } from './cnc-telegram-runtime-config.service';
@@ -265,6 +266,33 @@ export class CncTelegramController {
   }
 
   @ApiOperation({
+    operationId: 'createCncMdfCardForCutJob',
+    summary: 'Create the MDF-board card for the current cut result',
+  })
+  @ApiHeader({ name: 'Idempotency-Key', required: true })
+  @ApiResponse({ status: 201, description: 'MDF-board card created or replayed' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 409, description: 'Stale current-result or idempotency conflict' })
+  @ApiResponse({ status: 422, description: 'Cut job has no usable current result' })
+  @ApiResponse({ status: 503, description: 'CNC Telegram API is disabled' })
+  @Post('cut-jobs/:cutJobId/mdf-card')
+  createMdfCard(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Headers('idempotency-key') idempotencyKey: string | string[] | undefined,
+  ): Promise<CreateCncMdfCardResponseDto> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.cncTelegram.createMdfCard({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      idempotencyKey: parseIdempotencyKey(idempotencyKey),
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
     operationId: 'listManualSvgCommentPresets',
     summary: 'List comment presets for manual SVG uploads',
   })
@@ -430,6 +458,16 @@ export function parseIdempotencyKey(value: string | string[] | undefined): strin
     });
   }
   return key;
+}
+
+export function parseCutJobId(value: string): number {
+  const parsed = z.coerce.number().int().positive().safeParse(value);
+  if (!parsed.success) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'cutJobId must be a positive integer', {
+      field: 'cutJobId',
+    });
+  }
+  return parsed.data;
 }
 
 export function parseTodayQuery(query: Record<string, unknown>): {

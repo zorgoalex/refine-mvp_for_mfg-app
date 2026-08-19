@@ -188,11 +188,15 @@ export interface SaveManualLayoutRequest {
   commandId: string;
 }
 
+export type CutTextureDirection = 'vertical' | 'horizontal' | 'none';
+
 export interface CutJobDto {
   cutJobId: number;
   name: string;
   status: string;
   source: string;
+  /** cut_job.created_at — creation timestamp for list/card display. */
+  createdAt: string;
   version: number;
   pdfPrewarmState: string;
   /** Stable failure code when status === 'failed' (else null/absent). */
@@ -208,8 +212,14 @@ export interface CutJobDto {
   /** true (default) = split by material (different materials → separate groups);
    *  false = all details in one group. */
   splitByMaterial: boolean;
+  /** true (default) = calculation may rotate details 90° when profile/grain rules allow it. */
+  rotationAllowed: boolean;
+  /** Informational material/film texture direction for PDF maps; does not affect calculation. */
+  textureDirection: CutTextureDirection;
   /** Unique per-detail material names in this job (not the per-job sheet override). */
   materialNames: string[];
+  /** MDF board linkage, populated on list reads when the backend can inspect CNC packets. */
+  mdfBoardStatus?: CutJobMdfBoardStatus;
   totals: CutJobTotals;
   items: CutJobItemDto[];
   groups: CutGroupDto[];
@@ -240,6 +250,26 @@ export interface CutJobLinkedMdfPacket {
   machine: string | null;
   programName: string | null;
   itemCount: number;
+}
+
+export type CutJobMdfBoardState = 'created' | 'hidden' | 'not_created' | 'unknown';
+
+export type CutJobMdfBoardCardKind = 'machine_file' | 'bath';
+
+export interface CutJobMdfBoardTarget {
+  kind: CutJobMdfBoardCardKind;
+  cardId: string;
+  workday: string;
+}
+
+export interface CutJobMdfBoardStatus {
+  state: CutJobMdfBoardState;
+  cardKind: CutJobMdfBoardCardKind;
+  reason: string;
+  activePacketCount: number;
+  hiddenPacketCount: number;
+  packets: CutJobLinkedMdfPacket[];
+  target: CutJobMdfBoardTarget | null;
 }
 
 export interface CutJobDeleteImpact {

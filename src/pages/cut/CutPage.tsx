@@ -43,7 +43,9 @@ import {
 } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import dayjs, { type Dayjs } from 'dayjs';
+import { Link } from 'react-router-dom';
 import { cutApi } from '../../api/cutApi';
+import { cncTelegramApi } from '../../api/cncTelegramApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import { subscribeCutPdfTemplatesChanged } from '../../api/cutPdfTemplateEvents';
 import { ordersApi } from '../../api/ordersApi';
@@ -364,6 +366,95 @@ function formatJobMaterialNames(materialNames: string[] | undefined): string {
   const names = (materialNames ?? []).map((name) => name.trim()).filter(Boolean);
   return names.length > 0 ? names.join(', ') : '—';
 }
+
+function cutJobMdfBoardExportValue(job: CutJobDto): string {
+  const status = job.mdfBoardStatus;
+  if (!status) return 'Неизвестно: backend не вернул состояние МДФ-доски';
+  const label = cutJobMdfBoardStatusLabel(status.state);
+  return `${label}: ${status.reason}`;
+}
+
+function cutJobMdfBoardStatusLabel(state: NonNullable<CutJobDto['mdfBoardStatus']>['state']): string {
+  if (state === 'created') return 'Создана';
+  if (state === 'hidden') return 'Скрыта';
+  if (state === 'unknown') return 'Неизвестно';
+  return 'Нет';
+}
+
+function cutJobMdfBoardStatusColor(state: NonNullable<CutJobDto['mdfBoardStatus']>['state']): string {
+  if (state === 'created') return 'green';
+  if (state === 'hidden') return 'orange';
+  if (state === 'unknown') return 'default';
+  return 'default';
+}
+
+function cutJobMdfBoardTooltip(status: CutJobDto['mdfBoardStatus']): string {
+  if (!status) return 'Backend не вернул состояние МДФ-доски для этого задания.';
+  const packets = status.packets
+    .map((packet) => {
+      const program = packet.programName ?? packet.externalPacketKey;
+      return `${packet.workday}: ${program} (${packet.itemCount} поз.)`;
+    })
+    .join('\n');
+  return packets ? `${status.reason}\n${packets}` : status.reason;
+}
+
+export function cutJobMdfBoardLink(target: NonNullable<NonNullable<CutJobDto['mdfBoardStatus']>['target']>): string {
+  const params = new URLSearchParams({
+    flow: 'cnc',
+    date: target.workday,
+    period: '1w',
+    cardKind: target.kind === 'bath' ? 'bath' : 'packet',
+    cardId: target.cardId,
+  });
+  return `/order-status-board?${params.toString()}`;
+}
+
+const CutJobMdfBoardCell: React.FC<{
+  job: CutJobDto;
+  canOpenBoard: boolean;
+  canCreate: boolean;
+  creating: boolean;
+  onCreate: (job: CutJobDto) => void;
+}> = ({ job, canOpenBoard, canCreate, creating, onCreate }) => {
+  const status = job.mdfBoardStatus;
+  const state = status?.state ?? 'unknown';
+  const reason = status?.reason ?? 'Backend не вернул состояние МДФ-доски.';
+  const statusTag = <Tag color={cutJobMdfBoardStatusColor(state)}>{cutJobMdfBoardStatusLabel(state)}</Tag>;
+  const linkedStatus = state === 'created' && status?.target && canOpenBoard
+    ? (
+      <Link
+        className="cut-job-mdf-board-cell__link"
+        to={cutJobMdfBoardLink(status.target)}
+        aria-label={`Открыть ${status.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'} на МДФ-доске`}
+      >
+        {statusTag}
+      </Link>
+    )
+    : statusTag;
+  const tooltip = state === 'created' && !canOpenBoard
+    ? `${cutJobMdfBoardTooltip(status)}\nДля перехода на МДФ-доску требуется право orders.view.`
+    : cutJobMdfBoardTooltip(status);
+  return (
+    <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{tooltip}</span>}>
+      <span className="cut-job-mdf-board-cell">
+        {linkedStatus}
+        {state === 'not_created' && canCreate ? (
+          <Button
+            size="small"
+            className="cut-job-mdf-board-cell__create"
+            loading={creating}
+            disabled={creating}
+            onClick={() => onCreate(job)}
+          >
+            Создать карточку
+          </Button>
+        ) : null}
+        <Text type="secondary" className="cut-job-mdf-board-cell__reason">{reason}</Text>
+      </span>
+    </Tooltip>
+  );
+};
 
 function defaultCutOrderDateRange(now: Dayjs = dayjs()): CutOrderDateRange {
   return [now, now];
@@ -845,6 +936,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [selected, setSelected] = useState<number[]>([]);
   const [previewName, setPreviewName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [creatingMdfCardJobIds, setCreatingMdfCardJobIds] = useState<Set<number>>(new Set());
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
   // Auto-loaded small layout previews (preset 'thumb') for a ready job's sheets,
   // keyed `${cutGroupId}:${sheetIndex}`. thumbReqRef dedupes in-flight/done fetches.
@@ -1226,6 +1318,31 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       setJobsLoading(false);
     }
   }, [embeddedOrderId, handleError, isEmbeddedOrder, showDeletedJobs]);
+
+  const createMdfBoardCard = useCallback(async (targetJob: CutJobDto) => {
+    if (creatingMdfCardJobIds.has(targetJob.cutJobId)) return;
+    setCreatingMdfCardJobIds((current) => new Set(current).add(targetJob.cutJobId));
+    try {
+      const created = await cncTelegramApi.createMdfCard(
+        targetJob.cutJobId,
+        `cut-mdf-card:${targetJob.cutJobId}:${crypto.randomUUID()}`,
+      );
+      message.success(
+        created.cardKind === 'bath'
+          ? 'Карточка ванны создана на МДФ-доске.'
+          : 'Карточка файла станка создана на МДФ-доске.',
+      );
+      await loadJobs();
+    } catch (error) {
+      handleError(error, 'Не удалось создать карточку на МДФ-доске');
+    } finally {
+      setCreatingMdfCardJobIds((current) => {
+        const next = new Set(current);
+        next.delete(targetJob.cutJobId);
+        return next;
+      });
+    }
+  }, [creatingMdfCardJobIds, handleError, loadJobs]);
 
   useEffect(() => {
     if (!showDeletedJobs && statusFilter === 'archived') {
@@ -2456,13 +2573,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   }), [jobs]);
   const exportJobs = useCallback(() => {
     const cells = [
-      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Материал'],
+      ['#', 'Дата', 'Название', 'Статус', 'Источник', 'МДФ-доска', 'Позиции', 'Заказы', 'Детали', 'Площадь', 'Листы', 'Количество плёнки', 'Профиль', 'Материал'],
       ...filteredJobs.map((candidate) => [
         candidate.cutJobId,
         formatCutJobCreatedDate(candidate.createdAt),
         candidate.name,
         cutJobStatusLabel(candidate.status),
         cutJobSourceLabel(candidate.source),
+        cutJobMdfBoardExportValue(candidate),
         candidate.totals.positions,
         cutJobOrderRefs(candidate.items).map(cutJobOrderLabel).join(', '),
         candidate.totals.details,
@@ -2597,6 +2715,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         render: (_: unknown, row: CutJobDto) => cutJobSourceLabel(row.source),
       },
       {
+        title: 'МДФ-доска',
+        key: 'mdfBoard',
+        width: 168,
+        render: (_: unknown, row: CutJobDto) => (
+          <CutJobMdfBoardCell
+            job={row}
+            canOpenBoard={canViewOrders}
+            canCreate={canManage}
+            creating={creatingMdfCardJobIds.has(row.cutJobId)}
+            onCreate={createMdfBoardCard}
+          />
+        ),
+      },
+      {
         title: 'Позиции',
         key: 'positions',
         width: 63,
@@ -2693,7 +2825,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ),
       },
     ],
-    [busy, canManage, openJob, deleteJob, profiles, cutSettings, isOperational, show],
+    [busy, canManage, canViewOrders, createMdfBoardCard, creatingMdfCardJobIds, openJob, deleteJob, profiles, cutSettings, isOperational, show],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
@@ -3546,6 +3678,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 </span>
                 <span>
                   {candidate.status === 'ready' ? `${candidate.totals.sheets} листов` : 'Ожидает расчета'} · {formatArea(candidate.totals.area)}
+                </span>
+                <span className="cut-jobs-operational-list__mdf">
+                  МДФ-доска: {cutJobMdfBoardExportValue(candidate)}
                 </span>
               </button>
             ))}

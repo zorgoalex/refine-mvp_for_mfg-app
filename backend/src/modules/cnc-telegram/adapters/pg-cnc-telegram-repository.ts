@@ -4,6 +4,7 @@ import { auditService } from '../../../common/audit/audit.service';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
 import type { TransactionClient } from '../../../database/database.types';
+import { cncMdfTargetDetailsCtes } from '../../../shared/cnc-mdf-board/target-details-sql.js';
 import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
 import type {
   CutGroupDto,
@@ -21,6 +22,7 @@ import {
 import type {
   CncTelegramDeniedAuditPort,
   CncTelegramRepositoryPort,
+  CreateCncMdfCardCommand,
   CreateManualSvgCommentPresetCommand,
   IngestCncTelegramPacketCommand,
   ListManualSvgCommentPresetsCommand,
@@ -47,6 +49,7 @@ import type {
   CncTelegramTodayColumnDto,
   CncTelegramTodayResponseDto,
   CncTelegramToolDto,
+  CreateCncMdfCardResponseDto,
 } from '../dto/cnc-telegram.dto';
 
 const SOURCE = 'backend-cnc-telegram-command';
@@ -58,6 +61,9 @@ const MANUAL_SVG_EVENT = 'cnc.manual_svg_upload.created';
 const MANUAL_SVG_COMPLETED_EVENT = 'cnc.manual_svg_upload.mdf_card_created';
 const MANUAL_SVG_PRESET_COMMAND_NAME = 'cnc.manual_svg_comment_preset.create';
 const MANUAL_SVG_PRESET_CREATE_EVENT = 'cnc.manual_svg_comment_preset.created';
+const MDF_CARD_COMMAND_NAME = 'cnc.mdf_card.create';
+const MDF_CARD_CREATED_EVENT = 'cnc.mdf_card.created';
+const MDF_CARD_SOURCE = 'backend-cut-mdf-card-command';
 const IGNORED_ANALYSIS_WARNINGS = new Set([
   'RapidOCR found text, but no detail rows with order and size',
 ]);
@@ -124,6 +130,10 @@ interface IdempotencyRow extends QueryResultRow {
   request_hash: string;
   response_json: unknown;
   status: 'processing' | 'completed' | 'failed';
+  command_name?: string;
+  actor_user_id?: string | number;
+  entity_type?: string;
+  entity_id?: string;
 }
 
 interface CurrentDateRow extends QueryResultRow {
@@ -149,6 +159,7 @@ interface BathJoinedRow extends QueryResultRow {
   revision_no: string | number;
   result_created_at: string | Date;
   cut_job_name: string | null;
+  forced: boolean;
   order_id: string | number;
   order_detail_id: string | number;
   order_name: string | null;
@@ -162,6 +173,16 @@ interface BathJoinedRow extends QueryResultRow {
   sheet_ordinal: string | number;
   sheet_width_mm: string | number | null;
   sheet_height_mm: string | number | null;
+}
+
+interface MdfCardCutResultItemRow extends QueryResultRow {
+  order_id: string | number;
+  order_detail_id: string | number;
+  order_name: string;
+  detail_number: string | number | null;
+  width_mm: string | number | null;
+  height_mm: string | number | null;
+  quantity: string | number;
 }
 
 interface DetailMatchRow extends QueryResultRow {
@@ -197,7 +218,7 @@ export class PgCncTelegramRepository
     const workdayFrom = command.workdayFrom ?? workday;
     const workdayTo = command.workdayTo ?? workday;
     const rows = await this.database.query<PacketJoinedRow>(
-      packetSelectSql('p.workday BETWEEN $1::date AND $2::date AND p.mdf_board_hidden_at IS NULL'),
+      packetSelectSql("p.workday BETWEEN $1::date AND $2::date AND p.mdf_board_hidden_at IS NULL AND p.mdf_board_card_kind = 'machine_file'"),
       [workdayFrom, workdayTo],
     );
     const packets = mapPacketRows(rows.rows);
@@ -437,6 +458,244 @@ export class PgCncTelegramRepository
     });
   }
 
+  async createMdfCard(command: CreateCncMdfCardCommand): Promise<CreateCncMdfCardResponseDto> {
+    return this.database.transaction(async (tx) => {
+      await setSessionUser(tx, command.currentUser.id);
+      const requestId = command.requestId || 'cnc-mdf-card-create';
+      const jobResult = await tx.query<{
+        name: string;
+        status: string;
+        current_cut_result_id: string | number | null;
+        current_result_no: string | number | null;
+        layout_mode: string | null;
+      }>(
+        `
+        SELECT
+          j.name,
+          j.status,
+          j.current_cut_result_id,
+          result.result_no AS current_result_no,
+          COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') AS layout_mode
+        FROM cut_job j
+        LEFT JOIN cut_result result ON result.cut_result_id = j.current_cut_result_id
+        LEFT JOIN cut_param_profiles profile ON profile.cut_param_profile_id = j.param_profile_id
+        WHERE j.cut_job_id = $1
+        FOR UPDATE OF j
+        `,
+        [command.cutJobId],
+      );
+      const job = jobResult.rows[0];
+      if (!job) {
+        throw new ApiError(404, 'CUT_JOB_NOT_FOUND', 'Задание на раскрой не найдено', {
+          cutJobId: command.cutJobId,
+        });
+      }
+      if (job.status === 'archived') {
+        throw new ApiError(409, 'CUT_JOB_ARCHIVED', 'Для архивного раскроя нельзя создать карточку МДФ-доски', {
+          cutJobId: command.cutJobId,
+        });
+      }
+      const cutResultId = toPositiveInteger(job.current_cut_result_id);
+      const resultNo = toPositiveInteger(job.current_result_no);
+      if (cutResultId === null || resultNo === null) {
+        throw new ApiError(422, 'CUT_JOB_CURRENT_RESULT_REQUIRED', 'Сначала рассчитайте раскрой', {
+          cutJobId: command.cutJobId,
+        });
+      }
+      const cardKind: CreateCncMdfCardResponseDto['cardKind'] =
+        job.layout_mode === 'vacuum_table' ? 'bath' : 'machine_file';
+      const storageKind = cardKind === 'bath' ? 'bath_seed' : 'machine_file';
+      const requestHash = sha256Json({
+        actorUserId: command.currentUser.id,
+        cutJobId: command.cutJobId,
+        cutResultId,
+        cardKind,
+      });
+      const idempotency = await reconcileMdfCardIdempotency(tx, {
+        idempotencyKey: command.idempotencyKey,
+        currentUserId: command.currentUser.id,
+        requestHash,
+        entityId: String(command.cutJobId),
+      });
+      if (idempotency.completedResponse) {
+        if (
+          idempotency.completedResponse.cutJobId !== command.cutJobId ||
+          idempotency.completedResponse.cutResultId !== cutResultId ||
+          idempotency.completedResponse.cardKind !== cardKind
+        ) {
+          throw new ApiError(409, 'MDF_CARD_CURRENT_RESULT_CHANGED', 'Текущий результат раскроя изменился; повторите создание', {
+            cutJobId: command.cutJobId,
+            expectedCutResultId: idempotency.completedResponse.cutResultId,
+            currentCutResultId: cutResultId,
+          });
+        }
+        return idempotency.completedResponse;
+      }
+
+      const externalPacketKey = `erp-cut-mdf-card:${storageKind}:${command.cutJobId}:${cutResultId}`;
+      const existing = await tx.query<{ packet_id: string; workday: string | Date }>(
+        `SELECT packet_id::text AS packet_id, workday
+         FROM cnc_telegram_packets
+         WHERE external_packet_key = $1
+         FOR UPDATE`,
+        [externalPacketKey],
+      );
+      const existingPacket = existing.rows[0];
+      if (existingPacket) {
+        const response = mdfCardResponse({
+          cutJobId: command.cutJobId,
+          cutResultId,
+          cardKind,
+          packetId: existingPacket.packet_id,
+          workday: existingPacket.workday,
+          created: false,
+        });
+        await completeMdfCardIdempotency(tx, command.idempotencyKey, response);
+        return response;
+      }
+
+      const itemResult = await tx.query<MdfCardCutResultItemRow>(
+        `
+        SELECT
+          placement.order_id,
+          placement.order_detail_id,
+          COALESCE(NULLIF(trim(o.order_name), ''), placement.order_id::text) AS order_name,
+          od.detail_number,
+          COALESCE(od.width, placement.detail_width_mm) AS width_mm,
+          COALESCE(od.height, placement.detail_height_mm) AS height_mm,
+          COUNT(*)::integer AS quantity
+        FROM cut_result_placement placement
+        JOIN cut_result_sheet_map sheet
+          ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+         AND sheet.is_effective = true
+        JOIN orders o ON o.order_id = placement.order_id AND o.delete_flag = false
+        JOIN order_details od ON od.detail_id = placement.order_detail_id AND od.delete_flag = false
+        WHERE placement.cut_result_id = $1
+          AND placement.order_id IS NOT NULL
+          AND placement.order_detail_id IS NOT NULL
+        GROUP BY
+          placement.order_id,
+          placement.order_detail_id,
+          o.order_name,
+          od.detail_number,
+          od.width,
+          od.height,
+          placement.detail_width_mm,
+          placement.detail_height_mm
+        ORDER BY placement.order_id, od.detail_number, placement.order_detail_id
+        `,
+        [cutResultId],
+      );
+      if (itemResult.rows.length === 0) {
+        throw new ApiError(422, 'CUT_RESULT_HAS_NO_MDF_CARD_ITEMS', 'В текущем результате нет активных деталей для карточки', {
+          cutJobId: command.cutJobId,
+          cutResultId,
+        });
+      }
+
+      const dto: CncTelegramStructuredIngestDto = {
+        idempotencyKey: command.idempotencyKey,
+        externalPacketKey,
+        source: { chatId: 'erp-cut-mdf-card', version: 1 },
+        machine: 'ERP',
+        programName: job.name,
+        materialName: 'МДФ',
+        parseStatus: 'parsed',
+        completionStatus: 'pending',
+        thumbsUp: false,
+        comments: [],
+        tools: [],
+        parserVersion: 'erp-cut-mdf-card-v1',
+        items: itemResult.rows.map((row) => ({
+          sourceItemKey: `${toNumber(row.order_id)}:${toNumber(row.order_detail_id)}`,
+          orderName: row.order_name,
+          detailNumber: toNullableNumber(row.detail_number),
+          widthMm: toNullableNumber(row.width_mm),
+          heightMm: toNullableNumber(row.height_mm),
+          quantity: Math.max(1, toNumber(row.quantity)),
+          source: 'manual',
+          confidence: 1,
+          matchOrderId: toNumber(row.order_id),
+          matchDetailId: toNumber(row.order_detail_id),
+          matchStatus: 'matched',
+          reviewNote: null,
+        })),
+      };
+      const packetCommand: IngestCncTelegramPacketCommand = {
+        currentUser: command.currentUser,
+        dto,
+        requestId,
+      };
+      const packetId = await insertPacket(tx, packetCommand, requestHash);
+      await replaceItems(tx, packetId, dto);
+      await tx.query(
+        `UPDATE cnc_telegram_packets
+         SET svg_cut_job_id = $2,
+             svg_cut_result_id = $3,
+             svg_cut_import_status = 'imported',
+             svg_cut_import_note = 'forced_mdf_board_card',
+             mdf_board_card_kind = $4,
+             updated_at = now()
+         WHERE packet_id = $1::uuid`,
+        [packetId, command.cutJobId, cutResultId, storageKind],
+      );
+      const packet = await loadPacket(tx, packetId);
+      const response = mdfCardResponse({
+        cutJobId: command.cutJobId,
+        cutResultId,
+        cardKind,
+        packetId,
+        workday: packet.workday,
+        created: true,
+      });
+      const relatedEntities = [
+        { entityType: 'cut_job', entityId: command.cutJobId },
+        { entityType: 'cut_result', entityId: cutResultId },
+        ...itemResult.rows.flatMap((row) => [
+          { entityType: 'order', entityId: toNumber(row.order_id) },
+          { entityType: 'order_detail', entityId: toNumber(row.order_detail_id) },
+        ]),
+      ];
+      const auditId = await auditService.record(tx, {
+        event: MDF_CARD_CREATED_EVENT,
+        entityType: 'cnc_telegram_packet',
+        entityId: packetId,
+        actorUserId: command.currentUser.id,
+        actorUsername: command.currentUser.username ?? null,
+        actorRole: command.currentUser.role ?? null,
+        requestId,
+        source: MDF_CARD_SOURCE,
+        before: null,
+        after: { ...response },
+        diff: { created: true, cardKind },
+        metadata: {
+          cutJobId: command.cutJobId,
+          cutResultId,
+          resultNo,
+          cardKind,
+          packetId,
+          itemCount: itemResult.rows.length,
+        },
+        relatedEntities,
+      });
+      await enqueueOutbox(tx, {
+        eventType: MDF_CARD_CREATED_EVENT,
+        aggregateType: 'cut_job',
+        aggregateId: String(command.cutJobId),
+        idempotencyKey: `${MDF_CARD_CREATED_EVENT}:${command.cutJobId}:${cutResultId}:${cardKind}`,
+        payload: {
+          ...response,
+          actorUserId: command.currentUser.id,
+          requestId,
+          auditId,
+          packetId,
+        },
+      });
+      await completeMdfCardIdempotency(tx, command.idempotencyKey, response);
+      return response;
+    });
+  }
+
   async listManualSvgCommentPresets(
     _command: ListManualSvgCommentPresetsCommand,
   ): Promise<CncTelegramManualSvgCommentPresetDto[]> {
@@ -518,7 +777,7 @@ export class PgCncTelegramRepository
         requestId,
         source: MANUAL_SVG_SOURCE,
         before: null,
-        after: preset,
+        after: { ...preset },
         diff: { created: true },
         metadata: {
           source: MANUAL_SVG_SOURCE,
@@ -547,11 +806,13 @@ export class PgCncTelegramRepository
   }
 
   async recordIngestDenied(command: RecordCncTelegramDeniedAuditCommand): Promise<void> {
-    const entityType = command.event === 'cnc.manual_svg_comment_preset.create_denied'
-      ? 'cnc_manual_svg_comment_preset'
-      : command.event === 'cnc.manual_svg_upload.denied'
-        ? 'cnc_manual_svg_upload'
-        : 'cnc_telegram_packet';
+    const entityType = command.event === 'cnc.mdf_card.create_denied'
+      ? 'cut_job'
+      : command.event === 'cnc.manual_svg_comment_preset.create_denied'
+        ? 'cnc_manual_svg_comment_preset'
+        : command.event === 'cnc.manual_svg_upload.denied'
+          ? 'cnc_manual_svg_upload'
+          : 'cnc_telegram_packet';
     await auditService.recordDenied(this.database, {
       event: command.event,
       entityType,
@@ -1020,6 +1281,7 @@ async function insertPacket(
   if (!packetId) {
     throw new ApiError(500, 'CNC_TELEGRAM_PACKET_INSERT_FAILED', 'CNC packet insert failed');
   }
+  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
   return packetId;
 }
 
@@ -1065,6 +1327,32 @@ async function updatePacket(
     WHERE packet_id = $1::uuid
     `,
     [packetId, ...packetParams(dto, payloadHash, command.currentUser.id).slice(1)],
+  );
+  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
+}
+
+async function replaceWholeOrderKeys(
+  tx: TransactionClient,
+  packetId: string,
+  comments: readonly string[],
+): Promise<void> {
+  const orderKeys = Array.from(new Set(
+    comments.flatMap((comment) => {
+      if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return [];
+      return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g), (match) => match[2]);
+    }),
+  ));
+  await tx.query(
+    `DELETE FROM cnc_telegram_packet_whole_order_keys WHERE packet_id = $1::uuid`,
+    [packetId],
+  );
+  if (orderKeys.length === 0) return;
+  await tx.query(
+    `INSERT INTO cnc_telegram_packet_whole_order_keys (packet_id, order_key)
+     SELECT $1::uuid, order_key
+     FROM unnest($2::text[]) AS order_key
+     ON CONFLICT (packet_id, order_key) DO NOTHING`,
+    [packetId, orderKeys],
   );
 }
 
@@ -2502,6 +2790,104 @@ async function failIdempotency(tx: TransactionClient, idempotencyKey: string): P
   );
 }
 
+function mdfCardResponse(input: {
+  cutJobId: number;
+  cutResultId: number;
+  cardKind: CreateCncMdfCardResponseDto['cardKind'];
+  packetId: string;
+  workday: string | Date;
+  created: boolean;
+}): CreateCncMdfCardResponseDto {
+  return {
+    cutJobId: input.cutJobId,
+    cutResultId: input.cutResultId,
+    cardKind: input.cardKind,
+    cardId: input.cardKind === 'bath' ? `cut-result:${input.cutResultId}` : input.packetId,
+    workday: toDateOnly(input.workday),
+    created: input.created,
+  };
+}
+
+async function reconcileMdfCardIdempotency(
+  tx: TransactionClient,
+  input: {
+    idempotencyKey: string;
+    currentUserId: string;
+    requestHash: string;
+    entityId: string;
+  },
+): Promise<{ completedResponse?: CreateCncMdfCardResponseDto }> {
+  const inserted = await tx.query<IdempotencyRow>(
+    `
+    INSERT INTO command_idempotency_keys (
+      idempotency_key, command_name, actor_user_id, entity_type, entity_id, request_hash, status
+    )
+    VALUES ($1, $2, $3, 'cut_job', $4, $5, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING request_hash, response_json, status
+    `,
+    [input.idempotencyKey, MDF_CARD_COMMAND_NAME, Number(input.currentUserId), input.entityId, input.requestHash],
+  );
+  if (inserted.rows[0]) return {};
+
+  const existing = await tx.query<IdempotencyRow>(
+    `SELECT request_hash, response_json, status, command_name, actor_user_id, entity_type, entity_id
+     FROM command_idempotency_keys
+     WHERE idempotency_key = $1
+     FOR UPDATE`,
+    [input.idempotencyKey],
+  );
+  const row = existing.rows[0];
+  if (!row) throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.idempotencyKey);
+  if (
+    row.command_name !== MDF_CARD_COMMAND_NAME ||
+    String(row.actor_user_id) !== String(input.currentUserId) ||
+    row.entity_type !== 'cut_job' ||
+    String(row.entity_id) !== input.entityId
+  ) {
+    throw idempotencyError('IDEMPOTENCY_KEY_REUSED', input.idempotencyKey);
+  }
+  if (row.status === 'completed' && row.response_json) {
+    return { completedResponse: parseStoredMdfCardResponse(row.response_json) };
+  }
+  if (row.request_hash !== input.requestHash) {
+    throw idempotencyError('IDEMPOTENCY_KEY_REUSED', input.idempotencyKey);
+  }
+  if (row.status === 'failed') throw idempotencyError('IDEMPOTENCY_FAILED', input.idempotencyKey);
+  throw idempotencyError('IDEMPOTENCY_IN_PROGRESS', input.idempotencyKey);
+}
+
+function parseStoredMdfCardResponse(value: unknown): CreateCncMdfCardResponseDto {
+  const row = value as Partial<CreateCncMdfCardResponseDto>;
+  const cutJobId = toPositiveInteger(row.cutJobId);
+  const cutResultId = toPositiveInteger(row.cutResultId);
+  const cardKind = row.cardKind === 'bath' ? 'bath' : row.cardKind === 'machine_file' ? 'machine_file' : null;
+  if (cutJobId === null || cutResultId === null || cardKind === null || typeof row.cardId !== 'string' || typeof row.workday !== 'string') {
+    throw new ApiError(500, 'IDEMPOTENCY_RESPONSE_INVALID', 'Stored MDF-card response is invalid');
+  }
+  return {
+    cutJobId,
+    cutResultId,
+    cardKind,
+    cardId: row.cardId,
+    workday: row.workday,
+    created: row.created === true,
+  };
+}
+
+async function completeMdfCardIdempotency(
+  tx: TransactionClient,
+  idempotencyKey: string,
+  response: CreateCncMdfCardResponseDto,
+): Promise<void> {
+  await tx.query(
+    `UPDATE command_idempotency_keys
+     SET status = 'completed', response_json = $2::jsonb, completed_at = now()
+     WHERE idempotency_key = $1`,
+    [idempotencyKey, JSON.stringify(response)],
+  );
+}
+
 async function reconcilePresetIdempotency(
   tx: TransactionClient,
   input: {
@@ -2605,160 +2991,8 @@ async function loadBathCards(
 ): Promise<CncTelegramBathCardDto[]> {
   const result = await database.query<BathJoinedRow>(
     `
-    WITH packet_items AS (
-      SELECT
-        p.completion_status,
-        p.thumbs_up,
-        NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
-          WHERE lower(packet_comment.comment_text) LIKE ANY (
-            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-          )
-        ) AS mdf_relevant,
-        i.match_order_id,
-        i.match_detail_id,
-        i.source,
-        lower(trim(i.order_name)) AS order_key,
-        i.detail_number,
-        i.width_mm,
-        i.height_mm,
-        i.quantity
-      FROM cnc_telegram_packets p
-      JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
-      WHERE p.workday BETWEEN $1::date AND $2::date
-        AND p.mdf_board_hidden_at IS NULL
-    ),
-    matched_target_details AS (
-      SELECT
-        item.match_order_id::bigint AS order_id,
-        item.match_detail_id::bigint AS detail_id,
-        SUM(
-          CASE
-            WHEN item.mdf_relevant
-              AND (item.completion_status = 'completed' OR item.thumbs_up = true)
-              THEN GREATEST(item.quantity, 0)
-            ELSE 0
-          END
-        )::integer AS completed_quantity
-      FROM packet_items item
-      WHERE item.match_order_id IS NOT NULL
-        AND item.match_detail_id IS NOT NULL
-      GROUP BY item.match_order_id, item.match_detail_id
-    ),
-    unique_order_keys AS (
-      SELECT
-        lower(trim(o.order_name)) AS order_key,
-        MIN(o.order_id)::bigint AS order_id
-      FROM orders o
-      WHERE o.delete_flag = false
-        AND NULLIF(trim(o.order_name), '') IS NOT NULL
-      GROUP BY lower(trim(o.order_name))
-      HAVING COUNT(*) = 1
-    ),
-    completed_whole_order_keys AS (
-      SELECT DISTINCT lower(trim(order_match.match[2])) AS order_key
-      FROM cnc_telegram_packets p
-      CROSS JOIN LATERAL jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
-      CROSS JOIN LATERAL regexp_matches(
-        packet_comment.comment_text,
-        '(^|[^0-9])([0-9]{4,})([^0-9]|$)',
-        'g'
-      ) AS order_match(match)
-      WHERE p.workday BETWEEN $1::date AND $2::date
-        AND p.mdf_board_hidden_at IS NULL
-        AND (p.completion_status = 'completed' OR p.thumbs_up = true)
-        AND lower(packet_comment.comment_text) LIKE '%весь%'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM jsonb_array_elements_text(p.comments_json) AS material_comment(comment_text)
-          WHERE lower(material_comment.comment_text) LIKE ANY (
-            ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
-          )
-        )
-    ),
-    whole_order_target_details AS (
-      SELECT
-        order_key.order_id,
-        od.detail_id::bigint AS detail_id,
-        1000000000::integer AS completed_quantity
-      FROM completed_whole_order_keys whole_order
-      JOIN unique_order_keys order_key
-        ON order_key.order_key = whole_order.order_key
-      JOIN order_details od
-        ON od.order_id = order_key.order_id
-       AND od.delete_flag = false
-    ),
-    fallback_target_details AS (
-      SELECT
-        order_key.order_id,
-        od.detail_id::bigint AS detail_id,
-        SUM(
-          CASE
-            WHEN item.mdf_relevant
-              AND (item.completion_status = 'completed' OR item.thumbs_up = true)
-              THEN GREATEST(item.quantity, 0)
-            ELSE 0
-          END
-        )::integer AS completed_quantity
-      FROM packet_items item
-      JOIN unique_order_keys order_key
-        ON order_key.order_key = item.order_key
-      JOIN order_details od
-        ON od.order_id = order_key.order_id
-       AND od.delete_flag = false
-      WHERE item.match_order_id IS NULL
-        AND item.match_detail_id IS NULL
-        AND item.detail_number IS NOT NULL
-        AND od.detail_number = item.detail_number
-        AND item.width_mm IS NOT NULL
-        AND item.height_mm IS NOT NULL
-        AND od.width IS NOT NULL
-        AND od.height IS NOT NULL
-        AND (
-          (
-            item.source <> 'ocr'
-            AND (
-              (
-                item.width_mm::numeric = od.width::numeric
-                AND item.height_mm::numeric = od.height::numeric
-              )
-              OR (
-                item.width_mm::numeric = od.height::numeric
-                AND item.height_mm::numeric = od.width::numeric
-              )
-            )
-          )
-          OR (
-            item.source = 'ocr'
-            AND (
-              (
-                ABS(item.width_mm::numeric - od.width::numeric) <= 3
-                AND ABS(item.height_mm::numeric - od.height::numeric) <= 3
-              )
-              OR (
-                ABS(item.width_mm::numeric - od.height::numeric) <= 3
-                AND ABS(item.height_mm::numeric - od.width::numeric) <= 3
-              )
-            )
-          )
-        )
-      GROUP BY order_key.order_id, od.detail_id
-    ),
-    target_details AS (
-      SELECT
-        target.order_id,
-        target.detail_id,
-        LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer AS completed_quantity
-      FROM (
-        SELECT * FROM matched_target_details
-        UNION ALL
-        SELECT * FROM fallback_target_details
-        UNION ALL
-        SELECT * FROM whole_order_target_details
-      ) target
-      GROUP BY target.order_id, target.detail_id
-    ),
+    WITH
+    ${cncMdfTargetDetailsCtes()},
     candidate_vacuum_results AS (
       SELECT
         r.cut_result_id,
@@ -2767,6 +3001,14 @@ async function loadBathCards(
         r.revision_no,
         r.created_at AS result_created_at,
         COALESCE(r.snapshot_job ->> 'name', j.name, 'Раскрой ' || j.cut_job_id::text) AS cut_job_name,
+        EXISTS (
+          SELECT 1
+          FROM cnc_telegram_packets forced_packet
+          WHERE forced_packet.svg_cut_result_id = r.cut_result_id
+            AND forced_packet.mdf_board_card_kind = 'bath_seed'
+            AND forced_packet.mdf_board_hidden_at IS NULL
+            AND forced_packet.workday BETWEEN $1::date AND $2::date
+        ) AS forced,
         (current_result.result_no = r.result_no) AS is_current_result
       FROM cut_job j
       JOIN cut_result r ON r.cut_job_id = j.cut_job_id
@@ -2815,6 +3057,7 @@ async function loadBathCards(
       result.revision_no,
       result.result_created_at,
       result.cut_job_name,
+      result.forced,
       placement.order_id,
       placement.order_detail_id,
       COALESCE(NULLIF(trim(o.order_name), ''), placement.order_id::text) AS order_name,
@@ -2925,6 +3168,7 @@ function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
         cutNumber: `${cutJobId}-${resultNo}`,
         cutJobName: normalizeOptional(row.cut_job_name) ?? `Раскрой ${cutJobId}`,
         createdAt: toIso(row.result_created_at),
+        forced: row.forced === true,
         ready: false,
         orderCount: 0,
         positionCount: 0,
