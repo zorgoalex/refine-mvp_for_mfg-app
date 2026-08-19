@@ -5,10 +5,10 @@ import crypto from 'node:crypto';
 
 const canaryEnabled = process.env.PAYMENTS_STAGE_CANARY === 'true';
 const frontendUrl = trimTrailingSlash(
-    process.env.PAYMENTS_STAGE_FRONTEND_URL ?? 'https://stage.mebelkz.app',
+    process.env.PAYMENTS_STAGE_FRONTEND_URL ?? 'https://app-test.mebelkz.app',
 );
 const backendApiUrl = trimTrailingSlash(
-    process.env.PAYMENTS_STAGE_BACKEND_API_URL ?? 'https://backend.dev.mebelkz.app/api/v1',
+    process.env.PAYMENTS_STAGE_BACKEND_API_URL ?? 'https://backend-test.mebelkz.app/api/v1',
 );
 const testOrderId = readNumberEnv('PAYMENTS_STAGE_ORDER_ID', 11151);
 const testOrderName =

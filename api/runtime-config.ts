@@ -37,11 +37,11 @@ function inferRuntimeApiUrl(req: VercelRequest): string {
   const host = rawHost?.trim().toLowerCase().replace(/:\d+$/, '') ?? '';
 
   if (
-    host === 'stage.mebelkz.app' ||
+    host === 'app-test.mebelkz.app' ||
     process.env.VERCEL_ENV === 'preview' ||
     process.env.VERCEL_GIT_COMMIT_REF === 'feat/backend-erp-stage1'
   ) {
-    return 'https://backend.dev.mebelkz.app';
+    return 'https://backend-test.mebelkz.app';
   }
 
   return '';
