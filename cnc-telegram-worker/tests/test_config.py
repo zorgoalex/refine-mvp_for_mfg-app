@@ -15,6 +15,7 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertEqual(config.stack_env, "test")
         self.assertEqual(config.worker_role, "disabled")
         self.assertEqual(config.poll_interval_seconds, 60)
+        self.assertEqual(config.import_queue_poll_interval_seconds, 5)
         self.assertEqual(config.manual_svg_send_poll_interval_seconds, 5)
         self.assertFalse(config.enable_glm_ocr)
         self.assertEqual(config.ocr_command_timeout_seconds, 180)
@@ -97,6 +98,16 @@ class WorkerConfigTest(unittest.TestCase):
         self.assertTrue(config.can_send_manual_svg_uploads)
         self.assertEqual(config.manual_svg_send_poll_interval_seconds, 7)
         config.require_worker_enabled()
+
+    def test_import_queue_poll_interval_is_independently_configurable(self) -> None:
+        with patch.dict(os.environ, {
+            "CNC_POLL_INTERVAL_SECONDS": "60",
+            "CNC_TELEGRAM_IMPORT_POLL_INTERVAL_SECONDS": "4",
+        }, clear=True):
+            config = WorkerConfig.from_env()
+
+        self.assertEqual(config.poll_interval_seconds, 60)
+        self.assertEqual(config.import_queue_poll_interval_seconds, 4)
 
     def test_writer_runs_on_prod_stack(self) -> None:
         with patch.dict(os.environ, {

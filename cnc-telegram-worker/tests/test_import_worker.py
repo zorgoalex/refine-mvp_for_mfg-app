@@ -6,6 +6,7 @@ import tempfile
 import types
 import unittest
 import re
+import time
 from unittest.mock import AsyncMock, patch
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -338,6 +339,42 @@ class ImportWorkerTest(unittest.TestCase):
             # 50ms cooldown; a zero-delay loop would be orders of magnitude
             # larger than this bound.
             self.assertLessEqual(total_calls, 8)
+
+        asyncio.run(scenario())
+
+    def test_import_cooldown_is_short_without_changing_manual_restore_polling(self) -> None:
+        async def scenario() -> None:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = types.SimpleNamespace(
+                can_send_manual_svg_uploads=False,
+                poll_interval_seconds=60,
+                # Test value keeps the regression fast; production default is 5s.
+                import_queue_poll_interval_seconds=0.05,
+            )
+            stop_event = asyncio.Event()
+            import_calls: list[float] = []
+
+            async def import_once(*args: object, **kwargs: object) -> int:
+                import_calls.append(time.monotonic())
+                if len(import_calls) == 2:
+                    stop_event.set()
+                return 0
+
+            worker.process_manual_svg_telegram_send_requests = AsyncMock(return_value=0)
+            worker.process_import_item_queue = AsyncMock(side_effect=import_once)
+            worker.process_media_restore_requests = AsyncMock(return_value=0)
+            worker.process_import_scan_queue = AsyncMock(return_value=0)
+            await asyncio.wait_for(
+                worker.poll_queue_scheduler(object(), object(), "-100", stop_event),
+                timeout=0.5,
+            )
+
+            self.assertEqual(len(import_calls), 2)
+            self.assertGreaterEqual(import_calls[1] - import_calls[0], 0.04)
+            # With the old global 60s cooldown this assertion would time out;
+            # manual/restore still retain that old interval.
+            self.assertLess(import_calls[1] - import_calls[0], 0.5)
+            self.assertEqual(worker.process_manual_svg_telegram_send_requests.call_count, 0)
 
         asyncio.run(scenario())
 

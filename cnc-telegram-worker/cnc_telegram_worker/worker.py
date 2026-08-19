@@ -761,6 +761,13 @@ class CncTelegramWorker:
         scheduler = WeightedQueueScheduler()
         ready_since: dict[str, float] = {}
         next_probe_at: dict[str, float] = {}
+        import_poll_interval = getattr(self.config, "import_queue_poll_interval_seconds", 5)
+        poll_intervals = {
+            "manual": self.config.poll_interval_seconds,
+            "import": import_poll_interval,
+            "restore": self.config.poll_interval_seconds,
+            "discovery": import_poll_interval,
+        }
         while not stop_event.is_set():
             now = time.monotonic()
             enabled = {
@@ -790,7 +797,7 @@ class CncTelegramWorker:
                     for name, is_enabled in enabled.items()
                     if is_enabled and name in next_probe_at
                 ]
-                timeout = self.config.poll_interval_seconds
+                timeout = min(poll_intervals.values())
                 if cooling:
                     timeout = min(timeout, max(min(cooling) - now, 0.0))
                 try:
@@ -845,7 +852,7 @@ class CncTelegramWorker:
                 # and are probed immediately, so an empty manual queue cannot
                 # delay an available import queue by its weighted slots.
                 ready_since.pop(queue_name, None)
-                next_probe_at[queue_name] = time.monotonic() + self.config.poll_interval_seconds
+                next_probe_at[queue_name] = time.monotonic() + poll_intervals[queue_name]
                 await asyncio.sleep(0)
             else:
                 next_probe_at.pop(queue_name, None)
