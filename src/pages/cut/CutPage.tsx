@@ -23,7 +23,6 @@ import {
   UploadOutlined,
 } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
-import { Link } from 'react-router-dom';
 import dayjs, { type Dayjs } from 'dayjs';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
@@ -479,13 +478,13 @@ const CutJobMdfBoardCell: React.FC<{
   const reason = status?.reason ?? 'Backend не вернул состояние МДФ-доски.';
   const statusTag = <Tag color={cutJobMdfBoardStatusColor(state)}>{cutJobMdfBoardStatusLabel(state)}</Tag>;
   const linkedStatus = state === 'created' && status?.target && canOpenBoard ? (
-    <Link
+    <a
       className="cut-job-mdf-board-cell__link"
-      to={cutJobMdfBoardLink(status.target)}
+      href={cutJobMdfBoardLink(status.target)}
       aria-label={`Открыть ${status.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'} на МДФ-доске`}
     >
       {statusTag}
-    </Link>
+    </a>
   ) : statusTag;
   const tooltip = state === 'created' && !canOpenBoard
     ? `${cutJobMdfBoardTooltip(status)}\nДля перехода на МДФ-доску требуется право orders.view.`
