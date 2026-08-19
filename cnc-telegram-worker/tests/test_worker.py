@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import unittest
 import json
+import httpx
 import sys
 import tempfile
 import types
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 telethon_stub = types.ModuleType("telethon")
 telethon_stub.TelegramClient = object
@@ -40,6 +41,7 @@ from cnc_telegram_worker.worker import (
     is_cutting_sequence_reply_text,
     parse_cutting_sequence_reply,
 )
+from cnc_telegram_worker.erp_client import ErpResponseError, WorkerSessionLease
 
 
 VALID_SVG = """
@@ -408,8 +410,91 @@ class WorkerDayHistoryTest(unittest.IsolatedAsyncioTestCase):
 
 
 class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
+    async def test_session_claim_waits_for_exact_busy_lease_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp))
+            worker.config.telegram_chat = "-100"
+            worker.config.telegram_allowed_chat_ids = ("-100",)
+            worker.config.worker_image_revision = "test-image"
+            worker.config.worker_instance_id = "test-worker"
+            worker.config.session_lease_ttl_seconds = 3
+            worker.config.poll_interval_seconds = 1
+            worker.config.require_session_lease_timing = lambda: None
+
+            busy_response = httpx.Response(
+                409,
+                request=httpx.Request("POST", "http://backend/cnc-telegram/worker-session/claim"),
+                json={"code": "CNC_TELEGRAM_SESSION_LEASE_BUSY"},
+            )
+            worker.erp.claim_worker_session = AsyncMock(side_effect=[
+                ErpResponseError(busy_response, "worker session claim"),
+                WorkerSessionLease("lease-token", 4),
+            ])
+
+            with patch("cnc_telegram_worker.worker.asyncio.sleep", new=AsyncMock()) as sleep:
+                await worker._claim_session_lease()
+
+            self.assertEqual(worker.erp.claim_worker_session.await_count, 2)
+            self.assertEqual([call.args[0] for call in sleep.await_args_list], [1])
+
+    async def test_session_claim_does_not_retry_other_409_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp))
+            worker.config.telegram_chat = "-100"
+            worker.config.telegram_allowed_chat_ids = ("-100",)
+            worker.config.worker_image_revision = "test-image"
+            worker.config.worker_instance_id = "test-worker"
+            worker.config.session_lease_ttl_seconds = 3
+            worker.config.poll_interval_seconds = 1
+            worker.config.require_session_lease_timing = lambda: None
+
+            stale_response = httpx.Response(
+                409,
+                request=httpx.Request("POST", "http://backend/cnc-telegram/worker-session/claim"),
+                json={"code": "CNC_TELEGRAM_SESSION_LEASE_STALE"},
+            )
+            worker.erp.claim_worker_session = AsyncMock(
+                side_effect=ErpResponseError(stale_response, "worker session claim"),
+            )
+
+            with patch("cnc_telegram_worker.worker.asyncio.sleep", new=AsyncMock()) as sleep:
+                with self.assertRaises(ErpResponseError):
+                    await worker._claim_session_lease()
+
+            worker.erp.claim_worker_session.assert_awaited_once()
+            sleep.assert_not_awaited()
+
+    async def test_session_claim_busy_retries_are_bounded_by_lease_ttl(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            worker = make_worker(Path(temp))
+            worker.config.telegram_chat = "-100"
+            worker.config.telegram_allowed_chat_ids = ("-100",)
+            worker.config.worker_image_revision = "test-image"
+            worker.config.worker_instance_id = "test-worker"
+            worker.config.session_lease_ttl_seconds = 3
+            worker.config.poll_interval_seconds = 1
+            worker.config.require_session_lease_timing = lambda: None
+
+            def busy_error() -> ErpResponseError:
+                response = httpx.Response(
+                    409,
+                    request=httpx.Request("POST", "http://backend/cnc-telegram/worker-session/claim"),
+                    json={"code": "CNC_TELEGRAM_SESSION_LEASE_BUSY"},
+                )
+                return ErpResponseError(response, "worker session claim")
+
+            worker.erp.claim_worker_session = AsyncMock(side_effect=[busy_error() for _ in range(5)])
+
+            with patch("cnc_telegram_worker.worker.asyncio.sleep", new=AsyncMock()) as sleep:
+                with self.assertRaises(ErpResponseError):
+                    await worker._claim_session_lease()
+
+            self.assertEqual(worker.erp.claim_worker_session.await_count, 5)
+            self.assertEqual([call.args[0] for call in sleep.await_args_list], [1, 1, 1, 1])
+
     async def test_serve_never_scans_history(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
+            events: list[str] = []
             worker = make_worker(Path(temp))
             worker.config.enabled = True
             worker.config.stack_env = "test"
@@ -426,6 +511,7 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
             worker.config.audit_allow_unsafe_path = True
             worker.config.session_lease_ttl_seconds = 90
             worker.config.session_lease_heartbeat_seconds = 30
+            worker.config.poll_interval_seconds = 1
             worker.config.media_restore_poll_interval_seconds = 1
             worker.config.manual_svg_send_poll_interval_seconds = 1
             worker.config.temp_ttl_hours = 1
@@ -440,8 +526,18 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
             worker.erp.set_session_lease = lambda _lease: None
             worker.erp.audit_capabilities = AsyncMock(return_value={})
 
+            async def claim_session(**_kwargs: object) -> WorkerSessionLease:
+                events.append("lease-success")
+                return WorkerSessionLease("lease-token", 4)
+
+            worker.erp.claim_worker_session = AsyncMock(side_effect=claim_session)
+
             class ServeClient:
+                def __init__(self, *_args: object) -> None:
+                    events.append("telegram-init")
+
                 async def connect(self) -> None:
+                    events.append("telegram-connect")
                     return None
 
                 async def is_user_authorized(self) -> bool:
@@ -463,9 +559,9 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
                 stop_event: asyncio.Event,
                 **_kwargs: object,
             ) -> None:
+                events.append("queue")
                 stop_event.set()
 
-            worker._claim_session_lease = AsyncMock()
             worker._heartbeat_session = AsyncMock()
             worker.process_media_restore_requests = AsyncMock()
             worker.process_manual_svg_telegram_send_requests = AsyncMock()
@@ -475,7 +571,7 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
 
             reconcile = AsyncMock()
             with (
-                patch("cnc_telegram_worker.worker.TelegramClient", return_value=ServeClient()),
+                patch("cnc_telegram_worker.worker.TelegramClient", side_effect=ServeClient),
                 patch("cnc_telegram_worker.worker.assert_allowed_chat"),
                 patch("cnc_telegram_worker.worker.backfill_sheet_previews"),
                 patch("cnc_telegram_worker.worker.flush_audit_spool", new=AsyncMock()),
@@ -485,6 +581,8 @@ class WorkerServeSafetyTest(unittest.IsolatedAsyncioTestCase):
 
             worker.scan_workday.assert_not_awaited()
             reconcile.assert_not_awaited()
+            self.assertLess(events.index("lease-success"), events.index("telegram-init"))
+            self.assertLess(events.index("telegram-connect"), events.index("queue"))
 
     async def test_heartbeat_failure_stops_serve_fail_closed(self) -> None:
         worker = object.__new__(CncTelegramWorker)

@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import math
 import mimetypes
 import re
 import shutil
@@ -29,7 +30,7 @@ from .audit import (
     utc_now,
 )
 from .config import WorkerConfig
-from .erp_client import BackendAuth, ErpClient, SessionLeaseLost, WorkerItemLease, parse_item_lease
+from .erp_client import BackendAuth, ErpClient, ErpResponseError, SessionLeaseLost, WorkerItemLease, parse_item_lease
 from .gcode import extract_order_names, parse_gcode_text
 from .ocr import OcrResult, run_ocr_command
 from .packet import (
@@ -171,11 +172,49 @@ class CncTelegramWorker:
                     "Telegram session lease requires numeric TELEGRAM_CHAT when multiple allowed chats are configured",
                 )
             configured_chat_id = self.config.telegram_allowed_chat_ids[0]
-        await self.erp.claim_worker_session(
-            chat_id=configured_chat_id,
-            image_revision=self.config.worker_image_revision,
-            lease_ttl_seconds=self.config.session_lease_ttl_seconds,
-        )
+        max_attempts, retry_delay_seconds = self._session_claim_retry_policy()
+        for attempt in range(max_attempts):
+            try:
+                await self.erp.claim_worker_session(
+                    chat_id=configured_chat_id,
+                    image_revision=self.config.worker_image_revision,
+                    lease_ttl_seconds=self.config.session_lease_ttl_seconds,
+                )
+                return
+            except ErpResponseError as exc:
+                if not self._is_busy_session_claim_error(exc) or attempt + 1 >= max_attempts:
+                    raise
+                print(
+                    "CNC Telegram session lease is busy; "
+                    f"retry {attempt + 2}/{max_attempts} in {retry_delay_seconds:g}s",
+                    flush=True,
+                )
+                await asyncio.sleep(retry_delay_seconds)
+
+    def _session_claim_retry_policy(self) -> tuple[int, float]:
+        lease_ttl_seconds = max(1.0, float(self.config.session_lease_ttl_seconds))
+        poll_interval_seconds = max(0.01, float(self.config.poll_interval_seconds))
+        # One extra poll beyond the advertised TTL avoids racing a lease that
+        # expires between backend/database clock ticks during rolling restart.
+        max_attempts = max(2, math.ceil(lease_ttl_seconds / poll_interval_seconds) + 2)
+        return max_attempts, min(lease_ttl_seconds, poll_interval_seconds)
+
+    @staticmethod
+    def _is_busy_session_claim_error(exc: ErpResponseError) -> bool:
+        response = exc.response
+        if response.status_code != 409:
+            return False
+        try:
+            payload = response.json()
+        except (ValueError, json.JSONDecodeError):
+            return False
+        if not isinstance(payload, dict):
+            return False
+        candidates: list[Any] = [payload.get("code"), payload.get("errorCode")]
+        nested_error = payload.get("error")
+        if isinstance(nested_error, dict):
+            candidates.extend([nested_error.get("code"), nested_error.get("errorCode")])
+        return any(candidate == "CNC_TELEGRAM_SESSION_LEASE_BUSY" for candidate in candidates)
 
     async def run_once(
         self,
