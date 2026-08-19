@@ -31,6 +31,15 @@ const BUSINESS_TIMEZONE = 'Asia/Almaty';
 const MAX_ATTEMPTS = 5;
 const LEASE_MINUTES = 5;
 
+export function programNameFromVerifiedSource(
+  source: Pick<CncTelegramImportCompleteDto['source'], 'gcodeFileName' | 'svgFileName'>,
+  fallbackSvgFileName: string | null,
+): string | null {
+  return source.gcodeFileName
+    ?? source.svgFileName
+    ?? fallbackSvgFileName;
+}
+
 export class PgCncTelegramImportRepository implements CncTelegramImportRepositoryPort {
   constructor(
     private readonly database: DatabaseService,
@@ -353,6 +362,7 @@ export class PgCncTelegramImportRepository implements CncTelegramImportRepositor
         // names remain informational, while uniquely matched names still link
         // to their active orders and details.
         matchMode: 'order_details', validationMode: 'lenient', svgContentHash: text(item, 'svg_content_sha256'),
+        programName: programNameFromVerifiedSource(input.completion.source, text(item, 'svg_file_name')),
         cutLayout: layout, items: parsedItems, sourceFiles,
         duplicatePolicy: { kind: 'intentional_copy', approvedByImportItemId: text(item, 'import_item_id') },
       };
