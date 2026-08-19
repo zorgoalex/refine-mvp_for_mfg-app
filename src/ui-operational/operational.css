@@ -222,6 +222,85 @@
   background: var(--ant-color-bg-container, #fff);
 }
 
+.cut-telegram-import__preview-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.cut-telegram-import__preview {
+  cursor: zoom-in;
+  transition-property: transform, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.cut-telegram-import__preview:hover {
+  transform: scale(1.02);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
+}
+
+.cut-telegram-import__preview-action {
+  min-height: 40px;
+  padding-inline: 4px;
+}
+
+.cut-telegram-import__preview-action:active,
+.cut-telegram-import__lightbox-close:active {
+  transform: scale(0.96);
+}
+
+.cut-telegram-import__lightbox .ant-modal-content {
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.cut-telegram-import__lightbox .ant-modal-header {
+  background: transparent;
+}
+
+.cut-telegram-import__lightbox .ant-modal-title {
+  color: #fff;
+}
+
+.cut-telegram-import__lightbox-content {
+  position: relative;
+  display: flex;
+  min-height: 160px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+}
+
+.cut-telegram-import__lightbox-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(72vh, 760px);
+  object-fit: contain;
+  outline: 1px solid rgba(0, 0, 0, 0.1);
+  outline-offset: -1px;
+}
+
+[data-theme="dark"] .cut-telegram-import__lightbox-image {
+  outline-color: rgba(255, 255, 255, 0.1);
+}
+
+.cut-telegram-import__lightbox-close {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  color: #fff;
+}
+
+.cut-telegram-import__lightbox-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
 [data-theme="dark"] .cut-telegram-import__preview {
   outline-color: rgba(255, 255, 255, 0.1);
 }

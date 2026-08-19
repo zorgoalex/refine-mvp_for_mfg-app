@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Checkbox, DatePicker, Empty, Modal, Pagination, Progress, Space, Spin, Steps, Tabs, Tag, Typography, message } from 'antd';
 import type { ColumnsType, TableProps } from 'antd/es/table';
-import { CheckCircleOutlined, ExclamationCircleOutlined, LinkOutlined, SearchOutlined, SendOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, CloseOutlined, ExclamationCircleOutlined, LinkOutlined, SearchOutlined, SendOutlined, ZoomInOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import { ApiError } from '../../api/httpClient';
 import { can } from '../../utils/permissions';
@@ -120,7 +120,51 @@ const CandidateDetails: React.FC<{ candidate: CncTelegramImportCandidate }> = ({
   );
 };
 
-const CandidatePreview: React.FC<{ candidate: CncTelegramImportCandidate }> = ({ candidate }) => {
+interface PreviewImage {
+  src: string;
+  alt: string;
+}
+
+const PreviewLightbox: React.FC<{ preview: PreviewImage | null; onClose: () => void }> = ({ preview, onClose }) => {
+  useEffect(() => {
+    if (!preview) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, preview]);
+
+  return (
+    <Modal
+      className="cut-telegram-import__lightbox"
+      open={Boolean(preview)}
+      title={preview?.alt ?? 'Полноразмерный просмотр'}
+      width="min(1000px, 92vw)"
+      footer={null}
+      centered
+      keyboard
+      onCancel={onClose}
+      closable={false}
+      destroyOnClose
+    >
+      {preview && (
+        <div className="cut-telegram-import__lightbox-content">
+          <Button
+            type="text"
+            className="cut-telegram-import__lightbox-close"
+            icon={<CloseOutlined />}
+            aria-label="Закрыть полноразмерный просмотр"
+            onClick={onClose}
+          />
+          <img className="cut-telegram-import__lightbox-image" src={preview.src} alt={preview.alt} />
+        </div>
+      )}
+    </Modal>
+  );
+};
+
+const CandidatePreview: React.FC<{ candidate: CncTelegramImportCandidate; onOpenPreview: (preview: PreviewImage) => void }> = ({ candidate, onOpenPreview }) => {
   const previewUrl = useMemo(() => {
     if (candidate.previewUrl) return candidate.previewUrl;
     const layout = candidate.cutLayout;
@@ -133,7 +177,28 @@ const CandidatePreview: React.FC<{ candidate: CncTelegramImportCandidate }> = ({
     }
   }, [candidate.cutLayout, candidate.previewUrl]);
 
-  if (previewUrl) return <img className="cut-telegram-import__preview" src={previewUrl} alt={`Превью раскроя ${candidate.svgFileName}`} />;
+  if (previewUrl) {
+    const preview = { src: previewUrl, alt: `Превью раскроя ${candidate.svgFileName}` };
+    return (
+      <div className="cut-telegram-import__preview-wrap">
+        <img
+          className="cut-telegram-import__preview"
+          src={preview.src}
+          alt={preview.alt}
+          onDoubleClick={() => onOpenPreview(preview)}
+        />
+        <Button
+          type="link"
+          size="small"
+          className="cut-telegram-import__preview-action"
+          icon={<ZoomInOutlined />}
+          onClick={() => onOpenPreview(preview)}
+        >
+          Увеличить
+        </Button>
+      </div>
+    );
+  }
   return <Text type="secondary">{candidateScreenshotLabel(candidate) === 'нет' ? 'Нет превью' : 'Скриншот найден, превью раскроя недоступно'}</Text>;
 };
 
@@ -300,7 +365,13 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
   const [confirming, setConfirming] = useState(false);
   const [repeatPreparing, setRepeatPreparing] = useState(false);
   const [reconfirming, setReconfirming] = useState(false);
+  const [preview, setPreview] = useState<PreviewImage | null>(null);
   const doneRequestRef = React.useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!open) setPreview(null);
+  }, [open]);
+
   const {
     scan,
     candidates,
@@ -381,7 +452,7 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
       title: 'Превью',
       key: 'preview',
       width: 150,
-      render: (_value, candidate) => <CandidatePreview candidate={candidate} />,
+      render: (_value, candidate) => <CandidatePreview candidate={candidate} onOpenPreview={setPreview} />,
     },
   ];
 
@@ -499,7 +570,8 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
   ];
 
   return (
-    <Modal
+    <>
+      <Modal
       className="cut-telegram-import-modal"
       title={<Space><SendOutlined /> Импорт раскроев из Telegram</Space>}
       open={open}
@@ -595,7 +667,9 @@ export const CutTelegramImportModal: React.FC<CutTelegramImportModalProps> = ({ 
           ) : <Spin />}
         </div>
       )}
-    </Modal>
+      </Modal>
+      <PreviewLightbox preview={preview} onClose={() => setPreview(null)} />
+    </>
   );
 };
 

@@ -44,4 +44,18 @@ describe('manual Telegram import UI safety guards', () => {
     expect(original).not.toContain('sourceMessageId');
     expect(original).not.toContain('senderUserId');
   });
+
+  it('keeps image previews inspectable without changing the original view default', () => {
+    expect(source).toContain('const [preview, setPreview] = useState<PreviewImage | null>(null);');
+    expect(source).toContain('onDoubleClick={() => onOpenPreview(preview)}');
+    expect(source).toContain('Увеличить');
+    expect(source).toContain('aria-label="Закрыть полноразмерный просмотр"');
+    expect(source).toContain('keyboard');
+    expect(source).toContain("event.key === 'Escape'");
+    const styles = readFileSync(new URL('../../ui-operational/operational.css', import.meta.url), 'utf8');
+    expect(styles).toContain('.cut-telegram-import__lightbox-close');
+    expect(styles).toContain('min-width: 40px;');
+    expect(styles).toContain('outline: 1px solid rgba(0, 0, 0, 0.1);');
+    expect(styles).toContain('outline-color: rgba(255, 255, 255, 0.1);');
+  });
 });
