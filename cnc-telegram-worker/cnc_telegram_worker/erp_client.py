@@ -18,6 +18,30 @@ LOGIN_MAX_ATTEMPTS = 3
 LOGIN_RETRY_BASE_SECONDS = 0.5
 LOGIN_RETRY_MAX_SECONDS = 30.0
 LOGIN_RETRY_SAFETY_MARGIN_SECONDS = 0.25
+_IMPORT_SCAN_CANDIDATE_FIELDS = (
+    "sourceChatId",
+    "sourceMessageId",
+    "sourceThreadId",
+    "sourceCreatedAt",
+    "sourceUpdatedAt",
+    "workday",
+    "svgMessageId",
+    "gcodeMessageId",
+    "screenshotMessageId",
+    "svgFileName",
+    "gcodeFileName",
+    "screenshotFileName",
+    "svgContentSha256",
+    "gcodeContentSha256",
+    "screenshotContentSha256",
+    "sourceSetFingerprint",
+    "parserVersion",
+    "layoutFingerprint",
+    "parsedSnapshot",
+    "cutLayout",
+    "warnings",
+    "eligibilityStatus",
+)
 _SECRET_PATTERNS = (
     (re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I), "Bearer [REDACTED]"),
     (re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{20,}\b"), "[BOT_TOKEN_REDACTED]"),
@@ -276,7 +300,7 @@ class ErpClient:
             f"/cnc-telegram/import-worker/scans/{scan_id}/candidates/batch",
             payload=with_item_lease(
                 {
-                    "candidates": candidates,
+                    "candidates": [serialize_import_scan_candidate(candidate) for candidate in candidates],
                     **({"daysScanned": days_scanned} if days_scanned is not None else {}),
                     **({"messagesScanned": messages_scanned} if messages_scanned is not None else {}),
                     **({"truncated": truncated} if truncated is not None else {}),
@@ -527,6 +551,19 @@ def with_item_lease(payload: dict[str, Any], item_lease: WorkerItemLease | None)
         "itemLeaseToken": item_lease.token,
         "itemLeaseGeneration": item_lease.generation,
         "itemLeaseOwner": item_lease.owner,
+    }
+
+
+def serialize_import_scan_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Serialize only fields accepted by the backend candidate batch DTO.
+
+    Discovery keeps worker-only fields such as ``sourceFiles`` for source
+    revalidation.  They must not cross the candidate batch HTTP boundary.
+    """
+    return {
+        field: candidate[field]
+        for field in _IMPORT_SCAN_CANDIDATE_FIELDS
+        if field in candidate
     }
 
 

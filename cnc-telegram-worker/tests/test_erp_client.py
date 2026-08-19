@@ -261,6 +261,61 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(SessionLeaseLost):
                 await client.fail_media_restore("request-1", "stale", WorkerItemLease("item-token", 7, "worker-instance"))
 
+    async def test_import_scan_candidate_batch_excludes_worker_only_source_files(self) -> None:
+        fake_http = FakeAsyncClient([response(200, {"accepted": 1})])
+        client = ErpClient("http://backend/api/v1", BackendAuth(bearer_token="test-token"))
+        lease = WorkerItemLease("item-token", 7, "worker-instance")
+        candidate = {
+            "sourceChatId": "-100",
+            "sourceMessageId": 42,
+            "sourceThreadId": None,
+            "sourceCreatedAt": "2026-08-18T12:00:00+00:00",
+            "sourceUpdatedAt": None,
+            "workday": "2026-08-18",
+            "svgMessageId": 42,
+            "gcodeMessageId": None,
+            "screenshotMessageId": None,
+            "svgFileName": "part.svg",
+            "gcodeFileName": None,
+            "screenshotFileName": None,
+            "svgContentSha256": "a" * 64,
+            "gcodeContentSha256": None,
+            "screenshotContentSha256": None,
+            "sourceSetFingerprint": "b" * 64,
+            "parserVersion": "parser-1",
+            "layoutFingerprint": "c" * 64,
+            "parsedSnapshot": {"items": []},
+            "cutLayout": {"status": "valid"},
+            "warnings": [],
+            "eligibilityStatus": "valid",
+            "sourceFiles": [{"kind": "svg", "sha256": "a" * 64}],
+        }
+
+        with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
+            await client.submit_import_scan_candidates(
+                "scan-1",
+                [candidate],
+                lease,
+                days_scanned=3,
+                messages_scanned=42,
+                truncated=False,
+            )
+
+        payload = fake_http.requests[0][1]["json"]
+        outbound_candidate = payload["candidates"][0]
+        self.assertNotIn("sourceFiles", outbound_candidate)
+        self.assertEqual(set(outbound_candidate), set(candidate) - {"sourceFiles"})
+        self.assertEqual(outbound_candidate["sourceMessageId"], 42)
+        self.assertEqual(outbound_candidate["sourceSetFingerprint"], "b" * 64)
+        self.assertEqual(outbound_candidate["parsedSnapshot"], {"items": []})
+        self.assertEqual(payload["itemLeaseToken"], "item-token")
+        self.assertEqual(payload["itemLeaseGeneration"], 7)
+        self.assertEqual(payload["itemLeaseOwner"], "worker-instance")
+        self.assertEqual(payload["daysScanned"], 3)
+        self.assertEqual(payload["messagesScanned"], 42)
+        self.assertFalse(payload["truncated"])
+        self.assertIn("sourceFiles", candidate)
+
 
 if __name__ == "__main__":
     unittest.main()
