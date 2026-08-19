@@ -149,7 +149,8 @@ describe('order detail required numeric validation', () => {
 
     expect(orderFormSource).not.toContain('filtered out ${skippedCount} unfilled detail(s)');
     expect(tableSource).not.toContain('empty detail detected, removing from store');
-    expect(orderFormSource).toContain('prepareOrderDetailsForSave(formValues.details ?? [])');
+    expect(orderFormSource).toContain('businessOrderDetails(formValues.details ?? [])');
+    expect(orderFormSource).toContain('prepareOrderDetailsForSave(businessFormDetails)');
     expect(orderFormSource).toContain('collectOrderDetailEmptyTailRowsForDisplay(formValues.details ?? [])');
     expect(orderFormSource).toContain('appendOrderDetailEmptyTailRowsForDisplay(');
     expect(tableSource).toContain('saveCurrentRow({ allowEmptyTailRow: true })');
