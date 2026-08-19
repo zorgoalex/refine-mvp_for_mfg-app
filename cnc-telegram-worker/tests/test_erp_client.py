@@ -35,12 +35,116 @@ class FakeAsyncClient:
         return response
 
 
-def response(status_code: int, payload: dict[str, Any] | None = None) -> httpx.Response:
+def response(
+    status_code: int,
+    payload: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
     request = httpx.Request("POST", "http://backend/api/v1/cnc-telegram/ingest")
-    return httpx.Response(status_code, request=request, json=payload or {})
+    return httpx.Response(status_code, request=request, headers=headers, json=payload or {})
 
 
 class ErpClientTest(unittest.IsolatedAsyncioTestCase):
+    async def test_backend_login_retries_429_using_retry_after(self) -> None:
+        fake_http = FakeAsyncClient([
+            response(429, {"code": "RATE_LIMIT_EXCEEDED"}, {"Retry-After": "7"}),
+            response(200, {"accessToken": "access-token", "accessTokenExpiresAt": "2026-08-19T01:00:00Z"}),
+        ])
+        client = ErpClient(
+            "http://backend/api/v1",
+            BackendAuth(username="worker", password="secret"),
+        )
+
+        with (
+            patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http),
+            patch("cnc_telegram_worker.erp_client.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            authorization = await client._authorization_header()
+
+        self.assertEqual(authorization, "Bearer access-token")
+        self.assertEqual(fake_http.post_calls, 2)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [7.0])
+
+    async def test_backend_login_uses_bounded_reset_ms_delay_when_retry_after_invalid(self) -> None:
+        fake_http = FakeAsyncClient([
+            response(
+                429,
+                {"code": "RATE_LIMIT_EXCEEDED", "details": {"resetMs": 22_795}},
+                {"Retry-After": "not-a-delay"},
+            ),
+            response(200, {"accessToken": "access-token"}),
+        ])
+        client = ErpClient(
+            "http://backend/api/v1",
+            BackendAuth(username="worker", password="secret"),
+        )
+
+        with (
+            patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http),
+            patch("cnc_telegram_worker.erp_client.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            await client._authorization_header()
+
+        self.assertEqual(fake_http.post_calls, 2)
+        self.assertAlmostEqual(sleep.await_args_list[0].args[0], 23.045)
+
+    async def test_backend_login_uses_bounded_fallback_when_429_has_no_delay(self) -> None:
+        fake_http = FakeAsyncClient([
+            response(429, {"code": "RATE_LIMIT_EXCEEDED"}),
+            response(200, {"accessToken": "access-token"}),
+        ])
+        client = ErpClient(
+            "http://backend/api/v1",
+            BackendAuth(username="worker", password="secret"),
+        )
+
+        with (
+            patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http),
+            patch("cnc_telegram_worker.erp_client.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            await client._authorization_header()
+
+        self.assertEqual(fake_http.post_calls, 2)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [0.5])
+
+    async def test_backend_login_stops_after_bounded_429_retries(self) -> None:
+        fake_http = FakeAsyncClient([
+            response(429, {"code": "RATE_LIMIT_EXCEEDED"}),
+            response(429, {"code": "RATE_LIMIT_EXCEEDED"}),
+            response(429, {"code": "RATE_LIMIT_EXCEEDED"}),
+        ])
+        client = ErpClient(
+            "http://backend/api/v1",
+            BackendAuth(username="worker", password="secret"),
+        )
+
+        with (
+            patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http),
+            patch("cnc_telegram_worker.erp_client.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            with self.assertRaises(ErpResponseError):
+                await client._authorization_header()
+
+        self.assertEqual(fake_http.post_calls, 3)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [0.5, 1.0])
+
+    async def test_backend_login_does_not_retry_other_client_errors(self) -> None:
+        fake_http = FakeAsyncClient([response(422, {"code": "VALIDATION_ERROR"})])
+        client = ErpClient(
+            "http://backend/api/v1",
+            BackendAuth(username="worker", password="secret"),
+        )
+
+        with (
+            patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http),
+            patch("cnc_telegram_worker.erp_client.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            with self.assertRaises(ErpResponseError):
+                await client._authorization_header()
+
+        self.assertEqual(fake_http.post_calls, 1)
+        sleep.assert_not_awaited()
+
     async def test_retries_transient_server_errors_with_same_request(self) -> None:
         fake_http = FakeAsyncClient([
             response(500),

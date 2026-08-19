@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -12,6 +14,10 @@ import httpx
 
 INGEST_MAX_ATTEMPTS = 3
 INGEST_RETRY_BASE_SECONDS = 0.5
+LOGIN_MAX_ATTEMPTS = 3
+LOGIN_RETRY_BASE_SECONDS = 0.5
+LOGIN_RETRY_MAX_SECONDS = 30.0
+LOGIN_RETRY_SAFETY_MARGIN_SECONDS = 0.25
 _SECRET_PATTERNS = (
     (re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]+", re.I), "Bearer [REDACTED]"),
     (re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{20,}\b"), "[BOT_TOKEN_REDACTED]"),
@@ -391,13 +397,25 @@ class ErpClient:
         if not force and self._access_token and datetime.now(timezone.utc) + timedelta(minutes=2) < self._access_token_expires_at:
             return f"Bearer {self._access_token}"
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(
-                f"{self.api_url}/auth/login",
-                json={"username": self.auth.username, "password": self.auth.password},
-            )
-            if response.is_error:
-                raise ErpResponseError(response, "backend login")
-            data = response.json()
+            for attempt in range(LOGIN_MAX_ATTEMPTS):
+                response = await client.post(
+                    f"{self.api_url}/auth/login",
+                    json={"username": self.auth.username, "password": self.auth.password},
+                )
+                if response.status_code != 429 or attempt + 1 >= LOGIN_MAX_ATTEMPTS:
+                    if response.is_error:
+                        raise ErpResponseError(response, "backend login")
+                    data = response.json()
+                    break
+                delay_seconds = login_retry_delay(response, attempt)
+                print(
+                    f"backend login returned 429; "
+                    f"retry {attempt + 2}/{LOGIN_MAX_ATTEMPTS} in {delay_seconds:g}s",
+                    flush=True,
+                )
+                await asyncio.sleep(delay_seconds)
+            else:
+                raise RuntimeError("backend login retry loop finished without a response")
         token = data.get("accessToken")
         if not isinstance(token, str) or not token:
             raise RuntimeError("backend login response has no accessToken")
@@ -413,6 +431,62 @@ def parse_expires_at(value: Any) -> datetime:
         except ValueError:
             pass
     return datetime.now(timezone.utc) + timedelta(minutes=10)
+
+
+def login_retry_delay(response: httpx.Response, attempt: int) -> float:
+    retry_after = parse_retry_after(response.headers.get("Retry-After"))
+    if retry_after is not None:
+        return min(retry_after, LOGIN_RETRY_MAX_SECONDS)
+
+    reset_ms = response_reset_ms(response)
+    if reset_ms is not None:
+        return min(
+            reset_ms / 1000 + LOGIN_RETRY_SAFETY_MARGIN_SECONDS,
+            LOGIN_RETRY_MAX_SECONDS,
+        )
+
+    return min(LOGIN_RETRY_BASE_SECONDS * (2**attempt), LOGIN_RETRY_MAX_SECONDS)
+
+
+def parse_retry_after(value: str | None) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    try:
+        delay_seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        delay_seconds = (retry_at.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds()
+    if not math.isfinite(delay_seconds) or delay_seconds < 0:
+        return None
+    return delay_seconds
+
+
+def response_reset_ms(response: httpx.Response) -> float | None:
+    try:
+        payload = response.json()
+    except (ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    details_candidates: list[Any] = [payload.get("details")]
+    nested_error = payload.get("error")
+    if isinstance(nested_error, dict):
+        details_candidates.append(nested_error.get("details"))
+    for details in details_candidates:
+        if not isinstance(details, dict):
+            continue
+        reset_ms = details.get("resetMs")
+        if isinstance(reset_ms, bool):
+            continue
+        if isinstance(reset_ms, (int, float)) and math.isfinite(reset_ms) and reset_ms >= 0:
+            return float(reset_ms)
+    return None
 
 
 def parse_session_lease(value: Any) -> WorkerSessionLease:
