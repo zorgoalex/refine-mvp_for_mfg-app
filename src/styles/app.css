@@ -1676,6 +1676,26 @@ html {
   gap: 2px;
 }
 
+.cut-jobs-table .cut-job-mdf-board-cell__link,
+.cut-jobs-table .cut-job-mdf-board-cell__create {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  transition: transform 150ms ease, opacity 150ms ease;
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell__link:active,
+.cut-jobs-table .cut-job-mdf-board-cell__create:active {
+  transform: scale(0.96);
+}
+
+.cut-jobs-table .cut-job-mdf-board-cell__link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
 .cut-jobs-table .cut-job-mdf-board-cell .ant-tag {
   margin-inline-end: 0;
 }

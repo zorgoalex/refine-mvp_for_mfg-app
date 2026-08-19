@@ -623,6 +623,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const topScrollbarRef = useRef<HTMLDivElement | null>(null);
   const topScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const boardViewportRef = useRef<HTMLElement | null>(null);
+  const deepLinkWarningRef = useRef<string | null>(null);
   const cncBoardScrollTargetLeftRef = useRef<number | null>(null);
   const cncBoardScrollButtonScrollActiveRef = useRef(false);
   const [cncBoardScrollEdges, setCncBoardScrollEdges] =
@@ -1374,6 +1375,35 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     ),
     [cncActiveColumns, cncTerminalColumnsVisible],
   );
+  useEffect(() => {
+    const kind = viewState.cncCardKind;
+    const cardId = viewState.cncCardId;
+    if (!isCncToday || loading || !kind || !cardId) return undefined;
+    const key = `${kind}:${cardId}`;
+    const root = boardViewportRef.current;
+    const target = root
+      ? Array.from(root.querySelectorAll<HTMLElement>('[data-cnc-card-id]')).find(
+          (element) => element.dataset.cncCardKind === kind && element.dataset.cncCardId === cardId,
+        ) ?? null
+      : null;
+    if (!target) {
+      if (deepLinkWarningRef.current !== key) {
+        deepLinkWarningRef.current = key;
+        message.warning('Карточка не найдена в выбранном периоде МДФ-доски.');
+      }
+      return undefined;
+    }
+    deepLinkWarningRef.current = null;
+    target.classList.add('cnc-board-card-shell--deep-linked');
+    const frame = window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      target.focus({ preventScroll: true });
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      target.classList.remove('cnc-board-card-shell--deep-linked');
+    };
+  }, [cncShownDataColumns, isCncToday, loading, viewState.cncCardId, viewState.cncCardKind]);
   const cncMutedOrderIds = useMemo(
     () => new Set(
       cncDisplayOrderStatusCards
@@ -3973,6 +4003,9 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
           touchReady ? 'cnc-board-card-shell--touch-ready' : '',
           touchReady ? 'cnc-board-card-shell--touch-locked' : '',
         ].filter(Boolean).join(' ')}
+        data-cnc-card-kind={kind}
+        data-cnc-card-id={cardId}
+        tabIndex={-1}
         onMouseDownCapture={updateDragSuppression}
         onMouseUpCapture={clearDragSuppression}
         onTouchStartCapture={queueTouchReadySignal}

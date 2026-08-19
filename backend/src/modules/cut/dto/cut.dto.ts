@@ -263,15 +263,24 @@ export interface CutJobLinkedMdfPacketDto {
 }
 
 export type CutJobMdfBoardState = 'created' | 'hidden' | 'not_created' | 'unknown';
+export type CutJobMdfBoardCardKind = 'machine_file' | 'bath';
+
+export interface CutJobMdfBoardTargetDto {
+  kind: CutJobMdfBoardCardKind;
+  cardId: string;
+  workday: string;
+}
 
 export interface CutJobMdfBoardStatusDto {
   state: CutJobMdfBoardState;
+  cardKind: CutJobMdfBoardCardKind;
   reason: string;
   activePacketCount: number;
   hiddenPacketCount: number;
   /** True when a single linked manual-SVG packet is missing the MDF-board marker and can be created safely. */
   canCreateCard?: boolean;
   packets: CutJobLinkedMdfPacketDto[];
+  target: CutJobMdfBoardTargetDto | null;
 }
 
 export interface CutJobDeleteImpactDto {

@@ -317,6 +317,9 @@ interface MdfBoardStatusRow extends QueryResultRow {
   hidden_packet_count: string | number | null;
   manual_pending_packet_count: string | number | null;
   active_packets_json: unknown;
+  card_kind: 'machine_file' | 'bath';
+  card_id: string | null;
+  target_workday: string | Date | null;
 }
 
 interface MdfBoardCardPacketRow extends QueryResultRow {
@@ -1595,7 +1598,40 @@ export class PgCutRepository implements CutRepositoryPort {
         throw new ApiError(503, 'CUT_JOB_MDF_BOARD_SCHEMA_UNAVAILABLE', 'Схема МДФ-доски недоступна');
       }
 
-      const packet = await loadSingleMdfBoardCardPacket(tx, command.cutJobId);
+      const status = (await loadMdfBoardStatuses(tx, [command.cutJobId])).get(command.cutJobId);
+      if (status?.state === 'created') {
+        return loadJobWithMdfBoardStatus(tx, command.cutJobId);
+      }
+      if (status?.cardKind === 'bath') {
+        await createForcedMdfBoardPacket(tx, {
+          cutJobId: command.cutJobId,
+          jobName: job.name,
+          actorUserId: command.currentUser.id,
+          cardKind: 'bath',
+          requestId,
+          currentUser: command.currentUser,
+        });
+        return loadJobWithMdfBoardStatus(tx, command.cutJobId);
+      }
+
+      let packet: MdfBoardCardPacketRow;
+      try {
+        packet = await loadSingleMdfBoardCardPacket(tx, command.cutJobId);
+      } catch (error) {
+        if (!(error instanceof ApiError) || ![
+          'CUT_JOB_MDF_BOARD_PACKET_NOT_FOUND',
+          'CUT_JOB_MDF_BOARD_MULTIPLE_PACKETS',
+        ].includes(error.code)) throw error;
+        await createForcedMdfBoardPacket(tx, {
+          cutJobId: command.cutJobId,
+          jobName: job.name,
+          actorUserId: command.currentUser.id,
+          cardKind: 'machine_file',
+          requestId,
+          currentUser: command.currentUser,
+        });
+        return loadJobWithMdfBoardStatus(tx, command.cutJobId);
+      }
       const eventKey = mdfBoardCardEventKey(packet);
       await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [eventKey]);
 
@@ -6541,10 +6577,11 @@ async function hasMdfBoardHiddenColumns(client: DatabaseClient): Promise<boolean
             'mdf_board_hidden_at',
             'mdf_board_hidden_by',
             'mdf_board_hidden_reason',
-            'mdf_board_hidden_cut_job_id'
+            'mdf_board_hidden_cut_job_id',
+            'mdf_board_card_kind'
           )
         GROUP BY table_name
-        HAVING COUNT(DISTINCT column_name) = 4
+        HAVING COUNT(DISTINCT column_name) = 5
       ) AS exists
     `,
   );
@@ -6685,6 +6722,154 @@ async function loadSingleMdfBoardCardPacket(
     );
   }
   return result.rows[0]!;
+}
+
+async function createForcedMdfBoardPacket(
+  tx: TransactionClient,
+  input: {
+    cutJobId: number;
+    jobName: string;
+    actorUserId: string | number;
+    cardKind: 'machine_file' | 'bath';
+    requestId: string;
+    currentUser: CurrentUser;
+  },
+): Promise<void> {
+  const currentResult = await tx.query<{ cut_result_id: string | number; result_no: string | number }>(
+    `SELECT result.cut_result_id, result.result_no
+     FROM cut_job job
+     JOIN cut_result result ON result.cut_result_id = job.current_cut_result_id
+     WHERE job.cut_job_id = $1
+     FOR UPDATE OF result`,
+    [input.cutJobId],
+  );
+  const result = currentResult.rows[0];
+  if (!result) {
+    throw new ApiError(422, 'CUT_JOB_CURRENT_RESULT_REQUIRED', 'Сначала рассчитайте раскрой', {
+      cutJobId: input.cutJobId,
+    });
+  }
+  const cutResultId = toNum(result.cut_result_id);
+  const storageKind = forcedMdfCardStorageKind(input.cardKind);
+  const externalPacketKey = `erp-cut-mdf-card:${storageKind}:${input.cutJobId}:${cutResultId}`;
+  await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [externalPacketKey]);
+
+  const inserted = await tx.query<{ packet_id: string }>(
+    `INSERT INTO cnc_telegram_packets (
+       external_packet_key, source_chat_id, source_version, payload_hash,
+       workday, machine, program_name, material_name, parse_status,
+       completion_status, comments_json, tools_json, doweling_links_json,
+       analysis_warnings_json, parser_version, created_by, updated_by,
+       svg_cut_job_id, svg_cut_result_id, svg_cut_import_status,
+       svg_cut_import_note, mdf_board_card_kind
+     )
+     VALUES (
+       $1, 'erp-cut-mdf-card', 1, $2, CURRENT_DATE, 'ERP', $3, 'МДФ',
+       'parsed', 'pending', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+       '[]'::jsonb, 'erp-cut-mdf-card-v1', $4, $4, $5, $6,
+       'imported', 'forced_mdf_board_card', $7
+     )
+     ON CONFLICT (external_packet_key) DO NOTHING
+     RETURNING packet_id::text AS packet_id`,
+    [
+      externalPacketKey,
+      createHash('sha256').update(externalPacketKey).digest('hex'),
+      input.jobName,
+      Number(input.actorUserId),
+      input.cutJobId,
+      cutResultId,
+      storageKind,
+    ],
+  );
+  const existing = inserted.rows[0] ?? (await tx.query<{ packet_id: string }>(
+    `SELECT packet_id::text AS packet_id FROM cnc_telegram_packets WHERE external_packet_key = $1 FOR UPDATE`,
+    [externalPacketKey],
+  )).rows[0];
+  if (!existing) {
+    throw new ApiError(500, 'CUT_JOB_MDF_BOARD_PACKET_INSERT_FAILED', 'Не удалось создать карточку МДФ-доски');
+  }
+  if (!inserted.rows[0]) return;
+
+  const items = await tx.query<{ order_id: string | number }>(
+    `INSERT INTO cnc_telegram_packet_items (
+       packet_id, source_item_key, order_name, detail_number, width_mm,
+       height_mm, quantity, source, confidence, match_order_id,
+       match_detail_id, match_status
+     )
+     SELECT
+       $1::uuid,
+       placement.order_id::text || ':' || placement.order_detail_id::text,
+       COALESCE(NULLIF(trim(ord.order_name), ''), placement.order_id::text),
+       detail.detail_number,
+       COALESCE(detail.width, placement.detail_width_mm),
+       COALESCE(detail.height, placement.detail_height_mm),
+       COUNT(*)::integer,
+       'manual', 1, placement.order_id, placement.order_detail_id, 'matched'
+     FROM cut_result_placement placement
+     JOIN cut_result_sheet_map sheet
+       ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+      AND sheet.is_effective = true
+     JOIN orders ord ON ord.order_id = placement.order_id AND ord.delete_flag = false
+     JOIN order_details detail ON detail.detail_id = placement.order_detail_id AND detail.delete_flag = false
+     WHERE placement.cut_result_id = $2
+       AND placement.order_id IS NOT NULL
+       AND placement.order_detail_id IS NOT NULL
+     GROUP BY placement.order_id, placement.order_detail_id, ord.order_name,
+       detail.detail_number, detail.width, detail.height,
+       placement.detail_width_mm, placement.detail_height_mm
+     RETURNING match_order_id AS order_id`,
+    [existing.packet_id, cutResultId],
+  );
+  if (items.rows.length === 0) {
+    throw new ApiError(422, 'CUT_RESULT_HAS_NO_MDF_CARD_ITEMS', 'В текущем результате нет активных деталей для карточки', {
+      cutJobId: input.cutJobId,
+      cutResultId,
+    });
+  }
+  const orderIds = [...new Set(items.rows.map((row) => toNum(row.order_id)))];
+  const eventKey = `${MDF_BOARD_CARD_CREATED_EVENT}:${input.cutJobId}:${cutResultId}:${input.cardKind}`;
+  const auditId = await auditService.record(tx, {
+    event: MDF_BOARD_CARD_CREATED_EVENT,
+    entityType: 'cnc_telegram_packet',
+    entityId: existing.packet_id,
+    actorUserId: input.actorUserId,
+    actorUsername: input.currentUser.username ?? null,
+    actorRole: input.currentUser.role ?? null,
+    requestId: input.requestId,
+    source: MDF_BOARD_CARD_CREATED_SOURCE,
+    before: null,
+    after: { cutJobId: input.cutJobId, cutResultId, cardKind: input.cardKind, packetId: existing.packet_id },
+    diff: { created: true, forcedFromCutJob: true, cardKind: input.cardKind },
+    metadata: { cutJobId: input.cutJobId, cutResultId, cardKind: input.cardKind, orderIds },
+    relatedEntities: [
+      { entityType: 'cut_job', entityId: input.cutJobId },
+      { entityType: 'cut_result', entityId: cutResultId },
+      ...orderIds.map((entityId) => ({ entityType: 'order', entityId })),
+    ],
+  });
+  await tx.query(
+    `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+     VALUES ($1, 'cut_job', $2, $3::jsonb, $4)
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      MDF_BOARD_CARD_CREATED_EVENT,
+      String(input.cutJobId),
+      JSON.stringify({ cutJobId: input.cutJobId, cutResultId, cardKind: input.cardKind, packetId: existing.packet_id, auditId }),
+      eventKey,
+    ],
+  );
+  if (input.cardKind === 'machine_file') {
+    await evaluateMdfOrderMachineFilesPresentAutomation(tx, {
+      orderIds,
+      actor: input.currentUser,
+      requestId: input.requestId,
+      sourceIdempotencyKey: eventKey,
+    });
+  }
+}
+
+export function forcedMdfCardStorageKind(cardKind: 'machine_file' | 'bath'): 'machine_file' | 'bath_seed' {
+  return cardKind === 'bath' ? 'bath_seed' : 'machine_file';
 }
 
 async function loadMdfBoardPacketOrderIds(
@@ -6838,10 +7023,12 @@ async function loadMdfBoardStatuses(
     for (const id of ids) {
       out.set(id, {
         state: 'unknown',
+        cardKind: 'machine_file',
         reason: 'Схема МДФ-доски недоступна: нельзя проверить связанные карточки.',
         activePacketCount: 0,
         hiddenPacketCount: 0,
         packets: [],
+        target: null,
       });
     }
     return out;
@@ -6901,18 +7088,131 @@ async function loadMdfBoardStatuses(
         WHERE i.packet_id = p.packet_id
       ) packet_items ON true
       WHERE p.svg_cut_job_id = ANY($1::bigint[])
+        AND p.mdf_board_card_kind = 'machine_file'
       GROUP BY p.svg_cut_job_id
     )
     SELECT
       j.cut_job_id,
       j.status,
       j.selection_criteria,
-      COALESCE(packet_summary.active_packet_count, 0)::integer AS active_packet_count,
-      COALESCE(packet_summary.hidden_packet_count, 0)::integer AS hidden_packet_count,
+      CASE
+        WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+          THEN 'bath'
+        ELSE 'machine_file'
+      END AS card_kind,
+      CASE WHEN bath_target.workday IS NOT NULL
+        THEN 'cut-result:' || j.current_cut_result_id::text
+        ELSE NULL
+      END AS card_id,
+      bath_target.workday AS target_workday,
+      CASE
+        WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+          THEN CASE WHEN bath_target.workday IS NULL THEN 0 ELSE 1 END
+        ELSE COALESCE(packet_summary.active_packet_count, 0)
+      END::integer AS active_packet_count,
+      CASE
+        WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+          THEN COALESCE(hidden_bath.hidden_packet_count, 0)
+        ELSE COALESCE(packet_summary.hidden_packet_count, 0)
+      END::integer AS hidden_packet_count,
       COALESCE(packet_summary.manual_pending_packet_count, 0)::integer AS manual_pending_packet_count,
-      COALESCE(packet_summary.active_packets_json, '[]'::jsonb) AS active_packets_json
+      CASE
+        WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+          THEN '[]'::jsonb
+        ELSE COALESCE(packet_summary.active_packets_json, '[]'::jsonb)
+      END AS active_packets_json
     FROM cut_job j
+    LEFT JOIN cut_param_profiles profile ON profile.cut_param_profile_id = j.param_profile_id
     LEFT JOIN packet_summary ON packet_summary.cut_job_id = j.cut_job_id
+    LEFT JOIN LATERAL (
+      SELECT MAX(source.workday) AS workday
+      FROM (
+        SELECT packet.workday
+        FROM cut_result_placement placement
+        JOIN cut_result_sheet_map sheet
+          ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+         AND sheet.is_effective = true
+        JOIN cnc_telegram_packet_items item
+          ON item.match_order_id = placement.order_id
+         AND item.match_detail_id = placement.order_detail_id
+        JOIN cnc_telegram_packets packet
+          ON packet.packet_id = item.packet_id
+         AND packet.mdf_board_hidden_at IS NULL
+        WHERE placement.cut_result_id = j.current_cut_result_id
+
+        UNION ALL
+
+        SELECT packet.workday
+        FROM cut_result_placement placement
+        JOIN cut_result_sheet_map sheet
+          ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+         AND sheet.is_effective = true
+        JOIN orders target_order ON target_order.order_id = placement.order_id AND target_order.delete_flag = false
+        JOIN order_details target_detail ON target_detail.detail_id = placement.order_detail_id AND target_detail.delete_flag = false
+        JOIN cnc_telegram_packet_items item
+          ON item.match_order_id IS NULL
+         AND item.match_detail_id IS NULL
+         AND lower(trim(item.order_name)) = lower(trim(target_order.order_name))
+         AND item.detail_number = target_detail.detail_number
+         AND item.width_mm IS NOT NULL
+         AND item.height_mm IS NOT NULL
+         AND target_detail.width IS NOT NULL
+         AND target_detail.height IS NOT NULL
+         AND (
+           (item.width_mm::numeric = target_detail.width::numeric AND item.height_mm::numeric = target_detail.height::numeric)
+           OR (item.width_mm::numeric = target_detail.height::numeric AND item.height_mm::numeric = target_detail.width::numeric)
+           OR (item.source = 'ocr' AND ABS(item.width_mm::numeric - target_detail.width::numeric) <= 3 AND ABS(item.height_mm::numeric - target_detail.height::numeric) <= 3)
+           OR (item.source = 'ocr' AND ABS(item.width_mm::numeric - target_detail.height::numeric) <= 3 AND ABS(item.height_mm::numeric - target_detail.width::numeric) <= 3)
+         )
+        JOIN cnc_telegram_packets packet
+          ON packet.packet_id = item.packet_id
+         AND packet.mdf_board_hidden_at IS NULL
+        WHERE placement.cut_result_id = j.current_cut_result_id
+          AND NOT EXISTS (
+            SELECT 1 FROM orders duplicate_order
+            WHERE duplicate_order.delete_flag = false
+              AND duplicate_order.order_id <> target_order.order_id
+              AND lower(trim(duplicate_order.order_name)) = lower(trim(target_order.order_name))
+          )
+
+        UNION ALL
+
+        SELECT packet.workday
+        FROM cut_result_placement placement
+        JOIN cut_result_sheet_map sheet
+          ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+         AND sheet.is_effective = true
+        JOIN orders target_order ON target_order.order_id = placement.order_id AND target_order.delete_flag = false
+        JOIN cnc_telegram_packet_whole_order_keys whole_order
+          ON whole_order.order_key = lower(trim(target_order.order_name))
+        JOIN cnc_telegram_packets packet
+          ON packet.packet_id = whole_order.packet_id
+         AND packet.mdf_board_hidden_at IS NULL
+         AND (packet.completion_status = 'completed' OR packet.thumbs_up = true OR packet.mdf_board_card_kind = 'bath_seed')
+        WHERE placement.cut_result_id = j.current_cut_result_id
+          AND NOT EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(packet.comments_json) AS material_comment(comment_text)
+            WHERE lower(material_comment.comment_text) LIKE ANY (
+              ARRAY['%hdf%', '%хдф%', '%лдсп%', '%ldsp%', '%fanera%', '%фанера%']
+            )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM orders duplicate_order
+            WHERE duplicate_order.delete_flag = false
+              AND duplicate_order.order_id <> target_order.order_id
+              AND lower(trim(duplicate_order.order_name)) = lower(trim(target_order.order_name))
+          )
+      ) source
+      WHERE COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+    ) bath_target ON true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::integer AS hidden_packet_count
+      FROM cnc_telegram_packets packet
+      WHERE packet.svg_cut_result_id = j.current_cut_result_id
+        AND packet.mdf_board_card_kind = 'bath_seed'
+        AND packet.mdf_board_hidden_at IS NOT NULL
+    ) hidden_bath ON true
     WHERE j.cut_job_id = ANY($1::bigint[])
     `,
     [ids, MANUAL_SVG_CHAT_ID],
@@ -6924,28 +7224,40 @@ async function loadMdfBoardStatuses(
   return out;
 }
 
-function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatusDto {
+export function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatusDto {
   const activePacketCount = toNum(row.active_packet_count ?? 0);
   const hiddenPacketCount = toNum(row.hidden_packet_count ?? 0);
-  const manualPendingPacketCount = toNum(row.manual_pending_packet_count ?? 0);
   const packets = cutJobLinkedMdfPacketsFromJson(row.active_packets_json);
+  const cardKind = row.card_kind;
+  const target = cardKind === 'bath'
+    ? row.card_id && row.target_workday
+      ? { kind: 'bath' as const, cardId: row.card_id, workday: mdfPacketWorkday(row.target_workday) }
+      : null
+    : packets[0]
+      ? { kind: 'machine_file' as const, cardId: packets[0].packetId, workday: packets[0].workday }
+      : null;
 
-  if (activePacketCount > 0) {
+  if (activePacketCount > 0 && target) {
     return {
       state: 'created',
+      cardKind,
       reason: activePacketCount === 1
-        ? 'Карточка создана и видна на МДФ-доске.'
+        ? cardKind === 'bath'
+          ? 'Карточка ванны создана и видна на МДФ-доске.'
+          : 'Карточка файла станка создана и видна на МДФ-доске.'
         : `Создано ${activePacketCount} карточек, видимых на МДФ-доске.`,
       activePacketCount,
       hiddenPacketCount,
       canCreateCard: false,
       packets,
+      target,
     };
   }
 
   if (hiddenPacketCount > 0) {
     return {
       state: 'hidden',
+      cardKind,
       reason: hiddenPacketCount === 1
         ? 'Связанная карточка была скрыта с МДФ-доски.'
         : `Связанные карточки скрыты с МДФ-доски: ${hiddenPacketCount}.`,
@@ -6953,17 +7265,20 @@ function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatusDto {
       hiddenPacketCount,
       canCreateCard: false,
       packets,
+      target: null,
     };
   }
 
   const source = cutJobSelectionSource(row.selection_criteria);
   return {
     state: 'not_created',
-    reason: mdfBoardNotCreatedReason(source, row.status),
+    cardKind,
+    reason: mdfBoardNotCreatedReason(source, row.status, cardKind),
     activePacketCount,
     hiddenPacketCount,
-    canCreateCard: manualPendingPacketCount === 1,
+    canCreateCard: row.status === 'ready',
     packets,
+    target: null,
   };
 }
 
@@ -6995,7 +7310,16 @@ function cutJobSelectionSource(selectionCriteria: Record<string, unknown> | null
   return typeof source === 'string' && source.trim() ? source.trim() : null;
 }
 
-function mdfBoardNotCreatedReason(source: string | null, status: string): string {
+function mdfBoardNotCreatedReason(
+  source: string | null,
+  status: string,
+  cardKind: CutJobMdfBoardStatusDto['cardKind'],
+): string {
+  if (cardKind === 'bath') {
+    return status === 'ready'
+      ? 'Для текущего результата карточка ванны на МДФ-доске не создана.'
+      : 'Задание ещё не готово; карточку ванны можно создать после расчёта.';
+  }
   if (source === 'manual_svg_upload') {
     return 'Задание импортировано из SVG, но связанная карточка МДФ-доски не найдена.';
   }
