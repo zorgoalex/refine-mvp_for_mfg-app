@@ -9,6 +9,9 @@ describe('CncTelegramService', () => {
         async listToday() {
           throw new Error('repository must not be called');
         },
+        async listOriginalBoard() {
+          throw new Error('unused');
+        },
         async ingest() {
           throw new Error('unused');
         },
@@ -43,6 +46,9 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         async listToday() {
+          throw new Error('unused');
+        },
+        async listOriginalBoard() {
           throw new Error('unused');
         },
         async ingest() {
@@ -88,6 +94,9 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         async listToday() {
+          throw new Error('unused');
+        },
+        async listOriginalBoard() {
           throw new Error('unused');
         },
         async ingest() {
@@ -140,6 +149,7 @@ describe('CncTelegramService', () => {
     const deniedAudit = { recordIngestDenied: vi.fn().mockResolvedValue(undefined) };
     const packets = {
       listToday: vi.fn(),
+      listOriginalBoard: vi.fn(),
       ingest: vi.fn(),
       manualSvgUpload: vi.fn(),
       createMdfCard,
@@ -166,6 +176,33 @@ describe('CncTelegramService', () => {
       requestId: 'request-authorized',
     });
     expect(createMdfCard).toHaveBeenCalledOnce();
+  });
+
+  it('requires orders.view for the original MDF board and delegates authorized reads', async () => {
+    const listOriginalBoard = vi.fn().mockResolvedValue({
+      dateFrom: '2026-06-19',
+      dateTo: '2026-08-19',
+      generatedAt: '2026-08-19T12:00:00.000Z',
+      packets: [],
+      baths: [],
+    });
+    const packets = {
+      listToday: vi.fn(),
+      listOriginalBoard,
+      ingest: vi.fn(),
+      manualSvgUpload: vi.fn(),
+      createMdfCard: vi.fn(),
+      listManualSvgCommentPresets: vi.fn(),
+      createManualSvgCommentPreset: vi.fn(),
+    };
+    const service = new CncTelegramService({ packets });
+
+    await expect(service.listOriginalBoard({ currentUser: user([]) }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(listOriginalBoard).not.toHaveBeenCalled();
+
+    await service.listOriginalBoard({ currentUser: user(['orders.view']) });
+    expect(listOriginalBoard).toHaveBeenCalledOnce();
   });
 });
 

@@ -6,6 +6,7 @@ import type {
   CreateCncTelegramManualSvgCommentPresetDto,
   CncTelegramIngestResponseDto,
   CncTelegramStructuredIngestDto,
+  CncTelegramOriginalBoardResponseDto,
   CncTelegramTodayResponseDto,
   CreateCncMdfCardResponseDto,
 } from '../dto/cnc-telegram.dto';
@@ -15,6 +16,11 @@ export interface ListCncTelegramTodayCommand {
   workday?: string | null;
   workdayFrom?: string | null;
   workdayTo?: string | null;
+  requestId?: string;
+}
+
+export interface ListCncTelegramOriginalBoardCommand {
+  currentUser: CurrentUser;
   requestId?: string;
 }
 
@@ -51,6 +57,7 @@ export interface ListManualSvgCommentPresetsCommand {
 
 export interface CncTelegramRepositoryPort {
   listToday(command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto>;
+  listOriginalBoard(command: ListCncTelegramOriginalBoardCommand): Promise<CncTelegramOriginalBoardResponseDto>;
   ingest(command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto>;
   manualSvgUpload(command: ManualSvgUploadCommand): Promise<CncTelegramManualSvgUploadResponseDto>;
   createMdfCard(command: CreateCncMdfCardCommand): Promise<CreateCncMdfCardResponseDto>;

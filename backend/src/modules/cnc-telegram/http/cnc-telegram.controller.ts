@@ -24,6 +24,7 @@ import type {
   CncTelegramIngestResponseDto,
   CncTelegramStructuredIngestDto,
   CncTelegramTodayResponseDto,
+  CncTelegramOriginalBoardResponseDto,
   CreateCncMdfCardResponseDto,
   CreateCncTelegramManualSvgCommentPresetDto,
 } from '../dto/cnc-telegram.dto';
@@ -209,6 +210,26 @@ export class CncTelegramController {
       workday: parsedQuery.workday,
       workdayFrom: parsedQuery.workdayFrom,
       workdayTo: parsedQuery.workdayTo,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
+    operationId: 'listCncTelegramOriginalBoard',
+    summary: 'List MDF cards in their original columns for the last two calendar months',
+  })
+  @ApiResponse({ status: 200, description: 'Original MDF board cards and current locations' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 503, description: 'CNC Telegram API is disabled' })
+  @Get('mdf-board/original')
+  listOriginalBoard(
+    @Req() request: RequestWithCurrentUser,
+  ): Promise<CncTelegramOriginalBoardResponseDto> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    return this.cncTelegram.listOriginalBoard({
+      currentUser,
       requestId: request.requestId,
     });
   }

@@ -158,6 +158,25 @@ export interface CncTelegramTodayResponse {
   columns: CncTelegramTodayColumn[];
 }
 
+export interface CncTelegramOriginalPacket extends CncTelegramPacket {
+  currentBoardVisibility: 'visible' | 'hidden';
+  currentBoardColumn: 'parsed' | 'completed' | null;
+}
+
+export interface CncTelegramOriginalBathCard extends CncTelegramBathCard {
+  currentBoardVisibility: 'visible' | 'archived';
+  currentBoardColumn: 'baths' | 'baths_ready' | null;
+  currentBoardCardId: string | null;
+}
+
+export interface CncTelegramOriginalBoardResponse {
+  dateFrom: string;
+  dateTo: string;
+  generatedAt: string;
+  packets: CncTelegramOriginalPacket[];
+  baths: CncTelegramOriginalBathCard[];
+}
+
 export interface CreateCncMdfCardResponse {
   cutJobId: number;
   cutResultId: number;

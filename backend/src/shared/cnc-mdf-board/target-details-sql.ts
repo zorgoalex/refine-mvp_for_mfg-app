@@ -2,11 +2,24 @@
  * Shared MDF-bath target matching. Keep cut-list card presence and the actual
  * board projection on one SQL contract.
  *
- * Expects `$1 = workdayFrom`, `$2 = workdayTo`.
+ * Expects `$1 = dateFrom`, `$2 = dateTo`.
  */
-export function cncMdfTargetDetailsCtes(): string {
+export function cncMdfTargetDetailsCtes(
+  mode: 'workday-visible' | 'created-history' | 'current-visible' = 'workday-visible',
+  namespace = '',
+): string {
+  const packetDatePredicate = mode === 'created-history'
+    ? `COALESCE(p.source_created_at, p.created_at) >= $1::date
+        AND COALESCE(p.source_created_at, p.created_at) < ($2::date + INTERVAL '1 day')`
+    : mode === 'current-visible'
+    ? 'p.workday = CURRENT_DATE'
+    : 'p.workday BETWEEN $1::date AND $2::date';
+  const packetVisibilityPredicate = mode === 'created-history'
+    ? ''
+    : 'AND p.mdf_board_hidden_at IS NULL';
+  const cte = (name: string) => `${namespace}${name}`;
   return `
-    packet_items AS (
+    ${cte('packet_items')} AS (
       SELECT
         p.workday,
         p.completion_status,
@@ -28,10 +41,10 @@ export function cncMdfTargetDetailsCtes(): string {
         i.quantity
       FROM cnc_telegram_packets p
       JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
-      WHERE p.workday BETWEEN $1::date AND $2::date
-        AND p.mdf_board_hidden_at IS NULL
+      WHERE ${packetDatePredicate}
+        ${packetVisibilityPredicate}
     ),
-    matched_target_detail_sources AS (
+    ${cte('matched_target_detail_sources')} AS (
       SELECT
         item.workday,
         item.match_order_id::bigint AS order_id,
@@ -44,12 +57,12 @@ export function cncMdfTargetDetailsCtes(): string {
             ELSE 0
           END
         )::integer AS completed_quantity
-      FROM packet_items item
+      FROM ${cte('packet_items')} item
       WHERE item.match_order_id IS NOT NULL
         AND item.match_detail_id IS NOT NULL
       GROUP BY item.workday, item.match_order_id, item.match_detail_id
     ),
-    unique_order_keys AS (
+    ${cte('unique_order_keys')} AS (
       SELECT
         lower(trim(o.order_name)) AS order_key,
         MIN(o.order_id)::bigint AS order_id
@@ -59,15 +72,15 @@ export function cncMdfTargetDetailsCtes(): string {
       GROUP BY lower(trim(o.order_name))
       HAVING COUNT(*) = 1
     ),
-    completed_whole_order_keys AS (
+    ${cte('completed_whole_order_keys')} AS (
       SELECT DISTINCT
         p.workday,
         whole_order.order_key
       FROM cnc_telegram_packets p
       JOIN cnc_telegram_packet_whole_order_keys whole_order
         ON whole_order.packet_id = p.packet_id
-      WHERE p.workday BETWEEN $1::date AND $2::date
-        AND p.mdf_board_hidden_at IS NULL
+      WHERE ${packetDatePredicate}
+        ${packetVisibilityPredicate}
         AND (p.completion_status = 'completed' OR p.thumbs_up = true)
         AND NOT EXISTS (
           SELECT 1
@@ -77,20 +90,20 @@ export function cncMdfTargetDetailsCtes(): string {
           )
         )
     ),
-    whole_order_target_detail_sources AS (
+    ${cte('whole_order_target_detail_sources')} AS (
       SELECT
         whole_order.workday,
         order_key.order_id,
         od.detail_id::bigint AS detail_id,
         1000000000::integer AS completed_quantity
-      FROM completed_whole_order_keys whole_order
-      JOIN unique_order_keys order_key
+      FROM ${cte('completed_whole_order_keys')} whole_order
+      JOIN ${cte('unique_order_keys')} order_key
         ON order_key.order_key = whole_order.order_key
       JOIN order_details od
         ON od.order_id = order_key.order_id
        AND od.delete_flag = false
     ),
-    fallback_target_detail_sources AS (
+    ${cte('fallback_target_detail_sources')} AS (
       SELECT
         item.workday,
         order_key.order_id,
@@ -103,8 +116,8 @@ export function cncMdfTargetDetailsCtes(): string {
             ELSE 0
           END
         )::integer AS completed_quantity
-      FROM packet_items item
-      JOIN unique_order_keys order_key
+      FROM ${cte('packet_items')} item
+      JOIN ${cte('unique_order_keys')} order_key
         ON order_key.order_key = item.order_key
       JOIN order_details od
         ON od.order_id = order_key.order_id
@@ -135,19 +148,19 @@ export function cncMdfTargetDetailsCtes(): string {
         )
       GROUP BY item.workday, order_key.order_id, od.detail_id
     ),
-    target_detail_sources AS (
-      SELECT * FROM matched_target_detail_sources
+    ${cte('target_detail_sources')} AS (
+      SELECT * FROM ${cte('matched_target_detail_sources')}
       UNION ALL
-      SELECT * FROM fallback_target_detail_sources
+      SELECT * FROM ${cte('fallback_target_detail_sources')}
       UNION ALL
-      SELECT * FROM whole_order_target_detail_sources
+      SELECT * FROM ${cte('whole_order_target_detail_sources')}
     ),
-    target_details AS (
+    ${cte('target_details')} AS (
       SELECT
         target.order_id,
         target.detail_id,
         LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer AS completed_quantity
-      FROM target_detail_sources target
+      FROM ${cte('target_detail_sources')} target
       GROUP BY target.order_id, target.detail_id
     )`;
 }

@@ -5,6 +5,7 @@ import type {
   CncTelegramManualSvgCommentPreset,
   CncTelegramManualSvgUploadRequest,
   CncTelegramManualSvgUploadResponse,
+  CncTelegramOriginalBoardResponse,
   CncTelegramTodayResponse,
   CreateCncMdfCardResponse,
 } from './types/cncTelegramApi.types';
@@ -19,6 +20,11 @@ export const cncTelegramApi = {
   today(query: CncTelegramTodayQuery = {}): Promise<CncTelegramTodayResponse> {
     return httpClient.get<CncTelegramTodayResponse>(
       withQuery(apiRoutes.cncTelegram.today, query),
+    );
+  },
+  originalBoard(): Promise<CncTelegramOriginalBoardResponse> {
+    return httpClient.get<CncTelegramOriginalBoardResponse>(
+      apiRoutes.cncTelegram.originalBoard,
     );
   },
   downloadSheetImage(path: string): Promise<{ blob: Blob; fileName: string | null; status: number }> {

@@ -26,6 +26,7 @@ import type {
   CreateManualSvgCommentPresetCommand,
   IngestCncTelegramPacketCommand,
   ListManualSvgCommentPresetsCommand,
+  ListCncTelegramOriginalBoardCommand,
   ListCncTelegramTodayCommand,
   ManualSvgUploadCommand,
   RecordCncTelegramDeniedAuditCommand,
@@ -41,6 +42,9 @@ import type {
   CncTelegramItemSource,
   CncTelegramManualSvgCommentPresetDto,
   CncTelegramManualSvgUploadResponseDto,
+  CncTelegramOriginalBathCardDto,
+  CncTelegramOriginalBoardResponseDto,
+  CncTelegramOriginalPacketDto,
   CncTelegramMatchStatus,
   CncTelegramPacketDto,
   CncTelegramPacketCutSheetDto,
@@ -103,6 +107,7 @@ interface PacketJoinedRow extends QueryResultRow {
   svg_cut_import_note: string | null;
   svg_cut_sheets_json: unknown;
   updated_at: string | Date;
+  mdf_board_hidden_at: string | Date | null;
   packet_item_id: string | null;
   source_item_key: string | null;
   order_name: string | null;
@@ -140,6 +145,11 @@ interface CurrentDateRow extends QueryResultRow {
   workday: string | Date;
 }
 
+interface OriginalDateRangeRow extends QueryResultRow {
+  date_from: string | Date;
+  date_to: string | Date;
+}
+
 interface ManualSvgCommentPresetRow extends QueryResultRow {
   preset_id: string | number;
   label: string;
@@ -173,6 +183,10 @@ interface BathJoinedRow extends QueryResultRow {
   sheet_ordinal: string | number;
   sheet_width_mm: string | number | null;
   sheet_height_mm: string | number | null;
+  current_cut_result_id?: string | number | null;
+  current_result_archived_at?: string | Date | null;
+  job_status?: string | null;
+  current_ready?: boolean | null;
 }
 
 interface MdfCardCutResultItemRow extends QueryResultRow {
@@ -227,6 +241,40 @@ export class PgCncTelegramRepository
       workday: workdayTo,
       generatedAt: new Date().toISOString(),
       columns: buildTodayColumns(packets, baths),
+    };
+  }
+
+  async listOriginalBoard(
+    _command: ListCncTelegramOriginalBoardCommand,
+  ): Promise<CncTelegramOriginalBoardResponseDto> {
+    const rangeResult = await this.database.query<OriginalDateRangeRow>(`
+      SELECT
+        (CURRENT_DATE - INTERVAL '2 months')::date::text AS date_from,
+        CURRENT_DATE::text AS date_to
+    `);
+    const range = rangeResult.rows[0];
+    if (!range?.date_from || !range.date_to) {
+      throw new ApiError(500, 'CNC_ORIGINAL_RANGE_UNAVAILABLE', 'Original MDF board date range is unavailable');
+    }
+    const dateFrom = toDateOnly(range.date_from);
+    const dateTo = toDateOnly(range.date_to);
+    const packetRows = await this.database.query<PacketJoinedRow>(
+      packetSelectSql(
+        `COALESCE(p.source_created_at, p.created_at) >= $1::date
+         AND COALESCE(p.source_created_at, p.created_at) < ($2::date + INTERVAL '1 day')
+         AND p.mdf_board_card_kind = 'machine_file'`,
+        { coalesceSourceCreatedAt: true },
+      ),
+      [dateFrom, dateTo],
+    );
+    const packets = mapOriginalPackets(packetRows.rows);
+    const baths = await loadOriginalBathCards(this.database, dateFrom, dateTo);
+    return {
+      dateFrom,
+      dateTo,
+      generatedAt: new Date().toISOString(),
+      packets,
+      baths,
     };
   }
 
@@ -1107,7 +1155,10 @@ function mapManualSvgCommentPreset(row: ManualSvgCommentPresetRow): CncTelegramM
   };
 }
 
-function packetSelectSql(whereSql: string): string {
+function packetSelectSql(
+  whereSql: string,
+  options: { coalesceSourceCreatedAt?: boolean } = {},
+): string {
   return `
     SELECT
       p.packet_id,
@@ -1116,7 +1167,9 @@ function packetSelectSql(whereSql: string): string {
       p.source_message_id,
       p.source_thread_id,
       p.source_version,
-      p.source_created_at,
+      ${options.coalesceSourceCreatedAt
+        ? 'COALESCE(p.source_created_at, p.created_at) AS source_created_at'
+        : 'p.source_created_at'},
       p.source_updated_at,
       p.workday,
       p.machine,
@@ -1173,6 +1226,7 @@ function packetSelectSql(whereSql: string): string {
         ) sheet_summary
       ) AS svg_cut_sheets_json,
       p.updated_at,
+      p.mdf_board_hidden_at,
       i.packet_item_id,
       i.source_item_key,
       i.order_name,
@@ -3100,6 +3154,169 @@ async function loadBathCards(
   return mapBathRows(result.rows);
 }
 
+async function loadOriginalBathCards(
+  database: DatabaseService,
+  dateFrom: string,
+  dateTo: string,
+): Promise<CncTelegramOriginalBathCardDto[]> {
+  const rowsResult = await database.query<BathJoinedRow>(
+    originalBathSelectSql(),
+    [dateFrom, dateTo],
+  );
+  return mapOriginalBathRows(rowsResult.rows);
+}
+
+function originalBathSelectSql(): string {
+  const packetRangePredicate = `COALESCE(forced_packet.source_created_at, forced_packet.created_at) >= $1::date
+            AND COALESCE(forced_packet.source_created_at, forced_packet.created_at) < ($2::date + INTERVAL '1 day')`;
+  const forcedPacketExistsSql = `EXISTS (
+          SELECT 1
+          FROM cnc_telegram_packets forced_packet
+          WHERE forced_packet.svg_cut_result_id = r.cut_result_id
+            AND forced_packet.mdf_board_card_kind = 'bath_seed'
+            AND ${packetRangePredicate}
+        )`;
+  return `
+    WITH
+    ${cncMdfTargetDetailsCtes('created-history', 'history_')},
+    ${cncMdfTargetDetailsCtes('current-visible', 'current_')},
+    candidate_vacuum_results AS (
+      SELECT
+        r.cut_result_id,
+        r.cut_job_id,
+        r.result_no,
+        r.revision_no,
+        r.created_at AS result_created_at,
+        COALESCE(r.snapshot_job ->> 'name', j.name, 'Раскрой ' || j.cut_job_id::text) AS cut_job_name,
+        ${forcedPacketExistsSql} AS forced,
+        j.status AS job_status,
+        j.current_cut_result_id,
+        current_archive.archived_at AS current_result_archived_at,
+        archive.archived_at AS selected_result_archived_at,
+        CASE
+          WHEN j.current_cut_result_id IS NULL THEN NULL
+          ELSE
+            EXISTS (
+              SELECT 1
+              FROM cut_result_placement current_placement
+              JOIN cut_result_sheet_map current_sheet
+                ON current_sheet.cut_result_sheet_map_id = current_placement.cut_result_sheet_map_id
+               AND current_sheet.is_effective = true
+              WHERE current_placement.cut_result_id = j.current_cut_result_id
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM cut_result_placement current_placement
+              JOIN cut_result_sheet_map current_sheet
+                ON current_sheet.cut_result_sheet_map_id = current_placement.cut_result_sheet_map_id
+               AND current_sheet.is_effective = true
+              LEFT JOIN current_target_details current_target
+                ON current_target.order_id = current_placement.order_id
+               AND current_target.detail_id = current_placement.order_detail_id
+              WHERE current_placement.cut_result_id = j.current_cut_result_id
+              GROUP BY current_placement.order_id, current_placement.order_detail_id
+              HAVING COUNT(*) > COALESCE(MAX(current_target.completed_quantity), 0)
+            )
+        END AS current_ready
+      FROM cut_job j
+      JOIN cut_result r ON r.cut_job_id = j.cut_job_id
+      LEFT JOIN cut_result current_result
+        ON current_result.cut_result_id = j.current_cut_result_id
+      LEFT JOIN cut_param_profiles profile
+        ON profile.cut_param_profile_id = j.param_profile_id
+      LEFT JOIN cut_result_archive_state archive
+        ON archive.cut_job_id = r.cut_job_id
+       AND archive.result_no = r.result_no
+      LEFT JOIN cut_result_archive_state current_archive
+        ON current_archive.cut_job_id = current_result.cut_job_id
+       AND current_archive.result_no = current_result.result_no
+      JOIN cut_result_label_map_projection projection
+        ON projection.cut_result_id = r.cut_result_id
+       AND projection.snapshot_digest = r.snapshot_digest
+      WHERE r.snapshot_job IS NOT NULL
+        AND r.created_at >= $1::date
+        AND r.created_at < ($2::date + INTERVAL '1 day')
+        AND COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+        AND (
+          ${forcedPacketExistsSql}
+          OR EXISTS (
+            SELECT 1
+            FROM cut_result_placement placement
+            JOIN cut_result_sheet_map sheet
+              ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+             AND sheet.is_effective = true
+            JOIN history_target_details target
+              ON target.order_id = placement.order_id
+             AND target.detail_id = placement.order_detail_id
+            WHERE placement.cut_result_id = r.cut_result_id
+          )
+        )
+    ),
+    latest_vacuum_results AS (
+      SELECT DISTINCT ON (candidate.cut_job_id)
+        candidate.*
+      FROM candidate_vacuum_results candidate
+      ORDER BY
+        candidate.cut_job_id,
+        candidate.result_created_at DESC,
+        candidate.result_no DESC,
+        candidate.revision_no DESC,
+        candidate.cut_result_id DESC
+    )
+    SELECT
+      result.cut_result_id,
+      result.cut_job_id,
+      result.result_no,
+      result.revision_no,
+      result.result_created_at,
+      result.cut_job_name,
+      result.forced,
+      result.job_status,
+      result.current_cut_result_id,
+      CASE
+        WHEN result.current_cut_result_id IS NULL THEN result.selected_result_archived_at
+        ELSE result.current_result_archived_at
+      END AS current_result_archived_at,
+      result.current_ready,
+      placement.order_id,
+      placement.order_detail_id,
+      COALESCE(NULLIF(trim(o.order_name), ''), placement.order_id::text) AS order_name,
+      od.detail_number,
+      COALESCE(od.width, placement.detail_width_mm) AS width_mm,
+      COALESCE(od.height, placement.detail_height_mm) AS height_mm,
+      COALESCE(target.completed_quantity, 0) AS completed_quantity,
+      sheet.cut_group_id,
+      sheet.variant,
+      sheet.sheet_index,
+      sheet.sheet_ordinal,
+      sheet.sheet_width_mm,
+      sheet.sheet_height_mm
+    FROM latest_vacuum_results result
+    JOIN cut_result_placement placement
+      ON placement.cut_result_id = result.cut_result_id
+    JOIN cut_result_sheet_map sheet
+      ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+     AND sheet.is_effective = true
+    LEFT JOIN orders o
+      ON o.order_id = placement.order_id
+     AND o.delete_flag = false
+    LEFT JOIN order_details od
+      ON od.detail_id = placement.order_detail_id
+     AND od.delete_flag = false
+    LEFT JOIN history_target_details target
+      ON target.order_id = placement.order_id
+     AND target.detail_id = placement.order_detail_id
+    ORDER BY
+      result.result_created_at DESC,
+      result.cut_result_id DESC,
+      sheet.sheet_ordinal ASC,
+      placement.order_id ASC,
+      od.detail_number ASC NULLS LAST,
+      placement.order_detail_id ASC,
+      placement.instance ASC
+  `;
+}
+
 function buildTodayColumns(
   packets: CncTelegramPacketDto[],
   baths: CncTelegramBathCardDto[],
@@ -3238,6 +3455,30 @@ function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
   return result;
 }
 
+function mapOriginalBathRows(rows: BathJoinedRow[]): CncTelegramOriginalBathCardDto[] {
+  const metadata = new Map<string, BathJoinedRow>();
+  for (const row of rows) metadata.set(String(row.cut_result_id), row);
+
+  return mapBathRows(rows)
+    .map((bath) => {
+      const row = metadata.get(String(bath.cutResultId));
+      const archived = row?.job_status === 'archived' || Boolean(row?.current_result_archived_at);
+      const currentCutResultId = toPositiveInteger(row?.current_cut_result_id ?? bath.cutResultId);
+      const currentReady = row?.current_ready ?? bath.ready;
+      return {
+        ...bath,
+        currentBoardVisibility: archived ? 'archived' as const : 'visible' as const,
+        currentBoardColumn: archived ? null : currentReady ? 'baths_ready' as const : 'baths' as const,
+        currentBoardCardId: archived || currentCutResultId === null
+          ? null
+          : `cut-result:${currentCutResultId}`,
+      };
+    })
+    .sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt) || left.bathCardId.localeCompare(right.bathCardId),
+    );
+}
+
 function bathSheetFromRow(row: BathJoinedRow): CncTelegramBathSheetDto | null {
   const cutGroupId = toPositiveInteger(row.cut_group_id);
   const sheetIndex = toNullableNumber(row.sheet_index);
@@ -3343,6 +3584,27 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
     }
   }
   return Array.from(packets.values());
+}
+
+function mapOriginalPackets(rows: PacketJoinedRow[]): CncTelegramOriginalPacketDto[] {
+  const hiddenPacketIds = new Set(
+    rows
+      .filter((row) => row.mdf_board_hidden_at !== null && row.mdf_board_hidden_at !== undefined)
+      .map((row) => row.packet_id),
+  );
+  return mapPacketRows(rows)
+    .map((packet) => {
+      const hidden = hiddenPacketIds.has(packet.packetId);
+      return {
+        ...packet,
+        currentBoardVisibility: hidden ? 'hidden' as const : 'visible' as const,
+        currentBoardColumn: hidden ? null : packetColumnKey(packet),
+      };
+    })
+    .sort((left, right) =>
+      (right.sourceCreatedAt ?? '').localeCompare(left.sourceCreatedAt ?? '') ||
+      left.packetId.localeCompare(right.packetId),
+    );
 }
 
 function packetAuditSnapshot(packet: CncTelegramPacketDto): Record<string, unknown> {

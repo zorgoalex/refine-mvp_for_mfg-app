@@ -7,6 +7,7 @@ import type {
   CreateManualSvgCommentPresetCommand,
   IngestCncTelegramPacketCommand,
   ListManualSvgCommentPresetsCommand,
+  ListCncTelegramOriginalBoardCommand,
   ListCncTelegramTodayCommand,
   ManualSvgUploadCommand,
 } from './cnc-telegram.types';
@@ -15,6 +16,7 @@ import type {
   CncTelegramManualSvgCommentPresetDto,
   CncTelegramManualSvgUploadResponseDto,
   CncTelegramTodayResponseDto,
+  CncTelegramOriginalBoardResponseDto,
   CreateCncMdfCardResponseDto,
 } from '../dto/cnc-telegram.dto';
 
@@ -38,6 +40,17 @@ export class CncTelegramService {
       });
     }
     return this.ports.packets.listToday(command);
+  }
+
+  async listOriginalBoard(
+    command: ListCncTelegramOriginalBoardCommand,
+  ): Promise<CncTelegramOriginalBoardResponseDto> {
+    if (!this.permissions.canUser(command.currentUser, 'orders.view')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра CNC-потока', {
+        requiredPermissions: ['orders.view'],
+      });
+    }
+    return this.ports.packets.listOriginalBoard(command);
   }
 
   async ingest(command: IngestCncTelegramPacketCommand): Promise<CncTelegramIngestResponseDto> {

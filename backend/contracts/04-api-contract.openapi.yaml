@@ -9449,6 +9449,29 @@ paths:
         '503':
           $ref: '#/components/responses/FeatureDisabled'
 
+  /api/v1/cnc-telegram/mdf-board/original:
+    get:
+      tags:
+        - CncTelegram
+      operationId: listCncTelegramOriginalBoard
+      summary: List MDF cards in their original columns for the last two calendar months
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Original MDF board cards and their current standard-board locations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CncTelegramOriginalBoardResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/FeatureDisabled'
+
   /api/v1/cnc-telegram/media/{storageKey}:
     get:
       tags:
@@ -11597,6 +11620,125 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    CncTelegramOriginalBoardResponse:
+      type: object
+      additionalProperties: false
+      required: [dateFrom, dateTo, generatedAt, packets, baths]
+      properties:
+        dateFrom: { type: string, format: date }
+        dateTo: { type: string, format: date }
+        generatedAt: { type: string, format: date-time }
+        packets:
+          type: array
+          items: { $ref: '#/components/schemas/CncTelegramOriginalPacket' }
+        baths:
+          type: array
+          items: { $ref: '#/components/schemas/CncTelegramOriginalBathCard' }
+
+    CncTelegramOriginalPacket:
+      type: object
+      required:
+        - packetId
+        - sourceCreatedAt
+        - workday
+        - completionStatus
+        - thumbsUp
+        - items
+        - updatedAt
+        - currentBoardVisibility
+        - currentBoardColumn
+      properties:
+        packetId: { type: string, format: uuid }
+        externalPacketKey: { type: string }
+        sourceChatId: { type: string }
+        sourceMessageId: { type: integer, nullable: true }
+        sourceThreadId: { type: integer, nullable: true }
+        sourceVersion: { type: integer }
+        sourceCreatedAt: { type: string, format: date-time, nullable: true }
+        sourceUpdatedAt: { type: string, format: date-time, nullable: true }
+        workday: { type: string, format: date }
+        machine: { type: string, nullable: true }
+        programName: { type: string, nullable: true }
+        materialName: { type: string }
+        sheetImageUrl:
+          type: string
+          nullable: true
+          description: Authorized API media URL; raw storage keys are never returned.
+        sheetImageContentType: { type: string, nullable: true }
+        sheetImageSizeBytes: { type: integer, nullable: true }
+        parseStatus: { type: string, enum: [received, parsed, needs_review] }
+        completionStatus: { type: string, enum: [pending, completed] }
+        thumbsUp: { type: boolean }
+        completedAt: { type: string, format: date-time, nullable: true }
+        rework: { type: boolean }
+        comments: { type: array, items: { type: string } }
+        tools: { type: array, items: { type: object } }
+        dowelingLinks: { type: array, items: { type: object } }
+        analysisWarnings: { type: array, items: { type: string } }
+        ocrEngine: { type: string, nullable: true }
+        parserVersion: { type: string }
+        cutLayout: { type: object, nullable: true }
+        svgCutJobId: { type: integer, nullable: true }
+        svgCutResultId: { type: integer, nullable: true }
+        svgCutResultNo: { type: integer, nullable: true }
+        svgCutImportStatus: { type: string, enum: [none, skipped, needs_review, imported] }
+        svgCutImportNote: { type: string, nullable: true }
+        svgCutSheets: { type: array, items: { type: object } }
+        itemCount: { type: integer }
+        itemQuantityTotal: { type: integer }
+        updatedAt: { type: string, format: date-time }
+        items: { type: array, items: { type: object } }
+        currentBoardVisibility: { type: string, enum: [visible, hidden] }
+        currentBoardColumn:
+          type: string
+          enum: [parsed, completed]
+          nullable: true
+
+    CncTelegramOriginalBathCard:
+      type: object
+      additionalProperties: false
+      required:
+        - bathCardId
+        - cutJobId
+        - cutResultId
+        - resultNo
+        - revisionNo
+        - cutNumber
+        - cutJobName
+        - createdAt
+        - forced
+        - ready
+        - orderCount
+        - positionCount
+        - itemQuantityTotal
+        - items
+        - sheets
+        - currentBoardVisibility
+        - currentBoardColumn
+        - currentBoardCardId
+      properties:
+        bathCardId: { type: string }
+        cutJobId: { type: integer }
+        cutResultId: { type: integer }
+        resultNo: { type: integer }
+        revisionNo: { type: integer }
+        cutNumber: { type: string }
+        cutJobName: { type: string }
+        createdAt: { type: string, format: date-time }
+        forced: { type: boolean }
+        ready: { type: boolean }
+        orderCount: { type: integer }
+        positionCount: { type: integer }
+        itemQuantityTotal: { type: integer }
+        items: { type: array, items: { type: object } }
+        sheets: { type: array, items: { type: object } }
+        currentBoardVisibility: { type: string, enum: [visible, archived] }
+        currentBoardColumn:
+          type: string
+          enum: [baths, baths_ready]
+          nullable: true
+        currentBoardCardId: { type: string, nullable: true }
+
     CreateBazisCutSetRequest:
       type: object
       additionalProperties: false

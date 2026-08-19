@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
   CncTelegramBathCard,
+  CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
   CncTelegramTodayColumn,
 } from '../../api/types/cncTelegramApi.types';
@@ -10,6 +11,7 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 import {
   buildCncBoardDisplayColumns,
+  buildCncOriginalCurrentLocations,
   buildCncPacketLabelCoverage,
   cncManualMoveStorageKey,
   isCncManualMoveAllowed,
@@ -383,6 +385,113 @@ describe('order status board model', () => {
       '1',
       '10',
     ]);
+  });
+
+  it('restores two-month MDF cards to their original columns newest-first', () => {
+    const columns = [
+      cncTodayColumn('completed', [
+        cncPacket('packet-old', ['1001'], {
+          completionStatus: 'completed',
+          sourceCreatedAt: '2026-07-01T09:00:00.000Z',
+        }),
+        cncPacket('packet-new', ['2002'], {
+          completionStatus: 'completed',
+          sourceCreatedAt: '2026-08-18T09:00:00.000Z',
+        }),
+      ]),
+      cncTodayColumn('baths_ready', [], [
+        cncBath('bath-old', ['1001'], {
+          ready: true,
+          createdAt: '2026-07-02T09:00:00.000Z',
+        }),
+        cncBath('bath-new', ['2002'], {
+          ready: true,
+          createdAt: '2026-08-19T08:00:00.000Z',
+        }),
+      ]),
+    ];
+    const manualMoves: CncBoardManualMoveState = {
+      [cncManualMoveStorageKey('packet', 'packet-new')]: 'completed',
+      [cncManualMoveStorageKey('bath', 'bath-new')]: 'baths_rolled',
+      [cncManualMoveStorageKey('order', 'id:2002')]: 'orders_issued',
+    };
+
+    const display = cncDisplayMap(buildCncBoardDisplayColumns(
+      columns,
+      manualMoves,
+      undefined,
+      {
+        placement: 'original',
+      },
+    ));
+
+    expect(display.get('parsed')?.packets.map((packet) => packet.packetId)).toEqual([
+      'packet-new',
+      'packet-old',
+    ]);
+    expect(display.get('completed')?.packets).toEqual([]);
+    expect(display.get('baths')?.baths.map((bath) => bath.bathCardId)).toEqual([
+      'bath-new',
+      'bath-old',
+    ]);
+    expect(display.get('baths_ready')?.baths).toEqual([]);
+    expect(display.get('baths_rolled')?.baths).toEqual([]);
+    expect(display.get('orders')?.orders.map((order) => order.orderName)).toEqual([
+      '2002',
+      '1001',
+    ]);
+    expect(display.get('orders_ready')?.orders).toEqual([]);
+    expect(display.get('orders_issued')?.orders).toEqual([]);
+  });
+
+  it('reports current locations with server visibility before browser-local moves', () => {
+    const board: CncTelegramOriginalBoardResponse = {
+      dateFrom: '2026-06-19',
+      dateTo: '2026-08-19',
+      generatedAt: '2026-08-19T12:00:00.000Z',
+      packets: [
+        {
+          ...cncPacket('hidden-packet', ['1001']),
+          currentBoardVisibility: 'hidden',
+          currentBoardColumn: null,
+        },
+        {
+          ...cncPacket('visible-packet', ['2002']),
+          currentBoardVisibility: 'visible',
+          currentBoardColumn: 'parsed',
+        },
+      ],
+      baths: [
+        {
+          ...cncBath('archived-bath', ['3003']),
+          currentBoardVisibility: 'archived',
+          currentBoardColumn: null,
+          currentBoardCardId: null,
+        },
+        {
+          ...cncBath('historical-bath', ['4004']),
+          currentBoardVisibility: 'visible',
+          currentBoardColumn: 'baths_ready',
+          currentBoardCardId: 'current-bath',
+        },
+      ],
+    };
+    const locations = buildCncOriginalCurrentLocations(board, {
+      [cncManualMoveStorageKey('packet', 'hidden-packet')]: 'completed',
+      [cncManualMoveStorageKey('packet', 'visible-packet')]: 'completed',
+      [cncManualMoveStorageKey('bath', 'archived-bath')]: 'baths_rolled',
+      [cncManualMoveStorageKey('bath', 'current-bath')]: 'baths_rolled',
+      [cncManualMoveStorageKey('order', 'id:2002')]: 'orders_issued',
+    });
+
+    expect(locations[cncManualMoveStorageKey('packet', 'hidden-packet')]).toBe('Сейчас: скрыта');
+    expect(locations[cncManualMoveStorageKey('packet', 'visible-packet')]).toBe('Сейчас: «Распилено»');
+    expect(locations[cncManualMoveStorageKey('bath', 'archived-bath')]).toBe('Сейчас: в архиве');
+    expect(locations[cncManualMoveStorageKey('bath', 'historical-bath')]).toBe('Сейчас: «Закатаны»');
+    expect(locations[cncManualMoveStorageKey('order', 'id:1001')]).toBe(
+      'Сейчас: отсутствует на стандартной доске (источники скрыты/архивированы)',
+    );
+    expect(locations[cncManualMoveStorageKey('order', 'id:2002')]).toBe('Сейчас: «Выдан»');
   });
 
   it('keeps completed packet-only MDF orders ready and ignores stale manual targets', () => {

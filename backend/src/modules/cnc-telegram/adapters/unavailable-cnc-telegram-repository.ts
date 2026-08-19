@@ -7,6 +7,7 @@ import type {
   IngestCncTelegramPacketCommand,
   ListManualSvgCommentPresetsCommand,
   ListCncTelegramTodayCommand,
+  ListCncTelegramOriginalBoardCommand,
   ManualSvgUploadCommand,
   RecordCncTelegramDeniedAuditCommand,
 } from '../application/cnc-telegram.types';
@@ -15,6 +16,7 @@ import type {
   CncTelegramManualSvgCommentPresetDto,
   CncTelegramManualSvgUploadResponseDto,
   CncTelegramTodayResponseDto,
+  CncTelegramOriginalBoardResponseDto,
   CreateCncMdfCardResponseDto,
 } from '../dto/cnc-telegram.dto';
 
@@ -22,6 +24,12 @@ export class UnavailableCncTelegramRepository
   implements CncTelegramRepositoryPort, CncTelegramDeniedAuditPort
 {
   async listToday(_command: ListCncTelegramTodayCommand): Promise<CncTelegramTodayResponseDto> {
+    throw unavailable();
+  }
+
+  async listOriginalBoard(
+    _command: ListCncTelegramOriginalBoardCommand,
+  ): Promise<CncTelegramOriginalBoardResponseDto> {
     throw unavailable();
   }
 

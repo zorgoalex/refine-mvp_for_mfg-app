@@ -177,7 +177,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("orders_issued: 'Выдан'");
     expect(page).toContain('DEFAULT_CNC_ORDER_SORT_SETTINGS');
     expect(page).toContain('const [cncOrderSort, setCncOrderSort]');
-    expect(page).toContain('buildCncBoardDisplayColumns(cncFilteredColumns, cncManualMoves, cncOrderSort)');
+    expect(page).toContain('buildCncBoardDisplayColumns(');
+    expect(page).toContain('cncFilteredColumns,');
+    expect(page).toContain('cncManualMoves,');
+    expect(page).toContain('cncOrderSort,');
     expect(page).toContain('Сортировка заказов');
     expect(page).toContain('Свойство сортировки заказов МДФ-доски');
     expect(page).toContain('Направление сортировки заказов МДФ-доски');
@@ -188,7 +191,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("trigger={['contextMenu']}");
     expect(page).toContain("label: 'Переместить'");
     expect(page).toContain('isCncManualMoveAllowed');
-    expect(page).toContain('const autoColumn = isCncOrderReady(order)');
+    expect(page).toContain('isCncOrderReady(order)');
     expect(page).toContain('CncOrderCardView');
     expect(page).toContain('Из {order.totalDetails} деталей Распилено {order.cutDetails}, Закатаны {order.rolledDetails}. Осталось {order.remainingDetails}.');
     expect(css).toContain('.cnc-today-column--baths_rolled');
@@ -335,6 +338,23 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-toolbar__settings-button.ant-btn');
     expect(css).toContain('margin-left: auto');
     expect(css).toContain('.status-board-toolbar__settings-panel');
+  });
+
+  it('keeps the two-month original MDF placement view behind the settings gear', () => {
+    expect(page).toContain("useState<CncBoardPlacementMode>('current')");
+    expect(page).toContain("cncPlacementMode === 'original'");
+    expect(page).toContain('Исходный (2 месяца)');
+    expect(page).toContain('cncTelegramApi.originalBoard()');
+    expect(page).toContain('buildCncOriginalSourceColumns(cncOriginalBoard)');
+    expect(page).toContain('buildCncOriginalCurrentLocations(cncOriginalBoard, cncManualMoves)');
+    expect(page).toContain('Сейчас: скрыта');
+    expect(page).toContain('Сейчас: в архиве');
+    expect(page).toContain('movesEnabled={!cncOriginalView}');
+    expect(page).toContain("trigger={['hover', 'focus']}");
+    expect(page).toContain("cncPlacementModeRef.current === 'original'");
+    expect(page).toContain('Стартовые колонки, новые карточки сверху. Перемещение отключено.');
+    expect(page).toContain('aria-pressed={cncOriginalView}');
+    expect(css).toContain('min-height: 40px');
   });
 
   it('keeps CNC detailed bath mode explicit and clickable by SVG detail metadata', () => {

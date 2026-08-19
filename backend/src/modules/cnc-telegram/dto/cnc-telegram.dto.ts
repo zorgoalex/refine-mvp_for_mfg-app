@@ -161,6 +161,25 @@ export interface CncTelegramTodayResponseDto {
   columns: CncTelegramTodayColumnDto[];
 }
 
+export interface CncTelegramOriginalPacketDto extends CncTelegramPacketDto {
+  currentBoardVisibility: 'visible' | 'hidden';
+  currentBoardColumn: 'parsed' | 'completed' | null;
+}
+
+export interface CncTelegramOriginalBathCardDto extends CncTelegramBathCardDto {
+  currentBoardVisibility: 'visible' | 'archived';
+  currentBoardColumn: 'baths' | 'baths_ready' | null;
+  currentBoardCardId: string | null;
+}
+
+export interface CncTelegramOriginalBoardResponseDto {
+  dateFrom: string;
+  dateTo: string;
+  generatedAt: string;
+  packets: CncTelegramOriginalPacketDto[];
+  baths: CncTelegramOriginalBathCardDto[];
+}
+
 export type CncMdfCardKindDto = 'machine_file' | 'bath';
 
 export interface CreateCncMdfCardResponseDto {
