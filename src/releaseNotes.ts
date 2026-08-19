@@ -41,6 +41,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-19",
+    title: "МДФ-работы: исходный вид карточек",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "В настройках за шестерёнкой появился исходный вид: карточки за два месяца показаны в колонках создания, новые сверху.",
+      "При наведении или фокусе карточка показывает текущее положение в стандартном виде.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-19",
     title: "Раскрой: переход к карточкам МДФ-доски",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

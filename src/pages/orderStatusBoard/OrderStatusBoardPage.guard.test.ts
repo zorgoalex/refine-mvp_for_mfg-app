@@ -619,7 +619,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('suffixIcon={<SearchOutlined />}');
     expect(page).toContain('options={cncOrderFilterOptions}');
     expect(page).toContain('aria-label="Фильтр МДФ-работ по номеру заказа"');
-    expect(page).toContain('() => filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters)');
+    expect(page).toContain('filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters)');
     expect(page).toContain('viewState.cncPlannedTodayOnly');
     expect(page).toContain('cncPlannedTodayDate');
     expect(page).not.toContain('filterCncBazisCutSetsByMissingBathDetails');
@@ -1704,5 +1704,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.status-board-columns--narrow-cards:not(.status-board-columns--cnc) .status-board-card--compact .status-board-card__compact-text');
     expect(css).toContain('white-space: normal');
     expect(css).toContain('word-break: normal');
+  });
+
+  it('keeps original MDF placement behind gear settings with read-only current-location tooltips', () => {
+    expect(page).toContain("useState<CncBoardPlacementMode>('current')");
+    expect(page).toContain('Исходный (2 месяца)');
+    expect(page).toContain("cncTelegramApi.originalBoard({ cache: 'no-store' })");
+    expect(page).toContain('buildCncOriginalSourceColumns(cncOriginalBoard)');
+    expect(page).toContain('movesEnabled={!originalMode}');
+    expect(page).toContain("trigger={['hover', 'focus']}");
+    expect(page).toContain('Текущее положение:');
   });
 });

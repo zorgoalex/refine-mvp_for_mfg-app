@@ -77,6 +77,25 @@ describe('cncTelegramApi', () => {
     );
   });
 
+  it('loads DB-bounded original MDF board without client dates', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        dateFrom: '2026-06-19',
+        dateTo: '2026-08-19',
+        generatedAt: '2026-08-19T08:00:00.000Z',
+        packets: [],
+        baths: [],
+        bazisCutSets: [],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.originalBoard();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/cnc-telegram/mdf-board/original');
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: 'GET' }));
+  });
+
   it('loads machine-file cutting sequence numbers for an order card', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ orderId: 2700, sequences: [] }), {
