@@ -1626,6 +1626,9 @@ probe_file() {
                      "$(q_tbl cnc_telegram_packet_whole_order_keys)" \
                      "$(q_con_on cnc_telegram_packet_whole_order_keys cnc_telegram_packet_whole_order_keys_pkey)" \
                      "$(q_idx idx_cnc_telegram_packet_whole_order_keys_order)" ;;
+    139_cnc_mdf_original_board_indexes*) probe_all \
+                     "$(q_idx idx_cnc_telegram_packets_mdf_original_created)" \
+                     "$(q_idx idx_cut_result_original_board_created_job)" ;;
     139_vacuum_cut_number_legacy_floor*) probe_all \
                      "SELECT NOT EXISTS (
                        WITH boundary AS (
