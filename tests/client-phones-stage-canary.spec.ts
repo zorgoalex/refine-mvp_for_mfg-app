@@ -7,11 +7,11 @@ const canaryEnabled = process.env.CLIENT_PHONES_STAGE_CANARY === 'true';
 const frontendUrl = trimTrailingSlash(
   process.env.CLIENT_PHONES_STAGE_FRONTEND_URL ??
     process.env.FRONTEND_STAGE_URL ??
-    'https://stage.mebelkz.app',
+    'https://app-test.mebelkz.app',
 );
 const backendApiUrl = trimTrailingSlash(
   process.env.CLIENT_PHONES_STAGE_BACKEND_API_URL ??
-    'https://backend.dev.mebelkz.app/api/v1',
+    'https://backend-test.mebelkz.app/api/v1',
 );
 const postgresContainer =
   process.env.CLIENT_PHONES_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';

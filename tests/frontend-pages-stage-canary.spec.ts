@@ -15,10 +15,10 @@ type StageIds = Record<string, number | null>;
 const canaryEnabled = process.env.FRONTEND_PAGES_STAGE_CANARY === 'true';
 const createUserEnabled = process.env.FRONTEND_PAGES_STAGE_CREATE_USER === 'true';
 const stageFrontendUrl = trimTrailingSlash(
-    process.env.FRONTEND_PAGES_STAGE_FRONTEND_URL ?? 'https://stage.mebelkz.app',
+    process.env.FRONTEND_PAGES_STAGE_FRONTEND_URL ?? 'https://app-test.mebelkz.app',
 );
 const stageBackendApiUrl = trimTrailingSlash(
-    process.env.FRONTEND_PAGES_STAGE_BACKEND_API_URL ?? 'https://backend.dev.mebelkz.app',
+    process.env.FRONTEND_PAGES_STAGE_BACKEND_API_URL ?? 'https://backend-test.mebelkz.app',
 );
 const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
 const publicPreviewEnabled = process.env.FRONTEND_PAGES_STAGE_PUBLIC_PREVIEW === 'true';

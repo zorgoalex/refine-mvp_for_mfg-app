@@ -112,12 +112,12 @@ describe('runtime-config handler', () => {
     const res = createResponse();
 
     handler(
-      { method: 'GET', headers: { host: 'stage.mebelkz.app' } } as VercelRequest,
+      { method: 'GET', headers: { host: 'app-test.mebelkz.app' } } as VercelRequest,
       res as unknown as VercelResponse,
     );
 
     expect(res.body).toMatchObject({
-      apiUrl: 'https://backend.dev.mebelkz.app',
+      apiUrl: 'https://backend-test.mebelkz.app',
     });
   });
 
@@ -125,7 +125,7 @@ describe('runtime-config handler', () => {
     vi.stubEnv('VERCEL_ENV', 'preview');
     const previewRes = createResponse();
     handler({ method: 'GET', headers: {} } as VercelRequest, previewRes as unknown as VercelResponse);
-    expect(previewRes.body).toMatchObject({ apiUrl: 'https://backend.dev.mebelkz.app' });
+    expect(previewRes.body).toMatchObject({ apiUrl: 'https://backend-test.mebelkz.app' });
 
     vi.stubEnv('RUNTIME_CONFIG_API_URL', 'https://explicit.example.test/');
     const explicitRes = createResponse();

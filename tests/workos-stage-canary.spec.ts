@@ -26,7 +26,7 @@ const canaryEnabled = process.env.WORKOS_STAGE_CANARY === 'true';
 const frontendUrl = trimTrailingSlash(
   process.env.WORKOS_STAGE_FRONTEND_URL ??
     process.env.FRONTEND_STAGE_URL ??
-    'https://stage.mebelkz.app',
+    'https://app-test.mebelkz.app',
 );
 const postgresContainer =
   process.env.WORKOS_STAGE_POSTGRES_CONTAINER ?? 'erp_test-postgresdb-1';
