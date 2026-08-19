@@ -198,6 +198,8 @@
   padding: 0;
   margin-left: auto;
   flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 40px;
 }
 
 .status-board-toolbar--cnc .status-board-toolbar__settings-button.ant-btn {

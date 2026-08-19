@@ -207,6 +207,82 @@ describe('PgCncTelegramRepository', () => {
     expect(queries[1]?.params).toEqual(['2026-07-18', '2026-07-24']);
   });
 
+  it('loads the DB-owned original-board window with hidden packets and archived latest baths', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    let bathQueryCount = 0;
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/CURRENT_DATE - INTERVAL '2 months'/i.test(text)) {
+          return { rows: [{ date_from: '2026-06-19', date_to: '2026-08-19' }] };
+        }
+        if (/latest_vacuum_results/i.test(text)) {
+          bathQueryCount += 1;
+          if (bathQueryCount > 1) return { rows: [] };
+          return {
+            rows: [bathPlacementRow({
+              cut_result_id: 700,
+              cut_job_id: 70,
+              result_no: 4,
+              revision_no: 2,
+              result_created_at: '2026-08-18T09:00:00.000Z',
+              job_status: 'archived',
+              current_cut_result_id: 701,
+              current_result_archived_at: '2026-08-19T10:00:00.000Z',
+            })],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              packet_id: '00000000-0000-0000-0000-000000000099',
+              source_created_at: '2026-08-19T23:59:59.000Z',
+              mdf_board_hidden_at: '2026-08-20T01:00:00.000Z',
+              completion_status: 'pending',
+              thumbs_up: false,
+            })],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listOriginalBoard({ currentUser: user() });
+    const sql = queries.map((query) => query.text).join('\n');
+    const historyBathSql = queries[3]?.text ?? '';
+
+    expect(result).toMatchObject({
+      dateFrom: '2026-06-19',
+      dateTo: '2026-08-19',
+      packets: [{
+        packetId: '00000000-0000-0000-0000-000000000099',
+        currentBoardVisibility: 'hidden',
+        currentBoardColumn: null,
+        sheetImageUrl: '/api/v1/cnc-telegram/media/tg_100_10.jpg',
+      }],
+      baths: [{
+        bathCardId: 'cut-result:700',
+        currentBoardVisibility: 'archived',
+        currentBoardColumn: null,
+        currentBoardCardId: null,
+      }],
+    });
+    expect(queries[1]?.params).toEqual(['2026-06-19', '2026-08-19', 'erp-manual-svg-upload']);
+    expect(queries[2]?.params).toEqual(['2026-06-19', '2026-08-19']);
+    expect(queries[3]?.params).toEqual(['2026-06-19', '2026-08-19']);
+    expect(queries[4]?.params).toEqual(['2026-08-19', '2026-08-19']);
+    expect(sql).toContain("COALESCE(p.source_created_at, p.created_at) < ($2::date + INTERVAL '1 day')");
+    expect(sql).toContain("p.mdf_board_card_kind = 'machine_file'");
+    expect(queries[1]?.text).toContain("':mdf-card-created'");
+    expect(historyBathSql).toContain("mdf_board_card_kind = 'bath_seed'");
+    expect(historyBathSql).toContain('OR EXISTS (');
+    expect(historyBathSql).toContain('candidate.result_created_at DESC');
+    expect(historyBathSql).not.toContain('candidate.is_current_result DESC');
+    expect(sql).not.toMatch(/sheet_image_storage_key\s*:/i);
+    expect(result.packets[0]).not.toHaveProperty('sheetImageStorageKey');
+  });
+
   it('ingests structured packets with idempotency, audit and outbox writes', async () => {
     const queries: Array<{ text: string; params: readonly unknown[] }> = [];
     const tx = {
@@ -3699,6 +3775,7 @@ function packetRowBase() {
       },
     ],
     updated_at: '2026-07-24T08:00:10.000Z',
+    mdf_board_hidden_at: null,
     packet_item_id: '00000000-0000-0000-0000-000000000002',
     source_item_key: '2689:31:497x477',
     order_name: '2689',

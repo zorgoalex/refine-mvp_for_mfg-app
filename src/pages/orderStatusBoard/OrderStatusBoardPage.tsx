@@ -66,6 +66,7 @@ import type {
 import type {
   CncTelegramBathCard,
   CncTelegramBazisCutSetCard,
+  CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
   CncTelegramPacketCutSheet,
   CncTelegramTodayColumn,
@@ -339,6 +340,8 @@ export interface CncOrderSortSettings {
   direction: CncOrderSortDirection;
 }
 
+export type CncBoardPlacementMode = 'current' | 'original';
+
 const STATUS_BOARD_CARD_DISPLAY_OPTIONS: Array<{
   label: string;
   value: StatusBoardCardDisplayMode;
@@ -572,6 +575,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const hasExplicitMdfCardDeepLink = Boolean(
     viewState.cncCardKind && viewState.cncCardId && viewState.cncWorkday,
   );
+  const [cncPlacementMode, setCncPlacementMode] =
+    useState<CncBoardPlacementMode>('current');
   const shouldApplyMdfWorkdayTodayOnOpen =
     fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
   const mdfWorkdayTodayOpenPatchNeeded =
@@ -587,13 +592,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
     );
   const datasetKey = useMemo(() => {
-    return buildOrderStatusBoardDatasetKey(
+    const baseKey = buildOrderStatusBoardDatasetKey(
       searchParams,
       viewState,
       todayCncWorkday,
       defaultCncOrderSearchPeriod,
     );
+    return `${baseKey}|cncPlacement=${cncPlacementMode}`;
   }, [
+    cncPlacementMode,
     defaultCncOrderSearchPeriod,
     searchParams,
     todayCncWorkday,
@@ -605,6 +612,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [board, setBoard] = useState<OrderStatusBoardResponse | null>(null);
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);
   const [cncToday, setCncToday] = useState<CncTelegramTodayResponse | null>(null);
+  const [cncOriginalBoard, setCncOriginalBoard] =
+    useState<CncTelegramOriginalBoardResponse | null>(null);
   const cncTodayRef = useRef<CncTelegramTodayResponse | null>(null);
   const [cncOrderSearchToday, setCncOrderSearchToday] =
     useState<CncTelegramTodayResponse | null>(null);
@@ -643,6 +652,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [announcement, setAnnouncement] = useState('');
   const viewStateRef = useRef(viewState);
   viewStateRef.current = viewState;
+  const cncPlacementModeRef = useRef(cncPlacementMode);
+  cncPlacementModeRef.current = cncPlacementMode;
   const [cardDisplayMode, setCardDisplayMode] =
     useState<StatusBoardCardDisplayMode>('compact');
   const [cncCardDisplayMode, setCncCardDisplayMode] =
@@ -783,6 +794,44 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           const currentViewState = viewStateRef.current;
           const auxiliaryRevision = ++cncAuxiliaryRefreshRevisionRef.current;
           cncStrongRefreshInFlightRef.current = true;
+          if (cncPlacementModeRef.current === 'original') {
+            try {
+              const [response, manualMoves] = await Promise.all([
+                cncTelegramApi.originalBoard({ cache: 'no-store' }),
+                fetchCncManualMoves({ cache: 'no-store' }),
+                refetchMdfBoardSettings(),
+              ]);
+              const sourceColumns = buildCncOriginalSourceColumns(response);
+              const orderIds = collectCncOrderIds(sourceColumns);
+              const orderBoardResponse = await fetchCncOrderStatusBoard(orderIds, {
+                sortBy: currentViewState.sortBy,
+                sortOrder: currentViewState.sortOrder,
+              }, { cache: 'no-store' });
+              if (
+                datasetRevisionRef.current !== revision
+                || cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision
+              ) return false;
+              setCncOriginalBoard(response);
+              cncTodayRef.current = null;
+              cncOrderSearchTodayRef.current = null;
+              setCncToday(null);
+              setCncOrderSearchToday(null);
+              cncManualMovesRef.current = manualMoves;
+              setCncManualMoves(manualMoves);
+              setCncOrderBoard(orderBoardResponse);
+              boardRef.current = null;
+              setBoard(null);
+              setStale(false);
+              replacePending(new Set());
+              setLoading(false);
+              return true;
+            } finally {
+              if (cncAuxiliaryRefreshRevisionRef.current === auxiliaryRevision) {
+                cncStrongRefreshInFlightRef.current = false;
+                setCncOrderBoardLoading(false);
+              }
+            }
+          }
           const workday = currentViewState.cncWorkday ?? dayjs().format('YYYY-MM-DD');
           const displayRange = buildCncOrderSearchDateRange(
             workday,
@@ -816,6 +865,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             cncOrderSearchTodayRef.current = response;
             setCncToday(response);
             setCncOrderSearchToday(response);
+            setCncOriginalBoard(null);
             cncManualMovesRef.current = manualMoves;
             setCncManualMoves(manualMoves);
             setCncOrderBoard(orderBoardResponse);
@@ -843,6 +893,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         cncOrderSearchTodayRef.current = null;
         setCncToday(null);
         setCncOrderSearchToday(null);
+        setCncOriginalBoard(null);
         setCncOrderBoard(null);
         setStale(false);
         if (!commandInFlightRef.current && pendingRef.current.size > 0) {
@@ -1283,10 +1334,16 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [userVisibleBoardColumns, viewState.hideEmpty],
   );
   const cncOrderFilters = viewState.cncOrderFilters;
+  const cncOriginalView = cncPlacementMode === 'original';
   const cncOrderFilterKey = cncOrderFilters.join('\u0000');
   const cncDisplayPeriod = viewState.cncOrderSearchPeriod ?? defaultCncOrderSearchPeriod;
   const cncPlannedTodayDate = dayjs().format('YYYY-MM-DD');
-  const cncPeriodColumns = cncToday?.columns ?? [];
+  const cncPeriodColumns = useMemo(
+    () => cncOriginalView
+      ? buildCncOriginalSourceColumns(cncOriginalBoard)
+      : cncToday?.columns ?? [],
+    [cncOriginalBoard, cncOriginalView, cncToday?.columns],
+  );
   const cncOrderFilterOptions = useMemo(
     () =>
       buildCncOrderFilterOptions(cncPeriodColumns).map((orderName) => ({
@@ -1296,15 +1353,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [cncPeriodColumns],
   );
   const cncOrderFilteredColumns = useMemo(
-    () => filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
-    [cncPeriodColumns, cncOrderFilterKey],
+    () => cncOriginalView
+      ? cncPeriodColumns
+      : filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
+    [cncOriginalView, cncPeriodColumns, cncOrderFilterKey],
   );
   const cncFilteredColumns = useMemo(
     () =>
-      cncBathsRequireMachineFiles
+      !cncOriginalView && cncBathsRequireMachineFiles
         ? filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)
         : cncOrderFilteredColumns,
-    [cncBathsRequireMachineFiles, cncOrderFilteredColumns],
+    [cncBathsRequireMachineFiles, cncOrderFilteredColumns, cncOriginalView],
   );
   const cncOrderIds = useMemo(
     () => collectCncOrderIds(cncFilteredColumns),
@@ -1319,7 +1378,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [cncOrderBoardColumns, cncOrderIds],
   );
   const cncPlannedDateColumns = useMemo(
-    () => viewState.cncPlannedTodayOnly
+    () => !cncOriginalView && viewState.cncPlannedTodayOnly
       ? filterCncTodayColumnsByPlannedOrderDate(
           cncFilteredColumns,
           cncOrderStatusCards,
@@ -1330,11 +1389,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cncFilteredColumns,
       cncOrderStatusCards,
       cncPlannedTodayDate,
+      cncOriginalView,
       viewState.cncPlannedTodayOnly,
     ],
   );
   const cncDisplayOrderStatusCards = useMemo(
-    () => viewState.cncPlannedTodayOnly
+    () => !cncOriginalView && viewState.cncPlannedTodayOnly
       ? filterCncOrderCardsByPlannedOrderDate(
           cncOrderStatusCards,
           cncPlannedTodayDate,
@@ -1343,6 +1403,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [
       cncOrderStatusCards,
       cncPlannedTodayDate,
+      cncOriginalView,
       viewState.cncPlannedTodayOnly,
     ],
   );
@@ -1358,26 +1419,31 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [mdfBoardHiddenStatusesSetting],
   );
   const cncActiveColumns = useMemo(
-    () => applyMdfBoardHiddenCardRulesToColumns(
-      cncPlannedDateColumns,
-      cncDisplayOrderStatusCards,
-      mdfBoardHiddenStatusesSetting,
-      cncHiddenProductionStatusIds,
-      cncHiddenOrderStatusIds,
-    ),
+    () => cncOriginalView
+      ? cncPlannedDateColumns
+      : applyMdfBoardHiddenCardRulesToColumns(
+          cncPlannedDateColumns,
+          cncDisplayOrderStatusCards,
+          mdfBoardHiddenStatusesSetting,
+          cncHiddenProductionStatusIds,
+          cncHiddenOrderStatusIds,
+        ),
     [
       cncDisplayOrderStatusCards,
       cncHiddenOrderStatusIds,
       cncHiddenProductionStatusIds,
       cncPlannedDateColumns,
       mdfBoardHiddenStatusesSetting,
+      cncOriginalView,
     ],
   );
   const cncShownDataColumns = useMemo(
-    () => cncActiveColumns.filter((column) =>
-      cncTerminalColumnsVisible || !isCncTerminalColumnKey(column.key),
-    ),
-    [cncActiveColumns, cncTerminalColumnsVisible],
+    () => cncOriginalView
+      ? cncActiveColumns
+      : cncActiveColumns.filter((column) =>
+          cncTerminalColumnsVisible || !isCncTerminalColumnKey(column.key),
+        ),
+    [cncActiveColumns, cncOriginalView, cncTerminalColumnsVisible],
   );
   useEffect(() => {
     const kind = viewState.cncCardKind;
@@ -1423,10 +1489,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     [cncDisplayOrderStatusCards, cncHiddenOrderStatusIds, cncHiddenProductionStatusIds],
   );
   const cncOrderCards = useMemo(
-    () => cncTerminalColumnsVisible
+    () => cncOriginalView || cncTerminalColumnsVisible
       ? cncDisplayOrderStatusCards
       : cncDisplayOrderStatusCards.filter((card) => !cncMutedOrderIds.has(card.orderId)),
-    [cncDisplayOrderStatusCards, cncMutedOrderIds, cncTerminalColumnsVisible],
+    [cncDisplayOrderStatusCards, cncMutedOrderIds, cncOriginalView, cncTerminalColumnsVisible],
   );
   const cncOrderSortPreference = useMemo(
     () => ({ sortBy: viewState.sortBy, sortOrder: viewState.sortOrder }),
@@ -1434,14 +1500,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   );
   const cncRelationContext = useMemo(
     () =>
-      cncRelationsEnabled
+      !cncOriginalView && cncRelationsEnabled
         ? buildCncRelationContext(cncShownDataColumns, cncOrderCards, activeCncRelation)
         : null,
-    [activeCncRelation, cncOrderCards, cncRelationsEnabled, cncShownDataColumns],
+    [activeCncRelation, cncOrderCards, cncOriginalView, cncRelationsEnabled, cncShownDataColumns],
   );
   const cncDetailedContext = useMemo(
     () =>
-      cncDetailedEnabled
+      !cncOriginalView && cncDetailedEnabled
         ? buildCncDetailedContext(
             cncShownDataColumns,
             activeCncDetailedBathId,
@@ -1452,18 +1518,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       activeCncDetailedBathId,
       activeCncDetailedDetail,
       cncDetailedEnabled,
+      cncOriginalView,
       cncShownDataColumns,
     ],
   );
   const cncVisibleColumns = useMemo(
-    () =>
-      filterVisibleStatusBoardColumns(
-        cncShownDataColumns,
-        cncColumnPreferences.settings.hidden,
-      ).filter((column) =>
-        isCncTerminalColumnKey(column.key) || !viewState.hideEmpty || column.total > 0,
-      ),
-    [cncColumnPreferences.settings.hidden, cncShownDataColumns, viewState.hideEmpty],
+    () => cncOriginalView
+      ? cncShownDataColumns
+      : filterVisibleStatusBoardColumns(
+          cncShownDataColumns,
+          cncColumnPreferences.settings.hidden,
+        ).filter((column) =>
+          isCncTerminalColumnKey(column.key) || !viewState.hideEmpty || column.total > 0,
+        ),
+    [cncColumnPreferences.settings.hidden, cncOriginalView, cncShownDataColumns, viewState.hideEmpty],
   );
   const cncPlaceholderColumns = useMemo(
     () =>
@@ -1485,9 +1553,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       ),
     [cncColumnPreferences.settings.hidden, cncTerminalColumnsVisible],
   );
-  const cncDetailedWorkspaceActive = cncDetailedEnabled && cncDetailedContext !== null;
+  const cncDetailedWorkspaceActive = !cncOriginalView && cncDetailedEnabled && cncDetailedContext !== null;
   const cncOrdersColumnVisible =
-    !cncColumnPreferences.settings.hidden.includes('orders');
+    cncOriginalView || !cncColumnPreferences.settings.hidden.includes('orders');
   const cncColumnsLoading = isCncToday && loading;
   const cncRenderColumns = cncColumnsLoading
     ? cncPlaceholderColumns
@@ -1504,10 +1572,40 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     (definition) => cncColumnPreferences.settings.hidden.includes(definition.key),
   );
   const generatedAt = isCncToday
-    ? cncOrderFilters.length > 0
+    ? cncOriginalView
+      ? cncOriginalBoard?.generatedAt
+      : cncOrderFilters.length > 0
       ? cncOrderSearchToday?.generatedAt
       : cncToday?.generatedAt
-    : board?.generatedAt;
+      : board?.generatedAt;
+  const cncOriginalCurrentRuleColumns = useMemo(
+    () => applyMdfBoardHiddenCardRulesToColumns(
+      buildCncOriginalCurrentColumns(cncOriginalBoard),
+      cncDisplayOrderStatusCards,
+      mdfBoardHiddenStatusesSetting,
+      cncHiddenProductionStatusIds,
+      cncHiddenOrderStatusIds,
+    ),
+    [
+      cncDisplayOrderStatusCards,
+      cncHiddenOrderStatusIds,
+      cncHiddenProductionStatusIds,
+      cncOriginalBoard,
+      mdfBoardHiddenStatusesSetting,
+    ],
+  );
+  const cncOriginalCurrentLocations = useMemo(
+    () => buildCncOriginalCurrentLocations(
+      cncOriginalBoard,
+      cncOriginalCurrentRuleColumns,
+      cncManualMoves,
+    ),
+    [cncManualMoves, cncOriginalBoard, cncOriginalCurrentRuleColumns],
+  );
+  const cncOriginalOrderCreatedAt = useMemo(
+    () => buildCncOriginalOrderCreatedAt(cncOriginalBoard),
+    [cncOriginalBoard],
+  );
 
   useEffect(() => {
     if (!cncRelationsEnabled) setActiveCncRelation(null);
@@ -1957,7 +2055,26 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       <label className="status-board-toolbar__switch">
         <Switch
           size="small"
+          checked={cncOriginalView}
+          onChange={(checked) => {
+            setCncPlacementMode(checked ? 'original' : 'current');
+            if (checked && viewState.cncOrderFilters.length > 0) {
+              updateViewState({ cncOrderFilters: [] });
+            }
+          }}
+        />
+        Исходный (2 месяца)
+      </label>
+      {cncOriginalView && (
+        <Typography.Text type="secondary">
+          Карточки в стартовых колонках, новые сверху. Перемещение отключено.
+        </Typography.Text>
+      )}
+      <label className="status-board-toolbar__switch">
+        <Switch
+          size="small"
           checked={viewState.hideEmpty}
+          disabled={cncOriginalView}
           onChange={(checked) => updateViewState({ hideEmpty: checked })}
         />
         Скрыть пустые
@@ -1966,6 +2083,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         <Switch
           size="small"
           checked={cncBathsRequireMachineFiles}
+          disabled={cncOriginalView}
           onChange={setCncBathsRequireMachineFiles}
         />
         Ванны с файлами
@@ -1974,6 +2092,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         <Switch
           size="small"
           checked={cncRelationsEnabled}
+          disabled={cncOriginalView}
           onChange={setCncRelationsEnabled}
         />
         Связи
@@ -1982,6 +2101,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
         <Switch
           size="small"
           checked={cncDetailedEnabled}
+          disabled={cncOriginalView}
           onChange={setCncDetailedEnabled}
         />
         Подробный
@@ -1989,6 +2109,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       <div className="status-board-settings__terminal-toggle">
         <Checkbox
           checked={cncTerminalColumnsVisible}
+          disabled={cncOriginalView}
           onChange={(event) => setCncTerminalColumnsVisible(event.target.checked)}
         >
           Завершенные файлы и ванны
@@ -2022,7 +2143,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           />
         </div>
       </div>
-      <div
+      {!cncOriginalView && <div
         className="status-board-toolbar__sort-settings"
         aria-label="Сортировка карточек заказов МДФ-доски"
       >
@@ -2047,7 +2168,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             aria-label="Направление сортировки заказов МДФ-доски"
           />
         </div>
-      </div>
+      </div>}
     </section>
   );
   const cardSortSettingsContent = (
@@ -2572,7 +2693,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           className="status-board-viewport"
           aria-label={
             isCncToday
-              ? 'CNC-работы на сегодня'
+              ? cncOriginalView
+                ? 'Исходные места МДФ-карточек за два месяца'
+                : 'CNC-работы на сегодня'
               : activeBoard === 'order'
               ? 'Доска статусов заказов'
               : 'Доска производственных статусов'
@@ -2607,11 +2730,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 orderStatusColumns={cncOrderBoardColumns}
                 orderCardsLoading={cncOrderBoardLoading}
                 terminalColumnsVisible={cncTerminalColumnsVisible}
+                originalMode={cncOriginalView}
+                currentLocations={cncOriginalCurrentLocations}
+                originalOrderCreatedAt={cncOriginalOrderCreatedAt}
                 orderSort={cncOrderSortPreference}
                 relationContext={cncRelationContext}
-                relationsEnabled={cncRelationsEnabled}
+                relationsEnabled={!cncOriginalView && cncRelationsEnabled}
                 detailedContext={cncDetailedContext}
-                detailedEnabled={cncDetailedEnabled}
+                detailedEnabled={!cncOriginalView && cncDetailedEnabled}
                 canViewCut={canViewCncCutMaps}
                 cardDisplayMode={cncCardDisplayMode}
                 showOrdersColumn={cncDetailedWorkspaceActive || cncOrdersColumnVisible}
@@ -2738,6 +2864,9 @@ interface CncTelegramTodayColumnsProps {
   orderStatusColumns: OrderStatusBoardColumn[];
   orderCardsLoading: boolean;
   terminalColumnsVisible: boolean;
+  originalMode: boolean;
+  currentLocations: CncOriginalCurrentLocationMap;
+  originalOrderCreatedAt: ReadonlyMap<number, string>;
   orderSort: {
     sortBy: OrderStatusBoardSortBy;
     sortOrder: OrderStatusBoardSortOrder;
@@ -2790,6 +2919,7 @@ interface CncOrderColumnScrollTopState {
 }
 
 export type CncBoardManualMoveState = Partial<Record<string, CncTelegramTodayDisplayColumnKey>>;
+export type CncOriginalCurrentLocationMap = Partial<Record<string, string>>;
 
 export interface CncOrderReadiness {
   totalDetails: number;
@@ -2970,6 +3100,133 @@ function createCncPlaceholderColumn(
   };
 }
 
+export function buildCncOriginalSourceColumns(
+  response: CncTelegramOriginalBoardResponse | null,
+): CncTelegramTodayColumn[] {
+  const packets = response?.packets ?? [];
+  const baths = response?.baths ?? [];
+  const bazisCutSets = response?.bazisCutSets ?? [];
+  const definitions = [
+    ...CNC_STATUS_BOARD_COLUMN_DEFINITIONS.filter((definition) => !isCncOrderColumnKey(definition.key)),
+    ...CNC_TERMINAL_COLUMN_DEFINITIONS,
+  ];
+  return definitions.map((definition) => {
+    const columnPackets = definition.key === 'parsed' ? packets : [];
+    const columnBaths = definition.key === 'baths' ? baths : [];
+    const columnBazisCutSets = definition.key === 'parsed' ? bazisCutSets : [];
+    return {
+      key: definition.key as CncTelegramTodayColumn['key'],
+      title: definition.label,
+      total: columnPackets.length + columnBaths.length + columnBazisCutSets.length,
+      packets: columnPackets,
+      baths: columnBaths,
+      bazisCutSets: columnBazisCutSets,
+    };
+  });
+}
+
+export function buildCncOriginalCurrentColumns(
+  response: CncTelegramOriginalBoardResponse | null,
+): CncTelegramTodayColumn[] {
+  const columns = buildCncOriginalSourceColumns(null);
+  const byKey = new Map(columns.map((column) => [column.key, column]));
+  for (const packet of response?.packets ?? []) {
+    if (packet.currentBoardVisibility !== 'hidden' && packet.currentBoardColumn) {
+      byKey.get(packet.currentBoardColumn)?.packets.push(packet);
+    }
+  }
+  for (const bath of response?.baths ?? []) {
+    if (bath.currentBoardVisibility !== 'archived' && bath.currentBoardColumn) {
+      byKey.get(bath.currentBoardColumn)?.baths.push(bath);
+    }
+  }
+  for (const card of response?.bazisCutSets ?? []) {
+    byKey.get(card.currentBoardColumn)?.bazisCutSets?.push(card);
+  }
+  return columns.map((column) => ({
+    ...column,
+    total: column.packets.length + column.baths.length + (column.bazisCutSets?.length ?? 0),
+  }));
+}
+
+export function buildCncOriginalCurrentLocations(
+  response: CncTelegramOriginalBoardResponse | null,
+  currentRuleColumns: CncTelegramTodayColumn[],
+  manualMoves: CncBoardManualMoveState,
+): CncOriginalCurrentLocationMap {
+  const locations: CncOriginalCurrentLocationMap = {};
+  for (const packet of response?.packets ?? []) {
+    const key = cncManualMoveStorageKey('packet', packet.packetId);
+    if (packet.currentBoardVisibility === 'hidden' || packet.currentBoardColumn === null) {
+      locations[key] = 'скрыта из стандартного вида';
+      continue;
+    }
+  }
+  for (const bath of response?.baths ?? []) {
+    const key = cncManualMoveStorageKey('bath', bath.bathCardId);
+    if (bath.currentBoardVisibility === 'archived' || bath.currentBoardColumn === null) {
+      locations[key] = 'не отображается в стандартном виде';
+      continue;
+    }
+  }
+  const currentBathCardIdBySourceId = new Map(
+    (response?.baths ?? []).map((bath) => [
+      bath.bathCardId,
+      bath.currentBoardCardId ?? bath.bathCardId,
+    ]),
+  );
+  for (const column of currentRuleColumns) {
+    for (const packet of column.packets) {
+      locations[cncManualMoveStorageKey('packet', packet.packetId)] = cncColumnTitleByKey(
+        resolveCncManualTarget('packet', packet.packetId, column.key, manualMoves),
+      );
+    }
+    for (const bath of column.baths) {
+      locations[cncManualMoveStorageKey('bath', bath.bathCardId)] = cncColumnTitleByKey(
+        resolveCncManualTarget(
+          'bath',
+          currentBathCardIdBySourceId.get(bath.bathCardId) ?? bath.bathCardId,
+          column.key,
+          manualMoves,
+        ),
+      );
+    }
+    for (const card of column.bazisCutSets ?? []) {
+      locations[cncManualMoveStorageKey('bazisCutSet', String(card.bazisCutSetId))] =
+        cncColumnTitleByKey(resolveCncManualTarget(
+          'bazisCutSet',
+          String(card.bazisCutSetId),
+          column.key,
+          manualMoves,
+        ));
+    }
+  }
+  return locations;
+}
+
+function buildCncOriginalOrderCreatedAt(
+  response: CncTelegramOriginalBoardResponse | null,
+): ReadonlyMap<number, string> {
+  const result = new Map<number, string>();
+  const record = (orderId: number | null | undefined, createdAt: string | null | undefined) => {
+    if (!orderId || !createdAt) return;
+    const previous = result.get(orderId);
+    if (!previous || createdAt > previous) result.set(orderId, createdAt);
+  };
+  for (const packet of response?.packets ?? []) {
+    for (const item of packet.items) {
+      record(item.matchOrderId ?? item.orderId, packet.sourceCreatedAt);
+    }
+  }
+  for (const bath of response?.baths ?? []) {
+    for (const item of bath.items) record(item.orderId, bath.createdAt);
+  }
+  for (const card of response?.bazisCutSets ?? []) {
+    for (const item of card.items) record(item.orderId, card.createdAt);
+  }
+  return result;
+}
+
 const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   columns,
   readinessColumns,
@@ -2979,6 +3236,9 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   orderStatusColumns,
   orderCardsLoading,
   terminalColumnsVisible,
+  originalMode,
+  currentLocations,
+  originalOrderCreatedAt,
   orderSort,
   relationContext,
   relationsEnabled,
@@ -3077,7 +3337,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     () => buildCncOrderMissingDetails(orderCards, readinessColumns),
     [orderCards, readinessColumns],
   );
-  const orderDisplayCards = useMemo(
+  const currentOrderDisplayCards = useMemo(
     () => splitCncOrderCardsByManualColumn(
       orderCards,
       orderReadinessByOrderId,
@@ -3087,14 +3347,45 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     ),
     [manualMoves, orderCards, orderMissingDetailsByOrderId, orderReadinessByOrderId, orderSort],
   );
+  const orderDisplayCards = useMemo(
+    () => originalMode
+      ? splitCncOrderCardsByManualColumn(
+          orderCards,
+          orderReadinessByOrderId,
+          {},
+          orderSort,
+          orderMissingDetailsByOrderId,
+          { forceOriginal: true, sourceCreatedAtByOrderId: originalOrderCreatedAt },
+        )
+      : currentOrderDisplayCards,
+    [
+      currentOrderDisplayCards,
+      orderCards,
+      orderMissingDetailsByOrderId,
+      orderReadinessByOrderId,
+      orderSort,
+      originalMode,
+      originalOrderCreatedAt,
+    ],
+  );
+  const currentOrderLocations = useMemo(() => {
+    const locations: CncOriginalCurrentLocationMap = {};
+    for (const columnKey of CNC_ORDER_DISPLAY_COLUMN_KEYS) {
+      for (const entry of currentOrderDisplayCards[columnKey]) {
+        locations[cncManualMoveStorageKey('order', String(entry.card.orderId))] =
+          cncColumnTitleByKey(columnKey);
+      }
+    }
+    return locations;
+  }, [currentOrderDisplayCards]);
   const manualDisplayColumns = useMemo(
-    () => applyCncManualMovesToColumns(columns, manualMoves, {
+    () => applyCncManualMovesToColumns(columns, originalMode ? {} : manualMoves, {
       includeTerminalManualMoves: terminalColumnsVisible,
     }),
-    [columns, manualMoves, terminalColumnsVisible],
+    [columns, manualMoves, originalMode, terminalColumnsVisible],
   );
   const detailedBathActive = detailedEnabled && Boolean(detailedContext?.activeBathId);
-  const displayColumns = useMemo(
+  const displayColumns = useMemo<CncTelegramTodayDisplayColumn[]>(
     () => {
       const primaryColumns = detailedBathActive
         ? CNC_STATUS_BOARD_COLUMN_DEFINITIONS
@@ -3274,6 +3565,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
             columnKey={column.key}
             columnTitle={title}
             onMove={onMove}
+            movesEnabled={!originalMode}
           >
             {({ dropRef, dropActive }) => (
           <article
@@ -3386,6 +3678,11 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cardId={String(card.orderId)}
                         sourceColumn={column.key}
                         onMove={onMove}
+                        movesEnabled={!originalMode}
+                        currentLocation={originalMode
+                          ? currentOrderLocations[cncManualMoveStorageKey('order', String(card.orderId))]
+                            ?? 'не отображается в стандартном виде'
+                          : undefined}
                       >
                         {() => (
                       <StatusBoardCardView
@@ -3454,6 +3751,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cardId={bath.bathCardId}
                         sourceColumn={column.key}
                         onMove={onMove}
+                        movesEnabled={!originalMode}
+                        currentLocation={originalMode
+                          ? currentLocations[cncManualMoveStorageKey('bath', bath.bathCardId)]
+                          : undefined}
                       >
                         {() => (
                       <CncTelegramBathCardView
@@ -3513,6 +3814,13 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         cardId={String(bazisCutSet.bazisCutSetId)}
                         sourceColumn={column.key}
                         onMove={onMove}
+                        movesEnabled={!originalMode}
+                        currentLocation={originalMode
+                          ? currentLocations[cncManualMoveStorageKey(
+                              'bazisCutSet',
+                              String(bazisCutSet.bazisCutSetId),
+                            )]
+                          : undefined}
                       >
                         {() => (
                           <CncBazisCutSetCardView
@@ -3554,6 +3862,10 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                       cardId={packet.packetId}
                       sourceColumn={column.key}
                       onMove={onMove}
+                      movesEnabled={!originalMode}
+                      currentLocation={originalMode
+                        ? currentLocations[cncManualMoveStorageKey('packet', packet.packetId)]
+                        : undefined}
                     >
                       {() => (
                     <CncTelegramPacketCard
@@ -3773,6 +4085,7 @@ interface CncColumnDropZoneProps {
   columnKey: CncTelegramTodayDisplayColumnKey;
   columnTitle: string;
   onMove: CncTelegramTodayColumnsProps['onMove'];
+  movesEnabled: boolean;
   children: (state: {
     dropRef: (node: HTMLElement | null) => void;
     dropActive: boolean;
@@ -3783,6 +4096,7 @@ const CncColumnDropZone: React.FC<CncColumnDropZoneProps> = ({
   columnKey,
   columnTitle,
   onMove,
+  movesEnabled,
   children,
 }) => {
   const [{ isOver, canDrop }, dropRef] = useDrop<
@@ -3792,6 +4106,7 @@ const CncColumnDropZone: React.FC<CncColumnDropZoneProps> = ({
   >({
     accept: CNC_BOARD_DRAG_TYPE,
     canDrop: (item) =>
+      movesEnabled &&
       item.sourceColumn !== columnKey &&
       isCncManualMoveAllowed(item.kind, columnKey),
     drop: (item) => {
@@ -3821,6 +4136,8 @@ interface CncManualCardFrameProps {
   cardId: string;
   sourceColumn: CncTelegramTodayDisplayColumnKey;
   onMove: CncTelegramTodayColumnsProps['onMove'];
+  movesEnabled: boolean;
+  currentLocation?: string;
   children: () => React.ReactElement;
 }
 
@@ -3829,6 +4146,8 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
   cardId,
   sourceColumn,
   onMove,
+  movesEnabled,
+  currentLocation,
   children,
 }) => {
   const shellRef = useRef<HTMLDivElement | null>(null);
@@ -3843,7 +4162,7 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
     () => cncManualMoveDestinations(kind, sourceColumn),
     [kind, sourceColumn],
   );
-  const moveAvailable = destinations.length > 0;
+  const moveAvailable = movesEnabled && destinations.length > 0;
   const [{ isDragging }, dragRef] = useDrag<
     CncBoardDragItem,
     void,
@@ -3995,6 +4314,10 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       menu={moveMenu}
       overlayClassName="cnc-card-context-menu"
     >
+      <Tooltip
+        title={currentLocation ? `Текущее положение: ${currentLocation}` : undefined}
+        trigger={['hover', 'focus']}
+      >
       <div
         ref={(node) => {
           shellRef.current = node;
@@ -4009,7 +4332,8 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
         ].filter(Boolean).join(' ')}
         data-cnc-card-kind={kind}
         data-cnc-card-id={cardId}
-        tabIndex={-1}
+        tabIndex={currentLocation ? 0 : -1}
+        aria-label={currentLocation ? `Текущее положение: ${currentLocation}` : undefined}
         onMouseDownCapture={updateDragSuppression}
         onMouseUpCapture={clearDragSuppression}
         onTouchStartCapture={queueTouchReadySignal}
@@ -4019,6 +4343,7 @@ const CncManualCardFrame: React.FC<CncManualCardFrameProps> = ({
       >
         {children()}
       </div>
+      </Tooltip>
     </Dropdown>
   );
 };
@@ -7862,6 +8187,10 @@ export function splitCncOrderCardsByManualColumn(
   manualMoves: CncBoardManualMoveState,
   sortPreference = DEFAULT_MDF_ORDER_CARD_SORT,
   missingDetailsByOrderId: ReadonlyMap<number, CncOrderMissingDetail[]> = new Map(),
+  options: {
+    forceOriginal?: boolean;
+    sourceCreatedAtByOrderId?: ReadonlyMap<number, string>;
+  } = {},
 ): Record<'orders' | 'orders_ready' | 'orders_issued', CncOrderBoardCard[]> {
   const result: Record<'orders' | 'orders_ready' | 'orders_issued', CncOrderBoardCard[]> = {
     orders: [],
@@ -7885,7 +8214,9 @@ export function splitCncOrderCardsByManualColumn(
       autoColumn,
       manualMoves,
     );
-    const orderColumn = isCncOrderColumnKey(targetColumn) ? targetColumn : autoColumn;
+    const orderColumn = options.forceOriginal
+      ? 'orders'
+      : isCncOrderColumnKey(targetColumn) ? targetColumn : autoColumn;
     result[orderColumn].push({
       card,
       readiness,
@@ -7893,9 +8224,11 @@ export function splitCncOrderCardsByManualColumn(
     });
   }
   for (const columnCards of Object.values(result)) {
-    columnCards.sort((left, right) =>
-      compareCncOrderBoardCards(left, right, sortPreference),
-    );
+    columnCards.sort((left, right) => options.forceOriginal
+      ? (options.sourceCreatedAtByOrderId?.get(right.card.orderId) ?? '')
+          .localeCompare(options.sourceCreatedAtByOrderId?.get(left.card.orderId) ?? '')
+        || left.card.orderName.localeCompare(right.card.orderName, 'ru', { numeric: true })
+      : compareCncOrderBoardCards(left, right, sortPreference));
   }
   return result;
 }

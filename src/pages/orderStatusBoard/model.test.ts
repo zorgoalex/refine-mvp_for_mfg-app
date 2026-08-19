@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
   CncTelegramBazisCutSetCard,
+  CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
   CncTelegramTodayColumn,
 } from '../../api/types/cncTelegramApi.types';
@@ -11,6 +12,8 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 import {
   applyCncManualMovesToColumns,
+  buildCncOriginalCurrentColumns,
+  buildCncOriginalCurrentLocations,
   buildCncMachineColumnCards,
   buildCncOrderReadiness,
   cncRelationStatePriority,
@@ -1231,6 +1234,29 @@ describe('order status board model', () => {
     expect(moved.find((column) => column.key === 'baths')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-mixed']);
     expect(moved.find((column) => column.key === 'baths_laminated')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-terminal']);
     expect(moved.find((column) => column.key === 'baths_laminated')?.title).toBe('Завершённые ванны');
+  });
+
+  it('reports the Basis cut set location after standard-board hidden-card rules', () => {
+    const response: CncTelegramOriginalBoardResponse = {
+      dateFrom: '2026-06-19',
+      dateTo: '2026-08-19',
+      generatedAt: '2026-08-19T08:00:00.000Z',
+      packets: [],
+      baths: [],
+      bazisCutSets: [{
+        ...cncBazisCutSet(901, [{ orderName: '2700', orderId: 2700, detailId: 1 }]),
+        currentBoardColumn: 'parsed',
+      }],
+    };
+    const currentColumns = applyMdfBoardHiddenCardRulesToColumns(
+      buildCncOriginalCurrentColumns(response),
+      [card(2700, { orderStatusId: 8, orderStatusName: 'Выдан' })],
+      { cardRules: [{ cardKind: 'bazisCutSet', orderStatusIds: [8] }] },
+    );
+
+    expect(buildCncOriginalCurrentLocations(response, currentColumns, {})).toMatchObject({
+      'bazisCutSet:901': 'Распиленные файлы',
+    });
   });
 
   it('removes a bath only when every linked order has left the MDF board', () => {

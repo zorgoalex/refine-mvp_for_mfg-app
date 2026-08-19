@@ -172,6 +172,7 @@ export const apiRoutes = {
   },
   cncTelegram: {
     today: backendApiPath('/cnc-telegram/today'),
+    originalBoard: backendApiPath('/cnc-telegram/mdf-board/original'),
     ingest: backendApiPath('/cnc-telegram/ingest'),
     manualSvgUpload: backendApiPath('/cnc-telegram/manual-svg-upload'),
     manualSvgCommentPresets: backendApiPath('/cnc-telegram/manual-svg-comment-presets'),
