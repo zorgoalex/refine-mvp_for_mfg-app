@@ -11,6 +11,7 @@ import shutil
 import os
 import time
 import traceback
+import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta
@@ -1917,7 +1918,28 @@ def select_gcode_message(
         if attachment_base_name(message) == vector_base_name
     ]
     if not matching_gcode_messages:
-        return None
+        canonical_vector_base_name = canonical_attachment_base_name(vector_base_name)
+        confusable_candidates = [
+            message
+            for message in gcode_messages
+            if attachment_base_name(message) is not None
+            and canonical_attachment_base_name(attachment_base_name(message) or "") == canonical_vector_base_name
+        ]
+        original_base_names = {
+            attachment_base_name(message)
+            for message in confusable_candidates
+            if attachment_base_name(message) is not None
+        }
+        if len(original_base_names) != 1:
+            if confusable_candidates:
+                print(
+                    "skip ambiguous G-code confusable match "
+                    f"for SVG message {vector_message.id}: "
+                    f"{sorted(original_base_names)}",
+                    flush=True,
+                )
+            return None
+        matching_gcode_messages = confusable_candidates
     return select_attachment_message(
         matching_gcode_messages,
         vector_message,
@@ -1954,8 +1976,30 @@ def attachment_base_name(message: Any) -> str | None:
     filename = message_filename(message)
     if not filename:
         return None
-    base_name = Path(filename).stem.strip().lower()
+    base_name = unicodedata.normalize("NFKC", Path(filename).stem).casefold().strip()
     return base_name or None
+
+
+_CYRILLIC_FILENAME_LOOKALIKE_TRANSLATION = str.maketrans({
+    "а": "a",
+    "е": "e",
+    "к": "k",
+    "м": "m",
+    "н": "h",
+    "о": "o",
+    "р": "p",
+    "с": "c",
+    "т": "t",
+    "х": "x",
+    "у": "y",
+})
+
+
+def canonical_attachment_base_name(value: str) -> str:
+    """Canonicalize only filename confusables before exact base-name matching."""
+    return unicodedata.normalize("NFKC", value).casefold().translate(
+        _CYRILLIC_FILENAME_LOOKALIKE_TRANSLATION,
+    ).strip()
 
 
 def select_attachment_message(

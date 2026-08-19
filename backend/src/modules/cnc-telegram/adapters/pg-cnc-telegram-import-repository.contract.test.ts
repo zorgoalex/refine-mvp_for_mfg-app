@@ -8,6 +8,7 @@ import {
   assertCncTelegramScanMessageCount,
   assertTerminalItemLeaseReplay,
   inferTelegramImportSelectedOrderIds,
+  programNameFromVerifiedSource,
   telegramImportItemsFromLayout,
 } from './pg-cnc-telegram-import-repository';
 import { parseImportComplete } from '../dto/cnc-telegram-import.dto';
@@ -236,9 +237,9 @@ describe('explicit Telegram import backend contracts', () => {
       import_item_id: 'item-1', import_request_id: 'request-1', requested_by: 'user-1', scan_id: 'scan-1',
       source_chat_id: '-1001', source_message_id: 42, source_thread_id: null,
       source_created_at: '2026-08-19T10:00:00.000Z', source_updated_at: null, workday: '2026-08-19',
-      svg_message_id: 42, gcode_message_id: null, screenshot_message_id: null,
-      svg_file_name: 'CNC#1_2808+2807.svg', gcode_file_name: null, screenshot_file_name: null,
-      svg_content_sha256: 'a'.repeat(64), gcode_content_sha256: null, screenshot_content_sha256: null,
+      svg_message_id: 42, gcode_message_id: 43, screenshot_message_id: null,
+      svg_file_name: 'CNC#1_2808+2807.svg', gcode_file_name: 'CNC#1_2808+2807-18ММ.TXT', screenshot_file_name: null,
+      svg_content_sha256: 'a'.repeat(64), gcode_content_sha256: 'b'.repeat(64), screenshot_content_sha256: null,
       source_set_fingerprint: 'b'.repeat(64), parser_version: 'test', layout_fingerprint: null,
       parsed_snapshot_json: {}, cut_layout_json: {
         status: 'valid', reasons: [], sheet: { widthMm: 2800, heightMm: 2070 },
@@ -271,14 +272,20 @@ describe('explicit Telegram import backend contracts', () => {
       completion: {
         itemLeaseToken: 'l'.repeat(32), itemLeaseGeneration: 1, itemLeaseOwner: '00000000-0000-4000-8000-000000000001',
         sourceSetFingerprint: 'b'.repeat(64),
-        source: { sourceChatId: '-1001', sourceMessageId: '42', svgMessageId: '42', gcodeMessageId: null, screenshotMessageId: null, svgFileName: 'CNC#1_2808+2807.svg', gcodeFileName: null, screenshotFileName: null, svgContentSha256: 'a'.repeat(64), gcodeContentSha256: null, screenshotContentSha256: null },
-        sourceFiles: [{ kind: 'svg', fileName: 'CNC#1_2808+2807.svg', contentType: 'image/svg+xml', sizeBytes: 1, sha256: 'a'.repeat(64), base64Content: 'YQ==' }],
+        source: { sourceChatId: '-1001', sourceMessageId: '42', svgMessageId: '42', gcodeMessageId: '43', screenshotMessageId: null, svgFileName: 'CNC#1_2808+2807.svg', gcodeFileName: 'CNC#1_2808+2807-18ММ.TXT', screenshotFileName: null, svgContentSha256: 'a'.repeat(64), gcodeContentSha256: 'b'.repeat(64), screenshotContentSha256: null },
+        sourceFiles: [
+          { kind: 'svg', fileName: 'CNC#1_2808+2807.svg', contentType: 'image/svg+xml', sizeBytes: 1, sha256: 'a'.repeat(64), base64Content: 'YQ==' },
+          { kind: 'gcode', fileName: 'CNC#1_2808+2807-18ММ.TXT', contentType: 'text/plain', sizeBytes: 1, sha256: 'b'.repeat(64), base64Content: 'YQ==' },
+        ],
       },
       requestId: 'request-1',
     });
 
     expect(importer.manualSvgUploadInTransaction).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      dto: expect.objectContaining({ matchMode: 'order_details', validationMode: 'lenient', selectedOrderIds: [] }),
+      dto: expect.objectContaining({
+        matchMode: 'order_details', validationMode: 'lenient', selectedOrderIds: [],
+        programName: 'CNC#1_2808+2807-18ММ.TXT',
+      }),
     }));
     expect(queries.some((sql) => sql.includes('INSERT INTO cut_job'))).toBe(false); // importer owns cut-job creation
   });
@@ -320,6 +327,38 @@ describe('explicit Telegram import backend contracts', () => {
     expect(dto).toContain('15_728_640');
     expect(source).toContain('CNC_TELEGRAM_SOURCE_FILES_REQUIRED');
     expect(source).toContain('manualSvgUploadInTransaction');
+  });
+
+  it('uses verified G-code filename first, then SVG filename for imported job names', () => {
+    const svg = {
+      kind: 'svg' as const,
+      fileName: 'CNC#1_2812-8MM.svg',
+      contentType: 'image/svg+xml',
+      sizeBytes: 1,
+      sha256: 'a'.repeat(64),
+      base64Content: 'YQ==',
+    };
+    const gcode = {
+      kind: 'gcode' as const,
+      fileName: 'CNC#1_2812-8ММ.TXT',
+      contentType: 'text/plain',
+      sizeBytes: 1,
+      sha256: 'b'.repeat(64),
+      base64Content: 'YQ==',
+    };
+
+    expect(programNameFromVerifiedSource({
+      svgFileName: svg.fileName,
+      gcodeFileName: gcode.fileName,
+    }, 'candidate.svg')).toBe('CNC#1_2812-8ММ.TXT');
+    expect(programNameFromVerifiedSource({
+      svgFileName: svg.fileName,
+      gcodeFileName: null,
+    }, 'candidate.svg')).toBe('CNC#1_2812-8MM.svg');
+    expect(programNameFromVerifiedSource({
+      svgFileName: null,
+      gcodeFileName: null,
+    }, 'candidate.svg')).toBe('candidate.svg');
   });
 
   it('builds the manual SVG ingest item contract from Telegram layout rows', () => {

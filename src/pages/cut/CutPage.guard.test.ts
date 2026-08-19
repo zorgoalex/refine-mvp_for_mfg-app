@@ -579,6 +579,7 @@ describe('CutPage profile + totals columns (source guard)', () => {
     expect(source).toContain('cutJobMdfBoardExportValue(candidate)');
     expect(source).toContain('cutApi.createMdfBoardCard(targetJob.cutJobId)');
     expect(source).toContain('return `/mdf-work-board?${params.toString()}`');
+    expect(source).toContain("period: '1m'");
     expect(source).toContain('event.preventDefault();');
     expect(source).toContain('push(cutJobMdfBoardLink(status.target!));');
     expect(source).toContain('job.mdfBoardStatus?.canCreateCard !== true');

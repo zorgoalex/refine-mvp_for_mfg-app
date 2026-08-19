@@ -50,6 +50,7 @@ import { validateSheetDimensions } from '../../../../utils/materialDimensionVali
 import {
   clearOrderDetailTailRowValues,
   countOrderDetailsWithRequiredEntryValues,
+  MIN_ORDER_DETAIL_GRID_ROWS,
   orderDetailIdentityKey,
   promoteOrderDetailOptions,
   prepareOrderDetailsForSave,
@@ -418,14 +419,18 @@ export function calculateOrderDetailTableBodyScrollY(
   detailRowsCount: number,
 ): number {
   const minimumRows = detailRowsCount > 0 ? 1 : 0;
-  const visibleDetailRows = Math.max(minimumRows, filledDetailRowsCount);
+  const visibleDetailRows = Math.max(
+    minimumRows,
+    filledDetailRowsCount,
+    Math.min(detailRowsCount, MIN_ORDER_DETAIL_GRID_ROWS),
+  );
   const safetyRows = visibleDetailRows > 0 ? ORDER_DETAIL_TABLE_SCROLL_SAFETY_ROWS : 0;
   const bodyRows = Math.max(1, visibleDetailRows + safetyRows);
+  const desiredScrollY = bodyRows * ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT;
 
-  return Math.min(
-    ORDER_DETAIL_TABLE_MAX_SCROLL_Y,
-    bodyRows * ORDER_DETAIL_TABLE_SCROLL_ROW_HEIGHT,
-  );
+  return detailRowsCount <= MIN_ORDER_DETAIL_GRID_ROWS
+    ? desiredScrollY
+    : Math.min(ORDER_DETAIL_TABLE_MAX_SCROLL_Y, desiredScrollY);
 }
 
 const SUMMARY_TEXT_BASE_STYLE: React.CSSProperties = {
