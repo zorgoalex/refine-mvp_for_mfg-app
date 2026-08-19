@@ -390,6 +390,7 @@ export function filterCncTodayColumnsByPlannedOrderDate(
 
 export function filterCncBathColumnsByMachineOrderMatches(
   columns: CncTelegramTodayColumn[],
+  preservedBathCardId?: string,
 ): CncTelegramTodayColumn[] {
   const machineOrderKeys = new Set<string>();
   for (const column of columns) {
@@ -415,7 +416,8 @@ export function filterCncBathColumnsByMachineOrderMatches(
   return columns.map((column) => {
     if (!isCncBathColumnKey(column.key)) return column;
     const baths = (column.baths ?? []).filter((bath) =>
-      bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
+      bath.bathCardId === preservedBathCardId
+      || bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
     );
     return { ...column, baths, total: baths.length };
   });

@@ -181,6 +181,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current");
     expect(page).toContain('const hasExplicitMdfCardDeepLink = Boolean(');
     expect(page).toMatch(/mdfWorkdayTodayOpenPatchNeeded\s*=\s*[\s\S]*?!hasExplicitMdfCardDeepLink/);
+    expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
     expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
@@ -1346,7 +1347,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('useState(true)');
     expect(page).toContain('Ванны с файлами');
     expect(page).toContain('checked={cncBathsRequireMachineFiles}');
-    expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)');
+    expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
     expect(page).toContain('const [cncTerminalColumnsVisible, setCncTerminalColumnsVisible] = useState(false)');
     expect(page).toContain('terminalColumnsVisible={cncTerminalColumnsVisible}');
     expect(settings).toContain('checked={cncTerminalColumnsVisible}');

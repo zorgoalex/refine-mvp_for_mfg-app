@@ -1358,12 +1358,15 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       : filterCncTodayColumnsByOrders(cncPeriodColumns, cncOrderFilters),
     [cncOriginalView, cncPeriodColumns, cncOrderFilterKey],
   );
+  const preservedCncBathCardId = viewState.cncCardKind === 'bath'
+    ? viewState.cncCardId
+    : undefined;
   const cncFilteredColumns = useMemo(
     () =>
       !cncOriginalView && cncBathsRequireMachineFiles
-        ? filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns)
+        ? filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)
         : cncOrderFilteredColumns,
-    [cncBathsRequireMachineFiles, cncOrderFilteredColumns, cncOriginalView],
+    [cncBathsRequireMachineFiles, cncOrderFilteredColumns, cncOriginalView, preservedCncBathCardId],
   );
   const cncOrderIds = useMemo(
     () => collectCncOrderIds(cncFilteredColumns),
@@ -7791,8 +7794,9 @@ function collectCncOrderStatusBoardIds(
   bathsRequireMachineFiles: boolean,
 ): number[] {
   const filteredByOrder = filterCncTodayColumnsByOrders(columns, viewState.cncOrderFilters);
+  const preservedBathCardId = viewState.cncCardKind === 'bath' ? viewState.cncCardId : undefined;
   const filteredColumns = bathsRequireMachineFiles
-    ? filterCncBathColumnsByMachineOrderMatches(filteredByOrder)
+    ? filterCncBathColumnsByMachineOrderMatches(filteredByOrder, preservedBathCardId)
     : filteredByOrder;
   return collectCncOrderIds(filteredColumns);
 }
