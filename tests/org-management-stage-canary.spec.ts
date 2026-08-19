@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 // All writes go through the API; SQL is used only for preflight + restore proof.
 const canaryEnabled = process.env.ORG_MANAGEMENT_STAGE_CANARY === 'true';
 const backendApiUrl = trimTrailingSlash(
-  process.env.ORG_MANAGEMENT_STAGE_BACKEND_API_URL ?? 'https://backend.dev.mebelkz.app/api/v1',
+  process.env.ORG_MANAGEMENT_STAGE_BACKEND_API_URL ?? 'https://backend-test.mebelkz.app/api/v1',
 );
 const postgresContainer = process.env.ORG_MANAGEMENT_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
 

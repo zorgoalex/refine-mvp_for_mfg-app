@@ -10,7 +10,7 @@ import {
 
 const stageCanaryEnabled = process.env.CALENDAR_STAGE_CANARY === 'true';
 const stageFrontendUrl = trimTrailingSlash(
-    process.env.CALENDAR_STAGE_FRONTEND_URL ?? 'https://stage.mebelkz.app',
+    process.env.CALENDAR_STAGE_FRONTEND_URL ?? 'https://app-test.mebelkz.app',
 );
 const stagePostgresContainer =
     process.env.CALENDAR_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
