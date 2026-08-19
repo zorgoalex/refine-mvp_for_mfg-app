@@ -55,4 +55,19 @@ describe('OrderDetailColumnSettings', () => {
 
     expect(result.map((column) => column.key)).toEqual(['c', 'a']);
   });
+
+  it('keeps fixed-right columns after unknown dynamic columns', () => {
+    const columns: ColumnsType<{ id: number }> = [
+      { key: 'a', title: 'A' },
+      { key: 'actions', title: 'Actions', fixed: 'right' },
+      { key: 'dynamic', title: 'Dynamic' },
+    ];
+
+    const result = applyOrderDetailColumnSettings(columns, {
+      order: ['a', 'actions'],
+      hidden: [],
+    });
+
+    expect(result.map((column) => column.key)).toEqual(['a', 'dynamic', 'actions']);
+  });
 });
