@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import rolloutLib from './order-sse-rollout-lib.js';
 
 const {
+  STAGE_REMOTE_URL,
   assertDatabaseState,
   assertBackendReadyPayload,
   attachFetchResponseCleanup,
@@ -25,6 +26,13 @@ const {
 } = rolloutLib;
 
 describe('Order SSE rollout controller', () => {
+  it('pins canonical stage identity to the repository URL instead of cwd origin', () => {
+    expect(STAGE_REMOTE_URL).toBe('https://github.com/zorgoalex/refine-mvp_for_mfg-app.git');
+    const source = readFileSync(new URL('./order-sse-rollout-lib.js', import.meta.url), 'utf8');
+    expect(source).toContain("['git', 'ls-remote', '--heads', STAGE_REMOTE_URL, STAGE_REF]");
+    expect(source).not.toContain("['git', 'ls-remote', '--heads', 'origin', STAGE_REF]");
+  });
+
   it('parses conservative stage defaults', () => {
     const parsed = parseOrderSseRolloutArgs(['--mode', 'rollout', '--apply']);
     const config = resolveOrderSseRolloutConfig(parsed, {
@@ -372,7 +380,9 @@ describe('Order SSE rollout controller', () => {
     expect(launcher).toContain('/tmp/codex-rtk-heavy-core.1.lock');
     expect(launcher).toContain('/tmp/codex-rtk-heavy-core.2.lock');
     expect(launcher).toContain('flock --no-fork --nonblock --conflict-exit-code 75');
-    expect(launcher).toContain('node "$SCRIPT_DIR/order-sse-rollout.js" "$@"');
+    expect(launcher).toContain('node --env-file="$PROJECT_ENV"');
+    expect(launcher).not.toContain('dotenv/config');
+    expect(launcher).toContain('node --env-file="$PROJECT_ENV" "$SCRIPT_DIR/order-sse-rollout.js" "$@"');
     expect(launcher).not.toContain('npm run order-sse:rollout');
   });
 
@@ -391,10 +401,19 @@ describe('Order SSE rollout controller', () => {
     );
     expect(installer).toContain('Prepared only. Start later with:');
     expect(installer).toContain('is-active --quiet order-sse-continuous-monitor.timer');
+    expect(installer).toContain('is-enabled --quiet order-sse-continuous-monitor.timer');
+    expect(installer).toContain('is-active --quiet order-sse-continuous-monitor.service');
+    expect(installer).toContain('actual_sha="$(git -C "$REPO_DIR" rev-parse --verify HEAD');
+    expect(installer).toContain('candidates/$SHA');
+    expect(installer).toContain('ORDER_SSE_RUNNER_DIR=%s');
     expect(installer).not.toMatch(/^\s*systemctl --user (?:enable|start)/m);
     expect(service).toContain('TimeoutStartSec=120s');
     expect(service).toContain('KillMode=mixed');
+    expect(service).toContain('ExecStart=%h/.local/libexec/erp-order-sse/order-sse-continuous-once.sh');
+    expect(service).not.toContain('/home/ovhtest/projects/erp_dev/repo_erp');
     expect(runner).toContain("-mtime +30 -delete");
+    expect(runner).toContain('ORDER_SSE_RUNNER_DIR:?ORDER_SSE_RUNNER_DIR is required');
+    expect(runner).toContain('candidate bundle SHA mismatch');
     expect(runner).toContain("trap 'forward_signal TERM' TERM");
     expect(runner).toContain("trap 'forward_signal INT' INT");
     expect(runner).toContain('wait "$child_pid"');

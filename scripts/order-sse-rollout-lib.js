@@ -16,6 +16,7 @@ const STAGE_BACKEND_ORIGIN = 'https://backend-test.mebelkz.app';
 const STAGE_BACKEND_URL = 'https://backend-test.mebelkz.app/api/v1';
 const STAGE_DB_CONTAINER = 'erp_test-postgresdb-1';
 const STAGE_BACKEND_CONTAINER = 'erp_test-backend-1';
+const STAGE_REMOTE_URL = 'https://github.com/zorgoalex/refine-mvp_for_mfg-app.git';
 const EXPECTED_CANARY_USER_ID = 83;
 const ALLOWED_STEPS = [5, 25, 50, 100];
 const CHILD_ABORT_INT_GRACE_MS = 5000;
@@ -492,7 +493,7 @@ function createStageDependencies(config, logger, signal) {
   const readCanonicalStageSha = async () => {
     const result = await runCommand(
       config.rtkBin,
-      ['git', 'ls-remote', '--heads', 'origin', STAGE_REF],
+      ['git', 'ls-remote', '--heads', STAGE_REMOTE_URL, STAGE_REF],
       { signal, maxOutputBytes: 64 * 1024 },
     );
     const actualSha = String(result.stdout).trim().split(/\s+/)[0]?.toLowerCase() || '';
@@ -1357,6 +1358,7 @@ module.exports = {
   STAGE_BACKEND_URL,
   STAGE_BACKEND_ORIGIN,
   STAGE_FRONTEND_URL,
+  STAGE_REMOTE_URL,
   assertDatabaseState,
   assertOrderSseRolloutAllowed,
   assertRuntimeConfig,

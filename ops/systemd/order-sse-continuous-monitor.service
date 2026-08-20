@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/ovhtest/projects/erp_dev/repo_erp
-EnvironmentFile=/home/ovhtest/.local/state/erp-order-sse/continuous.env
-ExecStart=/home/ovhtest/projects/erp_dev/repo_erp/ops/order-sse-continuous-once.sh
+WorkingDirectory=%h/.local/state/erp-order-sse
+EnvironmentFile=%h/.local/state/erp-order-sse/continuous.env
+ExecStart=%h/.local/libexec/erp-order-sse/order-sse-continuous-once.sh
 KillMode=mixed
 TimeoutStartSec=120s
 TimeoutStopSec=35s

@@ -83,6 +83,11 @@ Rules:
 - A final Compose identity overlay tags the backend image with exact HEAD and
   injects the same SHA as Docker build arg. This also covers existing VPS
   compose files that predate the identity fields in the current template.
+- `ops/install-order-sse-continuous-monitor.sh <40-hex-stage-sha>` requires a
+  clean checkout at that exact SHA and installs an immutable user-level runner
+  bundle. The prepared systemd timer never executes code from a mutable main
+  checkout and is not enabled or started by the installer. Reinstall requires
+  the timer to be both disabled and inactive.
 - Keep real values only in the VPS `.env`.
 - Set `ERP_STACK_ENV=test|prod` explicitly. Test deploys load
   `docker-compose.test.yml` and use `CNC_TELEGRAM_WORKER_ROLE=reader`;

@@ -19,6 +19,4 @@ fi
 exec rtk flock --no-fork --nonblock --conflict-exit-code 75 "$CORE1_LOCK" \
   rtk flock --no-fork --nonblock --conflict-exit-code 75 "$CORE2_LOCK" \
   rtk nice -n 10 taskset -c 0 "$GUARD" -- \
-  env DOTENV_CONFIG_PATH="$PROJECT_ENV" \
-  NODE_OPTIONS="-r dotenv/config" \
-  node "$SCRIPT_DIR/order-sse-rollout.js" "$@"
+  node --env-file="$PROJECT_ENV" "$SCRIPT_DIR/order-sse-rollout.js" "$@"

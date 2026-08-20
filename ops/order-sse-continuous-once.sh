@@ -1,11 +1,27 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly REPO_DIR="/home/ovhtest/projects/erp_dev/repo_erp"
 readonly STATE_DIR="${HOME}/.local/state/erp-order-sse"
 readonly LOG_ROOT="/home/ovhtest/projects/erp_dev/spec_erp/logs/order-sse-continuous"
 readonly EXPECTED_SHA="${ORDER_SSE_EXPECTED_STAGE_SHA:?ORDER_SSE_EXPECTED_STAGE_SHA is required}"
+readonly RUNNER_DIR="${ORDER_SSE_RUNNER_DIR:?ORDER_SSE_RUNNER_DIR is required}"
 child_pid=""
+
+if [[ "$RUNNER_DIR" != /* || ! -r "$RUNNER_DIR/candidate.sha" ]]; then
+  printf 'Order SSE candidate bundle is missing or invalid.\n' >&2
+  exit 75
+fi
+IFS= read -r bundled_sha <"$RUNNER_DIR/candidate.sha" || bundled_sha=""
+if [[ "$bundled_sha" != "$EXPECTED_SHA" ]]; then
+  printf 'Order SSE candidate bundle SHA mismatch.\n' >&2
+  exit 75
+fi
+for required_file in order-sse-guarded-run.sh order-sse-rollout.js order-sse-rollout-lib.js; do
+  if [[ ! -r "$RUNNER_DIR/$required_file" ]]; then
+    printf 'Order SSE candidate bundle file missing: %s\n' "$required_file" >&2
+    exit 75
+  fi
+done
 
 forward_signal() {
   local signal="$1"
@@ -25,7 +41,7 @@ find "$STATE_DIR" -maxdepth 1 -type f -name 'skips-*.jsonl' -mtime +30 -delete
 
 set +e
 ORDER_SSE_ROLLOUT_APPROVE_STAGE=true \
-  "$REPO_DIR/scripts/order-sse-guarded-run.sh" \
+  "$RUNNER_DIR/order-sse-guarded-run.sh" \
   --mode accelerated-soak \
   --apply \
   --expected-stage-sha "$EXPECTED_SHA" \
