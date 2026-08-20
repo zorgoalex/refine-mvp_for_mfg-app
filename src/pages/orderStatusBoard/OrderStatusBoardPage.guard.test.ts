@@ -182,6 +182,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const hasExplicitMdfCardDeepLink = Boolean(');
     expect(page).toMatch(/mdfWorkdayTodayOpenPatchNeeded\s*=\s*[\s\S]*?!hasExplicitMdfCardDeepLink/);
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
+    expect(page).toContain('const deepLinkFocusAppliedRef = useRef<string | null>(null);');
+    expect(page).toContain('if (deepLinkFocusAppliedRef.current === key) return undefined;');
+    expect(page).toContain('deepLinkFocusAppliedRef.current = key;');
+    expect(page.indexOf('deepLinkFocusAppliedRef.current = key;')).toBeLessThan(page.indexOf('target.focus({ preventScroll: true });'));
     expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
     expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');

@@ -637,6 +637,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const topScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
   const boardViewportRef = useRef<HTMLElement | null>(null);
   const deepLinkWarningRef = useRef<string | null>(null);
+  const deepLinkFocusAppliedRef = useRef<string | null>(null);
   const cncBoardScrollTargetLeftRef = useRef<number | null>(null);
   const cncBoardScrollButtonScrollActiveRef = useRef(false);
   const [cncBoardScrollEdges, setCncBoardScrollEdges] =
@@ -1451,8 +1452,13 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   useEffect(() => {
     const kind = viewState.cncCardKind;
     const cardId = viewState.cncCardId;
-    if (!isCncToday || loading || !kind || !cardId) return undefined;
+    if (!isCncToday || !kind || !cardId) {
+      deepLinkFocusAppliedRef.current = null;
+      return undefined;
+    }
+    if (loading) return undefined;
     const key = `${kind}:${cardId}`;
+    if (deepLinkFocusAppliedRef.current === key) return undefined;
     const root = boardViewportRef.current;
     const target = root
       ? Array.from(root.querySelectorAll<HTMLElement>('[data-cnc-card-id]')).find(
@@ -1467,6 +1473,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       return undefined;
     }
     deepLinkWarningRef.current = null;
+    deepLinkFocusAppliedRef.current = key;
     target.classList.add('cnc-board-card-shell--deep-linked');
     const frame = window.requestAnimationFrame(() => {
       target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
