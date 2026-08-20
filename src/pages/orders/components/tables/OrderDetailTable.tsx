@@ -71,6 +71,7 @@ import {
   findOrderDetailInlineEditor,
   finishOrderDetailInlineTab,
   focusOrderDetailInlineEditorAtEnd,
+  mergeOrderDetailLiveNumericValues,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
@@ -230,6 +231,13 @@ export function isLastOrderDetailRow(
   if (targetKey == null || details.length === 0) return false;
 
   return orderDetailRowKey(details[details.length - 1]) === targetKey;
+}
+
+export function orderDetailSpreadsheetNavigationRows(
+  details: readonly OrderDetail[],
+  placeholders: readonly OrderDetail[],
+): OrderDetail[] {
+  return [...details, ...placeholders];
 }
 
 const ORDER_DETAIL_EDIT_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -974,6 +982,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }, []);
 
   const validateInlineForm = useCallback(async (): Promise<Record<string, any>> => {
+    form.setFieldsValue(mergeOrderDetailLiveNumericValues(
+      form.getFieldsValue(true),
+      fieldValuesRef.current,
+    ));
     await form.validateFields();
     const values = form.getFieldsValue(true);
     const errors: string[] = [];
@@ -1424,7 +1436,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const finishInlineEditOnTab = async (record: OrderDetail) => {
     return await finishOrderDetailInlineTab({
       saveCurrentRow,
-      isLastRow: isLastOrderDetailRow(realSortedDetails, record),
+      isLastRow: isLastOrderDetailRow(sortedDetails, record),
       onQuickAdd,
     });
   };
@@ -1433,7 +1445,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     record: OrderDetail,
     columnKey: React.Key,
   ): Promise<boolean> => {
-    if (!onQuickAdd || !isLastOrderDetailRow(realSortedDetails, record)) return false;
+    if (!onQuickAdd || !isLastOrderDetailRow(sortedDetails, record)) return false;
     if (arrowDownQuickAddInFlightRef.current) return true;
     arrowDownQuickAddInFlightRef.current = true;
     pendingQuickAddFocusFieldRef.current = columnKey;
@@ -1619,8 +1631,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   }, [recalcArea]);
 
   const handleMillingCostChange = useCallback((value: number | null) => {
+    fieldValuesRef.current.milling_cost_per_sqm = value;
     recalcSum('milling_cost_per_sqm', value);
   }, [recalcSum]);
+
+  const handleDetailCostChange = useCallback((value: number | null) => {
+    fieldValuesRef.current.detail_cost = value;
+  }, []);
 
   const handleMillingCostBlur = useCallback(() => {
     queueMicrotask(() => {
@@ -2069,6 +2086,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
                 min={0.01}
                 emptyWhenUnset
                 disabled={!isSumEditable}
+                onChange={handleDetailCostChange}
                 onContextMenu={(e) => {
                   if (!isSumEditable) {
                     e.preventDefault();
@@ -2467,7 +2485,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   };
   const getSpreadsheetNavigationRowKeys = () => groupingActive
     ? getVisibleSpreadsheetRowKeys()
-    : paginatedDetails.map((detail) => String(getRowKey(detail)));
+    : spreadsheetNavigationDetails.map((detail) => String(getRowKey(detail)));
   const focusSpreadsheetCoordinate = (cell: OrderDetailSpreadsheetCell) => {
     if (!groupingActive) {
       const targetIndex = getSpreadsheetNavigationRowKeys().indexOf(cell.rowKey);
@@ -2535,7 +2553,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     const direction = directionByKey[event.key];
     if (direction) {
       event.preventDefault();
-      if (direction === 'down' && isLastOrderDetailRow(realSortedDetails, record)) {
+      if (direction === 'down' && isLastOrderDetailRow(spreadsheetNavigationDetails, record)) {
         void requestQuickAddFromLastRow(record, columnKey);
         return;
       }
@@ -2611,7 +2629,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         const currentRecord = details.find((detail) =>
           (detail.temp_id || detail.detail_id) === editingKey,
         );
-        if (currentRecord && isLastOrderDetailRow(realSortedDetails, currentRecord)) {
+        if (currentRecord && isLastOrderDetailRow(spreadsheetNavigationDetails, currentRecord)) {
           void requestQuickAddFromLastRow(currentRecord, currentField);
           return;
         }
@@ -2779,6 +2797,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const paginatedDetails = useMemo(
     () => sortOrderDetailsForPagination(realSortedDetails, activeCompare, activeSorter.order),
     [activeCompare, activeSorter.order, realSortedDetails],
+  );
+  const spreadsheetNavigationDetails = useMemo(
+    () => orderDetailSpreadsheetNavigationRows(paginatedDetails, placeholderDetails),
+    [paginatedDetails, placeholderDetails],
   );
 
   const summaryAwareColumns = controlledColumns.map((column: any) => {
@@ -3196,8 +3218,8 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
           groupValueOf,
           groupLabelOf,
         }).concat(placeholderDetails as any[])
-      : paginatedDetails.concat(placeholderDetails)),
-    [groupingActive, realSortedDetails, placeholderDetails, paginatedDetails, groupField, cutSelectable, groupValueOf, groupLabelOf],
+      : spreadsheetNavigationDetails),
+    [groupingActive, realSortedDetails, spreadsheetNavigationDetails, groupField, cutSelectable, groupValueOf, groupLabelOf],
   );
 
   const selectRows = useCallback((predicate: (detail: OrderDetail) => boolean) => {
