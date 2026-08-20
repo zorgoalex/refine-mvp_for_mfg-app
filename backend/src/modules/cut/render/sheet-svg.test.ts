@@ -6,6 +6,7 @@ import {
   resolveCutRenderStyleFromSetting,
 } from '../../../shared/cut-render-style';
 import {
+  addCutJobHeadingToSvg,
   addBathMeterGuidesToSvg,
   buildBathProfileSheetSvg,
   buildSheetSvg,
@@ -141,6 +142,31 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
 });
 
 describe('buildSheetSvg multi-line labels', () => {
+  it('adds a prominent cut-job heading above the sheet without covering geometry', () => {
+    const base = buildSheetSvg({ sheet, labelFor: () => ['2817', '# 12', '597*187'] });
+    const svg = addCutJobHeadingToSvg(base, '150');
+    const viewBox = svg.match(/viewBox="([^"]+)"/)?.[1]?.split(/\s+/).map(Number);
+    const headingFont = Number(svg.match(/class="cut-sheet-job-heading"[^>]*font-size="([^"]+)"/)?.[1]);
+    const orderFont = Number(svg.match(/<tspan[^>]*font-size="([^"]+)">2817<\/tspan>/)?.[1]);
+
+    expect(svg).toContain('data-cut-job-heading="150"');
+    expect(svg).toContain('>Раскрой №150</text>');
+    expect(svg).toMatch(/class="cut-sheet-job-heading"[^>]*font-weight="400"/);
+    expect(viewBox?.[1]).toBeLessThan(0);
+    expect(viewBox?.[3]).toBeGreaterThan(sheet.sheet_height_mm);
+    expect(headingFont).toBeGreaterThanOrEqual(orderFont);
+  });
+
+  it('escapes the displayed cut number and does not duplicate an existing heading', () => {
+    const base = buildSheetSvg({ sheet, labelFor: () => 'X' });
+    const once = addCutJobHeadingToSvg(base, 'В-15&<');
+    const twice = addCutJobHeadingToSvg(once, 'В-15&<');
+
+    expect(once).toContain('data-cut-job-heading="В-15&amp;&lt;"');
+    expect(once).toContain('Раскрой №В-15&amp;&lt;');
+    expect(twice).toBe(once);
+  });
+
   it('renders each label line as its own <tspan> sharing the piece centre x', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => ['5', '# 9', '600*400'] });
     // first piece centre: x=10+600/2=310, y=15+400/2=215

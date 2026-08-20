@@ -45,8 +45,20 @@ const imagePrintPreview = readFileSync(
   'src/components/ImagePrintPreviewModal.tsx',
   'utf8',
 );
+const pdfPreview = readFileSync(
+  'src/pages/orderStatusBoard/cncPdfPreview.ts',
+  'utf8',
+);
 
 describe('OrderStatusBoardPage UX guards', () => {
+  it('defers optional MDF PDF and label tooling until the operator opens it', () => {
+    expect(page).not.toContain("new URL('pdfjs-dist/build/pdf.worker.min.mjs'");
+    expect(page).not.toContain("import('pdfjs-dist')");
+    expect(page).toContain("await import('./cncPdfPreview')");
+    expect(page).toContain("await import('../cut/CutSheetLabelGenerateAction')");
+    expect(page).toContain('<Suspense fallback={<CncLabelActionLoadingButton />}>');
+  });
+
   it('keeps status-board drag and column helpers bound after branch merges', () => {
     expect(page).toContain("export type CncOrderSortField =");
     expect(page).toContain("export type CncOrderSortDirection = 'asc' | 'desc';");
@@ -676,6 +688,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('className="cnc-order-card__missing-summary"');
     expect(page).toContain('formatCncMissingDetailsSummary(details)');
     expect(page).toContain('Отсутствуют - позиций - ${positionCount}, деталей - ${detailCount}');
+    expect(page).toContain('onToggle={(event) => setOpen(event.currentTarget.open)}');
+    expect(page).toContain('{open && (');
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('data-cnc-manual-drag-ignore="true"');
     expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');
@@ -749,7 +763,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const freshUrl = URL.createObjectURL(result.blob)');
     expect(page).toContain("CNC_BATH_DEFAULT_PDF_TEMPLATE = 'bath_profiles'");
     expect(page).toContain('Шаблон PDF ванны');
-    expect(page).toContain("import('pdfjs-dist')");
+    expect(page).not.toContain("import('pdfjs-dist')");
+    expect(pdfPreview).toContain("import('pdfjs-dist')");
     expect(page).toContain('renderCncPdfPagePreviews(result.blob)');
     expect(page).toContain('data-testid="cnc-bath-pdf-preview-pages"');
     expect(page).not.toContain('<iframe');
@@ -1148,6 +1163,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('orderStatusBoardApi.get({');
     expect(page).toContain('orderIds: chunk');
     expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
+    expect(page).toContain('const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;');
+    expect(page).toContain('if (!alreadyLoaded) void loadOrderBoard();');
     expect(page).toContain('const timer = window.setInterval(() => {');
     expect(page).toContain('}, CNC_ORDER_STATUS_REFRESH_MS);');
     expect(page).toContain("primaryStatusKind === 'order' || board === 'order'");
@@ -1589,12 +1606,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).not.toContain('printSheetImage');
-    expect(sheetPreview.match(/<CutSheetLabelGenerateAction/g)).toHaveLength(1);
+    expect(sheetPreview.match(/<LazyCutSheetLabelGenerateAction/g)).toHaveLength(1);
     expect(sheetPreview.match(/onClick=\{\(\) => setPrintPreviewOpen\(true\)\}/g)).toHaveLength(1);
     expect(sheetPreview).not.toContain('cnc-packet-card__sheet-toolbar');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
     expect(sheetPreview).toContain("status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}");
     expect(sheetPreview).toContain('printHeader={printHeader}');
+    expect(packetCard).toContain('cutJobDisplayNumber={cncPacketDisplayCutJobNumber(packet)}');
+    expect(sheetPreview).toContain('cutJobDisplayNumber,');
+    expect(sheetPreview).toContain("previewSource === 'screenshot' && printHeader");
+    expect(sheetPreview).toContain('className="cnc-packet-card__sheet-heading"');
+    expect(css).toMatch(/\.cnc-packet-card__sheet-heading\s*\{[^}]*font-weight:\s*400;/s);
+    expect(page).toContain('cutJobDisplayNumber: formatCncBathCardCutNumber(bath),');
     expect(sheetPreview).toContain('printMode="stretch-page-height"');
     expect(packetCard).toContain('const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);');
     expect(page).toContain('function cncMachineFileCutPrintHeader(packet: CncTelegramPacket)');

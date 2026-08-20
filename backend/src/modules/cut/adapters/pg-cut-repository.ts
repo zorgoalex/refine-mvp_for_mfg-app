@@ -136,6 +136,7 @@ import {
   type TotalsRow,
 } from './cut-totals';
 import {
+  addCutJobHeadingToSvg,
   addBathMeterGuidesToSvg,
   buildBathProfileSheetSvg,
   buildSheetSvg,
@@ -2241,6 +2242,7 @@ export class PgCutRepository implements CutRepositoryPort {
     job: CutJobDto;
     group: CutGroupDto;
     sheets: RenderedSheetContext[];
+    cutJobDisplayNumber: string;
     renderContractVersion: FrozenPdfRenderContract;
   }> {
     const frozen = await this.getResult({
@@ -2373,7 +2375,13 @@ export class PgCutRepository implements CutRepositoryPort {
     const resolvedSheets = args.refreshPdfDynamicFields
       ? await this.refreshPdfDynamicFieldsForSheets(args.cutGroupId, sheets)
       : sheets;
-    return { job: frozen.job, group, sheets: resolvedSheets, renderContractVersion: 'cut_sheet_render_v1' };
+    return {
+      job: frozen.job,
+      group,
+      sheets: resolvedSheets,
+      cutJobDisplayNumber: frozen.job.displayNumber ?? String(frozen.job.cutJobId),
+      renderContractVersion: 'cut_sheet_render_v1',
+    };
   }
 
   private async attachFrozenRenderSnapshots(tx: TransactionClient, snapshot: CutJobDto): Promise<CutJobDto> {
@@ -3221,7 +3229,7 @@ export class PgCutRepository implements CutRepositoryPort {
     // PNG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
     const variant = query.variant ?? 'auto';
     const showLabels = query.showLabels ?? true;
-    const { sheets } = query.resultNo !== undefined && query.cutJobId !== undefined
+    const { sheets, cutJobDisplayNumber } = query.resultNo !== undefined && query.cutJobId !== undefined
       ? await this.loadFrozenRenderContext({
           currentUser: query.currentUser,
           cutJobId: query.cutJobId,
@@ -3254,7 +3262,7 @@ export class PgCutRepository implements CutRepositoryPort {
     const targetPx = await this.config.getRenderPresetPx(query.preset);
     // When rotated, the SVG viewBox is h×w — the rasterizer's fit dims must match.
     return renderSheetPng({
-      svg: sheet.svg,
+      svg: addCutJobHeadingToSvg(sheet.svg, cutJobDisplayNumber),
       targetPx,
       sheetWidthMm: query.rotate90 ? sheet.placements.sheet_height_mm : sheet.placements.sheet_width_mm,
       sheetHeightMm: query.rotate90 ? sheet.placements.sheet_width_mm : sheet.placements.sheet_height_mm,
@@ -3264,7 +3272,7 @@ export class PgCutRepository implements CutRepositoryPort {
   async renderSheetSvg(query: RenderSheetSvgQuery): Promise<string> {
     // SVG is NOT recalc-blocked (rule 5): only PDF endpoints enforce the print-block.
     const variant = query.variant ?? 'auto';
-    const { sheets } = query.resultNo !== undefined && query.cutJobId !== undefined
+    const { sheets, cutJobDisplayNumber } = query.resultNo !== undefined && query.cutJobId !== undefined
       ? await this.loadFrozenRenderContext({
           currentUser: query.currentUser,
           cutJobId: query.cutJobId,
@@ -3294,7 +3302,7 @@ export class PgCutRepository implements CutRepositoryPort {
     if (!sheet) {
       throw new CutGroupSheetNotFoundError(query.cutGroupId, query.sheetIndex);
     }
-    return sheet.svg;
+    return addCutJobHeadingToSvg(sheet.svg, cutJobDisplayNumber);
   }
 
   async renderGroupPdf(query: RenderGroupPdfQuery): Promise<Buffer> {
@@ -3828,10 +3836,11 @@ export class PgCutRepository implements CutRepositoryPort {
     client: DatabaseClient = this.database,
     allowStaleManual = false,
     renderStyle: CutRenderStyleName = CUT_RENDER_STYLE_DEFAULT,
-  ): Promise<{ sheets: RenderedSheetContext[] }> {
+  ): Promise<{ sheets: RenderedSheetContext[]; cutJobDisplayNumber: string }> {
     // Rule 6: load group metadata + assert job ownership when cutJobId provided.
     const groupRes = await client.query<{
       cut_job_id: string | number;
+      source_display_number: string | number | null;
       group_key: string | null;
       summary: Record<string, unknown> | null;
       last_calc_params: FreecutParams | null;
@@ -3843,6 +3852,7 @@ export class PgCutRepository implements CutRepositoryPort {
               cg.group_key,
               cg.summary,
               cj.last_calc_params,
+              cj.source_display_number,
               smt.name AS sheet_material_name,
               smt.width_mm AS sheet_material_width_mm,
               smt.height_mm AS sheet_material_height_mm
@@ -3856,6 +3866,15 @@ export class PgCutRepository implements CutRepositoryPort {
       throw new CutGroupSheetNotFoundError(cutGroupId, 0);
     }
     const resolvedJobId = toNum(groupRes.rows[0].cut_job_id);
+    const cutJobDisplayNumber = formatCutJobNumber(
+      resolvedJobId,
+      cutJobEffectiveDisplayKind(
+        groupRes.rows[0].source_display_number,
+        null,
+        groupRes.rows[0].last_calc_params,
+      ) === 'vacuum',
+      groupRes.rows[0].source_display_number,
+    );
     const groupKey = groupRes.rows[0].group_key ?? null;
     const showBathMeterGuides = shouldShowBathMeterGuides({
       engineUsed: groupRes.rows[0].summary?.engine_used,
@@ -4006,6 +4025,7 @@ export class PgCutRepository implements CutRepositoryPort {
     };
 
     return {
+      cutJobDisplayNumber,
       sheets: rawSheets.map((s) => {
         const includeMaterial = sheetMixesMaterials(s.placements);
         const labelFor = (piece: FreecutPlacement): string[] => labelForPiece(piece, includeMaterial);

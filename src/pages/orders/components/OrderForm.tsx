@@ -1265,7 +1265,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const { show } = useNavigation();
 
   // Handle save
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
     console.log('[OrderForm] ========== handleSave STARTED ==========');
     console.log('[OrderForm] handleSave - mode:', mode);
     console.log('[OrderForm] handleSave - orderId:', orderId);
@@ -1277,7 +1277,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       const applied = await detailsTabRef.current.applyCurrentEdits();
       if (!applied) {
         console.log('[OrderForm] handleSave - failed to apply current edits, aborting save');
-        return;
+        return false;
       }
       console.log('[OrderForm] handleSave - current edits applied successfully');
     }
@@ -1292,7 +1292,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           message: 'Ошибка валидации',
           description: 'Заполните обязательные поля в редактируемом платеже',
         });
-        return;
+        return false;
       }
       console.log('[OrderForm] handleSave - payment edits applied successfully');
     }
@@ -1336,7 +1336,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
       if (!result.success) {
         showValidationErrors(result.error.issues, formValues.details);
-        return;
+        return false;
       }
 
       const saveSignature = computeOrderSaveSignature(formValues);
@@ -1404,21 +1404,26 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           console.warn('[OrderForm] handleSave - WARNING: onSaveSuccess callback is not defined!');
         }
 
-        // Auto-export to Google Drive
-        try {
-          console.log('[OrderForm] handleSave - starting auto-export to Google Drive');
-          await exportToDrive({
-            order_id: savedOrderId,
-            order_name: formValues.header.order_name,
-            order_date: formValues.header.order_date,
-            client: formValues.header.client,
+        // Auto-export to Google Drive in background. Order persistence and HDF
+        // reconciliation are already complete, so optional export must not keep
+        // save actions (including the HDF bulk button) in a loading state.
+        console.log('[OrderForm] handleSave - starting background auto-export to Google Drive');
+        void exportToDrive({
+          order_id: savedOrderId,
+          order_name: formValues.header.order_name,
+          order_date: formValues.header.order_date,
+          client: formValues.header.client,
+        })
+          .then(() => {
+            console.log('[OrderForm] handleSave - background auto-export completed successfully');
+          })
+          .catch((exportError) => {
+            // Error already handled in useOrderExport hook (shows message.error).
+            console.error('[OrderForm] handleSave - background auto-export failed:', exportError);
           });
-          console.log('[OrderForm] handleSave - auto-export completed successfully');
-        } catch (exportError) {
-          // Error already handled in useOrderExport hook (shows message.error)
-          console.error('[OrderForm] handleSave - auto-export failed:', exportError);
-        }
+        return true;
       }
+      return false;
     } catch (error) {
       console.error('[OrderForm] handleSave - CATCH block, error:', error);
       notification.error({
@@ -1426,6 +1431,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         description: error instanceof Error ? error.message : 'Неизвестная ошибка',
         duration: 0,
       });
+      return false;
     } finally {
       console.log('[OrderForm] ========== handleSave ENDED ==========');
     }
@@ -1520,7 +1526,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       {
         key: 'hdf',
         label: 'ХДФ',
-        children: <OrderHdfTab />,
+        children: <OrderHdfTab onSave={handleSave} isSaving={isSaving} />,
       },
       {
         key: 'dates',

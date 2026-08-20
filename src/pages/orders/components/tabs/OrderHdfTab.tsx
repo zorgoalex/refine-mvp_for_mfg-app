@@ -6,7 +6,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { Link, useNavigate } from 'react-router-dom';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import type { OrderHdfDetail } from '../../../../types/orders';
-import { formatNumber } from '../../../../utils/numberFormat';
+import { formatNumber, numberParser } from '../../../../utils/numberFormat';
 import { useOrderFormData } from '../../../../hooks/useOrderFormData';
 import { ordersApi } from '../../../../api/ordersApi';
 import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
@@ -14,12 +14,22 @@ import { AddToCutModal } from '../AddToCutModal';
 import { AddToBazisCutModal } from '../../../bazis-cut/AddToBazisCutModal';
 import { cutJobDeepLink } from '../../cutColumnHelpers';
 import {
+  collectSelectedHdfSourceDetailIds,
+  resolveHdfParameterDisplay,
+} from './orderHdfBulkParameter';
+import {
   collectHdfConfigErrorDescriptions,
   describeHdfConfigErrors,
   HDF_CONFIG_SETTINGS_LOCATION,
 } from './orderHdfStatusView';
+import './OrderHdfTab.css';
 
 const { Text } = Typography;
+
+interface OrderHdfTabProps {
+  isSaving: boolean;
+  onSave: () => Promise<boolean>;
+}
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   ok: { label: 'Рассчитано', color: 'green' },
@@ -49,21 +59,25 @@ function hdfNumber(value: unknown, digits: number) {
   return <span className="order-hdf-table__number">{formatNullableNumber(value, digits)}</span>;
 }
 
-export function OrderHdfTab() {
+export function OrderHdfTab({ isSaving, onSave }: OrderHdfTabProps) {
   const {
     header,
+    details,
     hdfDetails,
     isDirty,
     loadOrder,
     setDirty,
     syncOriginals,
     updateHeaderField,
+    updateDetail,
     updateHdfDetail,
   } = useOrderFormStore();
   const orderFormData = useOrderFormData();
   const navigate = useNavigate();
   const [recalculating, setRecalculating] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [bulkParameterMm, setBulkParameterMm] = useState<number | null>(null);
+  const [savingBulkParameter, setSavingBulkParameter] = useState(false);
   const [cutModalOpen, setCutModalOpen] = useState(false);
   const [bazisModalOpen, setBazisModalOpen] = useState(false);
   const productionStatusOptions = orderFormData.references.productionStatuses;
@@ -75,9 +89,28 @@ export function OrderHdfTab() {
   const hasStaleHdfDetails = hdfDetails.some((detail) => detail.is_stale === true);
   const orderId = positiveId(header.order_id);
   const orderName = typeof header.order_name === 'string' ? header.order_name : null;
+  const selectedHdfRows = useMemo(
+    () => {
+      const selected = new Set(selectedRowKeys.map(Number));
+      return hdfDetails.filter((detail) => selected.has(detail.order_hdf_detail_id));
+    },
+    [hdfDetails, selectedRowKeys],
+  );
+  const selectedSourceDetailIds = useMemo(
+    () => collectSelectedHdfSourceDetailIds(hdfDetails, selectedRowKeys),
+    [hdfDetails, selectedRowKeys],
+  );
   const selectedHdfDetailIds = useMemo(
-    () => selectedRowKeys.map((key) => Number(key)).filter((id) => Number.isSafeInteger(id) && id > 0),
-    [selectedRowKeys],
+    () => selectedHdfRows
+      .filter(isSelectableHdfDetail)
+      .map((detail) => detail.order_hdf_detail_id),
+    [selectedHdfRows],
+  );
+  const sourceDetailById = useMemo(
+    () => new Map<number, typeof details[number]>(details
+      .filter((detail) => positiveId(detail.detail_id) !== null)
+      .map((detail) => [Number(detail.detail_id), detail] as const)),
+    [details],
   );
 
   const totals = useMemo(() => {
@@ -162,6 +195,47 @@ export function OrderHdfTab() {
     setBazisModalOpen(true);
   };
 
+  const saveBulkParameter = async () => {
+    const parameterMm = Number(bulkParameterMm);
+    if (!(parameterMm > 0)) {
+      message.warning('Укажите параметр отступа больше 0');
+      return;
+    }
+    if (selectedSourceDetailIds.length === 0) {
+      message.warning('Выберите позиции ХДФ');
+      return;
+    }
+
+    let updatedCount = 0;
+    selectedSourceDetailIds.forEach((sourceDetailId) => {
+      const sourceDetail = sourceDetailById.get(sourceDetailId);
+      const sourceKey = sourceDetail?.temp_id ?? sourceDetail?.detail_id;
+      if (!sourceDetail || !sourceKey) return;
+      updateDetail(sourceKey, { hdf_parameter_override_mm: parameterMm });
+      updatedCount += 1;
+    });
+
+    if (updatedCount === 0) {
+      message.warning('Не удалось найти исходные детали выбранных позиций');
+      return;
+    }
+
+    setSavingBulkParameter(true);
+    try {
+      const saved = await onSave();
+      if (!saved) {
+        message.warning('Параметр изменён в форме, но заказ не сохранён');
+        return;
+      }
+      setSelectedRowKeys([]);
+      message.success(
+        `Параметр ${formatNumber(parameterMm, 2)} мм сохранён для позиций: ${updatedCount}. ХДФ пересчитан.`,
+      );
+    } finally {
+      setSavingBulkParameter(false);
+    }
+  };
+
   const columns: ColumnsType<OrderHdfDetail> = [
     {
       title: hdfHeader('Позиция'),
@@ -213,9 +287,18 @@ export function OrderHdfTab() {
       title: hdfHeader('Парам.', 'мм'),
       dataIndex: 'edge_mm',
       key: 'edge_mm',
-      width: 54,
+      width: 72,
       align: 'right',
-      render: (value) => hdfNumber(value, 1),
+      render: (_, row) => {
+        const display = resolveHdfParameterDisplay(row, sourceDetailById);
+        if (!display.pending) return hdfNumber(display.value, 2);
+        return (
+          <span className="order-hdf-bulk-parameter__pending" title="Новое значение применено в форме заказа">
+            <span className="order-hdf-table__number">{formatNullableNumber(display.value, 2)}</span>
+            <span className="order-hdf-bulk-parameter__pending-label">изменено</span>
+          </span>
+        );
+      },
     },
     {
       title: hdfHeader('ХДФ', 'выс.'),
@@ -375,6 +458,34 @@ export function OrderHdfTab() {
               onChange={(value) => updateHeaderField('hdf_min_threshold_mm', value == null ? null : Number(value))}
             />
           </div>
+          <div className="order-hdf-bulk-parameter">
+            <Text strong className="order-hdf-bulk-parameter__label">Параметр отступа, мм</Text>
+            <Space.Compact className="order-hdf-bulk-parameter__controls">
+              <InputNumber
+                className="order-hdf-bulk-parameter__input"
+                aria-label="Параметр отступа, мм"
+                min={0.01}
+                step={0.5}
+                precision={2}
+                parser={numberParser}
+                value={bulkParameterMm}
+                placeholder="Значение"
+                onChange={(value) => setBulkParameterMm(value == null ? null : Number(value))}
+              />
+              <Button
+                type="primary"
+                className="order-hdf-bulk-parameter__apply"
+                loading={savingBulkParameter}
+                disabled={isSaving || selectedSourceDetailIds.length === 0 || !(Number(bulkParameterMm) > 0)}
+                onClick={() => void saveBulkParameter()}
+              >
+                Сохранить
+              </Button>
+            </Space.Compact>
+            <Text type="secondary" className="order-hdf-bulk-parameter__selection">
+              Выбрано позиций: {selectedSourceDetailIds.length}
+            </Text>
+          </div>
           <Text type="secondary">
             Итого ХДФ: {formatNumber(totals.area, 2)} м², деталей: {totals.quantity}
           </Text>
@@ -406,8 +517,10 @@ export function OrderHdfTab() {
             selectedRowKeys,
             onChange: setSelectedRowKeys,
             getCheckboxProps: (row) => ({
-              disabled: !isSelectableHdfDetail(row),
-              title: isSelectableHdfDetail(row) ? undefined : 'Можно выбрать только свежие рассчитанные ХДФ-детали',
+              disabled: positiveId(row.source_order_detail_id_snapshot) === null,
+              title: positiveId(row.source_order_detail_id_snapshot) === null
+                ? 'Исходная деталь не найдена'
+                : undefined,
             }),
           }}
         />

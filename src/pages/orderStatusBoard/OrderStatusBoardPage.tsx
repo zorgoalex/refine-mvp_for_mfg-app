@@ -1,6 +1,8 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import React, {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -79,10 +81,9 @@ import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
-import {
-  CutSheetLabelGenerateAction,
-  type CutSheetLabelCoverage,
-  type CutSheetLabelDetailInstance,
+import type {
+  CutSheetLabelCoverage,
+  CutSheetLabelDetailInstance,
 } from '../cut/CutSheetLabelGenerateAction';
 import type { LabelCutMapFallbackImage } from '../../api/types/labelsApi.types';
 import {
@@ -178,7 +179,14 @@ const CNC_BATH_PDF_TEMPLATE_OPTIONS = [
   { value: CNC_BATH_DEFAULT_PDF_TEMPLATE, label: 'Профили ванн' },
   { value: 'standard', label: 'Стандартный' },
 ];
-const CNC_PDF_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+const LazyCutSheetLabelGenerateAction = lazy(async () => ({
+  default: (await import('../cut/CutSheetLabelGenerateAction')).CutSheetLabelGenerateAction,
+}));
+const CncLabelActionLoadingButton: React.FC = () => (
+  <Button className="app-hit-area-sm" size="small" icon={<TagsOutlined />} loading disabled>
+    Бирки
+  </Button>
+);
 const CNC_ORDER_SEARCH_PERIOD_OPTIONS: Array<{
   label: string;
   value: CncOrderSearchPeriod;
@@ -334,8 +342,6 @@ export type CncRelationCardState =
   | 'order-mentioned'
   | 'dimmed';
 type CncDetailedBathPlacement = 'left' | 'right';
-type CncPdfjsModule = typeof import('pdfjs-dist');
-
 export interface CncOrderSortSettings {
   field: CncOrderSortField;
   direction: CncOrderSortDirection;
@@ -672,6 +678,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncManualMovesRef = useRef<CncBoardManualMoveState>({});
   const cncStrongRefreshInFlightRef = useRef(false);
   const cncAuxiliaryRefreshRevisionRef = useRef(0);
+  const cncOrderBoardRequestKeyRef = useRef<string | null>(null);
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
@@ -813,6 +820,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 datasetRevisionRef.current !== revision
                 || cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision
               ) return false;
+              cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
+                orderIds,
+                currentViewState,
+              );
               setCncOriginalBoard(response);
               cncTodayRef.current = null;
               cncOrderSearchTodayRef.current = null;
@@ -863,6 +874,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             ) {
               return false;
             }
+            cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
+              refreshedOrderIds,
+              currentViewState,
+            );
             cncTodayRef.current = response;
             cncOrderSearchTodayRef.current = response;
             setCncToday(response);
@@ -1624,14 +1639,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
 
   useEffect(() => {
     if (!isCncToday || cncOrderIds.length === 0) {
+      cncOrderBoardRequestKeyRef.current = null;
       setCncOrderBoard(null);
       setCncOrderBoardLoading(false);
       return;
     }
 
+    const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState);
+    const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;
     let cancelled = false;
     let inFlight = false;
-    let initialLoad = true;
+    let initialLoad = !alreadyLoaded;
     let warned = false;
     const loadOrderBoard = async () => {
       if (cncStrongRefreshInFlightRef.current) return;
@@ -1650,6 +1668,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           !cancelled
           && cncAuxiliaryRefreshRevisionRef.current === requestRevision
         ) {
+          cncOrderBoardRequestKeyRef.current = requestKey;
           setCncOrderBoard(response);
         }
       } catch (error) {
@@ -1663,7 +1682,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       }
     };
 
-    void loadOrderBoard();
+    if (!alreadyLoaded) void loadOrderBoard();
     const timer = window.setInterval(() => {
       void loadOrderBoard();
     }, CNC_ORDER_STATUS_REFRESH_MS);
@@ -5842,6 +5861,7 @@ const CncTelegramPacketCard = memo<CncTelegramPacketCardProps>(({
               title={packet.programName ?? packet.externalPacketKey}
               open={activeAuxView === 'sheet'}
               cutJobId={packet.svgCutJobId ?? null}
+              cutJobDisplayNumber={cncPacketDisplayCutJobNumber(packet)}
               cutResultNo={packet.svgCutResultNo ?? null}
               labelSheet={svgCutSheet}
               printHeader={sheetPrintHeader ?? undefined}
@@ -5866,6 +5886,7 @@ interface CncTelegramSheetImagePreviewProps {
   title: string;
   open: boolean;
   cutJobId: number | null;
+  cutJobDisplayNumber: string | null;
   cutResultNo: number | null;
   labelSheet: CncTelegramPacketCutSheet | null;
   printHeader?: string;
@@ -5879,6 +5900,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
   title,
   open,
   cutJobId,
+  cutJobDisplayNumber,
   cutResultNo,
   labelSheet,
   printHeader,
@@ -5897,7 +5919,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     setPreviewSource(null);
     setError(null);
     setPrintPreviewOpen(false);
-  }, [imageUrl, cutJobId, cutResultNo, labelSheet?.cutGroupId, labelSheet?.sheetIndex, labelSheet?.variant]);
+  }, [imageUrl, cutJobId, cutJobDisplayNumber, cutResultNo, labelSheet?.cutGroupId, labelSheet?.sheetIndex, labelSheet?.variant]);
 
   useEffect(() => {
     if (!open) setPrintPreviewOpen(false);
@@ -5921,6 +5943,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
           axisOrigin: 'top-left',
           resultNo: cutResultNo ?? undefined,
           pieceMetadata: true,
+          cutJobDisplayNumber,
         }).then((blob) => ({ blob, source: 'svg' as const }))
       : Promise.reject(new Error('Нет связанного SVG-раскроя'));
     const loadPreview = cutJobId && labelSheet
@@ -5945,7 +5968,7 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
     return () => {
       cancelled = true;
     };
-  }, [imageUrl, objectUrl, open, cutJobId, cutResultNo, labelSheet]);
+  }, [imageUrl, objectUrl, open, cutJobId, cutJobDisplayNumber, cutResultNo, labelSheet]);
 
   useEffect(() => () => {
     if (objectUrl) URL.revokeObjectURL(objectUrl);
@@ -5967,15 +5990,17 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
       >
         <div className="cnc-packet-card__sheet-actions" onClick={(event) => event.stopPropagation()}>
           {canGenerateLabels ? (
-            <CutSheetLabelGenerateAction
-              detailInstances={labelDetailInstances}
-              cutJobId={hasCutSheetScope ? cutJobId : null}
-              cutGroupId={hasCutSheetScope ? labelSheet?.cutGroupId : null}
-              sheetIndex={labelSheet?.sheetIndex ?? 0}
-              sheetLabel={labelSheet ? `листа ${labelSheet.sheetNumber}` : 'скрина'}
-              cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}
-              labelCoverage={labelCoverage}
-            />
+            <Suspense fallback={<CncLabelActionLoadingButton />}>
+              <LazyCutSheetLabelGenerateAction
+                detailInstances={labelDetailInstances}
+                cutJobId={hasCutSheetScope ? cutJobId : null}
+                cutGroupId={hasCutSheetScope ? labelSheet?.cutGroupId : null}
+                sheetIndex={labelSheet?.sheetIndex ?? 0}
+                sheetLabel={labelSheet ? `листа ${labelSheet.sheetNumber}` : 'скрина'}
+                cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}
+                labelCoverage={labelCoverage}
+              />
+            </Suspense>
           ) : (
             <Tooltip title={disabledLabelReason}>
               <span>
@@ -5998,6 +6023,9 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
           </Tooltip>
         </div>
         <div className="cnc-packet-card__sheet-body">
+          {previewSource === 'screenshot' && printHeader && (
+            <div className="cnc-packet-card__sheet-heading">{printHeader}</div>
+          )}
           {loading && (
             <div className="cnc-packet-card__sheet-loading">
               <Spin size="small" />
@@ -6364,6 +6392,7 @@ const CncBathSheetPreview: React.FC<CncBathSheetPreviewProps> = ({
           axisOrigin: 'bottom-left',
           resultNo: bath.resultNo,
           pieceMetadata: detailed,
+          cutJobDisplayNumber: formatCncBathCardCutNumber(bath),
         });
         const svgText = detailed
           ? decorateCncBathSheetSvg(
@@ -6784,6 +6813,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath, open, onClo
         setFileName(result.fileName ?? `bath-cut-${bath.cutNumber}.pdf`);
 
         try {
+          const { renderCncPdfPagePreviews } = await import('./cncPdfPreview');
           const nextPagePreviews = await renderCncPdfPagePreviews(result.blob);
           if (!isCurrentRequest()) {
             revokeCncPdfPagePreviewUrls(nextPagePreviews);
@@ -7617,29 +7647,35 @@ interface CncOrderMissingDetailsSpoilerProps {
 
 const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>(({
   details,
-}) => (
-  <details
-    className="cnc-order-card__missing"
-    data-cnc-manual-drag-ignore="true"
-    onPointerDown={stopCncCardNestedInteraction}
-    onMouseDown={stopCncCardNestedInteraction}
-    onTouchStart={stopCncCardNestedInteraction}
-    onClick={stopCncCardClickPropagation}
-  >
-    <summary className="cnc-order-card__missing-summary">
-      <span className="cnc-order-card__missing-label">
-        {formatCncMissingDetailsSummary(details)}
-      </span>
-    </summary>
-    <ul className="cnc-order-card__missing-list">
-      {details.map((detail) => (
-        <li key={detail.detailId}>
-          {formatCncMissingDetailLine(detail)}
-        </li>
-      ))}
-    </ul>
-  </details>
-));
+}) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="cnc-order-card__missing"
+      data-cnc-manual-drag-ignore="true"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onPointerDown={stopCncCardNestedInteraction}
+      onMouseDown={stopCncCardNestedInteraction}
+      onTouchStart={stopCncCardNestedInteraction}
+      onClick={stopCncCardClickPropagation}
+    >
+      <summary className="cnc-order-card__missing-summary">
+        <span className="cnc-order-card__missing-label">
+          {formatCncMissingDetailsSummary(details)}
+        </span>
+      </summary>
+      {open && (
+        <ul className="cnc-order-card__missing-list">
+          {details.map((detail) => (
+            <li key={detail.detailId}>
+              {formatCncMissingDetailLine(detail)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+});
 CncOrderMissingDetailsSpoiler.displayName = 'CncOrderMissingDetailsSpoiler';
 
 export function formatStatusBoardOrderNumber(
@@ -7797,6 +7833,17 @@ async function fetchCncOrderStatusBoard(
     ),
   );
   return mergeCncOrderStatusBoardResponses(responses);
+}
+
+export function buildCncOrderStatusBoardRequestKey(
+  orderIds: readonly number[],
+  sortPreference: {
+    sortBy: OrderStatusBoardSortBy;
+    sortOrder: OrderStatusBoardSortOrder;
+  },
+): string {
+  const normalizedOrderIds = [...new Set(orderIds)].sort((left, right) => left - right);
+  return `${sortPreference.sortBy}|${sortPreference.sortOrder}|${normalizedOrderIds.join(',')}`;
 }
 
 function collectCncOrderStatusBoardIds(
@@ -9130,70 +9177,6 @@ function cncSheetPreviewRotate90(
 
 type CncBathPdfTemplateOption = { value: string; label: string };
 let cncBathPdfTemplateOptionsPromise: Promise<CncBathPdfTemplateOption[]> | null = null;
-let cncPdfjsPromise: Promise<CncPdfjsModule> | null = null;
-let cncPdfjsWorkerConfigured = false;
-
-async function loadCncPdfjs(): Promise<CncPdfjsModule> {
-  if (!cncPdfjsPromise) {
-    cncPdfjsPromise = import('pdfjs-dist');
-  }
-  const pdfjsLib = await cncPdfjsPromise;
-  if (!cncPdfjsWorkerConfigured) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = CNC_PDF_WORKER_SRC;
-    cncPdfjsWorkerConfigured = true;
-  }
-  return pdfjsLib;
-}
-
-async function renderCncPdfPagePreviews(blob: Blob): Promise<CncBathPdfPagePreview[]> {
-  const pdfjsLib = await loadCncPdfjs();
-  const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
-  const previews: CncBathPdfPagePreview[] = [];
-
-  try {
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 1.35 });
-      const ratio = window.devicePixelRatio || 1;
-      const canvas = document.createElement('canvas');
-      const canvasContext = canvas.getContext('2d');
-      if (!canvasContext) throw new Error('Canvas недоступен для предпросмотра PDF');
-
-      canvas.width = Math.floor(viewport.width * ratio);
-      canvas.height = Math.floor(viewport.height * ratio);
-      await page.render({
-        canvasContext,
-        transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
-        viewport,
-      }).promise;
-
-      const imageBlob = await canvasToPngBlob(canvas);
-      previews.push({
-        pageNumber,
-        url: URL.createObjectURL(imageBlob),
-      });
-    }
-  } catch (error) {
-    revokeCncPdfPagePreviewUrls(previews);
-    throw error;
-  } finally {
-    await pdf.destroy();
-  }
-
-  return previews;
-}
-
-function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) {
-        resolve(blob);
-      } else {
-        reject(new Error('Не удалось подготовить изображение PDF'));
-      }
-    }, 'image/png');
-  });
-}
 
 function revokeCncPdfPagePreviewUrls(previews: CncBathPdfPagePreview[]): void {
   previews.forEach((preview) => URL.revokeObjectURL(preview.url));

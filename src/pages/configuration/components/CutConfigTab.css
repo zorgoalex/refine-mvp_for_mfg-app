@@ -176,6 +176,16 @@
 }
 
 @media (min-width: 1200px) {
+  .cut-render-preview-column {
+    position: sticky;
+    top: var(--cut-render-preview-sticky-top, 12px);
+    align-self: flex-start;
+    max-height: calc(100vh - var(--cut-render-preview-sticky-top, 12px) - 12px);
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+    z-index: 1;
+  }
+
   .cut-pdf-template-editor-field-col {
     flex: 0 0 min(var(--cut-pdf-field-panel-width), 13.75%);
     max-width: min(var(--cut-pdf-field-panel-width), 13.75%);

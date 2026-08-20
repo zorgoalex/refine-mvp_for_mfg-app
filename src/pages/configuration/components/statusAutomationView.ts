@@ -103,13 +103,7 @@ export interface StatusAutomationFormValues {
   isEnabled: boolean;
 }
 
-const ORDER_SOURCE_LABELS: Record<StatusAutomationOrderSource, string> = {
-  manual: 'Вручную',
-  bazis: 'Базис',
-  import: 'Импорт',
-};
-
-const CONDITION_KEYS = [
+export const STATUS_AUTOMATION_CONDITION_KEYS = [
   'currentOrderStatusIn',
   'currentOrderStatusNotIn',
   'currentPaymentStatusIn',
@@ -120,6 +114,21 @@ const CONDITION_KEYS = [
   'orderSourceIn',
   'firstPaymentOnly',
 ] as const;
+
+export type StatusAutomationConditionKey = (typeof STATUS_AUTOMATION_CONDITION_KEYS)[number];
+
+export interface StatusAutomationRuleBuilderState {
+  form: StatusAutomationFormValues;
+  activeConditionKeys: StatusAutomationConditionKey[];
+}
+
+const ORDER_SOURCE_LABELS: Record<StatusAutomationOrderSource, string> = {
+  manual: 'Вручную',
+  bazis: 'Базис',
+  import: 'Импорт',
+};
+
+const CONDITION_KEYS = STATUS_AUTOMATION_CONDITION_KEYS;
 
 const ACTION_TYPES: StatusAutomationActionType[] = [
   'change_order_status',
@@ -165,22 +174,22 @@ export function describeConditions(
   const current = conditions ?? {};
 
   if (current.currentOrderStatusIn?.length) {
-    parts.push(`Статус заказа: ${formatStatusIds(current.currentOrderStatusIn, catalogs.orderStatusNames)}`);
+    parts.push(`Статус заказа — один из: ${formatStatusIds(current.currentOrderStatusIn, catalogs.orderStatusNames)}`);
   }
   if (current.currentOrderStatusNotIn?.length) {
     parts.push(
-      `Исключить статус заказа: ${formatStatusIds(
+      `Статус заказа — не входит в: ${formatStatusIds(
         current.currentOrderStatusNotIn,
         catalogs.orderStatusNames,
       )}`,
     );
   }
   if (current.currentPaymentStatusIn?.length) {
-    parts.push(`Статус оплаты: ${formatStatusIds(current.currentPaymentStatusIn, catalogs.paymentStatusNames)}`);
+    parts.push(`Статус оплаты — один из: ${formatStatusIds(current.currentPaymentStatusIn, catalogs.paymentStatusNames)}`);
   }
   if (current.currentPaymentStatusNotIn?.length) {
     parts.push(
-      `Исключить статус оплаты: ${formatStatusIds(
+      `Статус оплаты — не входит в: ${formatStatusIds(
         current.currentPaymentStatusNotIn,
         catalogs.paymentStatusNames,
       )}`,
@@ -188,7 +197,7 @@ export function describeConditions(
   }
   if (current.currentProductionStatusIn?.length) {
     parts.push(
-      `Статус производства: ${formatStatusIds(
+      `Общий статус производства заказа — один из: ${formatStatusIds(
         current.currentProductionStatusIn,
         catalogs.productionStatusNames,
       )}`,
@@ -196,7 +205,7 @@ export function describeConditions(
   }
   if (current.currentProductionStatusNotIn?.length) {
     parts.push(
-      `Исключить статус производства: ${formatStatusIds(
+      `Общий статус производства заказа — не входит в: ${formatStatusIds(
         current.currentProductionStatusNotIn,
         catalogs.productionStatusNames,
       )}`,
@@ -216,17 +225,191 @@ export function describeConditions(
     parts.push('Только первый платёж');
   }
 
-  return parts.length > 0 ? parts.join('; ') : '—';
+  return parts.length > 0 ? parts.join('; ') : 'Без условий';
 }
 
 function formatStatusIds(ids: number[], names: Map<number, string>): string {
   return ids.map((id) => names.get(id) ?? `#${id}`).join(', ');
 }
 
+export function describeFormConditions(
+  form: StatusAutomationFormValues,
+  catalogs: StatusAutomationCatalogs,
+): string {
+  const description = describeConditions(buildConditions(form), catalogs);
+  return description === 'Без условий' ? 'Без дополнительных условий' : description;
+}
+
+export function describeFormAction(
+  form: StatusAutomationFormValues,
+  catalogs: StatusAutomationCatalogs,
+): string {
+  const entries = form.statusMappingEntries ?? [];
+  if (form.actionType === 'map_order_status_to_details_production_status') {
+    const completeEntries = entries.filter(
+      (entry) => entry.sourceStatusIds.length > 0 && entry.targetStatusId > 0,
+    );
+    const mapping = completeEntries
+      .map((entry) => `${formatStatusIds(entry.sourceStatusIds, catalogs.orderStatusNames)} → ${catalogs.productionStatusNames.get(entry.targetStatusId) ?? `#${entry.targetStatusId}`}`)
+      .join('; ');
+    const suffix = completeEntries.length < entries.length
+      ? [mapping, 'соответствие не заполнено'].filter(Boolean).join('; ')
+      : mapping || 'соответствия не заданы';
+    return `Менять статус деталей: ${suffix}`;
+  }
+  if (form.actionType === 'map_production_status_to_order_status') {
+    const completeEntries = entries.filter(
+      (entry) => entry.sourceStatusIds.length > 0 && entry.targetStatusId > 0,
+    );
+    const mapping = completeEntries
+      .map((entry) => `${formatStatusIds(entry.sourceStatusIds, catalogs.productionStatusNames)} → ${catalogs.orderStatusNames.get(entry.targetStatusId) ?? `#${entry.targetStatusId}`}`)
+      .join('; ');
+    const suffix = completeEntries.length < entries.length
+      ? [mapping, 'соответствие не заполнено'].filter(Boolean).join('; ')
+      : mapping || 'соответствия не заданы';
+    return `Менять статус заказа: ${suffix}`;
+  }
+
+  const targetNames = form.actionType === 'change_order_status'
+    ? catalogs.orderStatusNames
+    : catalogs.productionStatusNames;
+  const targetName = form.targetStatusId === null
+    ? 'не выбран'
+    : targetNames.get(form.targetStatusId) ?? `#${form.targetStatusId}`;
+  if (form.actionType === 'change_order_status') {
+    return `Установить заказу статус «${targetName}»`;
+  }
+  if (form.actionType === 'change_details_production_status') {
+    return `Установить всем производственным деталям статус «${targetName}»`;
+  }
+  return `Установить заказу производственный статус «${targetName}»`;
+}
+
 export function allowedConditionKeysForEvent(
   descriptor: StatusAutomationEventTypeDto | null,
 ): string[] {
   return descriptor ? [...descriptor.allowedConditions] : [];
+}
+
+export function statusAutomationConditionKeysFromForm(
+  form: StatusAutomationFormValues,
+): StatusAutomationConditionKey[] {
+  return STATUS_AUTOMATION_CONDITION_KEYS.filter((key) => {
+    const value = form[key];
+    return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== false;
+  });
+}
+
+export function statusAutomationConditionIsFilled(
+  form: StatusAutomationFormValues,
+  key: StatusAutomationConditionKey,
+): boolean {
+  const value = form[key];
+  return key === 'firstPaymentOnly'
+    ? value === true
+    : Array.isArray(value)
+      ? value.length > 0
+      : value !== undefined;
+}
+
+export function addStatusAutomationCondition(
+  state: StatusAutomationRuleBuilderState,
+  key: StatusAutomationConditionKey,
+): StatusAutomationRuleBuilderState {
+  return {
+    form: key === 'firstPaymentOnly' ? { ...state.form, firstPaymentOnly: true } : state.form,
+    activeConditionKeys: state.activeConditionKeys.includes(key)
+      ? state.activeConditionKeys
+      : [...state.activeConditionKeys, key],
+  };
+}
+
+export function removeStatusAutomationCondition(
+  state: StatusAutomationRuleBuilderState,
+  key: StatusAutomationConditionKey,
+): StatusAutomationRuleBuilderState {
+  return {
+    form: clearStatusAutomationCondition(state.form, key),
+    activeConditionKeys: state.activeConditionKeys.filter((item) => item !== key),
+  };
+}
+
+export function changeStatusAutomationEvent(
+  state: StatusAutomationRuleBuilderState,
+  descriptor: StatusAutomationEventTypeDto,
+): StatusAutomationRuleBuilderState {
+  const allowed = new Set(descriptor.allowedConditions);
+  let form: StatusAutomationFormValues = { ...state.form, eventType: descriptor.eventType };
+  if (!descriptor.allowedActions.includes(form.actionType)) {
+    form.actionType = (descriptor.allowedActions[0] as StatusAutomationActionType | undefined) ?? form.actionType;
+  }
+  for (const key of STATUS_AUTOMATION_CONDITION_KEYS) {
+    if (!allowed.has(key)) {
+      form = clearStatusAutomationCondition(form, key);
+    }
+  }
+  return {
+    form,
+    activeConditionKeys: state.activeConditionKeys.filter((key) => allowed.has(key)),
+  };
+}
+
+function clearStatusAutomationCondition(
+  form: StatusAutomationFormValues,
+  key: StatusAutomationConditionKey,
+): StatusAutomationFormValues {
+  switch (key) {
+    case 'currentOrderStatusIn': return { ...form, currentOrderStatusIn: [] };
+    case 'currentOrderStatusNotIn': return { ...form, currentOrderStatusNotIn: [] };
+    case 'currentPaymentStatusIn': return { ...form, currentPaymentStatusIn: [] };
+    case 'currentPaymentStatusNotIn': return { ...form, currentPaymentStatusNotIn: [] };
+    case 'currentProductionStatusIn': return { ...form, currentProductionStatusIn: [] };
+    case 'currentProductionStatusNotIn': return { ...form, currentProductionStatusNotIn: [] };
+    case 'paidShareGte': return { ...form, paidShareGte: undefined };
+    case 'orderSourceIn': return { ...form, orderSourceIn: [] };
+    case 'firstPaymentOnly': return { ...form, firstPaymentOnly: undefined };
+  }
+}
+
+export function changeStatusAutomationAction(
+  form: StatusAutomationFormValues,
+  actionType: StatusAutomationActionType,
+): StatusAutomationFormValues {
+  return {
+    ...form,
+    actionType,
+    targetStatusId: null,
+    statusMappingEntries: isStatusMappingAction(actionType)
+      ? [{ sourceStatusIds: [], targetStatusId: 0 }]
+      : form.statusMappingEntries,
+  };
+}
+
+export function validateStatusAutomationRuleBuilder(
+  state: StatusAutomationRuleBuilderState,
+  descriptor: StatusAutomationEventTypeDto | null,
+): string[] {
+  const errors: string[] = [];
+  if (!state.form.name.trim()) errors.push('Укажите название правила');
+  if (!descriptor || !descriptor.allowedActions.includes(state.form.actionType)) {
+    errors.push('Выберите допустимое действие');
+  }
+  if (state.activeConditionKeys.some((key) => !statusAutomationConditionIsFilled(state.form, key))) {
+    errors.push('Заполните или удалите пустое условие');
+  }
+  if (isStatusMappingAction(state.form.actionType)) {
+    const entries = state.form.statusMappingEntries ?? [];
+    if (entries.length === 0 || entries.some((entry) => entry.sourceStatusIds.length === 0 || entry.targetStatusId < 1)) {
+      errors.push('Заполните все строки соответствий статусов');
+    }
+    const sourceIds = entries.flatMap((entry) => entry.sourceStatusIds);
+    if (new Set(sourceIds).size !== sourceIds.length) {
+      errors.push('Один исходный статус нельзя маппить дважды');
+    }
+  } else if ((state.form.targetStatusId ?? 0) < 1) {
+    errors.push('Выберите целевой статус');
+  }
+  return errors;
 }
 
 function buildConditions(form: StatusAutomationFormValues): StatusAutomationConditionsDto {

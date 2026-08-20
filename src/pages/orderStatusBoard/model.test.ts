@@ -16,6 +16,7 @@ import {
   buildCncOriginalCurrentLocations,
   buildCncMachineColumnCards,
   buildCncOrderReadiness,
+  buildCncOrderStatusBoardRequestKey,
   cncRelationStatePriority,
   cncManualMoveDestinations,
   cncManualMoveStorageKey,
@@ -54,6 +55,17 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it('builds a stable CNC order-board request key for equivalent order sets', () => {
+    const sort = { sortBy: 'priority' as const, sortOrder: 'asc' as const };
+
+    expect(buildCncOrderStatusBoardRequestKey([7, 3, 7], sort)).toBe(
+      buildCncOrderStatusBoardRequestKey([3, 7], sort),
+    );
+    expect(buildCncOrderStatusBoardRequestKey([3, 7], sort)).not.toBe(
+      buildCncOrderStatusBoardRequestKey([3, 7], { ...sort, sortOrder: 'desc' }),
+    );
+  });
+
   it('sorts CNC relation cards by active and related state before dimmed cards', () => {
     const cards: Array<{ id: string; state: CncRelationCardState }> = [
       { id: 'dimmed', state: 'dimmed' },

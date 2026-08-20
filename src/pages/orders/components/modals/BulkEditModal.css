@@ -1,0 +1,97 @@
+.order-bulk-edit-modal__hint.ant-alert {
+  min-height: 28px;
+  margin-bottom: 8px;
+  padding: 4px 8px;
+}
+
+.order-bulk-edit-modal__hint .ant-alert-icon {
+  margin-inline-end: 6px;
+  font-size: 12px;
+}
+
+.order-bulk-edit-modal__hint .ant-alert-message {
+  font-size: 11px;
+  line-height: 14px;
+  text-wrap: pretty;
+}
+
+.order-bulk-edit-modal__apply-all {
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--app-surface-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.order-bulk-edit-modal__apply-all .ant-typography {
+  font-size: inherit;
+}
+
+.order-bulk-edit-modal__divider.ant-divider {
+  margin: 4px 0;
+}
+
+.order-bulk-edit-modal__form .ant-form-item {
+  margin-bottom: 5px;
+}
+
+.order-bulk-edit-modal__form .ant-form-item-label {
+  padding-bottom: 1px;
+}
+
+.order-bulk-edit-modal__form .ant-form-item-label > label {
+  height: 16px;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.order-bulk-edit-modal__form .ant-checkbox-wrapper {
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.order-bulk-edit-modal__form .ant-input-number,
+.order-bulk-edit-modal__form .ant-select-single,
+.order-bulk-edit-modal__form .ant-select-single .ant-select-selector {
+  min-height: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+
+.order-bulk-edit-modal__form .ant-input-number-input {
+  height: 20px;
+  padding-block: 0;
+  font-size: 11px;
+}
+
+.order-bulk-edit-modal__form .ant-select-single .ant-select-selector :where(.ant-select-selection-item, .ant-select-selection-placeholder) {
+  line-height: 20px;
+}
+
+.order-bulk-edit-modal__form .ant-input-number-group-addon {
+  padding-inline: 6px;
+  font-size: 11px;
+}
+
+.order-bulk-edit-modal__form .ant-input-textarea textarea.ant-input {
+  min-height: 22px;
+  height: 22px;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 16px;
+  resize: none;
+}
+
+.order-bulk-edit-modal__summary {
+  margin-top: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background-color: var(--app-selection-bg);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.order-bulk-edit-modal__summary .ant-typography {
+  font-size: inherit;
+}

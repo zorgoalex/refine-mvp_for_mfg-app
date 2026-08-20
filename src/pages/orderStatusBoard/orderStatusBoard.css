@@ -2687,6 +2687,16 @@
   gap: 8px;
 }
 
+.cnc-packet-card__sheet-heading {
+  padding: 8px 12px 0;
+  background: #fff;
+  color: #111827;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: center;
+}
+
 .cnc-packet-card__sheet-loading {
   min-height: 80px;
   display: grid;
