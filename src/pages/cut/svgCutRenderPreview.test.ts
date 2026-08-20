@@ -9,14 +9,17 @@ import { buildStyledSvgUploadPreview } from './svgCutRenderPreview';
 import type { ParsedSvgUpload } from './svgCutUploadParser';
 
 describe('buildStyledSvgUploadPreview', () => {
-  it('renders order-colored pieces, source geometry, and labels with the MDF preview profile', () => {
+  it('renders one sheet background and uses each order color for its contour and milling lines', () => {
     const svg = buildStyledSvgUploadPreview(parsedUpload());
     const rendered = svg ?? '';
 
     expect(svg).not.toBeNull();
-    expect(rendered).toContain('fill="#d7e9ff"');
-    expect(rendered).toContain('fill="#dff3d7"');
-    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#d7e9ff'));
+    expect(rendered).toContain('fill="#ffffff" stroke="#d7e9ff"');
+    expect(rendered).toContain('fill="#ffffff" stroke="#dff3d7"');
+    expect(rendered).not.toContain('fill="#d7e9ff"');
+    expect(rendered).not.toContain('fill="#dff3d7"');
+    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff'));
+    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#dff3d7'));
     expect(rendered).toContain('<style>.cut-sheet-piece-source-svg *{');
     expect(rendered).not.toContain('<style>*{');
     expect(rendered).toContain('fill="#111827" stroke="#ffffff"');
@@ -68,11 +71,14 @@ describe('buildStyledSvgUploadPreview', () => {
     const style = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, setting);
     const rendered = buildStyledSvgUploadPreview(parsedUpload(), setting) ?? '';
 
-    expect(rendered).toContain('fill="#111827"');
-    expect(rendered).toContain('stroke="#654321" stroke-width="4"');
-    expect(rendered).toContain(cutRenderSourceSvgCss(style, '#111827'));
+    expect(rendered).toContain('fill="#ffffff" stroke="#111827" stroke-width="4"');
+    expect(rendered).toContain('fill="#ffffff" stroke="#e5e7eb" stroke-width="4"');
+    expect(rendered).not.toMatch(/<rect[^>]*fill="#111827"/);
+    expect(rendered).not.toMatch(/<rect[^>]*fill="#e5e7eb"/);
+    expect(rendered).toContain(cutRenderSourceSvgCss(style, '#ffffff', '#111827'));
+    expect(rendered).toContain(cutRenderSourceSvgCss(style, '#ffffff', '#e5e7eb'));
     expect(rendered).not.toContain('vector-effect:non-scaling-stroke!important');
-    expect(rendered).toContain('fill="#fefefe" stroke="#222222"');
+    expect(rendered).toContain('fill="#111827" stroke="#ffffff"');
     expect(rendered).toContain('letter-spacing="-2.4"');
     expect(rendered).toContain('font-size="28.8">2723</tspan>');
     expect(rendered).toContain('font-size="9.6"># 01</tspan>');
@@ -117,7 +123,10 @@ function parsedUpload(): ParsedSvgUpload {
           placedWidthMm: 300,
           placedHeightMm: 200,
           rotated: false,
-          sourceSvg: null,
+          sourceSvg: {
+            viewBox: { xMm: 0, yMm: 0, widthMm: 300, heightMm: 200 },
+            body: '<path d="M10 100 H290" stroke="#626769" stroke-width="0.5"/>',
+          },
         },
       ],
     },

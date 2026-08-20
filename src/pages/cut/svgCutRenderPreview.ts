@@ -43,23 +43,24 @@ export function buildStyledCutLayoutPreview(
   const orderIndexByName = new Map<string, number>();
   const fontMm = Math.max(24, Math.round(Math.min(sheet.widthMm, sheet.heightMm) / 40));
   const pieces = layout.items.map((item) => {
-    const fill = fillForOrderName(item.orderName, orderIndexByName, palette, style.piece.defaultFill);
+    const background = style.piece.defaultFill;
+    const contour = contourForOrderName(item.orderName, orderIndexByName, palette, style.piece.stroke);
     const cx = item.xMm + item.placedWidthMm / 2;
     const cy = item.yMm + item.placedHeightMm / 2;
     const rect = `<rect x="${num(item.xMm)}" y="${num(item.yMm)}" width="${num(item.placedWidthMm)}" height="${num(
       item.placedHeightMm,
-    )}" fill="${escapeXml(fill)}" stroke="${style.piece.stroke}" stroke-width="${num(style.piece.strokeWidthMm)}"/>`;
+    )}" fill="${escapeXml(background)}" stroke="${escapeXml(contour)}" stroke-width="${num(style.piece.strokeWidthMm)}"/>`;
     const sourceSvg = renderSourceSvg(
       item.sourceSvg,
       item.xMm,
       item.yMm,
       item.placedWidthMm,
       item.placedHeightMm,
-      cutRenderSourceSvgCss(style, fill),
+      cutRenderSourceSvgCss(style, background, contour),
     );
     const lines = itemLabelLines(item);
-    const labelFill = cutRenderLabelFillForBackground(fill, style);
-    const labelStroke = cutRenderLabelStrokeForBackground(fill, fontMm, style);
+    const labelFill = cutRenderLabelFillForBackground(background, style);
+    const labelStroke = cutRenderLabelStrokeForBackground(background, fontMm, style);
     const labelStrokeAttrs = labelStroke
       ? ` stroke="${labelStroke.stroke}" stroke-width="${num(labelStroke.strokeWidthMm)}" paint-order="stroke"`
       : '';
@@ -78,7 +79,7 @@ export function buildStyledCutLayoutPreview(
   }).join('');
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(sheet.widthMm)} ${num(sheet.heightMm)}">`,
-    `<rect x="0" y="0" width="${num(sheet.widthMm)}" height="${num(sheet.heightMm)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
+    `<rect x="0" y="0" width="${num(sheet.widthMm)}" height="${num(sheet.heightMm)}" fill="${escapeXml(style.piece.defaultFill)}" stroke="#9aa7b4" stroke-width="3"/>`,
     pieces,
     '</svg>',
   ].join('');
@@ -126,7 +127,7 @@ function renderPieceLabelText(input: {
   )}" font-weight="${num(input.fontWeight)}"${letterSpacingAttr} fill="${input.fill}"${input.strokeAttrs} text-anchor="middle" dominant-baseline="middle">${tspans}</text>`;
 }
 
-function fillForOrderName(
+function contourForOrderName(
   orderName: string,
   orderIndexByName: Map<string, number>,
   palette: readonly string[],
