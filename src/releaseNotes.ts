@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Раскрой: закреплённый SVG-предпросмотр",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "На широком экране тестовый SVG-предпросмотр остаётся у верхнего края окна при прокрутке длинных настроек рендера; на узком экране сохраняется обычный последовательный layout.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Заказы: компактные групповые действия",
     services: ["ERP"],
     repositories: ["repo_erp"],

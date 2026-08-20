@@ -45,6 +45,10 @@ interface TemplateDraft {
   profile: CutRenderStyleProfile;
 }
 
+type CutRenderPreviewStickyStyle = React.CSSProperties & {
+  '--cut-render-preview-sticky-top': string;
+};
+
 const SOURCE_STROKE_MODE_OPTIONS = [
   { value: 'piece-pastel', label: 'Контур заказа' },
   { value: 'fixed', label: 'Фиксированный без заказа' },
@@ -69,6 +73,10 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
   const [previewParsed, setPreviewParsed] = useState<ParsedSvgUpload>(() => samplePreviewUpload());
   const [previewName, setPreviewName] = useState('Тестовый SVG');
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const workspaceTabsHeight = useWorkspaceTabsHeight();
+  const previewStickyStyle = useMemo<CutRenderPreviewStickyStyle>(() => ({
+    '--cut-render-preview-sticky-top': `${workspaceTabsHeight + 12}px`,
+  }), [workspaceTabsHeight]);
 
   const selectedTemplate = useMemo(
     () => templateById(resolvedSetting, selectedTemplateId),
@@ -548,7 +556,7 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
           </Card>
         </Col>
 
-        <Col xs={24} xl={10}>
+        <Col className="cut-render-preview-column" style={previewStickyStyle} xs={24} xl={10}>
           <Card size="small" title="Предпросмотр SVG" extra={<Tag>{previewName}</Tag>}>
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <label className={`cut-render-upload${canManage ? '' : ' is-disabled'}`}>
@@ -771,6 +779,36 @@ function useObjectUrl(svg: string | null): string | null {
     return () => URL.revokeObjectURL(nextUrl);
   }, [svg]);
   return url;
+}
+
+function useWorkspaceTabsHeight(): number {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => {
+    let resizeObserver: ResizeObserver | null = null;
+    const attach = (): boolean => {
+      const tabs = document.querySelector('.workspace-tabs');
+      if (!tabs) return false;
+      const measure = () => setHeight(tabs.getBoundingClientRect().height);
+      measure();
+      if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(measure);
+        resizeObserver.observe(tabs);
+      }
+      return true;
+    };
+    if (attach()) return () => resizeObserver?.disconnect();
+    const mutationObserver = new MutationObserver(() => {
+      if (attach()) mutationObserver.disconnect();
+    });
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      mutationObserver.disconnect();
+      resizeObserver?.disconnect();
+    };
+  }, []);
+
+  return height;
 }
 
 function templateById(setting: CutRenderStylesSetting, id: string): CutRenderStyleTemplate {
