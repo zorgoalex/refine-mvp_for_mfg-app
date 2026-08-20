@@ -42,6 +42,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "МДФ-доска: быстрая первая загрузка",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Тяжёлые инструменты PDF и печати бирок теперь загружаются только при открытии соответствующего действия, поэтому МДФ-доска быстрее показывает рабочие карточки без изменения её логики.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Раскрой: закреплённый SVG-предпросмотр",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

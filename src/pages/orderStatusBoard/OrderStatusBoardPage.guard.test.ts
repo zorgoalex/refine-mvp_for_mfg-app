@@ -45,8 +45,20 @@ const imagePrintPreview = readFileSync(
   'src/components/ImagePrintPreviewModal.tsx',
   'utf8',
 );
+const pdfPreview = readFileSync(
+  'src/pages/orderStatusBoard/cncPdfPreview.ts',
+  'utf8',
+);
 
 describe('OrderStatusBoardPage UX guards', () => {
+  it('defers optional MDF PDF and label tooling until the operator opens it', () => {
+    expect(page).not.toContain("new URL('pdfjs-dist/build/pdf.worker.min.mjs'");
+    expect(page).not.toContain("import('pdfjs-dist')");
+    expect(page).toContain("await import('./cncPdfPreview')");
+    expect(page).toContain("await import('../cut/CutSheetLabelGenerateAction')");
+    expect(page).toContain('<Suspense fallback={<CncLabelActionLoadingButton />}>');
+  });
+
   it('keeps status-board drag and column helpers bound after branch merges', () => {
     expect(page).toContain("export type CncOrderSortField =");
     expect(page).toContain("export type CncOrderSortDirection = 'asc' | 'desc';");
@@ -749,7 +761,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const freshUrl = URL.createObjectURL(result.blob)');
     expect(page).toContain("CNC_BATH_DEFAULT_PDF_TEMPLATE = 'bath_profiles'");
     expect(page).toContain('Шаблон PDF ванны');
-    expect(page).toContain("import('pdfjs-dist')");
+    expect(page).not.toContain("import('pdfjs-dist')");
+    expect(pdfPreview).toContain("import('pdfjs-dist')");
     expect(page).toContain('renderCncPdfPagePreviews(result.blob)');
     expect(page).toContain('data-testid="cnc-bath-pdf-preview-pages"');
     expect(page).not.toContain('<iframe');
@@ -1589,7 +1602,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}');
     expect(sheetPreview).toContain('aria-haspopup="dialog"');
     expect(sheetPreview).not.toContain('printSheetImage');
-    expect(sheetPreview.match(/<CutSheetLabelGenerateAction/g)).toHaveLength(1);
+    expect(sheetPreview.match(/<LazyCutSheetLabelGenerateAction/g)).toHaveLength(1);
     expect(sheetPreview.match(/onClick=\{\(\) => setPrintPreviewOpen\(true\)\}/g)).toHaveLength(1);
     expect(sheetPreview).not.toContain('cnc-packet-card__sheet-toolbar');
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');

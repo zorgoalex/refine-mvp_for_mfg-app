@@ -1,6 +1,8 @@
 import { Popover, Tooltip } from '../../ui/tooltipDelay';
 import React, {
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -79,10 +81,9 @@ import { useCoarsePointer } from '../../hooks/useDeviceTier';
 import { OrderDeletedTag, ORDER_DELETED_REFERENCE_LINE_CLASS } from '../../components/OrderDeletedTag';
 import { ImagePrintPreviewModal } from '../../components/ImagePrintPreviewModal';
 import { pollPdf, triggerBlobDownload } from '../cut/cutPageHelpers';
-import {
-  CutSheetLabelGenerateAction,
-  type CutSheetLabelCoverage,
-  type CutSheetLabelDetailInstance,
+import type {
+  CutSheetLabelCoverage,
+  CutSheetLabelDetailInstance,
 } from '../cut/CutSheetLabelGenerateAction';
 import type { LabelCutMapFallbackImage } from '../../api/types/labelsApi.types';
 import {
@@ -178,7 +179,14 @@ const CNC_BATH_PDF_TEMPLATE_OPTIONS = [
   { value: CNC_BATH_DEFAULT_PDF_TEMPLATE, label: 'Профили ванн' },
   { value: 'standard', label: 'Стандартный' },
 ];
-const CNC_PDF_WORKER_SRC = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+const LazyCutSheetLabelGenerateAction = lazy(async () => ({
+  default: (await import('../cut/CutSheetLabelGenerateAction')).CutSheetLabelGenerateAction,
+}));
+const CncLabelActionLoadingButton: React.FC = () => (
+  <Button className="app-hit-area-sm" size="small" icon={<TagsOutlined />} loading disabled>
+    Бирки
+  </Button>
+);
 const CNC_ORDER_SEARCH_PERIOD_OPTIONS: Array<{
   label: string;
   value: CncOrderSearchPeriod;
@@ -334,8 +342,6 @@ export type CncRelationCardState =
   | 'order-mentioned'
   | 'dimmed';
 type CncDetailedBathPlacement = 'left' | 'right';
-type CncPdfjsModule = typeof import('pdfjs-dist');
-
 export interface CncOrderSortSettings {
   field: CncOrderSortField;
   direction: CncOrderSortDirection;
@@ -5967,15 +5973,17 @@ const CncTelegramSheetImagePreview: React.FC<CncTelegramSheetImagePreviewProps> 
       >
         <div className="cnc-packet-card__sheet-actions" onClick={(event) => event.stopPropagation()}>
           {canGenerateLabels ? (
-            <CutSheetLabelGenerateAction
-              detailInstances={labelDetailInstances}
-              cutJobId={hasCutSheetScope ? cutJobId : null}
-              cutGroupId={hasCutSheetScope ? labelSheet?.cutGroupId : null}
-              sheetIndex={labelSheet?.sheetIndex ?? 0}
-              sheetLabel={labelSheet ? `листа ${labelSheet.sheetNumber}` : 'скрина'}
-              cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}
-              labelCoverage={labelCoverage}
-            />
+            <Suspense fallback={<CncLabelActionLoadingButton />}>
+              <LazyCutSheetLabelGenerateAction
+                detailInstances={labelDetailInstances}
+                cutJobId={hasCutSheetScope ? cutJobId : null}
+                cutGroupId={hasCutSheetScope ? labelSheet?.cutGroupId : null}
+                sheetIndex={labelSheet?.sheetIndex ?? 0}
+                sheetLabel={labelSheet ? `листа ${labelSheet.sheetNumber}` : 'скрина'}
+                cutMapFallbackImage={hasCutSheetScope ? null : cutMapFallbackImage}
+                labelCoverage={labelCoverage}
+              />
+            </Suspense>
           ) : (
             <Tooltip title={disabledLabelReason}>
               <span>
@@ -6784,6 +6792,7 @@ const CncBathPdfPreview: React.FC<CncBathPdfPreviewProps> = ({ bath, open, onClo
         setFileName(result.fileName ?? `bath-cut-${bath.cutNumber}.pdf`);
 
         try {
+          const { renderCncPdfPagePreviews } = await import('./cncPdfPreview');
           const nextPagePreviews = await renderCncPdfPagePreviews(result.blob);
           if (!isCurrentRequest()) {
             revokeCncPdfPagePreviewUrls(nextPagePreviews);
@@ -9130,70 +9139,6 @@ function cncSheetPreviewRotate90(
 
 type CncBathPdfTemplateOption = { value: string; label: string };
 let cncBathPdfTemplateOptionsPromise: Promise<CncBathPdfTemplateOption[]> | null = null;
-let cncPdfjsPromise: Promise<CncPdfjsModule> | null = null;
-let cncPdfjsWorkerConfigured = false;
-
-async function loadCncPdfjs(): Promise<CncPdfjsModule> {
-  if (!cncPdfjsPromise) {
-    cncPdfjsPromise = import('pdfjs-dist');
-  }
-  const pdfjsLib = await cncPdfjsPromise;
-  if (!cncPdfjsWorkerConfigured) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = CNC_PDF_WORKER_SRC;
-    cncPdfjsWorkerConfigured = true;
-  }
-  return pdfjsLib;
-}
-
-async function renderCncPdfPagePreviews(blob: Blob): Promise<CncBathPdfPagePreview[]> {
-  const pdfjsLib = await loadCncPdfjs();
-  const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise;
-  const previews: CncBathPdfPagePreview[] = [];
-
-  try {
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-      const page = await pdf.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: 1.35 });
-      const ratio = window.devicePixelRatio || 1;
-      const canvas = document.createElement('canvas');
-      const canvasContext = canvas.getContext('2d');
-      if (!canvasContext) throw new Error('Canvas недоступен для предпросмотра PDF');
-
-      canvas.width = Math.floor(viewport.width * ratio);
-      canvas.height = Math.floor(viewport.height * ratio);
-      await page.render({
-        canvasContext,
-        transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0],
-        viewport,
-      }).promise;
-
-      const imageBlob = await canvasToPngBlob(canvas);
-      previews.push({
-        pageNumber,
-        url: URL.createObjectURL(imageBlob),
-      });
-    }
-  } catch (error) {
-    revokeCncPdfPagePreviewUrls(previews);
-    throw error;
-  } finally {
-    await pdf.destroy();
-  }
-
-  return previews;
-}
-
-function canvasToPngBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) {
-        resolve(blob);
-      } else {
-        reject(new Error('Не удалось подготовить изображение PDF'));
-      }
-    }, 'image/png');
-  });
-}
 
 function revokeCncPdfPagePreviewUrls(previews: CncBathPdfPagePreview[]): void {
   previews.forEach((preview) => URL.revokeObjectURL(preview.url));
