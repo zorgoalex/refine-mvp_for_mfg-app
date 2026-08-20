@@ -6,6 +6,7 @@ PROJECT_DIR="$REPO_DIR"
 ENV_FILE="$PROJECT_DIR/.env"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.yml"
 CNC_TELEGRAM_OVERLAY="$REPO_DIR/ops/templates/docker-compose.cnc-telegram-worker.yml"
+BACKEND_IDENTITY_OVERLAY="$REPO_DIR/ops/templates/docker-compose.backend-build-identity.yml"
 STACK_ENV_OVERLAY=""
 COMPOSE_FILE_ARGS=()
 PULL=1
@@ -15,6 +16,37 @@ SKIP_CHECK=0
 BUILD_ONLY=0
 ENV_FILE_ARG_SET=0
 COMPOSE_FILE_ARG_SET=0
+
+resolve_backend_build_sha() {
+  local revision requested requested_context backend_context resolved_context requested_image expected_image
+  revision="$(git -C "$REPO_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || fail "cannot resolve immutable backend build SHA"
+  [[ -z "$(git -C "$REPO_DIR" status --porcelain --untracked-files=normal)" ]] \
+    || fail "repository must be clean before publishing BACKEND_BUILD_SHA"
+  requested="${BACKEND_BUILD_SHA:-}"
+  if [[ -n "$requested" && "$requested" != "$revision" ]]; then
+    fail "BACKEND_BUILD_SHA does not match exact repository HEAD"
+  fi
+  backend_context="$(cd "$REPO_DIR/backend" && pwd -P)"
+  requested_context="${BACKEND_BUILD_CONTEXT:-}"
+  if [[ -n "$requested_context" ]]; then
+    if [[ "$requested_context" = /* ]]; then
+      resolved_context="$(cd "$requested_context" 2>/dev/null && pwd -P || true)"
+    else
+      resolved_context="$(cd "$PROJECT_DIR/$requested_context" 2>/dev/null && pwd -P || true)"
+    fi
+    [[ "$resolved_context" == "$backend_context" ]] \
+      || fail "BACKEND_BUILD_CONTEXT must resolve to this exact repository backend"
+  fi
+  export BACKEND_BUILD_SHA="$revision"
+  export BACKEND_BUILD_CONTEXT="$backend_context"
+  expected_image="erp-backend:${revision}"
+  requested_image="${BACKEND_BUILD_IMAGE:-}"
+  if [[ -n "$requested_image" && "$requested_image" != "$expected_image" ]]; then
+    fail "BACKEND_BUILD_IMAGE does not match exact repository HEAD"
+  fi
+  export BACKEND_BUILD_IMAGE="$expected_image"
+}
 
 usage() {
   cat <<'EOF'
@@ -99,10 +131,26 @@ prepare_compose_file_args() {
     COMPOSE_FILE_ARGS+=(-f "$STACK_ENV_OVERLAY")
     log "Using $stack_env Compose overlay"
   fi
+  [[ -f "$BACKEND_IDENTITY_OVERLAY" ]] \
+    || fail "Backend build identity overlay not found: $BACKEND_IDENTITY_OVERLAY"
+  COMPOSE_FILE_ARGS+=(-f "$BACKEND_IDENTITY_OVERLAY")
 }
 
 docker_compose() {
   docker compose --env-file "$ENV_FILE" "${COMPOSE_FILE_ARGS[@]}" "$@"
+}
+
+assert_backend_image_revision() {
+  local image_ref image_revision
+  image_ref="$(docker_compose config --format json 2>/dev/null \
+    | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["backend"]["image"])' \
+    2>/dev/null || true)"
+  [[ -n "$image_ref" ]] || fail "cannot resolve the rendered backend image reference"
+  image_revision="$(docker image inspect \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+    "$image_ref" 2>/dev/null || true)"
+  [[ "$image_revision" == "$BACKEND_BUILD_SHA" ]] \
+    || fail "backend image revision does not match exact repository HEAD"
 }
 
 ensure_worker_image_revision() {
@@ -152,6 +200,7 @@ REPO_DIR="$(cd "$REPO_DIR" && pwd)"
 [[ "$COMPOSE_FILE" = /* ]] || COMPOSE_FILE="$PROJECT_DIR/$COMPOSE_FILE"
 [[ -f "$ENV_FILE" ]] || fail "Env file not found: $ENV_FILE"
 load_compose_profiles
+resolve_backend_build_sha
 
 if [[ ! -f "$COMPOSE_FILE" ]]; then
   cp "$REPO_DIR/ops/templates/docker-compose.vps.yml" "$COMPOSE_FILE"
@@ -191,11 +240,17 @@ if [[ "$BUILD_ONLY" == "1" ]]; then
   [[ "$BUILD" == "1" ]] || fail "--build-only cannot be combined with --no-build"
   log "Building source images"
   docker_compose build
+  assert_backend_image_revision
   exit 0
 fi
 
+if [[ "$BUILD" == "1" ]]; then
+  log "Building source images"
+  docker_compose build
+fi
+assert_backend_image_revision
+
 up_args=(up -d)
-[[ "$BUILD" == "1" ]] && up_args+=(--build)
 [[ "$FORCE_RECREATE" == "1" ]] && up_args+=(--force-recreate)
 
 log "Starting stack"
@@ -203,7 +258,6 @@ docker_compose "${up_args[@]}"
 
 if compose_profile_enabled cnc-telegram; then
   worker_up_args=(up -d)
-  [[ "$BUILD" == "1" ]] && worker_up_args+=(--build)
   worker_up_args+=(--force-recreate cnc-telegram-worker)
   log "Recreating CNC Telegram worker after stack update"
   docker_compose "${worker_up_args[@]}"

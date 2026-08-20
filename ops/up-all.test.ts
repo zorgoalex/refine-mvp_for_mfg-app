@@ -175,6 +175,7 @@ describe('up-all.sh provision', () => {
 
   it('deploy-stack overlays CNC Telegram worker for existing live compose files', () => {
     expect(deploySource).toContain('docker-compose.cnc-telegram-worker.yml');
+    expect(deploySource).toContain('docker-compose.backend-build-identity.yml');
     expect(deploySource).toContain('docker-compose.${stack_env}.yml');
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS\+=\(-f "\$CNC_TELEGRAM_OVERLAY"\)[\s\S]*COMPOSE_FILE_ARGS\+=\(-f "\$STACK_ENV_OVERLAY"\)/);
     expect(deploySource).toMatch(
@@ -186,6 +187,7 @@ describe('up-all.sh provision', () => {
     expect(readFileSync(resolve(__dirname, 'templates/docker-compose.cnc-telegram-worker.yml'), 'utf8'))
       .toContain('profiles: !override ["cnc-telegram-glm"]');
     expect(deploySource).toMatch(/COMPOSE_FILE_ARGS=\(-f "\$COMPOSE_FILE"\)/);
+    expect(deploySource).toMatch(/COMPOSE_FILE_ARGS\+=\(-f "\$BACKEND_IDENTITY_OVERLAY"\)/);
     expect(deploySource).toMatch(/docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/);
     expect(deploySource).toMatch(/git -C "\$REPO_DIR" rev-parse --verify HEAD/);
     expect(deploySource).toMatch(/export CNC_TELEGRAM_WORKER_IMAGE_REVISION="\$revision"/);

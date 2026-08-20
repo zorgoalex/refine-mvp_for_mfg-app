@@ -13,6 +13,9 @@ RUN npm run build && npm prune --omit=dev
 
 FROM node:20-bookworm-slim AS runtime
 
+ARG BACKEND_BUILD_SHA=local
+LABEL org.opencontainers.image.revision="$BACKEND_BUILD_SHA"
+
 WORKDIR /app
 
 RUN apt-get update \

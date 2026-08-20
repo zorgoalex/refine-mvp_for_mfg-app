@@ -10,6 +10,43 @@ function readTemplate(path: string): string {
 }
 
 describe('VPS compose backend runtime flags', () => {
+  it('renders an exact backend image and build identity through the deploy overlay', () => {
+    const sha = 'a154fef554948d9643630a827cb1aa4795117e54';
+    const composePath = resolve(repoRoot, 'ops/templates/docker-compose.vps.yml');
+    const identityOverlayPath = resolve(
+      repoRoot,
+      'ops/templates/docker-compose.backend-build-identity.yml',
+    );
+    const envPath = resolve(repoRoot, 'ops/templates/env.vps.example');
+    const backendContext = resolve(repoRoot, 'backend');
+    const rendered = JSON.parse(execFileSync(
+      'docker',
+      [
+        'compose',
+        '--env-file', envPath,
+        '-f', composePath,
+        '-f', identityOverlayPath,
+        'config',
+        '--format', 'json',
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          BACKEND_BUILD_CONTEXT: backendContext,
+          BACKEND_BUILD_IMAGE: `erp-backend:${sha}`,
+          BACKEND_BUILD_SHA: sha,
+          CNC_TELEGRAM_WORKER_IMAGE_REVISION: sha,
+        },
+      },
+    ));
+
+    expect(rendered.services.backend.image).toBe(`erp-backend:${sha}`);
+    expect(rendered.services.backend.build.context).toBe(backendContext);
+    expect(rendered.services.backend.build.args.BACKEND_BUILD_SHA).toBe(sha);
+    expect(rendered.services.backend.environment.BACKEND_BUILD_SHA).toBe(sha);
+  });
+
   it('passes the Bazis-cut flag with a safe default and documents activation', () => {
     const compose = readTemplate('ops/templates/docker-compose.vps.yml');
     const localCompose = readTemplate('backend/docker-compose.yml');

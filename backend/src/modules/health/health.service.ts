@@ -30,11 +30,13 @@ export class HealthService {
       new Date(),
       process.uptime(),
       this.config.get('APP_NAME', { infer: true }),
+      this.config.get('BACKEND_BUILD_SHA', { infer: true }),
     );
   }
 
   async ready(): Promise<ReadyHealthResponse> {
     return createReadyHealthResponse({
+      gitCommitSha: this.config.get('BACKEND_BUILD_SHA', { infer: true }),
       database: await this.databaseCheck(),
       redis: await this.redisCheck(),
       config: await this.configCheck(),

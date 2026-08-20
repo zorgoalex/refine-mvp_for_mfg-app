@@ -1,6 +1,14 @@
 const { createHash } = require('node:crypto');
 const { spawn } = require('node:child_process');
-const { mkdirSync, appendFileSync, writeFileSync } = require('node:fs');
+const {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeSync,
+} = require('node:fs');
 const path = require('node:path');
 
 const STAGE_FRONTEND_URL = 'https://app-test.mebelkz.app';
@@ -10,9 +18,12 @@ const STAGE_DB_CONTAINER = 'erp_test-postgresdb-1';
 const STAGE_BACKEND_CONTAINER = 'erp_test-backend-1';
 const EXPECTED_CANARY_USER_ID = 83;
 const ALLOWED_STEPS = [5, 25, 50, 100];
-const CHILD_ABORT_INT_GRACE_MS = 500;
-const CHILD_ABORT_TERM_GRACE_MS = 500;
-const CHILD_ABORT_KILL_GRACE_MS = 1000;
+const CHILD_ABORT_INT_GRACE_MS = 5000;
+const CHILD_ABORT_TERM_GRACE_MS = 5000;
+const CHILD_ABORT_KILL_GRACE_MS = 5000;
+const STAGE_REF = 'refs/heads/feat/backend-erp-stage1';
+const IMMUTABLE_SHA_PATTERN = /^[0-9a-f]{40}$/;
+const FETCH_RESPONSE_CLEANUP = Symbol('orderSseFetchCleanup');
 
 function parseOrderSseRolloutArgs(rawArgs) {
   const result = {
@@ -25,9 +36,12 @@ function parseOrderSseRolloutArgs(rawArgs) {
     backendContainer: STAGE_BACKEND_CONTAINER,
     steps: [...ALLOWED_STEPS],
     samplesPerStep: 3,
-    sampleIntervalSeconds: 20,
+    sampleIntervalSeconds: null,
     cacheWaitSeconds: 6,
     maxEventLatencyMs: 2000,
+    samples: 90,
+    authRefreshEvery: 10,
+    expectedStageSha: null,
     orderId: null,
     logRoot: null,
   };
@@ -82,6 +96,15 @@ function parseOrderSseRolloutArgs(rawArgs) {
       case '--max-event-latency-ms':
         result.maxEventLatencyMs = parseInteger(readValue(), inlineName, 100, 30000);
         break;
+      case '--samples':
+        result.samples = parseInteger(readValue(), inlineName, 1, 360);
+        break;
+      case '--auth-refresh-every':
+        result.authRefreshEvery = parseInteger(readValue(), inlineName, 1, 360);
+        break;
+      case '--expected-stage-sha':
+        result.expectedStageSha = parseImmutableSha(readValue(), inlineName);
+        break;
       case '--order-id':
         result.orderId = parseInteger(readValue(), inlineName, 1, Number.MAX_SAFE_INTEGER);
         break;
@@ -104,6 +127,7 @@ function resolveOrderSseRolloutConfig(parsed, env = process.env, cwd = process.c
   const logRoot = parsed.logRoot || env.ORDER_SSE_ROLLOUT_LOG_ROOT || findDefaultLogRoot(cwd);
   return {
     ...parsed,
+    sampleIntervalSeconds: parsed.sampleIntervalSeconds ?? (parsed.mode === 'accelerated-soak' ? 60 : 20),
     logRoot: path.resolve(logRoot),
     backendOrigin: new URL(parsed.backendUrl).origin,
     username: env.ERP_WORKER_LOGIN || '',
@@ -115,8 +139,8 @@ function resolveOrderSseRolloutConfig(parsed, env = process.env, cwd = process.c
 }
 
 function assertOrderSseRolloutAllowed(config) {
-  if (!['preflight', 'shadow-canary', 'rollout'].includes(config.mode)) {
-    throw new Error('mode must be preflight, shadow-canary, or rollout');
+  if (!['preflight', 'shadow-canary', 'rollout', 'accelerated-soak'].includes(config.mode)) {
+    throw new Error('mode must be preflight, shadow-canary, rollout, or accelerated-soak');
   }
   if (config.targetEnv !== 'backend-test') {
     throw new Error('Order SSE rollout controller is stage-only: target-env must be backend-test');
@@ -138,6 +162,9 @@ function assertOrderSseRolloutAllowed(config) {
   }
   if (config.mode === 'preflight' && config.apply) {
     throw new Error('--apply is not valid in preflight mode');
+  }
+  if (config.mode === 'accelerated-soak' && !config.expectedStageSha) {
+    throw new Error('accelerated-soak requires --expected-stage-sha');
   }
   parseSteps(config.steps.join(','));
 }
@@ -193,10 +220,36 @@ function assertRuntimeConfig(runtimeConfig, mode) {
     throw new Error('Stage runtime config must enable backendAuth and backendOrdersRead');
   }
   const realtimeEnabled = runtimeConfig.features?.orderRealtime === true;
-  if (mode === 'rollout' && !realtimeEnabled) {
-    throw new Error('Live stage runtime config has features.orderRealtime=false; percentage rollout is blocked');
+  if (['rollout', 'accelerated-soak'].includes(mode) && !realtimeEnabled) {
+    throw new Error('Live stage runtime config has features.orderRealtime=false; realtime qualification is blocked');
   }
   return realtimeEnabled;
+}
+
+function assertDeploymentIdentity(label, deployment, expectedSha) {
+  if (!expectedSha) return null;
+  const actualSha = String(deployment?.gitCommitSha || '').trim().toLowerCase();
+  if (!IMMUTABLE_SHA_PATTERN.test(actualSha)) {
+    throw new Error(`${label} deployment gitCommitSha is missing or invalid`);
+  }
+  if (actualSha !== expectedSha) {
+    throw new Error(`${label} deployment SHA mismatch: expected ${expectedSha}, received ${actualSha}`);
+  }
+  return actualSha;
+}
+
+function assertBackendReadyPayload(body, expectedSha = null) {
+  if (!body || typeof body !== 'object') throw new Error('Backend readiness payload is missing');
+  if (body.status !== 'ready') throw new Error(`Backend readiness is ${body.status || 'unknown'}`);
+  const realtime = body.checks?.realtime;
+  if (realtime?.status !== 'ok') {
+    throw new Error(`Backend realtime health is ${realtime?.status || 'missing'}`);
+  }
+  if (/\bdisabled\b/i.test(String(realtime?.message || ''))) {
+    throw new Error(`Backend realtime stream is disabled: ${String(realtime.message).slice(0, 200)}`);
+  }
+  assertDeploymentIdentity('backend', body.deployment, expectedSha);
+  return body;
 }
 
 async function runRolloutController(config, dependencies) {
@@ -221,6 +274,8 @@ async function runRolloutController(config, dependencies) {
     activeUsers: preflight.database.activeUserIds.length,
     eligibleActiveUsers: countEligibleUsers(preflight.database.activeUserIds, appliedPercent),
     orderId: preflight.orderId,
+    expectedStageSha: config.expectedStageSha,
+    candidateIdentity: preflight.identity || null,
   });
 
   if (config.mode === 'preflight') {
@@ -230,7 +285,12 @@ async function runRolloutController(config, dependencies) {
       currentPercent: appliedPercent,
       runtimeRealtimeEnabled,
       orderId: preflight.orderId,
+      candidateIdentity: preflight.identity || null,
     };
+  }
+
+  if (config.mode === 'accelerated-soak') {
+    return runAcceleratedSoak(config, dependencies, preflight, runtimeRealtimeEnabled);
   }
 
   const baselineResult = await dependencies.sample({
@@ -338,6 +398,68 @@ async function runRolloutController(config, dependencies) {
   };
 }
 
+async function runAcceleratedSoak(config, dependencies, preflight, runtimeRealtimeEnabled) {
+  const signal = dependencies.signal;
+  const log = dependencies.log || (() => undefined);
+  const startedAtMs = dependencies.now();
+  let completedSamples = 0;
+
+  try {
+    for (let sampleNumber = 1; sampleNumber <= config.samples; sampleNumber += 1) {
+      const scheduledAtMs = startedAtMs + ((sampleNumber - 1) * config.sampleIntervalSeconds * 1000);
+      const waitMs = Math.max(0, scheduledAtMs - dependencies.now());
+      if (waitMs > 0) await dependencies.sleep(waitMs, signal);
+      assertNotAborted(signal);
+
+      const identityBefore = await dependencies.verifyCandidateIdentity();
+      const forceReauth = sampleNumber === 1 || (sampleNumber - 1) % config.authRefreshEvery === 0;
+      if (forceReauth) dependencies.resetAuth();
+      const result = await dependencies.sample({
+        phase: 'accelerated-soak',
+        percent: preflight.database.rollout.rolloutPercent,
+        sampleNumber,
+        orderId: preflight.orderId,
+        signal,
+      });
+      const identityAfter = await dependencies.verifyCandidateIdentity();
+      completedSamples = sampleNumber;
+      log('accelerated_sample_passed', {
+        sampleNumber,
+        expectedSamples: config.samples,
+        scheduledAt: new Date(scheduledAtMs).toISOString(),
+        completedAt: new Date(dependencies.now()).toISOString(),
+        forceReauth,
+        eventLatencyMs: result.eventLatencyMs,
+        cursorChanged: result.cursorChanged,
+        logErrorCount: result.logErrorCount,
+        identityBefore,
+        identityAfter,
+      });
+    }
+  } catch (error) {
+    error.qualification = {
+      status: 'failed',
+      expectedSamples: config.samples,
+      completedSamples,
+      failureCount: 1,
+      failedSample: completedSamples + 1,
+    };
+    throw error;
+  }
+
+  return {
+    status: 'accelerated_soak_passed',
+    mode: config.mode,
+    expectedStageSha: config.expectedStageSha,
+    expectedSamples: config.samples,
+    completedSamples,
+    failureCount: 0,
+    runtimeRealtimeEnabled,
+    orderId: preflight.orderId,
+    durationMs: dependencies.now() - startedAtMs,
+  };
+}
+
 function createStageDependencies(config, logger, signal) {
   let auth = null;
   let runSequence = 0;
@@ -353,13 +475,65 @@ function createStageDependencies(config, logger, signal) {
     return parseSingleJsonLine(result.stdout, 'database state');
   };
 
+  const fetchRuntimeConfig = async () => {
+    const response = await fetchWithTimeout(
+      `${config.frontendUrl}/runtime-config.json`,
+      { headers: commonHeaders(), cache: 'no-store' },
+      10000,
+      signal,
+    );
+    if (!response.ok) {
+      await discardFetchResponse(response);
+      throw new Error(`Runtime config request failed: HTTP ${response.status}`);
+    }
+    return response.json();
+  };
+
+  const readCanonicalStageSha = async () => {
+    const result = await runCommand(
+      config.rtkBin,
+      ['git', 'ls-remote', '--heads', 'origin', STAGE_REF],
+      { signal, maxOutputBytes: 64 * 1024 },
+    );
+    const actualSha = String(result.stdout).trim().split(/\s+/)[0]?.toLowerCase() || '';
+    if (!IMMUTABLE_SHA_PATTERN.test(actualSha)) {
+      throw new Error('Canonical stage ref returned no immutable SHA');
+    }
+    return actualSha;
+  };
+
+  const verifyCandidateIdentity = async () => {
+    const [stageSha, runtimeConfig] = await Promise.all([
+      readCanonicalStageSha(),
+      fetchRuntimeConfig(),
+    ]);
+    if (config.expectedStageSha && stageSha !== config.expectedStageSha) {
+      throw new Error(`Canonical stage SHA mismatch: expected ${config.expectedStageSha}, received ${stageSha}`);
+    }
+    assertRuntimeConfig(runtimeConfig, config.mode);
+    const frontendSha = assertDeploymentIdentity(
+      'frontend',
+      runtimeConfig.deployment,
+      config.expectedStageSha,
+    );
+    const backendReady = await assertBackendHealth(config, signal, config.expectedStageSha);
+    return {
+      stageSha,
+      frontendSha,
+      backendSha: backendReady.deployment?.gitCommitSha || null,
+    };
+  };
+
   const login = async () => {
     const response = await fetchWithTimeout(`${config.backendUrl}/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ username: config.username, password: config.password }),
     }, 10000, signal);
-    if (!response.ok) throw new Error(`Stage login failed: HTTP ${response.status}`);
+    if (!response.ok) {
+      await discardFetchResponse(response);
+      throw new Error(`Stage login failed: HTTP ${response.status}`);
+    }
     const body = await response.json();
     if (typeof body.accessToken !== 'string' || !body.accessToken) {
       throw new Error('Stage login returned no access token');
@@ -379,6 +553,7 @@ function createStageDependencies(config, logger, signal) {
     }, timeoutMs, signal);
     let response = await execute();
     if (response.status === 401) {
+      await response.arrayBuffer().catch(() => undefined);
       await login();
       response = await execute();
     }
@@ -387,18 +562,14 @@ function createStageDependencies(config, logger, signal) {
 
   const preflight = async () => {
     const database = await queryDatabaseState();
-    const runtimeResponse = await fetchWithTimeout(
-      `${config.frontendUrl}/runtime-config.json`,
-      { headers: commonHeaders(), cache: 'no-store' },
-      10000,
-      signal,
-    );
-    if (!runtimeResponse.ok) throw new Error(`Runtime config request failed: HTTP ${runtimeResponse.status}`);
-    const runtimeConfig = await runtimeResponse.json();
-    await assertBackendHealth(config, signal);
+    const runtimeConfig = await fetchRuntimeConfig();
+    const identity = await verifyCandidateIdentity();
     await login();
     const meResponse = await authenticatedFetch(`${config.backendUrl}/me`);
-    if (!meResponse.ok) throw new Error(`Stage /me failed: HTTP ${meResponse.status}`);
+    if (!meResponse.ok) {
+      await discardFetchResponse(meResponse);
+      throw new Error(`Stage /me failed: HTTP ${meResponse.status}`);
+    }
     const me = await meResponse.json();
     if (String(me.user?.id) !== String(EXPECTED_CANARY_USER_ID)) {
       throw new Error(`ERP_WORKER_LOGIN resolves to user ${me.user?.id || 'missing'}, expected 83`);
@@ -415,7 +586,7 @@ function createStageDependencies(config, logger, signal) {
       permissionCount: Array.isArray(me.user.permissions) ? me.user.permissions.length : 0,
       orderId,
     });
-    return { database, runtimeConfig, orderId };
+    return { database, runtimeConfig, orderId, identity };
   };
 
   const applyRolloutPercent = async (expectedPercent, nextPercent, commandSignal, label) => {
@@ -453,7 +624,7 @@ function createStageDependencies(config, logger, signal) {
 
   const sample = async ({ phase, percent, sampleNumber, orderId }) => {
     const startedAt = new Date();
-    await assertBackendHealth(config, signal);
+    await assertBackendHealth(config, signal, config.expectedStageSha);
     const result = await probeRealtimeTransport({
       config,
       authenticatedFetch,
@@ -481,28 +652,38 @@ function createStageDependencies(config, logger, signal) {
     setRolloutPercent,
     rollbackRolloutPercent,
     sample,
+    verifyCandidateIdentity,
+    resetAuth: () => { auth = null; },
+    now: () => Date.now(),
     sleep,
     signal,
     log: logger,
   };
 }
 
-async function assertBackendHealth(config, signal) {
+async function assertBackendHealth(config, signal, expectedSha = null) {
   const backendOrigin = config.backendOrigin || new URL(config.backendUrl).origin;
   const live = await fetchWithTimeout(`${backendOrigin}/health/live`, {}, 10000, signal);
-  if (!live.ok) throw new Error(`Backend live health failed: HTTP ${live.status}`);
-  const ready = await fetchWithTimeout(`${backendOrigin}/health/ready`, {}, 10000, signal);
-  if (!ready.ok) throw new Error(`Backend ready health failed: HTTP ${ready.status}`);
-  const body = await ready.json();
-  if (body.status !== 'ready') throw new Error(`Backend readiness is ${body.status || 'unknown'}`);
-  if (body.checks?.realtime?.status !== 'ok') {
-    throw new Error(`Backend realtime health is ${body.checks?.realtime?.status || 'missing'}`);
+  if (!live.ok) {
+    await discardFetchResponse(live);
+    throw new Error(`Backend live health failed: HTTP ${live.status}`);
   }
+  await live.arrayBuffer();
+  const ready = await fetchWithTimeout(`${backendOrigin}/health/ready`, {}, 10000, signal);
+  if (!ready.ok) {
+    await discardFetchResponse(ready);
+    throw new Error(`Backend ready health failed: HTTP ${ready.status}`);
+  }
+  const body = await ready.json();
+  return assertBackendReadyPayload(body, expectedSha);
 }
 
 async function findCanaryOrderId(config, authenticatedFetch) {
   const response = await authenticatedFetch(`${config.backendUrl}/orders?page=1&pageSize=50`);
-  if (!response.ok) throw new Error(`Order list request failed: HTTP ${response.status}`);
+  if (!response.ok) {
+    await discardFetchResponse(response);
+    throw new Error(`Order list request failed: HTTP ${response.status}`);
+  }
   const body = await response.json();
   const orders = Array.isArray(body.data) ? body.data : [];
   const selected = orders.find((order) => Number(order.partsCount) > 0) || orders[0];
@@ -516,6 +697,7 @@ async function findCanaryOrderId(config, authenticatedFetch) {
 async function probeRealtimeTransport({ config, authenticatedFetch, orderId, emit, maxEventLatencyMs, signal }) {
   const snapshotUrl = `${config.backendUrl}/orders/${orderId}/detail-live-state`;
   const first = await authenticatedFetch(snapshotUrl, { headers: { Accept: 'application/json' } });
+  await first.arrayBuffer();
   if (first.status !== 200) throw new Error(`Initial realtime snapshot failed: HTTP ${first.status}`);
   if (first.headers.get('x-erp-realtime-enabled') !== 'true') {
     throw new Error('Initial realtime snapshot reports rollout disabled for user 83');
@@ -523,7 +705,6 @@ async function probeRealtimeTransport({ config, authenticatedFetch, orderId, emi
   const etag = first.headers.get('etag');
   const initialCursor = first.headers.get('x-erp-stream-cursor');
   if (!etag || !initialCursor) throw new Error('Initial realtime snapshot omitted ETag or cursor');
-  await first.arrayBuffer();
 
   const streamController = new AbortController();
   const unlinkAbort = linkAbortSignal(signal, streamController);
@@ -538,7 +719,7 @@ async function probeRealtimeTransport({ config, authenticatedFetch, orderId, emi
         },
         signal: streamController.signal,
       },
-      10000,
+      maxEventLatencyMs + 5000,
     );
     if (streamResponse.status !== 200) throw new Error(`SSE open failed: HTTP ${streamResponse.status}`);
     if (!String(streamResponse.headers.get('content-type')).includes('text/event-stream')) {
@@ -563,6 +744,7 @@ async function probeRealtimeTransport({ config, authenticatedFetch, orderId, emi
     const converged = await authenticatedFetch(snapshotUrl, {
       headers: { Accept: 'application/json', 'if-none-match': etag },
     });
+    await converged.arrayBuffer();
     if (converged.status !== 304) {
       throw new Error(`Synthetic invalidation convergence expected HTTP 304, received ${converged.status}`);
     }
@@ -580,6 +762,7 @@ async function probeRealtimeTransport({ config, authenticatedFetch, orderId, emi
     streamController.abort();
     unlinkAbort();
     if (streamResponse?.body) await streamResponse.body.cancel().catch(() => undefined);
+    releaseFetchResponse(streamResponse);
   }
 }
 
@@ -756,6 +939,7 @@ function runCommand(command, args, options = {}) {
     const child = spawn(command, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: process.env,
+      detached: true,
     });
     let stdout = '';
     let stderr = '';
@@ -764,6 +948,9 @@ function runCommand(command, args, options = {}) {
     let abortReason = null;
     const cleanupTimers = [];
     const maxOutputBytes = options.maxOutputBytes || 1024 * 1024;
+    const intGraceMs = options.abortIntGraceMs ?? CHILD_ABORT_INT_GRACE_MS;
+    const termGraceMs = options.abortTermGraceMs ?? CHILD_ABORT_TERM_GRACE_MS;
+    const killGraceMs = options.abortKillGraceMs ?? CHILD_ABORT_KILL_GRACE_MS;
 
     const capture = (current, chunk) => {
       const next = current + chunk.toString('utf8');
@@ -776,22 +963,22 @@ function runCommand(command, args, options = {}) {
     };
 
     child.stdout.on('data', (chunk) => {
-      try { stdout = capture(stdout, chunk); } catch (error) { rejectOnce(error); }
+      try { stdout = capture(stdout, chunk); } catch (error) { settleReject(error); }
     });
     child.stderr.on('data', (chunk) => {
-      try { stderr = capture(stderr, chunk); } catch (error) { rejectOnce(error); }
+      try { stderr = capture(stderr, chunk); } catch (error) { settleReject(error); }
     });
-    child.on('error', rejectOnce);
+    child.on('error', (error) => settleReject(error));
     child.on('close', (code, closeSignal) => {
-      clearCleanupTimers();
       if (settled) return;
-      settled = true;
       if (aborting) {
-        reject(abortReason || new Error(`${command} aborted`));
+        settleAbortIfGone();
+      } else if (groupIsAlive()) {
+        beginAbort(new Error(`${command} leader exited while descendants remained`));
       } else if (code === 0 || options.allowFailure) {
-        resolve({ code, signal: closeSignal, stdout, stderr });
+        settleResolve({ code, signal: closeSignal, stdout, stderr });
       } else {
-        reject(new Error(`${command} exited ${code}: ${redactText(stderr || stdout).trim().slice(0, 1000)}`));
+        settleReject(new Error(`${command} exited ${code}: ${redactText(stderr || stdout).trim().slice(0, 1000)}`));
       }
     });
 
@@ -800,13 +987,20 @@ function runCommand(command, args, options = {}) {
       if (options.signal.aborted) abortHandler();
       else options.signal.addEventListener('abort', abortHandler, { once: true });
     }
-    child.on('close', () => options.signal?.removeEventListener('abort', abortHandler));
     if (options.input !== undefined) child.stdin.end(options.input);
     else child.stdin.end();
 
-    function rejectOnce(error) {
+    function settleResolve(value) {
       if (settled) return;
       settled = true;
+      finishCleanup();
+      resolve(value);
+    }
+
+    function settleReject(error) {
+      if (settled) return;
+      settled = true;
+      finishCleanup();
       reject(error);
     }
 
@@ -814,21 +1008,49 @@ function runCommand(command, args, options = {}) {
       if (aborting || settled) return;
       aborting = true;
       abortReason = reason;
-      child.kill('SIGINT');
-      cleanupTimers.push(setTimeout(() => child.kill('SIGTERM'), CHILD_ABORT_INT_GRACE_MS));
-      cleanupTimers.push(setTimeout(
-        () => child.kill('SIGKILL'),
-        CHILD_ABORT_INT_GRACE_MS + CHILD_ABORT_TERM_GRACE_MS,
-      ));
+      signalGroup('SIGINT');
       cleanupTimers.push(setTimeout(() => {
-        rejectOnce(new Error(`${command} abort cleanup did not complete within ${
-          CHILD_ABORT_INT_GRACE_MS + CHILD_ABORT_TERM_GRACE_MS + CHILD_ABORT_KILL_GRACE_MS
-        }ms`));
-      }, CHILD_ABORT_INT_GRACE_MS + CHILD_ABORT_TERM_GRACE_MS + CHILD_ABORT_KILL_GRACE_MS));
+        if (settleAbortIfGone()) return;
+        signalGroup('SIGTERM');
+      }, intGraceMs));
+      cleanupTimers.push(setTimeout(() => {
+        if (settleAbortIfGone()) return;
+        signalGroup('SIGKILL');
+      }, intGraceMs + termGraceMs));
+      cleanupTimers.push(setTimeout(() => {
+        if (settleAbortIfGone()) return;
+        settleReject(new Error(`${command} abort cleanup did not complete within ${
+          intGraceMs + termGraceMs + killGraceMs
+        }ms; owned process group ${child.pid} is still alive`));
+      }, intGraceMs + termGraceMs + killGraceMs));
     }
 
-    function clearCleanupTimers() {
+    function groupIsAlive() {
+      try {
+        process.kill(-child.pid, 0);
+        return true;
+      } catch (error) {
+        return error?.code === 'EPERM';
+      }
+    }
+
+    function signalGroup(signalName) {
+      try {
+        process.kill(-child.pid, signalName);
+      } catch (error) {
+        if (error?.code !== 'ESRCH') throw error;
+      }
+    }
+
+    function settleAbortIfGone() {
+      if (!aborting || groupIsAlive()) return false;
+      settleReject(abortReason || new Error(`${command} aborted`));
+      return true;
+    }
+
+    function finishCleanup() {
       for (const timer of cleanupTimers) clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abortHandler);
     }
   });
 }
@@ -839,8 +1061,12 @@ function createEvidenceLogger(logRoot, mode, now = new Date()) {
   const basename = `${stamp}-${mode}`;
   const jsonlPath = path.join(logRoot, `${basename}.jsonl`);
   const summaryPath = path.join(logRoot, `${basename}.summary.json`);
+  const summaryTempPath = `${summaryPath}.tmp-${process.pid}`;
+  const descriptor = openSync(jsonlPath, 'wx', 0o600);
   let sequence = 0;
+  let closed = false;
   const log = (event, details = {}) => {
+    if (closed) throw new Error('Evidence logger is closed');
     sequence += 1;
     const record = sanitizeValue({
       sequence,
@@ -848,13 +1074,61 @@ function createEvidenceLogger(logRoot, mode, now = new Date()) {
       event,
       ...details,
     });
-    appendFileSync(jsonlPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-    process.stdout.write(`${JSON.stringify(record)}\n`);
+    const line = `${JSON.stringify(record)}\n`;
+    writeFully(descriptor, line);
+    fsyncSync(descriptor);
+    process.stdout.write(line);
   };
   const writeSummary = (summary) => {
-    writeFileSync(summaryPath, `${JSON.stringify(sanitizeValue(summary), null, 2)}\n`, { mode: 0o600 });
+    const summaryDescriptor = openSync(summaryTempPath, 'wx', 0o600);
+    try {
+      writeFully(summaryDescriptor, `${JSON.stringify(sanitizeValue(summary), null, 2)}\n`);
+      fsyncSync(summaryDescriptor);
+    } finally {
+      closeSync(summaryDescriptor);
+    }
+    renameSync(summaryTempPath, summaryPath);
+    fsyncDirectory(logRoot);
   };
-  return { log, writeSummary, jsonlPath, summaryPath };
+  const validate = () => {
+    fsyncSync(descriptor);
+    const lines = readFileSync(jsonlPath, 'utf8').split(/\r?\n/).filter(Boolean);
+    if (lines.length !== sequence || sequence === 0) {
+      throw new Error(`Evidence JSONL sequence mismatch: expected ${sequence}, found ${lines.length}`);
+    }
+    lines.forEach((line, index) => {
+      const record = JSON.parse(line);
+      if (!record || typeof record !== 'object' || record.sequence !== index + 1) {
+        throw new Error(`Evidence JSONL record ${index + 1} is invalid`);
+      }
+    });
+    return { records: lines.length };
+  };
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    closeSync(descriptor);
+  };
+  return { log, validate, writeSummary, close, jsonlPath, summaryPath };
+}
+
+function writeFully(descriptor, value) {
+  const buffer = Buffer.from(value, 'utf8');
+  let offset = 0;
+  while (offset < buffer.length) {
+    const written = writeSync(descriptor, buffer, offset, buffer.length - offset);
+    if (written <= 0) throw new Error('Evidence write made no progress');
+    offset += written;
+  }
+}
+
+function fsyncDirectory(directoryPath) {
+  const descriptor = openSync(directoryPath, 'r');
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function parseSingleJsonLine(output, label) {
@@ -926,6 +1200,14 @@ function parseInteger(value, name, minimum, maximum) {
   return parsed;
 }
 
+function parseImmutableSha(value, name) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!IMMUTABLE_SHA_PATTERN.test(normalized)) {
+    throw new Error(`${name} must be a 40-character hexadecimal git SHA`);
+  }
+  return normalized;
+}
+
 function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/+$/, '');
 }
@@ -970,17 +1252,61 @@ async function fetchWithTimeout(url, init, timeoutMs, parentSignal) {
   const controller = new AbortController();
   const unlinkParent = linkAbortSignal(parentSignal, controller);
   const unlinkRequest = linkAbortSignal(init?.signal, controller);
-  const timeout = setTimeout(() => controller.abort(new Error(`Request timeout after ${timeoutMs}ms`)), timeoutMs);
-  timeout.unref?.();
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (error) {
-    if (controller.signal.aborted) throw new Error(`Request failed or timed out: ${url}`);
-    throw error;
-  } finally {
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
     clearTimeout(timeout);
     unlinkParent();
     unlinkRequest();
+    controller.signal.removeEventListener('abort', cleanup);
+  };
+  const timeout = setTimeout(
+    () => controller.abort(new Error(`Request timeout after ${timeoutMs}ms`)),
+    timeoutMs,
+  );
+  timeout.unref?.();
+  controller.signal.addEventListener('abort', cleanup, { once: true });
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    return attachFetchResponseCleanup(response, cleanup);
+  } catch (error) {
+    cleanup();
+    if (controller.signal.aborted) throw new Error(`Request failed or timed out: ${url}`);
+    throw error;
+  }
+}
+
+function attachFetchResponseCleanup(response, cleanup) {
+  for (const method of ['arrayBuffer', 'blob', 'formData', 'json', 'text']) {
+    if (typeof response[method] !== 'function') continue;
+    const consume = response[method].bind(response);
+    Object.defineProperty(response, method, {
+      configurable: true,
+      value: async (...args) => {
+        try {
+          return await consume(...args);
+        } finally {
+          cleanup();
+        }
+      },
+    });
+  }
+  Object.defineProperty(response, FETCH_RESPONSE_CLEANUP, { value: cleanup });
+  return response;
+}
+
+function releaseFetchResponse(response) {
+  response?.[FETCH_RESPONSE_CLEANUP]?.();
+}
+
+async function discardFetchResponse(response) {
+  try {
+    await response?.body?.cancel();
+  } catch {
+    // Cleanup still owns the timeout and linked abort listeners.
+  } finally {
+    releaseFetchResponse(response);
   }
 }
 
@@ -1034,18 +1360,24 @@ module.exports = {
   assertDatabaseState,
   assertOrderSseRolloutAllowed,
   assertRuntimeConfig,
+  assertBackendReadyPayload,
+  assertDeploymentIdentity,
+  attachFetchResponseCleanup,
   canaryEmitSql,
   countEligibleUsers,
   createEvidenceLogger,
   createStageDependencies,
   databaseStateSql,
+  discardFetchResponse,
   parseOrderSseRolloutArgs,
   planRolloutSteps,
   probeRealtimeTransport,
+  releaseFetchResponse,
   resolveOrderSseRolloutConfig,
   rolloutUpdateSql,
   runCommand,
   runRolloutController,
+  runAcceleratedSoak,
   safeErrorMessage,
   sanitizeValue,
   stableCohort,

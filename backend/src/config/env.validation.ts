@@ -80,6 +80,10 @@ export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'staging', 'production']).default('development'),
     APP_NAME: z.string().trim().min(1).default('erp-backend'),
+    BACKEND_BUILD_SHA: z
+      .union([z.string().trim().regex(/^[0-9a-fA-F]{40}$/), emptyTrimmedStringFromEnv])
+      .optional()
+      .transform((value) => value?.toLowerCase()),
     API_PREFIX: z
       .string()
       .trim()
