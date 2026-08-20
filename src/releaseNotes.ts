@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Заказы: переход между подготовленными строками",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Стрелка вниз после заполнения или ручного сохранения детали переводит курсор в следующую подготовленную строку без ложной ошибки высоты и без сбоя фокуса на флажке.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Заказы: выбор материала с клавиатуры",
     services: ["ERP"],
     repositories: ["repo_erp"],
