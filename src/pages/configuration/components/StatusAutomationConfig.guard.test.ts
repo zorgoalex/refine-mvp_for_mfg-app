@@ -67,8 +67,8 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
   });
 
   it('uses intent-oriented labels for order-status rule conditions', () => {
-    expect(config).toContain('label="Выполнять только при статусах заказа"');
-    expect(config).toContain('label="Не выполнять при статусах заказа"');
+    expect(config).toContain("currentOrderStatusIn: 'Статус заказа — один из'");
+    expect(config).toContain("currentOrderStatusNotIn: 'Статус заказа — не входит в'");
     expect(config).not.toContain('label="Текущие статусы заказа"');
     expect(config).not.toContain('label="Исключающие статусы заказа"');
   });
@@ -95,5 +95,35 @@ describe('StatusAutomationConfig CNC cut-status setting guards', () => {
     expect(config).toContain('Ошибок: ${result.failedOrderCount}');
     expect(config).toContain('<Button');
     expect(config).toContain('Обновить');
+  });
+});
+
+describe('StatusAutomationConfig rule-builder UX', () => {
+  it('presents rules as event, conditions, and action with a live preview', () => {
+    expect(config).toContain('1. Когда запускать правило?');
+    expect(config).toContain('2. Для каких заказов?');
+    expect(config).toContain('3. Что сделать?');
+    expect(config).toContain('Как будет работать правило');
+    expect(config).toContain('describeFormConditions(form, catalogs)');
+    expect(config).toContain('describeFormAction(form, catalogs)');
+  });
+
+  it('uses addable conditions and hides data-model language from field labels', () => {
+    expect(config).toContain('+ Добавить условие');
+    expect(config).toContain('Все добавленные условия должны совпасть');
+    expect(config).not.toMatch(/label="(?:Целевой статус|Текущие статусы|Исключающие статусы|Маппинг статусов)"/);
+  });
+
+  it('keeps priority out of the primary flow and explains lower-number precedence', () => {
+    expect(config).toContain('Дополнительные настройки');
+    expect(config).toContain('правил одного типа');
+    expect(config).toContain('выполнится только одно — с меньшим числом');
+  });
+
+  it('names dynamic controls and keeps mapping rows responsive', () => {
+    expect(config).toContain('aria-label={CONDITION_LABELS[key]}');
+    expect(config).toContain('aria-label={`Исходные статусы для соответствия ${index + 1}`}');
+    expect(config).toContain('direction="vertical" size={6} style={{ width: \'100%\' }}');
+    expect(config).toContain("type={rulePreviewComplete ? 'success' : 'info'}");
   });
 });
