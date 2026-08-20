@@ -5,6 +5,7 @@ describe('frontend runtime config delivery', () => {
   it('fails closed when runtime env is absent', () => {
     expect(buildFrontendRuntimeConfig({})).toEqual({
       apiUrl: '',
+      hasuraUrl: '',
       ui: {
         evolutionEnabled: false,
         forceLegacy: false,
@@ -42,6 +43,7 @@ describe('frontend runtime config delivery', () => {
     expect(
       buildFrontendRuntimeConfig({
         RUNTIME_CONFIG_API_URL: ' https://api.example.test/ ',
+        RUNTIME_CONFIG_HASURA_URL: ' https://hasura.example.test/v1/graphql/ ',
         RUNTIME_CONFIG_BACKEND_AUTH: 'true',
         RUNTIME_CONFIG_BACKEND_PERMISSIONS: '1',
         RUNTIME_CONFIG_BACKEND_ORDERS_READ: 'yes',
@@ -64,6 +66,7 @@ describe('frontend runtime config delivery', () => {
       }),
     ).toEqual({
       apiUrl: 'https://api.example.test',
+      hasuraUrl: 'https://hasura.example.test/v1/graphql',
       ui: {
         evolutionEnabled: false,
         forceLegacy: false,

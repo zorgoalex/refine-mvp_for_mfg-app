@@ -4,6 +4,7 @@ import {
   applyRuntimeConfig,
   getLoadedRuntimeConfig,
   getRuntimeApiUrl,
+  getRuntimeHasuraUrl,
   initializeRuntimeConfig,
   resetRuntimeConfigForTests,
 } from './runtimeConfig';
@@ -18,6 +19,7 @@ describe('runtimeConfig', () => {
     applyRuntimeConfig(
       {
         apiUrl: 'https://api.example.test/',
+        hasuraUrl: 'https://hasura.example.test/v1/graphql/',
         features: {
           backendAuth: true,
           backendOrdersRead: true,
@@ -38,6 +40,7 @@ describe('runtimeConfig', () => {
     );
 
     expect(getRuntimeApiUrl()).toBe('https://api.example.test');
+    expect(getRuntimeHasuraUrl()).toBe('https://hasura.example.test/v1/graphql');
     expect(featureFlags).toMatchObject({
       useBackendAuth: true,
       useBackendOrdersRead: true,
@@ -60,6 +63,7 @@ describe('runtimeConfig', () => {
     expect(config).toBeNull();
     expect(getLoadedRuntimeConfig()).toBeNull();
     expect(getRuntimeApiUrl()).toBeNull();
+    expect(getRuntimeHasuraUrl()).toBeNull();
     expect(featureFlags.useBackendUsers).toBe(true);
     expect(fetchMock).toHaveBeenCalledWith(
       '/runtime-config.json',
