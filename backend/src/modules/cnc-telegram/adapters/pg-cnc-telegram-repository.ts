@@ -7440,6 +7440,7 @@ async function loadBathCards(
     SELECT
       result.cut_result_id,
       result.cut_job_id,
+      result.source_display_number,
       result.result_no,
       result.revision_no,
       result.result_created_at,
