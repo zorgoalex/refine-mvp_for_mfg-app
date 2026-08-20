@@ -363,6 +363,10 @@ export interface OrderFormDataResponse {
   sheetMaterialTypes?: SheetMaterialTypeLookup[];
 }
 
+export interface OrderNameSuggestionResponse {
+  suggestedOrderName: string;
+}
+
 export interface SaveOrderHeaderDto {
   orderName: string;
   clientId: number;

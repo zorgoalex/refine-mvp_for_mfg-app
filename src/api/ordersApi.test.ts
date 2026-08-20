@@ -94,6 +94,18 @@ describe('ordersApi', () => {
     );
   });
 
+  it('loads the next numeric order name suggestion', async () => {
+    const fetchMock = mockFetch({ suggestedOrderName: '2561' });
+
+    await expect(ordersApi.getNextOrderName()).resolves.toEqual({
+      suggestedOrderName: '2561',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/v1/orders/name-suggestion',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   it('creates an order with one POST /api/v1/orders request', async () => {
     const dto = createSaveOrderDto();
     const order = createOrderDto();

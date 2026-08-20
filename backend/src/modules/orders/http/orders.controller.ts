@@ -1075,6 +1075,19 @@ export class OrdersController {
     return this.orderQueries.getFormData({ currentUser });
   }
 
+  @ApiResponse({ status: 200, description: 'Next available numeric order name' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 503, description: 'Orders API is disabled' })
+  @ApiOperation({ operationId: 'getNextOrderName', summary: 'Suggest next numeric order name' })
+  @Get('name-suggestion')
+  async getNextOrderName(
+    @Req() request: RequestWithCurrentUser,
+  ): Promise<{ suggestedOrderName: string }> {
+    this.assertOrdersReadEnabled();
+    return this.orderQueries.getNextOrderName({ currentUser: this.requireCurrentUser(request) });
+  }
+
   @ApiParam({ name: 'orderId', type: Number, description: 'Source order ID' })
   @ApiQuery({ name: 'search', required: false, type: String, description: 'Target search text: order, client, project, status' })
   @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Maximum returned targets' })

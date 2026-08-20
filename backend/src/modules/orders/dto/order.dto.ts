@@ -55,6 +55,10 @@ export interface OrderRefreshResponseDto extends OrderRefreshMetadataDto {
   order: OrderDto;
 }
 
+export interface OrderNameSuggestionResponseDto {
+  suggestedOrderName: string;
+}
+
 export interface DeleteOrderResponseDto {
   success: true;
   orderId: number;

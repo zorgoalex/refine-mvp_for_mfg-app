@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Заказы: автоматическая подстановка номера",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "При создании заказа поле «Название заказа» автоматически получает следующий свободный числовой номер; номер можно изменить вручную до сохранения.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Раскрой: цветные контуры заказов",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

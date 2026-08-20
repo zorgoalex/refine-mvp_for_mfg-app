@@ -54,6 +54,7 @@ export const apiRoutes = {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),
     resourceDemands: backendApiPath('/orders/resource-demands'),
+    nameSuggestion: backendApiPath('/orders/name-suggestion'),
     statusBoard: backendApiPath('/orders/status-board'),
     statusBoardMdfManualMoves: backendApiPath('/orders/status-board/mdf-manual-moves'),
     statusBoardMdfManualMove: (cardKind: string, cardId: string) =>
