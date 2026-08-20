@@ -58,6 +58,7 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     );
     expect(renderFormSrc).toMatch(/const previewSvg = useMemo\(/);
     expect(renderFormSrc).toMatch(/\[previewParsed, previewSetting\]/);
+    expect(renderFormSrc).toMatch(/useLayoutEffect\(\(\) =>/);
   });
 
   it('eligibility statuses use a multiselect from the production-statuses reference (no free text)', () => {
