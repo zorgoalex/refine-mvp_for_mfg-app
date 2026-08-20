@@ -1404,20 +1404,23 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           console.warn('[OrderForm] handleSave - WARNING: onSaveSuccess callback is not defined!');
         }
 
-        // Auto-export to Google Drive
-        try {
-          console.log('[OrderForm] handleSave - starting auto-export to Google Drive');
-          await exportToDrive({
-            order_id: savedOrderId,
-            order_name: formValues.header.order_name,
-            order_date: formValues.header.order_date,
-            client: formValues.header.client,
+        // Auto-export to Google Drive in background. Order persistence and HDF
+        // reconciliation are already complete, so optional export must not keep
+        // save actions (including the HDF bulk button) in a loading state.
+        console.log('[OrderForm] handleSave - starting background auto-export to Google Drive');
+        void exportToDrive({
+          order_id: savedOrderId,
+          order_name: formValues.header.order_name,
+          order_date: formValues.header.order_date,
+          client: formValues.header.client,
+        })
+          .then(() => {
+            console.log('[OrderForm] handleSave - background auto-export completed successfully');
+          })
+          .catch((exportError) => {
+            // Error already handled in useOrderExport hook (shows message.error).
+            console.error('[OrderForm] handleSave - background auto-export failed:', exportError);
           });
-          console.log('[OrderForm] handleSave - auto-export completed successfully');
-        } catch (exportError) {
-          // Error already handled in useOrderExport hook (shows message.error)
-          console.error('[OrderForm] handleSave - auto-export failed:', exportError);
-        }
         return true;
       }
       return false;

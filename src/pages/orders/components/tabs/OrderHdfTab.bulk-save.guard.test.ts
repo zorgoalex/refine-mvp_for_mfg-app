@@ -16,6 +16,8 @@ describe('OrderHdfTab bulk parameter save', () => {
     expect(tab).toContain('Сохранить');
     expect(tab).not.toContain('>\n                Применить\n              </Button>');
     expect(form).toContain('<OrderHdfTab onSave={handleSave} isSaving={isSaving} />');
+    expect(form).toContain('void exportToDrive({');
+    expect(form).not.toContain('await exportToDrive({');
     expect(service).toContain('await unitOfWork.reconcileHdfDetails({ orderId, currentUser, requestId })');
   });
 });
