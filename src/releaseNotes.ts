@@ -41,6 +41,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Раскрой: номер задания на каждом листе",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Над каждым SVG- и PNG-листом раскроя теперь крупно показан операторский номер задания; единый заголовок используется в задании, карточках файлов станка на Доске МДФ и скринах для Telegram.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Раскрой: закреплённый SVG-предпросмотр",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

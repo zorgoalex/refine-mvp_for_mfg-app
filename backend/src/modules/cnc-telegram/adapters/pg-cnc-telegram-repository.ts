@@ -25,6 +25,7 @@ import type {
   CutSheetRenderSnapshotDto,
 } from '../../cut/dto/cut.dto';
 import {
+  addCutJobHeadingToSvg,
   buildBathProfileSheetSvg,
   buildSheetSvg,
   composePieceLabelLines,
@@ -2080,7 +2081,11 @@ async function persistManualSvgUploadFiles(
   },
 ): Promise<ManualSvgFilePersistenceResult> {
   const renderStyle = await loadManualSvgUploadRenderStyle(tx);
-  const decodedFiles = prepareManualSvgUploadFiles(input.command.dto, renderStyle);
+  const decodedFiles = prepareManualSvgUploadFiles(
+    input.command.dto,
+    renderStyle,
+    input.packet.svgCutJobDisplayNumber ?? input.packet.svgCutJobId ?? null,
+  );
   if (decodedFiles.length === 0) {
     if (input.command.dto.telegramSend?.enabled) {
       throw new ApiError(422, 'MANUAL_SVG_TELEGRAM_FILES_REQUIRED', 'Для отправки в Telegram нужен SVG-файл');
@@ -2182,6 +2187,7 @@ async function lockActiveManualSvgTelegramSend(
 function prepareManualSvgUploadFiles(
   dto: CncTelegramManualSvgUploadDto,
   renderStyle: CutRenderStyleRule,
+  cutJobDisplayNumber: string | number | null,
 ): ManualSvgDecodedUploadFile[] {
   const files = (dto.sourceFiles ?? []).map(decodeManualSvgUploadFile);
   const seen = new Set<string>();
@@ -2195,7 +2201,7 @@ function prepareManualSvgUploadFiles(
   }
   const svg = files.find((file) => file.kind === 'svg');
   if (svg && !files.some((file) => file.kind === 'screenshot')) {
-    const screenshot = renderManualSvgScreenshot(dto, svg, renderStyle);
+    const screenshot = renderManualSvgScreenshot(dto, svg, renderStyle, cutJobDisplayNumber);
     files.push(screenshot);
   }
   return files.sort((left, right) => manualSvgFileKindOrder(left.kind) - manualSvgFileKindOrder(right.kind));
@@ -2264,8 +2270,9 @@ function renderManualSvgScreenshot(
   dto: CncTelegramManualSvgUploadDto,
   svg: ManualSvgDecodedUploadFile,
   renderStyle: CutRenderStyleRule,
+  cutJobDisplayNumber: string | number | null,
 ): ManualSvgDecodedUploadFile {
-  const styledSvg = buildManualSvgScreenshotSvg(dto, renderStyle);
+  const styledSvg = buildManualSvgScreenshotSvg(dto, renderStyle, cutJobDisplayNumber);
   const png = styledSvg && dto.cutLayout.sheet
     ? enhanceRawSvgScreenshotContrast(
         renderSheetPng({
@@ -2277,7 +2284,7 @@ function renderManualSvgScreenshot(
         dto.generatedScreenshot?.contrast,
       )
     : renderRawSvgPng({
-        svg: svg.raw.toString('utf8'),
+        svg: addCutJobHeadingToSvg(svg.raw.toString('utf8'), cutJobDisplayNumber),
         targetPx: RENDER_PRESETS.screen,
         sheetWidthMm: dto.cutLayout.sheet?.widthMm ?? null,
         sheetHeightMm: dto.cutLayout.sheet?.heightMm ?? null,
@@ -2299,6 +2306,7 @@ function renderManualSvgScreenshot(
 function buildManualSvgScreenshotSvg(
   dto: CncTelegramManualSvgUploadDto,
   renderStyle: CutRenderStyleRule,
+  cutJobDisplayNumber: string | number | null,
 ): string | null {
   const sheet = dto.cutLayout.sheet;
   if (!sheet || dto.cutLayout.items.length === 0) return null;
@@ -2345,7 +2353,7 @@ function buildManualSvgScreenshotSvg(
       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)),
     renderStyle,
   );
-  return buildSheetSvg({
+  const svg = buildSheetSvg({
     sheet: placements,
     fillFor: (piece) => fillForOrder((piece as { label?: { orderId: number | null } }).label?.orderId ?? null),
     labelFor: (piece) => {
@@ -2382,6 +2390,7 @@ function buildManualSvgScreenshotSvg(
     },
     renderStyle,
   });
+  return addCutJobHeadingToSvg(svg, cutJobDisplayNumber);
 }
 
 function manualSvgVisualLabelLines(

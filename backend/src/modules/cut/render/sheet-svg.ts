@@ -324,7 +324,63 @@ function removeBathMeterGuideElements(svg: string): string {
 }
 
 function replaceSvgViewBox(svg: string, viewBox: string): string {
-  return svg.replace(/(<svg\b[^>]*\bviewBox=")[^"]*(")/, `$1${viewBox}$2`);
+  return svg.replace(
+    /(<svg\b[^>]*\bviewBox=)(["'])[^"']*\2/,
+    (_match, prefix: string, quote: string) => `${prefix}${quote}${viewBox}${quote}`,
+  );
+}
+
+/**
+ * Adds the visible cut-job number above a rendered sheet. This decorates both
+ * current and frozen SVGs, so every screen/Telegram consumer gets the same
+ * heading without changing the PDF sheet renderer or persisted snapshots.
+ */
+export function addCutJobHeadingToSvg(
+  svg: string,
+  cutJobDisplayNumber: string | number | null | undefined,
+): string {
+  const displayNumber = cutJobDisplayNumber === null || cutJobDisplayNumber === undefined
+    ? ''
+    : String(cutJobDisplayNumber).trim();
+  if (!displayNumber || svg.includes('class="cut-sheet-job-heading"')) return svg;
+
+  const viewBoxMatch = svg.match(/<svg\b[^>]*\bviewBox=(["'])([^"']+)\1[^>]*>/);
+  const values = viewBoxMatch?.[2]?.trim().split(/[\s,]+/).map(Number) ?? [];
+  const [viewX, viewY, viewWidth, viewHeight] = values;
+  if (
+    values.length !== 4 ||
+    ![viewX, viewY, viewWidth, viewHeight].every((value) => Number.isFinite(value)) ||
+    viewWidth <= 0 ||
+    viewHeight <= 0
+  ) {
+    return svg;
+  }
+
+  const pieceLabelFontMm = [...svg.matchAll(/<tspan\b[^>]*\bfont-size="([^"]+)"/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .reduce((largest, value) => Math.max(largest, value), 0);
+  const declaredOrderFontMm = Number(svg.match(/\bdata-cut-order-label-font-mm="([^"]+)"/)?.[1]);
+  const sheetBackground = svg.match(/<rect\b[^>]*\bfill="([^"]+)"/)?.[1] ?? '#ffffff';
+  const minimumHeadingFontMm = Math.max(
+    24,
+    Math.round(Math.min(viewWidth, viewHeight) / 40),
+    pieceLabelFontMm,
+    Number.isFinite(declaredOrderFontMm) ? declaredOrderFontMm : 0,
+  );
+  const headingFontMm = Math.round(minimumHeadingFontMm * 1.15);
+  const headingHeightMm = headingFontMm * 1.9;
+  const headingViewY = viewY - headingHeightMm;
+  const headingCenterY = viewY - headingHeightMm / 2;
+  const headingCenterX = viewX + viewWidth / 2;
+  const escapedDisplayNumber = escapeXml(displayNumber);
+  const decoratedViewBox = `${num(viewX)} ${num(headingViewY)} ${num(viewWidth)} ${num(viewHeight + headingHeightMm)}`;
+  const decorated = replaceSvgViewBox(svg, decoratedViewBox);
+  const heading = [
+    `<rect class="cut-sheet-job-heading-background" x="${num(viewX)}" y="${num(headingViewY)}" width="${num(viewWidth)}" height="${num(headingHeightMm)}" fill="${sheetBackground}"/>`,
+    `<text class="cut-sheet-job-heading" data-cut-job-heading="${escapedDisplayNumber}" x="${num(headingCenterX)}" y="${num(headingCenterY)}" font-family="Liberation Sans, sans-serif" font-size="${num(headingFontMm)}" font-weight="800" fill="#111827" text-anchor="middle" dominant-baseline="middle">Раскрой №${escapedDisplayNumber}</text>`,
+  ].join('');
+  return decorated.replace(/(<svg\b[^>]*>)/, `$1${heading}`);
 }
 
 /** Adds guide overlays to an already rendered/frozen SVG, idempotently. */
@@ -353,6 +409,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 40));
+  const orderLabelFontMm = fontMm * renderStyle.label.orderFontRatio;
 
   // orientPieceRect (shared/cut-geometry, Task 1 Codex R4 MAJOR #4) provides the
   // canonical portrait/landscape transform used by BOTH the SVG renderer and the
@@ -413,7 +470,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
     // via resvg fitTo; explicit width/height would make resvg ignore fitTo.
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" data-cut-order-label-font-mm="${num(orderLabelFontMm)}">`,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="#9aa7b4" stroke-width="3"/>`,
     pieces,
     bathMeterGuides,
