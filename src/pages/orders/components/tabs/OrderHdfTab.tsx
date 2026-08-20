@@ -26,6 +26,11 @@ import './OrderHdfTab.css';
 
 const { Text } = Typography;
 
+interface OrderHdfTabProps {
+  isSaving: boolean;
+  onSave: () => Promise<boolean>;
+}
+
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   ok: { label: 'Рассчитано', color: 'green' },
   too_narrow: { label: 'ХДФ слишком узкий', color: 'red' },
@@ -54,7 +59,7 @@ function hdfNumber(value: unknown, digits: number) {
   return <span className="order-hdf-table__number">{formatNullableNumber(value, digits)}</span>;
 }
 
-export function OrderHdfTab() {
+export function OrderHdfTab({ isSaving, onSave }: OrderHdfTabProps) {
   const {
     header,
     details,
@@ -72,6 +77,7 @@ export function OrderHdfTab() {
   const [recalculating, setRecalculating] = useState(false);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [bulkParameterMm, setBulkParameterMm] = useState<number | null>(null);
+  const [savingBulkParameter, setSavingBulkParameter] = useState(false);
   const [cutModalOpen, setCutModalOpen] = useState(false);
   const [bazisModalOpen, setBazisModalOpen] = useState(false);
   const productionStatusOptions = orderFormData.references.productionStatuses;
@@ -189,7 +195,7 @@ export function OrderHdfTab() {
     setBazisModalOpen(true);
   };
 
-  const applyBulkParameter = () => {
+  const saveBulkParameter = async () => {
     const parameterMm = Number(bulkParameterMm);
     if (!(parameterMm > 0)) {
       message.warning('Укажите параметр отступа больше 0');
@@ -213,9 +219,21 @@ export function OrderHdfTab() {
       message.warning('Не удалось найти исходные детали выбранных позиций');
       return;
     }
-    message.success(
-      `Параметр ${formatNumber(parameterMm, 2)} мм применён к позициям: ${updatedCount}. Сохраните заказ для перерасчёта ХДФ.`,
-    );
+
+    setSavingBulkParameter(true);
+    try {
+      const saved = await onSave();
+      if (!saved) {
+        message.warning('Параметр изменён в форме, но заказ не сохранён');
+        return;
+      }
+      setSelectedRowKeys([]);
+      message.success(
+        `Параметр ${formatNumber(parameterMm, 2)} мм сохранён для позиций: ${updatedCount}. ХДФ пересчитан.`,
+      );
+    } finally {
+      setSavingBulkParameter(false);
+    }
   };
 
   const columns: ColumnsType<OrderHdfDetail> = [
@@ -457,10 +475,11 @@ export function OrderHdfTab() {
               <Button
                 type="primary"
                 className="order-hdf-bulk-parameter__apply"
-                disabled={selectedSourceDetailIds.length === 0 || !(Number(bulkParameterMm) > 0)}
-                onClick={applyBulkParameter}
+                loading={savingBulkParameter}
+                disabled={isSaving || selectedSourceDetailIds.length === 0 || !(Number(bulkParameterMm) > 0)}
+                onClick={() => void saveBulkParameter()}
               >
-                Применить
+                Сохранить
               </Button>
             </Space.Compact>
             <Text type="secondary" className="order-hdf-bulk-parameter__selection">
