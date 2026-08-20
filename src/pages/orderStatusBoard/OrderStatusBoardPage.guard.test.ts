@@ -688,6 +688,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('className="cnc-order-card__missing-summary"');
     expect(page).toContain('formatCncMissingDetailsSummary(details)');
     expect(page).toContain('Отсутствуют - позиций - ${positionCount}, деталей - ${detailCount}');
+    expect(page).toContain('onToggle={(event) => setOpen(event.currentTarget.open)}');
+    expect(page).toContain('{open && (');
     expect(page).toContain('canDrag: () => moveAvailable && finePointer && !dragSuppressedRef.current');
     expect(page).toContain('data-cnc-manual-drag-ignore="true"');
     expect(page).toContain('onPointerDown={stopCncCardNestedInteraction}');

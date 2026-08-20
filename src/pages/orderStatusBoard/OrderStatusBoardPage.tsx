@@ -7647,29 +7647,35 @@ interface CncOrderMissingDetailsSpoilerProps {
 
 const CncOrderMissingDetailsSpoiler = memo<CncOrderMissingDetailsSpoilerProps>(({
   details,
-}) => (
-  <details
-    className="cnc-order-card__missing"
-    data-cnc-manual-drag-ignore="true"
-    onPointerDown={stopCncCardNestedInteraction}
-    onMouseDown={stopCncCardNestedInteraction}
-    onTouchStart={stopCncCardNestedInteraction}
-    onClick={stopCncCardClickPropagation}
-  >
-    <summary className="cnc-order-card__missing-summary">
-      <span className="cnc-order-card__missing-label">
-        {formatCncMissingDetailsSummary(details)}
-      </span>
-    </summary>
-    <ul className="cnc-order-card__missing-list">
-      {details.map((detail) => (
-        <li key={detail.detailId}>
-          {formatCncMissingDetailLine(detail)}
-        </li>
-      ))}
-    </ul>
-  </details>
-));
+}) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="cnc-order-card__missing"
+      data-cnc-manual-drag-ignore="true"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onPointerDown={stopCncCardNestedInteraction}
+      onMouseDown={stopCncCardNestedInteraction}
+      onTouchStart={stopCncCardNestedInteraction}
+      onClick={stopCncCardClickPropagation}
+    >
+      <summary className="cnc-order-card__missing-summary">
+        <span className="cnc-order-card__missing-label">
+          {formatCncMissingDetailsSummary(details)}
+        </span>
+      </summary>
+      {open && (
+        <ul className="cnc-order-card__missing-list">
+          {details.map((detail) => (
+            <li key={detail.detailId}>
+              {formatCncMissingDetailLine(detail)}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+});
 CncOrderMissingDetailsSpoiler.displayName = 'CncOrderMissingDetailsSpoiler';
 
 export function formatStatusBoardOrderNumber(
