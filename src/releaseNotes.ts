@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Календарь: загрузка заказов по плановой дате",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Экран «Календарь» снова загружает заказы за выбранный период через backend и не остаётся пустым.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Заказы: переход между подготовленными строками",
     services: ["ERP"],
     repositories: ["repo_erp"],

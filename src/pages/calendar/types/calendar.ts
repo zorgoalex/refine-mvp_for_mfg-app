@@ -69,6 +69,7 @@ export interface CalendarOrder {
   doweling_order_name?: string;
 
   // Пройденные этапы производства (коды из production_status_events)
+  passed_production_status_codes?: string[];
   passedProductionCodes?: string[];
 
   // Дополнительные поля

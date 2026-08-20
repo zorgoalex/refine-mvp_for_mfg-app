@@ -1336,6 +1336,18 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       clauses.push(`o.order_date <= $${params.push(command.query.dateTo)}`);
     }
 
+    if (command.query.plannedCompletionDateFrom) {
+      clauses.push(
+        `o.planned_completion_date >= $${params.push(command.query.plannedCompletionDateFrom)}`,
+      );
+    }
+
+    if (command.query.plannedCompletionDateTo) {
+      clauses.push(
+        `o.planned_completion_date <= $${params.push(command.query.plannedCompletionDateTo)}`,
+      );
+    }
+
     if (command.query.onlyMyOrders) {
       clauses.push(`o.manager_id = $${params.push(Number(command.currentUser.id))}`);
     }

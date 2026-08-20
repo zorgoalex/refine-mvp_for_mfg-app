@@ -139,6 +139,8 @@ export interface OrderListQuery {
   productionStatusId?: number;
   dateFrom?: DateOnlyString;
   dateTo?: DateOnlyString;
+  plannedCompletionDateFrom?: DateOnlyString;
+  plannedCompletionDateTo?: DateOnlyString;
   onlyMyOrders?: boolean;
   groupIds?: string[];
   groupMode?: 'any' | 'all' | 'primary' | 'none';

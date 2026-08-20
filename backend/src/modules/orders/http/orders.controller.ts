@@ -1022,6 +1022,8 @@ export class OrdersController {
   @ApiQuery({ name: 'productionStatusId', required: false, type: Number, description: 'Production status ID filter' })
   @ApiQuery({ name: 'dateFrom', required: false, type: String, description: 'Start date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
   @ApiQuery({ name: 'dateTo', required: false, type: String, description: 'End date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
+  @ApiQuery({ name: 'plannedCompletionDateFrom', required: false, type: String, description: 'Planned completion start date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
+  @ApiQuery({ name: 'plannedCompletionDateTo', required: false, type: String, description: 'Planned completion end date filter', schema: swaggerSchema(dateOnlySwaggerSchema) })
   @ApiQuery({ name: 'onlyMyOrders', required: false, type: Boolean, description: 'Only orders assigned to the current user' })
   @ApiQuery({ name: 'deleted', required: false, type: Boolean, description: 'True to list only deleted orders; requires orders.delete' })
   @ApiQuery({ name: 'groupIds', required: false, type: String, description: 'Comma-separated current group UUID filters' })
@@ -1563,6 +1565,14 @@ export function parseOrderListQuery(
     ),
     dateFrom: parseOptionalDateOnly(query.dateFrom, 'dateFrom'),
     dateTo: parseOptionalDateOnly(query.dateTo, 'dateTo'),
+    plannedCompletionDateFrom: parseOptionalDateOnly(
+      query.plannedCompletionDateFrom,
+      'plannedCompletionDateFrom',
+    ),
+    plannedCompletionDateTo: parseOptionalDateOnly(
+      query.plannedCompletionDateTo,
+      'plannedCompletionDateTo',
+    ),
     onlyMyOrders: parseBoolean(query.onlyMyOrders, false),
     deleted: parseOptionalBoolean(query.deleted, 'deleted'),
     groupIds: parseGroupIds(query.groupIds),
