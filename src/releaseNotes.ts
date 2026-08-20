@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Аудит: понятные события автостатусов",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Журнал аудита для применённого правила автостатусов показывает название и номер правила, событие-триггер и точный переход статуса с названиями, кодами и количеством изменённых деталей.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Заказы: автоматическая подстановка номера",
     services: ["ERP"],
     repositories: ["repo_erp"],

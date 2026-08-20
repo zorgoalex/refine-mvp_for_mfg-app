@@ -66,6 +66,25 @@ interface AuditRow extends QueryResultRow {
   created_at: string | Date;
 }
 
+interface StatusCommandAuditRow extends QueryResultRow {
+  audit_id: string;
+  event: string;
+  status_field: string | null;
+  status_id: string | number | null;
+  status_name: string | null;
+  status_code: string | null;
+  before_json: unknown;
+  after_json: unknown;
+  diff_json: unknown;
+}
+
+interface StatusCatalogRow extends QueryResultRow {
+  status_kind: 'order' | 'production';
+  status_id: string | number;
+  status_name: string;
+  status_code: string | null;
+}
+
 interface AuditFilterOptionsRow extends QueryResultRow {
   events: unknown;
   entity_types: unknown;
@@ -352,7 +371,11 @@ function str(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
-function mapRow(row: AuditRow): AuditLogEventDto {
+function mapRow(row: AuditRow, statusCommand?: Record<string, unknown>): AuditLogEventDto {
+  const rawMetadata = jsonObject(row.metadata_json);
+  const metadata = statusCommand === undefined
+    ? row.metadata_json
+    : { ...(rawMetadata ?? {}), statusCommand };
   return {
     auditId: row.audit_id,
     event: row.event,
@@ -383,7 +406,7 @@ function mapRow(row: AuditRow): AuditLogEventDto {
     before: row.before_json == null ? null : redactLogValue(row.before_json),
     after: row.after_json == null ? null : redactLogValue(row.after_json),
     diff: row.diff_json == null ? null : redactLogValue(row.diff_json),
-    metadata: row.metadata_json == null ? null : redactLogValue(row.metadata_json),
+    metadata: metadata == null ? null : redactLogValue(metadata),
     relatedEntities: Array.isArray(row.related_entities)
       ? (
           row.related_entities as Array<{
@@ -405,6 +428,109 @@ function mapRow(row: AuditRow): AuditLogEventDto {
         })
       : [],
     createdAt: typeof row.created_at === 'string' ? row.created_at : row.created_at.toISOString(),
+  };
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function jsonObject(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function linkedStatusCommandAuditId(row: AuditRow): string | null {
+  const value = jsonObject(row.metadata_json)?.statusCommandAuditId;
+  return typeof value === 'string' && UUID_PATTERN.test(value) ? value : null;
+}
+
+function addStatusId(target: Set<number>, value: unknown): void {
+  const statusId = num(value as string | number | null);
+  if (statusId != null && Number.isSafeInteger(statusId) && statusId > 0) target.add(statusId);
+}
+
+function addDistributionStatusIds(target: Set<number>, value: unknown): void {
+  const distribution = jsonObject(value);
+  if (!distribution) return;
+  for (const statusId of Object.keys(distribution)) addStatusId(target, statusId);
+}
+
+function collectStatusCatalogIds(rows: readonly StatusCommandAuditRow[]): {
+  orderStatusIds: number[];
+  productionStatusIds: number[];
+} {
+  const orderStatusIds = new Set<number>();
+  const productionStatusIds = new Set<number>();
+  for (const row of rows) {
+    const before = jsonObject(row.before_json) ?? {};
+    const after = jsonObject(row.after_json) ?? {};
+    const diff = jsonObject(row.diff_json) ?? {};
+    if (row.status_field === 'orderStatus') {
+      const pair = jsonObject(diff.orderStatusId) ?? {};
+      addStatusId(orderStatusIds, row.status_id);
+      addStatusId(orderStatusIds, before.orderStatusId);
+      addStatusId(orderStatusIds, after.orderStatusId);
+      addStatusId(orderStatusIds, pair.before);
+      addStatusId(orderStatusIds, pair.after);
+      continue;
+    }
+
+    const productionPair = jsonObject(diff.productionStatusId) ?? {};
+    const orderProductionPair = jsonObject(diff.orderProductionStatusId) ?? {};
+    addStatusId(productionStatusIds, row.status_id);
+    addStatusId(productionStatusIds, before.productionStatusId);
+    addStatusId(productionStatusIds, after.productionStatusId);
+    addStatusId(productionStatusIds, before.orderProductionStatusId);
+    addStatusId(productionStatusIds, after.orderProductionStatusId);
+    addStatusId(productionStatusIds, productionPair.before);
+    addStatusId(productionStatusIds, productionPair.after);
+    addStatusId(productionStatusIds, orderProductionPair.before);
+    addStatusId(productionStatusIds, orderProductionPair.after);
+    addDistributionStatusIds(productionStatusIds, before.detailStatusDistribution);
+    addDistributionStatusIds(productionStatusIds, after.detailStatusDistribution);
+    addDistributionStatusIds(productionStatusIds, diff.beforeStatusDistribution);
+    addDistributionStatusIds(productionStatusIds, diff.afterStatusDistribution);
+  }
+  return {
+    orderStatusIds: Array.from(orderStatusIds).sort((left, right) => left - right),
+    productionStatusIds: Array.from(productionStatusIds).sort((left, right) => left - right),
+  };
+}
+
+function buildStatusCatalog(rows: readonly StatusCatalogRow[]): Map<string, Record<string, unknown>> {
+  const catalog = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    catalog.set(`${row.status_kind}:${String(row.status_id)}`, {
+      name: row.status_name,
+      code: row.status_code,
+    });
+  }
+  return catalog;
+}
+
+function mapStatusCommand(
+  row: StatusCommandAuditRow,
+  catalog: ReadonlyMap<string, Record<string, unknown>>,
+): Record<string, unknown> {
+  const statusKind = row.status_field === 'orderStatus' ? 'order' : 'production';
+  const statusCatalog: Record<string, unknown> = {};
+  const ids = collectStatusCatalogIds([row]);
+  const relevantIds = statusKind === 'order' ? ids.orderStatusIds : ids.productionStatusIds;
+  for (const statusId of relevantIds) {
+    const status = catalog.get(`${statusKind}:${statusId}`);
+    if (status) statusCatalog[String(statusId)] = status;
+  }
+  return {
+    auditId: row.audit_id,
+    event: row.event,
+    statusField: row.status_field,
+    statusId: num(row.status_id),
+    statusName: row.status_name,
+    statusCode: row.status_code,
+    before: row.before_json,
+    after: row.after_json,
+    diff: row.diff_json,
+    statusCatalog,
   };
 }
 
@@ -547,8 +673,41 @@ export class PgAuditLogRepository implements AuditLogRepositoryPort {
       `SELECT ${SELECT_COLUMNS} FROM audit_log ${AUDIT_LABEL_JOINS} ${where} ORDER BY audit_log.created_at DESC, audit_log.audit_id DESC LIMIT $${limitParam} OFFSET $${offsetParam}`,
       [...params, command.pageSize, (command.page - 1) * command.pageSize]
     );
+    const linkedAuditIds = Array.from(new Set(
+      rowsResult.rows.map(linkedStatusCommandAuditId).filter((value): value is string => value !== null),
+    ));
+    const statusCommands = new Map<string, Record<string, unknown>>();
+    if (linkedAuditIds.length > 0) {
+      const linkedResult = await this.database.query<StatusCommandAuditRow>(
+        `SELECT audit_id, event, status_field, status_id, status_name, status_code,
+                before_json, after_json, diff_json
+         FROM audit_log
+         WHERE audit_id = ANY($1::uuid[])`,
+        [linkedAuditIds],
+      );
+      const { orderStatusIds, productionStatusIds } = collectStatusCatalogIds(linkedResult.rows);
+      const catalogResult = await this.database.query<StatusCatalogRow>(
+        `SELECT 'order'::text AS status_kind, order_status_id AS status_id,
+                order_status_name AS status_name, NULL::text AS status_code
+         FROM order_statuses
+         WHERE order_status_id = ANY($1::bigint[])
+         UNION ALL
+         SELECT 'production'::text AS status_kind, production_status_id AS status_id,
+                production_status_name AS status_name, production_status_code AS status_code
+         FROM production_statuses
+         WHERE production_status_id = ANY($2::bigint[])`,
+        [orderStatusIds, productionStatusIds],
+      );
+      const catalog = buildStatusCatalog(catalogResult.rows);
+      for (const row of linkedResult.rows) {
+        statusCommands.set(row.audit_id, mapStatusCommand(row, catalog));
+      }
+    }
     return {
-      data: rowsResult.rows.map(mapRow),
+      data: rowsResult.rows.map((row) => {
+        const linkedAuditId = linkedStatusCommandAuditId(row);
+        return mapRow(row, linkedAuditId === null ? undefined : statusCommands.get(linkedAuditId));
+      }),
       pagination: {
         page: command.page,
         pageSize: command.pageSize,

@@ -80,6 +80,30 @@ const EVENT_TITLES: Record<string, string> = {
   'cnc.manual_svg_upload.telegram_send_completed': 'Файлы раскроя отправлены в Telegram',
   'cnc.manual_svg_upload.telegram_send_failed': 'Ошибка отправки файлов раскроя в Telegram',
   'cnc.manual_svg_upload.telegram_send_unknown': 'Статус отправки файлов раскроя неизвестен',
+  'status_automation.rule_applied': 'Применено правило автостатусов',
+  'status_automation.rule_skipped': 'Правило автостатусов не применено',
+};
+
+const STATUS_AUTOMATION_TRIGGER_LABELS: Record<string, string> = {
+  'order.created': 'создания заказа',
+  'order.status_changed': 'изменения статуса заказа',
+  'order.production_status_changed': 'изменения производственного статуса заказа',
+  'order.payment_status_changed': 'изменения статуса оплаты',
+  'payment.created': 'добавления первого платежа',
+  'payment.updated': 'изменения платежа',
+  'mdf.order_machine_files_present': 'появления файлов станка',
+  'mdf.board.completed': 'завершения МДФ-работ',
+  'mdf.board.baths': 'появления ванн на МДФ-доске',
+  'mdf.board.baths_ready': 'готовности ванн',
+  'mdf.board.baths_laminated': 'закатки ванн',
+};
+
+const STATUS_AUTOMATION_ACTION_LABELS: Record<string, string> = {
+  change_order_status: 'Статус заказа',
+  change_production_status: 'Производственный статус заказа',
+  change_details_production_status: 'Производственный статус деталей',
+  map_order_status_to_details_production_status: 'Производственный статус деталей',
+  map_production_status_to_order_status: 'Статус заказа',
 };
 
 const ENTITY_LABELS: Record<string, string> = {
@@ -163,6 +187,7 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
   const notes: string[] = [];
 
   addDetailTransferSummary(record, metadata, changes, notes);
+  addStatusAutomationSummary(record, metadata, changes, notes);
   addStatusChange(record, before, after, diff, metadata, changes);
   addProductionModeChange(record, diff, before, after, changes);
   addManualSvgFileUploadSummary(record, metadata, changes, notes);
@@ -186,6 +211,95 @@ export function buildAuditReadableSummary(record: AuditLogEventDto): AuditReadab
     notes: dedupeStrings(notes).slice(0, 5),
     related: auditRelated(record),
   };
+}
+
+function addStatusAutomationSummary(
+  record: AuditLogEventDto,
+  metadata: JsonObject,
+  changes: AuditReadableChange[],
+  notes: string[],
+): void {
+  if (record.event !== 'status_automation.rule_applied') return;
+
+  const ruleName = stringValue(metadata.ruleName) ?? 'без названия';
+  const ruleId = numericEntityId(record.entityId);
+  notes.push(`Правило: ${ruleName}${ruleId == null ? '' : ` (#${ruleId})`}`);
+
+  const triggerEvent = stringValue(metadata.eventType);
+  if (triggerEvent) {
+    notes.push(`Сработало после: ${STATUS_AUTOMATION_TRIGGER_LABELS[triggerEvent] ?? humanizeToken(triggerEvent).toLocaleLowerCase('ru-RU')}`);
+  }
+
+  const statusCommand = objectOrEmpty(metadata.statusCommand);
+  const commandEvent = stringValue(statusCommand.event);
+  if (!commandEvent) {
+    const actionType = stringValue(metadata.actionType);
+    const targetStatusId = numberValue(metadata.targetStatusId);
+    changes.push({
+      label: actionType ? STATUS_AUTOMATION_ACTION_LABELS[actionType] ?? humanizeToken(actionType) : 'Целевой статус',
+      before: 'связанная запись недоступна',
+      after: targetStatusId == null ? 'не указан' : `#${targetStatusId}`,
+    });
+    return;
+  }
+
+  const commandDiff = objectOrEmpty(statusCommand.diff);
+  const statusCatalog = objectOrEmpty(statusCommand.statusCatalog);
+  if (commandEvent === 'orders.detail_production_status_batch_change') {
+    const beforeDistribution = commandDiff.beforeStatusDistribution;
+    const afterDistribution = commandDiff.afterStatusDistribution;
+    changes.push({
+      label: 'Производственный статус деталей',
+      before: formatStatusDistribution(beforeDistribution, statusCatalog),
+      after: formatStatusDistribution(afterDistribution, statusCatalog),
+    });
+    const affectedDetailCount = numberValue(commandDiff.affectedDetailCount);
+    if (affectedDetailCount != null) notes.push(`Изменено деталей: ${affectedDetailCount}`);
+    return;
+  }
+
+  const config = STATUS_EVENT_CONFIG[commandEvent];
+  if (!config) return;
+  const statusPair = objectOrEmpty(commandDiff[`${config.statusPrefix}Id`]);
+  const beforeId = numberValue(statusPair.before);
+  const afterId = numberValue(statusPair.after) ?? numberValue(statusCommand.statusId);
+  changes.push({
+    label: config.changeLabel,
+    before: statusCatalogLabel(beforeId, statusCatalog),
+    after: statusCatalogLabel(
+      afterId,
+      statusCatalog,
+      stringValue(statusCommand.statusName),
+      stringValue(statusCommand.statusCode),
+    ),
+  });
+}
+
+function formatStatusDistribution(value: unknown, catalog: JsonObject): string {
+  const distribution = objectOrEmpty(value);
+  const entries = Object.entries(distribution)
+    .map(([statusId, count]) => {
+      const numericCount = numberValue(count);
+      if (numericCount == null) return null;
+      return `${statusCatalogLabel(numberValue(statusId), catalog)} × ${numericCount}`;
+    })
+    .filter((entry): entry is string => entry !== null);
+  return entries.length > 0 ? entries.join('; ') : 'не указано';
+}
+
+function statusCatalogLabel(
+  statusId: number | undefined,
+  catalog: JsonObject,
+  fallbackName?: string,
+  fallbackCode?: string,
+): string {
+  const status = statusId == null ? {} : objectOrEmpty(catalog[String(statusId)]);
+  const name = stringValue(status.name) ?? fallbackName;
+  const code = stringValue(status.code) ?? fallbackCode;
+  if (name && code) return `${name} (${code})`;
+  if (name) return name;
+  if (code) return code;
+  return statusId == null ? 'не указан' : `#${statusId}`;
 }
 
 export function auditActor(record: AuditLogEventDto, metadata?: JsonObject): string {

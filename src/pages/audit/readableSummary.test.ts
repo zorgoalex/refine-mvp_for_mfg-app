@@ -41,6 +41,101 @@ function event(overrides: Partial<AuditLogEventDto> = {}): AuditLogEventDto {
 }
 
 describe('buildAuditReadableSummary', () => {
+  it('shows the applied automation rule and exact detail status transition', () => {
+    const summary = buildAuditReadableSummary(
+      event({
+        event: 'status_automation.rule_applied',
+        entityType: 'status_automation_rule',
+        entityId: '4',
+        entityName: null,
+        relatedOrderId: 11520,
+        relatedOrderName: '2777',
+        source: 'backend-status-automation',
+        metadata: {
+          ruleName: 'Готов к выдаче -> произ-во Упакован',
+          eventType: 'order.status_changed',
+          actionType: 'change_details_production_status',
+          targetStatusId: 7,
+          statusCommandAuditId: '29987552-3914-4bb9-985b-c9690d366fd1',
+          statusCommand: {
+            auditId: '29987552-3914-4bb9-985b-c9690d366fd1',
+            event: 'orders.detail_production_status_batch_change',
+            statusField: 'productionDetailBatch',
+            statusId: 7,
+            statusName: 'Упакован',
+            statusCode: 'packed',
+            before: { detailStatusDistribution: { 2: 8 } },
+            after: { detailStatusDistribution: { 7: 8 } },
+            diff: {
+              affectedDetailCount: 8,
+              beforeStatusDistribution: { 2: 8 },
+              afterStatusDistribution: { 7: 8 },
+            },
+            statusCatalog: {
+              2: { name: 'Распилен', code: 'cut' },
+              7: { name: 'Упакован', code: 'packed' },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(summary.title).toBe('Применено правило автостатусов');
+    expect(summary.object).toBe('Заказ 2777 (#11520)');
+    expect(summary.changes).toEqual([
+      {
+        label: 'Производственный статус деталей',
+        before: 'Распилен (cut) × 8',
+        after: 'Упакован (packed) × 8',
+      },
+    ]);
+    expect(summary.notes).toEqual(
+      expect.arrayContaining([
+        'Правило: Готов к выдаче -> произ-во Упакован (#4)',
+        'Сработало после: изменения статуса заказа',
+        'Изменено деталей: 8',
+        'Источник: автоматизация',
+      ]),
+    );
+  });
+
+  it('shows an exact order status transition for an applied automation rule', () => {
+    const summary = buildAuditReadableSummary(
+      event({
+        event: 'status_automation.rule_applied',
+        entityType: 'status_automation_rule',
+        entityId: '6',
+        metadata: {
+          ruleName: 'пр Распилен -> В производстве',
+          eventType: 'order.production_status_changed',
+          actionType: 'change_order_status',
+          targetStatusId: 4,
+          statusCommand: {
+            event: 'orders.status_change',
+            statusField: 'orderStatus',
+            statusId: 4,
+            statusName: 'В производстве',
+            before: { orderStatusId: 2 },
+            after: { orderStatusId: 4, orderStatusName: 'В производстве' },
+            diff: { orderStatusId: { before: 2, after: 4 } },
+            statusCatalog: {
+              2: { name: 'Новый', code: null },
+              4: { name: 'В производстве', code: null },
+            },
+          },
+        },
+      }),
+    );
+
+    expect(summary.changes).toEqual([
+      {
+        label: 'Статус заказа',
+        before: 'Новый',
+        after: 'В производстве',
+      },
+    ]);
+  });
+
   it('describes order status changes without using target metadata as the previous value', () => {
     const summary = buildAuditReadableSummary(
       event({
