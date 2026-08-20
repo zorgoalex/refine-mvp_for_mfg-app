@@ -1161,6 +1161,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('orderStatusBoardApi.get({');
     expect(page).toContain('orderIds: chunk');
     expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
+    expect(page).toContain('const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;');
+    expect(page).toContain('if (!alreadyLoaded) void loadOrderBoard();');
     expect(page).toContain('const timer = window.setInterval(() => {');
     expect(page).toContain('}, CNC_ORDER_STATUS_REFRESH_MS);');
     expect(page).toContain("primaryStatusKind === 'order' || board === 'order'");

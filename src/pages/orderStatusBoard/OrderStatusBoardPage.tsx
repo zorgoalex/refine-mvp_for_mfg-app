@@ -678,6 +678,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const cncManualMovesRef = useRef<CncBoardManualMoveState>({});
   const cncStrongRefreshInFlightRef = useRef(false);
   const cncAuxiliaryRefreshRevisionRef = useRef(0);
+  const cncOrderBoardRequestKeyRef = useRef<string | null>(null);
   const cncManualMoveRequestSeqRef = useRef<Record<string, number>>({});
   const [cncDetailedEnabled, setCncDetailedEnabled] = useState(false);
   const [cncBathsRequireMachineFiles, setCncBathsRequireMachineFiles] =
@@ -819,6 +820,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 datasetRevisionRef.current !== revision
                 || cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision
               ) return false;
+              cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
+                orderIds,
+                currentViewState,
+              );
               setCncOriginalBoard(response);
               cncTodayRef.current = null;
               cncOrderSearchTodayRef.current = null;
@@ -869,6 +874,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             ) {
               return false;
             }
+            cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
+              refreshedOrderIds,
+              currentViewState,
+            );
             cncTodayRef.current = response;
             cncOrderSearchTodayRef.current = response;
             setCncToday(response);
@@ -1630,14 +1639,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
 
   useEffect(() => {
     if (!isCncToday || cncOrderIds.length === 0) {
+      cncOrderBoardRequestKeyRef.current = null;
       setCncOrderBoard(null);
       setCncOrderBoardLoading(false);
       return;
     }
 
+    const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState);
+    const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;
     let cancelled = false;
     let inFlight = false;
-    let initialLoad = true;
+    let initialLoad = !alreadyLoaded;
     let warned = false;
     const loadOrderBoard = async () => {
       if (cncStrongRefreshInFlightRef.current) return;
@@ -1656,6 +1668,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           !cancelled
           && cncAuxiliaryRefreshRevisionRef.current === requestRevision
         ) {
+          cncOrderBoardRequestKeyRef.current = requestKey;
           setCncOrderBoard(response);
         }
       } catch (error) {
@@ -1669,7 +1682,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       }
     };
 
-    void loadOrderBoard();
+    if (!alreadyLoaded) void loadOrderBoard();
     const timer = window.setInterval(() => {
       void loadOrderBoard();
     }, CNC_ORDER_STATUS_REFRESH_MS);
@@ -7814,6 +7827,17 @@ async function fetchCncOrderStatusBoard(
     ),
   );
   return mergeCncOrderStatusBoardResponses(responses);
+}
+
+export function buildCncOrderStatusBoardRequestKey(
+  orderIds: readonly number[],
+  sortPreference: {
+    sortBy: OrderStatusBoardSortBy;
+    sortOrder: OrderStatusBoardSortOrder;
+  },
+): string {
+  const normalizedOrderIds = [...new Set(orderIds)].sort((left, right) => left - right);
+  return `${sortPreference.sortBy}|${sortPreference.sortOrder}|${normalizedOrderIds.join(',')}`;
 }
 
 function collectCncOrderStatusBoardIds(
