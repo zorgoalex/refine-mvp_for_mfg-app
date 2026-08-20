@@ -373,7 +373,7 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
                 <Title level={5}>Детали и заказы</Title>
                 <Row gutter={[16, 12]}>
                   <Col xs={24} md={12}>
-                    <ColorField label="Фон без заказа" value={draft.profile.piece.defaultFill} disabled={!canManage} onChange={(value) => updatePiece({ defaultFill: value })} />
+                    <ColorField label="Фон листа и деталей" value={draft.profile.piece.defaultFill} disabled={!canManage} onChange={(value) => updatePiece({ defaultFill: value })} />
                   </Col>
                   <Col xs={24} md={12}>
                     <ColorField label="Контур детали" value={draft.profile.piece.stroke} disabled={!canManage} onChange={(value) => updatePiece({ stroke: value })} />
@@ -711,7 +711,7 @@ function PaletteEditor({
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <div className="cut-render-number-header">
-        <Text className="cut-render-field-label">Палитра заказов</Text>
+        <Text className="cut-render-field-label">Палитра контуров заказов</Text>
         <Button
           size="small"
           icon={<PlusOutlined />}

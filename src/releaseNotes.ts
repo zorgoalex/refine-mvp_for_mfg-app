@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Раскрой: цветные контуры заказов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "В SVG и на экране раскроя разные заказы теперь выделяются цветом контуров деталей и линий фрезеровок; фон деталей совпадает с фоном листа и больше не закрашивается палитрой заказа.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Справочники: обязательная проверка доступности",
     services: ["ERP"],
     repositories: ["repo_erp"],

@@ -1475,8 +1475,10 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('detailed ? false : true');
     expect(page).toContain('buildCncBathDetailOrderFillMap');
     expect(page).toContain('CNC_BATH_DETAIL_ORDER_FILL_COLORS');
-    expect(page).toContain("rect.setAttribute('fill', fill)");
-    expect(page).toContain("rect.setAttribute('data-cnc-order-fill', 'true')");
+    expect(page).toContain("rect.setAttribute('fill', CNC_BATH_SHEET_BACKGROUND)");
+    expect(page).toContain("piece.querySelectorAll<SVGElement>('rect, path, line, polyline, polygon, circle, ellipse')");
+    expect(page).toContain("contour.setAttribute('stroke', fill)");
+    expect(page).toContain("contour.setAttribute('data-cnc-order-contour', 'true')");
     expect(page).toContain('enlargeCncBathDetailText(piece, 2)');
     expect(page).toContain("text.setAttribute('data-cnc-detailed-font-scale'");
     expect(page).toContain('cncBathDetailCheckPoint');
@@ -1540,7 +1542,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('font-size: 10px');
     expect(css).toContain('.cnc-bath-card__detail-close');
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-detail-id]');
-    expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-order-fill="true"]');
+    expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-order-contour="true"]');
     expect(css).toContain('.cnc-bath-card__sheet-svg [data-cnc-selected-detail="true"] > rect:first-child');
   });
 

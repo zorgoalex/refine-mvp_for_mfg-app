@@ -219,7 +219,7 @@ describe('buildSheetSvg multi-line labels', () => {
       renderStyle: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
     });
 
-    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#d7e9ff'));
+    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff'));
     expect(svg).toContain('<style>.cut-sheet-piece-source-svg *{');
     expect(svg).not.toContain('<style>*{');
     expect(svg).toContain('fill="#111827" stroke="#ffffff"');
@@ -286,25 +286,27 @@ describe('buildSheetSvg multi-line labels', () => {
       renderStyle: customStyle,
     });
 
-    expect(svg).toContain('stroke="#654321" stroke-width="4"');
-    expect(svg).toContain(cutRenderSourceSvgCss(customStyle, '#111827'));
+    expect(svg).toContain('fill="#ffffff" stroke="#111827" stroke-width="4"');
+    expect(svg).toContain(cutRenderSourceSvgCss(customStyle, '#ffffff', '#111827'));
     expect(svg).not.toContain('vector-effect:non-scaling-stroke!important');
-    expect(svg).toContain('fill="#fefefe" stroke="#222222"');
+    expect(svg).toContain('fill="#111827" stroke="#ffffff"');
     expect(svg).toContain('letter-spacing="-2.4"');
     expect(svg).toContain('font-size="28.8">2723</tspan>');
     expect(svg).toContain('font-size="9.6"># 1</tspan>');
     expect(svg).toContain('font-size="16.8">100*80</tspan>');
   });
 
-  it('uses deterministic per-order fills when provided', () => {
+  it('uses deterministic per-order contour colors while keeping the sheet background', () => {
     const svg = buildSheetSvg({
       sheet,
       labelFor: () => 'X',
       fillFor: (piece) => (piece.instance === 1 ? orderFillColor(12) : orderFillColor(13)),
     });
 
-    expect(svg).toContain(`fill="${orderFillColor(12)}"`);
-    expect(svg).toContain(`fill="${orderFillColor(13)}"`);
+    expect(svg).toContain(`fill="#ffffff" stroke="${orderFillColor(12)}"`);
+    expect(svg).toContain(`fill="#ffffff" stroke="${orderFillColor(13)}"`);
+    expect(svg).not.toContain(`fill="${orderFillColor(12)}"`);
+    expect(svg).not.toContain(`fill="${orderFillColor(13)}"`);
     expect(orderFillColor(12)).not.toBe(orderFillColor(13));
     expect(orderFillColor(12)).toBe(orderFillColor(12));
   });
@@ -316,9 +318,21 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(fill(11372)).toBe(fill(11372));
   });
 
-  it('keeps the legacy piece fill when no order color is resolved', () => {
+  it('keeps the sheet background and legacy contour when no order color is resolved', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => 'X', fillFor: () => null });
-    expect(svg).toContain('fill="#eef3f8"');
+    expect(svg).toContain('fill="#ffffff" stroke="#1f2d3d"');
+    expect(orderFillColor(null)).toBe('#1f2d3d');
+  });
+
+  it('uses the order color for bath piece contours too', () => {
+    const svg = buildBathProfileSheetSvg({
+      sheet,
+      labelFor: () => ['11300', 'поз. 5', '600X400'],
+      fillFor: () => orderFillColor(12),
+    });
+
+    expect(svg).toContain(`fill="#f7f7f7" stroke="${orderFillColor(12)}"`);
+    expect(svg).not.toContain(`fill="${orderFillColor(12)}"`);
   });
 });
 
@@ -513,7 +527,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/<text x="67\.75" y="215" transform="rotate\(-90 67\.75 215\)"[^>]*>400<\/text>/);
   });
 
-  it('uses a light sheet surface and opaque white detail interiors in bath PDF SVGs', () => {
+  it('uses one sheet surface for bath details and order colors only for contours', () => {
     const bath = buildBathProfileSheetSvg({
       sheet,
       labelFor: () => ['11300', '# 5'],
@@ -522,9 +536,10 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     const normal = buildSheetSvg({ sheet, labelFor: () => 'X', fillFor: () => '#123456' });
 
     expect(bath).toContain('width="2800" height="2070" fill="#f7f7f7"');
-    expect(bath).toMatch(/data-detail-id="999"><rect[^>]*fill="#ffffff"/);
+    expect(bath).toMatch(/data-detail-id="999"><rect[^>]*fill="#f7f7f7"[^>]*stroke="#123456"/);
     expect(bath).not.toContain('fill="#123456"');
-    expect(normal).toContain('fill="#123456"');
+    expect(normal).toContain('fill="#ffffff" stroke="#123456"');
+    expect(normal).not.toContain('fill="#123456"');
   });
 });
 

@@ -100,7 +100,7 @@ const CUT_RENDER_STYLE_MDF_TEMPLATE_NAME = 'MDF-превью';
 const CUT_RENDER_STYLE_PROFILES = {
   [CUT_RENDER_STYLE_DEFAULT]: {
     piece: {
-      defaultFill: '#eef3f8',
+      defaultFill: '#ffffff',
       stroke: '#1f2d3d',
       strokeWidthMm: 2,
       orderPalette: ORDER_FILL_PALETTE,
@@ -136,7 +136,7 @@ const CUT_RENDER_STYLE_PROFILES = {
   },
   [CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]: {
     piece: {
-      defaultFill: '#eef3f8',
+      defaultFill: '#ffffff',
       stroke: '#1f2d3d',
       strokeWidthMm: 1.6,
       orderPalette: ORDER_FILL_PALETTE,
@@ -399,12 +399,16 @@ export function cutRenderNormalizeLabelLines(lines: readonly string[]): string[]
       .replace(/(\d(?:[.,]\d+)?)\s*[xхX×]\s*(\d(?:[.,]\d+)?)/g, '$1*$2'));
 }
 
-export function cutRenderSourceSvgCss(value: CutRenderStyleRef, pieceFill?: string | null): string {
+export function cutRenderSourceSvgCss(
+  value: CutRenderStyleRef,
+  pieceFill?: string | null,
+  orderContour?: string | null,
+): string {
   const style = resolveCutRenderStyle(value);
   const minStrokePx = style.sourceSvg.minStrokePx;
   const declarations: string[] = [];
   if (minStrokePx !== null) declarations.push(`stroke-width:${formatNumber(minStrokePx)}px!important`);
-  const sourceStroke = cutRenderSourceSvgStroke(style, pieceFill);
+  const sourceStroke = orderContour || cutRenderSourceSvgStroke(style, pieceFill);
   if (sourceStroke) {
     declarations.push(`stroke:${sourceStroke}!important`);
     declarations.push('fill:none!important');
