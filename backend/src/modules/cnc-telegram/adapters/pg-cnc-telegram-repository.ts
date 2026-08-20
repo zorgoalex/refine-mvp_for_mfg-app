@@ -883,6 +883,15 @@ export class PgCncTelegramRepository
         dto.source.version === Number(existing.source_version) &&
         existing.payload_hash !== payloadHash
       ) {
+        const reusedSourceFile = await reuseExistingManualSvgSourceFile(tx, {
+          command,
+          dto,
+          requestId,
+        });
+        if (reusedSourceFile) {
+          await completeIdempotency(tx, dto.idempotencyKey, reusedSourceFile);
+          return reusedSourceFile;
+        }
         await failIdempotency(tx, dto.idempotencyKey);
         throw new ApiError(
           409,
@@ -968,6 +977,18 @@ export class PgCncTelegramRepository
         }, mdfCardCreatedNow, filePersistence);
         await completeIdempotency(tx, dto.idempotencyKey, response);
         return response;
+      }
+
+      if (!existing) {
+        const reusedSourceFile = await reuseExistingManualSvgSourceFile(tx, {
+          command,
+          dto,
+          requestId,
+        });
+        if (reusedSourceFile) {
+          await completeIdempotency(tx, dto.idempotencyKey, reusedSourceFile);
+          return reusedSourceFile;
+        }
       }
 
       const prepared = await prepareManualSvgUploadDto(tx, dto, command.dto);
@@ -1329,7 +1350,7 @@ function buildManualSvgStructuredDto(
     },
     workday: dto.workday,
     machine: normalizeOptional(dto.machine) ?? 'manual-svg-upload',
-    programName: normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`,
+    programName: manualSvgProgramName(dto),
     materialName: normalizeOptional(dto.materialName) ?? 'МДФ 16мм',
     parseStatus: 'parsed',
     completionStatus: 'pending',
@@ -1350,6 +1371,17 @@ function buildManualSvgStructuredDto(
       reviewNote: null,
     })),
   };
+}
+
+export function manualSvgProgramName(dto: ManualSvgUploadCommand['dto']): string {
+  if (dto.duplicatePolicy?.kind === 'intentional_copy') {
+    return normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`;
+  }
+  const gcode = dto.sourceFiles?.find((file) => file.kind === 'gcode');
+  if (gcode) return sanitizeManualSvgFileName(gcode.fileName);
+  const svg = dto.sourceFiles?.find((file) => file.kind === 'svg');
+  if (svg) return sanitizeManualSvgFileName(svg.fileName);
+  return normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`;
 }
 
 function manualSvgAnalysisWarnings(dto: ManualSvgUploadCommand['dto']): string[] {
@@ -1935,6 +1967,107 @@ async function manualSvgMdfCardEventExists(
 
 function manualSvgMdfCardEventKey(packet: CncTelegramPacketDto): string {
   return `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-card-created`;
+}
+
+async function reuseExistingManualSvgSourceFile(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    dto: CncTelegramStructuredIngestDto;
+    requestId: string;
+  },
+): Promise<CncTelegramManualSvgUploadResponseDto | null> {
+  const match = await findExistingSvgCutJobForSourceFile(tx, input.dto, null);
+  if (!match) return null;
+  const packet = await loadExistingSvgSourceFilePacket(tx, match);
+
+  const jobResult = await tx.query<{ selection_criteria: unknown }>(
+    `SELECT selection_criteria
+       FROM cut_job
+      WHERE cut_job_id=$1::bigint
+        AND status <> 'archived'
+      FOR UPDATE`,
+    [match.cutJobId],
+  );
+  if (!jobResult.rows[0]) return null;
+
+  const rawCriteria = jobResult.rows[0].selection_criteria;
+  const criteria: Record<string, unknown> = rawCriteria && typeof rawCriteria === 'object' && !Array.isArray(rawCriteria)
+    ? { ...(rawCriteria as Record<string, unknown>) }
+    : {};
+  const existingFiles = Array.isArray(criteria.sourceFiles)
+    ? criteria.sourceFiles.filter((file): file is Record<string, unknown> => Boolean(file) && typeof file === 'object' && !Array.isArray(file))
+    : [];
+  const incomingFiles = sourceFileIdentitySnapshots(input.dto.sourceFiles ?? []);
+  const existingGcode = existingFiles.find((file) => file.kind === 'gcode') ?? null;
+  const incomingGcode = incomingFiles.find((file) => file.kind === 'gcode') ?? null;
+  const promoteToGcode = existingGcode === null && incomingGcode !== null;
+  const promotedProgramName = input.command.dto.duplicatePolicy?.kind === 'intentional_copy'
+    ? input.dto.programName
+    : incomingGcode?.fileName;
+  const mergedFiles = mergeCanonicalSourceFiles(existingFiles, incomingFiles, existingGcode !== null);
+  criteria.sourceFiles = mergedFiles;
+  if (promoteToGcode) criteria.programName = promotedProgramName;
+
+  await tx.query(
+    `UPDATE cut_job
+        SET name=CASE WHEN $3::boolean THEN left($2, 200) ELSE name END,
+            selection_criteria=$4::jsonb,
+            updated_at=now()
+      WHERE cut_job_id=$1::bigint`,
+    [match.cutJobId, promoteToGcode ? String(promotedProgramName) : '', promoteToGcode, JSON.stringify(criteria)],
+  );
+  if (promoteToGcode) {
+    await tx.query(
+      `UPDATE cnc_telegram_packets
+          SET program_name=left($2, 200), updated_at=now()
+        WHERE packet_id=$1::uuid`,
+      [packet.packetId, String(promotedProgramName)],
+    );
+  }
+
+  const existingGcodeHash = typeof existingGcode?.sha256 === 'string' ? existingGcode.sha256.toLowerCase() : null;
+  const effectiveSourceFiles = (input.command.dto.sourceFiles ?? []).filter((file) =>
+    file.kind !== 'gcode' || existingGcodeHash === null || file.sha256.toLowerCase() === existingGcodeHash
+  );
+  const effectiveCommand: ManualSvgUploadCommand = {
+    ...input.command,
+    dto: { ...input.command.dto, sourceFiles: effectiveSourceFiles },
+  };
+  const refreshedPacket = promoteToGcode ? await loadPacket(tx, packet.packetId) : packet;
+  const filePersistence = await persistManualSvgUploadFiles(tx, {
+    command: effectiveCommand,
+    packet: refreshedPacket,
+    requestId: input.requestId,
+    externalPacketKey: input.dto.externalPacketKey,
+  });
+  return manualSvgResponse({
+    packet: refreshedPacket,
+    requestId: input.requestId,
+    applied: false,
+    ignoredStaleSourceVersion: false,
+    skippedDuplicateSourceFile: skippedDuplicateSourceFileDto({ ...match, packetId: packet.packetId }),
+  }, false, filePersistence);
+}
+
+export function mergeCanonicalSourceFiles(
+  existing: Array<Record<string, unknown>>,
+  incoming: Array<Record<string, unknown>>,
+  preserveExistingGcode: boolean,
+): Array<Record<string, unknown>> {
+  const byKind = new Map<string, Record<string, unknown>>();
+  for (const file of existing) {
+    if (typeof file.kind === 'string') byKind.set(file.kind, file);
+  }
+  for (const file of incoming) {
+    if (typeof file.kind !== 'string') continue;
+    if (file.kind === 'gcode' && preserveExistingGcode && byKind.has('gcode')) continue;
+    byKind.set(file.kind, file);
+  }
+  return [...byKind.values()].sort((left, right) =>
+    manualSvgFileKindOrder(left.kind as CncTelegramManualSvgUploadFileDto['kind'])
+      - manualSvgFileKindOrder(right.kind as CncTelegramManualSvgUploadFileDto['kind'])
+  );
 }
 
 async function persistManualSvgUploadFiles(

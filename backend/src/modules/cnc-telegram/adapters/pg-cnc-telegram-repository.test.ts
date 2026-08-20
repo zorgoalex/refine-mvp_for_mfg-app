@@ -5,6 +5,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import {
   cncWholeOrderIds,
   cncWholeOrderKeys,
+  manualSvgProgramName,
+  mergeCanonicalSourceFiles,
   PgCncTelegramRepository,
 } from './pg-cnc-telegram-repository';
 
@@ -94,6 +96,44 @@ describe('PgCncTelegramRepository', () => {
     expect(preflightIndex).toBeGreaterThan(replayIndex);
     expect(resolverIndex).toBeGreaterThan(preflightIndex);
     expect(insertPacketIndex).toBeGreaterThan(preflightIndex);
+  });
+
+  it('reuses an exact manual SVG source before inserting another packet or cut job', () => {
+    const reuseIndex = repositorySource.indexOf('const reusedSourceFile = await reuseExistingManualSvgSourceFile(');
+    const conflictIndex = repositorySource.indexOf('existing.payload_hash !== payloadHash');
+    const failConflictIndex = repositorySource.indexOf("'MANUAL_SVG_SOURCE_CONFLICT'", conflictIndex);
+    const insertIndex = repositorySource.indexOf('const packetId = await insertPacket(tx, resolvedCommand, payloadHash);', reuseIndex);
+    expect(reuseIndex).toBeGreaterThan(-1);
+    expect(reuseIndex).toBeGreaterThan(conflictIndex);
+    expect(failConflictIndex).toBeGreaterThan(reuseIndex);
+    expect(insertIndex).toBeGreaterThan(reuseIndex);
+    expect(repositorySource).toContain('findExistingSvgCutJobForSourceFile(tx, input.dto, null)');
+    expect(repositorySource).toContain('SET name=CASE WHEN $3::boolean');
+    expect(repositorySource).toContain('SET program_name=left($2, 200)');
+    expect(repositorySource).toContain('preserveExistingGcode && byKind.has(\'gcode\')');
+  });
+
+  it('uses the verified import name and never replaces canonical G-code metadata', () => {
+    expect(manualSvgProgramName({
+      duplicatePolicy: { kind: 'intentional_copy', approvedByImportItemId: 'item-1' },
+      programName: 'CNC#1_2812-8ММ.TXT',
+      svgContentHash: 'a'.repeat(64),
+      sourceFiles: [{ kind: 'gcode', fileName: 'untrusted-name.txt' }],
+    } as never)).toBe('CNC#1_2812-8ММ.TXT');
+    expect(manualSvgProgramName({
+      programName: 'old.svg', svgContentHash: 'a'.repeat(64),
+      sourceFiles: [{ kind: 'gcode', fileName: 'actual.TXT' }],
+    } as never)).toBe('actual.TXT');
+
+    expect(mergeCanonicalSourceFiles(
+      [{ kind: 'svg', fileName: 'sheet.svg' }, { kind: 'gcode', fileName: 'first.TXT', sha256: '1' }],
+      [{ kind: 'gcode', fileName: 'second.TXT', sha256: '2' }, { kind: 'screenshot', fileName: 'sheet.jpg' }],
+      true,
+    )).toEqual([
+      { kind: 'svg', fileName: 'sheet.svg' },
+      { kind: 'gcode', fileName: 'first.TXT', sha256: '1' },
+      { kind: 'screenshot', fileName: 'sheet.jpg' },
+    ]);
   });
 
   it('refreshes a pending manual SVG Telegram send before relinking files', () => {
