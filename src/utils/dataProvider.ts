@@ -1875,12 +1875,12 @@ export const dataProvider = (_apiUrl: string) => {
         return backendUsersList;
       }
 
-      if (!hasHasuraUrl()) {
+      if (!hasHasuraReadAccess(resource)) {
         return { data: [], total: 0 };
       }
 
-      if (!hasHasuraReadAccess(resource)) {
-        return { data: [], total: 0 };
+      if (!hasHasuraUrl()) {
+        throw HASURA_NOT_CONFIGURED_ERROR;
       }
 
       // Handle pagination: mode 'off' means no limit/offset
@@ -1954,12 +1954,12 @@ export const dataProvider = (_apiUrl: string) => {
         return backendUser;
       }
 
-      if (!hasHasuraUrl()) {
+      if (!hasHasuraReadAccess(resource)) {
         return { data: null };
       }
 
-      if (!hasHasuraReadAccess(resource)) {
-        return { data: null };
+      if (!hasHasuraUrl()) {
+        throw HASURA_NOT_CONFIGURED_ERROR;
       }
 
       const idCol = ID_COLUMNS[resource] ?? "id";
@@ -2164,7 +2164,7 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       if (!hasHasuraUrl()) {
-        return { data: [] };
+        throw HASURA_NOT_CONFIGURED_ERROR;
       }
 
       const idCol = ID_COLUMNS[resource] ?? "id";

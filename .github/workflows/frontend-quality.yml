@@ -7,15 +7,33 @@ on:
       - main
       - feat/backend-erp-stage1
   push:
-    branches:
-      - main
-      - feat/backend-erp-stage1
 
 concurrency:
   group: frontend-quality-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  business-reference-contracts:
+    name: Business reference contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify business reference contracts
+        run: npm run test:business-references
+
+      - name: Verify runtime config canaries
+        run: npm run test:runtime-config-canary
+
   promotion-policy:
     name: Main promotion policy
     if: github.event_name == 'pull_request' && github.base_ref == 'main'
@@ -28,6 +46,7 @@ jobs:
 
   frontend-quality:
     name: Typecheck, unit, build, browser smoke
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/backend-erp-stage1'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

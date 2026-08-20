@@ -201,10 +201,24 @@ function validateRuntimeConfig(config, options = {}) {
     errors.push(`${label}: apiUrl must be a string, null, or omitted`);
   }
 
+  if (
+    config.hasuraUrl !== undefined
+    && config.hasuraUrl !== null
+    && typeof config.hasuraUrl !== 'string'
+  ) {
+    errors.push(`${label}: hasuraUrl must be a string, null, or omitted`);
+  }
+
   const features = config.features;
   if (!features || typeof features !== 'object' || Array.isArray(features)) {
     errors.push(`${label}: features must be an object`);
     return errors;
+  }
+
+  if (features.enableLegacyHasura === true && !isAbsoluteHttpUrl(config.hasuraUrl)) {
+    errors.push(
+      `${label}: hasuraUrl must be a non-empty absolute HTTP(S) URL when features.enableLegacyHasura=true`,
+    );
   }
 
   if (requireCompleteFeatures) {
@@ -307,6 +321,17 @@ function validateFeatureDependencies(features, label) {
   }
 
   return errors;
+}
+
+function isAbsoluteHttpUrl(value) {
+  if (typeof value !== 'string' || value.trim() === '') return false;
+
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function validateNoSecretLikeKeys(value, label, pathParts = []) {
