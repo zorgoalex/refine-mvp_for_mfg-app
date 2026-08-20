@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Заказы: компактные групповые действия",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Модальное окно «Групповые действия» стало заметно ниже: подсказка, поля и вертикальные отступы уплотнены, чтобы форма помещалась на экране без лишней прокрутки.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Раскрой: палитра в загруженном SVG",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],
