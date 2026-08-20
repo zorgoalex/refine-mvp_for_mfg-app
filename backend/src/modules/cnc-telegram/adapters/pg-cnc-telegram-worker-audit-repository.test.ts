@@ -29,6 +29,7 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     ]) expect(capabilitySql).toContain(marker);
     expect(capabilitySql).toContain('created_at,updated_at,cut_job_display_number');
     expect(capabilitySql).toContain('73c369920b8011e2047221cc37bc0da6');
+    expect(capabilitySql).toContain('e814e1e9d4e8dc751fac89f31cf10e38');
     expect(capabilitySql).toContain('pg_get_constraintdef(oid)');
     expect(capabilitySql).toContain("indexname || '|' || indexdef");
     expect(capabilitySql).toContain("pg_get_functiondef(to_regprocedure('cnc_telegram_worker_reason_code_valid(text)'))");
