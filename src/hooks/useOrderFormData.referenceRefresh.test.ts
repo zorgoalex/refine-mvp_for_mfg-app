@@ -220,6 +220,44 @@ describe('useOrderFormData live reference refresh', () => {
     ]);
     expect(ordersApiMock.getFormData).toHaveBeenCalledTimes(3);
   });
+
+  it('falls back from backend references when the initial aggregate request fails', async () => {
+    ordersApiMock.getFormData.mockRejectedValueOnce(new Error('form-data unavailable'));
+
+    renderHook();
+    await flushPromises();
+    const failed = renderHook();
+
+    expect(failed.enabled).toBe(false);
+    expect(failed.error?.message).toBe('form-data unavailable');
+    expect(failed.references.productionStatuses).toEqual([]);
+  });
+
+  it('keeps the fallback active while retrying after an initial failure', async () => {
+    let resolveRetry!: (response: OrderFormDataResponse) => void;
+    const retryResponse = new Promise<OrderFormDataResponse>((resolve) => {
+      resolveRetry = resolve;
+    });
+    ordersApiMock.getFormData
+      .mockRejectedValueOnce(new Error('form-data unavailable'))
+      .mockReturnValueOnce(retryResponse);
+
+    renderHook();
+    await flushPromises();
+    expect(renderHook().enabled).toBe(false);
+
+    window.dispatchEvent(new Event('focus'));
+    renderHook();
+    expect(renderHook().enabled).toBe(false);
+
+    resolveRetry(createFormDataResponse([{ id: 8, name: 'Белая' }]));
+    await flushPromises();
+    const recovered = renderHook();
+
+    expect(recovered.enabled).toBe(true);
+    expect(recovered.error).toBeNull();
+    expect(recovered.references.films.map((option) => option.label)).toEqual(['Белая']);
+  });
 });
 
 function renderHook() {
