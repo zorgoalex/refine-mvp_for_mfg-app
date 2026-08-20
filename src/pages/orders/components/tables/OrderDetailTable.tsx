@@ -189,6 +189,9 @@ const isOrderDetailSelectDropdownNavigation = (e: React.KeyboardEvent): boolean 
     target.getAttribute('aria-expanded') === 'true';
 };
 
+export const isOrderDetailSelectVerticalNavigationKey = (key: string): boolean =>
+  key === 'ArrowDown' || key === 'ArrowUp';
+
 export function sortOrderDetailsForPagination(
   details: readonly OrderDetail[],
   compare: ((left: OrderDetail, right: OrderDetail) => number) | undefined,
@@ -2580,7 +2583,10 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
 
     const currentField = String(editingField);
     const currentCell = { rowKey: String(editingKey), columnKey: currentField };
-    if (event.key === 'ArrowDown' && isOrderDetailSelectDropdownNavigation(event)) return;
+    if (
+      isOrderDetailSelectVerticalNavigationKey(event.key)
+      && isOrderDetailSelectDropdownNavigation(event)
+    ) return;
     const selectIsOpen = !!target.closest('.ant-select-open')
       || target.getAttribute('aria-expanded') === 'true';
     if (event.key === 'Escape') {

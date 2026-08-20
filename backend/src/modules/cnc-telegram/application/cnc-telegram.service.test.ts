@@ -3,11 +3,43 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import { CncTelegramService } from './cnc-telegram.service';
 
 describe('CncTelegramService', () => {
+  it('requires orders.view for original MDF board and delegates authorized reads', async () => {
+    const listOriginalBoard = vi.fn().mockResolvedValue({
+      dateFrom: '2026-06-19',
+      dateTo: '2026-08-19',
+      generatedAt: '2026-08-19T12:00:00.000Z',
+      packets: [],
+      baths: [],
+      bazisCutSets: [],
+    });
+    const packets = {
+      listToday: vi.fn(),
+      listOriginalBoard,
+      listOrderCuttingSequences: vi.fn(),
+      ingest: vi.fn(),
+      manualSvgUpload: vi.fn(),
+      listManualSvgCommentPresets: vi.fn(),
+      createManualSvgCommentPreset: vi.fn(),
+      configureAutoCutStatus: vi.fn(),
+    };
+    const service = new CncTelegramService({ packets });
+
+    await expect(service.listOriginalBoard({ currentUser: user([]) }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+    expect(listOriginalBoard).not.toHaveBeenCalled();
+
+    await service.listOriginalBoard({ currentUser: user(['orders.view']) });
+    expect(listOriginalBoard).toHaveBeenCalledOnce();
+  });
+
   it('requires orders.view for the today projection', async () => {
     const service = new CncTelegramService({
       packets: {
         async listToday() {
           throw new Error('repository must not be called');
+        },
+        async listOriginalBoard() {
+          throw new Error('unused');
         },
         async listOrderCuttingSequences() {
           throw new Error('unused');
@@ -49,6 +81,9 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         async listToday() {
+          throw new Error('unused');
+        },
+        async listOriginalBoard() {
           throw new Error('unused');
         },
         async listOrderCuttingSequences() {
@@ -108,6 +143,7 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         listToday: vi.fn(),
+        listOriginalBoard: vi.fn(),
         listOrderCuttingSequences: vi.fn(),
         ingest,
         manualSvgUpload: vi.fn(),
@@ -134,6 +170,9 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         async listToday() {
+          throw new Error('unused');
+        },
+        async listOriginalBoard() {
           throw new Error('unused');
         },
         async listOrderCuttingSequences() {
@@ -172,6 +211,7 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         listToday: vi.fn(),
+        listOriginalBoard: vi.fn(),
         listOrderCuttingSequences: vi.fn(),
         ingest: vi.fn(),
         manualSvgUpload: vi.fn(),
@@ -197,6 +237,7 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         listToday: vi.fn(),
+        listOriginalBoard: vi.fn(),
         listOrderCuttingSequences: vi.fn(),
         ingest: vi.fn(),
         manualSvgUpload: vi.fn(),
@@ -238,6 +279,7 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         listToday: vi.fn(),
+        listOriginalBoard: vi.fn(),
         listOrderCuttingSequences: vi.fn(),
         ingest: vi.fn(),
         manualSvgUpload: vi.fn(),
@@ -266,6 +308,7 @@ describe('CncTelegramService', () => {
     const service = new CncTelegramService({
       packets: {
         listToday: vi.fn(),
+        listOriginalBoard: vi.fn(),
         listOrderCuttingSequences: vi.fn(),
         ingest: vi.fn(),
         manualSvgUpload,

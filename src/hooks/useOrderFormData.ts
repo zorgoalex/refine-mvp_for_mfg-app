@@ -169,7 +169,9 @@ export function mapOrderFormDataToReferences(
         widthMm: item.widthMm ?? null,
         heightMm: item.heightMm ?? null,
         isActive: item.isActive,
-        isCuttable: item.isCuttable,
+        // Older backend deployments omitted this field. Match the legacy
+        // Hasura path: only an explicit false marks a header-only material.
+        isCuttable: item.isCuttable !== false,
         sortOrder: item.sortOrder,
       }))
     : [];

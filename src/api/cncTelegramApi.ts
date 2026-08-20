@@ -8,6 +8,7 @@ import type {
   CncTelegramManualSvgUploadResponse,
   CncTelegramMediaRestoreResponse,
   CncTelegramOrderCuttingSequencesResponse,
+  CncTelegramOriginalBoardResponse,
   CncTelegramOrderScreenshotsResponse,
   CncTelegramTodayResponse,
   CreateCncTelegramManualSvgCommentPresetRequest,
@@ -28,6 +29,12 @@ export interface CncTelegramTodayQuery {
 }
 
 export const cncTelegramApi = {
+  originalBoard(options?: RequestOptions): Promise<CncTelegramOriginalBoardResponse> {
+    return httpClient.get<CncTelegramOriginalBoardResponse>(
+      apiRoutes.cncTelegram.originalBoard,
+      options,
+    );
+  },
   today(
     query: CncTelegramTodayQuery = {},
     options?: RequestOptions,

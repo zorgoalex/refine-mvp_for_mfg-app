@@ -246,6 +246,30 @@ export interface CncTelegramTodayResponse {
   columns: CncTelegramTodayColumn[];
 }
 
+export interface CncTelegramOriginalPacket extends CncTelegramPacket {
+  currentBoardVisibility: 'visible' | 'hidden';
+  currentBoardColumn: 'parsed' | 'completed' | 'completed_laminated' | null;
+}
+
+export interface CncTelegramOriginalBathCard extends CncTelegramBathCard {
+  currentBoardVisibility: 'visible' | 'archived';
+  currentBoardColumn: 'baths' | 'baths_ready' | 'baths_laminated' | 'completed_baths' | null;
+  currentBoardCardId: string | null;
+}
+
+export interface CncTelegramOriginalBazisCutSetCard extends CncTelegramBazisCutSetCard {
+  currentBoardColumn: 'parsed' | 'completed_laminated';
+}
+
+export interface CncTelegramOriginalBoardResponse {
+  dateFrom: string;
+  dateTo: string;
+  generatedAt: string;
+  packets: CncTelegramOriginalPacket[];
+  baths: CncTelegramOriginalBathCard[];
+  bazisCutSets: CncTelegramOriginalBazisCutSetCard[];
+}
+
 export interface CncTelegramOrderCuttingSequence {
   packetId: string;
   externalPacketKey: string;

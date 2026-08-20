@@ -5,6 +5,8 @@ import type { CurrentUser } from '../../../permissions/current-user';
 import {
   cncWholeOrderIds,
   cncWholeOrderKeys,
+  manualSvgProgramName,
+  mergeCanonicalSourceFiles,
   PgCncTelegramRepository,
 } from './pg-cnc-telegram-repository';
 
@@ -13,6 +15,7 @@ const repositorySource = readFileSync(new URL('./pg-cnc-telegram-repository.ts',
 describe('PgCncTelegramRepository', () => {
   it('returns bath display cut numbers without result version', () => {
     expect(repositorySource).toContain('j.source_display_number');
+    expect(repositorySource).toContain('result.source_display_number');
     expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true, row.source_display_number)');
     expect(repositorySource).toContain('cutNumber: formatCutNumber(cutJobId, resultNo, true, row.source_display_number)');
     expect(repositorySource).not.toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
@@ -93,6 +96,44 @@ describe('PgCncTelegramRepository', () => {
     expect(preflightIndex).toBeGreaterThan(replayIndex);
     expect(resolverIndex).toBeGreaterThan(preflightIndex);
     expect(insertPacketIndex).toBeGreaterThan(preflightIndex);
+  });
+
+  it('reuses an exact manual SVG source before inserting another packet or cut job', () => {
+    const reuseIndex = repositorySource.indexOf('const reusedSourceFile = await reuseExistingManualSvgSourceFile(');
+    const conflictIndex = repositorySource.indexOf('existing.payload_hash !== payloadHash');
+    const failConflictIndex = repositorySource.indexOf("'MANUAL_SVG_SOURCE_CONFLICT'", conflictIndex);
+    const insertIndex = repositorySource.indexOf('const packetId = await insertPacket(tx, resolvedCommand, payloadHash);', reuseIndex);
+    expect(reuseIndex).toBeGreaterThan(-1);
+    expect(reuseIndex).toBeGreaterThan(conflictIndex);
+    expect(failConflictIndex).toBeGreaterThan(reuseIndex);
+    expect(insertIndex).toBeGreaterThan(reuseIndex);
+    expect(repositorySource).toContain('findExistingSvgCutJobForSourceFile(tx, input.dto, null)');
+    expect(repositorySource).toContain('SET name=CASE WHEN $3::boolean');
+    expect(repositorySource).toContain('SET program_name=left($2, 200)');
+    expect(repositorySource).toContain('preserveExistingGcode && byKind.has(\'gcode\')');
+  });
+
+  it('uses the verified import name and never replaces canonical G-code metadata', () => {
+    expect(manualSvgProgramName({
+      duplicatePolicy: { kind: 'intentional_copy', approvedByImportItemId: 'item-1' },
+      programName: 'CNC#1_2812-8ММ.TXT',
+      svgContentHash: 'a'.repeat(64),
+      sourceFiles: [{ kind: 'gcode', fileName: 'untrusted-name.txt' }],
+    } as never)).toBe('CNC#1_2812-8ММ.TXT');
+    expect(manualSvgProgramName({
+      programName: 'old.svg', svgContentHash: 'a'.repeat(64),
+      sourceFiles: [{ kind: 'gcode', fileName: 'actual.TXT' }],
+    } as never)).toBe('actual.TXT');
+
+    expect(mergeCanonicalSourceFiles(
+      [{ kind: 'svg', fileName: 'sheet.svg' }, { kind: 'gcode', fileName: 'first.TXT', sha256: '1' }],
+      [{ kind: 'gcode', fileName: 'second.TXT', sha256: '2' }, { kind: 'screenshot', fileName: 'sheet.jpg' }],
+      true,
+    )).toEqual([
+      { kind: 'svg', fileName: 'sheet.svg' },
+      { kind: 'gcode', fileName: 'first.TXT', sha256: '1' },
+      { kind: 'screenshot', fileName: 'sheet.jpg' },
+    ]);
   });
 
   it('refreshes a pending manual SVG Telegram send before relinking files', () => {
@@ -205,6 +246,82 @@ describe('PgCncTelegramRepository', () => {
     expect(queries[0]?.params).toEqual(['2026-07-18', '2026-07-24', 'erp-manual-svg-upload']);
     expect(queries[1]?.text).toContain('p.workday BETWEEN $1::date AND $2::date');
     expect(queries[1]?.params).toEqual(['2026-07-18', '2026-07-24']);
+  });
+
+  it('loads the DB-owned original-board window with hidden packets and archived latest baths', async () => {
+    const queries: Array<{ text: string; params: readonly unknown[] }> = [];
+    let bathQueryCount = 0;
+    const database = {
+      query: vi.fn(async (text: string, params: readonly unknown[] = []) => {
+        queries.push({ text, params });
+        if (/CURRENT_DATE - INTERVAL '2 months'/i.test(text)) {
+          return { rows: [{ date_from: '2026-06-19', date_to: '2026-08-19' }] };
+        }
+        if (/latest_vacuum_results/i.test(text)) {
+          bathQueryCount += 1;
+          if (bathQueryCount > 1) return { rows: [] };
+          return {
+            rows: [bathPlacementRow({
+              cut_result_id: 700,
+              cut_job_id: 70,
+              result_no: 4,
+              revision_no: 2,
+              result_created_at: '2026-08-18T09:00:00.000Z',
+              job_status: 'archived',
+              current_cut_result_id: 701,
+              current_result_archived_at: '2026-08-19T10:00:00.000Z',
+            })],
+          };
+        }
+        if (/FROM cnc_telegram_packets p/i.test(text)) {
+          return {
+            rows: [packetRow({
+              packet_id: '00000000-0000-0000-0000-000000000099',
+              source_created_at: '2026-08-19T23:59:59.000Z',
+              mdf_board_hidden_at: '2026-08-20T01:00:00.000Z',
+              completion_status: 'pending',
+              thumbs_up: false,
+            })],
+          };
+        }
+        return { rows: [] };
+      }),
+    };
+    const repo = new PgCncTelegramRepository(database as never);
+
+    const result = await repo.listOriginalBoard({ currentUser: user() });
+    const sql = queries.map((query) => query.text).join('\n');
+    const historyBathSql = queries[3]?.text ?? '';
+
+    expect(result).toMatchObject({
+      dateFrom: '2026-06-19',
+      dateTo: '2026-08-19',
+      packets: [{
+        packetId: '00000000-0000-0000-0000-000000000099',
+        currentBoardVisibility: 'hidden',
+        currentBoardColumn: null,
+        sheetImageUrl: '/api/v1/cnc-telegram/media/tg_100_10.jpg',
+      }],
+      baths: [{
+        bathCardId: 'cut-result:700',
+        currentBoardVisibility: 'archived',
+        currentBoardColumn: null,
+        currentBoardCardId: null,
+      }],
+    });
+    expect(queries[1]?.params).toEqual(['2026-06-19', '2026-08-19', 'erp-manual-svg-upload']);
+    expect(queries[2]?.params).toEqual(['2026-06-19', '2026-08-19']);
+    expect(queries[3]?.params).toEqual(['2026-06-19', '2026-08-19']);
+    expect(queries[4]?.params).toEqual(['2026-08-19', '2026-08-19']);
+    expect(sql).toContain("COALESCE(p.source_created_at, p.created_at) < ($2::date + INTERVAL '1 day')");
+    expect(sql).toContain("p.mdf_board_card_kind = 'machine_file'");
+    expect(queries[1]?.text).toContain("':mdf-card-created'");
+    expect(historyBathSql).toContain("mdf_board_card_kind = 'bath_seed'");
+    expect(historyBathSql).toContain('OR EXISTS (');
+    expect(historyBathSql).toContain('candidate.result_created_at DESC');
+    expect(historyBathSql).not.toContain('candidate.is_current_result DESC');
+    expect(sql).not.toMatch(/sheet_image_storage_key\s*:/i);
+    expect(result.packets[0]).not.toHaveProperty('sheetImageStorageKey');
   });
 
   it('ingests structured packets with idempotency, audit and outbox writes', async () => {
@@ -978,6 +1095,7 @@ describe('PgCncTelegramRepository', () => {
               bathPlacementRow({
                 cut_result_id: 501,
                 cut_job_id: 31,
+                source_display_number: 'В-42',
                 result_no: 1,
                 order_detail_id: 3201,
                 detail_number: 32,
@@ -1004,14 +1122,15 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('fallback_target_details');
     expect(sql).toContain('completed_whole_order_keys');
     expect(sql).toContain('whole_order_target_details');
-    expect(sql).toContain("lower(packet_comment.comment_text) LIKE '%весь%'");
-    expect(sql).toContain("regexp_matches(\n        packet_comment.comment_text,\n        '(^|[^0-9])([0-9]{4,})([^0-9]|$)'");
+    expect(sql).toContain('JOIN cnc_telegram_packet_whole_order_keys whole_order');
+    expect(sql).toContain('whole_order.order_key');
     expect(sql).toContain('1000000000::integer AS completed_quantity');
     expect(sql).toContain('LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer');
     expect(sql).toContain('candidate_vacuum_results AS (');
     expect(sql).toContain('latest_vacuum_results AS (');
     expect(sql).toContain('SELECT DISTINCT ON (candidate.cut_job_id)');
     expect(sql).toContain('FROM candidate_vacuum_results candidate');
+    expect(sql).toContain('result.source_display_number');
     expect(sql).toContain('(current_result.result_no = r.result_no) AS is_current_result');
     expect(sql).toContain('LEFT JOIN cut_result current_result');
     expect(sql).toContain('LEFT JOIN cut_result_archive_state archive');
@@ -1044,6 +1163,8 @@ describe('PgCncTelegramRepository', () => {
     ]);
     expect(result.columns[2]?.baths[0]).toMatchObject({
       cutJobId: 31,
+      cutNumber: 'В-42-1',
+      displayCutNumber: 'В-42',
       ready: false,
       itemQuantityTotal: 1,
       positionCount: 1,
@@ -3699,6 +3820,7 @@ function packetRowBase() {
       },
     ],
     updated_at: '2026-07-24T08:00:10.000Z',
+    mdf_board_hidden_at: null,
     packet_item_id: '00000000-0000-0000-0000-000000000002',
     source_item_key: '2689:31:497x477',
     order_name: '2689',
