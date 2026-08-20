@@ -19,8 +19,8 @@ describe('edit-form detail grouping', () => {
     expect(table).toContain("'summary'");
     expect(table).toContain('details-grouped');
   });
-  it('uses the paginated detail grid when separation is off (no clustering)', () => {
-    expect(table).toMatch(/groupingActive\s*\?\s*[^:]*buildGroupedRows[\s\S]*?:\s*paginatedDetails/);
+  it('uses the paginated detail grid plus prepared rows when separation is off (no clustering)', () => {
+    expect(table).toMatch(/groupingActive\s*\?\s*[^:]*buildGroupedRows[\s\S]*?:\s*spreadsheetNavigationDetails/);
   });
   it('disables column sorters when grouping is active', () => {
     expect(table).toMatch(/groupingActive[\s\S]{0,80}(sorter|defaultSortOrder)/);
@@ -116,7 +116,7 @@ describe('edit-form detail grouping', () => {
   });
   it('quick-adds a new detail row on ArrowDown from the last row and preserves the target column', () => {
     expect(table).toContain('requestQuickAddFromLastRow');
-    expect(table).toContain("direction === 'down' && isLastOrderDetailRow(realSortedDetails, record)");
+    expect(table).toContain("direction === 'down' && isLastOrderDetailRow(spreadsheetNavigationDetails, record)");
     expect(table).toContain("editorDirection === 'down'");
     expect(table).toContain('pendingQuickAddFocusFieldRef.current = columnKey');
     expect(table).toContain('focusSpreadsheetCoordinate({');
