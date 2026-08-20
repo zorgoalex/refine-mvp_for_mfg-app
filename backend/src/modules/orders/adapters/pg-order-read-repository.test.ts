@@ -509,6 +509,23 @@ describe('PgOrderReadRepository', () => {
       11,
     );
   });
+
+  it('suggests one above the greatest active numeric order name in the current series', async () => {
+    const queries: string[] = [];
+    const database = {
+      async query(text: string) {
+        queries.push(text);
+        return { rows: [{ next_order_name: '2561' }] };
+      },
+    } as unknown as DatabaseService;
+    const repository = new PgOrderReadRepository(database);
+
+    await expect(repository.getNextOrderName()).resolves.toBe('2561');
+    expect(queries[0]).toContain('MAX(order_name::bigint)');
+    expect(queries[0]).toContain("order_name ~ '^\\d{1,15}$'");
+    expect(queries[0]).toContain('delete_flag = false');
+    expect(queries[0]).toContain("order_date >= DATE '2025-12-01'");
+  });
 });
 
 // SP3 tier2 finding 4: backend order reads must be deployable BEFORE migration 029.

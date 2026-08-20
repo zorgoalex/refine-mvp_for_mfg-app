@@ -2012,7 +2012,11 @@ const PdfKonvaElement: React.FC<{
   if (element.type === 'sheet_thumbnail') {
     const w = Math.max(element.w, 1);
     const h = Math.max(element.h, 1);
-    const pieceColor = ['#e6f4ff', '#fff1f0', '#f6ffed', '#fffbe6'];
+    const orderContourColors = new Map([
+      ['11380', '#2563eb'],
+      ['11381', '#15803d'],
+      ['11382', '#d97706'],
+    ]);
     const pieces = [
       { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24, order: '11380', widthLabel: '800', heightLabel: '240', edge: 'ПВХ 2мм', milling: 'Модерн', doweling: true },
       { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18, order: '11380', widthLabel: '780', heightLabel: '180', edge: 'ABS 1мм', milling: 'Паз', doweling: false },
@@ -2057,7 +2061,7 @@ const PdfKonvaElement: React.FC<{
                 clipHeight={piece.h}
                 listening={false}
               >
-                <KonvaRect x={0} y={0} width={piece.w} height={piece.h} fill={pieceColor[index % pieceColor.length]} stroke="#334155" strokeWidth={0.18} listening={false} />
+                <KonvaRect x={0} y={0} width={piece.w} height={piece.h} fill="#ffffff" stroke={orderContourColors.get(piece.order) ?? '#1f2d3d'} strokeWidth={0.35} listening={false} />
                 <KonvaText
                   x={1}
                   y={0.5}

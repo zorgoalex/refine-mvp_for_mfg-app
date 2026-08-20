@@ -642,6 +642,24 @@ describe('OrdersController read endpoints', () => {
     } satisfies Partial<ApiError>);
   });
 
+  it('returns the next order name suggestion through the query service', async () => {
+    const calls: string[] = [];
+    const controller = createController({
+      flags: { ordersEnabled: true, ordersReadOnly: true },
+      queries: {
+        async getNextOrderName(command) {
+          calls.push(command.currentUser.id);
+          return { suggestedOrderName: '2561' };
+        },
+      },
+    });
+
+    await expect(
+      controller.getNextOrderName({ user: currentUser('manager-id') }),
+    ).resolves.toEqual({ suggestedOrderName: '2561' });
+    expect(calls).toEqual(['manager-id']);
+  });
+
   it('normalizes list query with whitelist defaults', () => {
     expect(
       parseOrderListQuery({
@@ -1228,6 +1246,9 @@ function createController(options: {
     },
     async getFormData() {
       throw new Error('getFormData should not be called');
+    },
+    async getNextOrderName() {
+      throw new Error('getNextOrderName should not be called');
     },
     ...options.queries,
   } as unknown as OrderQueryService;

@@ -1,5 +1,5 @@
 import { Table, Tooltip } from '../../../ui/tooltipDelay';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Col, Input, InputNumber, Row, Segmented, Slider, Space, Switch, Tag, Typography, message } from 'antd';
 import {
   CheckCircleOutlined,
@@ -46,9 +46,9 @@ interface TemplateDraft {
 }
 
 const SOURCE_STROKE_MODE_OPTIONS = [
-  { value: 'piece-pastel', label: 'Цвет детали' },
-  { value: 'fixed', label: 'Фиксированный' },
-  { value: 'preserve', label: 'Как в SVG' },
+  { value: 'piece-pastel', label: 'Контур заказа' },
+  { value: 'fixed', label: 'Фиксированный без заказа' },
+  { value: 'preserve', label: 'Как в SVG без заказа' },
 ] as const;
 
 const LABEL_FILL_OPTIONS = [
@@ -373,7 +373,7 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
                 <Title level={5}>Детали и заказы</Title>
                 <Row gutter={[16, 12]}>
                   <Col xs={24} md={12}>
-                    <ColorField label="Фон без заказа" value={draft.profile.piece.defaultFill} disabled={!canManage} onChange={(value) => updatePiece({ defaultFill: value })} />
+                    <ColorField label="Фон листа и деталей" value={draft.profile.piece.defaultFill} disabled={!canManage} onChange={(value) => updatePiece({ defaultFill: value })} />
                   </Col>
                   <Col xs={24} md={12}>
                     <ColorField label="Контур детали" value={draft.profile.piece.stroke} disabled={!canManage} onChange={(value) => updatePiece({ stroke: value })} />
@@ -458,7 +458,7 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
                     />
                   </Col>
                   <Col xs={24} md={12}>
-                    <ColorField label="Фиксированный цвет линий" value={draft.profile.sourceSvg.fixedStroke} disabled={!canManage} onChange={(value) => updateSourceSvg({ fixedStroke: value })} />
+                    <ColorField label="Цвет линий без заказа" value={draft.profile.sourceSvg.fixedStroke} disabled={!canManage} onChange={(value) => updateSourceSvg({ fixedStroke: value })} />
                   </Col>
                   <Col xs={24} md={12}>
                     <Text className="cut-render-field-label">Не масштабировать толщину</Text>
@@ -711,7 +711,7 @@ function PaletteEditor({
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       <div className="cut-render-number-header">
-        <Text className="cut-render-field-label">Палитра заказов</Text>
+        <Text className="cut-render-field-label">Палитра контуров заказов</Text>
         <Button
           size="small"
           icon={<PlusOutlined />}
@@ -761,7 +761,7 @@ function RenderStyleSummary({ profile }: { profile: CutRenderStyleProfile }) {
 
 function useObjectUrl(svg: string | null): string | null {
   const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!svg || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
       setUrl(null);
       return undefined;

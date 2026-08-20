@@ -70,6 +70,14 @@ export interface GetOrderFormDataCommand {
   currentUser: CurrentUser;
 }
 
+export interface GetOrderNameSuggestionCommand {
+  currentUser: CurrentUser;
+}
+
+export interface OrderNameSuggestionRepositoryPort {
+  getNextOrderName(): Promise<string>;
+}
+
 export interface OrderReadRepositoryPort {
   listOrders(command: ListOrdersCommand): Promise<OrderListResponseDto>;
   getOrderById(command: GetOrderByIdCommand): Promise<OrderDto | null>;

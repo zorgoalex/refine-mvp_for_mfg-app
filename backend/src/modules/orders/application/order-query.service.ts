@@ -5,15 +5,18 @@ import type {
   OrderAuditListResponseDto,
   OrderDto,
   OrderListResponseDto,
+  OrderNameSuggestionResponseDto,
 } from '../dto/order.dto';
 import { OrderNotFoundError } from '../errors/order.errors';
 import type { OrderPermissionCheckerPort } from './order-transaction.types';
 import type {
   GetOrderFormDataCommand,
+  GetOrderNameSuggestionCommand,
   GetOrderAuditCommand,
   GetOrderByIdCommand,
   ListOrdersCommand,
   OrderReadRepositoryPort,
+  OrderNameSuggestionRepositoryPort,
   OrderListSortBy,
 } from './order-query.types';
 
@@ -27,6 +30,7 @@ const PACKER_ALLOWED_ORDER_STATUS_NAMES = new Set(['готов к выдаче',
 
 export interface OrderQueryServicePorts {
   reader: OrderReadRepositoryPort;
+  nameSuggestions?: OrderNameSuggestionRepositoryPort;
   permissions?: OrderPermissionCheckerPort;
 }
 
@@ -116,6 +120,24 @@ export class OrderQueryService {
       })),
       paymentStatuses: [],
       paymentTypes: [],
+    };
+  }
+
+  async getNextOrderName(
+    command: GetOrderNameSuggestionCommand,
+  ): Promise<OrderNameSuggestionResponseDto> {
+    if (!this.permissions.canUser(command.currentUser, 'orders.create')) {
+      throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для выполнения действия', {
+        requiredPermissions: ['orders.create'],
+      });
+    }
+
+    if (!this.ports.nameSuggestions) {
+      throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'Order name suggestion is unavailable');
+    }
+
+    return {
+      suggestedOrderName: await this.ports.nameSuggestions.getNextOrderName(),
     };
   }
 

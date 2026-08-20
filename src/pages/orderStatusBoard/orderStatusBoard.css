@@ -2835,8 +2835,8 @@
   cursor: pointer;
 }
 
-.cnc-bath-card__sheet-svg [data-cnc-order-fill="true"] {
-  fill-opacity: 0.96;
+.cnc-bath-card__sheet-svg [data-cnc-order-contour="true"] {
+  stroke-opacity: 1;
 }
 
 .cnc-bath-card__sheet-svg [data-cnc-selected-detail="true"] > rect:first-child {

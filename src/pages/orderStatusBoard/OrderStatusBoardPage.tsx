@@ -204,17 +204,18 @@ const CNC_CARD_DISPLAY_ICONS: Record<CncCardDisplayMode, React.ReactNode> = {
   minimal: <FileTextOutlined />,
 };
 const CNC_SVG_NS = 'http://www.w3.org/2000/svg';
+const CNC_BATH_SHEET_BACKGROUND = '#ffffff';
 const CNC_BATH_DETAIL_ORDER_FILL_COLORS = [
-  '#d7e9ff',
-  '#dff3d7',
-  '#ffe6b8',
-  '#f7d5e8',
-  '#d9f0ef',
-  '#eadcff',
-  '#ffe0d2',
-  '#e8edc9',
-  '#d5e5f2',
-  '#f2ddd5',
+  '#2563eb',
+  '#15803d',
+  '#d97706',
+  '#be185d',
+  '#0f766e',
+  '#7e22ce',
+  '#c2410c',
+  '#4d7c0f',
+  '#0369a1',
+  '#a21caf',
 ] as const;
 const DND_BACKEND_OPTIONS = {
   enableMouseEvents: true,
@@ -6547,8 +6548,11 @@ function decorateCncBathSheetSvg(
     const fill = orderFillByDetailId.get(detailId);
     const rect = piece.querySelector('rect');
     if (fill && rect) {
-      rect.setAttribute('fill', fill);
-      rect.setAttribute('data-cnc-order-fill', 'true');
+      rect.setAttribute('fill', CNC_BATH_SHEET_BACKGROUND);
+      for (const contour of Array.from(piece.querySelectorAll<SVGElement>('rect, path, line, polyline, polygon, circle, ellipse'))) {
+        contour.setAttribute('stroke', fill);
+        contour.setAttribute('data-cnc-order-contour', 'true');
+      }
     }
 
     const completedQuantity = completedDetailCounts.get(detailId) ?? 0;

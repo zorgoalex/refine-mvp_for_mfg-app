@@ -445,6 +445,27 @@ describe('OrderQueryService', () => {
     expect(calls).toEqual(['form-data:manager-id']);
   });
 
+  it('returns next order name only to users allowed to create orders', async () => {
+    const service = new OrderQueryService({
+      reader: readerThatShouldNotBeCalled(),
+      nameSuggestions: {
+        async getNextOrderName() {
+          return '2561';
+        },
+      },
+    });
+
+    await expect(service.getNextOrderName({ currentUser: currentUser() })).resolves.toEqual({
+      suggestedOrderName: '2561',
+    });
+    await expect(
+      service.getNextOrderName({ currentUser: userWithoutOrderView() }),
+    ).rejects.toMatchObject({
+      code: 'PERMISSION_DENIED',
+      details: { requiredPermissions: ['orders.create'] },
+    });
+  });
+
   it('masks finance and payment reference form data without finance visibility', async () => {
     const response = createOrderFormDataResponse();
     const service = new OrderQueryService({

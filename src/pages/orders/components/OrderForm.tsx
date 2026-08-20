@@ -244,6 +244,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const bazisDraftRuntimeRef = useRef<BazisDraftRuntime | null>(null);
   const seededBazisDraftLocationKeyRef = useRef<string | null>(null);
   const createDefaultsSeededRef = useRef(false);
+  const orderNameSuggestionRequestedRef = useRef(false);
   const automaticPlannedCompletionRef = useRef<string | null>(null);
   const projectClientRef = useRef<number | undefined>(undefined);
   const projectRequestIdRef = useRef(0);
@@ -692,6 +693,25 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       seededBazisDraftLocationKeyRef.current = null;
     }
   }, [bazisDraft, mode]);
+
+  useEffect(() => {
+    if (mode !== 'create' || bazisDraft || orderNameSuggestionRequestedRef.current) {
+      return;
+    }
+
+    orderNameSuggestionRequestedRef.current = true;
+    void ordersApi
+      .getNextOrderName()
+      .then(({ suggestedOrderName }) => {
+        const store = getOrderDraftStore(orderKey).getState();
+        if (!store.header.order_name?.trim()) {
+          store.updateHeaderField('order_name', suggestedOrderName);
+        }
+      })
+      .catch(() => {
+        // Suggestion is non-blocking; server still enforces uniqueness on save.
+      });
+  }, [bazisDraft, mode, orderKey]);
 
   useEffect(() => {
     if (

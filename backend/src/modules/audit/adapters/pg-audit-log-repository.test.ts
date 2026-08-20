@@ -29,6 +29,115 @@ function db(results: Array<{ rows: QueryResultRow[] }>): {
 }
 
 describe('PgAuditLogRepository.list', () => {
+  it('enriches status automation rule events with the linked status command audit', async () => {
+    const statusCommandAuditId = '29987552-3914-4bb9-985b-c9690d366fd1';
+    const { client, calls } = db([
+      { rows: [{ total: 1 }] },
+      {
+        rows: [
+          {
+            audit_id: '0dba6004-099f-4f64-af92-3bc9cd357683',
+            event: 'status_automation.rule_applied',
+            entity_type: 'status_automation_rule',
+            entity_id: '4',
+            entity_name: null,
+            entity_detail_number: null,
+            user_id: 1,
+            username: 'admin',
+            role: 'admin',
+            source: 'backend-status-automation',
+            related_order_id: 11520,
+            related_order_name: '2777',
+            related_client_id: null,
+            related_client_name: null,
+            related_payment_id: null,
+            related_deadline_id: null,
+            related_production_event_id: null,
+            related_user_id: null,
+            status_field: null,
+            status_id: null,
+            status_name: null,
+            status_code: null,
+            stage_code: null,
+            request_id: 'req-1',
+            ip_address: null,
+            user_agent: null,
+            before_json: null,
+            after_json: null,
+            diff_json: null,
+            metadata_json: {
+              ruleName: 'Готов к выдаче -> произ-во Упакован',
+              eventType: 'order.status_changed',
+              actionType: 'change_details_production_status',
+              targetStatusId: 7,
+              statusCommandAuditId,
+            },
+            related_entities: [],
+            created_at: '2026-08-19T01:52:37.396Z',
+          },
+        ],
+      },
+      {
+        rows: [
+          {
+            audit_id: statusCommandAuditId,
+            event: 'orders.detail_production_status_batch_change',
+            status_field: 'productionDetailBatch',
+            status_id: 7,
+            status_name: 'Упакован',
+            status_code: 'packed',
+            before_json: { detailStatusDistribution: { 2: 8 } },
+            after_json: { detailStatusDistribution: { 7: 8 } },
+            diff_json: {
+              affectedDetailCount: 8,
+              beforeStatusDistribution: { 2: 8 },
+              afterStatusDistribution: { 7: 8 },
+            },
+            status_catalog: {
+              2: { name: 'Распилен', code: 'cut' },
+              7: { name: 'Упакован', code: 'packed' },
+            },
+          },
+        ],
+      },
+      {
+        rows: [
+          { status_kind: 'production', status_id: 2, status_name: 'Распилен', status_code: 'cut' },
+          { status_kind: 'production', status_id: 7, status_name: 'Упакован', status_code: 'packed' },
+        ],
+      },
+    ]);
+    const repo = new PgAuditLogRepository(client);
+
+    const res = await repo.list({
+      currentUser: undefined,
+      filters: {},
+      page: 1,
+      pageSize: 50,
+      requestId: 'rq',
+    });
+
+    expect(calls).toHaveLength(4);
+    expect(calls[2].text).toMatch(/audit_id = ANY\(\$1::uuid\[\]\)/i);
+    expect(calls[2].params).toEqual([[statusCommandAuditId]]);
+    expect(calls[3].params).toEqual([[], [2, 7]]);
+    expect(res.data[0].metadata).toMatchObject({
+      ruleName: 'Готов к выдаче -> произ-во Упакован',
+      statusCommand: {
+        auditId: statusCommandAuditId,
+        event: 'orders.detail_production_status_batch_change',
+        statusField: 'productionDetailBatch',
+        statusId: 7,
+        statusName: 'Упакован',
+        statusCode: 'packed',
+        statusCatalog: {
+          2: { name: 'Распилен', code: 'cut' },
+          7: { name: 'Упакован', code: 'packed' },
+        },
+      },
+    });
+  });
+
   it('builds a parameterized WHERE from filters and paginates', async () => {
     const { client, calls } = db([
       { rows: [{ total: 3 }] },

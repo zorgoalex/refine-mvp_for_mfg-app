@@ -16,6 +16,7 @@ import type {
   ListOrdersCommand,
   OrderListSortBy,
   OrderReadRepositoryPort,
+  OrderNameSuggestionRepositoryPort,
 } from '../application/order-query.types';
 import { formatCutJobNumber } from '../../cut/application/cut-numbering';
 
@@ -368,7 +369,9 @@ interface UnitLookupRow extends QueryResultRow {
   sort_order: string | number;
 }
 
-export class PgOrderReadRepository implements OrderReadRepositoryPort {
+export class PgOrderReadRepository
+  implements OrderReadRepositoryPort, OrderNameSuggestionRepositoryPort
+{
   // SP3: sheetOrdersReads gates the migration-029 sheet columns/joins in order reads.
   // Defaults true so direct instantiations (tests) keep full sheet reads; the orders
   // module + tx-manager pass the env flag (BACKEND_SHEET_ORDERS_READS, default false) so
@@ -1272,6 +1275,20 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
       units: units.rows.map(mapUnitLookup),
       sheetMaterialTypes: sheetMaterialTypes.rows.map(mapSheetMaterialTypeLookup),
     };
+  }
+
+  async getNextOrderName(): Promise<string> {
+    const result = await this.database.query<{ next_order_name: string }>(
+      `
+      SELECT (COALESCE(MAX(order_name::bigint), 0) + 1)::text AS next_order_name
+      FROM orders
+      WHERE order_name ~ '^\\d{1,15}$'
+        AND delete_flag = false
+        AND order_date >= DATE '2025-12-01'
+      `,
+    );
+
+    return result.rows[0]?.next_order_name ?? '1';
   }
 
   private buildListWhere(command: ListOrdersCommand, params: unknown[]): string {

@@ -58,6 +58,7 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     );
     expect(renderFormSrc).toMatch(/const previewSvg = useMemo\(/);
     expect(renderFormSrc).toMatch(/\[previewParsed, previewSetting\]/);
+    expect(renderFormSrc).toMatch(/useLayoutEffect\(\(\) =>/);
   });
 
   it('eligibility statuses use a multiselect from the production-statuses reference (no free text)', () => {
@@ -232,6 +233,9 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/text=\{piece\.heightLabel\}/);
     expect(tabSrc).toMatch(/rotation=\{-90\}/);
     expect(tabSrc).not.toMatch(/size:\s*'800×240'/);
+    expect(tabSrc).toMatch(/const orderContourColors = new Map/);
+    expect(tabSrc).toMatch(/fill="#ffffff" stroke=\{orderContourColors\.get\(piece\.order\) \?\? '#1f2d3d'\}/);
+    expect(tabSrc).not.toMatch(/fill=\{orderContourColors\.get\(piece\.order\)/);
     expect(tabSrc).toMatch(/wrap="word"/);
     expect(tabSrc).toMatch(/customFieldRowsToSchema/);
     expect(tabSrc).toMatch(/CustomFieldExpressionEditor/);
