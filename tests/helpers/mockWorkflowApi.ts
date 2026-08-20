@@ -600,6 +600,7 @@ export async function setupWorkflowMockApi(
                 contentType: 'application/json',
                 body: JSON.stringify({
                     apiUrl: '',
+                    hasuraUrl: '/v1/graphql',
                     ...(options.uiVariant
                         ? { ui: { evolutionEnabled: true, forceLegacy: false } }
                         : {}),
