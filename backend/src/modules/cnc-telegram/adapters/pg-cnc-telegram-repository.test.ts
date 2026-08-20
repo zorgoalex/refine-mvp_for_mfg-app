@@ -13,6 +13,7 @@ const repositorySource = readFileSync(new URL('./pg-cnc-telegram-repository.ts',
 describe('PgCncTelegramRepository', () => {
   it('returns bath display cut numbers without result version', () => {
     expect(repositorySource).toContain('j.source_display_number');
+    expect(repositorySource).toContain('result.source_display_number');
     expect(repositorySource).toContain('displayCutNumber: formatCutJobNumber(cutJobId, true, row.source_display_number)');
     expect(repositorySource).toContain('cutNumber: formatCutNumber(cutJobId, resultNo, true, row.source_display_number)');
     expect(repositorySource).not.toContain('displayCutNumber: formatCutJobNumber(cutJobId, true)');
@@ -1054,6 +1055,7 @@ describe('PgCncTelegramRepository', () => {
               bathPlacementRow({
                 cut_result_id: 501,
                 cut_job_id: 31,
+                source_display_number: 'В-42',
                 result_no: 1,
                 order_detail_id: 3201,
                 detail_number: 32,
@@ -1080,14 +1082,15 @@ describe('PgCncTelegramRepository', () => {
     expect(sql).toContain('fallback_target_details');
     expect(sql).toContain('completed_whole_order_keys');
     expect(sql).toContain('whole_order_target_details');
-    expect(sql).toContain("lower(packet_comment.comment_text) LIKE '%весь%'");
-    expect(sql).toContain("regexp_matches(\n        packet_comment.comment_text,\n        '(^|[^0-9])([0-9]{4,})([^0-9]|$)'");
+    expect(sql).toContain('JOIN cnc_telegram_packet_whole_order_keys whole_order');
+    expect(sql).toContain('whole_order.order_key');
     expect(sql).toContain('1000000000::integer AS completed_quantity');
     expect(sql).toContain('LEAST(SUM(target.completed_quantity), 1000000000::bigint)::integer');
     expect(sql).toContain('candidate_vacuum_results AS (');
     expect(sql).toContain('latest_vacuum_results AS (');
     expect(sql).toContain('SELECT DISTINCT ON (candidate.cut_job_id)');
     expect(sql).toContain('FROM candidate_vacuum_results candidate');
+    expect(sql).toContain('result.source_display_number');
     expect(sql).toContain('(current_result.result_no = r.result_no) AS is_current_result');
     expect(sql).toContain('LEFT JOIN cut_result current_result');
     expect(sql).toContain('LEFT JOIN cut_result_archive_state archive');
@@ -1120,6 +1123,8 @@ describe('PgCncTelegramRepository', () => {
     ]);
     expect(result.columns[2]?.baths[0]).toMatchObject({
       cutJobId: 31,
+      cutNumber: 'В-42-1',
+      displayCutNumber: 'В-42',
       ready: false,
       itemQuantityTotal: 1,
       positionCount: 1,
