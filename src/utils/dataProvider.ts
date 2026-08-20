@@ -1343,6 +1343,16 @@ function mapOrdersViewQueryToBackend(
           break;
         }
         return null;
+      case 'planned_completion_date':
+        if (filter.operator === 'gte') {
+          query.plannedCompletionDateFrom = String(value);
+          break;
+        }
+        if (filter.operator === 'lte') {
+          query.plannedCompletionDateTo = String(value);
+          break;
+        }
+        return null;
       case 'created_by':
         if (currentUser?.id && Number(value) === Number(currentUser.id)) {
           query.onlyMyOrders = true;
@@ -1383,9 +1393,35 @@ async function getBackendOrdersListIfEnabled(
     return null;
   }
 
-  const response = await ordersApi.list(query);
+  const requestedPage = query.page ?? 1;
+  const requestedPageSize = query.pageSize ?? 10;
+  const backendPageSize = Math.min(requestedPageSize, 200);
+  const requestedStart = (requestedPage - 1) * requestedPageSize;
+  const firstBackendPage = Math.floor(requestedStart / backendPageSize) + 1;
+  const firstPageOffset = requestedStart % backendPageSize;
+  const response = await ordersApi.list({
+    ...query,
+    page: firstBackendPage,
+    pageSize: backendPageSize,
+  });
+
+  const lastBackendPage = Math.min(
+    Math.ceil((requestedStart + requestedPageSize) / backendPageSize),
+    response.pagination.totalPages,
+  );
+  const remainingPages = Array.from(
+    { length: Math.max(0, lastBackendPage - firstBackendPage) },
+    (_, index) => firstBackendPage + index + 1,
+  );
+  const remainingResponses = await Promise.all(
+    remainingPages.map((page) => ordersApi.list({ ...query, page, pageSize: backendPageSize })),
+  );
+  const requestedData = [response, ...remainingResponses]
+    .flatMap((page) => page.data)
+    .slice(firstPageOffset, firstPageOffset + requestedPageSize);
+
   return {
-    data: response.data.map(mapOrderListItemToLegacyRow),
+    data: requestedData.map(mapOrderListItemToLegacyRow),
     total: response.pagination.total,
   };
 }

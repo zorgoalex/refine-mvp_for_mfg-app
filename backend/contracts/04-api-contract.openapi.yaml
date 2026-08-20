@@ -1026,6 +1026,20 @@ paths:
           schema:
             type: string
             format: date
+        - name: plannedCompletionDateFrom
+          in: query
+          required: false
+          description: Нижняя граница плановой даты завершения, включительно.
+          schema:
+            type: string
+            format: date
+        - name: plannedCompletionDateTo
+          in: query
+          required: false
+          description: Верхняя граница плановой даты завершения, включительно.
+          schema:
+            type: string
+            format: date
         - name: onlyMyOrders
           in: query
           required: false

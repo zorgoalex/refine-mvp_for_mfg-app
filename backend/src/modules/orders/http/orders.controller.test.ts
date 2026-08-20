@@ -657,6 +657,8 @@ describe('OrdersController read endpoints', () => {
         productionStatusId: '5',
         dateFrom: '2026-04-01',
         dateTo: '2026-04-30',
+        plannedCompletionDateFrom: '2026-05-01',
+        plannedCompletionDateTo: '2026-05-31',
         onlyMyOrders: 'true',
         deleted: 'true',
       }),
@@ -673,6 +675,8 @@ describe('OrdersController read endpoints', () => {
       productionStatusId: 5,
       dateFrom: '2026-04-01',
       dateTo: '2026-04-30',
+      plannedCompletionDateFrom: '2026-05-01',
+      plannedCompletionDateTo: '2026-05-31',
       onlyMyOrders: true,
       deleted: true,
     });
@@ -746,6 +750,7 @@ describe('OrdersController read endpoints', () => {
     expect(() => parseOrderListQuery({ sortBy: 'raw_sql_injection' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ pageSize: '201' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ dateFrom: '30.04.2026' })).toThrow(ApiError);
+    expect(() => parseOrderListQuery({ plannedCompletionDateFrom: '30.04.2026' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ deleted: 'да' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ sortBy: 'deletedAt' })).toThrow(ApiError);
     expect(() => parseOrderAuditQuery({ pageSize: '201' })).toThrow(ApiError);
