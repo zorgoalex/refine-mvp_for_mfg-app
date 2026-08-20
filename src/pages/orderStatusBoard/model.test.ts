@@ -509,6 +509,21 @@ describe('order status board model', () => {
       'b-3000',
     ]);
     expect(filtered[2]?.total).toBe(3);
+
+    const bathColumn = columns[2]!;
+    const withDeepLinkedBath = filterCncBathColumnsByMachineOrderMatches(
+      [
+        ...columns.slice(0, 2),
+        {
+          ...bathColumn,
+          total: 4,
+          baths: [...(bathColumn.baths ?? []), cncBath('cut-result:120', ['9999'])],
+        },
+      ],
+      'cut-result:120',
+    );
+    expect(withDeepLinkedBath[2]?.baths.map((bath) => bath.bathCardId)).toContain('cut-result:120');
+    expect(withDeepLinkedBath[2]?.total).toBe(4);
   });
 
   it('allows MDF manual moves only inside card-specific column groups', () => {
