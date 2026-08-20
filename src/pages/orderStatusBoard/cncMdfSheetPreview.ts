@@ -77,7 +77,7 @@ export function decorateCncMdfBoardSheetSvg(
   );
   const heading = [
     `<rect class="cut-sheet-job-heading-background" x="${svgNumber(viewX)}" y="${svgNumber(headingViewY)}" width="${svgNumber(viewWidth)}" height="${svgNumber(headingHeight)}" fill="${sheetBackground}"/>`,
-    `<text class="cut-sheet-job-heading" data-cut-job-heading="${escapedDisplayNumber}" x="${svgNumber(headingCenterX)}" y="${svgNumber(headingCenterY)}" font-family="Liberation Sans, sans-serif" font-size="${svgNumber(headingFont)}" font-weight="800" fill="#111827" text-anchor="middle" dominant-baseline="middle">Раскрой №${escapedDisplayNumber}</text>`,
+    `<text class="cut-sheet-job-heading" data-cut-job-heading="${escapedDisplayNumber}" x="${svgNumber(headingCenterX)}" y="${svgNumber(headingCenterY)}" font-family="Liberation Sans, sans-serif" font-size="${svgNumber(headingFont)}" font-weight="400" fill="#111827" text-anchor="middle" dominant-baseline="middle">Раскрой №${escapedDisplayNumber}</text>`,
   ].join('');
   return decorated.replace(/(<svg\b[^>]*>)/, `$1${heading}`);
 }

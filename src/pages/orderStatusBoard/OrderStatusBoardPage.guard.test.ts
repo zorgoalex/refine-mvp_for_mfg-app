@@ -1612,6 +1612,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('cutJobDisplayNumber,');
     expect(sheetPreview).toContain("previewSource === 'screenshot' && printHeader");
     expect(sheetPreview).toContain('className="cnc-packet-card__sheet-heading"');
+    expect(css).toMatch(/\.cnc-packet-card__sheet-heading\s*\{[^}]*font-weight:\s*400;/s);
     expect(page).toContain('cutJobDisplayNumber: formatCncBathCardCutNumber(bath),');
     expect(sheetPreview).toContain('printMode="stretch-page-height"');
     expect(packetCard).toContain('const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);');

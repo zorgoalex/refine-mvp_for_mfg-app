@@ -378,7 +378,7 @@ export function addCutJobHeadingToSvg(
   const decorated = replaceSvgViewBox(svg, decoratedViewBox);
   const heading = [
     `<rect class="cut-sheet-job-heading-background" x="${num(viewX)}" y="${num(headingViewY)}" width="${num(viewWidth)}" height="${num(headingHeightMm)}" fill="${sheetBackground}"/>`,
-    `<text class="cut-sheet-job-heading" data-cut-job-heading="${escapedDisplayNumber}" x="${num(headingCenterX)}" y="${num(headingCenterY)}" font-family="Liberation Sans, sans-serif" font-size="${num(headingFontMm)}" font-weight="800" fill="#111827" text-anchor="middle" dominant-baseline="middle">Раскрой №${escapedDisplayNumber}</text>`,
+    `<text class="cut-sheet-job-heading" data-cut-job-heading="${escapedDisplayNumber}" x="${num(headingCenterX)}" y="${num(headingCenterY)}" font-family="Liberation Sans, sans-serif" font-size="${num(headingFontMm)}" font-weight="400" fill="#111827" text-anchor="middle" dominant-baseline="middle">Раскрой №${escapedDisplayNumber}</text>`,
   ].join('');
   return decorated.replace(/(<svg\b[^>]*>)/, `$1${heading}`);
 }

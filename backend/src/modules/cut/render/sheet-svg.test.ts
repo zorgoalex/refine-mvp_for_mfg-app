@@ -151,6 +151,7 @@ describe('buildSheetSvg multi-line labels', () => {
 
     expect(svg).toContain('data-cut-job-heading="150"');
     expect(svg).toContain('>Раскрой №150</text>');
+    expect(svg).toMatch(/class="cut-sheet-job-heading"[^>]*font-weight="400"/);
     expect(viewBox?.[1]).toBeLessThan(0);
     expect(viewBox?.[3]).toBeGreaterThan(sheet.sheet_height_mm);
     expect(headingFont).toBeGreaterThanOrEqual(orderFont);

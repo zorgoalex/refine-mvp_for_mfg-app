@@ -63,6 +63,7 @@ describe('fetchCncMdfBoardSheetSvg', () => {
     expect(svg).toContain('class="cut-sheet-job-heading"');
     expect(svg).toContain('Раскрой №150');
     expect(svg).toContain('font-size="55"');
+    expect(svg).toContain('font-weight="400"');
     expect(svg).toContain('viewBox="0 -104.5 1000 2104.5"');
   });
 
