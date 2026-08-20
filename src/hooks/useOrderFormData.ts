@@ -102,11 +102,10 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
     }
 
     let cancelled = false;
-    setError(null);
-
     if (cachedFormData && !formDataCacheStale && refreshVersion === 0) {
       setData(cachedFormData);
       setIsLoading(false);
+      setError(null);
       return;
     }
 
@@ -118,6 +117,7 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
       .then((response) => {
         if (cancelled) return;
         setData(response);
+        setError(null);
       })
       .catch((unknownError) => {
         if (cancelled) return;
@@ -135,9 +135,14 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
   }, [enabled, refreshVersion]);
 
   const references = useMemo(() => mapOrderFormDataToReferences(data), [data]);
+  // A failed aggregate request must not leave every reference picker empty.
+  // Consumers treat `enabled=false` as the signal to use their legacy Hasura
+  // queries. Keep backend mode while loading or while cached data is usable,
+  // and fail over only when the initial request produced no data.
+  const backendReferencesAvailable = enabled && (data !== null || error === null);
 
   return {
-    enabled,
+    enabled: backendReferencesAvailable,
     data,
     references,
     isLoading,

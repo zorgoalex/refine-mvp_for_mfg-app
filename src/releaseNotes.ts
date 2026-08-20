@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Заказы: восстановление справочников формы",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Справочники клиентов, материалов и статусов больше не остаются пустыми при сбое агрегатного backend-запроса: форма автоматически использует резервную загрузку через Hasura.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Календарь: загрузка заказов по плановой дате",
     services: ["ERP"],
     repositories: ["repo_erp"],
