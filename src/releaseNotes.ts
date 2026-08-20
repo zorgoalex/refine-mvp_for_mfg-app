@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Заказы: групповой параметр ХДФ",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    added: [
+      "Во вкладке «ХДФ» параметр отступа можно задать сразу для выбранных позиций; новое значение сразу отмечается в таблице и сохраняется как индивидуальное переопределение исходной детали.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Автостатусы: понятный конструктор правил",
     services: ["ERP"],
     repositories: ["repo_erp"],
