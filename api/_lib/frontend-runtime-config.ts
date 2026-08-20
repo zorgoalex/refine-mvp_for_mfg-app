@@ -1,5 +1,6 @@
 export interface FrontendRuntimeConfigResponse {
   apiUrl: string;
+  hasuraUrl: string;
   ui: {
     evolutionEnabled: boolean;
     forceLegacy: boolean;
@@ -52,6 +53,7 @@ export function buildFrontendRuntimeConfig(
 
   return {
     apiUrl: normalizeApiUrl(env.RUNTIME_CONFIG_API_URL),
+    hasuraUrl: normalizeApiUrl(env.RUNTIME_CONFIG_HASURA_URL),
     ui: {
       evolutionEnabled: readBooleanEnv(env.RUNTIME_CONFIG_UI_EVOLUTION, false),
       forceLegacy: readBooleanEnv(env.RUNTIME_CONFIG_UI_FORCE_LEGACY, false),

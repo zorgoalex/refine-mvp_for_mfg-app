@@ -4,6 +4,7 @@ import handler from './runtime-config';
 
 const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_API_URL',
+  'RUNTIME_CONFIG_HASURA_URL',
   'RUNTIME_CONFIG_BACKEND_AUTH',
   'RUNTIME_CONFIG_BACKEND_PERMISSIONS',
   'RUNTIME_CONFIG_BACKEND_ORDERS',
@@ -50,6 +51,7 @@ describe('runtime-config handler', () => {
     expect(res.headers['Content-Type']).toBe('application/json; charset=utf-8');
     expect(res.body).toMatchObject({
       apiUrl: '',
+      hasuraUrl: '',
       ui: {
         evolutionEnabled: false,
         forceLegacy: false,
@@ -79,6 +81,7 @@ describe('runtime-config handler', () => {
 
   it('uses runtime env when explicitly set', () => {
     vi.stubEnv('RUNTIME_CONFIG_API_URL', 'https://api.example.test/');
+    vi.stubEnv('RUNTIME_CONFIG_HASURA_URL', 'https://hasura.example.test/v1/graphql/');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_AUTH', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_DEADLINES', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BAZIS_CUT', 'true');
@@ -93,6 +96,7 @@ describe('runtime-config handler', () => {
 
     expect(res.body).toMatchObject({
       apiUrl: 'https://api.example.test',
+      hasuraUrl: 'https://hasura.example.test/v1/graphql',
       ui: {
         evolutionEnabled: true,
         forceLegacy: false,
@@ -118,6 +122,7 @@ describe('runtime-config handler', () => {
 
     expect(res.body).toMatchObject({
       apiUrl: 'https://backend-test.mebelkz.app',
+      hasuraUrl: 'https://hasura-test.mebelkz.app/v1/graphql',
     });
   });
 
@@ -131,6 +136,18 @@ describe('runtime-config handler', () => {
     const explicitRes = createResponse();
     handler({ method: 'GET', headers: {} } as VercelRequest, explicitRes as unknown as VercelResponse);
     expect(explicitRes.body).toMatchObject({ apiUrl: 'https://explicit.example.test' });
+  });
+
+  it('uses production Hasura for the production host', () => {
+    const res = createResponse();
+    handler(
+      { method: 'GET', headers: { host: 'mebelkz.app' } } as VercelRequest,
+      res as unknown as VercelResponse,
+    );
+
+    expect(res.body).toMatchObject({
+      hasuraUrl: 'https://hasura-ovh.mebelkz.app/v1/graphql',
+    });
   });
 
   it('supports HEAD and rejects unsupported methods', () => {

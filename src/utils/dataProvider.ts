@@ -16,6 +16,7 @@ import type { PaymentDto } from '../api/types/paymentApi.types';
 import type { UserDto, UserListQuery } from '../api/types/userApi.types';
 import type { UserRole } from '../api/types/authApi.types';
 import { featureFlags } from '../config/featureFlags';
+import { getRuntimeHasuraUrl } from '../config/runtimeConfig';
 import { canMutateHasuraResource, canQueryHasuraResource } from './resourcePermissions';
 
 type AnyObject = Record<string, any>;
@@ -35,6 +36,7 @@ function normalizeHasuraUrl(value: unknown): string | null {
 
 function getConfiguredHasuraUrl(): string | null {
   return (
+    normalizeHasuraUrl(getRuntimeHasuraUrl()) ??
     normalizeHasuraUrl((import.meta as any).env?.VITE_HASURA_GRAPHQL_URL) ??
     normalizeHasuraUrl(
       (globalThis as { process?: { env?: Record<string, unknown> } }).process?.env

@@ -16,6 +16,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   const config = {
     ...baseConfig,
     apiUrl: baseConfig.apiUrl || inferRuntimeApiUrl(req),
+    hasuraUrl: baseConfig.hasuraUrl || inferRuntimeHasuraUrl(req),
     features: {
       ...baseConfig.features,
       statusAutomation: readBooleanEnv(process.env.RUNTIME_CONFIG_STATUS_AUTOMATION, false),
@@ -42,6 +43,25 @@ function inferRuntimeApiUrl(req: VercelRequest): string {
     process.env.VERCEL_GIT_COMMIT_REF === 'feat/backend-erp-stage1'
   ) {
     return 'https://backend-test.mebelkz.app';
+  }
+
+  return '';
+}
+
+function inferRuntimeHasuraUrl(req: VercelRequest): string {
+  const rawHost = Array.isArray(req.headers?.host) ? req.headers.host[0] : req.headers?.host;
+  const host = rawHost?.trim().toLowerCase().replace(/:\d+$/, '') ?? '';
+
+  if (
+    host === 'app-test.mebelkz.app' ||
+    process.env.VERCEL_ENV === 'preview' ||
+    process.env.VERCEL_GIT_COMMIT_REF === 'feat/backend-erp-stage1'
+  ) {
+    return 'https://hasura-test.mebelkz.app/v1/graphql';
+  }
+
+  if (host === 'mebelkz.app' || host === 'www.mebelkz.app') {
+    return 'https://hasura-ovh.mebelkz.app/v1/graphql';
   }
 
   return '';
