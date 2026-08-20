@@ -38,6 +38,8 @@ export interface OrderListQuery {
   productionStatusId?: number;
   dateFrom?: string;
   dateTo?: string;
+  plannedCompletionDateFrom?: string;
+  plannedCompletionDateTo?: string;
   onlyMyOrders: boolean;
   deleted?: boolean;
   deletedScopeUserId?: string;

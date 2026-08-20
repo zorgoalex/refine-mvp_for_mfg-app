@@ -13,6 +13,18 @@ const backendRoot = existsSync(resolve(process.cwd(), 'backend/contracts'))
   : process.cwd();
 
 describe('orders OpenAPI contract', () => {
+  it('documents planned completion date filters for calendar queries', () => {
+    const contract = readOpenApiContract();
+    const listSection = sectionBetween(
+      contract,
+      '  /api/v1/orders:',
+      '  /api/v1/orders/status-board:',
+    );
+
+    expect(listSection).toContain('- name: plannedCompletionDateFrom');
+    expect(listSection).toContain('- name: plannedCompletionDateTo');
+  });
+
   it('documents stale-safe POST refresh with current relation projections', () => {
     const contract = readOpenApiContract();
     const refreshSection = sectionBetween(

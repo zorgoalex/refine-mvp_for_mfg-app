@@ -19,6 +19,8 @@ describe('PgOrderReadRepository', () => {
           sortOrder: 'asc',
           search: 'client',
           dateFrom: '2026-05-01',
+          plannedCompletionDateFrom: '2026-05-02',
+          plannedCompletionDateTo: '2026-05-31',
           onlyMyOrders: true,
         },
       }),
@@ -60,6 +62,8 @@ describe('PgOrderReadRepository', () => {
 
     const listQuery = database.queries.find((query) => query.text.includes('LIMIT'))?.text ?? '';
     expect(listQuery).toContain('o.delete_flag = false');
+    expect(listQuery).toContain('o.planned_completion_date >= $');
+    expect(listQuery).toContain('o.planned_completion_date <= $');
     expect(listQuery).toContain('JOIN projects mp ON mp.project_id = o.project_id');
     expect(listQuery).toContain('mp.code AS project_code');
     expect(listQuery).toContain("(mp.code || '-' || o.order_name) AS full_number");
@@ -80,7 +84,16 @@ describe('PgOrderReadRepository', () => {
     expect(listQuery).toContain('FROM production_status_events pse');
     expect(listQuery).toContain('ORDER BY (o.final_amount - o.paid_amount) ASC');
     // search «client» биндит и contains-ветку, и code-prefix ветку (mp.code ILIKE 'client%')
-    expect(database.queries.at(-1)?.params).toEqual(['%client%', 'client%', '2026-05-01', 42, 10, 10]);
+    expect(database.queries.at(-1)?.params).toEqual([
+      '%client%',
+      'client%',
+      '2026-05-01',
+      '2026-05-02',
+      '2026-05-31',
+      42,
+      10,
+      10,
+    ]);
   });
 
   it('keeps the default list SQL free of trash-only select and join fragments', async () => {
