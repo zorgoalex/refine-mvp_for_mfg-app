@@ -23,6 +23,29 @@ describe('useOrderFormData mapping', () => {
     expect(references.defaultOrderStatus).toBeUndefined();
     expect(references.materialNameById.size).toBe(0);
   });
+
+  it('keeps older backend sheet materials when isCuttable is omitted', () => {
+    const data = {
+      ...createFormDataResponse(),
+      sheetMaterialTypes: [{
+        id: 21,
+        name: 'МДФ 16',
+        widthMm: 2800,
+        heightMm: 2070,
+        isActive: true,
+      }],
+    } as OrderFormDataResponse;
+
+    expect(mapOrderFormDataToReferences(data).sheetMaterialTypes).toEqual([{
+      label: 'МДФ 16',
+      value: 21,
+      widthMm: 2800,
+      heightMm: 2070,
+      isActive: true,
+      isCuttable: true,
+      sortOrder: undefined,
+    }]);
+  });
 });
 
 function createFormDataResponse(): OrderFormDataResponse {

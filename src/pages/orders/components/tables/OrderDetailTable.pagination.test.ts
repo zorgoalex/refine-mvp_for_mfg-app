@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../../../../types/orders';
 import {
   calculateOrderDetailTableBodyScrollY,
+  isOrderDetailSelectVerticalNavigationKey,
   isLastOrderDetailRow,
   pageContainingOrderDetail,
   sortOrderDetailsForPagination,
@@ -66,5 +67,11 @@ describe('order detail controlled pagination', () => {
     expect(calculateOrderDetailTableBodyScrollY(0, 20)).toBe(819);
     expect(calculateOrderDetailTableBodyScrollY(0, 21)).toBe(560);
     expect(calculateOrderDetailTableBodyScrollY(100, 100)).toBe(560);
+  });
+
+  it('leaves both vertical arrows to an open detail Select', () => {
+    expect(isOrderDetailSelectVerticalNavigationKey('ArrowDown')).toBe(true);
+    expect(isOrderDetailSelectVerticalNavigationKey('ArrowUp')).toBe(true);
+    expect(isOrderDetailSelectVerticalNavigationKey('ArrowLeft')).toBe(false);
   });
 });
