@@ -1608,6 +1608,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(sheetPreview).toContain('<ImagePrintPreviewModal');
     expect(sheetPreview).toContain("status={generatedSvgPreview ? 'SVG-раскрой из задания' : 'Скрин из Telegram-чата'}");
     expect(sheetPreview).toContain('printHeader={printHeader}');
+    expect(packetCard).toContain('cutJobDisplayNumber={cncPacketDisplayCutJobNumber(packet)}');
+    expect(sheetPreview).toContain('cutJobDisplayNumber,');
+    expect(sheetPreview).toContain("previewSource === 'screenshot' && printHeader");
+    expect(sheetPreview).toContain('className="cnc-packet-card__sheet-heading"');
+    expect(page).toContain('cutJobDisplayNumber: formatCncBathCardCutNumber(bath),');
     expect(sheetPreview).toContain('printMode="stretch-page-height"');
     expect(packetCard).toContain('const sheetPrintHeader = cncMachineFileCutPrintHeader(packet);');
     expect(page).toContain('function cncMachineFileCutPrintHeader(packet: CncTelegramPacket)');
