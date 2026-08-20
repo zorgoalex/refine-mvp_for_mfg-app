@@ -44,7 +44,7 @@ export class PgCncTelegramWorkerAuditRepository {
          'operation_id,operation_key,scan_id,log_id,operation_type,status,planned_at,finished_at,reason_code,reason_message,error_code,error_message,external_packet_key,source_version,packet_id,cut_job_id,cut_result_no,cutting_sequence_no,backend_applied,backend_stale,reply_text,reply_to_message_id,session_sender_user_id,sent_telegram_message_id,reconciliation_yielded_count,reconciliation_exhausted,reconciliation_truncated,reconciliation_error_code,reconciliation_window_from,reconciliation_window_to,steps_json,responses_json,created_at,updated_at,cut_job_display_number',
          '73c369920b8011e2047221cc37bc0da6',
          'chk_cnc_tg_worker_operation_arrays,chk_cnc_tg_worker_operation_bounds,chk_cnc_tg_worker_operation_display_number,chk_cnc_tg_worker_operation_reason_codes,chk_cnc_tg_worker_operation_status,chk_cnc_tg_worker_operation_type,cnc_telegram_worker_operations_log_id_fkey,cnc_telegram_worker_operations_operation_key_key,cnc_telegram_worker_operations_pkey,cnc_telegram_worker_operations_scan_id_fkey',
-         '98a6e95e097d305eaaed785bd26183b5',
+         'e814e1e9d4e8dc751fac89f31cf10e38',
          'cnc_telegram_worker_operations_operation_key_key,cnc_telegram_worker_operations_pkey,idx_cnc_tg_worker_operations_log,idx_cnc_tg_worker_operations_scan,idx_cnc_tg_worker_operations_type_status',
          '6e836ddb93d11c98f68670a6152b1f97'),
         ('cnc_telegram_worker_message_observations',
