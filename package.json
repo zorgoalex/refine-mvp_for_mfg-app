@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:frontend": "vitest run --config vitest.frontend.config.ts",
+    "test:business-references": "vitest run api/runtime-config.test.ts api/_lib/frontend-runtime-config.test.ts src/config/runtimeConfig.test.ts src/config/runtimeConfigCanaryExamples.test.ts src/utils/dataProvider.hasura-url.guard.test.ts src/utils/dataProvider.packerHasuraGuards.test.ts src/hooks/useOrderFormData.referenceRefresh.test.ts src/pages/orders/components/sections/OrderLegacySection.referenceFallback.test.tsx",
     "typecheck": "tsc -p tsconfig.app.json --pretty false",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.mjs",
     "typecheck:baseline": "node scripts/typecheck-ratchet.mjs --update",

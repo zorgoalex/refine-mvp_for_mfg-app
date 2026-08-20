@@ -31,6 +31,16 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-20",
+    title: "Справочники: обязательная проверка доступности",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Каждый отправленный коммит автоматически проверяет runtime-адрес Hasura и резервную загрузку бизнес-справочников; отсутствие адреса теперь завершается явной ошибкой вместо показа пустых списков.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-20",
     title: "Заказы: восстановление справочников формы",
     services: ["ERP"],
     repositories: ["repo_erp"],

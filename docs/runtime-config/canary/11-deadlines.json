@@ -1,5 +1,6 @@
 {
   "apiUrl": "https://backend-test.example.com",
+  "hasuraUrl": "https://hasura-test.example.com/v1/graphql",
   "features": {
     "backendAuth": true,
     "backendPermissions": true,
