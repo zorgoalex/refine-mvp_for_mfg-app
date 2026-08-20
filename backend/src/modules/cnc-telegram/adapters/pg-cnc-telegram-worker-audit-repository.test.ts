@@ -21,11 +21,14 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
       'cnc_telegram_worker_scans_writer_user_id_fkey',
       'chk_cnc_tg_worker_message_reason_codes',
       'cnc_telegram_worker_operations_scan_id_fkey',
+      'chk_cnc_tg_worker_operation_display_number',
       'chk_cnc_tg_worker_observation_owner',
       'chk_cnc_tg_worker_observation_classification_code',
       'idx_cnc_tg_worker_messages_search',
       'uq_cnc_tg_worker_observation_operation_ordinal',
     ]) expect(capabilitySql).toContain(marker);
+    expect(capabilitySql).toContain('created_at,updated_at,cut_job_display_number');
+    expect(capabilitySql).toContain('73c369920b8011e2047221cc37bc0da6');
     expect(capabilitySql).toContain('pg_get_constraintdef(oid)');
     expect(capabilitySql).toContain("indexname || '|' || indexdef");
     expect(capabilitySql).toContain("pg_get_functiondef(to_regprocedure('cnc_telegram_worker_reason_code_valid(text)'))");
@@ -72,6 +75,8 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     expect(operationSql).toContain('EXCLUDED.steps_json @> cnc_telegram_worker_operations.steps_json');
     expect(operationSql).toContain('EXCLUDED.responses_json @> cnc_telegram_worker_operations.responses_json');
     expect(operationSql).toContain('reply_text IS NULL OR cnc_telegram_worker_operations.reply_text IS NOT DISTINCT FROM EXCLUDED.reply_text');
+    expect(operationSql).toContain('cut_job_display_number');
+    expect(operationSql).toContain('cut_job_display_number IS NOT DISTINCT FROM EXCLUDED.cut_job_display_number');
   });
 
   it('accepts append-only evidence while an operation remains planned', async () => {
@@ -83,12 +88,13 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     const operationIndex = database.sql.findIndex((sql) => sql.includes('INSERT INTO cnc_telegram_worker_operations'));
     const operationSql = database.sql[operationIndex] ?? '';
     expect(database.params[operationIndex]?.[4]).toBe('planned');
-    expect(JSON.parse(String(database.params[operationIndex]?.[29]))).toHaveLength(2);
+    expect(JSON.parse(String(database.params[operationIndex]?.[30]))).toHaveLength(2);
     expect(operationSql).toContain("EXCLUDED.status='planned'");
     expect(operationSql).toContain('finished_at IS NOT DISTINCT FROM EXCLUDED.finished_at');
     expect(operationSql).toContain('reconciliation_window_to IS NOT DISTINCT FROM EXCLUDED.reconciliation_window_to');
     expect(operationSql).toContain('EXCLUDED.steps_json @> cnc_telegram_worker_operations.steps_json');
     expect(operationSql).toContain('EXCLUDED.responses_json @> cnc_telegram_worker_operations.responses_json');
+    expect(operationSql).toContain('cut_job_display_number IS NOT DISTINCT FROM EXCLUDED.cut_job_display_number');
   });
 
   it('accepts only an exact observation replay after an ordinal conflict', async () => {
@@ -130,6 +136,7 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     expect(messageSql).toContain("'operationKey', op.operation_key");
     expect(messageSql).toContain("'steps', p.steps_json");
     expect(messageSql).toContain("'responses', p.responses_json");
+    expect(messageSql).toContain("'cutJobDisplayNumber', p.cut_job_display_number");
     expect(messageSql).toContain('m.status = $3');
     expect(messageSql).toContain('m.message_type = $4');
     expect(messageSql).toContain('m.reason_code = $5');

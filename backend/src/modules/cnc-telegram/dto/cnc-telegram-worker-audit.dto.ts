@@ -155,6 +155,7 @@ const operationSchema = z.object({
   sourceVersion: telegramId.nullable().optional(),
   packetId: uuid.nullable().optional(),
   cutJobId: telegramId.nullable().optional(),
+  cutJobDisplayNumber: optionalText(80),
   cutResultNo: z.number().int().positive().nullable().optional(),
   cuttingSequenceNo: z.number().int().positive().max(999999).nullable().optional(),
   backendApplied: z.boolean().nullable().optional(),

@@ -144,10 +144,21 @@ describe('CNC Telegram worker audit DTO', () => {
     const operation = {
       operationKey: `tgop:v1:${scan.scanId}:${digest}:message_processing:1`,
       scanId: scan.scanId, logKey: message.logKey, operationType: 'message_processing' as const,
-      status: 'planned' as const, plannedAt: scan.startedAt, steps: [], responses: [],
+      status: 'planned' as const, plannedAt: scan.startedAt, cutJobId: '102',
+      cutJobDisplayNumber: 'CNC-102', steps: [], responses: [],
     };
-    expect(parseWorkerAuditBatch({ scan, messages: [message], observations: [], operations: [operation] })
-      .operations[0].operationKey).toBe(operation.operationKey);
+    expect(() => parseWorkerAuditBatch({
+      scan,
+      messages: [{ ...message, cutJobDisplayNumber: 'CNC-102' }],
+      observations: [],
+      operations: [],
+    })).toThrow();
+    const parsed = parseWorkerAuditBatch({ scan, messages: [message], observations: [], operations: [operation] });
+    expect(parsed.operations[0]).toMatchObject({
+      operationKey: operation.operationKey,
+      cutJobId: '102',
+      cutJobDisplayNumber: 'CNC-102',
+    });
     for (const operationKey of [
       `tgop:v1:da57432f-bb1e-45a1-a3ec-1022ab15e938:${digest}:message_processing:1`,
       `tgop:v1:${scan.scanId}:${'b'.repeat(64)}:message_processing:1`,
