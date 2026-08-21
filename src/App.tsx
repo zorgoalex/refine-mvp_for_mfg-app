@@ -29,6 +29,8 @@ import { can } from "./utils/permissions";
 import type { PermissionName } from "./api/types/authApi.types";
 import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility";
 import { DefaultRootRedirect } from "./components/DefaultRootRedirect";
+import { authSession } from "./api/authSession";
+import { cncTelegramApi } from "./api/cncTelegramApi";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -203,6 +205,19 @@ const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sh
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 
+function mdfDefaultDateRange(now = new Date()): { dateFrom: string; dateTo: string } {
+  const dateTo = formatLocalDate(now);
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+  return { dateFrom: formatLocalDate(from), dateTo };
+}
+
+function formatLocalDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export interface AppProps {
   initialUiVariant?: UiVariant;
 }
@@ -254,6 +269,18 @@ const ThemedApp = () => {
     // shell/auth/calendar settle so navigation does not wait for module fetch
     // and evaluation after the operator clicks the menu item.
     void loadOrderStatusBoardModule();
+  }, []);
+
+  useEffect(() => {
+    if (!featureFlags.orderStatusBoard || !featureFlags.cncTelegram) return;
+    let warmed = false;
+    const warmMdfData = () => {
+      if (warmed || !authSession.getAccessToken() || !authSession.getUser()) return;
+      warmed = true;
+      void cncTelegramApi.prefetchToday(mdfDefaultDateRange()).catch(() => undefined);
+    };
+    warmMdfData();
+    return authSession.subscribe(warmMdfData);
   }, []);
 
   return (

@@ -859,7 +859,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
           );
           try {
             const [response, manualMoves] = await Promise.all([
-              cncTelegramApi.today({
+              cncTelegramApi.consumePrefetchedToday({
                 dateFrom: displayRange.dateFrom,
                 dateTo: displayRange.dateTo,
               }, { cache: 'no-store' }),

@@ -618,7 +618,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(app).toContain('name: "mdf-work-board"');
     expect(app).toContain('list: "/mdf-work-board"');
     expect(app).toContain('<Route path="/mdf-work-board">');
-    expect(page).toContain('cncTelegramApi.today');
+    expect(page).toContain('cncTelegramApi.consumePrefetchedToday');
     expect(page).not.toContain('workday ? { date: workday } : {}');
     expect(page).toContain('<CncTelegramTodayColumns');
     expect(page).toContain("parsed: 'Файлы на станке'");
@@ -1035,7 +1035,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const cncStrongRefreshInFlightRef = useRef(false)');
     expect(page).toContain('const cncAuxiliaryRefreshRevisionRef = useRef(0)');
     expect(page).toContain('const auxiliaryRevision = ++cncAuxiliaryRefreshRevisionRef.current');
-    expect(page).toContain("cncTelegramApi.today({");
+    expect(page).toContain("cncTelegramApi.consumePrefetchedToday({");
     expect(page).toContain("}, { cache: 'no-store' })");
     expect(page).toContain("fetchCncManualMoves({ cache: 'no-store' })");
     expect(page).toContain('refetchMdfBoardSettings()');
