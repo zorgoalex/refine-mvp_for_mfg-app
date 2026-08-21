@@ -602,6 +602,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Направление сортировки заказов МДФ-доски');
     expect(page).toContain('fetchCncOrderStatusBoard(cncOrderIds, {');
     expect(page).toContain('orderStatusBoardApi.consumePrefetchedGet(');
+    expect(page).toContain('hasPrefetchedCncOrderStatusBoard(');
     expect(page).toContain('export async function prefetchMdfOrderStatusBoard(');
     expect(page).toContain('orderSort={cncOrderSortPreference}');
     expect(page).toContain('compareCncOrderBoardCards');
@@ -1042,7 +1043,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("fetchCncManualMoves({ cache: 'no-store' })");
     expect(page).toContain('refetchMdfBoardSettings()');
     expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
-    expect(page).toContain('fetchCncOrderStatusBoard(refreshedOrderIds, {');
+    expect(page).toContain('fetchCncOrderStatusBoard(\n              refreshedOrderIds,');
     expect(page).toContain("}, { cache: 'no-store' });");
     expect(page).toContain('cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision');
     expect(page).toContain('cncStrongRefreshInFlightRef.current = false');

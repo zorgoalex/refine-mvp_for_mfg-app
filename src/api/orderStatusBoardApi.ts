@@ -62,6 +62,14 @@ export const orderStatusBoardApi = {
     });
     return promise;
   },
+  hasPrefetchedGet(query: OrderStatusBoardQuery): boolean {
+    const entry = statusBoardPrefetches.get(statusBoardQueryKey(query));
+    return Boolean(
+      entry
+      && entry.sessionGeneration === authSession.getSessionGeneration()
+      && Date.now() - entry.createdAt <= STATUS_BOARD_PREFETCH_MAX_AGE_MS,
+    );
+  },
   consumePrefetchedGet(
     query: OrderStatusBoardQuery,
     options?: RequestOptions,

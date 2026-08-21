@@ -871,6 +871,21 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
               currentViewState,
               cncBathsRequireMachineFiles,
             );
+            const orderSortPreference = {
+              sortBy: currentViewState.sortBy,
+              sortOrder: currentViewState.sortOrder,
+            };
+            const orderBoardWasPrefetched = hasPrefetchedCncOrderStatusBoard(
+              refreshedOrderIds,
+              orderSortPreference,
+            );
+            const prefetchedOrderBoard = orderBoardWasPrefetched
+              ? await fetchCncOrderStatusBoard(
+                  refreshedOrderIds,
+                  orderSortPreference,
+                  { cache: 'no-store' },
+                )
+              : null;
             if (
               datasetRevisionRef.current !== revision
               || cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision
@@ -887,12 +902,21 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             setBoard(null);
             setStale(false);
             replacePending(new Set());
-            setCncOrderBoardLoading(true);
+            if (orderBoardWasPrefetched) {
+              cncOrderBoardRequestKeyRef.current = buildCncOrderStatusBoardRequestKey(
+                refreshedOrderIds,
+                currentViewState,
+              );
+              setCncOrderBoard(prefetchedOrderBoard);
+            }
+            setCncOrderBoardLoading(!orderBoardWasPrefetched);
             setLoading(false);
-            const orderBoardResponse = await fetchCncOrderStatusBoard(refreshedOrderIds, {
-              sortBy: currentViewState.sortBy,
-              sortOrder: currentViewState.sortOrder,
-            }, { cache: 'no-store' });
+            if (orderBoardWasPrefetched) return true;
+            const orderBoardResponse = await fetchCncOrderStatusBoard(
+              refreshedOrderIds,
+              orderSortPreference,
+              { cache: 'no-store' },
+            );
             if (
               datasetRevisionRef.current !== revision
               || cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision
@@ -8040,6 +8064,18 @@ async function fetchCncOrderStatusBoard(
     ),
   );
   return mergeCncOrderStatusBoardResponses(responses);
+}
+
+function hasPrefetchedCncOrderStatusBoard(
+  orderIds: readonly number[],
+  sortPreference: {
+    sortBy: OrderStatusBoardSortBy;
+    sortOrder: OrderStatusBoardSortOrder;
+  },
+): boolean {
+  return orderIds.length > 0 && chunkCncOrderIds(orderIds).every((chunk) =>
+    orderStatusBoardApi.hasPrefetchedGet(cncOrderStatusBoardQuery(chunk, sortPreference)),
+  );
 }
 
 export async function prefetchMdfOrderStatusBoard(

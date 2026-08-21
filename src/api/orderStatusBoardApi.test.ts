@@ -65,7 +65,9 @@ describe('orderStatusBoardApi MDF manual moves', () => {
     };
 
     const prefetched = orderStatusBoardApi.prefetchGet(query);
+    expect(orderStatusBoardApi.hasPrefetchedGet(query)).toBe(true);
     const consumed = orderStatusBoardApi.consumePrefetchedGet(query, { cache: 'no-store' });
+    expect(orderStatusBoardApi.hasPrefetchedGet(query)).toBe(false);
     await Promise.all([prefetched, consumed]);
     await orderStatusBoardApi.consumePrefetchedGet(query, { cache: 'no-store' });
 
