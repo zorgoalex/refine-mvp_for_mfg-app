@@ -1262,6 +1262,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('}, 1_500);');
     expect(page).toContain('fallbackLabel={card.orderName || String(card.orderId)}');
     expect(page).toContain('onPointerEnter={() => setRevealed(true)}');
+    expect(page).toContain('previous.contentIdentity === next.contentIdentity');
+    expect(page).toContain('previous.renderDependencies.every(');
     expect(page).toContain('<CncDeferredCard');
     expect(page).toContain('focusedCardKind={viewState.cncCardKind}');
     expect(page).toContain('focusedCardId={viewState.cncCardId}');

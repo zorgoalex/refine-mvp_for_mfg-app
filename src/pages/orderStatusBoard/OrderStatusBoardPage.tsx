@@ -3731,6 +3731,18 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                           focusedCardId,
                         )}
                         fallbackLabel={card.orderName || String(card.orderId)}
+                        contentIdentity={card}
+                        renderDependencies={[
+                          readiness,
+                          missingDetails,
+                          summaryOnly,
+                          mutedOrderIds.has(card.orderId),
+                          orderStatusColumns,
+                          relationContext,
+                          relationsEnabled,
+                          originalMode,
+                          currentOrderLocations,
+                        ]}
                       >
                       <CncManualCardFrame
                         kind="order"
@@ -3815,6 +3827,17 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                           focusedCardId,
                         )}
                         fallbackLabel={formatCncBathCardCutNumber(bath)}
+                        contentIdentity={bath}
+                        renderDependencies={[
+                          summaryOnly,
+                          relationContext,
+                          relationsEnabled,
+                          detailedContext,
+                          detailedEnabled,
+                          cardDisplayMode,
+                          originalMode,
+                          currentLocations,
+                        ]}
                       >
                       <CncManualCardFrame
                         kind="bath"
@@ -3889,6 +3912,18 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                           focusedCardId,
                         )}
                         fallbackLabel={`Раскрой №${bazisCutSet.bazisCutSetId}`}
+                        contentIdentity={bazisCutSet}
+                        renderDependencies={[
+                          state,
+                          summaryOnly,
+                          relationContext,
+                          relationsEnabled,
+                          detailedPacketHighlightEnabled,
+                          highlightedOrderKeys,
+                          cardDisplayMode,
+                          originalMode,
+                          currentLocations,
+                        ]}
                       >
                       <CncManualCardFrame
                         kind="bazisCutSet"
@@ -3948,6 +3983,18 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         focusedCardId,
                       )}
                       fallbackLabel={`Раскрой №${formatCncPacketCompactNumber(packet)}`}
+                      contentIdentity={packet}
+                      renderDependencies={[
+                        packetState,
+                        summaryOnly,
+                        relationContext,
+                        relationsEnabled,
+                        detailedPacketHighlightEnabled,
+                        highlightedOrderKeys,
+                        cardDisplayMode,
+                        originalMode,
+                        currentLocations,
+                      ]}
                     >
                     <CncManualCardFrame
                       kind="packet"
@@ -4098,11 +4145,19 @@ function observeDeferredCncCard(element: Element, reveal: () => void): (() => vo
   };
 }
 
-const CncDeferredCard: React.FC<{
+interface CncDeferredCardProps {
   defer: boolean;
   fallbackLabel: string;
+  contentIdentity: object;
+  renderDependencies: readonly unknown[];
   children: React.ReactNode;
-}> = ({ defer, fallbackLabel, children }) => {
+}
+
+const CncDeferredCardComponent: React.FC<CncDeferredCardProps> = ({
+  defer,
+  fallbackLabel,
+  children,
+}) => {
   const placeholderRef = useRef<HTMLDivElement | null>(null);
   const [revealed, setRevealed] = useState(!defer);
 
@@ -4142,6 +4197,18 @@ const CncDeferredCard: React.FC<{
     </div>
   );
 };
+
+const CncDeferredCard = memo(
+  CncDeferredCardComponent,
+  (previous, next) =>
+    previous.defer === next.defer
+    && previous.fallbackLabel === next.fallbackLabel
+    && previous.contentIdentity === next.contentIdentity
+    && previous.renderDependencies.length === next.renderDependencies.length
+    && previous.renderDependencies.every(
+      (dependency, index) => dependency === next.renderDependencies[index],
+    ),
+);
 
 const CncColumnCardPlaceholders: React.FC<{ displayMode: CncCardDisplayMode }> = ({
   displayMode,
