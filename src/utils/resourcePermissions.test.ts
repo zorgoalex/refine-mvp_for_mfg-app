@@ -64,14 +64,14 @@ describe('resourcePermissions', () => {
     const packer = { role: 'packer', permissions: ['orders.view'] };
 
     expect(canQueryHasuraResource('order_statuses', packer)).toBe(true);
+    expect(canQueryHasuraResource('production_statuses', packer)).toBe(true);
+    expect(canQueryHasuraResource('production_status_events', packer)).toBe(true);
     expect(canQueryHasuraResource('app_settings', packer)).toBe(true);
     for (const resource of [
       'materials',
       'films',
       'milling_types',
       'edge_types',
-      'production_statuses',
-      'production_status_events',
       'payment_types',
       'orders_view',
     ]) {

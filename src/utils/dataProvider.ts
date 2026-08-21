@@ -18,6 +18,7 @@ import type { UserRole } from '../api/types/authApi.types';
 import { featureFlags } from '../config/featureFlags';
 import { getRuntimeHasuraUrl } from '../config/runtimeConfig';
 import { canMutateHasuraResource, canQueryHasuraResource } from './resourcePermissions';
+import { getCurrentUserRoleKey } from './resourceVisibility';
 
 type AnyObject = Record<string, any>;
 
@@ -1841,8 +1842,30 @@ const PROJECT_SCHEMA_FIELDS: Record<string, string[]> = {
   orders_view: ["project_id", "project_code", "order_full_number"],
 };
 
+// Packer only needs read-only stage markers in order header. Keep GraphQL
+// selection aligned with narrow Hasura column grants for these resources.
+const PACKER_RESOURCE_FIELDS: Record<string, string[]> = {
+  production_statuses: [
+    'production_status_id',
+    'production_status_name',
+    'production_status_code',
+    'sort_order',
+    'color',
+    'is_active',
+  ],
+  production_status_events: [
+    'event_id',
+    'order_id',
+    'production_status_id',
+    'event_at',
+  ],
+};
+
 const fieldsFor = (resource: string) => {
-  const fields = RESOURCE_FIELDS[resource];
+  const roleKey = getCurrentUserRoleKey(authSession.getUser());
+  const fields = roleKey === 'packer'
+    ? PACKER_RESOURCE_FIELDS[resource] ?? RESOURCE_FIELDS[resource]
+    : RESOURCE_FIELDS[resource];
   if (!fields) return "";
   const hidden = new Set<string>();
   if (!featureFlags.sheetMaterialsReads) {
