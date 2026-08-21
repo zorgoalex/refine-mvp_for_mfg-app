@@ -11,6 +11,38 @@ interface CurrentProductionStatusInput extends ProductionStatusValue {
   detailStatuses?: readonly ProductionStatusValue[];
 }
 
+interface ActiveProductionEvent {
+  production_status_id: number;
+}
+
+export function buildActiveProductionStatusCodeMap(
+  statuses: readonly Record<string, unknown>[],
+): Map<number, string> {
+  return new Map(
+    statuses
+      .filter((status) => (
+        status.is_active === true
+        && typeof status.production_status_id === 'number'
+        && typeof status.production_status_code === 'string'
+      ))
+      .map((status) => [
+        status.production_status_id as number,
+        status.production_status_code as string,
+      ]),
+  );
+}
+
+export function resolveActiveProductionEventCodes(
+  events: readonly ActiveProductionEvent[],
+  statusIdToCode: ReadonlyMap<number, string>,
+): string[] {
+  const codes = events
+    .map((event) => statusIdToCode.get(event.production_status_id)?.trim())
+    .filter((code): code is string => Boolean(code));
+
+  return [...new Set(codes)];
+}
+
 export function resolveCurrentProductionStatusCodes({
   statusId,
   statusName,

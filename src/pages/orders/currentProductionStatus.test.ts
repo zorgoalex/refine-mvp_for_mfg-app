@@ -1,5 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { resolveCurrentProductionStatusCodes } from './currentProductionStatus';
+import {
+  buildActiveProductionStatusCodeMap,
+  resolveActiveProductionEventCodes,
+  resolveCurrentProductionStatusCodes,
+} from './currentProductionStatus';
+
+describe('resolveActiveProductionEventCodes', () => {
+  it('returns only unique statuses backed by active order events', () => {
+    const statusIdToCode = new Map([[1, 'new'], [2, 'cut']]);
+
+    expect(resolveActiveProductionEventCodes(
+      [{ production_status_id: 2 }, { production_status_id: 2 }],
+      statusIdToCode,
+    )).toEqual(['cut']);
+    expect(resolveActiveProductionEventCodes([], statusIdToCode)).toEqual([]);
+  });
+
+  it('ignores events whose status is no longer available', () => {
+    expect(resolveActiveProductionEventCodes(
+      [{ production_status_id: 99 }],
+      new Map([[2, 'cut']]),
+    )).toEqual([]);
+  });
+
+  it('cannot render an inactive catalog status that has no menu item', () => {
+    const activeStatusCodes = buildActiveProductionStatusCodeMap([
+      { production_status_id: 1, production_status_code: 'new', is_active: false },
+      { production_status_id: 2, production_status_code: 'cut', is_active: true },
+    ]);
+
+    expect(resolveActiveProductionEventCodes(
+      [{ production_status_id: 1 }, { production_status_id: 2 }],
+      activeStatusCodes,
+    )).toEqual(['cut']);
+  });
+});
 
 describe('resolveCurrentProductionStatusCodes', () => {
   it('returns exactly the current configured status code', () => {
