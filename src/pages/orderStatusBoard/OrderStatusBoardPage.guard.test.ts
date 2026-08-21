@@ -220,7 +220,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('refreshes MDF order statuses and forces status-owned order columns', () => {
     expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
-    expect(page).toContain('setCncOrderBoard(orderBoardResponse);');
+    expect(page).toContain('startTransition(() => setCncOrderBoard(orderBoardResponse));');
     expect(page).toContain('function collectCncOrderStatusBoardIds(');
     expect(page).toContain('resolveCncOrderStatusColumn(card) === null');
     expect(page).toContain('const statusColumn = resolveCncOrderStatusColumn(card);');
@@ -1254,6 +1254,20 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('border-color: #722ed1');
     expect(css).toContain('0 0 0 2px #722ed1');
     expect(css).not.toContain('transition: all');
+  });
+
+  it('hydrates only near-viewport MDF cards in standard mode', () => {
+    expect(page).toContain("displayMode !== 'standard'");
+    expect(page).toContain("{ rootMargin: '240px 80px' }");
+    expect(page).toContain('}, 1_500);');
+    expect(page).toContain('fallbackLabel={card.orderName || String(card.orderId)}');
+    expect(page).toContain('onPointerEnter={() => setRevealed(true)}');
+    expect(page).toContain('<CncDeferredCard');
+    expect(page).toContain('focusedCardKind={viewState.cncCardKind}');
+    expect(page).toContain('focusedCardId={viewState.cncCardId}');
+    expect(page).toContain('setCncOrderBoardLoading(true);');
+    expect(page).toContain('startTransition(() => setCncOrderBoard(orderBoardResponse));');
+    expect(css).toContain('.cnc-deferred-card--revealed');
   });
 
   it('opens MDF order cards from the order number without stealing the whole-card relation click', () => {
