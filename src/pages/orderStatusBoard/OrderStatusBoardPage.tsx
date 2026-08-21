@@ -353,6 +353,7 @@ interface MdfInitialSnapshot {
 
 const MDF_INITIAL_SNAPSHOT_MAX_AGE_MS = 30_000;
 const CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN = 6;
+const CNC_INITIAL_EAGER_COLUMNS = 4;
 const CNC_OVERFLOW_CARD_DELAY_MS = 1_200;
 let mdfInitialSnapshot: MdfInitialSnapshot | null = null;
 export interface CncOrderSortSettings {
@@ -3814,7 +3815,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     <small>В текущих карточках нет связанных заказов ERP.</small>
                   </div>
                 ) : (
-                  sortedOrderCards.map((entry) => {
+                  sortedOrderCards.map((entry, cardIndex) => {
                     const { card, readiness, missingDetails } = entry;
                     const cardKey = `order:${card.orderId}`;
                     const summaryOnly = detailedBathActive || isCncCardSummaryOnly(
@@ -3831,6 +3832,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                           String(card.orderId),
                           focusedCardKind,
                           focusedCardId,
+                          columnIndex < CNC_INITIAL_EAGER_COLUMNS
+                            && cardIndex < CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN,
                         )}
                         fallbackLabel={card.orderName || String(card.orderId)}
                         contentIdentity={card}
@@ -3901,7 +3904,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                     <small>Перетащите подготовленный раскрой или создайте карту вручную.</small>
                   </div>
                 ) : (
-                  bathCards.map((bath) => {
+                  bathCards.map((bath, cardIndex) => {
                     const cardKey = `bath:${bath.bathCardId}`;
                     const detailed = !detailedBathActive
                       && detailedContext?.activeBathId === bath.bathCardId;
@@ -3927,6 +3930,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                           bath.bathCardId,
                           focusedCardKind,
                           focusedCardId,
+                          columnIndex < CNC_INITIAL_EAGER_COLUMNS
+                            && cardIndex < CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN,
                         )}
                         fallbackLabel={formatCncBathCardCutNumber(bath)}
                         contentIdentity={bath}
@@ -3992,7 +3997,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                 </div>
               ) : (
                 <>
-                {machineFileCards.map((entry) => {
+                {machineFileCards.map((entry, cardIndex) => {
                   if (entry.kind === 'bazisCutSet') {
                     const bazisCutSet = entry.card;
                     const cardKey = `bazis-cut:${bazisCutSet.bazisCutSetId}`;
@@ -4012,6 +4017,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                           String(bazisCutSet.bazisCutSetId),
                           focusedCardKind,
                           focusedCardId,
+                          columnIndex < CNC_INITIAL_EAGER_COLUMNS
+                            && cardIndex < CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN,
                         )}
                         fallbackLabel={`Раскрой №${bazisCutSet.bazisCutSetId}`}
                         contentIdentity={bazisCutSet}
@@ -4083,6 +4090,8 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         packet.packetId,
                         focusedCardKind,
                         focusedCardId,
+                        columnIndex < CNC_INITIAL_EAGER_COLUMNS
+                          && cardIndex < CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN,
                       )}
                       fallbackLabel={`Раскрой №${formatCncPacketCompactNumber(packet)}`}
                       contentIdentity={packet}
@@ -4220,8 +4229,10 @@ export function shouldDeferCncCard(
   cardId: string,
   focusedCardKind?: 'packet' | 'bath',
   focusedCardId?: string,
+  initiallyVisible = false,
 ): boolean {
   if (displayMode !== 'standard') return false;
+  if (initiallyVisible) return false;
   if (cardKind === focusedCardKind && cardId === focusedCardId) return false;
   return true;
 }

@@ -1200,7 +1200,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cnc-order-number--highlighted');
     expect(page).toContain('const allBathCards = relationContext');
     expect(page).toContain('const allMachineFileCards = buildCncMachineColumnCards(');
-    expect(page).toContain('machineFileCards.map((entry) =>');
+    expect(page).toContain('machineFileCards.map((entry, cardIndex) =>');
     expect(page).toContain("kind: 'bazisCutSet',");
     expect(page).toContain('id: bazisCutSet.bazisCutSetId');
     expect(page).toContain("active.kind === 'bazisCutSet'");
@@ -1274,6 +1274,10 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('hydrates only near-viewport MDF cards in standard mode', () => {
     expect(page).toContain("displayMode !== 'standard'");
+    expect(page).toContain('const CNC_INITIAL_EAGER_COLUMNS = 4;');
+    expect(page).toContain('if (initiallyVisible) return false;');
+    expect(page).toContain('columnIndex < CNC_INITIAL_EAGER_COLUMNS');
+    expect(page).toContain('cardIndex < CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN');
     expect(page).toContain("{ rootMargin: '240px 80px' }");
     expect(page).not.toContain('}, 1_500);');
     expect(page).toContain('const cleanup = observeDeferredCncCard(element, () => setRevealed(true));');
