@@ -32,7 +32,9 @@ describe('PersistentMdfBoardHost guards', () => {
     expect(legacyLayout).toContain('<PersistentMdfBoardHost />');
     expect(modernLayout).toContain('<PersistentMdfBoardHost />');
     expect(app).toContain('<Route index element={null} />');
-    expect(page).toContain('<OrderStatusBoardPage active={active}');
+    expect(page).toContain('<OrderStatusBoardPage');
+    expect(page).toContain('active={active}');
+    expect(page).toContain('eagerFirstViewport');
     expect(page).toContain("active && fixedView === 'cnc_today'");
   });
 });

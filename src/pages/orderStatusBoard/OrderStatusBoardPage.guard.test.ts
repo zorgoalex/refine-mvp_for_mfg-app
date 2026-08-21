@@ -204,7 +204,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page.indexOf('deepLinkFocusAppliedRef.current = key;')).toBeLessThan(page.indexOf('target.focus({ preventScroll: true });'));
     expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
-    expect(page).toContain('<OrderStatusBoardPage active={active} fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
+    expect(page).toContain('<OrderStatusBoardPage');
+    expect(page).toContain('active={active}');
+    expect(page).toContain('eagerFirstViewport');
+    expect(page).toContain('fixedView="cnc_today"');
+    expect(page).toContain('defaultCncOrderSearchPeriod="1m"');
   });
 
   it('shows click help icons explaining how cards leave columns', () => {
@@ -627,7 +631,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;');
     expect(page).toContain('defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD');
     expect(page).toContain('defaultCncOrderSearchPeriod,');
-    expect(page).toContain('<OrderStatusBoardPage active={active} fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
+    expect(page).toContain('<OrderStatusBoardPage');
+    expect(page).toContain('active={active}');
+    expect(page).toContain('eagerFirstViewport');
+    expect(page).toContain('fixedView="cnc_today"');
+    expect(page).toContain('defaultCncOrderSearchPeriod="1m"');
     expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
     expect(page).toContain('{!fixedView && (');
     expect(page).not.toContain("{ key: 'cnc_today', label: 'МДФ-работы' }");
@@ -1200,7 +1208,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('cnc-order-number--highlighted');
     expect(page).toContain('const allBathCards = relationContext');
     expect(page).toContain('const allMachineFileCards = buildCncMachineColumnCards(');
-    expect(page).toContain('machineFileCards.map((entry) =>');
+    expect(page).toContain('machineFileCards.map((entry, cardIndex) =>');
     expect(page).toContain("kind: 'bazisCutSet',");
     expect(page).toContain('id: bazisCutSet.bazisCutSetId');
     expect(page).toContain("active.kind === 'bazisCutSet'");
@@ -1275,6 +1283,10 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('hydrates only near-viewport MDF cards in standard mode', () => {
     expect(page).toContain("displayMode !== 'standard'");
     expect(page).toContain("{ rootMargin: '240px 80px' }");
+    expect(page).toContain('const CNC_INITIAL_EAGER_COLUMNS = 4;');
+    expect(page).toContain('if (initiallyVisible) return false;');
+    expect(page).toContain('columnIndex < CNC_INITIAL_EAGER_COLUMNS');
+    expect(page).toContain('cardIndex < CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN');
     expect(page).not.toContain('}, 1_500);');
     expect(page).toContain('const cleanup = observeDeferredCncCard(element, () => setRevealed(true));');
     expect(page).toContain('fallbackLabel={card.orderName || String(card.orderId)}');
