@@ -3,6 +3,9 @@ services:
     image: ${BACKEND_BUILD_IMAGE:?BACKEND_BUILD_IMAGE must identify the exact backend build}
     environment:
       BACKEND_BUILD_SHA: ${BACKEND_BUILD_SHA:?BACKEND_BUILD_SHA must identify the exact repository HEAD}
+      BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT: ${BACKEND_ENABLE_ORDER_LIVE_SNAPSHOT:-false}
+      BACKEND_ENABLE_ORDER_REALTIME_WRITES: ${BACKEND_ENABLE_ORDER_REALTIME_WRITES:-false}
+      BACKEND_ENABLE_ORDER_REALTIME_STREAM: ${BACKEND_ENABLE_ORDER_REALTIME_STREAM:-false}
     build:
       context: ${BACKEND_BUILD_CONTEXT:?BACKEND_BUILD_CONTEXT must identify the exact repository backend}
       dockerfile: Dockerfile
