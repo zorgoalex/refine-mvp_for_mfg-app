@@ -31,6 +31,7 @@ import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility
 import { DefaultRootRedirect } from "./components/DefaultRootRedirect";
 import { authSession } from "./api/authSession";
 import { cncTelegramApi } from "./api/cncTelegramApi";
+import { MDF_BOARD_PREFETCH_EVENT } from "./utils/siderMenuItems";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -204,6 +205,7 @@ const SheetMaterialEdit = lazy(async () => ({ default: (await import('./pages/sh
 const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sheet-materials/show')).SheetMaterialShow }));
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
+const MDF_PREFETCH_COOLDOWN_MS = 25_000;
 
 function mdfDefaultDateRange(now = new Date()): { dateFrom: string; dateTo: string } {
   const dateTo = formatLocalDate(now);
@@ -273,17 +275,31 @@ const ThemedApp = () => {
 
   useEffect(() => {
     if (!featureFlags.orderStatusBoard || !featureFlags.cncTelegram) return;
-    let warmed = false;
+    let warming = false;
+    let lastWarmStartedAt = 0;
     const warmMdfData = () => {
-      if (warmed || !authSession.getAccessToken() || !authSession.getUser()) return;
-      warmed = true;
+      if (!authSession.getAccessToken() || !authSession.getUser()) return;
+      const now = Date.now();
+      if (warming || now - lastWarmStartedAt < MDF_PREFETCH_COOLDOWN_MS) return;
+      warming = true;
+      lastWarmStartedAt = now;
       const boardPromise = cncTelegramApi.prefetchToday(mdfDefaultDateRange());
       void Promise.all([loadOrderStatusBoardModule(), boardPromise])
         .then(([module, response]) => module.prefetchMdfOrderStatusBoard(response))
-        .catch(() => undefined);
+        .catch(() => {
+          lastWarmStartedAt = 0;
+        })
+        .finally(() => {
+          warming = false;
+        });
     };
     warmMdfData();
-    return authSession.subscribe(warmMdfData);
+    const unsubscribe = authSession.subscribe(warmMdfData);
+    window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData);
+    return () => {
+      unsubscribe();
+      window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData);
+    };
   }, []);
 
   return (

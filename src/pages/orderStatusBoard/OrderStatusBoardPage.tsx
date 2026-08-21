@@ -4271,15 +4271,9 @@ const CncDeferredCardComponent: React.FC<CncDeferredCardProps> = ({
     if (revealed) return undefined;
     const element = placeholderRef.current;
     if (!element) return undefined;
-    let cleanup: (() => void) | null = null;
-    const timer = window.setTimeout(() => {
-      cleanup = observeDeferredCncCard(element, () => setRevealed(true));
-      if (!cleanup) setRevealed(true);
-    }, 1_500);
-    return () => {
-      window.clearTimeout(timer);
-      cleanup?.();
-    };
+    const cleanup = observeDeferredCncCard(element, () => setRevealed(true));
+    if (!cleanup) setRevealed(true);
+    return cleanup ?? undefined;
   }, [defer, revealed]);
 
   return (

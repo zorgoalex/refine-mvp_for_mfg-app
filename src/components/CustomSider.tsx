@@ -242,7 +242,7 @@ export const CustomSider: React.FC = () => {
                   icon: SIDER_RESOURCE_ICONS[item.name],
                   label: menuLabelWithTooltip(item.label),
                   title: item.label,
-                  onClick: () => push(item.route),
+                  onClick: () => sider.handleNavigate(item.route),
                 }));
 
                 const isSelected = items.some((item) => item.name === sider.selectedKey);

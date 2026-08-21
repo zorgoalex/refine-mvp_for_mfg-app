@@ -7,6 +7,8 @@ const page = readFileSync(
 );
 const model = readFileSync('src/pages/orderStatusBoard/model.ts', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
+const siderMenuItems = readFileSync('src/utils/siderMenuItems.ts', 'utf8');
+const customSider = readFileSync('src/components/CustomSider.tsx', 'utf8');
 const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
@@ -1271,7 +1273,8 @@ describe('OrderStatusBoardPage UX guards', () => {
   it('hydrates only near-viewport MDF cards in standard mode', () => {
     expect(page).toContain("displayMode !== 'standard'");
     expect(page).toContain("{ rootMargin: '240px 80px' }");
-    expect(page).toContain('}, 1_500);');
+    expect(page).not.toContain('}, 1_500);');
+    expect(page).toContain('const cleanup = observeDeferredCncCard(element, () => setRevealed(true));');
     expect(page).toContain('fallbackLabel={card.orderName || String(card.orderId)}');
     expect(page).toContain('onPointerEnter={() => setRevealed(true)}');
     expect(page).toContain('previous.contentIdentity === next.contentIdentity');
@@ -1282,6 +1285,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('setCncOrderBoardLoading(true);');
     expect(page).toContain('startTransition(() => setCncOrderBoard(orderBoardResponse));');
     expect(css).toContain('.cnc-deferred-card--revealed');
+  });
+
+  it('refreshes expired MDF prefetch data when the operator navigates to the board', () => {
+    expect(siderMenuItems).toContain("MDF_BOARD_PREFETCH_EVENT = 'erp:mdf-board-prefetch'");
+    expect(siderMenuItems).toContain('requestMdfBoardPrefetch(route);');
+    expect(customSider).toContain('onClick: () => sider.handleNavigate(item.route)');
+    expect(app).toContain('MDF_PREFETCH_COOLDOWN_MS = 25_000');
+    expect(app).toContain('window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
+    expect(app).toContain('window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
   });
 
   it('opens MDF order cards from the order number without stealing the whole-card relation click', () => {
