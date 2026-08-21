@@ -1,6 +1,8 @@
 services:
   backend:
     image: ${BACKEND_BUILD_IMAGE:?BACKEND_BUILD_IMAGE must identify the exact backend build}
+    environment:
+      BACKEND_BUILD_SHA: ${BACKEND_BUILD_SHA:?BACKEND_BUILD_SHA must identify the exact repository HEAD}
     build:
       context: ${BACKEND_BUILD_CONTEXT:?BACKEND_BUILD_CONTEXT must identify the exact repository backend}
       dockerfile: Dockerfile

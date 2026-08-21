@@ -10,6 +10,16 @@ function readTemplate(path: string): string {
 }
 
 describe('VPS compose backend runtime flags', () => {
+  it('injects exact build identity into the backend runtime environment', () => {
+    const identityOverlay = readTemplate(
+      'ops/templates/docker-compose.backend-build-identity.yml',
+    );
+
+    expect(identityOverlay).toMatch(
+      /environment:\s*\n\s+BACKEND_BUILD_SHA: \$\{BACKEND_BUILD_SHA:\?BACKEND_BUILD_SHA must identify the exact repository HEAD\}/,
+    );
+  });
+
   it('renders an exact backend image and build identity through the deploy overlay', () => {
     const sha = 'a154fef554948d9643630a827cb1aa4795117e54';
     const composePath = resolve(repoRoot, 'ops/templates/docker-compose.vps.yml');
