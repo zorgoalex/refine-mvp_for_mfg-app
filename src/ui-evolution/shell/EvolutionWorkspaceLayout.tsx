@@ -4,6 +4,7 @@ import { useLocation } from 'react-router-dom';
 import { AppFooter } from '../../components/AppFooter';
 import { GlobalTableTopScrollbars } from '../../components/GlobalTableTopScrollbars';
 import { KeepAliveOutlet } from '../../components/workspace/KeepAliveOutlet';
+import { PersistentMdfBoardHost } from '../../components/workspace/PersistentMdfBoardHost';
 import { authSession } from '../../api/authSession';
 import { featureFlags } from '../../config/featureFlags';
 import {
@@ -192,6 +193,7 @@ export const EvolutionWorkspaceLayout: React.FC = () => {
           <div className="evolution-screen-frame" data-modern-route={routeFamily}>
             <React.Suspense fallback={<EvolutionRouteSkeleton />}>
               <KeepAliveOutlet />
+              <PersistentMdfBoardHost />
             </React.Suspense>
           </div>
         </Layout.Content>

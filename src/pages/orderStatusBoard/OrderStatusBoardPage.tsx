@@ -465,6 +465,7 @@ interface CncBoardDragPreview {
 }
 
 interface OrderStatusBoardPageProps {
+  active?: boolean;
   defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;
   fixedView?: OrderStatusBoardViewState['view'];
 }
@@ -557,6 +558,7 @@ function useWorkspaceTabsHeight(): number {
 }
 
 export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
+  active = true,
   defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD,
   fixedView,
 }) => {
@@ -598,7 +600,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [cncPlacementMode, setCncPlacementMode] =
     useState<CncBoardPlacementMode>('current');
   const shouldApplyMdfWorkdayTodayOnOpen =
-    fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
+    active && fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
   const mdfWorkdayTodayOpenPatchNeeded =
     shouldApplyMdfWorkdayTodayOnOpen &&
     !hasExplicitMdfCardDeepLink &&
@@ -2945,8 +2947,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   );
 };
 
-export const MdfWorkBoardPage: React.FC = () => (
-  <OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />
+export const MdfWorkBoardPage: React.FC<{ active?: boolean }> = ({ active = true }) => (
+  <OrderStatusBoardPage active={active} fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />
 );
 
 const StatusBoardToolbarIconToggle: React.FC<{

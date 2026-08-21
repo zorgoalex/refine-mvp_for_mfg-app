@@ -32,6 +32,7 @@ import { DefaultRootRedirect } from "./components/DefaultRootRedirect";
 import { authSession } from "./api/authSession";
 import { cncTelegramApi } from "./api/cncTelegramApi";
 import { MDF_BOARD_PREFETCH_EVENT } from "./utils/siderMenuItems";
+import { markMdfBoardSnapshotReady } from "./utils/mdfBoardPrewarm";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -40,7 +41,6 @@ const OrderTrash = lazy(async () => ({ default: (await import("./pages/orders/tr
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
 const loadOrderStatusBoardModule = () => import("./pages/orderStatusBoard");
 const OrderStatusBoardPage = lazy(async () => ({ default: (await loadOrderStatusBoardModule()).OrderStatusBoardPage }));
-const MdfWorkBoardPage = lazy(async () => ({ default: (await loadOrderStatusBoardModule()).MdfWorkBoardPage }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
@@ -289,6 +289,7 @@ const ThemedApp = () => {
       const boardPromise = cncTelegramApi.prefetchToday(mdfDefaultDateRange());
       void Promise.all([loadOrderStatusBoardModule(), boardPromise])
         .then(([module, response]) => module.prefetchMdfOrderStatusBoard(response))
+        .then(markMdfBoardSnapshotReady)
         .catch(() => {
           lastWarmStartedAt = 0;
         })
@@ -798,7 +799,7 @@ const ThemedApp = () => {
                   )}
                   {featureFlags.orderStatusBoard && featureFlags.cncTelegram && (
                     <Route path="/mdf-work-board">
-                      <Route index element={<MdfWorkBoardPage />} />
+                      <Route index element={null} />
                     </Route>
                   )}
                   {featureFlags.useBackendGroups && (

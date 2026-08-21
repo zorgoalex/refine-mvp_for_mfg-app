@@ -194,7 +194,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('opens the dedicated MDF work board on today unless a card deep-link provides its workday', () => {
     expect(page).toContain("const todayCncWorkday = dayjs().format('YYYY-MM-DD');");
-    expect(page).toContain("fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current");
+    expect(page).toContain("active && fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current");
     expect(page).toContain('const hasExplicitMdfCardDeepLink = Boolean(');
     expect(page).toMatch(/mdfWorkdayTodayOpenPatchNeeded\s*=\s*[\s\S]*?!hasExplicitMdfCardDeepLink/);
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
@@ -204,7 +204,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page.indexOf('deepLinkFocusAppliedRef.current = key;')).toBeLessThan(page.indexOf('target.focus({ preventScroll: true });'));
     expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
-    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
+    expect(page).toContain('<OrderStatusBoardPage active={active} fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
   });
 
   it('shows click help icons explaining how cards leave columns', () => {
@@ -627,7 +627,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;');
     expect(page).toContain('defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD');
     expect(page).toContain('defaultCncOrderSearchPeriod,');
-    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
+    expect(page).toContain('<OrderStatusBoardPage active={active} fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
     expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
     expect(page).toContain('{!fixedView && (');
     expect(page).not.toContain("{ key: 'cnc_today', label: 'МДФ-работы' }");

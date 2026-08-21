@@ -11,6 +11,7 @@ import { KeepAliveOutlet } from './KeepAliveOutlet';
 import { useTabSync } from '../../hooks/useTabSync';
 import { useGlobalUnloadGuard } from '../../hooks/useTabDirty';
 import { GlobalTableTopScrollbars } from '../GlobalTableTopScrollbars';
+import { PersistentMdfBoardHost } from './PersistentMdfBoardHost';
 
 const WorkspaceRouteSkeleton: React.FC = () => (
   <div
@@ -74,6 +75,7 @@ export const WorkspaceLayout: React.FC = () => {
         <div style={{ flex: 1 }}>
           <Suspense fallback={<WorkspaceRouteSkeleton />}>
             <KeepAliveOutlet />
+            <PersistentMdfBoardHost />
           </Suspense>
         </div>
         <AppFooter />
