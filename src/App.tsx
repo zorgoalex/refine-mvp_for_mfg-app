@@ -206,6 +206,7 @@ const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sh
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
 const MDF_PREFETCH_COOLDOWN_MS = 25_000;
+const MDF_PREFETCH_REFRESH_MS = 25_000;
 
 function mdfDefaultDateRange(now = new Date()): { dateFrom: string; dateTo: string } {
   const dateTo = formatLocalDate(now);
@@ -279,6 +280,8 @@ const ThemedApp = () => {
     let lastWarmStartedAt = 0;
     const warmMdfData = () => {
       if (!authSession.getAccessToken() || !authSession.getUser()) return;
+      if (document.visibilityState !== 'visible') return;
+      if (window.location.pathname === '/mdf-work-board') return;
       const now = Date.now();
       if (warming || now - lastWarmStartedAt < MDF_PREFETCH_COOLDOWN_MS) return;
       warming = true;
@@ -295,9 +298,16 @@ const ThemedApp = () => {
     };
     warmMdfData();
     const unsubscribe = authSession.subscribe(warmMdfData);
+    const refreshTimer = window.setInterval(warmMdfData, MDF_PREFETCH_REFRESH_MS);
+    const warmVisibleMdfData = () => {
+      if (document.visibilityState === 'visible') warmMdfData();
+    };
+    document.addEventListener('visibilitychange', warmVisibleMdfData);
     window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData);
     return () => {
       unsubscribe();
+      window.clearInterval(refreshTimer);
+      document.removeEventListener('visibilitychange', warmVisibleMdfData);
       window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData);
     };
   }, []);

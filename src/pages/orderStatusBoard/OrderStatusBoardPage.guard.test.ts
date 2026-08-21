@@ -9,6 +9,8 @@ const model = readFileSync('src/pages/orderStatusBoard/model.ts', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
 const siderMenuItems = readFileSync('src/utils/siderMenuItems.ts', 'utf8');
 const customSider = readFileSync('src/components/CustomSider.tsx', 'utf8');
+const cncTelegramApi = readFileSync('src/api/cncTelegramApi.ts', 'utf8');
+const orderStatusBoardApi = readFileSync('src/api/orderStatusBoardApi.ts', 'utf8');
 const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
@@ -1292,6 +1294,15 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(siderMenuItems).toContain('requestMdfBoardPrefetch(route);');
     expect(customSider).toContain('onClick: () => sider.handleNavigate(item.route)');
     expect(app).toContain('MDF_PREFETCH_COOLDOWN_MS = 25_000');
+    expect(app).toContain('MDF_PREFETCH_REFRESH_MS = 25_000');
+    expect(cncTelegramApi).toContain('CNC_TODAY_PREFETCH_MAX_AGE_MS = 20_000');
+    expect(orderStatusBoardApi).toContain('STATUS_BOARD_PREFETCH_MAX_AGE_MS = 20_000');
+    expect(app).toContain("document.visibilityState !== 'visible'");
+    expect(app).toContain("window.location.pathname === '/mdf-work-board'");
+    expect(app).toContain('window.setInterval(warmMdfData, MDF_PREFETCH_REFRESH_MS)');
+    expect(app).toContain("document.addEventListener('visibilitychange', warmVisibleMdfData)");
+    expect(app).toContain('window.clearInterval(refreshTimer)');
+    expect(app).toContain("document.removeEventListener('visibilitychange', warmVisibleMdfData)");
     expect(app).toContain('window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
     expect(app).toContain('window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
   });

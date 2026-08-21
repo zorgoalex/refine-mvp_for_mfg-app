@@ -36,7 +36,7 @@ interface CncTodayPrefetch {
   promise: Promise<CncTelegramTodayResponse>;
 }
 
-const CNC_TODAY_PREFETCH_MAX_AGE_MS = 30_000;
+const CNC_TODAY_PREFETCH_MAX_AGE_MS = 20_000;
 let cncTodayPrefetch: CncTodayPrefetch | null = null;
 
 function cncTodayQueryKey(query: CncTelegramTodayQuery): string {

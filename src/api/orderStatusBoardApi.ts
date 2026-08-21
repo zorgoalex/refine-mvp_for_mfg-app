@@ -18,7 +18,7 @@ interface StatusBoardPrefetch {
   promise: Promise<OrderStatusBoardResponse>;
 }
 
-const STATUS_BOARD_PREFETCH_MAX_AGE_MS = 30_000;
+const STATUS_BOARD_PREFETCH_MAX_AGE_MS = 20_000;
 const statusBoardPrefetches = new Map<string, StatusBoardPrefetch>();
 
 function statusBoardQueryKey(query: OrderStatusBoardQuery): string {
