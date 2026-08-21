@@ -632,11 +632,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     fixedView === 'cnc_today'
       && viewState.cncOrderFilters.length === 0
       && (viewState.cncWorkday ?? todayCncWorkday) === todayCncWorkday
-      ? takeMdfInitialSnapshot()
+      ? readMdfInitialSnapshot()
       : null,
   );
   const preserveInitialMdfSnapshotRef = useRef(Boolean(initialMdfSnapshot));
   const preserveInitialMdfOrderBoardRef = useRef(Boolean(initialMdfSnapshot?.orderBoard));
+  const preserveInitialMdfManualMovesRef = useRef(Boolean(initialMdfSnapshot));
   const [searchDraft, setSearchDraft] = useState(viewState.search);
   const [board, setBoard] = useState<OrderStatusBoardResponse | null>(null);
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);
@@ -715,6 +716,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [activeCncDetailedDetail, setActiveCncDetailedDetail] =
     useState<CncDetailedDetailTarget | null>(null);
   const isPacker = isPackerUser(currentUser);
+
+  useEffect(() => {
+    if (initialMdfSnapshot) clearMdfInitialSnapshot(initialMdfSnapshot);
+  }, [initialMdfSnapshot]);
 
   useEffect(() => {
     cncManualMovesRef.current = cncManualMoves;
@@ -1799,7 +1804,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       }
     };
 
-    void loadManualMoves();
+    const preserveInitialManualMoves = preserveInitialMdfManualMovesRef.current;
+    preserveInitialMdfManualMovesRef.current = false;
+    if (!preserveInitialManualMoves) void loadManualMoves();
     const timer = window.setInterval(() => {
       void loadManualMoves();
     }, CNC_ORDER_STATUS_REFRESH_MS);
@@ -8173,9 +8180,8 @@ export async function prefetchMdfOrderStatusBoard(
   };
 }
 
-function takeMdfInitialSnapshot(): MdfInitialSnapshot | null {
+function readMdfInitialSnapshot(): MdfInitialSnapshot | null {
   const snapshot = mdfInitialSnapshot;
-  mdfInitialSnapshot = null;
   if (
     !snapshot
     || snapshot.sessionGeneration !== authSession.getSessionGeneration()
@@ -8184,6 +8190,10 @@ function takeMdfInitialSnapshot(): MdfInitialSnapshot | null {
     return null;
   }
   return snapshot;
+}
+
+function clearMdfInitialSnapshot(snapshot: MdfInitialSnapshot): void {
+  if (mdfInitialSnapshot === snapshot) mdfInitialSnapshot = null;
 }
 
 function cncOrderStatusBoardQuery(
