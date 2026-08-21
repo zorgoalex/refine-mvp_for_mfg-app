@@ -343,6 +343,15 @@ export type CncRelationCardState =
   | 'order-mentioned'
   | 'dimmed';
 type CncDetailedBathPlacement = 'left' | 'right';
+interface MdfInitialSnapshot {
+  createdAt: number;
+  sessionGeneration: number;
+  today: CncTelegramTodayResponse;
+  orderBoard: OrderStatusBoardResponse | null;
+}
+
+const MDF_INITIAL_SNAPSHOT_MAX_AGE_MS = 30_000;
+let mdfInitialSnapshot: MdfInitialSnapshot | null = null;
 export interface CncOrderSortSettings {
   field: CncOrderSortField;
   direction: CncOrderSortDirection;
@@ -616,20 +625,30 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     viewState.cncWorkday,
     viewState.view,
   ]);
+  const [initialMdfSnapshot] = useState(() =>
+    fixedView === 'cnc_today'
+      && viewState.cncOrderFilters.length === 0
+      && (viewState.cncWorkday ?? todayCncWorkday) === todayCncWorkday
+      ? takeMdfInitialSnapshot()
+      : null,
+  );
+  const preserveInitialMdfSnapshotRef = useRef(Boolean(initialMdfSnapshot));
   const [searchDraft, setSearchDraft] = useState(viewState.search);
   const [board, setBoard] = useState<OrderStatusBoardResponse | null>(null);
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);
-  const [cncToday, setCncToday] = useState<CncTelegramTodayResponse | null>(null);
+  const [cncToday, setCncToday] = useState<CncTelegramTodayResponse | null>(
+    initialMdfSnapshot?.today ?? null,
+  );
   const [cncOriginalBoard, setCncOriginalBoard] =
     useState<CncTelegramOriginalBoardResponse | null>(null);
   const cncTodayRef = useRef<CncTelegramTodayResponse | null>(null);
   const [cncOrderSearchToday, setCncOrderSearchToday] =
-    useState<CncTelegramTodayResponse | null>(null);
+    useState<CncTelegramTodayResponse | null>(initialMdfSnapshot?.today ?? null);
   const cncOrderSearchTodayRef = useRef<CncTelegramTodayResponse | null>(null);
   const [cncOrderBoard, setCncOrderBoard] =
-    useState<OrderStatusBoardResponse | null>(null);
+    useState<OrderStatusBoardResponse | null>(initialMdfSnapshot?.orderBoard ?? null);
   const [cncOrderBoardLoading, setCncOrderBoardLoading] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialMdfSnapshot);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
   const [pendingOrders, setPendingOrders] = useState<Set<number>>(new Set());
@@ -1005,16 +1024,20 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
 
   useEffect(() => {
     if (mdfWorkdayTodayOpenPatchNeeded) return;
-    setBoard(null);
-    boardRef.current = null;
-    setCncToday(null);
-    cncTodayRef.current = null;
-    setCncOrderSearchToday(null);
-    cncOrderSearchTodayRef.current = null;
-    setCncOrderBoard(null);
+    const preserveInitialSnapshot = preserveInitialMdfSnapshotRef.current;
+    preserveInitialMdfSnapshotRef.current = false;
+    if (!preserveInitialSnapshot) {
+      setBoard(null);
+      boardRef.current = null;
+      setCncToday(null);
+      cncTodayRef.current = null;
+      setCncOrderSearchToday(null);
+      cncOrderSearchTodayRef.current = null;
+      setCncOrderBoard(null);
+    }
     setStale(false);
     loadingColumnTokensRef.current.clear();
-    void fetchInitial();
+    void fetchInitial({ preserveLoading: preserveInitialSnapshot });
     // datasetKey is the canonical backend data revision trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetKey, mdfWorkdayTodayOpenPatchNeeded]);
@@ -8083,13 +8106,32 @@ export async function prefetchMdfOrderStatusBoard(
 ): Promise<void> {
   const columns = filterCncBathColumnsByMachineOrderMatches(response.columns);
   const orderIds = collectCncOrderIds(columns);
-  await Promise.all(
+  const responses = await Promise.all(
     chunkCncOrderIds(orderIds).map((chunk) =>
       orderStatusBoardApi.prefetchGet(
         cncOrderStatusBoardQuery(chunk, DEFAULT_MDF_ORDER_CARD_SORT),
       ),
     ),
   );
+  mdfInitialSnapshot = {
+    createdAt: Date.now(),
+    sessionGeneration: authSession.getSessionGeneration(),
+    today: response,
+    orderBoard: mergeCncOrderStatusBoardResponses(responses),
+  };
+}
+
+function takeMdfInitialSnapshot(): MdfInitialSnapshot | null {
+  const snapshot = mdfInitialSnapshot;
+  mdfInitialSnapshot = null;
+  if (
+    !snapshot
+    || snapshot.sessionGeneration !== authSession.getSessionGeneration()
+    || Date.now() - snapshot.createdAt > MDF_INITIAL_SNAPSHOT_MAX_AGE_MS
+  ) {
+    return null;
+  }
+  return snapshot;
 }
 
 function cncOrderStatusBoardQuery(

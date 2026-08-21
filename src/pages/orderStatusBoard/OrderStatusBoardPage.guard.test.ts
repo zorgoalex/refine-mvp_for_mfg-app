@@ -603,6 +603,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('fetchCncOrderStatusBoard(cncOrderIds, {');
     expect(page).toContain('orderStatusBoardApi.consumePrefetchedGet(');
     expect(page).toContain('hasPrefetchedCncOrderStatusBoard(');
+    expect(page).toContain('takeMdfInitialSnapshot()');
+    expect(page).toContain('fetchInitial({ preserveLoading: preserveInitialSnapshot })');
     expect(page).toContain('export async function prefetchMdfOrderStatusBoard(');
     expect(page).toContain('orderSort={cncOrderSortPreference}');
     expect(page).toContain('compareCncOrderBoardCards');
