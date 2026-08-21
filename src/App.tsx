@@ -35,8 +35,9 @@ const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edi
 const OrderCreate = lazy(async () => ({ default: (await import("./pages/orders/create")).OrderCreate }));
 const OrderTrash = lazy(async () => ({ default: (await import("./pages/orders/trash")).OrderTrash }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
-const OrderStatusBoardPage = lazy(async () => ({ default: (await import("./pages/orderStatusBoard")).OrderStatusBoardPage }));
-const MdfWorkBoardPage = lazy(async () => ({ default: (await import("./pages/orderStatusBoard")).MdfWorkBoardPage }));
+const loadOrderStatusBoardModule = () => import("./pages/orderStatusBoard");
+const OrderStatusBoardPage = lazy(async () => ({ default: (await loadOrderStatusBoardModule()).OrderStatusBoardPage }));
+const MdfWorkBoardPage = lazy(async () => ({ default: (await loadOrderStatusBoardModule()).MdfWorkBoardPage }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
@@ -245,6 +246,14 @@ const ThemedApp = () => {
       duration: 2, // 2 seconds instead of default 4.5
       maxCount: 3, // Limit visible notifications
     });
+  }, []);
+
+  useEffect(() => {
+    if (!featureFlags.orderStatusBoard || !featureFlags.cncTelegram) return;
+    // MDF is a primary workspace route. Warm its existing lazy chunk while the
+    // shell/auth/calendar settle so navigation does not wait for module fetch
+    // and evaluation after the operator clicks the menu item.
+    void loadOrderStatusBoardModule();
   }, []);
 
   return (

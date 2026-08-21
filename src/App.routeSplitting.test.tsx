@@ -38,4 +38,10 @@ describe('App.tsx route-level code splitting', () => {
       .filter((line) => !/\.\/pages\/login/.test(line));
     expect(staticPageImports).toEqual([]);
   });
+
+  it('warms the shared status-board chunk before MDF navigation', () => {
+    expect(source).toContain('const loadOrderStatusBoardModule = () => import("./pages/orderStatusBoard")');
+    expect(source).toContain('void loadOrderStatusBoardModule()');
+    expect(source).toContain('(await loadOrderStatusBoardModule()).MdfWorkBoardPage');
+  });
 });
