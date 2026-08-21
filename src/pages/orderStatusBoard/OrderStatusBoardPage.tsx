@@ -345,6 +345,7 @@ export type CncRelationCardState =
 type CncDetailedBathPlacement = 'left' | 'right';
 interface MdfInitialSnapshot {
   createdAt: number;
+  manualMoves: CncBoardManualMoveState;
   sessionGeneration: number;
   today: CncTelegramTodayResponse;
   orderBoard: OrderStatusBoardResponse | null;
@@ -635,6 +636,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       : null,
   );
   const preserveInitialMdfSnapshotRef = useRef(Boolean(initialMdfSnapshot));
+  const preserveInitialMdfOrderBoardRef = useRef(Boolean(initialMdfSnapshot?.orderBoard));
   const [searchDraft, setSearchDraft] = useState(viewState.search);
   const [board, setBoard] = useState<OrderStatusBoardResponse | null>(null);
   const boardRef = useRef<OrderStatusBoardResponse | null>(null);
@@ -696,7 +698,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const [cncRelationsEnabled, setCncRelationsEnabled] = useState(true);
   const [activeCncRelation, setActiveCncRelation] =
     useState<CncRelationTarget | null>(null);
-  const [cncManualMoves, setCncManualMoves] = useState<CncBoardManualMoveState>({});
+  const [cncManualMoves, setCncManualMoves] = useState<CncBoardManualMoveState>(
+    initialMdfSnapshot?.manualMoves ?? {},
+  );
   const cncManualMovesRef = useRef<CncBoardManualMoveState>({});
   const cncStrongRefreshInFlightRef = useRef(false);
   const cncAuxiliaryRefreshRevisionRef = useRef(0);
@@ -1028,18 +1032,21 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     if (mdfWorkdayTodayOpenPatchNeeded) return;
     const preserveInitialSnapshot = preserveInitialMdfSnapshotRef.current;
     preserveInitialMdfSnapshotRef.current = false;
-    if (!preserveInitialSnapshot) {
-      setBoard(null);
-      boardRef.current = null;
-      setCncToday(null);
-      cncTodayRef.current = null;
-      setCncOrderSearchToday(null);
-      cncOrderSearchTodayRef.current = null;
-      setCncOrderBoard(null);
+    if (preserveInitialSnapshot) {
+      setStale(false);
+      loadingColumnTokensRef.current.clear();
+      return;
     }
+    setBoard(null);
+    boardRef.current = null;
+    setCncToday(null);
+    cncTodayRef.current = null;
+    setCncOrderSearchToday(null);
+    cncOrderSearchTodayRef.current = null;
+    setCncOrderBoard(null);
     setStale(false);
     loadingColumnTokensRef.current.clear();
-    void fetchInitial({ preserveLoading: preserveInitialSnapshot });
+    void fetchInitial();
     // datasetKey is the canonical backend data revision trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [datasetKey, mdfWorkdayTodayOpenPatchNeeded]);
@@ -1708,6 +1715,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     }
 
     const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState);
+    if (preserveInitialMdfOrderBoardRef.current) {
+      preserveInitialMdfOrderBoardRef.current = false;
+      cncOrderBoardRequestKeyRef.current = requestKey;
+    }
     const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;
     let cancelled = false;
     let inFlight = false;
@@ -8143,15 +8154,19 @@ export async function prefetchMdfOrderStatusBoard(
 ): Promise<void> {
   const columns = filterCncBathColumnsByMachineOrderMatches(response.columns);
   const orderIds = collectCncOrderIds(columns);
-  const responses = await Promise.all(
-    chunkCncOrderIds(orderIds).map((chunk) =>
-      orderStatusBoardApi.prefetchGet(
-        cncOrderStatusBoardQuery(chunk, DEFAULT_MDF_ORDER_CARD_SORT),
+  const [responses, manualMovesResponse] = await Promise.all([
+    Promise.all(
+      chunkCncOrderIds(orderIds).map((chunk) =>
+        orderStatusBoardApi.prefetchGet(
+          cncOrderStatusBoardQuery(chunk, DEFAULT_MDF_ORDER_CARD_SORT),
+        ),
       ),
     ),
-  );
+    orderStatusBoardApi.listMdfManualMoves(),
+  ]);
   mdfInitialSnapshot = {
     createdAt: Date.now(),
+    manualMoves: mapMdfBoardManualMovesResponse(manualMovesResponse.moves),
     sessionGeneration: authSession.getSessionGeneration(),
     today: response,
     orderBoard: mergeCncOrderStatusBoardResponses(responses),
