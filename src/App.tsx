@@ -277,7 +277,10 @@ const ThemedApp = () => {
     const warmMdfData = () => {
       if (warmed || !authSession.getAccessToken() || !authSession.getUser()) return;
       warmed = true;
-      void cncTelegramApi.prefetchToday(mdfDefaultDateRange()).catch(() => undefined);
+      const boardPromise = cncTelegramApi.prefetchToday(mdfDefaultDateRange());
+      void Promise.all([loadOrderStatusBoardModule(), boardPromise])
+        .then(([module, response]) => module.prefetchMdfOrderStatusBoard(response))
+        .catch(() => undefined);
     };
     warmMdfData();
     return authSession.subscribe(warmMdfData);

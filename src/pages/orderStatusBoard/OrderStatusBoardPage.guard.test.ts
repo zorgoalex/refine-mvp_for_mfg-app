@@ -601,6 +601,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Свойство сортировки заказов МДФ-доски');
     expect(page).toContain('Направление сортировки заказов МДФ-доски');
     expect(page).toContain('fetchCncOrderStatusBoard(cncOrderIds, {');
+    expect(page).toContain('orderStatusBoardApi.consumePrefetchedGet(');
+    expect(page).toContain('export async function prefetchMdfOrderStatusBoard(');
     expect(page).toContain('orderSort={cncOrderSortPreference}');
     expect(page).toContain('compareCncOrderBoardCards');
   });
@@ -1160,8 +1162,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('? buildCncRelationContext(cncShownDataColumns, cncOrderCards, activeCncRelation)');
     expect(page).toContain("key: 'orders' as const");
     expect(page).toContain("orders: 'Заказы'");
-    expect(page).toContain('orderStatusBoardApi.get({');
-    expect(page).toContain('orderIds: chunk');
+    expect(page).toContain('orderStatusBoardApi.consumePrefetchedGet(');
+    expect(page).toContain('cncOrderStatusBoardQuery(chunk, sortPreference)');
     expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
     expect(page).toContain('const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;');
     expect(page).toContain('if (!alreadyLoaded) void loadOrderBoard();');

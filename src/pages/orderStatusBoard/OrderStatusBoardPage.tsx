@@ -8033,17 +8033,44 @@ async function fetchCncOrderStatusBoard(
   if (orderIds.length === 0) return null;
   const responses = await Promise.all(
     chunkCncOrderIds(orderIds).map((chunk) =>
-      orderStatusBoardApi.get({
-        board: 'production',
-        limit: CNC_ORDER_STATUS_BOARD_BATCH_SIZE,
-        includeDone: true,
-        orderIds: chunk,
-        sortBy: sortPreference.sortBy,
-        sortOrder: sortPreference.sortOrder,
-      }, options),
+      orderStatusBoardApi.consumePrefetchedGet(
+        cncOrderStatusBoardQuery(chunk, sortPreference),
+        options,
+      ),
     ),
   );
   return mergeCncOrderStatusBoardResponses(responses);
+}
+
+export async function prefetchMdfOrderStatusBoard(
+  response: CncTelegramTodayResponse,
+): Promise<void> {
+  const columns = filterCncBathColumnsByMachineOrderMatches(response.columns);
+  const orderIds = collectCncOrderIds(columns);
+  await Promise.all(
+    chunkCncOrderIds(orderIds).map((chunk) =>
+      orderStatusBoardApi.prefetchGet(
+        cncOrderStatusBoardQuery(chunk, DEFAULT_MDF_ORDER_CARD_SORT),
+      ),
+    ),
+  );
+}
+
+function cncOrderStatusBoardQuery(
+  orderIds: number[],
+  sortPreference: {
+    sortBy: OrderStatusBoardSortBy;
+    sortOrder: OrderStatusBoardSortOrder;
+  },
+) {
+  return {
+    board: 'production' as const,
+    limit: CNC_ORDER_STATUS_BOARD_BATCH_SIZE,
+    includeDone: true,
+    orderIds,
+    sortBy: sortPreference.sortBy,
+    sortOrder: sortPreference.sortOrder,
+  };
 }
 
 export function buildCncOrderStatusBoardRequestKey(

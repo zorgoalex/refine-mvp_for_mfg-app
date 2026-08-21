@@ -1,4 +1,5 @@
 import { apiRoutes } from './apiRoutes';
+import { authSession } from './authSession';
 import { httpClient, type RequestOptions } from './httpClient';
 import type {
   MdfBoardManualMoveCardKind,
@@ -11,15 +12,68 @@ import type {
 } from './types/orderStatusBoardApi.types';
 import { withQuery } from './ordersApi';
 
+interface StatusBoardPrefetch {
+  sessionGeneration: number;
+  createdAt: number;
+  promise: Promise<OrderStatusBoardResponse>;
+}
+
+const STATUS_BOARD_PREFETCH_MAX_AGE_MS = 30_000;
+const statusBoardPrefetches = new Map<string, StatusBoardPrefetch>();
+
+function statusBoardQueryKey(query: OrderStatusBoardQuery): string {
+  return withQuery(apiRoutes.orders.statusBoard, query);
+}
+
+function requestStatusBoard(
+  query: OrderStatusBoardQuery,
+  options?: RequestOptions,
+): Promise<OrderStatusBoardResponse> {
+  return httpClient.get<OrderStatusBoardResponse>(statusBoardQueryKey(query), options);
+}
+
 export const orderStatusBoardApi = {
   get(
     query: OrderStatusBoardQuery,
     options?: RequestOptions,
   ): Promise<OrderStatusBoardResponse> {
-    return httpClient.get<OrderStatusBoardResponse>(
-      withQuery(apiRoutes.orders.statusBoard, query),
-      options,
-    );
+    return requestStatusBoard(query, options);
+  },
+  prefetchGet(query: OrderStatusBoardQuery): Promise<OrderStatusBoardResponse> {
+    const key = statusBoardQueryKey(query);
+    const sessionGeneration = authSession.getSessionGeneration();
+    const existing = statusBoardPrefetches.get(key);
+    if (
+      existing
+      && existing.sessionGeneration === sessionGeneration
+      && Date.now() - existing.createdAt <= STATUS_BOARD_PREFETCH_MAX_AGE_MS
+    ) {
+      return existing.promise;
+    }
+    const promise = requestStatusBoard(query, { cache: 'no-store' });
+    const entry: StatusBoardPrefetch = {
+      sessionGeneration,
+      createdAt: Date.now(),
+      promise,
+    };
+    statusBoardPrefetches.set(key, entry);
+    void promise.catch(() => {
+      if (statusBoardPrefetches.get(key) === entry) statusBoardPrefetches.delete(key);
+    });
+    return promise;
+  },
+  consumePrefetchedGet(
+    query: OrderStatusBoardQuery,
+    options?: RequestOptions,
+  ): Promise<OrderStatusBoardResponse> {
+    const key = statusBoardQueryKey(query);
+    const entry = statusBoardPrefetches.get(key);
+    const valid = entry
+      && entry.sessionGeneration === authSession.getSessionGeneration()
+      && Date.now() - entry.createdAt <= STATUS_BOARD_PREFETCH_MAX_AGE_MS;
+    if (!valid) return requestStatusBoard(query, options);
+    statusBoardPrefetches.delete(key);
+    return entry.promise.catch(() => requestStatusBoard(query, options));
   },
   listMdfManualMoves(options?: RequestOptions): Promise<MdfBoardManualMovesResponse> {
     return httpClient.get<MdfBoardManualMovesResponse>(
