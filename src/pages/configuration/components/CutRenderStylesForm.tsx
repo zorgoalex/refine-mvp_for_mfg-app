@@ -273,6 +273,7 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
         type="info"
         showIcon
         message="Эти правила используются для MDF-превью, карточек файлов станка и Telegram-скринов SVG-раскроя."
+        description="PDF-шаблоны используют отдельный встроенный стиль: изменения линий и цветов здесь не влияют на PDF."
       />
 
       <Card

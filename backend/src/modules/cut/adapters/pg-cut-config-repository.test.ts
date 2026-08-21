@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DatabaseService } from '../../../database/database.service';
 import {
+  CUT_RENDER_STYLE_DEFAULT,
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
   DEFAULT_CUT_RENDER_STYLES_SETTING,
 } from '../../../shared/cut-render-style';
@@ -141,6 +142,41 @@ describe('PgCutConfigRepository', () => {
 
     expect(style.piece.stroke).toBe('#123456');
     expect(style.sourceSvg.minStrokePx).toBe(3);
+  });
+
+  it('keeps the default PDF render style independent from editable SVG preview settings', async () => {
+    const customDefault = {
+      ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default,
+      piece: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default.piece,
+        stroke: '#ff0000',
+        strokeWidthMm: 12,
+      },
+      sourceSvg: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default.sourceSvg,
+        strokeColorMode: 'fixed' as const,
+        fixedStroke: '#00ff00',
+      },
+    };
+    const repo = new PgCutConfigRepository(
+      fakeDatabase({
+        ['WHERE key = $1 LIMIT 1']: [{
+          value: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+            profiles: {
+              ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+              default: customDefault,
+            },
+          },
+        }],
+      }),
+    );
+
+    const style = await repo.getRenderStyleRule(CUT_RENDER_STYLE_DEFAULT);
+
+    expect(style.piece.stroke).toBe('#1f2d3d');
+    expect(style.piece.strokeWidthMm).toBe(2);
+    expect(style.sourceSvg.strokeColorMode).toBe('preserve');
   });
 
   it('falls back to the built-in render style when render.styles is absent or invalid', async () => {

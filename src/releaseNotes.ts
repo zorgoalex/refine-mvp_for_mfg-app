@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-21",
+    title: "Раскрой: независимый стиль PDF-шаблонов",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Настройки линий и цветов SVG-превью больше не меняют PDF-шаблоны: PDF снова использует отдельный стандартный стиль, включая ранее сохранённые результаты раскроя.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-20",
     title: "Заказы: групповой параметр ХДФ",
     services: ["ERP"],

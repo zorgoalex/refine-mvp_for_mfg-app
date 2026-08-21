@@ -2268,7 +2268,10 @@ export class PgCutRepository implements CutRepositoryPort {
     const renderStyle = await this.config.getRenderStyleRule(renderStyleName);
     const rebuildForRenderStyle = renderStyleName !== CUT_RENDER_STYLE_DEFAULT;
     const rebuildFrozenPieceMetadata = args.pieceMetadata === true || args.refreshPdfDynamicFields === true || rebuildForRenderStyle;
-    const rebuildSvgWithPieceMetadata = args.pieceMetadata === true || rebuildForRenderStyle;
+    const rebuildStandardPdfSvgWithCurrentRenderer = args.refreshPdfDynamicFields === true;
+    const rebuildSvgWithPieceMetadata = args.pieceMetadata === true
+      || rebuildStandardPdfSvgWithCurrentRenderer
+      || rebuildForRenderStyle;
     const rebuildBathSvgWithCurrentRenderer = args.refreshPdfDynamicFields === true;
     const frozenQuantities = rebuildFrozenPieceMetadata
       ? computeGroupItemQuantities(sourceSheets.map((sheet) => ({
@@ -2316,7 +2319,9 @@ export class PgCutRepository implements CutRepositoryPort {
       if (!renderSnapshot || renderSnapshot.contractVersion !== 'cut_sheet_render_v1' || !view) {
         throw new ApiError(500, 'CUT_RESULT_SNAPSHOT_CORRUPT', `Нет frozen render листа ${sheet.sheetIndex}`);
       }
-      const baseSvg = rebuildSvgWithPieceMetadata && (rebuildForRenderStyle || !view.svg.includes('data-detail-id='))
+      const baseSvg = rebuildSvgWithPieceMetadata && (
+        rebuildForRenderStyle || rebuildStandardPdfSvgWithCurrentRenderer || !view.svg.includes('data-detail-id=')
+      )
         ? buildSheetSvg({
             sheet: placements,
             labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities),

@@ -25,7 +25,7 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
   });
 
   it('exposes editable render style settings in a dedicated tab', () => {
-    expect(tabSrc).toMatch(/Настройки рендера/);
+    expect(tabSrc).toMatch(/Рендер SVG-превью/);
     expect(tabSrc).toMatch(/CutRenderStylesForm/);
     expect(renderFormSrc).toMatch(/CUT_RENDER_STYLES_SETTING_KEY/);
     expect(renderFormSrc).toMatch(/parseCutRenderStylesSetting/);
@@ -40,6 +40,7 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(renderFormSrc).toMatch(/Интервал заказ - позиция/);
     expect(renderFormSrc).toMatch(/Интервал позиция - размеры/);
     expect(renderFormSrc).toMatch(/Плотность букв/);
+    expect(renderFormSrc).toMatch(/PDF-шаблоны используют отдельный встроенный стиль/);
   });
 
   it('keeps render settings tab and uploaded SVG preview mounted after saving', () => {
