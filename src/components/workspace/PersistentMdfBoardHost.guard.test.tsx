@@ -20,6 +20,8 @@ describe('PersistentMdfBoardHost guards', () => {
     expect(host).toContain('idleWindow.requestIdleCallback');
     expect(host).toContain("hidden={!active}");
     expect(host).toContain('data-persistent-mdf-board="true"');
+    expect(host).toContain('const initiallyActiveRef = useRef(active)');
+    expect(host).toContain('active={initiallyActiveRef.current}');
   });
 
   it('reveals the ready DOM on MDF navigation intent', () => {
@@ -35,6 +37,7 @@ describe('PersistentMdfBoardHost guards', () => {
     expect(page).toContain('<OrderStatusBoardPage');
     expect(page).toContain('active={active}');
     expect(page).toContain('eagerFirstViewport');
+    expect(page).toContain('memo(({ active = true }) =>');
     expect(page).toContain("active && fixedView === 'cnc_today'");
   });
 });

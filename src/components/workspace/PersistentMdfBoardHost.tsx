@@ -16,6 +16,7 @@ export const PersistentMdfBoardHost: React.FC = () => {
   const location = useLocation();
   const active = location.pathname === MDF_ROUTE;
   const [mounted, setMounted] = useState(active);
+  const initiallyActiveRef = useRef(active);
   const hostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -56,7 +57,7 @@ export const PersistentMdfBoardHost: React.FC = () => {
   if (!mounted) return null;
   return (
     <div ref={hostRef} hidden={!active} data-persistent-mdf-board="true">
-      <MdfWorkBoardPage active={active} />
+      <MdfWorkBoardPage active={initiallyActiveRef.current} />
     </div>
   );
 };

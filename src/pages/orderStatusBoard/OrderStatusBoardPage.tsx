@@ -2951,14 +2951,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   );
 };
 
-export const MdfWorkBoardPage: React.FC<{ active?: boolean }> = ({ active = true }) => (
+export const MdfWorkBoardPage: React.FC<{ active?: boolean }> = memo(({ active = true }) => (
   <OrderStatusBoardPage
     active={active}
     eagerFirstViewport
     fixedView="cnc_today"
     defaultCncOrderSearchPeriod="1m"
   />
-);
+));
 
 const StatusBoardToolbarIconToggle: React.FC<{
   active: boolean;
