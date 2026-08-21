@@ -144,7 +144,7 @@ describe('PgCutConfigRepository', () => {
     expect(style.sourceSvg.minStrokePx).toBe(3);
   });
 
-  it('keeps the default PDF render style independent from editable SVG preview settings', async () => {
+  it('reads the independent PDF render style from the default profile', async () => {
     const customDefault = {
       ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default,
       piece: {
@@ -174,9 +174,9 @@ describe('PgCutConfigRepository', () => {
 
     const style = await repo.getRenderStyleRule(CUT_RENDER_STYLE_DEFAULT);
 
-    expect(style.piece.stroke).toBe('#1f2d3d');
-    expect(style.piece.strokeWidthMm).toBe(2);
-    expect(style.sourceSvg.strokeColorMode).toBe('preserve');
+    expect(style.piece.stroke).toBe('#ff0000');
+    expect(style.piece.strokeWidthMm).toBe(12);
+    expect(style.sourceSvg.fixedStroke).toBe('#00ff00');
   });
 
   it('falls back to the built-in render style when render.styles is absent or invalid', async () => {

@@ -69,6 +69,9 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
   const resolvedSetting = useMemo(() => readCutRenderStylesSetting(config.settings), [config.settings]);
   const [selectedTemplateId, setSelectedTemplateId] = useState(resolvedSetting.defaultProfileId);
   const [draft, setDraft] = useState<TemplateDraft>(() => templateToDraft(templateById(resolvedSetting, resolvedSetting.defaultProfileId)));
+  const [pdfProfile, setPdfProfile] = useState<CutRenderStyleProfile>(
+    () => cloneProfile(resolvedSetting.profiles[CUT_RENDER_STYLE_DEFAULT]),
+  );
   const [saving, setSaving] = useState(false);
   const [previewParsed, setPreviewParsed] = useState<ParsedSvgUpload>(() => samplePreviewUpload());
   const [previewName, setPreviewName] = useState('Тестовый SVG');
@@ -93,6 +96,10 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
   useEffect(() => {
     setDraft(templateToDraft(selectedTemplate));
   }, [selectedTemplate]);
+
+  useEffect(() => {
+    setPdfProfile(cloneProfile(resolvedSetting.profiles[CUT_RENDER_STYLE_DEFAULT]));
+  }, [resolvedSetting]);
 
   const previewSetting = useMemo(() => {
     try {
@@ -134,6 +141,22 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
       showRenderStyleError(error);
     }
   }, [draft, persist, resolvedSetting, selectedTemplateId]);
+
+  const savePdfStyle = useCallback(() => {
+    try {
+      void persist(buildSettingWithPdfProfile(resolvedSetting, pdfProfile), selectedTemplateId);
+    } catch (error) {
+      showRenderStyleError(error);
+    }
+  }, [pdfProfile, persist, resolvedSetting, selectedTemplateId]);
+
+  const updatePdfLineWidth = useCallback((value: number) => {
+    setPdfProfile((current) => ({
+      ...current,
+      piece: { ...current.piece, strokeWidthMm: value },
+      sourceSvg: { ...current.sourceSvg, minStrokePx: value },
+    }));
+  }, []);
 
   const saveAsCopy = useCallback(() => {
     try {
@@ -272,9 +295,68 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
       <Alert
         type="info"
         showIcon
-        message="Эти правила используются для MDF-превью, карточек файлов станка и Telegram-скринов SVG-раскроя."
-        description="PDF-шаблоны используют отдельный встроенный стиль: изменения линий и цветов здесь не влияют на PDF."
+        message="SVG-превью и PDF используют независимые профили."
+        description="Настройки PDF меняют только карты раскроя PDF. Шаблоны ниже относятся к MDF-превью, карточкам файлов станка и Telegram-скринам SVG."
       />
+
+      <Card size="small" title="Рендер PDF-шаблонов">
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Row gutter={[16, 12]}>
+            <Col xs={24} md={8}>
+              <NumberSlider
+                label="Толщина линий PDF"
+                value={pdfProfile.piece.strokeWidthMm}
+                min={0.1}
+                max={20}
+                step={0.1}
+                disabled={!canManage}
+                onChange={updatePdfLineWidth}
+              />
+            </Col>
+            <Col xs={24} md={8}>
+              <ColorField
+                label="Цвет линий PDF"
+                value={pdfProfile.piece.stroke}
+                disabled={!canManage}
+                onChange={(stroke) => setPdfProfile((current) => ({
+                  ...current,
+                  piece: { ...current.piece, stroke },
+                  sourceSvg: { ...current.sourceSvg, fixedStroke: stroke },
+                }))}
+              />
+            </Col>
+            <Col xs={24} md={8}>
+              <ColorField
+                label="Фон листа PDF"
+                value={pdfProfile.piece.defaultFill}
+                disabled={!canManage}
+                onChange={(defaultFill) => setPdfProfile((current) => ({
+                  ...current,
+                  piece: { ...current.piece, defaultFill },
+                }))}
+              />
+            </Col>
+          </Row>
+          <Space wrap>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              disabled={!canManage || !settingRow}
+              loading={saving}
+              onClick={savePdfStyle}
+            >
+              Сохранить настройки PDF
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              disabled={!canManage}
+              onClick={() => setPdfProfile(cloneProfile(resolvedSetting.profiles[CUT_RENDER_STYLE_DEFAULT]))}
+            >
+              Сбросить изменения PDF
+            </Button>
+          </Space>
+        </Space>
+      </Card>
 
       <Card
         size="small"
@@ -886,6 +968,20 @@ function buildSetting(
       [CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]: cloneProfile(defaultTemplate.profile),
     },
     templates: nextTemplates,
+  });
+}
+
+function buildSettingWithPdfProfile(
+  current: CutRenderStylesSetting,
+  pdfProfile: CutRenderStyleProfile,
+): CutRenderStylesSetting {
+  return parseCutRenderStylesSetting({
+    ...current,
+    profiles: {
+      ...current.profiles,
+      [CUT_RENDER_STYLE_DEFAULT]: cloneProfile(pdfProfile),
+    },
+    templates: current.templates.map(cloneTemplate),
   });
 }
 

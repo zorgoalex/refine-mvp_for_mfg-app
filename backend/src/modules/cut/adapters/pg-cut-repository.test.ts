@@ -44,6 +44,12 @@ describe('frozen bath PDF render wiring', () => {
     expect(repositorySource).toContain('labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities)');
     expect(repositorySource).toContain('addBathMeterGuidesToSvg(baseBathSvg, placements');
     expect(repositorySource).not.toContain('addBathMeterGuidesToSvg(view.bathSvg, placements');
+    expect(repositorySource).toMatch(
+      /renderStyleName === CUT_RENDER_STYLE_DEFAULT\s*\? \(\(\) => renderStyle\.piece\.stroke\)/,
+    );
+    expect(repositorySource).toMatch(
+      /renderStyle === CUT_RENDER_STYLE_DEFAULT\s*\? \(\(\) => renderStyleRule\.piece\.stroke\)/,
+    );
   });
 });
 

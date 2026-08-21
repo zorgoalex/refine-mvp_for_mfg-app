@@ -1,7 +1,6 @@
 import type { DatabaseService } from '../../../database/database.service';
 import {
   CUT_RENDER_STYLES_SETTING_KEY,
-  CUT_RENDER_STYLE_DEFAULT,
   resolveCutRenderStyle,
   resolveCutRenderStyleFromSetting,
   type CutRenderStyleName,
@@ -118,12 +117,6 @@ export class PgCutConfigRepository implements CutConfigPort {
   }
 
   async getRenderStyleRule(name: CutRenderStyleName): Promise<CutRenderStyleRule> {
-    // The editable render.styles setting belongs to SVG/PNG previews only.
-    // PDF rendering uses the historical built-in default so preview line/color
-    // tuning cannot change printed templates.
-    if (name === CUT_RENDER_STYLE_DEFAULT) {
-      return resolveCutRenderStyle(CUT_RENDER_STYLE_DEFAULT);
-    }
     try {
       const result = await this.database.query<{ value: unknown | null }>(
         `SELECT value FROM cut_settings WHERE key = $1 LIMIT 1`,

@@ -397,7 +397,7 @@ export const CutConfigTab: React.FC = () => {
           },
           {
             key: 'render-style-settings',
-            label: 'Рендер SVG-превью',
+            label: 'Рендер SVG и PDF',
             children: <CutRenderStylesForm config={config} canManage={canManage} onSaved={updateSettingInConfig} />,
           },
         ]}

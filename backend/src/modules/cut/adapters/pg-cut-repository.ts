@@ -2283,7 +2283,9 @@ export class PgCutRepository implements CutRepositoryPort {
       ? new Map(frozen.job.items.map((item) => [item.itemId ?? freecutItemId(item.orderDetailId), item]))
       : new Map<string, CutJobItemDto>();
     const frozenFillByOrder = rebuildFrozenPieceMetadata
-      ? createOrderFillResolver(frozen.job.items.map((item) => item.orderId), renderStyle)
+      ? renderStyleName === CUT_RENDER_STYLE_DEFAULT
+        ? (() => renderStyle.piece.stroke)
+        : createOrderFillResolver(frozen.job.items.map((item) => item.orderId), renderStyle)
       : (() => '#eef3f8');
     const bathGuideMeta = await this.database.query<{
       last_calc_params: FreecutParams | null;
@@ -2360,6 +2362,7 @@ export class PgCutRepository implements CutRepositoryPort {
             rotate90: args.rotate90,
             originTopLeft: args.originTopLeft,
             axisOrigin: args.axisOrigin,
+            renderStyle,
           })
         : view.bathSvg;
       const bathSvg = showBathMeterGuides
@@ -3943,9 +3946,9 @@ export class PgCutRepository implements CutRepositoryPort {
 
     // Rule 7: build live detail lookup for LEGACY rows (pre-Task 4) that lack
     // a frozen label snapshot. New rows written by calculate always have piece.label.
-    const { detailById, detailByItemId, fillByOrder: baseFillByOrder, orderNameForOrderId } = await this.loadRenderDetailsForGroup(cutGroupId, client);
+    const { detailById, detailByItemId, orderNameForOrderId } = await this.loadRenderDetailsForGroup(cutGroupId, client);
     const fillByOrder = renderStyle === CUT_RENDER_STYLE_DEFAULT
-      ? baseFillByOrder
+      ? (() => renderStyleRule.piece.stroke)
       : createOrderFillResolver([...detailByItemId.values()].map((detail) => detail.orderId), renderStyleRule);
 
     // Resolve a piece's sheet-material name (live join; the frozen snapshot has no
@@ -4057,6 +4060,7 @@ export class PgCutRepository implements CutRepositoryPort {
             originTopLeft,
             axisOrigin,
             showBathMeterGuides,
+            renderStyle: renderStyleRule,
           }),
           pdfMeta: buildPdfSheetMeta(s.placements, detailById, detailByItemId),
           pdfDetailRows: buildPdfDetailRows(s.placements, detailById, detailByItemId),
