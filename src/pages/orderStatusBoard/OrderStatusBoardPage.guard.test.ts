@@ -395,7 +395,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
     expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
     expect(page).toContain("activeCncRelation.kind === 'order'");
-    expect(page).toContain('const sortedOrderCards = orderSourceCards;');
+    expect(page).toContain('const sortedOrderCards = deferOverflowCards');
     expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
     expect(page).toContain('[activeCncRelation, cncRelationsEnabled, isCncToday]');
   });
@@ -605,6 +605,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('hasPrefetchedCncOrderStatusBoard(');
     expect(page).toContain('takeMdfInitialSnapshot()');
     expect(page).toContain('fetchInitial({ preserveLoading: preserveInitialSnapshot })');
+    expect(page).toContain('CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN = 6');
+    expect(page).toContain('CNC_OVERFLOW_CARD_DELAY_MS = 1_200');
+    expect(page).toContain('onWheel={revealOverflowCards}');
     expect(page).toContain('export async function prefetchMdfOrderStatusBoard(');
     expect(page).toContain('orderSort={cncOrderSortPreference}');
     expect(page).toContain('compareCncOrderBoardCards');
@@ -1187,8 +1190,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('highlightedOrderKeys.has(orderKey)');
     expect(page).toContain('cncRelationOrderKeys(');
     expect(page).toContain('cnc-order-number--highlighted');
-    expect(page).toContain('const bathCards = relationContext');
-    expect(page).toContain('const machineFileCards = buildCncMachineColumnCards(');
+    expect(page).toContain('const allBathCards = relationContext');
+    expect(page).toContain('const allMachineFileCards = buildCncMachineColumnCards(');
     expect(page).toContain('machineFileCards.map((entry) =>');
     expect(page).toContain("kind: 'bazisCutSet',");
     expect(page).toContain('id: bazisCutSet.bazisCutSetId');

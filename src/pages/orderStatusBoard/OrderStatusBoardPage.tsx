@@ -351,6 +351,8 @@ interface MdfInitialSnapshot {
 }
 
 const MDF_INITIAL_SNAPSHOT_MAX_AGE_MS = 30_000;
+const CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN = 6;
+const CNC_OVERFLOW_CARD_DELAY_MS = 1_200;
 let mdfInitialSnapshot: MdfInitialSnapshot | null = null;
 export interface CncOrderSortSettings {
   field: CncOrderSortField;
@@ -3362,6 +3364,22 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     useRef<Partial<Record<CncOrderDisplayColumnKey, HTMLElement | null>>>({});
   const [orderColumnScrollTopState, setOrderColumnScrollTopState] =
     useState<Partial<Record<CncOrderDisplayColumnKey, CncOrderColumnScrollTopState>>>({});
+  const [overflowCardsVisible, setOverflowCardsVisible] = useState(
+    cardDisplayMode !== 'standard',
+  );
+
+  useEffect(() => {
+    if (cardDisplayMode !== 'standard') {
+      setOverflowCardsVisible(true);
+      return;
+    }
+    setOverflowCardsVisible(false);
+    const timer = window.setTimeout(
+      () => setOverflowCardsVisible(true),
+      CNC_OVERFLOW_CARD_DELAY_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [cardDisplayMode, columns, orderCards]);
 
   useEffect(() => {
     if (cardDisplayMode !== 'standard') return;
@@ -3593,6 +3611,14 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
     ? 'var(--status-board-cnc-column-width, 132px)'
     : 'var(--status-board-cnc-column-width, 220px)';
   const highlightedOrderKeys = relationContext?.activeOrderKeys ?? null;
+  const deferOverflowCards = !overflowCardsVisible
+    && cardDisplayMode === 'standard'
+    && !focusedCardId
+    && !relationContext
+    && !detailedContext?.activeBathId;
+  const revealOverflowCards = () => {
+    if (deferOverflowCards) setOverflowCardsVisible(true);
+  };
 
   return (
     <>
@@ -3604,6 +3630,9 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           cardDisplayMode === 'minimal' ? 'status-board-columns--cnc-minimal' : '',
           detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
         ].filter(Boolean).join(' ')}
+        onWheel={revealOverflowCards}
+        onPointerEnter={revealOverflowCards}
+        onFocusCapture={revealOverflowCards}
         style={
           {
             '--status-board-cnc-column-count': displayColumns.length,
@@ -3636,20 +3665,28 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           getCncOrderRelationState(entry.card, relationContext);
         const bazisCutSetStateFor = (card: CncTelegramBazisCutSetCard) =>
           getCncBazisCutSetDisplayState(card, relationContext, detailedContext);
-        const bathCards = relationContext
+        const allBathCards = relationContext
           ? sortCncRelationCards(
             bathSourceCards,
             (bath) => getCncBathRelationState(bath, relationContext),
           )
           : bathSourceCards;
-        const machineFileCards = buildCncMachineColumnCards(
+        const allMachineFileCards = buildCncMachineColumnCards(
           bazisCutSetSourceCards,
           packetSourceCards,
           bazisCutSetStateFor,
           packetStateFor,
           relationContext || detailedPacketHighlightEnabled,
         );
-        const sortedOrderCards = orderSourceCards;
+        const bathCards = deferOverflowCards
+          ? allBathCards.slice(0, CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN)
+          : allBathCards;
+        const machineFileCards = deferOverflowCards
+          ? allMachineFileCards.slice(0, CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN)
+          : allMachineFileCards;
+        const sortedOrderCards = deferOverflowCards
+          ? orderSourceCards.slice(0, CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN)
+          : orderSourceCards;
         const columnDetailed = !detailedBathActive && detailedEnabled && bathColumn && bathSourceCards.some(
           (bath) => bath.bathCardId === detailedContext?.activeBathId,
         );
