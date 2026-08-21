@@ -352,7 +352,7 @@ export function StatusAutomationConfig() {
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
     );
   const defaultMdfBoardHiddenProductionStatusIds = useMemo(() => {
-    const defaultNames = new Set(DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES);
+    const defaultNames = new Set<string>(DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES);
     return normalizeStatusIds(
       (productionStatusesData?.data ?? [])
         .filter((status) => defaultNames.has(

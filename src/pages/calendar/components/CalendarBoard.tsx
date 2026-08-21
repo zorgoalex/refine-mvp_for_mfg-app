@@ -60,6 +60,15 @@ import { useOrderFinancialVisibility } from '../../../hooks/useOrderFinancialVis
 import { cleanCalendarFilters } from '../utils/calendarFilters';
 import { isTabletTier, useDeviceTier } from '../../../hooks/useDeviceTier';
 
+// React 19 types incorrectly make four deprecated resize/pointer capture props
+// mandatory on Ant Design's React 18 Segmented declaration.
+const CalendarSegmented = Segmented as React.ComponentType<
+  Omit<
+    React.ComponentProps<typeof Segmented>,
+    'onResize' | 'onResizeCapture' | 'onPointerEnterCapture' | 'onPointerLeaveCapture'
+  >
+>;
+
 interface CalendarBoardProps {
   filters: CalendarFilters;
   filtersOpen?: boolean;
@@ -754,7 +763,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
             </div>
             {/* Row 3: Segmented — переключатель режимов отображения */}
             <div className="calendar-navigation__row">
-              <Segmented
+              <CalendarSegmented
                 block
                 options={[
                   { label: 'Стандарт', value: ViewMode.STANDARD },
@@ -789,7 +798,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
               value={filters.quickSearch}
               onChange={handleQuickSearchChange}
             />
-            <Segmented
+            <CalendarSegmented
               options={[
                 {
                   label: <span className="calendar-navigation__mode-label" aria-label="Неделя" title="Неделя"><CalendarOutlined /><span className="calendar-navigation__mode-text">Неделя</span></span>,
@@ -807,7 +816,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
               value={periodDays}
               onChange={(value) => setPeriodDays(value as 7 | 14 | 30)}
             />
-            <Segmented
+            <CalendarSegmented
               options={[
                 {
                   label: <span className="calendar-navigation__mode-label" aria-label="Комфортно" title="Комфортно"><AppstoreOutlined /><span className="calendar-navigation__mode-text">Комфортно</span></span>,
@@ -899,7 +908,7 @@ const CalendarBoard: React.FC<CalendarBoardProps> = ({
             />
 
             {/* Переключатель режимов отображения */}
-            <Segmented
+            <CalendarSegmented
               options={[
                 {
                   label: <span className="calendar-navigation__mode-label" aria-label="Стандартный" title="Стандартный"><AppstoreOutlined /><span className="calendar-navigation__mode-text">Стандартный</span></span>,
