@@ -12,10 +12,23 @@ export interface UseSheetMaterialOptionsResult {
   // backend orders WRITE on AND the current user has sheet_materials.view.
   enabled: boolean;
   canViewSheetMaterials: boolean;
+  /** Catalog order without cross-order user recency; use for order-local ranking. */
+  catalogOptions: SheetMaterialTypeOption[];
   options: SheetMaterialTypeOption[];
   byId: Map<number, SheetMaterialTypeOption>;
   isLoading: boolean;
   promoteUsage: (entityId: number) => void;
+}
+
+export function isSheetMaterialPickerEnabled(
+  useBackendOrdersWrite: boolean,
+  canViewSheetMaterials: boolean,
+  useBackendReferences: boolean,
+  sheetMaterialsReads: boolean,
+): boolean {
+  return useBackendOrdersWrite
+    && canViewSheetMaterials
+    && (useBackendReferences || sheetMaterialsReads);
 }
 
 /**
@@ -29,14 +42,17 @@ export interface UseSheetMaterialOptionsResult {
 export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
   const recency = useRecentReferences('sheet_material_types');
   const canViewSheetMaterials = can('sheet_materials.view');
-  // SP3: the picker also requires the migration 029 schema (sheetMaterialsReads)
-  // so the selected sheet_material_type_id round-trips through order_details and
-  // the resolved name view; never render it before the Hasura metadata is applied.
-  const enabled =
-    featureFlags.useBackendOrdersWrite && canViewSheetMaterials && featureFlags.sheetMaterialsReads;
-
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
+  // The legacy Hasura path still needs the schema cutover flag. Backend form-data
+  // already reads sheet_material_types directly, so gating that path on the old
+  // Hasura flag would leave the material picker empty in backend-only runtime config.
+  const enabled = isSheetMaterialPickerEnabled(
+    featureFlags.useBackendOrdersWrite,
+    canViewSheetMaterials,
+    useBackendReferences,
+    featureFlags.sheetMaterialsReads,
+  );
 
   // Hasura path only fires when the picker is enabled AND we are not using the
   // backend form-data reference — so a user without sheet_materials.view never
@@ -100,6 +116,7 @@ export function useSheetMaterialOptions(): UseSheetMaterialOptionsResult {
   return {
     enabled,
     canViewSheetMaterials,
+    catalogOptions,
     options,
     byId,
     isLoading,

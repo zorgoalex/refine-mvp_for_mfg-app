@@ -60,6 +60,7 @@ describe('dataProvider backend orders read routing', () => {
           clientId: 12,
           clientName: 'Client A',
           orderDate: '2026-05-01',
+          plannedCompletionDate: '2026-05-08',
           orderStatusId: 3,
           orderStatusName: 'New',
           paymentStatusId: 1,
@@ -141,6 +142,7 @@ describe('dataProvider backend orders read routing', () => {
           order_name: 'Order A',
           client_id: 12,
           client_name: 'Client A',
+          planned_completion_date: '2026-05-08',
           final_amount: 100,
           payment_date: '2026-05-02',
           notes: 'Backend note',
@@ -209,6 +211,58 @@ describe('dataProvider backend orders read routing', () => {
       order_status_name: 'New',
       version: 4,
     });
+  });
+
+  it('routes calendar planned completion date filters to backend orders', async () => {
+    const makeOrder = (orderId: number) => ({
+      orderId,
+      orderName: `Order ${orderId}`,
+      clientId: 1,
+      clientName: 'Client',
+      orderDate: '2026-08-01',
+      plannedCompletionDate: '2026-08-20',
+      orderStatusId: 1,
+      orderStatusName: 'New',
+      updatedAt: '2026-08-20T00:00:00.000Z',
+      version: 1,
+    });
+    listOrders.mockImplementation(async ({ page }: { page: number }) => ({
+      data: Array.from(
+        { length: page < 3 ? 200 : 50 },
+        (_, index) => makeOrder((page - 1) * 200 + index + 1),
+      ),
+      pagination: { page, pageSize: 200, total: 450, totalPages: 3 },
+    }));
+    const { dataProvider } = await import('./dataProvider');
+
+    const result = await dataProvider('').getList({
+      resource: 'orders_view',
+      pagination: { current: 1, pageSize: 1000 },
+      sorters: [
+        { field: 'planned_completion_date', order: 'asc' },
+        { field: 'order_id', order: 'asc' },
+      ],
+      filters: [
+        { field: 'planned_completion_date', operator: 'gte', value: '2026-08-17' },
+        { field: 'planned_completion_date', operator: 'lte', value: '2026-08-23' },
+      ],
+    });
+
+    expect(listOrders).toHaveBeenCalledTimes(3);
+    for (const page of [1, 2, 3]) {
+      expect(listOrders).toHaveBeenCalledWith({
+        page,
+        pageSize: 200,
+        sortBy: 'plannedCompletionDate',
+        sortOrder: 'asc',
+        plannedCompletionDateFrom: '2026-08-17',
+        plannedCompletionDateTo: '2026-08-23',
+      });
+    }
+    expect(result.total).toBe(450);
+    expect(result.data).toHaveLength(450);
+    expect(result.data[0]).toMatchObject({ order_id: 1 });
+    expect(result.data[449]).toMatchObject({ order_id: 450 });
   });
 
   it('routes orders delete to backend with required version and never calls Hasura', async () => {

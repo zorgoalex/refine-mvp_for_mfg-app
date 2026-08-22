@@ -41,10 +41,10 @@ export class PgCncTelegramWorkerAuditRepository {
          'cnc_telegram_worker_message_logs_log_key_key,cnc_telegram_worker_message_logs_pkey,idx_cnc_tg_worker_messages_reason,idx_cnc_tg_worker_messages_search,idx_cnc_tg_worker_messages_source,idx_cnc_tg_worker_messages_status,idx_cnc_tg_worker_messages_type,idx_cnc_tg_worker_messages_workday',
          'b89261e2356a3cd1967d5c07e9b34ceb'),
         ('cnc_telegram_worker_operations',
-         'operation_id,operation_key,scan_id,log_id,operation_type,status,planned_at,finished_at,reason_code,reason_message,error_code,error_message,external_packet_key,source_version,packet_id,cut_job_id,cut_result_no,cutting_sequence_no,backend_applied,backend_stale,reply_text,reply_to_message_id,session_sender_user_id,sent_telegram_message_id,reconciliation_yielded_count,reconciliation_exhausted,reconciliation_truncated,reconciliation_error_code,reconciliation_window_from,reconciliation_window_to,steps_json,responses_json,created_at,updated_at',
-         '460b3edcaee829bdfa87ba1564512179',
-         'chk_cnc_tg_worker_operation_arrays,chk_cnc_tg_worker_operation_bounds,chk_cnc_tg_worker_operation_reason_codes,chk_cnc_tg_worker_operation_status,chk_cnc_tg_worker_operation_type,cnc_telegram_worker_operations_log_id_fkey,cnc_telegram_worker_operations_operation_key_key,cnc_telegram_worker_operations_pkey,cnc_telegram_worker_operations_scan_id_fkey',
-         '262509547ad6915b354af482c8b4acf3',
+         'operation_id,operation_key,scan_id,log_id,operation_type,status,planned_at,finished_at,reason_code,reason_message,error_code,error_message,external_packet_key,source_version,packet_id,cut_job_id,cut_result_no,cutting_sequence_no,backend_applied,backend_stale,reply_text,reply_to_message_id,session_sender_user_id,sent_telegram_message_id,reconciliation_yielded_count,reconciliation_exhausted,reconciliation_truncated,reconciliation_error_code,reconciliation_window_from,reconciliation_window_to,steps_json,responses_json,created_at,updated_at,cut_job_display_number',
+         '73c369920b8011e2047221cc37bc0da6',
+         'chk_cnc_tg_worker_operation_arrays,chk_cnc_tg_worker_operation_bounds,chk_cnc_tg_worker_operation_display_number,chk_cnc_tg_worker_operation_reason_codes,chk_cnc_tg_worker_operation_status,chk_cnc_tg_worker_operation_type,cnc_telegram_worker_operations_log_id_fkey,cnc_telegram_worker_operations_operation_key_key,cnc_telegram_worker_operations_pkey,cnc_telegram_worker_operations_scan_id_fkey',
+         'e814e1e9d4e8dc751fac89f31cf10e38',
          'cnc_telegram_worker_operations_operation_key_key,cnc_telegram_worker_operations_pkey,idx_cnc_tg_worker_operations_log,idx_cnc_tg_worker_operations_scan,idx_cnc_tg_worker_operations_type_status',
          '6e836ddb93d11c98f68670a6152b1f97'),
         ('cnc_telegram_worker_message_observations',
@@ -317,7 +317,7 @@ export class PgCncTelegramWorkerAuditRepository {
           'errorCode', p.error_code, 'errorMessage', p.error_message,
           'externalPacketKey', p.external_packet_key, 'sourceVersion', p.source_version::text,
           'packetId', p.packet_id,
-          'cutJobId', p.cut_job_id::text, 'cutResultNo', p.cut_result_no,
+          'cutJobId', p.cut_job_id::text, 'cutJobDisplayNumber', p.cut_job_display_number, 'cutResultNo', p.cut_result_no,
           'cuttingSequenceNo', p.cutting_sequence_no, 'backendApplied', p.backend_applied,
           'backendStale', p.backend_stale,
           'replyText', p.reply_text, 'replyToMessageId', p.reply_to_message_id::text,
@@ -404,7 +404,7 @@ export class PgCncTelegramWorkerAuditRepository {
           'errorCode', p.error_code, 'errorMessage', p.error_message,
           'externalPacketKey', p.external_packet_key, 'sourceVersion', p.source_version::text,
           'packetId', p.packet_id, 'cutJobId', p.cut_job_id::text,
-          'cutResultNo', p.cut_result_no, 'cuttingSequenceNo', p.cutting_sequence_no,
+          'cutJobDisplayNumber', p.cut_job_display_number, 'cutResultNo', p.cut_result_no, 'cuttingSequenceNo', p.cutting_sequence_no,
           'backendApplied', p.backend_applied, 'backendStale', p.backend_stale,
           'replyText', p.reply_text, 'replyToMessageId', p.reply_to_message_id::text,
           'sessionSenderUserId', p.session_sender_user_id::text,
@@ -569,12 +569,12 @@ export class PgCncTelegramWorkerAuditRepository {
       INSERT INTO cnc_telegram_worker_operations (
         operation_key, scan_id, log_id, operation_type, status, planned_at, finished_at,
         reason_code, reason_message, error_code, error_message, external_packet_key, source_version,
-        packet_id, cut_job_id, cut_result_no, cutting_sequence_no, backend_applied, backend_stale,
+        packet_id, cut_job_id, cut_job_display_number, cut_result_no, cutting_sequence_no, backend_applied, backend_stale,
         reply_text, reply_to_message_id, session_sender_user_id, sent_telegram_message_id,
         reconciliation_yielded_count, reconciliation_exhausted, reconciliation_truncated,
         reconciliation_error_code, reconciliation_window_from, reconciliation_window_to,
         steps_json, responses_json
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::bigint,$14,$15::bigint,$16,$17,$18,$19,$20,$21::bigint,$22::bigint,$23::bigint,$24,$25,$26,$27,$28,$29,$30::jsonb,$31::jsonb)
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::bigint,$14,$15::bigint,$16,$17,$18,$19,$20,$21,$22::bigint,$23::bigint,$24::bigint,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb)
       ON CONFLICT (operation_key) DO UPDATE SET
         status=CASE WHEN cnc_telegram_worker_operations.status='planned' THEN EXCLUDED.status ELSE cnc_telegram_worker_operations.status END,
         finished_at=COALESCE(cnc_telegram_worker_operations.finished_at, EXCLUDED.finished_at),
@@ -584,6 +584,7 @@ export class PgCncTelegramWorkerAuditRepository {
         error_message=COALESCE(cnc_telegram_worker_operations.error_message, EXCLUDED.error_message),
         packet_id=COALESCE(cnc_telegram_worker_operations.packet_id, EXCLUDED.packet_id),
         cut_job_id=COALESCE(cnc_telegram_worker_operations.cut_job_id, EXCLUDED.cut_job_id),
+        cut_job_display_number=COALESCE(cnc_telegram_worker_operations.cut_job_display_number, EXCLUDED.cut_job_display_number),
         sent_telegram_message_id=COALESCE(cnc_telegram_worker_operations.sent_telegram_message_id, EXCLUDED.sent_telegram_message_id),
         reconciliation_yielded_count=GREATEST(cnc_telegram_worker_operations.reconciliation_yielded_count, EXCLUDED.reconciliation_yielded_count),
         reconciliation_exhausted=EXCLUDED.reconciliation_exhausted,
@@ -623,6 +624,7 @@ export class PgCncTelegramWorkerAuditRepository {
                AND cnc_telegram_worker_operations.source_version IS NOT DISTINCT FROM EXCLUDED.source_version
                AND cnc_telegram_worker_operations.packet_id IS NOT DISTINCT FROM EXCLUDED.packet_id
                AND cnc_telegram_worker_operations.cut_job_id IS NOT DISTINCT FROM EXCLUDED.cut_job_id
+               AND cnc_telegram_worker_operations.cut_job_display_number IS NOT DISTINCT FROM EXCLUDED.cut_job_display_number
                AND cnc_telegram_worker_operations.cut_result_no IS NOT DISTINCT FROM EXCLUDED.cut_result_no
                AND cnc_telegram_worker_operations.cutting_sequence_no IS NOT DISTINCT FROM EXCLUDED.cutting_sequence_no
                AND cnc_telegram_worker_operations.backend_applied IS NOT DISTINCT FROM EXCLUDED.backend_applied
@@ -643,6 +645,7 @@ export class PgCncTelegramWorkerAuditRepository {
            AND (cnc_telegram_worker_operations.source_version IS NULL OR cnc_telegram_worker_operations.source_version IS NOT DISTINCT FROM EXCLUDED.source_version)
            AND (cnc_telegram_worker_operations.packet_id IS NULL OR cnc_telegram_worker_operations.packet_id IS NOT DISTINCT FROM EXCLUDED.packet_id)
            AND (cnc_telegram_worker_operations.cut_job_id IS NULL OR cnc_telegram_worker_operations.cut_job_id IS NOT DISTINCT FROM EXCLUDED.cut_job_id)
+           AND (cnc_telegram_worker_operations.cut_job_display_number IS NULL OR cnc_telegram_worker_operations.cut_job_display_number IS NOT DISTINCT FROM EXCLUDED.cut_job_display_number)
            AND (cnc_telegram_worker_operations.cut_result_no IS NULL OR cnc_telegram_worker_operations.cut_result_no IS NOT DISTINCT FROM EXCLUDED.cut_result_no)
            AND (cnc_telegram_worker_operations.cutting_sequence_no IS NULL OR cnc_telegram_worker_operations.cutting_sequence_no IS NOT DISTINCT FROM EXCLUDED.cutting_sequence_no)
            AND (cnc_telegram_worker_operations.backend_applied IS NULL OR cnc_telegram_worker_operations.backend_applied IS NOT DISTINCT FROM EXCLUDED.backend_applied)
@@ -665,6 +668,7 @@ export class PgCncTelegramWorkerAuditRepository {
            AND cnc_telegram_worker_operations.source_version IS NOT DISTINCT FROM EXCLUDED.source_version
            AND cnc_telegram_worker_operations.packet_id IS NOT DISTINCT FROM EXCLUDED.packet_id
            AND cnc_telegram_worker_operations.cut_job_id IS NOT DISTINCT FROM EXCLUDED.cut_job_id
+           AND cnc_telegram_worker_operations.cut_job_display_number IS NOT DISTINCT FROM EXCLUDED.cut_job_display_number
            AND cnc_telegram_worker_operations.cut_result_no IS NOT DISTINCT FROM EXCLUDED.cut_result_no
            AND cnc_telegram_worker_operations.cutting_sequence_no IS NOT DISTINCT FROM EXCLUDED.cutting_sequence_no
            AND cnc_telegram_worker_operations.backend_applied IS NOT DISTINCT FROM EXCLUDED.backend_applied
@@ -688,7 +692,7 @@ export class PgCncTelegramWorkerAuditRepository {
       p.operationKey, p.scanId, logId, p.operationType, p.status, p.plannedAt, p.finishedAt ?? null,
       p.reasonCode ?? null, p.reasonMessage ?? null, p.errorCode ?? null, p.errorMessage ?? null,
       p.externalPacketKey ?? null, p.sourceVersion ?? null, p.packetId ?? null, p.cutJobId ?? null,
-      p.cutResultNo ?? null, p.cuttingSequenceNo ?? null, p.backendApplied ?? null, p.backendStale ?? null,
+      p.cutJobDisplayNumber ?? null, p.cutResultNo ?? null, p.cuttingSequenceNo ?? null, p.backendApplied ?? null, p.backendStale ?? null,
       p.replyText ?? null, p.replyToMessageId ?? null, p.sessionSenderUserId ?? null,
       p.sentTelegramMessageId ?? null, p.reconciliationYieldedCount, p.reconciliationExhausted,
       p.reconciliationTruncated, p.reconciliationErrorCode ?? null, p.reconciliationWindowFrom ?? null,

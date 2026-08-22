@@ -1618,6 +1618,53 @@ probe_file() {
                      "$(q_con_on cnc_telegram_import_scan_messages chk_cnc_tg_import_scan_message_role)" \
                      "$(q_idx idx_cnc_tg_import_scan_message_chronological)" \
                      "$(q_idx idx_cnc_tg_import_scan_message_ordinal)" ;;
+    138_cnc_mdf_card_kinds*) probe_all \
+                     "$(q_col cnc_telegram_packets mdf_board_card_kind)" \
+                     "$(q_con_on cnc_telegram_packets chk_cnc_telegram_packets_mdf_board_card_kind)" \
+                     "$(q_idx idx_cnc_telegram_packets_cut_job_card_kind)" \
+                     "$(q_idx idx_cnc_telegram_packet_items_unmatched_order_key)" \
+                     "$(q_tbl cnc_telegram_packet_whole_order_keys)" \
+                     "$(q_con_on cnc_telegram_packet_whole_order_keys cnc_telegram_packet_whole_order_keys_pkey)" \
+                     "$(q_idx idx_cnc_telegram_packet_whole_order_keys_order)" ;;
+    139_cnc_mdf_original_board_indexes*) probe_all \
+                     "$(q_idx idx_cnc_telegram_packets_mdf_original_created)" \
+                     "$(q_idx idx_cut_result_original_board_created_job)" ;;
+    139_vacuum_cut_number_legacy_floor*) probe_all \
+                     "SELECT NOT EXISTS (
+                       WITH boundary AS (
+                         SELECT applied_at
+                         FROM schema_migrations
+                         WHERE filename = '133_cut_job_split_display_numbers.sql'
+                       ),
+                       vacuum_jobs AS (
+                         SELECT j.cut_job_id, j.created_at, j.source_display_number
+                         FROM cut_job j
+                         LEFT JOIN cut_param_profiles profile
+                           ON profile.cut_param_profile_id = j.param_profile_id
+                         WHERE profile.params->>'layout_mode' = 'vacuum_table'
+                            OR j.last_calc_params->>'layout_mode' = 'vacuum_table'
+                            OR EXISTS (
+                              SELECT 1 FROM cut_group g
+                              WHERE g.cut_job_id = j.cut_job_id
+                                AND (g.summary->>'engine_used' = 'vacuum_table'
+                                  OR g.summary->>'layout_mode' = 'vacuum_table')
+                            )
+                       ),
+                       legacy_floor AS (
+                         SELECT COALESCE(MAX(j.cut_job_id), 0) AS value
+                         FROM vacuum_jobs j CROSS JOIN boundary b
+                         WHERE j.created_at < b.applied_at
+                       )
+                       SELECT 1
+                       FROM vacuum_jobs j
+                       CROSS JOIN boundary b
+                       CROSS JOIN legacy_floor floor
+                       WHERE (j.created_at < b.applied_at
+                              AND j.source_display_number IS DISTINCT FROM 'В-' || j.cut_job_id::text)
+                          OR (j.created_at >= b.applied_at
+                              AND (COALESCE(j.source_display_number, '') !~ '^В-[0-9]+$'
+                                   OR substring(j.source_display_number FROM 3)::integer <= floor.value))
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1629,7 +1676,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac

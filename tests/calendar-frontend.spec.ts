@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Response } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 import bcrypt from 'bcryptjs';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -15,60 +15,54 @@ const stageFrontendUrl = trimTrailingSlash(
 const stagePostgresContainer =
     process.env.CALENDAR_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
 const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
-const ORDERS_VIEW_VERSION_SCHEMA_ERROR = "field 'version' not found in type: 'orders_view'";
-
 test.describe('Calendar frontend', () => {
     test.skip(stageCanaryEnabled, 'Stage canary runs only against the deployed frontend');
 
-    test('loads calendar orders and requests orders_view.version', async ({ page }) => {
+    test('loads calendar orders through planned completion backend filters', async ({ page }) => {
         const db = createWorkflowMockDb();
         seedCalendarFrontendOrder(db, formatLocalDate(new Date()));
 
-        const ordersViewQueries: string[] = [];
-        const graphQLErrors: string[] = [];
-
         await setupWorkflowMockApi(page, db, {
-            onGraphqlQuery: (query) => {
-                if (/\borders_view\s*(?:\(|\{)/.test(query)) {
-                    ordersViewQueries.push(query);
-                }
-            },
-            onGraphqlError: (message) => graphQLErrors.push(message),
+            runtimeConfig: { backendOrdersRead: true },
         });
+        const orderListUrls: string[] = [];
+        await routeCalendarBackendOrders(page, db, orderListUrls);
 
-        await page.goto('/calendar');
+        await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
 
         await waitForCalendarHeading(page);
         await expect(page.locator('.calendar-grid')).toBeVisible({ timeout: 30000 });
-        await expect(
-            page.locator('.order-card').filter({ hasText: 'E2E calendar frontend order' }),
-        ).toBeVisible({ timeout: 30000 });
+        await expect(page.getByText('Ошибка загрузки данных')).toHaveCount(0);
+        await expect(page.locator('.order-card')).toContainText('E2E calendar frontend order');
 
-        expect(ordersViewQueries.some((query) => /\bversion\b/.test(query))).toBe(true);
-        expect(graphQLErrors).toEqual([]);
-        await expect(page.getByText(ORDERS_VIEW_VERSION_SCHEMA_ERROR)).toHaveCount(0);
+        expect(orderListUrls.length).toBeGreaterThan(0);
+        const requestUrl = new URL(orderListUrls.at(-1) ?? '');
+        expect(requestUrl.searchParams.get('plannedCompletionDateFrom')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(requestUrl.searchParams.get('plannedCompletionDateTo')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(requestUrl.searchParams.get('sortBy')).toBe('plannedCompletionDate');
     });
 
-    test('surfaces the Hasura schema error when orders_view.version is rejected', async ({
-        page,
-    }) => {
+    test('surfaces backend order list errors', async ({ page }) => {
         const db = createWorkflowMockDb();
-        seedCalendarFrontendOrder(db, formatLocalDate(new Date()));
-
-        const graphQLErrors: string[] = [];
         await setupWorkflowMockApi(page, db, {
-            graphqlErrorForQuery: (query) =>
-                /\borders_view\s*(?:\(|\{)/.test(query) && /\bversion\b/.test(query)
-                    ? ORDERS_VIEW_VERSION_SCHEMA_ERROR
-                    : null,
-            onGraphqlError: (message) => graphQLErrors.push(message),
+            runtimeConfig: { backendOrdersRead: true },
+        });
+        await page.route(/\/api\/v1\/orders(?:\?.*)?$/, async (route) => {
+            if (route.request().method() !== 'GET') {
+                await route.fallback();
+                return;
+            }
+            await route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({ message: 'Calendar backend unavailable' }),
+            });
         });
 
-        await page.goto('/calendar');
+        await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
 
         await expect(page.getByText('Ошибка загрузки данных')).toBeVisible({ timeout: 30000 });
-        await expect(page.getByText(ORDERS_VIEW_VERSION_SCHEMA_ERROR).first()).toBeVisible();
-        expect(graphQLErrors).toContain(ORDERS_VIEW_VERSION_SCHEMA_ERROR);
+        await expect(page.getByText('Internal Server Error').first()).toBeVisible();
     });
 });
 
@@ -90,17 +84,17 @@ test.describe('Calendar stage canary', () => {
         cleanupUser(userId);
     });
 
-    test('opens deployed calendar without orders_view.version GraphQL schema errors', async ({
+    test('opens deployed calendar through planned completion backend filters', async ({
         page,
     }) => {
         const runId = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
         const username = `e2e_test_calendar_${runId}`;
         const password = crypto.randomBytes(24).toString('base64url');
-        const ordersViewQueries: string[] = [];
-        const graphqlRecorder = recordGraphqlResponses(page);
+        const orderListUrls: string[] = [];
+        const orderListStatuses: number[] = [];
 
         userId = createSmokeUser(username, password);
-        recordGraphqlRequests(page, ordersViewQueries);
+        recordBackendOrderListRequests(page, orderListUrls, orderListStatuses);
         if (vercelAutomationBypassSecret) {
             await page.context().setExtraHTTPHeaders({
                 'x-vercel-protection-bypass': vercelAutomationBypassSecret,
@@ -113,17 +107,16 @@ test.describe('Calendar stage canary', () => {
         await waitForCalendarHeading(page);
         await expect(page.locator('.calendar-grid')).toBeVisible({ timeout: 30000 });
         await expect
-            .poll(() => ordersViewQueries.some((query) => /\borders_view\b/.test(query)))
+            .poll(() => orderListUrls.length > 0)
             .toBe(true);
-        await flushGraphqlResponses(graphqlRecorder);
-
-        expect(ordersViewQueries.some((query) => /\bversion\b/.test(query))).toBe(true);
-        expect(
-            graphqlRecorder.errors.filter((message) =>
-                message.includes(ORDERS_VIEW_VERSION_SCHEMA_ERROR),
-            ),
-        ).toEqual([]);
-        await expect(page.getByText(ORDERS_VIEW_VERSION_SCHEMA_ERROR)).toHaveCount(0);
+        await expect
+            .poll(() => orderListStatuses.length >= orderListUrls.length)
+            .toBe(true);
+        expect(orderListStatuses.every((status) => status >= 200 && status < 300)).toBe(true);
+        await expect(page.getByText('Ошибка загрузки данных')).toHaveCount(0);
+        const requestUrl = new URL(orderListUrls.at(-1) ?? '');
+        expect(requestUrl.searchParams.get('plannedCompletionDateFrom')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        expect(requestUrl.searchParams.get('plannedCompletionDateTo')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
 });
 
@@ -144,6 +137,13 @@ function seedCalendarFrontendOrder(db: WorkflowMockDb, plannedDate: string) {
         delete_flag: false,
         version: 7,
     });
+    db.order_details.push({
+        detail_id: 301,
+        order_id: 201,
+        detail_number: 1,
+        delete_flag: false,
+        production_status_id: 1,
+    });
 }
 
 async function waitForCalendarHeading(page: Page) {
@@ -152,58 +152,66 @@ async function waitForCalendarHeading(page: Page) {
     );
 }
 
-function recordGraphqlRequests(page: Page, queries: string[]) {
+function recordBackendOrderListRequests(page: Page, urls: string[], statuses: number[]) {
     page.on('request', (request) => {
-        if (!isGraphqlUrl(request.url()) || request.method() !== 'POST') return;
-
-        const body = request.postData() ?? '';
-        try {
-            const parsed = JSON.parse(body);
-            if (typeof parsed.query === 'string') {
-                queries.push(parsed.query);
-            }
-        } catch {
-            // Ignore non-JSON requests; GraphQL clients should send JSON here.
-        }
+        if (request.method() !== 'GET') return;
+        const url = new URL(request.url());
+        if (url.pathname !== '/api/v1/orders') return;
+        urls.push(request.url());
     });
-}
-
-type GraphqlResponseRecorder = {
-    errors: string[];
-    pending: Promise<void>[];
-};
-
-function recordGraphqlResponses(page: Page): GraphqlResponseRecorder {
-    const recorder: GraphqlResponseRecorder = { errors: [], pending: [] };
-
     page.on('response', (response) => {
-        if (!isGraphqlUrl(response.url()) || response.request().method() !== 'POST') return;
-
-        recorder.pending.push(
-            readGraphqlErrors(response).then((messages) => {
-                recorder.errors.push(...messages);
-            }),
-        );
+        if (response.request().method() !== 'GET') return;
+        const url = new URL(response.url());
+        if (url.pathname !== '/api/v1/orders') return;
+        statuses.push(response.status());
     });
-
-    return recorder;
 }
 
-async function flushGraphqlResponses(recorder: GraphqlResponseRecorder) {
-    await Promise.all(recorder.pending.splice(0));
-}
+async function routeCalendarBackendOrders(
+    page: Page,
+    db: WorkflowMockDb,
+    requestUrls: string[],
+) {
+    await page.route(/\/api\/v1\/orders(?:\?.*)?$/, async (route: Route) => {
+        if (route.request().method() !== 'GET') {
+            await route.fallback();
+            return;
+        }
 
-async function readGraphqlErrors(response: Response): Promise<string[]> {
-    try {
-        const body = await response.json();
-        if (!Array.isArray(body?.errors)) return [];
-
-        return body.errors
-            .map((error: { message?: unknown }) => error?.message)
-            .filter((message: unknown): message is string => typeof message === 'string');
-    } catch {
-        return [];
-    }
+        requestUrls.push(route.request().url());
+        const data = db.orders.map((order) => ({
+            orderId: order.order_id,
+            orderName: order.order_name,
+            clientId: order.client_id,
+            clientName: 'Базовый клиент',
+            projectId: 1,
+            projectCode: 'E2E',
+            fullNumber: `E2E-${order.order_name}`,
+            orderDate: order.order_date,
+            plannedCompletionDate: order.planned_completion_date,
+            orderStatusId: order.order_status_id,
+            orderStatusName: 'Новый',
+            paymentStatusId: order.payment_status_id,
+            paymentStatusName: 'Не оплачено',
+            productionStatusId: order.production_status_id,
+            productionStatusName: 'Новый',
+            finalAmount: order.final_amount,
+            paidAmount: order.paid_amount,
+            partsCount: order.parts_count,
+            totalArea: order.total_area,
+            priority: order.priority,
+            passedProductionStatusCodes: ['new'],
+            version: order.version,
+        }));
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                data,
+                pagination: { page: 1, pageSize: 200, total: data.length, totalPages: 1 },
+            }),
+        });
+    });
 }
 
 async function loginThroughUi(page: Page, username: string, password: string) {
@@ -215,7 +223,7 @@ async function loginThroughUi(page: Page, username: string, password: string) {
     );
     await page.locator('input[autocomplete="username"], input#username').fill(username);
     await page.locator('input[autocomplete="current-password"], input#password').fill(password);
-    await page.getByRole('button', { name: 'Войти' }).click();
+    await page.locator('button[type="submit"]').click();
     const loginResponse = await loginResponsePromise;
     expect(loginResponse.ok()).toBe(true);
     await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 30000 });
@@ -290,10 +298,6 @@ function dockerContainerExists(containerName: string): boolean {
 
 function sqlQuote(value: string) {
     return value.replaceAll("'", "''");
-}
-
-function isGraphqlUrl(url: string) {
-    return url.includes('/v1/graphql');
 }
 
 function trimTrailingSlash(value: string) {

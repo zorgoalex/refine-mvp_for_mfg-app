@@ -16,7 +16,7 @@ import { ProductionStatusEvent } from '../types/orders';
 import { useKeepAlive } from '../components/workspace/KeepAliveContext';
 import { runPageOwnedWorkspaceOperation } from '../workspace/workspaceOperationPins';
 
-interface ProductionStatusCommandOptions {
+export interface ProductionStatusCommandOptions {
   version?: number;
   onResponse?: (response: ProductionActionResponse) => void;
   onVersionConflict?: () => void | Promise<void>;
@@ -29,7 +29,7 @@ interface BackendStageOverride {
 
 export type BackendStageOverrides = Record<string, BackendStageOverride>;
 
-interface UseProductionStatusEventResult {
+export interface UseProductionStatusEventResult {
   /** Record a new production status event for an order */
   recordOrderEvent: (
     orderId: number,
@@ -511,7 +511,7 @@ function backendStageOverrideKey(orderId: number, productionStatusId: number): s
   return `${orderId}:${productionStatusId}`;
 }
 
-function applyBackendStageOverrides(
+export function applyBackendStageOverrides(
   sourceEvents: ProductionStatusEvent[],
   overrides: BackendStageOverrides,
   currentOrderId?: number,

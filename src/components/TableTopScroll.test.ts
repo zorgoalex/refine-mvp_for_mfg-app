@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { findTableHorizontalScroller, isPrimarilyVerticalWheel } from './TableTopScroll';
+import {
+  findTableHorizontalScroller,
+  isPrimarilyVerticalWheel,
+  syncHorizontalEdgeButton,
+} from './TableTopScroll';
 
 const source = readFileSync(new URL('./TableTopScroll.tsx', import.meta.url), 'utf8');
 
@@ -36,6 +40,31 @@ describe('isPrimarilyVerticalWheel', () => {
   });
 });
 
+describe('syncHorizontalEdgeButton', () => {
+  it('updates direction without scheduling a React render', () => {
+    const attributes = new Map<string, string>();
+    const button = {
+      dataset: {},
+      setAttribute: (name: string, value: string) => attributes.set(name, value),
+      title: '',
+    } as unknown as HTMLButtonElement;
+    const scroller = {
+      clientWidth: 400,
+      scrollLeft: 600,
+      scrollWidth: 1000,
+    } as HTMLElement;
+
+    syncHorizontalEdgeButton(button, scroller);
+    expect(button.dataset.scrollsBack).toBe('true');
+    expect(attributes.get('aria-label')).toBe('Прокрутить список деталей влево');
+
+    scroller.scrollLeft = 0;
+    syncHorizontalEdgeButton(button, scroller);
+    expect(button.dataset.scrollsBack).toBe('false');
+    expect(attributes.get('aria-label')).toBe('Прокрутить список деталей вправо');
+  });
+});
+
 describe('TableTopScroll performance guards', () => {
   it('uses the cached table scroller during scroll synchronization', () => {
     expect(source).toContain('const s = scroller');
@@ -67,6 +96,17 @@ describe('TableTopScroll performance guards', () => {
     expect(source).toContain('horizontalEdgeScrollButton && scrollState.visible');
     expect(source).toContain('className="app-table-horizontal-edge-button"');
     expect(source).toContain("scrollTo({ left: nextLeft, behavior: 'smooth' })");
-    expect(source).toContain('edgeButtonScrollsBack ? <LeftOutlined aria-hidden /> : <RightOutlined aria-hidden />');
+    expect(source).toContain('syncHorizontalEdgeButton(edgeButtonRef.current, scroller)');
+    expect(source).toContain('data-scrolls-back="false"');
+  });
+
+  it('does not update React state from the hot scroll handler', () => {
+    const handlerStart = source.indexOf('const onScrollerScroll');
+    const handlerEnd = source.indexOf('const onManagedWheelCapture', handlerStart);
+    const handler = source.slice(handlerStart, handlerEnd);
+
+    expect(handler).toContain('syncHorizontalEdgeButton(edgeButtonRef.current, scroller)');
+    expect(handler).not.toContain('measure()');
+    expect(handler).not.toContain('setScrollState');
   });
 });

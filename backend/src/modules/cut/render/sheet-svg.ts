@@ -122,7 +122,7 @@ export function computeGroupItemQuantities(sheets: readonly BackMappedSheet[]): 
   return counts;
 }
 
-const DEFAULT_PIECE_FILL = resolveCutRenderStyle(CUT_RENDER_STYLE_DEFAULT).piece.defaultFill;
+const DEFAULT_PIECE_STROKE = '#1f2d3d';
 const BATH_ORDER_LABEL_COLOR = '#7f1d1d';
 const BATH_POSITION_LABEL_COLOR = '#14532d';
 const BATH_DIMENSION_FONT_ENLARGE_MIN_SIDE_MM = 150;
@@ -131,8 +131,6 @@ const BATH_ORDER_FONT_SCALE = 4;
 const BATH_DETAIL_META_FONT_SCALE = 2;
 const BATH_DIMENSION_EDGE_INSET_RATIO = 0.55;
 const BATH_DIMENSION_RESERVED_RATIO = 1.05;
-const BATH_PDF_SHEET_FILL = '#f7f7f7';
-const BATH_PDF_PIECE_FILL = '#ffffff';
 const BATH_DETAIL_META_LINE_SPACING = 0.9;
 const BATH_DETAIL_META_GLYPH_HEIGHT_RATIO = 0.75;
 const BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO = 1.1;
@@ -141,15 +139,15 @@ const BATH_ORDER_LABEL_WEIGHT = 900;
 const BATH_ORDER_LABEL_STROKE_RATIO = 0.04;
 const SOURCE_SVG_FRAGMENT_UNSAFE_RE = /<\s*(?:script|foreignObject)\b|\bon[a-z]+\s*=|\b(?:href|xlink:href)\s*=|(?:javascript:|data:|https?:|file:)/i;
 
-/** Deterministic, light fill color for a source order. Unknown order keeps the
- * legacy neutral fill so old/partial data remains readable. */
+/** Deterministic contour color for a source order. The historical function
+ * name remains API-compatible with frozen render call sites. */
 export function orderFillColor(orderId: number | null | undefined): string {
   if (typeof orderId !== 'number' || !Number.isFinite(orderId)) {
-    return DEFAULT_PIECE_FILL;
+    return DEFAULT_PIECE_STROKE;
   }
   const palette = cutRenderOrderFillPalette(CUT_RENDER_STYLE_DEFAULT);
   const index = Math.abs(Math.trunc(orderId)) % palette.length;
-  return palette[index] ?? DEFAULT_PIECE_FILL;
+  return palette[index] ?? DEFAULT_PIECE_STROKE;
 }
 
 /** Build a per-render color resolver from the orders present in one cut group.
@@ -168,10 +166,10 @@ export function createOrderFillResolver(
   }
   return (orderId) => {
     if (typeof orderId !== 'number' || !Number.isFinite(orderId)) {
-      return style.piece.defaultFill;
+      return style.piece.stroke;
     }
     const index = indexByOrder.get(orderId);
-    return index === undefined ? style.piece.defaultFill : palette[index % palette.length] ?? style.piece.defaultFill;
+    return index === undefined ? style.piece.stroke : palette[index % palette.length] ?? style.piece.stroke;
   };
 }
 
@@ -185,7 +183,10 @@ export interface BuildSheetSvgInput {
   labelFor: (piece: FreecutPlacement) => string | string[];
   /** Extra labels printed only in the bath PDF miniature, at each piece's bottom-right. */
   bathDetailInfoFor?: (piece: FreecutPlacement) => BathPieceDetailInfo;
-  /** Optional per-piece fill, used to group details by source order. */
+  /**
+   * Optional per-piece order color. Kept as `fillFor` for frozen render API
+   * compatibility; renderers apply it to contours, never to piece backgrounds.
+   */
   fillFor?: (piece: FreecutPlacement) => string | null | undefined;
   /** font-size in mm for piece labels (scaled with the mm viewBox). */
   labelFontMm?: number;
@@ -322,7 +323,63 @@ function removeBathMeterGuideElements(svg: string): string {
 }
 
 function replaceSvgViewBox(svg: string, viewBox: string): string {
-  return svg.replace(/(<svg\b[^>]*\bviewBox=")[^"]*(")/, `$1${viewBox}$2`);
+  return svg.replace(
+    /(<svg\b[^>]*\bviewBox=)(["'])[^"']*\2/,
+    (_match, prefix: string, quote: string) => `${prefix}${quote}${viewBox}${quote}`,
+  );
+}
+
+/**
+ * Adds the visible cut-job number above a rendered sheet. This decorates both
+ * current and frozen SVGs, so every screen/Telegram consumer gets the same
+ * heading without changing the PDF sheet renderer or persisted snapshots.
+ */
+export function addCutJobHeadingToSvg(
+  svg: string,
+  cutJobDisplayNumber: string | number | null | undefined,
+): string {
+  const displayNumber = cutJobDisplayNumber === null || cutJobDisplayNumber === undefined
+    ? ''
+    : String(cutJobDisplayNumber).trim();
+  if (!displayNumber || svg.includes('class="cut-sheet-job-heading"')) return svg;
+
+  const viewBoxMatch = svg.match(/<svg\b[^>]*\bviewBox=(["'])([^"']+)\1[^>]*>/);
+  const values = viewBoxMatch?.[2]?.trim().split(/[\s,]+/).map(Number) ?? [];
+  const [viewX, viewY, viewWidth, viewHeight] = values;
+  if (
+    values.length !== 4 ||
+    ![viewX, viewY, viewWidth, viewHeight].every((value) => Number.isFinite(value)) ||
+    viewWidth <= 0 ||
+    viewHeight <= 0
+  ) {
+    return svg;
+  }
+
+  const pieceLabelFontMm = [...svg.matchAll(/<tspan\b[^>]*\bfont-size="([^"]+)"/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .reduce((largest, value) => Math.max(largest, value), 0);
+  const declaredOrderFontMm = Number(svg.match(/\bdata-cut-order-label-font-mm="([^"]+)"/)?.[1]);
+  const sheetBackground = svg.match(/<rect\b[^>]*\bfill="([^"]+)"/)?.[1] ?? '#ffffff';
+  const minimumHeadingFontMm = Math.max(
+    24,
+    Math.round(Math.min(viewWidth, viewHeight) / 40),
+    pieceLabelFontMm,
+    Number.isFinite(declaredOrderFontMm) ? declaredOrderFontMm : 0,
+  );
+  const headingFontMm = Math.round(minimumHeadingFontMm * 1.15);
+  const headingHeightMm = headingFontMm * 1.9;
+  const headingViewY = viewY - headingHeightMm;
+  const headingCenterY = viewY - headingHeightMm / 2;
+  const headingCenterX = viewX + viewWidth / 2;
+  const escapedDisplayNumber = escapeXml(displayNumber);
+  const decoratedViewBox = `${num(viewX)} ${num(headingViewY)} ${num(viewWidth)} ${num(viewHeight + headingHeightMm)}`;
+  const decorated = replaceSvgViewBox(svg, decoratedViewBox);
+  const heading = [
+    `<rect class="cut-sheet-job-heading-background" x="${num(viewX)}" y="${num(headingViewY)}" width="${num(viewWidth)}" height="${num(headingHeightMm)}" fill="${sheetBackground}"/>`,
+    `<text class="cut-sheet-job-heading" data-cut-job-heading="${escapedDisplayNumber}" x="${num(headingCenterX)}" y="${num(headingCenterY)}" font-family="Liberation Sans, sans-serif" font-size="${num(headingFontMm)}" font-weight="400" fill="#111827" text-anchor="middle" dominant-baseline="middle">Раскрой №${escapedDisplayNumber}</text>`,
+  ].join('');
+  return decorated.replace(/(<svg\b[^>]*>)/, `$1${heading}`);
 }
 
 /** Adds guide overlays to an already rendered/frozen SVG, idempotently. */
@@ -351,6 +408,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
   const fontMm = input.labelFontMm ?? Math.max(24, Math.round(Math.min(w, h) / 40));
+  const orderLabelFontMm = fontMm * renderStyle.label.orderFontRatio;
 
   // orientPieceRect (shared/cut-geometry, Task 1 Codex R4 MAJOR #4) provides the
   // canonical portrait/landscape transform used by BOTH the SVG renderer and the
@@ -358,8 +416,8 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   // from a full-sheet sentinel rect so the function is called once, not per piece.
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
-  const pieces = sheet.pieces
-    .map((piece) => {
+  const renderedPieces = sheet.pieces
+    .map((piece, pieceIndex) => {
       const x = sheet.trim_mm.left + piece.x_mm;
       const y = sheet.trim_mm.top + piece.y_mm;
       const pw = piece.width_mm;
@@ -367,13 +425,15 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const rect = applyAxisOrigin(orientPieceRect({ x, y, w: pw, h: ph }, w, h, rotate90, originTopLeft), axisOrigin, rotate90);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
-      const fill = fillFor?.(piece) ?? renderStyle.piece.defaultFill;
+      const fill = renderStyle.piece.defaultFill;
+      const stroke = fillFor?.(piece) ?? renderStyle.piece.stroke;
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
-      )}" fill="${escapeXml(fill)}" stroke="${renderStyle.piece.stroke}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
-      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect, renderStyle, fill);
+      )}" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
+      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect, renderStyle, fill, stroke, pieceIndex);
+      const geometry = renderPieceGroup(piece, cx, cy, [rectEl, sourceSvgEl].join(''));
       if (!showLabels) {
-        return renderPieceGroup(piece, cx, cy, [rectEl, sourceSvgEl].join(''));
+        return { geometry, label: '' };
       }
       const resolved = labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
@@ -382,10 +442,9 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const labelStrokeAttrs = labelStroke
         ? ` stroke="${labelStroke.stroke}" stroke-width="${num(labelStroke.strokeWidthMm)}" paint-order="stroke"`
         : '';
-      return renderPieceGroup(piece, cx, cy, [
-        rectEl,
-        sourceSvgEl,
-        renderPieceLabelText({
+      return {
+        geometry,
+        label: renderPieceLabelText({
           lines,
           cx,
           cy,
@@ -396,9 +455,10 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
           fill: labelFill,
           strokeAttrs: labelStrokeAttrs,
         }),
-      ].join(''));
-    })
-    .join('');
+      };
+    });
+  const pieces = renderedPieces.map((piece) => piece.geometry).join('');
+  const labels = renderedPieces.map((piece) => piece.label).join('');
   const guideLabelFontMm = bathMeterGuideLabelFontMm(w, h, input.labelFontMm);
   const bathMeterGuides = input.showBathMeterGuides
     ? renderBathMeterGuides(sheet, rotate90, guideLabelFontMm)
@@ -410,9 +470,10 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   return [
     // viewBox only (no width/height attrs): the px size is chosen at raster time
     // via resvg fitTo; explicit width/height would make resvg ignore fitTo.
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">`,
-    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="#ffffff" stroke="#9aa7b4" stroke-width="3"/>`,
-    pieces,
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" data-cut-order-label-font-mm="${num(orderLabelFontMm)}">`,
+    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
+    `<g class="cut-sheet-piece-geometry-layer">${pieces}</g>`,
+    showLabels ? `<g class="cut-sheet-piece-label-layer">${labels}</g>` : '',
     bathMeterGuides,
     `</svg>`,
   ].join('');
@@ -454,6 +515,8 @@ function renderPieceSourceSvgFragment(
   rect: { x: number; y: number; w: number; h: number },
   renderStyle: CutRenderStyleRef = CUT_RENDER_STYLE_DEFAULT,
   pieceFill?: string | null,
+  orderContour?: string | null,
+  pieceIndex = 0,
 ): string {
   const source = (piece as {
     source_svg?: {
@@ -479,9 +542,10 @@ function renderPieceSourceSvgFragment(
   ) {
     return '';
   }
-  const css = cutRenderSourceSvgCss(renderStyle, pieceFill);
+  const scopeClass = `cut-sheet-piece-source-svg-${pieceIndex}`;
+  const css = cutRenderSourceSvgCss(renderStyle, pieceFill, orderContour, `.${scopeClass}`);
   return [
-    `<svg class="cut-sheet-piece-source-svg" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
+    `<svg class="cut-sheet-piece-source-svg ${scopeClass}" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
     css ? `<style>${css}</style>` : '',
     body,
     '</svg>',
@@ -489,7 +553,8 @@ function renderPieceSourceSvgFragment(
 }
 
 export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
-  const { sheet, labelFor, rotate90 = false, axisOrigin = 'top-left' } = input;
+  const { sheet, labelFor, fillFor, rotate90 = false, axisOrigin = 'top-left' } = input;
+  const renderStyle = resolveCutRenderStyle(input.renderStyle);
   const originTopLeft = sheet.coordinate_contract === 'native_portrait_v1' ? false : (input.originTopLeft ?? false);
   const w = sheet.sheet_width_mm;
   const h = sheet.sheet_height_mm;
@@ -506,9 +571,10 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       const rect = applyAxisOrigin(orientPieceRect({ x, y, w: piece.width_mm, h: piece.height_mm }, w, h, rotate90, originTopLeft), axisOrigin, rotate90);
       const cx = rect.x + rect.w / 2;
       const cy = rect.y + rect.h / 2;
+      const stroke = fillFor?.(piece) ?? renderStyle.piece.stroke;
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
-      )}" fill="${BATH_PDF_PIECE_FILL}" stroke="#1f2d3d" stroke-width="2"/>`;
+      )}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
 
       const sideTexts: string[] = [];
       let reservedTop = 0;
@@ -571,7 +637,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">`,
-    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${BATH_PDF_SHEET_FILL}" stroke="#9aa7b4" stroke-width="3"/>`,
+    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
     pieces,
     bathMeterGuides,
     `</svg>`,

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { OrderDetail } from '../../../../types/orders';
 import {
   calculateOrderDetailTableBodyScrollY,
+  isOrderDetailSelectVerticalNavigationKey,
   isLastOrderDetailRow,
+  orderDetailSpreadsheetNavigationRows,
   pageContainingOrderDetail,
   sortOrderDetailsForPagination,
 } from './OrderDetailTable';
@@ -59,10 +61,31 @@ describe('order detail controlled pagination', () => {
     expect(isLastOrderDetailRow(persisted, { detail_id: 11 } as OrderDetail)).toBe(true);
   });
 
+  it('keeps prepared placeholder rows in keyboard navigation', () => {
+    const filled = [{ temp_id: 1, is_placeholder: false }] as OrderDetail[];
+    const placeholders = [
+      { temp_id: 2, is_placeholder: true },
+      { temp_id: 3, is_placeholder: true },
+    ] as OrderDetail[];
+
+    const rows = orderDetailSpreadsheetNavigationRows(filled, placeholders);
+    expect(rows.map((row) => row.temp_id)).toEqual([1, 2, 3]);
+    expect(isLastOrderDetailRow(rows, filled[0])).toBe(false);
+    expect(isLastOrderDetailRow(rows, placeholders[1])).toBe(true);
+  });
+
   it('adds spare body height so the last filled detail row is not clipped', () => {
     expect(calculateOrderDetailTableBodyScrollY(0, 0)).toBe(39);
     expect(calculateOrderDetailTableBodyScrollY(0, 1)).toBe(78);
     expect(calculateOrderDetailTableBodyScrollY(5, 5)).toBe(234);
+    expect(calculateOrderDetailTableBodyScrollY(0, 20)).toBe(819);
+    expect(calculateOrderDetailTableBodyScrollY(0, 21)).toBe(560);
     expect(calculateOrderDetailTableBodyScrollY(100, 100)).toBe(560);
+  });
+
+  it('leaves both vertical arrows to an open detail Select', () => {
+    expect(isOrderDetailSelectVerticalNavigationKey('ArrowDown')).toBe(true);
+    expect(isOrderDetailSelectVerticalNavigationKey('ArrowUp')).toBe(true);
+    expect(isOrderDetailSelectVerticalNavigationKey('ArrowLeft')).toBe(false);
   });
 });

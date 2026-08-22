@@ -3,6 +3,7 @@ export interface FrontendRuntimeConfigResponse {
   build: {
     sha: string;
   };
+  hasuraUrl: string;
   ui: {
     evolutionEnabled: boolean;
     forceLegacy: boolean;
@@ -69,6 +70,7 @@ export function buildFrontendRuntimeConfig(
     build: {
       sha: normalizeBuildSha(env.RUNTIME_CONFIG_BUILD_SHA ?? env.VERCEL_GIT_COMMIT_SHA),
     },
+    hasuraUrl: normalizeApiUrl(env.RUNTIME_CONFIG_HASURA_URL),
     ui: {
       evolutionEnabled: readBooleanEnv(env.RUNTIME_CONFIG_UI_EVOLUTION, false),
       forceLegacy: readBooleanEnv(env.RUNTIME_CONFIG_UI_FORCE_LEGACY, false),

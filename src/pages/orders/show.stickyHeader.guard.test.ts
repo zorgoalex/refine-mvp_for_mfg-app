@@ -78,7 +78,7 @@ describe('OrderShow sticky detail header guards', () => {
     expect(headerSource).toContain("import { collectOrderBasisProjects } from './orderBasisProjects';");
     expect(editHeaderSource).toContain("import { collectOrderBasisProjects } from './orderBasisProjects';");
     expect(headerSource).toContain('const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);');
-    expect(editHeaderSource).toContain('const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);');
+    expect(editHeaderSource).toContain('const basisProjects = useMemo(() => collectOrderBasisProjects(businessDetails), [businessDetails]);');
     expect(headerSource).toContain('basisProjects.length > 0 ? basisProjects.join');
     expect(editHeaderSource).toContain('basisProjects.length > 0 ? basisProjects.join');
     expect(headerSource).toContain('latestDowelingLink?.doweling_order?.doweling_order_name');

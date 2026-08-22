@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUT_RENDER_STYLE_DEFAULT,
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
   DEFAULT_CUT_RENDER_STYLES_SETTING,
   cutRenderSourceSvgCss,
   resolveCutRenderStyleFromSetting,
 } from '../../../shared/cut-render-style';
 import {
+  addCutJobHeadingToSvg,
   addBathMeterGuidesToSvg,
   buildBathProfileSheetSvg,
   buildSheetSvg,
@@ -141,6 +143,31 @@ describe('composePieceLabelLines (cut preview piece label)', () => {
 });
 
 describe('buildSheetSvg multi-line labels', () => {
+  it('adds a prominent cut-job heading above the sheet without covering geometry', () => {
+    const base = buildSheetSvg({ sheet, labelFor: () => ['2817', '# 12', '597*187'] });
+    const svg = addCutJobHeadingToSvg(base, '150');
+    const viewBox = svg.match(/viewBox="([^"]+)"/)?.[1]?.split(/\s+/).map(Number);
+    const headingFont = Number(svg.match(/class="cut-sheet-job-heading"[^>]*font-size="([^"]+)"/)?.[1]);
+    const orderFont = Number(svg.match(/<tspan[^>]*font-size="([^"]+)">2817<\/tspan>/)?.[1]);
+
+    expect(svg).toContain('data-cut-job-heading="150"');
+    expect(svg).toContain('>Раскрой №150</text>');
+    expect(svg).toMatch(/class="cut-sheet-job-heading"[^>]*font-weight="400"/);
+    expect(viewBox?.[1]).toBeLessThan(0);
+    expect(viewBox?.[3]).toBeGreaterThan(sheet.sheet_height_mm);
+    expect(headingFont).toBeGreaterThanOrEqual(orderFont);
+  });
+
+  it('escapes the displayed cut number and does not duplicate an existing heading', () => {
+    const base = buildSheetSvg({ sheet, labelFor: () => 'X' });
+    const once = addCutJobHeadingToSvg(base, 'В-15&<');
+    const twice = addCutJobHeadingToSvg(once, 'В-15&<');
+
+    expect(once).toContain('data-cut-job-heading="В-15&amp;&lt;"');
+    expect(once).toContain('Раскрой №В-15&amp;&lt;');
+    expect(twice).toBe(once);
+  });
+
   it('renders each label line as its own <tspan> sharing the piece centre x', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => ['5', '# 9', '600*400'] });
     // first piece centre: x=10+600/2=310, y=15+400/2=215
@@ -187,9 +214,11 @@ describe('buildSheetSvg multi-line labels', () => {
 
     const svg = buildSheetSvg({ sheet: sourceSheet, labelFor: () => ['2777', '# 3', '40*30'] });
 
-    expect(svg).toContain('class="cut-sheet-piece-source-svg"');
+    expect(svg).toContain('class="cut-sheet-piece-source-svg cut-sheet-piece-source-svg-0"');
     expect(svg).toContain('<line x1="2" y1="2" x2="38" y2="28"');
-    expect(svg.indexOf('cut-sheet-piece-source-svg')).toBeLessThan(svg.indexOf('<text x="30" y="35"'));
+    expect(svg.indexOf('class="cut-sheet-piece-geometry-layer"')).toBeLessThan(svg.indexOf('class="cut-sheet-piece-label-layer"'));
+    expect(svg.lastIndexOf('cut-sheet-piece-source-svg')).toBeLessThan(svg.indexOf('class="cut-sheet-piece-label-layer"'));
+    expect(svg.indexOf('<text x="30" y="35"')).toBeGreaterThan(svg.indexOf('class="cut-sheet-piece-label-layer"'));
   });
 
   it('applies the MDF board preview render profile to source strokes and labels', () => {
@@ -219,8 +248,11 @@ describe('buildSheetSvg multi-line labels', () => {
       renderStyle: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
     });
 
-    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#d7e9ff'));
-    expect(svg).toContain('<style>.cut-sheet-piece-source-svg *{');
+    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff', '.cut-sheet-piece-source-svg-0'));
+    expect(svg).toContain('<style>.cut-sheet-piece-source-svg-0 *{');
+    expect(svg).not.toContain('<style>.cut-sheet-piece-source-svg *{');
+    expect(svg).toContain('stroke:#d7e9ff!important;fill:none!important;stroke-opacity:1!important');
+    expect(svg).not.toContain('stroke-opacity:0.72!important');
     expect(svg).not.toContain('<style>*{');
     expect(svg).toContain('fill="#111827" stroke="#ffffff"');
     expect(svg).toContain('font-weight="800"');
@@ -286,25 +318,78 @@ describe('buildSheetSvg multi-line labels', () => {
       renderStyle: customStyle,
     });
 
-    expect(svg).toContain('stroke="#654321" stroke-width="4"');
-    expect(svg).toContain(cutRenderSourceSvgCss(customStyle, '#111827'));
+    expect(svg).toContain('fill="#ffffff" stroke="#111827" stroke-width="4"');
+    expect(svg).toContain(cutRenderSourceSvgCss(customStyle, '#ffffff', '#111827', '.cut-sheet-piece-source-svg-0'));
     expect(svg).not.toContain('vector-effect:non-scaling-stroke!important');
-    expect(svg).toContain('fill="#fefefe" stroke="#222222"');
+    expect(svg).toContain('fill="#111827" stroke="#ffffff"');
     expect(svg).toContain('letter-spacing="-2.4"');
     expect(svg).toContain('font-size="28.8">2723</tspan>');
     expect(svg).toContain('font-size="9.6"># 1</tspan>');
     expect(svg).toContain('font-size="16.8">100*80</tspan>');
   });
 
-  it('uses deterministic per-order fills when provided', () => {
+  it('applies the independent PDF profile to sheet, contours and source SVG lines', () => {
+    const renderStyle = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_DEFAULT, {
+      ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      profiles: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+        default: {
+          ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default,
+          piece: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default.piece,
+            defaultFill: '#fff4cc',
+            stroke: '#101010',
+            strokeWidthMm: 5,
+          },
+          sourceSvg: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default.sourceSvg,
+            minStrokePx: 5,
+          },
+        },
+      },
+    });
+    const sourceSheet: SheetPlacementsJson = {
+      trim_mm: { left: 0, top: 0, right: 0, bottom: 0 },
+      sheet_width_mm: 100,
+      sheet_height_mm: 80,
+      pieces: [{
+        item_id: 'det-1',
+        instance: 1,
+        x_mm: 0,
+        y_mm: 0,
+        width_mm: 100,
+        height_mm: 80,
+        rotated: false,
+        source_svg: {
+          viewBox: { x_mm: 0, y_mm: 0, width_mm: 100, height_mm: 80 },
+          body: '<line x1="5" y1="5" x2="95" y2="75" stroke="#cccccc" stroke-width="0.2"/>',
+        },
+      }],
+    };
+
+    const svg = buildSheetSvg({
+      sheet: sourceSheet,
+      labelFor: () => ['11300', '# 5', '100*80'],
+      fillFor: () => renderStyle.piece.stroke,
+      renderStyle,
+    });
+
+    expect(svg).toContain('width="100" height="80" fill="#fff4cc" stroke="#101010" stroke-width="5"');
+    expect(svg).toMatch(/data-detail-id="1"><rect[^>]*fill="#fff4cc"[^>]*stroke="#101010"[^>]*stroke-width="5"/);
+    expect(svg).toContain('stroke-width:5px!important;stroke:#101010!important');
+  });
+
+  it('uses deterministic per-order contour colors while keeping the sheet background', () => {
     const svg = buildSheetSvg({
       sheet,
       labelFor: () => 'X',
       fillFor: (piece) => (piece.instance === 1 ? orderFillColor(12) : orderFillColor(13)),
     });
 
-    expect(svg).toContain(`fill="${orderFillColor(12)}"`);
-    expect(svg).toContain(`fill="${orderFillColor(13)}"`);
+    expect(svg).toContain(`fill="#ffffff" stroke="${orderFillColor(12)}"`);
+    expect(svg).toContain(`fill="#ffffff" stroke="${orderFillColor(13)}"`);
+    expect(svg).not.toContain(`fill="${orderFillColor(12)}"`);
+    expect(svg).not.toContain(`fill="${orderFillColor(13)}"`);
     expect(orderFillColor(12)).not.toBe(orderFillColor(13));
     expect(orderFillColor(12)).toBe(orderFillColor(12));
   });
@@ -316,13 +401,53 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(fill(11372)).toBe(fill(11372));
   });
 
-  it('keeps the legacy piece fill when no order color is resolved', () => {
+  it('keeps the sheet background and legacy contour when no order color is resolved', () => {
     const svg = buildSheetSvg({ sheet, labelFor: () => 'X', fillFor: () => null });
-    expect(svg).toContain('fill="#eef3f8"');
+    expect(svg).toContain('fill="#ffffff" stroke="#1f2d3d"');
+    expect(orderFillColor(null)).toBe('#1f2d3d');
+  });
+
+  it('uses the order color for bath piece contours too', () => {
+    const svg = buildBathProfileSheetSvg({
+      sheet,
+      labelFor: () => ['11300', 'поз. 5', '600X400'],
+      fillFor: () => orderFillColor(12),
+    });
+
+    expect(svg).toContain(`fill="#ffffff" stroke="${orderFillColor(12)}"`);
+    expect(svg).not.toContain(`fill="${orderFillColor(12)}"`);
   });
 });
 
 describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
+  it('applies the independent PDF background, line color and width', () => {
+    const profile = {
+      ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      profiles: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+        default: {
+          ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default,
+          piece: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default.piece,
+            defaultFill: '#fff4cc',
+            stroke: '#101010',
+            strokeWidthMm: 5,
+          },
+        },
+      },
+    };
+    const renderStyle = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_DEFAULT, profile);
+    const svg = buildBathProfileSheetSvg({
+      sheet,
+      labelFor: () => ['11300', '# 5', '600*400'],
+      fillFor: () => renderStyle.piece.stroke,
+      renderStyle,
+    });
+
+    expect(svg).toContain('width="2800" height="2070" fill="#fff4cc" stroke="#101010" stroke-width="5"');
+    expect(svg).toMatch(/data-detail-id="999"><rect[^>]*fill="#fff4cc"[^>]*stroke="#101010"[^>]*stroke-width="5"/);
+  });
+
   it('prints edge, milling and doweling with the doubled standard metadata font when the crosswise side is roomy', () => {
     const svg = buildBathProfileSheetSvg({
       sheet,
@@ -513,7 +638,7 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     expect(svg).toMatch(/<text x="67\.75" y="215" transform="rotate\(-90 67\.75 215\)"[^>]*>400<\/text>/);
   });
 
-  it('uses a light sheet surface and opaque white detail interiors in bath PDF SVGs', () => {
+  it('uses one sheet surface for bath details and order colors only for contours', () => {
     const bath = buildBathProfileSheetSvg({
       sheet,
       labelFor: () => ['11300', '# 5'],
@@ -521,10 +646,11 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     });
     const normal = buildSheetSvg({ sheet, labelFor: () => 'X', fillFor: () => '#123456' });
 
-    expect(bath).toContain('width="2800" height="2070" fill="#f7f7f7"');
-    expect(bath).toMatch(/data-detail-id="999"><rect[^>]*fill="#ffffff"/);
+    expect(bath).toContain('width="2800" height="2070" fill="#ffffff"');
+    expect(bath).toMatch(/data-detail-id="999"><rect[^>]*fill="#ffffff"[^>]*stroke="#123456"/);
     expect(bath).not.toContain('fill="#123456"');
-    expect(normal).toContain('fill="#123456"');
+    expect(normal).toContain('fill="#ffffff" stroke="#123456"');
+    expect(normal).not.toContain('fill="#123456"');
   });
 });
 

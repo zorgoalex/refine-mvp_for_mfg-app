@@ -15,14 +15,19 @@ import { useCutDetailLastReady } from '../../useCutDetailLastReady';
 import { computeOrderBathFilmUsage } from '../../../cut/cutFilmUsage';
 import { buildCutJobNameById, CutJobLinks } from '../../CutJobLinks';
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from '../../orderMaterialsSummary';
+import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 
 const { Text } = Typography;
 
 export const OrderMaterialsTab: React.FC = () => {
   const { details, hdfDetails, header } = useOrderFormStore();
-  const detailIds = useMemo(
-    () => details.map((detail) => detail.detail_id).filter((id): id is number => Number.isInteger(id) && id > 0),
+  const businessDetails = useMemo(
+    () => businessOrderDetails(details),
     [details],
+  );
+  const detailIds = useMemo(
+    () => businessDetails.map((detail) => detail.detail_id).filter((id): id is number => Number.isInteger(id) && id > 0),
+    [businessDetails],
   );
   const cutViewAllowed = can('cut.view');
   const cutJobMaps = useCutDetailLastReady({
@@ -51,7 +56,7 @@ export const OrderMaterialsTab: React.FC = () => {
   const cutJobsLoading = cutJobsState.scopeKey === cutJobsScopeKey && cutJobsState.loading;
 
   // Загружаем справочники — gate: skip when no detail carries a legacy material_id (Variant B normal case)
-  const hasLegacyMaterialIds = details.some((d) => d.material_id != null);
+  const hasLegacyMaterialIds = businessDetails.some((d) => d.material_id != null);
   const { data: materialsData } = useList({
     resource: 'materials',
     pagination: { pageSize: 10000 },
@@ -143,21 +148,21 @@ export const OrderMaterialsTab: React.FC = () => {
   ]);
 
   const bathFilmUsage = useMemo(
-    () => computeOrderBathFilmUsage(details, cutJobs, filmNameById),
-    [cutJobs, details, filmNameById],
+    () => computeOrderBathFilmUsage(businessDetails, cutJobs, filmNameById),
+    [businessDetails, cutJobs, filmNameById],
   );
   const cutJobNameById = useMemo(() => buildCutJobNameById(cutJobs), [cutJobs]);
   const filmMaterialRows = useMemo(
-    () => buildOrderFilmMaterialRows(details, bathFilmUsage, filmNameById),
-    [bathFilmUsage, details, filmNameById],
+    () => buildOrderFilmMaterialRows(businessDetails, bathFilmUsage, filmNameById),
+    [bathFilmUsage, businessDetails, filmNameById],
   );
   const sheetMaterialRows = useMemo(
     () => buildOrderSheetMaterialRows(
-      details,
+      businessDetails,
       (detail) => resolveDetailMaterialName(detail, undefined, materialsMap),
       hdfDetails,
     ),
-    [details, hdfDetails, materialsMap],
+    [businessDetails, hdfDetails, materialsMap],
   );
 
   const sheetMaterialColumns = [

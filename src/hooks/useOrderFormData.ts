@@ -91,7 +91,9 @@ export function useOrderFormData(enabled = featureFlags.useBackendReferences): U
   }
 
   return {
-    enabled: true,
+    // Let consumers fall back to legacy reference queries only when initial
+    // aggregate loading failed and no last-good snapshot is available.
+    enabled: snapshot.data !== null || snapshot.error === null,
     data: snapshot.data,
     references: snapshot.normalizedReferences,
     isLoading: readEnabled && snapshot.data === null && snapshot.inFlight,

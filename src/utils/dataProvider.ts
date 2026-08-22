@@ -16,7 +16,9 @@ import type { PaymentDto } from '../api/types/paymentApi.types';
 import type { UserDto, UserListQuery } from '../api/types/userApi.types';
 import type { UserRole } from '../api/types/authApi.types';
 import { featureFlags } from '../config/featureFlags';
+import { getRuntimeHasuraUrl } from '../config/runtimeConfig';
 import { canMutateHasuraResource, canQueryHasuraResource } from './resourcePermissions';
+import { getCurrentUserRoleKey } from './resourceVisibility';
 
 type AnyObject = Record<string, any>;
 
@@ -35,6 +37,7 @@ function normalizeHasuraUrl(value: unknown): string | null {
 
 function getConfiguredHasuraUrl(): string | null {
   return (
+    normalizeHasuraUrl(getRuntimeHasuraUrl()) ??
     normalizeHasuraUrl((import.meta as any).env?.VITE_HASURA_GRAPHQL_URL) ??
     normalizeHasuraUrl(
       (globalThis as { process?: { env?: Record<string, unknown> } }).process?.env
@@ -1343,6 +1346,16 @@ function mapOrdersViewQueryToBackend(
           break;
         }
         return null;
+      case 'planned_completion_date':
+        if (filter.operator === 'gte') {
+          query.plannedCompletionDateFrom = String(value);
+          break;
+        }
+        if (filter.operator === 'lte') {
+          query.plannedCompletionDateTo = String(value);
+          break;
+        }
+        return null;
       case 'created_by':
         if (currentUser?.id && Number(value) === Number(currentUser.id)) {
           query.onlyMyOrders = true;
@@ -1383,9 +1396,35 @@ async function getBackendOrdersListIfEnabled(
     return null;
   }
 
-  const response = await ordersApi.list(query);
+  const requestedPage = query.page ?? 1;
+  const requestedPageSize = query.pageSize ?? 10;
+  const backendPageSize = Math.min(requestedPageSize, 200);
+  const requestedStart = (requestedPage - 1) * requestedPageSize;
+  const firstBackendPage = Math.floor(requestedStart / backendPageSize) + 1;
+  const firstPageOffset = requestedStart % backendPageSize;
+  const response = await ordersApi.list({
+    ...query,
+    page: firstBackendPage,
+    pageSize: backendPageSize,
+  });
+
+  const lastBackendPage = Math.min(
+    Math.ceil((requestedStart + requestedPageSize) / backendPageSize),
+    response.pagination.totalPages,
+  );
+  const remainingPages = Array.from(
+    { length: Math.max(0, lastBackendPage - firstBackendPage) },
+    (_, index) => firstBackendPage + index + 1,
+  );
+  const remainingResponses = await Promise.all(
+    remainingPages.map((page) => ordersApi.list({ ...query, page, pageSize: backendPageSize })),
+  );
+  const requestedData = [response, ...remainingResponses]
+    .flatMap((page) => page.data)
+    .slice(firstPageOffset, firstPageOffset + requestedPageSize);
+
   return {
-    data: response.data.map(mapOrderListItemToLegacyRow),
+    data: requestedData.map(mapOrderListItemToLegacyRow),
     total: response.pagination.total,
   };
 }
@@ -1803,8 +1842,30 @@ const PROJECT_SCHEMA_FIELDS: Record<string, string[]> = {
   orders_view: ["project_id", "project_code", "order_full_number"],
 };
 
+// Packer only needs read-only stage markers in order header. Keep GraphQL
+// selection aligned with narrow Hasura column grants for these resources.
+const PACKER_RESOURCE_FIELDS: Record<string, string[]> = {
+  production_statuses: [
+    'production_status_id',
+    'production_status_name',
+    'production_status_code',
+    'sort_order',
+    'color',
+    'is_active',
+  ],
+  production_status_events: [
+    'event_id',
+    'order_id',
+    'production_status_id',
+    'event_at',
+  ],
+};
+
 const fieldsFor = (resource: string) => {
-  const fields = RESOURCE_FIELDS[resource];
+  const roleKey = getCurrentUserRoleKey(authSession.getUser());
+  const fields = roleKey === 'packer'
+    ? PACKER_RESOURCE_FIELDS[resource] ?? RESOURCE_FIELDS[resource]
+    : RESOURCE_FIELDS[resource];
   if (!fields) return "";
   const hidden = new Set<string>();
   if (!featureFlags.sheetMaterialsReads) {
@@ -1837,12 +1898,12 @@ export const dataProvider = (_apiUrl: string) => {
         return backendUsersList;
       }
 
-      if (!hasHasuraUrl()) {
+      if (!hasHasuraReadAccess(resource)) {
         return { data: [], total: 0 };
       }
 
-      if (!hasHasuraReadAccess(resource)) {
-        return { data: [], total: 0 };
+      if (!hasHasuraUrl()) {
+        throw HASURA_NOT_CONFIGURED_ERROR;
       }
 
       // Handle pagination: mode 'off' means no limit/offset
@@ -1916,12 +1977,12 @@ export const dataProvider = (_apiUrl: string) => {
         return backendUser;
       }
 
-      if (!hasHasuraUrl()) {
+      if (!hasHasuraReadAccess(resource)) {
         return { data: null };
       }
 
-      if (!hasHasuraReadAccess(resource)) {
-        return { data: null };
+      if (!hasHasuraUrl()) {
+        throw HASURA_NOT_CONFIGURED_ERROR;
       }
 
       const idCol = ID_COLUMNS[resource] ?? "id";
@@ -2126,7 +2187,7 @@ export const dataProvider = (_apiUrl: string) => {
       }
 
       if (!hasHasuraUrl()) {
-        return { data: [] };
+        throw HASURA_NOT_CONFIGURED_ERROR;
       }
 
       const idCol = ID_COLUMNS[resource] ?? "id";

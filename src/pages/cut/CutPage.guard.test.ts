@@ -595,11 +595,19 @@ describe('CutPage profile + totals columns (source guard)', () => {
   it('renames the positions column and adds totals/profile/sheets columns', () => {
     expect(source).toContain("title: 'Позиции'");
     expect(source).toContain("title: 'МДФ-доска'");
-    expect(source).toContain('<CutJobMdfBoardCell job={row} />');
+    expect(source).toContain('<CutJobMdfBoardCell');
+    expect(source).toContain('job={row}');
+    expect(source).toContain('canOpenBoard={canViewOrders}');
+    expect(source).toContain('onCreate={createMdfBoardCard}');
     expect(source).toContain('cutJobMdfBoardExportValue(candidate)');
-    expect(source).toContain('cutApi.createMdfBoardCard(job.cutJobId)');
+    expect(source).toContain('cutApi.createMdfBoardCard(targetJob.cutJobId)');
+    expect(source).toContain('return `/mdf-work-board?${params.toString()}`');
+    expect(source).toContain("period: '1m'");
+    expect(source).toContain('event.preventDefault();');
+    expect(source).toContain('push(cutJobMdfBoardLink(status.target!));');
     expect(source).toContain('job.mdfBoardStatus?.canCreateCard !== true');
-    expect(source).toContain('Создать карточку файла станка для МДФ-доски');
+    expect(source).toContain("job.mdfBoardStatus?.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'");
+    expect(source).toContain('для МДФ-доски');
     expect(source).toContain("title: 'Заказы'");
     expect(source).toContain('<CutJobOrderLinks');
     expect(source).toContain('items={row.items}');

@@ -70,6 +70,9 @@ describe('runtime config canary examples', () => {
 
     for (const file of files) {
       const config = JSON.parse(readFileSync(path.join(canaryDirectory, file), 'utf8'));
+      expect(config.hasuraUrl, `${file}: hasuraUrl`).toBe(
+        'https://hasura-test.example.com/v1/graphql',
+      );
       expect(Object.keys(config.features)).toEqual(EXPECTED_FEATURE_KEYS);
       expect(config.features.enableLegacyHasura, `${file}: enableLegacyHasura`).toBe(true);
 
@@ -78,6 +81,20 @@ describe('runtime config canary examples', () => {
       }
     }
   });
+
+  it.each([undefined, '', '   ', '/v1/graphql', 'ftp://hasura.test/v1/graphql'])(
+    'rejects missing or invalid Hasura URL while legacy reads are enabled: %j',
+    (hasuraUrl) => {
+      const config = JSON.parse(
+        readFileSync(path.join(canaryDirectory, '00-all-off.json'), 'utf8'),
+      );
+      config.hasuraUrl = hasuraUrl;
+
+      expect(validateRuntimeConfig(config)).toContain(
+        'runtime config: hasuraUrl must be a non-empty absolute HTTP(S) URL when features.enableLegacyHasura=true',
+      );
+    },
+  );
 
   it('allows generic runtime config validation to disable legacy Hasura', () => {
     const config = JSON.parse(

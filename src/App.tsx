@@ -39,14 +39,18 @@ import {
 import { installWorkspaceStateLifecycle } from "./workspace/workspaceStateLifecycle";
 
 installWorkspaceStateLifecycle();
+import { authSession } from "./api/authSession";
+import { cncTelegramApi } from "./api/cncTelegramApi";
+import { MDF_BOARD_PREFETCH_EVENT } from "./utils/siderMenuItems";
+import { markMdfBoardSnapshotReady } from "./utils/mdfBoardPrewarm";
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
 const OrderCreate = lazy(async () => ({ default: (await import("./pages/orders/create")).OrderCreate }));
 const OrderTrash = lazy(async () => ({ default: (await import("./pages/orders/trash")).OrderTrash }));
 const CalendarList = lazy(async () => ({ default: (await import("./pages/calendar")).CalendarList }));
-const OrderStatusBoardPage = lazy(async () => ({ default: (await import("./pages/orderStatusBoard")).OrderStatusBoardPage }));
-const MdfWorkBoardPage = lazy(async () => ({ default: (await import("./pages/orderStatusBoard")).MdfWorkBoardPage }));
+const loadOrderStatusBoardModule = () => import("./pages/orderStatusBoard");
+const OrderStatusBoardPage = lazy(async () => ({ default: (await loadOrderStatusBoardModule()).OrderStatusBoardPage }));
 const CutPage = lazy(async () => ({ default: (await import("./pages/cut/CutPage")).CutPage }));
 const BazisPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisPage")).BazisPage }));
 const BazisProjectViewPage = lazy(async () => ({ default: (await import("./pages/bazis/BazisProjectViewPage")).BazisProjectViewPage }));
@@ -211,6 +215,21 @@ const SheetMaterialEdit = lazy(async () => ({ default: (await import('./pages/sh
 const SheetMaterialShow = lazy(async () => ({ default: (await import('./pages/sheet-materials/show')).SheetMaterialShow }));
 
 const API_URL = import.meta.env.VITE_HASURA_GRAPHQL_URL as string;
+const MDF_PREFETCH_COOLDOWN_MS = 25_000;
+const MDF_PREFETCH_REFRESH_MS = 25_000;
+
+function mdfDefaultDateRange(now = new Date()): { dateFrom: string; dateTo: string } {
+  const dateTo = formatLocalDate(now);
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+  return { dateFrom: formatLocalDate(from), dateTo };
+}
+
+function formatLocalDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export interface AppProps {
   initialUiVariant?: UiVariant;
@@ -255,6 +274,53 @@ const ThemedApp = () => {
       duration: 2, // 2 seconds instead of default 4.5
       maxCount: 3, // Limit visible notifications
     });
+  }, []);
+
+  useEffect(() => {
+    if (!featureFlags.orderStatusBoard || !featureFlags.cncTelegram) return;
+    // MDF is a primary workspace route. Warm its existing lazy chunk while the
+    // shell/auth/calendar settle so navigation does not wait for module fetch
+    // and evaluation after the operator clicks the menu item.
+    void loadOrderStatusBoardModule();
+  }, []);
+
+  useEffect(() => {
+    if (!featureFlags.orderStatusBoard || !featureFlags.cncTelegram) return;
+    let warming = false;
+    let lastWarmStartedAt = 0;
+    const warmMdfData = () => {
+      if (!authSession.getAccessToken() || !authSession.getUser()) return;
+      if (document.visibilityState !== 'visible') return;
+      if (window.location.pathname === '/mdf-work-board') return;
+      const now = Date.now();
+      if (warming || now - lastWarmStartedAt < MDF_PREFETCH_COOLDOWN_MS) return;
+      warming = true;
+      lastWarmStartedAt = now;
+      const boardPromise = cncTelegramApi.prefetchToday(mdfDefaultDateRange());
+      void Promise.all([loadOrderStatusBoardModule(), boardPromise])
+        .then(([module, response]) => module.prefetchMdfOrderStatusBoard(response))
+        .then(markMdfBoardSnapshotReady)
+        .catch(() => {
+          lastWarmStartedAt = 0;
+        })
+        .finally(() => {
+          warming = false;
+        });
+    };
+    warmMdfData();
+    const unsubscribe = authSession.subscribe(warmMdfData);
+    const refreshTimer = window.setInterval(warmMdfData, MDF_PREFETCH_REFRESH_MS);
+    const warmVisibleMdfData = () => {
+      if (document.visibilityState === 'visible') warmMdfData();
+    };
+    document.addEventListener('visibilitychange', warmVisibleMdfData);
+    window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData);
+    return () => {
+      unsubscribe();
+      window.clearInterval(refreshTimer);
+      document.removeEventListener('visibilitychange', warmVisibleMdfData);
+      window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData);
+    };
   }, []);
 
   return (
@@ -764,7 +830,7 @@ const ThemedApp = () => {
                   )}
                   {featureFlags.orderStatusBoard && featureFlags.cncTelegram && (
                     <Route path="/mdf-work-board">
-                      <Route index element={<MdfWorkBoardPage />} />
+                      <Route index element={null} />
                     </Route>
                   )}
                   {featureFlags.useBackendGroups && (

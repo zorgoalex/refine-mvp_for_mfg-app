@@ -165,6 +165,16 @@ describe('backend env validation', () => {
     ).toThrow(/Invalid backend environment/);
   });
 
+  it('normalizes and validates the immutable backend build identity', () => {
+    expect(validateEnv({
+      BACKEND_BUILD_SHA: 'A154FEF554948D9643630A827CB1AA4795117E54',
+    })).toMatchObject({
+      BACKEND_BUILD_SHA: 'a154fef554948d9643630a827cb1aa4795117e54',
+    });
+    expect(() => validateEnv({ BACKEND_BUILD_SHA: 'latest' })).toThrow(/BACKEND_BUILD_SHA/);
+    expect(() => validateEnv({ BACKEND_BUILD_SHA: 'a'.repeat(39) })).toThrow(/BACKEND_BUILD_SHA/);
+  });
+
   it('validates database runtime settings when provided or required', () => {
     expect(() =>
       validateEnv({

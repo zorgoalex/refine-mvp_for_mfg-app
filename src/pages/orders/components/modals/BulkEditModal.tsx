@@ -21,6 +21,7 @@ import {
   captureAntFormCheckpoint,
   restoreAntFormCheckpoint,
 } from '../../../../workspace/workspaceFormCheckpoint';
+import './BulkEditModal.css';
 
 const { Text } = Typography;
 
@@ -264,6 +265,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
       onOk={handleOk}
       onCancel={onCancel}
       width={700}
+      className="order-bulk-edit-modal"
       okText="Применить"
       cancelText="Отмена"
       okButtonProps={{
@@ -277,23 +279,22 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     >
       {/* Info alert */}
       <Alert
+        className="order-bulk-edit-modal__hint"
         message={
           <span>
-            Изменения будут применены к{' '}
+            Выбрано позиций:{' '}
             <Text strong style={{ color: '#1890ff' }}>
               {targetCount}
-            </Text>{' '}
-            {targetCount === 1 ? 'позиции' : targetCount < 5 ? 'позициям' : 'позициям'}
+            </Text>
+            . Отметьте нужные поля; пустое значение очистит поле.
           </span>
         }
-        description="Отметьте чекбоксами поля, которые хотите изменить. Пустые значения также будут применены (например, для очистки примечания)."
         type="info"
         showIcon
-        style={{ marginBottom: 16 }}
       />
 
       {/* Apply to all checkbox */}
-      <div style={{ marginBottom: 16, padding: '8px 12px', backgroundColor: 'var(--app-surface-muted)', borderRadius: 4 }}>
+      <div className="order-bulk-edit-modal__apply-all">
         <Checkbox
           checked={applyToAll}
           onChange={(e) => setApplyToAll(e.target.checked)}
@@ -312,9 +313,9 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         )}
       </div>
 
-      <Divider style={{ margin: '12px 0' }} />
+      <Divider className="order-bulk-edit-modal__divider" />
 
-      <Form form={form} layout="vertical">
+      <Form className="order-bulk-edit-modal__form" form={form} layout="vertical" size="small">
         {/* Размеры и материал */}
         <Row gutter={16}>
           {/* Высота */}
@@ -617,7 +618,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
         >
           <Form.Item name="note" noStyle>
             <Input.TextArea
-              rows={2}
+              rows={1}
               placeholder="Введите примечание (или оставьте пустым для очистки)"
               disabled={!enabledFields.note}
             />
@@ -627,7 +628,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
 
       {/* Summary */}
       {enabledCount > 0 && (
-        <div style={{ marginTop: 12, padding: '8px 12px', backgroundColor: 'var(--app-selection-bg)', borderRadius: 4 }}>
+        <div className="order-bulk-edit-modal__summary">
           <Text>
             Будет изменено полей: <Text strong>{enabledCount}</Text>
           </Text>

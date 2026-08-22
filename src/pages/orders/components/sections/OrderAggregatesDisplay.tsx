@@ -8,18 +8,23 @@ import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
+import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 
 export const OrderAggregatesDisplay: React.FC = () => {
   const { details, payments } = useOrderFormStore();
+  const businessDetails = useMemo(
+    () => businessOrderDetails(details),
+    [details],
+  );
 
   // FIX: Calculate totals directly from details/payments for proper reactivity
   const totals = useMemo(() => ({
-    positions_count: details.length,
-    parts_count: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
-    total_area: calculateOrderTotalArea(details),
+    positions_count: businessDetails.length,
+    parts_count: businessDetails.reduce((sum, d) => sum + (d.quantity || 0), 0),
+    total_area: calculateOrderTotalArea(businessDetails),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
-    total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
-  }), [details, payments]);
+    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
+  }), [businessDetails, payments]);
 
   return (
     <Card title="Итоговые показатели" size="small">

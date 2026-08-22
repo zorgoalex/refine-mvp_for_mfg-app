@@ -79,7 +79,12 @@ export function applyOrderDetailColumnSettings<T>(
     if (!hidden.has(key)) ordered.push(column);
   }
 
-  return [...ordered, ...unknownColumns];
+  const visibleColumns = [...ordered, ...unknownColumns];
+  const fixedRightColumns = visibleColumns.filter((column) => column.fixed === 'right');
+  return [
+    ...visibleColumns.filter((column) => column.fixed !== 'right'),
+    ...fixedRightColumns,
+  ];
 }
 
 export function useOrderDetailColumnPreferences(tableKey: string, defaultOrder: string[], definitions: OrderDetailColumnDefinition[]) {

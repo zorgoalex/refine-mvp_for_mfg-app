@@ -57,12 +57,22 @@ export function focusOrderDetailInlineEditorAtEnd(editor: HTMLElement | null): v
   if (!editor) return;
   editor.focus({ preventScroll: true });
   const input = editor as HTMLElement & {
+    type?: string;
     value?: string;
     setSelectionRange?: (selectionStart: number, selectionEnd: number) => void;
   };
+  const selectionInputTypes = new Set(['text', 'search', 'tel', 'url', 'password']);
+  if (typeof input.type === 'string' && !selectionInputTypes.has(input.type)) return;
   if (typeof input.value !== 'string' || typeof input.setSelectionRange !== 'function') return;
   const end = input.value.length;
   input.setSelectionRange(end, end);
+}
+
+export function mergeOrderDetailLiveNumericValues<T extends Record<string, unknown>>(
+  formValues: T,
+  liveValues: Partial<T>,
+): T {
+  return { ...formValues, ...liveValues };
 }
 
 interface FinishOrderDetailInlineTabOptions {

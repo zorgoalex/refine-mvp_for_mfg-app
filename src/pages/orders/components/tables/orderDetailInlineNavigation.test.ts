@@ -3,6 +3,7 @@ import {
   findOrderDetailInlineEditor,
   finishOrderDetailInlineTab,
   focusOrderDetailInlineEditorAtEnd,
+  mergeOrderDetailLiveNumericValues,
   nextOrderDetailInlineTabField,
   orderDetailInlineTabFields,
 } from './orderDetailInlineNavigation';
@@ -66,6 +67,34 @@ describe('order detail inline Tab navigation', () => {
 
     expect(editor.focus).toHaveBeenCalledWith({ preventScroll: true });
     expect(editor.setSelectionRange).toHaveBeenCalledWith(21, 21);
+  });
+
+  it('focuses a checkbox without trying to set a text selection', () => {
+    const editor = {
+      type: 'checkbox',
+      value: 'on',
+      focus: vi.fn(),
+      setSelectionRange: vi.fn(),
+    };
+
+    focusOrderDetailInlineEditorAtEnd(editor as unknown as HTMLElement);
+
+    expect(editor.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(editor.setSelectionRange).not.toHaveBeenCalled();
+  });
+
+  it('uses the latest numeric editor values before ArrowDown validation', () => {
+    expect(mergeOrderDetailLiveNumericValues(
+      { height: 0, width: 0, quantity: 1, note: 'A' },
+      { height: 1000, width: 200, quantity: 1 },
+    )).toEqual({ height: 1000, width: 200, quantity: 1, note: 'A' });
+  });
+
+  it('keeps the latest manual price and sum while merging live values', () => {
+    expect(mergeOrderDetailLiveNumericValues(
+      { milling_cost_per_sqm: 100, detail_cost: 20 },
+      { milling_cost_per_sqm: 125, detail_cost: 25 },
+    )).toEqual({ milling_cost_per_sqm: 125, detail_cost: 25 });
   });
 
   it('saves and adds a new row after Tab on the final field', async () => {

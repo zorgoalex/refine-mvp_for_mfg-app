@@ -7,6 +7,10 @@ const workspaceLayoutSource = readFileSync(
   resolve(__dirname, 'components/workspace/WorkspaceLayout.tsx'),
   'utf8',
 );
+const persistentMdfHostSource = readFileSync(
+  resolve(__dirname, 'components/workspace/PersistentMdfBoardHost.tsx'),
+  'utf8',
+);
 
 // Guard: route/page components must be loaded via React.lazy so the root bundle
 // ships only shell/providers/login. Regressing to static page imports re-inflates
@@ -37,5 +41,14 @@ describe('App.tsx route-level code splitting', () => {
       .filter((line) => /^import\s.*from\s+["']\.\/pages\//.test(line))
       .filter((line) => !/\.\/pages\/login/.test(line));
     expect(staticPageImports).toEqual([]);
+  });
+
+  it('warms the shared status-board chunk before MDF navigation', () => {
+    expect(source).toContain('const loadOrderStatusBoardModule = () => import("./pages/orderStatusBoard")');
+    expect(source).toContain('void loadOrderStatusBoardModule()');
+    expect(persistentMdfHostSource).toContain("import('../../pages/orderStatusBoard')");
+    expect(persistentMdfHostSource).toContain('MdfWorkBoardPage');
+    expect(source).toContain('cncTelegramApi.prefetchToday(mdfDefaultDateRange())');
+    expect(source).toContain('module.prefetchMdfOrderStatusBoard(response)');
   });
 });

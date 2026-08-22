@@ -14,6 +14,7 @@ import { resolveDetailMaterialName, resolveHeaderMaterialName } from '../../../.
 import { ProductionStagesDisplay } from '../../../../components/ProductionStagesDisplay';
 import { SETTING_KEYS } from '../../../../hooks/useAppSettings';
 import { useOrderAppSettings } from '../../../../hooks/useOrderAppSettings';
+import { useProductionStatusEvent } from '../../../../hooks/useProductionStatusEvent';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
@@ -23,7 +24,11 @@ import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummary';
-import { resolveCurrentProductionStatusCodes } from '../../currentProductionStatus';
+import {
+  buildActiveProductionStatusCodeMap,
+  resolveActiveProductionEventCodes,
+} from '../../currentProductionStatus';
+import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 
 const { Text } = Typography;
 
@@ -35,6 +40,13 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
   const isOperational = useOperationalUi();
   const { header, details, hdfDetails, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
   const { getSetting } = useOrderAppSettings();
+  const productionStatusEvents = useProductionStatusEvent({
+    orderId: header.order_id,
+  });
+  const businessDetails = useMemo(
+    () => businessOrderDetails(details),
+    [details],
+  );
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -59,12 +71,12 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
 
   // FIX: Calculate totals directly from details/payments for proper reactivity
   const totals = useMemo(() => ({
-    positions_count: details.length,
-    parts_count: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
-    total_area: calculateOrderTotalArea(details),
+    positions_count: businessDetails.length,
+    parts_count: businessDetails.reduce((sum, d) => sum + (d.quantity || 0), 0),
+    total_area: calculateOrderTotalArea(businessDetails),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
-    total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
-  }), [details, payments]);
+    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
+  }), [businessDetails, payments]);
 
   // Get the latest (last added) doweling link for header display
   const latestDowelingLink = useMemo(() => {
@@ -85,11 +97,11 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
 
   // Get unique material IDs from details
   const uniqueMaterialIds = useMemo(() => {
-    const ids = details
+    const ids = businessDetails
       .map(d => d.material_id)
       .filter((id): id is number => id !== null && id !== undefined);
     return [...new Set(ids)];
-  }, [details]);
+  }, [businessDetails]);
 
   // Load client name
   const { data: clientData } = useOne({
@@ -149,27 +161,6 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     },
   });
 
-  // Load production status
-  const { data: productionStatusData } = useOne({
-    resource: 'production_statuses',
-    id: header.production_status_id as number,
-    queryOptions: {
-      enabled: !!header.production_status_id,
-    },
-  });
-
-  // Load production status events for this order (all recorded statuses)
-  const { data: productionEventsData } = useList({
-    resource: 'production_status_events',
-    filters: header.order_id
-      ? [{ field: 'order_id', operator: 'eq', value: header.order_id }]
-      : [],
-    pagination: { pageSize: 100 },
-    queryOptions: {
-      enabled: !!header.order_id,
-    },
-  });
-
   // Load all production statuses for mapping
   const { data: allProductionStatusesData } = useList({
     resource: 'production_statuses',
@@ -181,11 +172,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
 
   // Create maps for production status lookup
   const productionStatusIdToCode = useMemo(() => {
-    const map = new Map<number, string>();
-    (allProductionStatusesData?.data || []).forEach((status: any) => {
-      map.set(status.production_status_id, status.production_status_code);
-    });
-    return map;
+    return buildActiveProductionStatusCodeMap(allProductionStatusesData?.data || []);
   }, [allProductionStatusesData]);
 
   const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
@@ -210,24 +197,15 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     }).display;
   }, [workflow, statusesForWorkflow]);
 
-  // Production stages are additive: keep every unique event/order/detail status.
+  // The same active-event state drives both these letters and menu marks.
+  // Never infer letters from aggregate order/detail names: that can display a
+  // stage which the context menu correctly considers inactive.
   const passedProductionCodes = useMemo(() => {
-    const events = productionEventsData?.data || [];
-    return resolveCurrentProductionStatusCodes({
-      statusId: header.production_status_id,
-      statusName: productionStatusData?.data?.production_status_name,
-      statusIdToCode: productionStatusIdToCode,
-      passedCodes: events.map((event: any) => (
-        productionStatusIdToCode.get(event.production_status_id)
-      )),
-      detailStatuses: details
-        .filter((detail: any) => detail.delete_flag !== true)
-        .map((detail: any) => ({
-          statusId: detail.production_status_id,
-          statusName: detail.production_status_name,
-        })),
-    });
-  }, [details, header.production_status_id, productionEventsData, productionStatusData, productionStatusIdToCode]);
+    return resolveActiveProductionEventCodes(
+      productionStatusEvents.events,
+      productionStatusIdToCode,
+    );
+  }, [productionStatusEvents.events, productionStatusIdToCode]);
 
   // Load materials list
   const { data: materialsData } = useList({
@@ -250,13 +228,13 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     [materialsData],
   );
   const resolvedMaterialNames = useMemo(() => {
-    const names = (details || [])
+    const names = businessDetails
       .map((d: any) => resolveDetailMaterialName(d, undefined, materialsMap))
       .filter((v): v is string => Boolean(v));
     if (names.length > 0) return Array.from(new Set(names));
     const headerName = resolveHeaderMaterialName(header);
     return headerName ? [headerName] : [];
-  }, [details, materialsMap, header]);
+  }, [businessDetails, materialsMap, header]);
 
   const materialSummaryItems = useMemo(
     () => buildOrderHeaderMaterialSummaryItems(resolvedMaterialNames, hdfDetails || []),
@@ -267,7 +245,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
   const materialsSummary = materialSummaryItems.length > 0
     ? materialSummaryItems.map((item) => item.label).join(', ')
     : '—';
-  const basisProjects = useMemo(() => collectOrderBasisProjects(details || []), [details]);
+  const basisProjects = useMemo(() => collectOrderBasisProjects(businessDetails), [businessDetails]);
 
   // Load milling types, edge types, films для lookup
   const { data: millingTypesData } = useList({
@@ -299,7 +277,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
 
   // Вычисляем общие значения для всех деталей
   const commonProductionValues = useMemo(() => {
-    if (!details || details.length === 0) {
+    if (businessDetails.length === 0) {
       return {
         millingTypeName: '—',
         edgeTypeName: '—',
@@ -308,21 +286,21 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     }
 
     // Проверяем milling_type_id
-    const millingTypeIds = details.map(d => d.milling_type_id).filter(id => id !== null && id !== undefined);
+    const millingTypeIds = businessDetails.map(d => d.milling_type_id).filter(id => id !== null && id !== undefined);
     const uniqueMillingTypeIds = [...new Set(millingTypeIds)];
     const millingTypeName = uniqueMillingTypeIds.length === 1 && uniqueMillingTypeIds[0]
       ? millingTypesMap.get(uniqueMillingTypeIds[0]) || '—'
       : '—';
 
     // Проверяем edge_type_id
-    const edgeTypeIds = details.map(d => d.edge_type_id).filter(id => id !== null && id !== undefined);
+    const edgeTypeIds = businessDetails.map(d => d.edge_type_id).filter(id => id !== null && id !== undefined);
     const uniqueEdgeTypeIds = [...new Set(edgeTypeIds)];
     const edgeTypeName = uniqueEdgeTypeIds.length === 1 && uniqueEdgeTypeIds[0]
       ? edgeTypesMap.get(uniqueEdgeTypeIds[0]) || '—'
       : '—';
 
     // Проверяем film_id
-    const filmIds = details.map(d => d.film_id).filter(id => id !== null && id !== undefined);
+    const filmIds = businessDetails.map(d => d.film_id).filter(id => id !== null && id !== undefined);
     const uniqueFilmIds = [...new Set(filmIds)];
     const filmName = uniqueFilmIds.length === 1 && uniqueFilmIds[0]
       ? filmsMap.get(uniqueFilmIds[0]) || '—'
@@ -333,7 +311,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
       edgeTypeName,
       filmName,
     };
-  }, [details, millingTypesMap, edgeTypesMap, filmsMap]);
+  }, [businessDetails, millingTypesMap, edgeTypesMap, filmsMap]);
 
   const orderStatusName = orderStatusData?.data?.order_status_name || 'Не назначен';
   const paymentStatusName = paymentStatusData?.data?.payment_status_name || 'Не назначен';
@@ -418,6 +396,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={closeContextMenu}
+          productionStatusEvents={productionStatusEvents}
         />
       </>
     );
@@ -495,6 +474,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={closeContextMenu}
+          productionStatusEvents={productionStatusEvents}
         />
       </>
     );
@@ -878,6 +858,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
       x={contextMenu.x}
       y={contextMenu.y}
       onClose={closeContextMenu}
+      productionStatusEvents={productionStatusEvents}
     />
     </>
   );

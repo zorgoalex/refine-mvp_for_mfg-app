@@ -71,6 +71,18 @@ describe('orderFormDataCache activation refresh', () => {
       ownsRefresh: false,
     });
   });
+
+  it('marks an initial request failure stale so activation can retry it', async () => {
+    ordersApiMock.getFormData.mockRejectedValueOnce(new Error('temporary failure'));
+
+    await expect(prefetchOrderFormData()).rejects.toThrow('temporary failure');
+
+    expect(isOrderFormDataCacheStale()).toBe(true);
+    expect(prepareOrderFormDataActivationRefresh(9)).toEqual({
+      refreshRequired: true,
+      ownsRefresh: true,
+    });
+  });
 });
 
 function response(name: string): OrderFormDataResponse {

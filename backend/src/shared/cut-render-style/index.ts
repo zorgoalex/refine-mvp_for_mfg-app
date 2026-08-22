@@ -100,7 +100,7 @@ const CUT_RENDER_STYLE_MDF_TEMPLATE_NAME = 'MDF-превью';
 const CUT_RENDER_STYLE_PROFILES = {
   [CUT_RENDER_STYLE_DEFAULT]: {
     piece: {
-      defaultFill: '#eef3f8',
+      defaultFill: '#ffffff',
       stroke: '#1f2d3d',
       strokeWidthMm: 2,
       orderPalette: ORDER_FILL_PALETTE,
@@ -136,7 +136,7 @@ const CUT_RENDER_STYLE_PROFILES = {
   },
   [CUT_RENDER_STYLE_MDF_BOARD_PREVIEW]: {
     piece: {
-      defaultFill: '#eef3f8',
+      defaultFill: '#ffffff',
       stroke: '#1f2d3d',
       strokeWidthMm: 1.6,
       orderPalette: ORDER_FILL_PALETTE,
@@ -399,17 +399,24 @@ export function cutRenderNormalizeLabelLines(lines: readonly string[]): string[]
       .replace(/(\d(?:[.,]\d+)?)\s*[xхX×]\s*(\d(?:[.,]\d+)?)/g, '$1*$2'));
 }
 
-export function cutRenderSourceSvgCss(value: CutRenderStyleRef, pieceFill?: string | null): string {
+export function cutRenderSourceSvgCss(
+  value: CutRenderStyleRef,
+  pieceFill?: string | null,
+  orderContour?: string | null,
+  scopeSelector = '.cut-sheet-piece-source-svg',
+): string {
   const style = resolveCutRenderStyle(value);
   const minStrokePx = style.sourceSvg.minStrokePx;
   const declarations: string[] = [];
   if (minStrokePx !== null) declarations.push(`stroke-width:${formatNumber(minStrokePx)}px!important`);
-  const sourceStroke = cutRenderSourceSvgStroke(style, pieceFill);
+  const sourceStroke = orderContour || cutRenderSourceSvgStroke(style, pieceFill);
   if (sourceStroke) {
     declarations.push(`stroke:${sourceStroke}!important`);
     declarations.push('fill:none!important');
   }
-  if (style.sourceSvg.strokeOpacity < 1) {
+  if (orderContour) {
+    declarations.push('stroke-opacity:1!important');
+  } else if (style.sourceSvg.strokeOpacity < 1) {
     declarations.push(`stroke-opacity:${formatNumber(style.sourceSvg.strokeOpacity)}!important`);
   }
   const vectorEffect = style.sourceSvg.nonScalingStroke
@@ -417,7 +424,7 @@ export function cutRenderSourceSvgCss(value: CutRenderStyleRef, pieceFill?: stri
     : '';
   if (vectorEffect) declarations.push(vectorEffect);
   if (declarations.length === 0) return '';
-  return `.cut-sheet-piece-source-svg *{${declarations.join(';')};}`;
+  return `${scopeSelector} *{${declarations.join(';')};}`;
 }
 
 export function cutRenderRawSvgScreenshotMinStrokePx(value: CutRenderStyleRef): number {

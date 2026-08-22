@@ -25,6 +25,7 @@ import type {
   CutSheetRenderSnapshotDto,
 } from '../../cut/dto/cut.dto';
 import {
+  addCutJobHeadingToSvg,
   buildBathProfileSheetSvg,
   buildSheetSvg,
   composePieceLabelLines,
@@ -44,6 +45,7 @@ import type {
   IngestCncTelegramPacketCommand,
   ListManualSvgCommentPresetsCommand,
   ListCncTelegramOrderCuttingSequencesCommand,
+  ListCncTelegramOriginalBoardCommand,
   ListCncTelegramTodayCommand,
   ManualSvgUploadCommand,
   RecordCncTelegramDeniedAuditCommand,
@@ -67,6 +69,10 @@ import type {
   CncTelegramMatchStatus,
   CncTelegramOrderCuttingSequenceDto,
   CncTelegramOrderCuttingSequencesResponseDto,
+  CncTelegramOriginalBathCardDto,
+  CncTelegramOriginalBazisCutSetCardDto,
+  CncTelegramOriginalBoardResponseDto,
+  CncTelegramOriginalPacketDto,
   CncTelegramPacketDto,
   CncTelegramPacketCutSheetDto,
   CncTelegramPacketItemDto,
@@ -143,6 +149,7 @@ interface PacketJoinedRow extends QueryResultRow {
   svg_cut_import_note: string | null;
   svg_cut_sheets_json: unknown;
   updated_at: string | Date;
+  mdf_board_hidden_at: string | Date | null;
   packet_item_id: string | null;
   source_item_key: string | null;
   order_name: string | null;
@@ -242,6 +249,11 @@ interface CurrentDateRow extends QueryResultRow {
   workday: string | Date;
 }
 
+interface OriginalDateRangeRow extends QueryResultRow {
+  date_from: string | Date;
+  date_to: string | Date;
+}
+
 interface ManualSvgCommentPresetRow extends QueryResultRow {
   preset_id: string | number;
   label: string;
@@ -277,6 +289,10 @@ interface BathJoinedRow extends QueryResultRow {
   sheet_ordinal: string | number;
   sheet_width_mm: string | number | null;
   sheet_height_mm: string | number | null;
+  current_cut_result_id?: string | number | null;
+  current_result_archived_at?: string | Date | null;
+  job_status?: string | null;
+  current_ready?: boolean | null;
 }
 
 interface BathColumnAutomationRow extends QueryResultRow {
@@ -443,33 +459,78 @@ export class PgCncTelegramRepository
       await currentDatabaseWorkday(this.database);
     const workdayFrom = command.workdayFrom ?? workday;
     const workdayTo = command.workdayTo ?? workday;
-    const rows = await this.database.query<PacketJoinedRow>(
-      packetSelectSql(`
-        p.workday BETWEEN $1::date AND $2::date
-        AND p.mdf_board_hidden_at IS NULL
-        AND (
-          p.source_chat_id IS DISTINCT FROM $3
-          OR EXISTS (
-            SELECT 1
-            FROM outbox_events manual_svg_mdf_card
-            WHERE manual_svg_mdf_card.idempotency_key =
-              'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+    const [rows, baths, bazisCutSets] = await Promise.all([
+      this.database.query<PacketJoinedRow>(
+        packetSelectSql(`
+          p.workday BETWEEN $1::date AND $2::date
+          AND p.mdf_board_hidden_at IS NULL
+          AND p.mdf_board_card_kind = 'machine_file'
+          AND (
+            p.source_chat_id IS DISTINCT FROM $3
+            OR EXISTS (
+              SELECT 1
+              FROM outbox_events manual_svg_mdf_card
+              WHERE manual_svg_mdf_card.idempotency_key =
+                'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+            )
           )
-        )
-      `),
-      [workdayFrom, workdayTo, MANUAL_SVG_CHAT_ID],
-    );
+        `),
+        [workdayFrom, workdayTo, MANUAL_SVG_CHAT_ID],
+      ),
+      loadBathCards(this.database, workdayFrom, workdayTo),
+      loadPeriodBazisCutSetCards(this.database, workdayFrom, workdayTo),
+    ]);
     const packets = mapPacketRows(rows.rows);
-    const baths = await loadBathCards(this.database, workdayFrom, workdayTo);
-    const bazisCutSets = await loadPeriodBazisCutSetCards(
-      this.database,
-      workdayFrom,
-      workdayTo,
-    );
     return {
       workday: workdayTo,
       generatedAt: new Date().toISOString(),
       columns: buildTodayColumns(packets, baths, bazisCutSets),
+    };
+  }
+
+  async listOriginalBoard(
+    _command: ListCncTelegramOriginalBoardCommand,
+  ): Promise<CncTelegramOriginalBoardResponseDto> {
+    const rangeResult = await this.database.query<OriginalDateRangeRow>(`
+      SELECT
+        (CURRENT_DATE - INTERVAL '2 months')::date::text AS date_from,
+        CURRENT_DATE::text AS date_to
+    `);
+    const range = rangeResult.rows[0];
+    if (!range?.date_from || !range.date_to) {
+      throw new ApiError(500, 'CNC_ORIGINAL_RANGE_UNAVAILABLE', 'Original MDF board date range is unavailable');
+    }
+    const dateFrom = toDateOnly(range.date_from);
+    const dateTo = toDateOnly(range.date_to);
+    const packetRows = await this.database.query<PacketJoinedRow>(
+      packetSelectSql(
+        `COALESCE(p.source_created_at, p.created_at) >= $1::date
+         AND COALESCE(p.source_created_at, p.created_at) < ($2::date + INTERVAL '1 day')
+         AND p.mdf_board_card_kind = 'machine_file'
+         AND (
+           p.source_chat_id IS DISTINCT FROM $3
+           OR EXISTS (
+             SELECT 1
+             FROM outbox_events manual_svg_mdf_card
+             WHERE manual_svg_mdf_card.idempotency_key =
+               'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+           )
+         )`,
+        { coalesceSourceCreatedAt: true },
+      ),
+      [dateFrom, dateTo, MANUAL_SVG_CHAT_ID],
+    );
+    const bazisCutSets = await loadPeriodBazisCutSetCards(this.database, dateFrom, dateTo);
+    return {
+      dateFrom,
+      dateTo,
+      generatedAt: new Date().toISOString(),
+      packets: mapOriginalPackets(packetRows.rows),
+      baths: mapOriginalBathCards(
+        await loadBathCards(this.database, dateFrom, dateTo, { includeHistory: true }),
+        await loadBathCards(this.database, dateTo, dateTo),
+      ),
+      bazisCutSets: mapOriginalBazisCutSets(bazisCutSets),
     };
   }
 
@@ -821,6 +882,15 @@ export class PgCncTelegramRepository
         dto.source.version === Number(existing.source_version) &&
         existing.payload_hash !== payloadHash
       ) {
+        const reusedSourceFile = await reuseExistingManualSvgSourceFile(tx, {
+          command,
+          dto,
+          requestId,
+        });
+        if (reusedSourceFile) {
+          await completeIdempotency(tx, dto.idempotencyKey, reusedSourceFile);
+          return reusedSourceFile;
+        }
         await failIdempotency(tx, dto.idempotencyKey);
         throw new ApiError(
           409,
@@ -906,6 +976,18 @@ export class PgCncTelegramRepository
         }, mdfCardCreatedNow, filePersistence);
         await completeIdempotency(tx, dto.idempotencyKey, response);
         return response;
+      }
+
+      if (!existing) {
+        const reusedSourceFile = await reuseExistingManualSvgSourceFile(tx, {
+          command,
+          dto,
+          requestId,
+        });
+        if (reusedSourceFile) {
+          await completeIdempotency(tx, dto.idempotencyKey, reusedSourceFile);
+          return reusedSourceFile;
+        }
       }
 
       const prepared = await prepareManualSvgUploadDto(tx, dto, command.dto);
@@ -1267,7 +1349,7 @@ function buildManualSvgStructuredDto(
     },
     workday: dto.workday,
     machine: normalizeOptional(dto.machine) ?? 'manual-svg-upload',
-    programName: normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`,
+    programName: manualSvgProgramName(dto),
     materialName: normalizeOptional(dto.materialName) ?? 'МДФ 16мм',
     parseStatus: 'parsed',
     completionStatus: 'pending',
@@ -1288,6 +1370,17 @@ function buildManualSvgStructuredDto(
       reviewNote: null,
     })),
   };
+}
+
+export function manualSvgProgramName(dto: ManualSvgUploadCommand['dto']): string {
+  if (dto.duplicatePolicy?.kind === 'intentional_copy') {
+    return normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`;
+  }
+  const gcode = dto.sourceFiles?.find((file) => file.kind === 'gcode');
+  if (gcode) return sanitizeManualSvgFileName(gcode.fileName);
+  const svg = dto.sourceFiles?.find((file) => file.kind === 'svg');
+  if (svg) return sanitizeManualSvgFileName(svg.fileName);
+  return normalizeOptional(dto.programName) ?? `SVG ${dto.svgContentHash.slice(0, 12)}`;
 }
 
 function manualSvgAnalysisWarnings(dto: ManualSvgUploadCommand['dto']): string[] {
@@ -1377,7 +1470,9 @@ async function prepareManualSvgUploadDto(
     tolerantSizeMm: 8,
   });
   if (manualDto.validationMode === 'lenient') {
-    await assertManualSvgSelectedOrdersExist(tx, manualDto.selectedOrderIds);
+    if (manualDto.selectedOrderIds.length > 0) {
+      await assertManualSvgSelectedOrdersExist(tx, manualDto.selectedOrderIds);
+    }
     return { resolvedDto: matchedDto, matchSourceDto: matchedDto };
   }
   await assertManualSvgOrderScope(tx, manualDto.selectedOrderIds, matchedDto);
@@ -1873,6 +1968,107 @@ function manualSvgMdfCardEventKey(packet: CncTelegramPacketDto): string {
   return `cnc-manual-svg:${packet.packetId}:source-${packet.sourceVersion}:mdf-card-created`;
 }
 
+async function reuseExistingManualSvgSourceFile(
+  tx: TransactionClient,
+  input: {
+    command: ManualSvgUploadCommand;
+    dto: CncTelegramStructuredIngestDto;
+    requestId: string;
+  },
+): Promise<CncTelegramManualSvgUploadResponseDto | null> {
+  const match = await findExistingSvgCutJobForSourceFile(tx, input.dto, null);
+  if (!match) return null;
+  const packet = await loadExistingSvgSourceFilePacket(tx, match);
+
+  const jobResult = await tx.query<{ selection_criteria: unknown }>(
+    `SELECT selection_criteria
+       FROM cut_job
+      WHERE cut_job_id=$1::bigint
+        AND status <> 'archived'
+      FOR UPDATE`,
+    [match.cutJobId],
+  );
+  if (!jobResult.rows[0]) return null;
+
+  const rawCriteria = jobResult.rows[0].selection_criteria;
+  const criteria: Record<string, unknown> = rawCriteria && typeof rawCriteria === 'object' && !Array.isArray(rawCriteria)
+    ? { ...(rawCriteria as Record<string, unknown>) }
+    : {};
+  const existingFiles = Array.isArray(criteria.sourceFiles)
+    ? criteria.sourceFiles.filter((file): file is Record<string, unknown> => Boolean(file) && typeof file === 'object' && !Array.isArray(file))
+    : [];
+  const incomingFiles = sourceFileIdentitySnapshots(input.dto.sourceFiles ?? []);
+  const existingGcode = existingFiles.find((file) => file.kind === 'gcode') ?? null;
+  const incomingGcode = incomingFiles.find((file) => file.kind === 'gcode') ?? null;
+  const promoteToGcode = existingGcode === null && incomingGcode !== null;
+  const promotedProgramName = input.command.dto.duplicatePolicy?.kind === 'intentional_copy'
+    ? input.dto.programName
+    : incomingGcode?.fileName;
+  const mergedFiles = mergeCanonicalSourceFiles(existingFiles, incomingFiles, existingGcode !== null);
+  criteria.sourceFiles = mergedFiles;
+  if (promoteToGcode) criteria.programName = promotedProgramName;
+
+  await tx.query(
+    `UPDATE cut_job
+        SET name=CASE WHEN $3::boolean THEN left($2, 200) ELSE name END,
+            selection_criteria=$4::jsonb,
+            updated_at=now()
+      WHERE cut_job_id=$1::bigint`,
+    [match.cutJobId, promoteToGcode ? String(promotedProgramName) : '', promoteToGcode, JSON.stringify(criteria)],
+  );
+  if (promoteToGcode) {
+    await tx.query(
+      `UPDATE cnc_telegram_packets
+          SET program_name=left($2, 200), updated_at=now()
+        WHERE packet_id=$1::uuid`,
+      [packet.packetId, String(promotedProgramName)],
+    );
+  }
+
+  const existingGcodeHash = typeof existingGcode?.sha256 === 'string' ? existingGcode.sha256.toLowerCase() : null;
+  const effectiveSourceFiles = (input.command.dto.sourceFiles ?? []).filter((file) =>
+    file.kind !== 'gcode' || existingGcodeHash === null || file.sha256.toLowerCase() === existingGcodeHash
+  );
+  const effectiveCommand: ManualSvgUploadCommand = {
+    ...input.command,
+    dto: { ...input.command.dto, sourceFiles: effectiveSourceFiles },
+  };
+  const refreshedPacket = promoteToGcode ? await loadPacket(tx, packet.packetId) : packet;
+  const filePersistence = await persistManualSvgUploadFiles(tx, {
+    command: effectiveCommand,
+    packet: refreshedPacket,
+    requestId: input.requestId,
+    externalPacketKey: input.dto.externalPacketKey,
+  });
+  return manualSvgResponse({
+    packet: refreshedPacket,
+    requestId: input.requestId,
+    applied: false,
+    ignoredStaleSourceVersion: false,
+    skippedDuplicateSourceFile: skippedDuplicateSourceFileDto({ ...match, packetId: packet.packetId }),
+  }, false, filePersistence);
+}
+
+export function mergeCanonicalSourceFiles(
+  existing: Array<Record<string, unknown>>,
+  incoming: Array<Record<string, unknown>>,
+  preserveExistingGcode: boolean,
+): Array<Record<string, unknown>> {
+  const byKind = new Map<string, Record<string, unknown>>();
+  for (const file of existing) {
+    if (typeof file.kind === 'string') byKind.set(file.kind, file);
+  }
+  for (const file of incoming) {
+    if (typeof file.kind !== 'string') continue;
+    if (file.kind === 'gcode' && preserveExistingGcode && byKind.has('gcode')) continue;
+    byKind.set(file.kind, file);
+  }
+  return [...byKind.values()].sort((left, right) =>
+    manualSvgFileKindOrder(left.kind as CncTelegramManualSvgUploadFileDto['kind'])
+      - manualSvgFileKindOrder(right.kind as CncTelegramManualSvgUploadFileDto['kind'])
+  );
+}
+
 async function persistManualSvgUploadFiles(
   tx: TransactionClient,
   input: {
@@ -1883,7 +2079,11 @@ async function persistManualSvgUploadFiles(
   },
 ): Promise<ManualSvgFilePersistenceResult> {
   const renderStyle = await loadManualSvgUploadRenderStyle(tx);
-  const decodedFiles = prepareManualSvgUploadFiles(input.command.dto, renderStyle);
+  const decodedFiles = prepareManualSvgUploadFiles(
+    input.command.dto,
+    renderStyle,
+    input.packet.svgCutJobDisplayNumber ?? input.packet.svgCutJobId ?? null,
+  );
   if (decodedFiles.length === 0) {
     if (input.command.dto.telegramSend?.enabled) {
       throw new ApiError(422, 'MANUAL_SVG_TELEGRAM_FILES_REQUIRED', 'Для отправки в Telegram нужен SVG-файл');
@@ -1985,6 +2185,7 @@ async function lockActiveManualSvgTelegramSend(
 function prepareManualSvgUploadFiles(
   dto: CncTelegramManualSvgUploadDto,
   renderStyle: CutRenderStyleRule,
+  cutJobDisplayNumber: string | number | null,
 ): ManualSvgDecodedUploadFile[] {
   const files = (dto.sourceFiles ?? []).map(decodeManualSvgUploadFile);
   const seen = new Set<string>();
@@ -1998,7 +2199,7 @@ function prepareManualSvgUploadFiles(
   }
   const svg = files.find((file) => file.kind === 'svg');
   if (svg && !files.some((file) => file.kind === 'screenshot')) {
-    const screenshot = renderManualSvgScreenshot(dto, svg, renderStyle);
+    const screenshot = renderManualSvgScreenshot(dto, svg, renderStyle, cutJobDisplayNumber);
     files.push(screenshot);
   }
   return files.sort((left, right) => manualSvgFileKindOrder(left.kind) - manualSvgFileKindOrder(right.kind));
@@ -2067,8 +2268,9 @@ function renderManualSvgScreenshot(
   dto: CncTelegramManualSvgUploadDto,
   svg: ManualSvgDecodedUploadFile,
   renderStyle: CutRenderStyleRule,
+  cutJobDisplayNumber: string | number | null,
 ): ManualSvgDecodedUploadFile {
-  const styledSvg = buildManualSvgScreenshotSvg(dto, renderStyle);
+  const styledSvg = buildManualSvgScreenshotSvg(dto, renderStyle, cutJobDisplayNumber);
   const png = styledSvg && dto.cutLayout.sheet
     ? enhanceRawSvgScreenshotContrast(
         renderSheetPng({
@@ -2080,7 +2282,7 @@ function renderManualSvgScreenshot(
         dto.generatedScreenshot?.contrast,
       )
     : renderRawSvgPng({
-        svg: svg.raw.toString('utf8'),
+        svg: addCutJobHeadingToSvg(svg.raw.toString('utf8'), cutJobDisplayNumber),
         targetPx: RENDER_PRESETS.screen,
         sheetWidthMm: dto.cutLayout.sheet?.widthMm ?? null,
         sheetHeightMm: dto.cutLayout.sheet?.heightMm ?? null,
@@ -2102,6 +2304,7 @@ function renderManualSvgScreenshot(
 function buildManualSvgScreenshotSvg(
   dto: CncTelegramManualSvgUploadDto,
   renderStyle: CutRenderStyleRule,
+  cutJobDisplayNumber: string | number | null,
 ): string | null {
   const sheet = dto.cutLayout.sheet;
   if (!sheet || dto.cutLayout.items.length === 0) return null;
@@ -2148,7 +2351,7 @@ function buildManualSvgScreenshotSvg(
       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)),
     renderStyle,
   );
-  return buildSheetSvg({
+  const svg = buildSheetSvg({
     sheet: placements,
     fillFor: (piece) => fillForOrder((piece as { label?: { orderId: number | null } }).label?.orderId ?? null),
     labelFor: (piece) => {
@@ -2185,6 +2388,7 @@ function buildManualSvgScreenshotSvg(
     },
     renderStyle,
   });
+  return addCutJobHeadingToSvg(svg, cutJobDisplayNumber);
 }
 
 function manualSvgVisualLabelLines(
@@ -2778,7 +2982,10 @@ function manualSvgPresetSnapshot(preset: CncTelegramManualSvgCommentPresetDto): 
   };
 }
 
-function packetSelectSql(whereSql: string): string {
+function packetSelectSql(
+  whereSql: string,
+  options: { coalesceSourceCreatedAt?: boolean } = {},
+): string {
   return `
     SELECT
       p.packet_id,
@@ -2788,7 +2995,9 @@ function packetSelectSql(whereSql: string): string {
       p.source_message_id,
       p.source_thread_id,
       p.source_version,
-      p.source_created_at,
+      ${options.coalesceSourceCreatedAt
+        ? 'COALESCE(p.source_created_at, p.created_at) AS source_created_at'
+        : 'p.source_created_at'},
       p.source_updated_at,
       p.workday,
       p.machine,
@@ -2867,6 +3076,7 @@ function packetSelectSql(whereSql: string): string {
         ) sheet_summary
       ) AS svg_cut_sheets_json,
       p.updated_at,
+      p.mdf_board_hidden_at,
       i.packet_item_id,
       i.source_item_key,
       i.order_name,
@@ -3230,6 +3440,7 @@ async function insertPacket(
     throw new ApiError(500, 'CNC_TELEGRAM_PACKET_INSERT_FAILED', 'CNC packet insert failed');
   }
   await persistPacketLayoutFingerprint(tx, packetId, dto);
+  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
   return packetId;
 }
 
@@ -3277,6 +3488,33 @@ async function updatePacket(
     [packetId, ...packetParams(dto, payloadHash, command.currentUser.id).slice(1)],
   );
   await persistPacketLayoutFingerprint(tx, packetId, dto);
+  await replaceWholeOrderKeys(tx, packetId, dto.comments ?? []);
+}
+
+async function replaceWholeOrderKeys(
+  tx: TransactionClient,
+  packetId: string,
+  comments: readonly string[],
+): Promise<void> {
+  const orderKeys = wholeOrderKeysFromComments(comments);
+  await tx.query('DELETE FROM cnc_telegram_packet_whole_order_keys WHERE packet_id = $1::uuid', [packetId]);
+  if (orderKeys.length === 0) return;
+  await tx.query(
+    `INSERT INTO cnc_telegram_packet_whole_order_keys (packet_id, order_key)
+     SELECT $1::uuid, order_key
+     FROM unnest($2::text[]) AS order_key
+     ON CONFLICT (packet_id, order_key) DO NOTHING`,
+    [packetId, orderKeys],
+  );
+}
+
+export function wholeOrderKeysFromComments(comments: readonly string[]): string[] {
+  return Array.from(new Set(
+    comments.flatMap((comment) => {
+      if (!comment.toLocaleLowerCase('ru-RU').includes('весь')) return [];
+      return Array.from(comment.matchAll(/(^|[^0-9])([0-9]{4,})(?=[^0-9]|$)/g), (match) => match[2]);
+    }),
+  ));
 }
 
 async function persistPacketLayoutFingerprint(
@@ -3624,7 +3862,18 @@ async function syncSvgCutImport(
     }
     throw error;
   }
-  await setSvgCutImportState(tx, packetId, 'imported', 'SVG layout imported into cut job', imported.cutJobId, imported.cutResultId);
+  const linkedOrderCount = plan.placements.filter((placement) => placement.orderId !== null).length;
+  const informationalNote = linkedOrderCount === 0
+    ? 'Предупреждение: раскрой создан без привязки к ERP-заказу; проверьте заказ вручную'
+    : 'Предупреждение: раскрой создан в информативном режиме; связь с деталями ERP неполная';
+  await setSvgCutImportState(
+    tx,
+    packetId,
+    'imported',
+    plan.informational ? informationalNote : 'SVG layout imported into cut job',
+    imported.cutJobId,
+    imported.cutResultId,
+  );
 }
 
 function svgImportOptionsFromDto(dto: CncTelegramStructuredIngestDto): {
@@ -4173,11 +4422,18 @@ async function buildLenientSvgCutImportPlan(
     const match = key ? matchedItems.get(key) : null;
     const matchedOrderId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchOrderId) : null;
     const matchedDetailId = match?.matchStatus === 'matched' ? toPositiveInteger(match.matchDetailId) : null;
-    const fallbackOrder = informationalOrderForLayoutItem(item, index, selectedOrders);
-    const orderId = matchedOrderId ?? fallbackOrder.orderId;
+    // Explicit manual selections may use the selected order as a fallback.
+    // Telegram's empty selection is an inferred scope: never attach an
+    // unresolved layout item to a different matched order by position.
+    const fallbackOrder = selectedOrderIds.length > 0
+      ? informationalOrderForLayoutItem(item, index, selectedOrders)
+      : null;
+    const orderId = matchedOrderId ?? fallbackOrder?.orderId ?? null;
     const orderName = matchedOrderId !== null
       ? item.orderName || match?.orderName || String(matchedOrderId)
-      : informationalLayoutOrderName(item, fallbackOrder);
+      : fallbackOrder
+        ? informationalLayoutOrderName(item, fallbackOrder)
+        : normalizeOptional(item.orderName) ?? 'SVG';
     const orderDetailId = matchedDetailId;
     placements.push({
       ...item,
@@ -4276,7 +4532,8 @@ function buildTelegramInformationalSvgCutImportPlan(
   layout: CncTelegramCutLayoutDto,
   strictFailureReason: string,
 ): SvgCutImportPlan {
-  if (dto.source.chatId === MANUAL_SVG_CHAT_ID || !isTelegramSvgDetailMatchFailure(strictFailureReason)) {
+  const isTelegramImportCopy = dto.externalPacketKey.startsWith('telegram-import:');
+  if ((!isTelegramImportCopy && dto.source.chatId === MANUAL_SVG_CHAT_ID) || !isTelegramSvgDetailMatchFailure(strictFailureReason)) {
     return { ok: false, reason: strictFailureReason };
   }
   const sheet = layout.sheet;
@@ -4315,7 +4572,8 @@ function buildTelegramInformationalSvgCutImportPlan(
 }
 
 function isTelegramSvgDetailMatchFailure(reason: string): boolean {
-  return reason.includes('is not uniquely matched to an order detail');
+  return reason.includes('is not uniquely matched to an order detail')
+    || reason === 'Для нестрогой загрузки SVG не выбраны заказы';
 }
 
 function informationalOrderForLayoutItem(
@@ -7072,7 +7330,28 @@ async function loadBathCards(
   database: DatabaseClient,
   workdayFrom: string,
   workdayTo: string,
+  options: { includeHistory?: boolean } = {},
 ): Promise<CncTelegramBathCardDto[]> {
+  const packetDatePredicate = options.includeHistory
+    ? `COALESCE(p.source_created_at, p.created_at) >= $1::date
+        AND COALESCE(p.source_created_at, p.created_at) < ($2::date + INTERVAL '1 day')`
+    : 'p.workday BETWEEN $1::date AND $2::date';
+  const packetVisibilityPredicate = options.includeHistory ? '' : 'AND p.mdf_board_hidden_at IS NULL';
+  const candidateVisibilityPredicate = options.includeHistory
+    ? `AND r.created_at >= $1::date
+        AND r.created_at < ($2::date + INTERVAL '1 day')`
+    : `AND j.status <> 'archived'
+        AND archive.archived_at IS NULL`;
+  const forcedHistoryPredicate = options.includeHistory
+    ? `OR EXISTS (
+            SELECT 1
+            FROM cnc_telegram_packets forced_packet
+            WHERE forced_packet.svg_cut_result_id = r.cut_result_id
+              AND forced_packet.mdf_board_card_kind = 'bath_seed'
+              AND COALESCE(forced_packet.source_created_at, forced_packet.created_at) >= $1::date
+              AND COALESCE(forced_packet.source_created_at, forced_packet.created_at) < ($2::date + INTERVAL '1 day')
+          )`
+    : '';
   const result = await database.query<BathJoinedRow>(
     `
     WITH laminated_status_threshold AS (
@@ -7118,8 +7397,8 @@ async function loadBathCards(
         i.quantity
       FROM cnc_telegram_packets p
       JOIN cnc_telegram_packet_items i ON i.packet_id = p.packet_id
-      WHERE p.workday BETWEEN $1::date AND $2::date
-        AND p.mdf_board_hidden_at IS NULL
+      WHERE ${packetDatePredicate}
+        ${packetVisibilityPredicate}
     ),
     matched_target_details AS (
       SELECT
@@ -7149,18 +7428,13 @@ async function loadBathCards(
       HAVING COUNT(*) = 1
     ),
     completed_whole_order_keys AS (
-      SELECT DISTINCT lower(trim(order_match.match[2])) AS order_key
+      SELECT DISTINCT whole_order.order_key
       FROM cnc_telegram_packets p
-      CROSS JOIN LATERAL jsonb_array_elements_text(p.comments_json) AS packet_comment(comment_text)
-      CROSS JOIN LATERAL regexp_matches(
-        packet_comment.comment_text,
-        '(^|[^0-9])([0-9]{4,})([^0-9]|$)',
-        'g'
-      ) AS order_match(match)
-      WHERE p.workday BETWEEN $1::date AND $2::date
-        AND p.mdf_board_hidden_at IS NULL
+      JOIN cnc_telegram_packet_whole_order_keys whole_order
+        ON whole_order.packet_id = p.packet_id
+      WHERE ${packetDatePredicate}
+        ${packetVisibilityPredicate}
         AND (p.completion_status = 'completed' OR p.thumbs_up = true)
-        AND lower(packet_comment.comment_text) LIKE '%весь%'
         AND NOT EXISTS (
           SELECT 1
           FROM jsonb_array_elements_text(p.comments_json) AS material_comment(comment_text)
@@ -7274,19 +7548,21 @@ async function loadBathCards(
         ON projection.cut_result_id = r.cut_result_id
        AND projection.snapshot_digest = r.snapshot_digest
       WHERE r.snapshot_job IS NOT NULL
-        AND j.status <> 'archived'
         AND COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
-        AND archive.archived_at IS NULL
-        AND EXISTS (
-          SELECT 1
-          FROM cut_result_placement placement
-          JOIN cut_result_sheet_map sheet
-            ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
-           AND sheet.is_effective = true
-          JOIN target_details target
-            ON target.order_id = placement.order_id
-           AND target.detail_id = placement.order_detail_id
-          WHERE placement.cut_result_id = r.cut_result_id
+        ${candidateVisibilityPredicate}
+        AND (
+          EXISTS (
+            SELECT 1
+            FROM cut_result_placement placement
+            JOIN cut_result_sheet_map sheet
+              ON sheet.cut_result_sheet_map_id = placement.cut_result_sheet_map_id
+             AND sheet.is_effective = true
+            JOIN target_details target
+              ON target.order_id = placement.order_id
+             AND target.detail_id = placement.order_detail_id
+            WHERE placement.cut_result_id = r.cut_result_id
+          )
+          ${forcedHistoryPredicate}
         )
     ),
     latest_vacuum_results AS (
@@ -7295,7 +7571,7 @@ async function loadBathCards(
       FROM candidate_vacuum_results candidate
       ORDER BY
         candidate.cut_job_id,
-        candidate.is_current_result DESC,
+        ${options.includeHistory ? '' : 'candidate.is_current_result DESC,'}
         candidate.result_created_at DESC,
         candidate.result_no DESC,
         candidate.revision_no DESC,
@@ -7304,6 +7580,7 @@ async function loadBathCards(
     SELECT
       result.cut_result_id,
       result.cut_job_id,
+      result.source_display_number,
       result.result_no,
       result.revision_no,
       result.result_created_at,
@@ -7364,6 +7641,50 @@ async function loadBathCards(
     [workdayFrom, workdayTo],
   );
   return mapBathRows(result.rows);
+}
+
+function mapOriginalBathCards(
+  historicalBaths: CncTelegramBathCardDto[],
+  currentBaths: CncTelegramBathCardDto[],
+): CncTelegramOriginalBathCardDto[] {
+  const currentByJob = new Map(currentBaths.map((bath) => [bath.cutJobId, bath]));
+  return historicalBaths
+    .map((bath) => {
+      const current = currentByJob.get(bath.cutJobId);
+      const currentColumn = current
+        ? allItemsPackedOrLater(current.items)
+          ? 'completed_baths' as const
+          : current.ready && allItemsLaminatedOrLater(current.items)
+            ? 'baths_laminated' as const
+            : current.ready
+              ? 'baths_ready' as const
+              : 'baths' as const
+        : null;
+      return {
+        ...bath,
+        currentBoardVisibility: current ? 'visible' as const : 'archived' as const,
+        currentBoardColumn: currentColumn,
+        currentBoardCardId: current?.bathCardId ?? null,
+      };
+    })
+    .sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt) || left.bathCardId.localeCompare(right.bathCardId),
+    );
+}
+
+function mapOriginalBazisCutSets(
+  cards: CncTelegramBazisCutSetCardDto[],
+): CncTelegramOriginalBazisCutSetCardDto[] {
+  return cards
+    .map((card) => ({
+      ...card,
+      currentBoardColumn: allItemsPackedOrLater(card.items)
+        ? 'completed_laminated' as const
+        : 'parsed' as const,
+    }))
+    .sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt) || right.bazisCutSetId - left.bazisCutSetId,
+    );
 }
 
 function buildTodayColumns(
@@ -7837,6 +8158,27 @@ function mapPacketRows(rows: PacketJoinedRow[]): CncTelegramPacketDto[] {
     }
   }
   return Array.from(packets.values());
+}
+
+function mapOriginalPackets(rows: PacketJoinedRow[]): CncTelegramOriginalPacketDto[] {
+  const hiddenPacketIds = new Set(
+    rows
+      .filter((row) => row.mdf_board_hidden_at !== null && row.mdf_board_hidden_at !== undefined)
+      .map((row) => row.packet_id),
+  );
+  return mapPacketRows(rows)
+    .map((packet) => {
+      const hidden = hiddenPacketIds.has(packet.packetId);
+      return {
+        ...packet,
+        currentBoardVisibility: hidden ? 'hidden' as const : 'visible' as const,
+        currentBoardColumn: hidden ? null : packetColumnKey(packet),
+      };
+    })
+    .sort((left, right) =>
+      (right.sourceCreatedAt ?? '').localeCompare(left.sourceCreatedAt ?? '') ||
+      left.packetId.localeCompare(right.packetId),
+    );
 }
 
 function packetAuditSnapshot(packet: CncTelegramPacketDto): Record<string, unknown> {

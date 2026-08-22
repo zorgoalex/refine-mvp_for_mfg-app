@@ -38,6 +38,8 @@ export interface OrderListQuery {
   productionStatusId?: number;
   dateFrom?: string;
   dateTo?: string;
+  plannedCompletionDateFrom?: string;
+  plannedCompletionDateTo?: string;
   onlyMyOrders: boolean;
   deleted?: boolean;
   deletedScopeUserId?: string;
@@ -66,6 +68,14 @@ export interface GetOrderAuditCommand {
 
 export interface GetOrderFormDataCommand {
   currentUser: CurrentUser;
+}
+
+export interface GetOrderNameSuggestionCommand {
+  currentUser: CurrentUser;
+}
+
+export interface OrderNameSuggestionRepositoryPort {
+  getNextOrderName(): Promise<string>;
 }
 
 export interface OrderReadRepositoryPort {

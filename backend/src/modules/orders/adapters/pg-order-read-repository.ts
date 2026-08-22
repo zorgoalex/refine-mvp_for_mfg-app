@@ -16,6 +16,7 @@ import type {
   ListOrdersCommand,
   OrderListSortBy,
   OrderReadRepositoryPort,
+  OrderNameSuggestionRepositoryPort,
 } from '../application/order-query.types';
 import { formatCutJobNumber } from '../../cut/application/cut-numbering';
 
@@ -368,7 +369,9 @@ interface UnitLookupRow extends QueryResultRow {
   sort_order: string | number;
 }
 
-export class PgOrderReadRepository implements OrderReadRepositoryPort {
+export class PgOrderReadRepository
+  implements OrderReadRepositoryPort, OrderNameSuggestionRepositoryPort
+{
   // SP3: sheetOrdersReads gates the migration-029 sheet columns/joins in order reads.
   // Defaults true so direct instantiations (tests) keep full sheet reads; the orders
   // module + tx-manager pass the env flag (BACKEND_SHEET_ORDERS_READS, default false) so
@@ -1274,6 +1277,20 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
     };
   }
 
+  async getNextOrderName(): Promise<string> {
+    const result = await this.database.query<{ next_order_name: string }>(
+      `
+      SELECT (COALESCE(MAX(order_name::bigint), 0) + 1)::text AS next_order_name
+      FROM orders
+      WHERE order_name ~ '^\\d{1,15}$'
+        AND delete_flag = false
+        AND order_date >= DATE '2025-12-01'
+      `,
+    );
+
+    return result.rows[0]?.next_order_name ?? '1';
+  }
+
   private buildListWhere(command: ListOrdersCommand, params: unknown[]): string {
     const clauses = [command.query.deleted === true ? 'o.delete_flag = true' : 'o.delete_flag = false'];
 
@@ -1334,6 +1351,18 @@ export class PgOrderReadRepository implements OrderReadRepositoryPort {
 
     if (command.query.dateTo) {
       clauses.push(`o.order_date <= $${params.push(command.query.dateTo)}`);
+    }
+
+    if (command.query.plannedCompletionDateFrom) {
+      clauses.push(
+        `o.planned_completion_date >= $${params.push(command.query.plannedCompletionDateFrom)}`,
+      );
+    }
+
+    if (command.query.plannedCompletionDateTo) {
+      clauses.push(
+        `o.planned_completion_date <= $${params.push(command.query.plannedCompletionDateTo)}`,
+      );
     }
 
     if (command.query.onlyMyOrders) {

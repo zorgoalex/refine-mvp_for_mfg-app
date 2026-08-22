@@ -59,6 +59,7 @@ export const apiRoutes = {
     list: backendApiPath('/orders'),
     formData: backendApiPath('/orders/form-data'),
     resourceDemands: backendApiPath('/orders/resource-demands'),
+    nameSuggestion: backendApiPath('/orders/name-suggestion'),
     statusBoard: backendApiPath('/orders/status-board'),
     statusBoardMdfManualMoves: backendApiPath('/orders/status-board/mdf-manual-moves'),
     statusBoardMdfManualMove: (cardKind: string, cardId: string) =>
@@ -177,6 +178,7 @@ export const apiRoutes = {
   },
   cncTelegram: {
     today: backendApiPath('/cnc-telegram/today'),
+    originalBoard: backendApiPath('/cnc-telegram/mdf-board/original'),
     ingest: backendApiPath('/cnc-telegram/ingest'),
     manualSvgUpload: backendApiPath('/cnc-telegram/manual-svg-upload'),
     manualSvgCommentPresets: backendApiPath('/cnc-telegram/manual-svg-comment-presets'),

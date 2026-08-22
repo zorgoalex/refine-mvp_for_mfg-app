@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { RightOutlined } from '@ant-design/icons';
 
 export const findTableHorizontalScroller = (root: ParentNode): HTMLElement | null =>
   (root.querySelector('.ant-table-body') as HTMLElement | null) ??
@@ -8,7 +8,6 @@ export const findTableHorizontalScroller = (root: ParentNode): HTMLElement | nul
 interface TableTopScrollState {
   scrollWidth: number;
   clientWidth: number;
-  scrollLeft: number;
   visible: boolean;
 }
 
@@ -23,18 +22,30 @@ const VERTICAL_WHEEL_SCROLL_QUIET_MS = 160;
 
 const createScrollState = (scroller: HTMLElement | null): TableTopScrollState => {
   if (!scroller) {
-    return { scrollWidth: 0, clientWidth: 0, scrollLeft: 0, visible: false };
+    return { scrollWidth: 0, clientWidth: 0, visible: false };
   }
   const scrollWidth = scroller.scrollWidth;
   const clientWidth = scroller.clientWidth;
-  const maxScrollLeft = Math.max(0, scrollWidth - clientWidth);
-  const scrollLeft = Math.max(0, Math.min(scroller.scrollLeft, maxScrollLeft));
   return {
     scrollWidth,
     clientWidth,
-    scrollLeft,
     visible: scrollWidth > clientWidth + 1,
   };
+};
+
+export const syncHorizontalEdgeButton = (
+  button: HTMLButtonElement | null,
+  scroller: HTMLElement | null,
+) => {
+  if (!button || !scroller) return;
+  const maxScrollLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+  const scrollsBack = maxScrollLeft > 0 && scroller.scrollLeft >= maxScrollLeft - 1;
+  button.dataset.scrollsBack = scrollsBack ? 'true' : 'false';
+  button.setAttribute(
+    'aria-label',
+    scrollsBack ? 'Прокрутить список деталей влево' : 'Прокрутить список деталей вправо',
+  );
+  button.title = scrollsBack ? 'Прокрутить влево' : 'Прокрутить вправо';
 };
 
 export const isPrimarilyVerticalWheel = (
@@ -65,14 +76,12 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
   const wrapRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const scrollerRef = useRef<HTMLElement | null>(null);
+  const edgeButtonRef = useRef<HTMLButtonElement>(null);
   const [scrollState, setScrollState] = useState<TableTopScrollState>({
     scrollWidth: 0,
     clientWidth: 0,
-    scrollLeft: 0,
     visible: false,
   });
-  const maxScrollLeft = Math.max(0, scrollState.scrollWidth - scrollState.clientWidth);
-  const edgeButtonScrollsBack = scrollState.visible && scrollState.scrollLeft >= maxScrollLeft - 1;
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -116,11 +125,11 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
       setScrollState((current) =>
         current.scrollWidth === next.scrollWidth
           && current.clientWidth === next.clientWidth
-          && current.scrollLeft === next.scrollLeft
           && current.visible === next.visible
           ? current
           : next,
       );
+      syncHorizontalEdgeButton(edgeButtonRef.current, scroller);
       scheduleEdgeButtonTop();
     };
 
@@ -140,7 +149,7 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
       if (manageAntTableScroll && headerScroller && headerScroller.scrollLeft !== scrollLeft) {
         headerScroller.scrollLeft = scrollLeft;
       }
-      measure();
+      syncHorizontalEdgeButton(edgeButtonRef.current, scroller);
       syncingScroller = false;
     };
 
@@ -232,6 +241,7 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
       : Math.min(maxLeft, scroller.scrollLeft + step);
     scroller.scrollTo({ left: nextLeft, behavior: 'smooth' });
     if (topRef.current) topRef.current.scrollTo({ left: nextLeft, behavior: 'smooth' });
+    syncHorizontalEdgeButton(edgeButtonRef.current, scroller);
   };
 
   return (
@@ -255,13 +265,15 @@ export const TableTopScroll: React.FC<TableTopScrollProps> = ({
       {children}
       {horizontalEdgeScrollButton && scrollState.visible ? (
         <button
+          ref={edgeButtonRef}
           type="button"
           className="app-table-horizontal-edge-button"
-          aria-label={edgeButtonScrollsBack ? 'Прокрутить список деталей влево' : 'Прокрутить список деталей вправо'}
-          title={edgeButtonScrollsBack ? 'Прокрутить влево' : 'Прокрутить вправо'}
+          data-scrolls-back="false"
+          aria-label="Прокрутить список деталей вправо"
+          title="Прокрутить вправо"
           onClick={scrollTableFromEdgeButton}
         >
-          {edgeButtonScrollsBack ? <LeftOutlined aria-hidden /> : <RightOutlined aria-hidden />}
+          <RightOutlined aria-hidden />
         </button>
       ) : null}
     </div>

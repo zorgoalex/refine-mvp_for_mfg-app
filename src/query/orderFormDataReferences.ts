@@ -65,7 +65,7 @@ export function mapOrderFormDataToReferences(
         widthMm: item.widthMm ?? null,
         heightMm: item.heightMm ?? null,
         isActive: item.isActive,
-        isCuttable: item.isCuttable,
+        isCuttable: item.isCuttable ?? true,
         sortOrder: item.sortOrder,
       }))
     : [];

@@ -4,6 +4,7 @@ import handler from './runtime-config';
 
 const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_API_URL',
+  'RUNTIME_CONFIG_HASURA_URL',
   'RUNTIME_CONFIG_BACKEND_AUTH',
   'RUNTIME_CONFIG_BACKEND_PERMISSIONS',
   'RUNTIME_CONFIG_BACKEND_ORDERS',
@@ -33,6 +34,7 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_ORDER_LIFECYCLE_PERCENT',
   'RUNTIME_CONFIG_ORDER_LIFECYCLE_SALT',
   'RUNTIME_CONFIG_ORDER_LIFECYCLE_VERSION',
+  'VERCEL_GIT_COMMIT_SHA',
 ];
 
 describe('runtime-config handler', () => {
@@ -55,8 +57,10 @@ describe('runtime-config handler', () => {
     expect(res.headers['Cache-Control']).toBe('no-store, max-age=0');
     expect(res.headers['Content-Type']).toBe('application/json; charset=utf-8');
     expect(res.body).toMatchObject({
+      deployment: { gitCommitSha: null },
       apiUrl: '',
       build: { sha: '' },
+      hasuraUrl: '',
       ui: {
         evolutionEnabled: false,
         forceLegacy: false,
@@ -93,8 +97,23 @@ describe('runtime-config handler', () => {
     });
   });
 
+  it('publishes only a valid immutable Vercel commit SHA', () => {
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'A154FEF554948D9643630A827CB1AA4795117E54');
+    const validRes = createResponse();
+    handler({ method: 'GET' } as VercelRequest, validRes as unknown as VercelResponse);
+    expect(validRes.body).toMatchObject({
+      deployment: { gitCommitSha: 'a154fef554948d9643630a827cb1aa4795117e54' },
+    });
+
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'not-an-immutable-sha');
+    const invalidRes = createResponse();
+    handler({ method: 'GET' } as VercelRequest, invalidRes as unknown as VercelResponse);
+    expect(invalidRes.body).toMatchObject({ deployment: { gitCommitSha: null } });
+  });
+
   it('uses runtime env when explicitly set', () => {
     vi.stubEnv('RUNTIME_CONFIG_API_URL', 'https://api.example.test/');
+    vi.stubEnv('RUNTIME_CONFIG_HASURA_URL', 'https://hasura.example.test/v1/graphql/');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_AUTH', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BACKEND_DEADLINES', 'true');
     vi.stubEnv('RUNTIME_CONFIG_BAZIS_CUT', 'true');
@@ -116,6 +135,7 @@ describe('runtime-config handler', () => {
     expect(res.body).toMatchObject({
       apiUrl: 'https://api.example.test',
       build: { sha: 'abcdef123456' },
+      hasuraUrl: 'https://hasura.example.test/v1/graphql',
       ui: {
         evolutionEnabled: true,
         forceLegacy: false,
@@ -150,6 +170,7 @@ describe('runtime-config handler', () => {
 
     expect(res.body).toMatchObject({
       apiUrl: 'https://backend-test.mebelkz.app',
+      hasuraUrl: 'https://hasura-test.mebelkz.app/v1/graphql',
     });
   });
 
@@ -163,6 +184,18 @@ describe('runtime-config handler', () => {
     const explicitRes = createResponse();
     handler({ method: 'GET', headers: {} } as VercelRequest, explicitRes as unknown as VercelResponse);
     expect(explicitRes.body).toMatchObject({ apiUrl: 'https://explicit.example.test' });
+  });
+
+  it('uses production Hasura for the production host', () => {
+    const res = createResponse();
+    handler(
+      { method: 'GET', headers: { host: 'mebelkz.app' } } as VercelRequest,
+      res as unknown as VercelResponse,
+    );
+
+    expect(res.body).toMatchObject({
+      hasuraUrl: 'https://hasura-ovh.mebelkz.app/v1/graphql',
+    });
   });
 
   it('supports HEAD and rejects unsupported methods', () => {

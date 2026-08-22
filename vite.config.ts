@@ -125,9 +125,7 @@ export default defineConfig(({ mode }) => {
 
             // Keep manual chunking minimal and safe; aggressive splitting can create chunk cycles
             // and runtime errors in production deployments (e.g. React exports becoming undefined).
-            if (pkg === "pdfjs-dist") return "pdfjs";
             if (pkg === "xlsx") return "xlsx";
-            if (pkg === "exceljs") return "exceljs";
 
             // Let Rollup decide the rest for correct execution order.
             return;

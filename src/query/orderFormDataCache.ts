@@ -180,7 +180,7 @@ export function invalidateOrderFormDataCache(
     ...entry.snapshot,
     generation,
     status: entry.snapshot.data ? 'ready' : 'idle',
-    error: null,
+    error: entry.snapshot.data ? null : entry.snapshot.error,
     inFlight: false,
   };
   emit();
@@ -216,7 +216,7 @@ export function prefetchOrderFormData(
   entry.snapshot = {
     ...entry.snapshot,
     status: entry.snapshot.data ? 'refreshing' : 'loading',
-    error: null,
+    error: entry.snapshot.data ? null : entry.snapshot.error,
     inFlight: true,
   };
   emit();
@@ -295,6 +295,7 @@ function getOrCreateEntry(namespace: string): ResourceEntry {
 
 function isEntryStale(entry: ResourceEntry): boolean {
   return entry.stale
+    || entry.snapshot.error !== null
     || (
       entry.snapshot.data !== null
       && Date.now() - entry.snapshot.fetchedAt >= ORDER_FORM_DATA_STALE_TIME_MS

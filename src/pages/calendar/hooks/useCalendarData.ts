@@ -370,7 +370,8 @@ export const useCalendarData = (
         // Приоритет: статус уровня заказа (из orders_view), затем агрегация из деталей
         production_status_name: order.production_status_name || aggregatedProductionStatus,
         // Пройденные этапы производства из production_status_events
-        passedProductionCodes: passedCodesByOrderId[order.order_id] || [],
+        passedProductionCodes:
+          passedCodesByOrderId[order.order_id] || order.passed_production_status_codes || [],
       };
     });
 

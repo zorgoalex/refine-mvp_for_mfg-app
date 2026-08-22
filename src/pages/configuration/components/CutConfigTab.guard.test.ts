@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 const tabSrc = readFileSync(new URL('./CutConfigTab.tsx', import.meta.url), 'utf8');
 const renderFormSrc = readFileSync(new URL('./CutRenderStylesForm.tsx', import.meta.url), 'utf8');
+const tabCss = readFileSync(new URL('./CutConfigTab.css', import.meta.url), 'utf8');
 const indexSrc = readFileSync(new URL('../index.tsx', import.meta.url), 'utf8');
 const apiSrc = readFileSync(new URL('../../../api/cutConfigApi.ts', import.meta.url), 'utf8');
 
@@ -24,7 +25,7 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
   });
 
   it('exposes editable render style settings in a dedicated tab', () => {
-    expect(tabSrc).toMatch(/Настройки рендера/);
+    expect(tabSrc).toMatch(/Рендер SVG и PDF/);
     expect(tabSrc).toMatch(/CutRenderStylesForm/);
     expect(renderFormSrc).toMatch(/CUT_RENDER_STYLES_SETTING_KEY/);
     expect(renderFormSrc).toMatch(/parseCutRenderStylesSetting/);
@@ -39,6 +40,8 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(renderFormSrc).toMatch(/Интервал заказ - позиция/);
     expect(renderFormSrc).toMatch(/Интервал позиция - размеры/);
     expect(renderFormSrc).toMatch(/Плотность букв/);
+    expect(renderFormSrc).not.toMatch(/Рендер PDF-шаблонов/);
+    expect(renderFormSrc).toMatch(/SVG-превью использует отдельный профиль/);
   });
 
   it('keeps render settings tab and uploaded SVG preview mounted after saving', () => {
@@ -58,6 +61,22 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     );
     expect(renderFormSrc).toMatch(/const previewSvg = useMemo\(/);
     expect(renderFormSrc).toMatch(/\[previewParsed, previewSetting\]/);
+    expect(renderFormSrc).toMatch(/useLayoutEffect\(\(\) =>/);
+  });
+
+  it('keeps render-template actions on one desktop row', () => {
+    expect(renderFormSrc).toMatch(/title: 'Действия',[\s\S]*width: 570/);
+    expect(renderFormSrc).toMatch(/<Space wrap=\{false\} style=\{\{ whiteSpace: 'nowrap' \}\}>/);
+    expect(renderFormSrc).toMatch(/scroll=\{\{ x: 900 \}\}/);
+  });
+
+  it('keeps the SVG preview visible while desktop render settings scroll', () => {
+    expect(renderFormSrc).toMatch(/className="cut-render-preview-column"/);
+    expect(renderFormSrc).toMatch(/--cut-render-preview-sticky-top/);
+    expect(tabCss).toMatch(/@media \(min-width: 1200px\)[\s\S]*\.cut-render-preview-column\s*\{[\s\S]*position:\s*sticky/);
+    expect(tabCss).toMatch(/top:\s*var\(--cut-render-preview-sticky-top/);
+    expect(tabCss).toMatch(/max-height:\s*calc\(100vh - var\(--cut-render-preview-sticky-top/);
+    expect(tabCss).toMatch(/overflow-y:\s*auto/);
   });
 
   it('eligibility statuses use a multiselect from the production-statuses reference (no free text)', () => {
@@ -212,6 +231,17 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/Линия/);
     expect(tabSrc).toMatch(/Прямоугольник/);
     expect(tabSrc).toMatch(/PdfTemplateCanvas/);
+    expect(tabSrc).toMatch(/Настройки визуала раскроя в PDF/);
+    expect(tabSrc).toMatch(/Толщина линий PDF/);
+    expect(tabSrc).toMatch(/Цвет линий PDF/);
+    expect(tabSrc).toMatch(/Фон листа PDF/);
+    expect(tabSrc).toMatch(/Изменения сразу видны на миниатюре листа/);
+    expect(tabSrc).toMatch(/pdfRenderProfile=\{pdfRenderProfile\}/);
+    expect(tabSrc).toMatch(/fill=\{pdfRenderProfile\.piece\.defaultFill\}/);
+    expect(tabSrc).toMatch(/stroke=\{pdfRenderProfile\.piece\.stroke\}/);
+    expect(tabSrc).toMatch(/strokeWidth=\{pdfRenderProfile\.piece\.strokeWidthMm\}/);
+    expect(tabSrc).toMatch(/cutConfigApi\.updateSetting\(\s*CUT_RENDER_STYLES_SETTING_KEY/);
+    expect(tabSrc).toMatch(/await savePdfRenderProfile\(\)/);
     expect(tabSrc).not.toContain('Обкат: ${piece.edge}');
     expect(tabSrc).not.toContain('Фрезеровка: ${piece.milling}');
     expect(tabSrc).toMatch(/doweling:\s*true/);
@@ -232,6 +262,8 @@ describe('CutConfigTab wiring (backend-owned, flag-guarded)', () => {
     expect(tabSrc).toMatch(/text=\{piece\.heightLabel\}/);
     expect(tabSrc).toMatch(/rotation=\{-90\}/);
     expect(tabSrc).not.toMatch(/size:\s*'800×240'/);
+    expect(tabSrc).not.toMatch(/const orderContourColors = new Map/);
+    expect(tabSrc).toMatch(/fill=\{pdfRenderProfile\.piece\.defaultFill\} stroke=\{pdfRenderProfile\.piece\.stroke\}/);
     expect(tabSrc).toMatch(/wrap="word"/);
     expect(tabSrc).toMatch(/customFieldRowsToSchema/);
     expect(tabSrc).toMatch(/CustomFieldExpressionEditor/);

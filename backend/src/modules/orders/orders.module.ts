@@ -151,15 +151,20 @@ export function shouldEnableOrderDeadlineSync(input: {
     },
     {
       provide: OrderQueryService,
-      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) =>
-        new OrderQueryService({
-          reader: database.isConfigured
-            ? new PgOrderReadRepository(
-                database,
-                config.get('BACKEND_SHEET_ORDERS_READS', { infer: true }),
-              )
-            : new UnavailableOrderReadRepository(),
-        }),
+      useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) => {
+        if (!database.isConfigured) {
+          return new OrderQueryService({ reader: new UnavailableOrderReadRepository() });
+        }
+
+        const reader = new PgOrderReadRepository(
+          database,
+          config.get('BACKEND_SHEET_ORDERS_READS', { infer: true }),
+        );
+        return new OrderQueryService({
+          reader,
+          nameSuggestions: reader,
+        });
+      },
       inject: [DatabaseService, ConfigService],
     },
     {

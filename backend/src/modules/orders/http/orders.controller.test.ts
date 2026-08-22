@@ -642,6 +642,24 @@ describe('OrdersController read endpoints', () => {
     } satisfies Partial<ApiError>);
   });
 
+  it('returns the next order name suggestion through the query service', async () => {
+    const calls: string[] = [];
+    const controller = createController({
+      flags: { ordersEnabled: true, ordersReadOnly: true },
+      queries: {
+        async getNextOrderName(command) {
+          calls.push(command.currentUser.id);
+          return { suggestedOrderName: '2561' };
+        },
+      },
+    });
+
+    await expect(
+      controller.getNextOrderName({ user: currentUser('manager-id') }),
+    ).resolves.toEqual({ suggestedOrderName: '2561' });
+    expect(calls).toEqual(['manager-id']);
+  });
+
   it('normalizes list query with whitelist defaults', () => {
     expect(
       parseOrderListQuery({
@@ -657,6 +675,8 @@ describe('OrdersController read endpoints', () => {
         productionStatusId: '5',
         dateFrom: '2026-04-01',
         dateTo: '2026-04-30',
+        plannedCompletionDateFrom: '2026-05-01',
+        plannedCompletionDateTo: '2026-05-31',
         onlyMyOrders: 'true',
         deleted: 'true',
       }),
@@ -673,6 +693,8 @@ describe('OrdersController read endpoints', () => {
       productionStatusId: 5,
       dateFrom: '2026-04-01',
       dateTo: '2026-04-30',
+      plannedCompletionDateFrom: '2026-05-01',
+      plannedCompletionDateTo: '2026-05-31',
       onlyMyOrders: true,
       deleted: true,
     });
@@ -746,6 +768,7 @@ describe('OrdersController read endpoints', () => {
     expect(() => parseOrderListQuery({ sortBy: 'raw_sql_injection' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ pageSize: '201' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ dateFrom: '30.04.2026' })).toThrow(ApiError);
+    expect(() => parseOrderListQuery({ plannedCompletionDateFrom: '30.04.2026' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ deleted: 'да' })).toThrow(ApiError);
     expect(() => parseOrderListQuery({ sortBy: 'deletedAt' })).toThrow(ApiError);
     expect(() => parseOrderAuditQuery({ pageSize: '201' })).toThrow(ApiError);
@@ -1223,6 +1246,9 @@ function createController(options: {
     },
     async getFormData() {
       throw new Error('getFormData should not be called');
+    },
+    async getNextOrderName() {
+      throw new Error('getNextOrderName should not be called');
     },
     ...options.queries,
   } as unknown as OrderQueryService;

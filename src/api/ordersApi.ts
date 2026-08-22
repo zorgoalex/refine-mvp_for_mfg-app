@@ -13,6 +13,7 @@ import type {
   OrderListResponse,
   OrderResourceDemandQuery,
   OrderResourceDemandResponse,
+  OrderNameSuggestionResponse,
   OrderTransferTargetsResponse,
   OrderResponse,
   OrderRefreshRequest,
@@ -38,6 +39,10 @@ export const ordersApi = {
 
   listResourceDemands(params: OrderResourceDemandQuery = {}): Promise<OrderResourceDemandResponse> {
     return httpClient.get<OrderResourceDemandResponse>(withQuery(apiRoutes.orders.resourceDemands, params));
+  },
+
+  getNextOrderName(): Promise<OrderNameSuggestionResponse> {
+    return httpClient.get<OrderNameSuggestionResponse>(apiRoutes.orders.nameSuggestion);
   },
 
   async getById(

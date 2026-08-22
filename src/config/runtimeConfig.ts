@@ -7,6 +7,7 @@ import {
 export interface FrontendRuntimeConfig {
   apiUrl?: string | null;
   build?: FrontendBuildRuntimeConfig | null;
+  hasuraUrl?: string | null;
   features?: RuntimeFeatureFlagSource | null;
   ui?: FrontendUiRuntimeConfig | null;
   observability?: FrontendObservabilityRuntimeConfig | null;
@@ -48,6 +49,7 @@ const DEFAULT_RUNTIME_CONFIG_URL = '/runtime-config.json';
 const DEFAULT_RUNTIME_CONFIG_TIMEOUT_MS = 1500;
 
 let runtimeApiUrl: string | null = null;
+let runtimeHasuraUrl: string | null = null;
 let loadedRuntimeConfig: FrontendRuntimeConfig | null = null;
 
 export async function initializeRuntimeConfig(
@@ -71,11 +73,16 @@ export function applyRuntimeConfig(
 ): void {
   loadedRuntimeConfig = config;
   runtimeApiUrl = normalizeApiUrl(config?.apiUrl);
+  runtimeHasuraUrl = normalizeApiUrl(config?.hasuraUrl);
   applyFeatureFlags(getFeatureFlags(env, config?.features ?? {}));
 }
 
 export function getRuntimeApiUrl(): string | null {
   return runtimeApiUrl;
+}
+
+export function getRuntimeHasuraUrl(): string | null {
+  return runtimeHasuraUrl;
 }
 
 export function getLoadedRuntimeConfig(): FrontendRuntimeConfig | null {
@@ -87,6 +94,7 @@ export function resetRuntimeConfigForTests(
 ): void {
   loadedRuntimeConfig = null;
   runtimeApiUrl = null;
+  runtimeHasuraUrl = null;
   applyFeatureFlags(getFeatureFlags(env));
 }
 
@@ -151,6 +159,10 @@ function isRuntimeConfig(value: unknown): value is FrontendRuntimeConfig {
     config.apiUrl === undefined ||
     config.apiUrl === null ||
     typeof config.apiUrl === 'string';
+  const hasuraUrlIsValid =
+    config.hasuraUrl === undefined ||
+    config.hasuraUrl === null ||
+    typeof config.hasuraUrl === 'string';
   const featuresAreValid =
     config.features === undefined ||
     config.features === null ||
@@ -178,7 +190,7 @@ function isRuntimeConfig(value: unknown): value is FrontendRuntimeConfig {
         typeof config.observability.performanceRum === 'boolean'));
   const rolloutsAreValid = validateRollouts(config.rollouts);
 
-  return apiUrlIsValid && buildIsValid && featuresAreValid && uiIsValid &&
+  return apiUrlIsValid && hasuraUrlIsValid && buildIsValid && featuresAreValid && uiIsValid &&
     observabilityIsValid && rolloutsAreValid;
 }
 

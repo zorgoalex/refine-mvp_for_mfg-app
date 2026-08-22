@@ -14,7 +14,7 @@ import type {
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
 
-const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
+const COMPLETED_ORDER_STATUS_NAMES = new Set<string>(['завершен', 'завершён']);
 export interface MdfBoardHiddenStatusesSetting {
   productionStatusIds?: number[];
   orderStatusIds?: number[];
@@ -47,7 +47,7 @@ export const DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES = [
   'выдан',
 ] as const;
 
-const MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES = new Set(
+const MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES = new Set<string>(
   DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES,
 );
 const DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES = [
@@ -55,7 +55,7 @@ const DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES = [
   'завершен',
   'завершён',
 ] as const;
-const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set(DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES);
+const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set<string>(DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1d' | '1w' | '2w' | '1m';
 export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal' | 'screenshot';
@@ -96,6 +96,8 @@ export interface OrderStatusBoardViewState {
   cncOrderSearchPeriod?: CncOrderSearchPeriod;
   cncOrderFilters: string[];
   cncPlannedTodayOnly: boolean;
+  cncCardKind?: 'packet' | 'bath';
+  cncCardId?: string;
   hideEmpty: boolean;
   sortBy: OrderStatusBoardSortBy;
   sortOrder: OrderStatusBoardSortOrder;
@@ -184,6 +186,13 @@ export function parseOrderStatusBoardViewState(
     ...(view === 'cnc_today' && cncOrderSearchPeriod ? { cncOrderSearchPeriod } : {}),
     cncOrderFilters: normalizeCncOrderFilterValues(params.getAll('order')),
     cncPlannedTodayOnly: view === 'cnc_today' && params.get('plannedToday') === '1',
+    ...(view === 'cnc_today' && (params.get('cardKind') === 'packet' || params.get('cardKind') === 'bath')
+      && params.get('cardId')?.trim()
+      ? {
+          cncCardKind: params.get('cardKind') as 'packet' | 'bath',
+          cncCardId: params.get('cardId')!.trim(),
+        }
+      : {}),
     hideEmpty: params.get('hideEmpty') === '1',
     sortBy,
     sortOrder,
@@ -198,6 +207,10 @@ export function serializeOrderStatusBoardViewState(
     params.set('flow', 'cnc');
   } else if (state.view !== 'order') {
     params.set('board', state.view);
+  }
+  if (state.view === 'cnc_today' && state.cncCardKind && state.cncCardId) {
+    params.set('cardKind', state.cncCardKind);
+    params.set('cardId', state.cncCardId);
   }
   if (state.search.trim()) params.set('q', state.search.trim());
   if (state.onlyMyOrders) params.set('mine', '1');
@@ -377,6 +390,7 @@ export function filterCncTodayColumnsByPlannedOrderDate(
 
 export function filterCncBathColumnsByMachineOrderMatches(
   columns: CncTelegramTodayColumn[],
+  preservedBathCardId?: string,
 ): CncTelegramTodayColumn[] {
   const machineOrderKeys = new Set<string>();
   for (const column of columns) {
@@ -402,7 +416,8 @@ export function filterCncBathColumnsByMachineOrderMatches(
   return columns.map((column) => {
     if (!isCncBathColumnKey(column.key)) return column;
     const baths = (column.baths ?? []).filter((bath) =>
-      bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
+      bath.bathCardId === preservedBathCardId
+      || bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
     );
     return { ...column, baths, total: baths.length };
   });

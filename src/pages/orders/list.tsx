@@ -1757,6 +1757,9 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             </div>
           </div>
         </Modal>
+        {(!filtersVisible || (isMobile && !mobileHeaderExpanded)) && (
+          <Form form={form} className="orders-filter-form-connector" aria-hidden />
+        )}
         {filtersVisible && (!isMobile || mobileHeaderExpanded) && (
           <Card className="orders-filter-card" style={{ marginBottom: 16 }}>
             <Form form={form} layout="vertical" onFinish={handleFilter}>

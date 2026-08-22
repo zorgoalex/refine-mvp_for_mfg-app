@@ -455,14 +455,61 @@ function cutJobMdfBoardTooltip(status: CutJobDto['mdfBoardStatus']): string {
   return packets ? `${status.reason}\n${packets}` : status.reason;
 }
 
-const CutJobMdfBoardCell: React.FC<{ job: CutJobDto }> = ({ job }) => {
+export function cutJobMdfBoardLink(target: NonNullable<NonNullable<CutJobDto['mdfBoardStatus']>['target']>): string {
+  const params = new URLSearchParams({
+    flow: 'cnc',
+    date: target.workday,
+    period: '1m',
+    cardKind: target.kind === 'bath' ? 'bath' : 'packet',
+    cardId: target.cardId,
+  });
+  return `/mdf-work-board?${params.toString()}`;
+}
+
+const CutJobMdfBoardCell: React.FC<{
+  job: CutJobDto;
+  canOpenBoard: boolean;
+  canCreate: boolean;
+  creating: boolean;
+  onCreate: (job: CutJobDto) => void;
+}> = ({ job, canOpenBoard, canCreate, creating, onCreate }) => {
+  const { push } = useNavigation();
   const status = job.mdfBoardStatus;
   const state = status?.state ?? 'unknown';
   const reason = status?.reason ?? 'Backend не вернул состояние МДФ-доски.';
+  const statusTag = <Tag color={cutJobMdfBoardStatusColor(state)}>{cutJobMdfBoardStatusLabel(state)}</Tag>;
+  const linkedStatus = state === 'created' && status?.target && canOpenBoard ? (
+    <a
+      className="cut-job-mdf-board-cell__link"
+      href={cutJobMdfBoardLink(status.target)}
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        push(cutJobMdfBoardLink(status.target!));
+      }}
+      aria-label={`Открыть ${status.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'} на МДФ-доске`}
+    >
+      {statusTag}
+    </a>
+  ) : statusTag;
+  const tooltip = state === 'created' && !canOpenBoard
+    ? `${cutJobMdfBoardTooltip(status)}\nДля перехода на МДФ-доску требуется право orders.view.`
+    : cutJobMdfBoardTooltip(status);
   return (
-    <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{cutJobMdfBoardTooltip(status)}</span>}>
+    <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{tooltip}</span>}>
       <span className="cut-job-mdf-board-cell">
-        <Tag color={cutJobMdfBoardStatusColor(state)}>{cutJobMdfBoardStatusLabel(state)}</Tag>
+        {linkedStatus}
+        {state === 'not_created' && canCreate ? (
+          <Button
+            size="small"
+            className="cut-job-mdf-board-cell__create"
+            loading={creating}
+            disabled={creating}
+            onClick={() => onCreate(job)}
+          >
+            Создать карточку
+          </Button>
+        ) : null}
         <Text type="secondary" className="cut-job-mdf-board-cell__reason">{reason}</Text>
       </span>
     </Tooltip>
@@ -2424,19 +2471,22 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     [applyPdfTemplateState, emitCutJobUpdate, job, loadJobs, handleError],
   );
 
-  const createMdfBoardCard = useCallback(async () => {
-    if (!job) return;
+  const createMdfBoardCard = useCallback(async (targetJob: CutJobDto) => {
     setBusy(true);
     setCreatingMdfBoardCard(true);
     try {
-      const updated = await cutApi.createMdfBoardCard(job.cutJobId);
-      setJob(updated);
-      applyPdfTemplateState(updated);
-      emitCutJobUpdate(updated, job);
-      message.success('Карточка файла станка создана на МДФ-доске');
+      const updated = await cutApi.createMdfBoardCard(targetJob.cutJobId);
+      if (job?.cutJobId === targetJob.cutJobId) {
+        setJob(updated);
+        applyPdfTemplateState(updated);
+        emitCutJobUpdate(updated, job);
+      }
+      message.success(updated.mdfBoardStatus?.cardKind === 'bath'
+        ? 'Карточка ванны создана на МДФ-доске'
+        : 'Карточка файла станка создана на МДФ-доске');
       await loadJobs();
     } catch (error) {
-      handleError(error, 'Не удалось создать карточку файла станка для МДФ-доски');
+      handleError(error, 'Не удалось создать карточку на МДФ-доске');
     } finally {
       setCreatingMdfBoardCard(false);
       setBusy(false);
@@ -3227,7 +3277,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         title: 'МДФ-доска',
         key: 'mdfBoard',
         width: 132,
-        render: (_: unknown, row: CutJobDto) => <CutJobMdfBoardCell job={row} />,
+        render: (_: unknown, row: CutJobDto) => (
+          <CutJobMdfBoardCell
+            job={row}
+            canOpenBoard={canViewOrders}
+            canCreate={canManage && row.mdfBoardStatus?.canCreateCard === true}
+            creating={creatingMdfBoardCard && row.cutJobId === job?.cutJobId}
+            onCreate={createMdfBoardCard}
+          />
+        ),
       },
       {
         title: 'Позиции',
@@ -3336,7 +3394,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ),
       },
     ],
-    [busy, canManage, openJob, deleteJob, profiles, cutSettings, isOperational, show],
+    [busy, canManage, canViewOrders, createMdfBoardCard, creatingMdfBoardCard, job?.cutJobId, openJob, deleteJob, profiles, cutSettings, isOperational, show],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
@@ -4365,7 +4423,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
               <Button
                 size="small"
                 icon={<PlusOutlined />}
-                onClick={() => void createMdfBoardCard()}
+                onClick={() => void createMdfBoardCard(job)}
                 loading={creatingMdfBoardCard}
                 disabled={
                   !canManage ||
@@ -4377,7 +4435,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 style={{ height: 'auto', minHeight: 32, whiteSpace: 'normal', textAlign: 'left' }}
                 data-testid="cut-job-create-mdf-board-card"
               >
-                Создать карточку файла станка для МДФ-доски
+                Создать {job.mdfBoardStatus?.cardKind === 'bath' ? 'карточку ванны' : 'карточку файла станка'} для МДФ-доски
               </Button>
             </Tooltip>
           </Space>

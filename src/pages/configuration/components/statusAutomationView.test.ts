@@ -4,16 +4,23 @@ import type {
   StatusAutomationRuleDto,
 } from '../../../api/types/statusAutomationApi.types';
 import {
+  addStatusAutomationCondition,
   allowedConditionKeysForEvent,
   buildCreatePayload,
   buildEventTypeSelectOptions,
   buildStatusAutomationRulesExportFile,
   buildUpdatePayload,
+  changeStatusAutomationAction,
+  changeStatusAutomationEvent,
   describeAction,
   describeConditions,
+  describeFormAction,
+  describeFormConditions,
   planStatusAutomationRulesImport,
   readStatusAutomationRulesImportSource,
+  validateStatusAutomationRuleBuilder,
   type StatusAutomationFormValues,
+  type StatusAutomationRuleBuilderState,
 } from './statusAutomationView';
 
 const catalogs = {
@@ -164,11 +171,11 @@ describe('statusAutomationView', () => {
         catalogs,
       ),
     ).toBe(
-      'Статус заказа: Новый, #999; Исключить статус заказа: Оплачен; Статус оплаты: Частично оплачен; Исключить статус оплаты: #777; Статус производства: В работе, #998; Исключить статус производства: В работе; Оплачено ≥ 50%; Источник: Базис; Только первый платёж',
+      'Статус заказа — один из: Новый, #999; Статус заказа — не входит в: Оплачен; Статус оплаты — один из: Частично оплачен; Статус оплаты — не входит в: #777; Общий статус производства заказа — один из: В работе, #998; Общий статус производства заказа — не входит в: В работе; Оплачено ≥ 50%; Источник: Базис; Только первый платёж',
     );
   });
 
-  it('returns an em dash for empty conditions and ignores empty arrays/false-only flags', () => {
+  it('describes empty conditions in plain language and ignores empty arrays/false-only flags', () => {
     expect(
       describeConditions(
         {
@@ -183,8 +190,87 @@ describe('statusAutomationView', () => {
         },
         catalogs,
       ),
-    ).toBe('—');
-    expect(describeConditions(undefined, catalogs)).toBe('—');
+    ).toBe('Без условий');
+    expect(describeConditions(undefined, catalogs)).toBe('Без условий');
+  });
+
+  it('builds a plain-language live preview from form values', () => {
+    const form = {
+      ...baseForm,
+      currentOrderStatusIn: [1, 2],
+      paidShareGte: 50,
+    };
+
+    expect(describeFormConditions(form, catalogs)).toBe(
+      'Статус заказа — один из: Новый, Оплачен; Оплачено ≥ 50%',
+    );
+    expect(describeFormAction(form, catalogs)).toBe(
+      'Установить заказу статус «Оплачен»',
+    );
+    expect(describeFormConditions(baseForm, catalogs)).toBe(
+      'Без дополнительных условий',
+    );
+  });
+
+  it('drives create/edit state through conditions, event pruning, and action switching', () => {
+    let state: StatusAutomationRuleBuilderState = {
+      form: { ...baseForm },
+      activeConditionKeys: [],
+    };
+
+    state = addStatusAutomationCondition(state, 'currentOrderStatusIn');
+    expect(validateStatusAutomationRuleBuilder(state, eventDescriptor())).toContain(
+      'Заполните или удалите пустое условие',
+    );
+
+    state = { ...state, form: { ...state.form, currentOrderStatusIn: [1] } };
+    expect(validateStatusAutomationRuleBuilder(state, eventDescriptor())).toEqual([]);
+    expect(describeFormConditions(state.form, catalogs)).toBe('Статус заказа — один из: Новый');
+    expect(buildCreatePayload(state.form).conditions).toEqual({ currentOrderStatusIn: [1] });
+    expect(buildUpdatePayload(rule, state.form)).toMatchObject({
+      conditions: { currentOrderStatusIn: [1] },
+      version: 7,
+    });
+
+    state = changeStatusAutomationEvent(
+      state,
+      eventDescriptor({
+        eventType: 'order.production_status_changed',
+        allowedConditions: ['paidShareGte'],
+        allowedActions: ['change_production_status'],
+      }),
+    );
+    expect(state.activeConditionKeys).toEqual([]);
+    expect(state.form.currentOrderStatusIn).toEqual([]);
+    expect(state.form.actionType).toBe('change_production_status');
+    expect(buildCreatePayload(state.form).conditions).toEqual({});
+
+    state = {
+      ...state,
+      form: changeStatusAutomationAction(
+        state.form,
+        'map_production_status_to_order_status',
+      ),
+    };
+    expect(state.form.targetStatusId).toBeNull();
+    expect(validateStatusAutomationRuleBuilder(
+      state,
+      eventDescriptor({ allowedActions: ['map_production_status_to_order_status'] }),
+    )).toContain('Заполните все строки соответствий статусов');
+
+    state = {
+      ...state,
+      form: {
+        ...state.form,
+        statusMappingEntries: [{ sourceStatusIds: [4, 5], targetStatusId: 2 }],
+      },
+    };
+    expect(buildCreatePayload(state.form)).toMatchObject({
+      targetStatusId: null,
+      actionConfig: {
+        statusMapping: { entries: [{ sourceStatusIds: [4, 5], targetStatusId: 2 }] },
+      },
+    });
   });
 
   it('filters condition keys by the event descriptor', () => {
@@ -417,6 +503,11 @@ describe('statusAutomationView', () => {
     };
 
     expect(describeAction(mappingRule, catalogs)).toBe('В работе, Готово → Оплачен');
+    expect(describeFormAction({
+      ...baseForm,
+      actionType: 'map_order_status_to_details_production_status',
+      statusMappingEntries: [{ sourceStatusIds: [], targetStatusId: 0 }],
+    }, catalogs)).toBe('Менять статус деталей: соответствие не заполнено');
     expect(buildCreatePayload({
       ...baseForm,
       eventType: 'order.status_changed',

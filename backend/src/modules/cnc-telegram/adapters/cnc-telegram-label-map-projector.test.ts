@@ -117,7 +117,7 @@ describe('Telegram label-map projector structural guards', () => {
     })).resolves.toEqual({ projected: true, sheetMapId: 88 });
     expect(sheetInsertParams[12]).toBe(2);
     expect(sheetInsertParams[13]).toBe(1);
-    expect(String(sheetInsertParams[7]).match(/cut-sheet-piece/g)).toHaveLength(2);
+    expect(String(sheetInsertParams[7]).match(/class="cut-sheet-piece"/g)).toHaveLength(2);
     expect(placementQueries).toHaveLength(1);
     expect(placementQueries[0]?.[2]).toBe(70);
   });

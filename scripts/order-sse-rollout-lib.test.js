@@ -1,14 +1,22 @@
-import { readFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import rolloutLib from './order-sse-rollout-lib.js';
 
 const {
+  STAGE_REMOTE_URL,
   assertDatabaseState,
+  assertBackendReadyPayload,
+  attachFetchResponseCleanup,
   assertOrderSseRolloutAllowed,
   assertRuntimeConfig,
   countEligibleUsers,
+  createEvidenceLogger,
+  discardFetchResponse,
   parseOrderSseRolloutArgs,
   planRolloutSteps,
+  releaseFetchResponse,
   resolveOrderSseRolloutConfig,
   rolloutUpdateSql,
   runCommand,
@@ -18,6 +26,13 @@ const {
 } = rolloutLib;
 
 describe('Order SSE rollout controller', () => {
+  it('pins canonical stage identity to the repository URL instead of cwd origin', () => {
+    expect(STAGE_REMOTE_URL).toBe('https://github.com/zorgoalex/refine-mvp_for_mfg-app.git');
+    const source = readFileSync(new URL('./order-sse-rollout-lib.js', import.meta.url), 'utf8');
+    expect(source).toContain("['git', 'ls-remote', '--heads', STAGE_REMOTE_URL, STAGE_REF]");
+    expect(source).not.toContain("['git', 'ls-remote', '--heads', 'origin', STAGE_REF]");
+  });
+
   it('parses conservative stage defaults', () => {
     const parsed = parseOrderSseRolloutArgs(['--mode', 'rollout', '--apply']);
     const config = resolveOrderSseRolloutConfig(parsed, {
@@ -39,6 +54,30 @@ describe('Order SSE rollout controller', () => {
       approveStage: true,
     });
     expect(() => assertOrderSseRolloutAllowed(config)).not.toThrow();
+  });
+
+  it('parses accelerated qualification defaults and immutable SHA', () => {
+    const sha = 'a154fef554948d9643630a827cb1aa4795117e54';
+    const parsed = parseOrderSseRolloutArgs([
+      '--mode', 'accelerated-soak', '--apply', '--expected-stage-sha', sha,
+    ]);
+    const config = resolveOrderSseRolloutConfig(parsed, {
+      ERP_WORKER_LOGIN: 'cncworkertest',
+      ERP_WORKER_PASSWORD: 'secret',
+      ORDER_SSE_ROLLOUT_APPROVE_STAGE: 'true',
+    }, '/home/ovhtest/projects/erp_dev');
+
+    expect(config).toMatchObject({
+      mode: 'accelerated-soak',
+      expectedStageSha: sha,
+      samples: 90,
+      sampleIntervalSeconds: 60,
+      authRefreshEvery: 10,
+    });
+    expect(() => assertOrderSseRolloutAllowed(config)).not.toThrow();
+    expect(() => parseOrderSseRolloutArgs([
+      '--mode', 'accelerated-soak', '--expected-stage-sha', 'short',
+    ])).toThrow(/40-character/);
   });
 
   it('refuses production, arbitrary hosts, and unapproved writes', () => {
@@ -69,8 +108,27 @@ describe('Order SSE rollout controller', () => {
   it('blocks percentage rollout while allowing shadow preflight when live runtime is false', () => {
     const runtime = validRuntimeConfig(false);
     expect(assertRuntimeConfig(runtime, 'shadow-canary')).toBe(false);
-    expect(() => assertRuntimeConfig(runtime, 'rollout')).toThrow(/percentage rollout is blocked/);
+    expect(() => assertRuntimeConfig(runtime, 'rollout')).toThrow(/realtime qualification is blocked/);
     expect(assertRuntimeConfig(validRuntimeConfig(true), 'rollout')).toBe(true);
+  });
+
+  it('rejects disabled realtime health and mismatched backend deployment identity', () => {
+    const sha = 'a154fef554948d9643630a827cb1aa4795117e54';
+    expect(() => assertBackendReadyPayload({
+      status: 'ready',
+      deployment: { gitCommitSha: sha },
+      checks: { realtime: { status: 'ok', message: 'order realtime stream disabled' } },
+    }, sha)).toThrow(/stream is disabled/);
+    expect(() => assertBackendReadyPayload({
+      status: 'ready',
+      deployment: { gitCommitSha: 'b'.repeat(40) },
+      checks: { realtime: { status: 'ok' } },
+    }, sha)).toThrow(/deployment SHA mismatch/);
+    expect(assertBackendReadyPayload({
+      status: 'ready',
+      deployment: { gitCommitSha: sha },
+      checks: { realtime: { status: 'ok' } },
+    }, sha)).toMatchObject({ status: 'ready' });
   });
 
   it('uses the same deterministic cohort and plans only forward steps', () => {
@@ -113,6 +171,24 @@ describe('Order SSE rollout controller', () => {
     expect(JSON.stringify(result)).not.toContain('raw-access-value');
     expect(JSON.stringify(result)).not.toContain('raw-json-refresh');
     expect(JSON.stringify(result)).not.toContain('hunter2');
+  });
+
+  it('releases bounded fetch ownership after body consumption or explicit stream cleanup', async () => {
+    const consumedCleanup = vi.fn();
+    const consumed = attachFetchResponseCleanup(new Response('ok'), consumedCleanup);
+    await expect(consumed.text()).resolves.toBe('ok');
+    expect(consumedCleanup).toHaveBeenCalledTimes(1);
+
+    const streamCleanup = vi.fn();
+    const stream = attachFetchResponseCleanup(new Response('stream'), streamCleanup);
+    releaseFetchResponse(stream);
+    expect(streamCleanup).toHaveBeenCalledTimes(1);
+
+    const discardedCleanup = vi.fn();
+    const discarded = attachFetchResponseCleanup(new Response('discarded'), discardedCleanup);
+    await discardFetchResponse(discarded);
+    expect(discardedCleanup).toHaveBeenCalledTimes(1);
+    expect(discarded.bodyUsed).toBe(true);
   });
 
   it('advances through every verified step', async () => {
@@ -188,28 +264,187 @@ describe('Order SSE rollout controller', () => {
     expect(setRolloutPercent).not.toHaveBeenCalled();
   });
 
+  it('runs exact accelerated samples on a fixed cadence with periodic re-auth', async () => {
+    const sha = 'a154fef554948d9643630a827cb1aa4795117e54';
+    let clock = Date.parse('2026-08-20T22:00:00.000Z');
+    const resetAuth = vi.fn();
+    const verifyCandidateIdentity = vi.fn(async () => ({
+      stageSha: sha,
+      frontendSha: sha,
+      backendSha: sha,
+    }));
+    const sample = vi.fn(async () => ({ eventLatencyMs: 15, cursorChanged: true, logErrorCount: 0 }));
+    const config = {
+      ...validConfig(),
+      mode: 'accelerated-soak',
+      expectedStageSha: sha,
+      samples: 3,
+      authRefreshEvery: 2,
+      sampleIntervalSeconds: 60,
+    };
+    const dependencies = fakeDependencies({
+      resetAuth,
+      verifyCandidateIdentity,
+      sample,
+      now: () => clock,
+      sleep: async (milliseconds) => { clock += milliseconds; },
+    });
+
+    const result = await runRolloutController(config, dependencies);
+
+    expect(result).toMatchObject({
+      status: 'accelerated_soak_passed',
+      expectedSamples: 3,
+      completedSamples: 3,
+      failureCount: 0,
+      expectedStageSha: sha,
+    });
+    expect(sample).toHaveBeenCalledTimes(3);
+    expect(verifyCandidateIdentity).toHaveBeenCalledTimes(6);
+    expect(resetAuth).toHaveBeenCalledTimes(2);
+    expect(clock).toBe(Date.parse('2026-08-20T22:02:00.000Z'));
+  });
+
+  it('fails accelerated qualification on the first identity error', async () => {
+    const sha = 'a154fef554948d9643630a827cb1aa4795117e54';
+    const dependencies = fakeDependencies({
+      verifyCandidateIdentity: vi.fn(async () => { throw new Error('frontend deployment SHA mismatch'); }),
+      resetAuth: vi.fn(),
+      now: () => 0,
+    });
+    const config = {
+      ...validConfig(),
+      mode: 'accelerated-soak',
+      expectedStageSha: sha,
+      samples: 3,
+    };
+
+    await expect(runRolloutController(config, dependencies)).rejects.toMatchObject({
+      qualification: {
+        expectedSamples: 3,
+        completedSamples: 0,
+        failureCount: 1,
+        failedSample: 1,
+      },
+    });
+  });
+
+  it('writes durable evidence atomically and rejects collisions or partial JSONL', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'order-sse-evidence-'));
+    const now = new Date('2026-08-20T22:00:00.000Z');
+    try {
+      const evidence = createEvidenceLogger(root, 'accelerated-soak', now);
+      evidence.log('run_started', { accessToken: 'must-not-survive' });
+      expect(evidence.validate()).toEqual({ records: 1 });
+      evidence.writeSummary({ status: 'pass' });
+      evidence.close();
+      expect(JSON.parse(readFileSync(evidence.summaryPath, 'utf8'))).toEqual({ status: 'pass' });
+      expect(readdirSync(root).some((name) => name.includes('.tmp-'))).toBe(false);
+      expect(() => createEvidenceLogger(root, 'accelerated-soak', now)).toThrow();
+
+      const partial = createEvidenceLogger(root, 'preflight', now);
+      partial.log('run_started');
+      appendFileSync(partial.jsonlPath, '{partial');
+      expect(() => partial.validate()).toThrow();
+      partial.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('bounds child cleanup after abort so orchestration can reach rollback', async () => {
     const controller = new AbortController();
     const startedAt = Date.now();
     const command = runCommand(process.execPath, [
       '-e',
       "process.on('SIGINT',()=>{}); setInterval(()=>{},1000)",
-    ], { signal: controller.signal });
+    ], {
+      signal: controller.signal,
+      abortIntGraceMs: 25,
+      abortTermGraceMs: 25,
+      abortKillGraceMs: 100,
+    });
     setTimeout(() => controller.abort(), 25);
 
     await expect(command).rejects.toThrow(/aborted/);
     expect(Date.now() - startedAt).toBeLessThan(3000);
   });
 
-  it('shows only guarded heavy-run commands in CLI help', () => {
+  it('requires the exact guarded launcher and direct guard parent proof', () => {
     const source = readFileSync(new URL('./order-sse-rollout.js', import.meta.url), 'utf8');
-    const examples = source.match(/'  .*npm run order-sse:rollout[^']*'/g) || [];
-    expect(examples).toHaveLength(3);
-    for (const example of examples) {
-      expect(example).toContain('rtk nice -n 10 taskset -c 0 /home/ovhtest/.codex/rtk-heavy-guard --');
-    }
+    const launcher = readFileSync(new URL('./order-sse-guarded-run.sh', import.meta.url), 'utf8');
     expect(source).toContain('assertGuardedRuntime();');
-    expect(source).toContain("allowedList !== '0' || getPriority(0) < 10");
+    expect(source).toContain("allowedList !== '0' || getPriority(0) < 10 || !guardedParent");
+    expect(source).toContain('/home/ovhtest/.codex/rtk-heavy-guard');
+    expect(source).toContain("if (!lockReleased) cleanupError = 'rollout lock ownership changed before cleanup'");
+    expect(launcher).toContain('/tmp/codex-rtk-heavy-core.1.lock');
+    expect(launcher).toContain('/tmp/codex-rtk-heavy-core.2.lock');
+    expect(launcher).toContain('flock --no-fork --nonblock --conflict-exit-code 75');
+    expect(launcher).toContain('node --env-file="$PROJECT_ENV"');
+    expect(launcher).not.toContain('dotenv/config');
+    expect(launcher).toContain('node --env-file="$PROJECT_ENV" "$SCRIPT_DIR/order-sse-rollout.js" "$@"');
+    expect(launcher).not.toContain('npm run order-sse:rollout');
+  });
+
+  it('prepares the continuous monitor without enabling it', () => {
+    const installer = readFileSync(
+      new URL('../ops/install-order-sse-continuous-monitor.sh', import.meta.url),
+      'utf8',
+    );
+    const service = readFileSync(
+      new URL('../ops/systemd/order-sse-continuous-monitor.service', import.meta.url),
+      'utf8',
+    );
+    const runner = readFileSync(
+      new URL('../ops/order-sse-continuous-once.sh', import.meta.url),
+      'utf8',
+    );
+    expect(installer).toContain('Prepared only. Start later with:');
+    expect(installer).toContain('is-active --quiet order-sse-continuous-monitor.timer');
+    expect(installer).toContain('is-enabled --quiet order-sse-continuous-monitor.timer');
+    expect(installer).toContain('is-active --quiet order-sse-continuous-monitor.service');
+    expect(installer).toContain('actual_sha="$(git -C "$REPO_DIR" rev-parse --verify HEAD');
+    expect(installer).toContain('candidates/$SHA');
+    expect(installer).toContain('ORDER_SSE_RUNNER_DIR=%s');
+    expect(installer).not.toMatch(/^\s*systemctl --user (?:enable|start)/m);
+    expect(service).toContain('TimeoutStartSec=120s');
+    expect(service).toContain('KillMode=mixed');
+    expect(service).toContain('ExecStart=%h/.local/libexec/erp-order-sse/order-sse-continuous-once.sh');
+    expect(service).not.toContain('/home/ovhtest/projects/erp_dev/repo_erp');
+    expect(runner).toContain("-mtime +30 -delete");
+    expect(runner).toContain('ORDER_SSE_RUNNER_DIR:?ORDER_SSE_RUNNER_DIR is required');
+    expect(runner).toContain('candidate bundle SHA mismatch');
+    expect(runner).toContain("trap 'forward_signal TERM' TERM");
+    expect(runner).toContain("trap 'forward_signal INT' INT");
+    expect(runner).toContain('wait "$child_pid"');
+  });
+
+  it('publishes backend identity only from a clean exact repository HEAD', () => {
+    const deploy = readFileSync(new URL('../ops/deploy-stack.sh', import.meta.url), 'utf8');
+    const compose = readFileSync(
+      new URL('../ops/templates/docker-compose.vps.yml', import.meta.url),
+      'utf8',
+    );
+    const dockerfile = readFileSync(new URL('../backend/Dockerfile', import.meta.url), 'utf8');
+    const identityOverlay = readFileSync(
+      new URL('../ops/templates/docker-compose.backend-build-identity.yml', import.meta.url),
+      'utf8',
+    );
+    expect(deploy).toContain('rev-parse --verify HEAD');
+    expect(deploy).toContain('status --porcelain --untracked-files=normal');
+    expect(deploy).toContain('BACKEND_BUILD_SHA does not match exact repository HEAD');
+    expect(deploy).toContain('export BACKEND_BUILD_SHA="$revision"');
+    expect(deploy).toContain('export BACKEND_BUILD_CONTEXT="$backend_context"');
+    expect(deploy).toContain('export BACKEND_BUILD_IMAGE="$expected_image"');
+    expect(deploy).toContain('BACKEND_IDENTITY_OVERLAY');
+    expect(deploy).toContain('assert_backend_image_revision');
+    expect(deploy).toContain('["services"]["backend"]["image"]');
+    expect(compose).toContain('BACKEND_BUILD_SHA: ${BACKEND_BUILD_SHA:-}');
+    expect(compose).toContain('BACKEND_BUILD_SHA: ${BACKEND_BUILD_SHA:-local}');
+    expect(identityOverlay).toContain('image: ${BACKEND_BUILD_IMAGE:?');
+    expect(identityOverlay).toContain('context: ${BACKEND_BUILD_CONTEXT:?');
+    expect(identityOverlay).toContain('BACKEND_BUILD_SHA: ${BACKEND_BUILD_SHA:?');
+    expect(dockerfile).toContain('LABEL org.opencontainers.image.revision="$BACKEND_BUILD_SHA"');
   });
 });
 
@@ -230,6 +465,9 @@ function validConfig() {
     sampleIntervalSeconds: 1,
     cacheWaitSeconds: 5,
     maxEventLatencyMs: 2000,
+    samples: 90,
+    authRefreshEvery: 10,
+    expectedStageSha: null,
   };
 }
 
@@ -249,6 +487,7 @@ function validRuntimeConfig(orderRealtime) {
   return {
     apiUrl: 'https://backend-test.mebelkz.app',
     features: { backendAuth: true, backendOrdersRead: true, orderRealtime },
+    deployment: { gitCommitSha: null },
   };
 }
 
@@ -265,6 +504,9 @@ function fakeDependencies(overrides = {}) {
     sleep: async () => undefined,
     log: () => undefined,
     signal: new AbortController().signal,
+    verifyCandidateIdentity: async () => ({ stageSha: null, frontendSha: null, backendSha: null }),
+    resetAuth: () => undefined,
+    now: () => Date.now(),
     ...overrides,
   };
 }

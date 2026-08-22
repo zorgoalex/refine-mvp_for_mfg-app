@@ -1,8 +1,8 @@
 import { Table } from '../../../ui/tooltipDelay';
-import { DeleteOutlined, DownloadOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useList } from '@refinedev/core';
 import {
-  Alert, Button, Card, Checkbox, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Typography, Upload, message } from 'antd';
+  Alert, Button, Card, Checkbox, Collapse, Empty, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Spin, Switch, Typography, Upload, message } from 'antd';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../../api/apiError';
 import { cncTelegramApi } from '../../../api/cncTelegramApi';
@@ -29,15 +29,26 @@ import {
 import { DeadlineTransitionRulesConfig } from './DeadlineTransitionRulesConfig';
 import {
   allowedConditionKeysForEvent,
+  addStatusAutomationCondition,
   buildEventTypeSelectOptions,
   buildStatusAutomationRulesExportFile,
   buildCreatePayload,
   buildUpdatePayload,
   describeAction,
   describeConditions,
+  describeFormAction,
+  describeFormConditions,
+  changeStatusAutomationAction,
+  changeStatusAutomationEvent,
   isStatusMappingAction,
   planStatusAutomationRulesImport,
   readStatusAutomationRulesImportSource,
+  removeStatusAutomationCondition,
+  STATUS_AUTOMATION_CONDITION_KEYS,
+  statusAutomationConditionIsFilled,
+  statusAutomationConditionKeysFromForm,
+  validateStatusAutomationRuleBuilder,
+  type StatusAutomationConditionKey,
   type StatusAutomationImportIssue,
   type StatusAutomationCatalogs,
   type StatusAutomationFormValues,
@@ -87,11 +98,11 @@ interface StatusAutomationRulesImportReport {
 }
 
 const ACTION_LABELS: Record<StatusAutomationActionType, string> = {
-  change_order_status: 'Статус заказа',
-  change_production_status: 'Статус производства',
-  change_details_production_status: 'Статус деталей производства',
-  map_order_status_to_details_production_status: 'Маппинг заказа → детали',
-  map_production_status_to_order_status: 'Маппинг производства → заказ',
+  change_order_status: 'Изменить статус заказа',
+  change_production_status: 'Изменить общий статус производства заказа',
+  change_details_production_status: 'Изменить статус всех производственных деталей',
+  map_order_status_to_details_production_status: 'Менять статус деталей по статусу заказа',
+  map_production_status_to_order_status: 'Менять статус заказа по статусу производства',
 };
 
 const SOURCE_OPTIONS: Array<{ value: StatusAutomationOrderSource; label: string }> = [
@@ -110,6 +121,20 @@ const MDF_BOARD_CARD_RULE_LABELS: Record<
 };
 
 const ALL_STATUS_FILTER = [{ field: 'is_active', operator: 'in' as const, value: [true, false] }];
+
+type ConditionKey = StatusAutomationConditionKey;
+
+const CONDITION_LABELS: Record<ConditionKey, string> = {
+  currentOrderStatusIn: 'Статус заказа — один из',
+  currentOrderStatusNotIn: 'Статус заказа — не входит в',
+  currentPaymentStatusIn: 'Статус оплаты — один из',
+  currentPaymentStatusNotIn: 'Статус оплаты — не входит в',
+  currentProductionStatusIn: 'Общий статус производства заказа — один из',
+  currentProductionStatusNotIn: 'Общий статус производства заказа — не входит в',
+  paidShareGte: 'Оплачено не менее',
+  orderSourceIn: 'Источник заказа — один из',
+  firstPaymentOnly: 'Это первый платёж по заказу',
+};
 
 function emptyForm(eventType: StatusAutomationEventType = 'order.created'): StatusAutomationFormValues {
   return {
@@ -217,6 +242,7 @@ export function StatusAutomationConfig() {
     useState<MdfBoardHiddenCardRule[]>([]);
   const [deletingRuleId, setDeletingRuleId] = useState<number | null>(null);
   const [updatingRuleId, setUpdatingRuleId] = useState<number | null>(null);
+  const [activeConditionKeys, setActiveConditionKeys] = useState<ConditionKey[]>([]);
   const {
     getSetting,
     saveSetting,
@@ -326,7 +352,7 @@ export function StatusAutomationConfig() {
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
     );
   const defaultMdfBoardHiddenProductionStatusIds = useMemo(() => {
-    const defaultNames = new Set(DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES);
+    const defaultNames = new Set<string>(DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES);
     return normalizeStatusIds(
       (productionStatusesData?.data ?? [])
         .filter((status) => defaultNames.has(
@@ -455,6 +481,20 @@ export function StatusAutomationConfig() {
     form.actionType === 'map_order_status_to_details_production_status'
       ? activeProductionStatusOptions
       : activeOrderStatusOptions;
+  const targetStatusQuestion =
+    form.actionType === 'change_order_status'
+      ? 'Какой статус установить заказу?'
+      : form.actionType === 'change_details_production_status'
+        ? 'Какой статус установить всем деталям?'
+        : 'Какой общий статус производства установить?';
+  const availableConditionOptions = STATUS_AUTOMATION_CONDITION_KEYS
+    .filter((key) => allowedConditionSet.has(key) && !activeConditionKeys.includes(key))
+    .map((key) => ({ value: key, label: CONDITION_LABELS[key] }));
+  const builderErrors = validateStatusAutomationRuleBuilder(
+    { form, activeConditionKeys },
+    selectedEvent,
+  );
+  const rulePreviewComplete = builderErrors.length === 0;
 
   const loadRules = useCallback(async () => {
     if (!canView) {
@@ -528,58 +568,36 @@ export function StatusAutomationConfig() {
     const descriptor = eventTypeByName.get(eventType);
     const firstAction = descriptor?.allowedActions[0] ?? 'change_order_status';
     setForm({ ...emptyForm(eventType), actionType: firstAction });
+    setActiveConditionKeys([]);
     setEditor({ kind: 'create' });
   };
 
   const openEdit = (rule: StatusAutomationRuleDto) => {
-    setForm(formFromRule(rule));
+    const nextForm = formFromRule(rule);
+    setForm(nextForm);
+    setActiveConditionKeys(statusAutomationConditionKeysFromForm(nextForm));
     setEditor({ kind: 'edit', rule });
   };
 
   const closeEditor = () => {
     setEditor({ kind: 'closed' });
     setForm(emptyForm());
+    setActiveConditionKeys([]);
   };
 
   const handleEventChange = (eventType: StatusAutomationEventType) => {
     const descriptor = eventTypeByName.get(eventType);
-    const allowed = new Set(descriptor?.allowedConditions ?? []);
-    setForm((current) => ({
-      ...current,
-      eventType,
-      actionType: descriptor?.allowedActions.includes(current.actionType)
-        ? current.actionType
-        : descriptor?.allowedActions[0] ?? current.actionType,
-      currentOrderStatusIn: allowed.has('currentOrderStatusIn') ? current.currentOrderStatusIn : [],
-      currentOrderStatusNotIn: allowed.has('currentOrderStatusNotIn')
-        ? current.currentOrderStatusNotIn
-        : [],
-      currentPaymentStatusIn: allowed.has('currentPaymentStatusIn')
-        ? current.currentPaymentStatusIn
-        : [],
-      currentPaymentStatusNotIn: allowed.has('currentPaymentStatusNotIn')
-        ? current.currentPaymentStatusNotIn
-        : [],
-      currentProductionStatusIn: allowed.has('currentProductionStatusIn')
-        ? current.currentProductionStatusIn
-        : [],
-      currentProductionStatusNotIn: allowed.has('currentProductionStatusNotIn')
-        ? current.currentProductionStatusNotIn
-        : [],
-      paidShareGte: allowed.has('paidShareGte') ? current.paidShareGte : undefined,
-      orderSourceIn: allowed.has('orderSourceIn') ? current.orderSourceIn : [],
-      firstPaymentOnly: allowed.has('firstPaymentOnly') ? current.firstPaymentOnly : undefined,
-    }));
+    if (!descriptor) {
+      updateForm({ eventType });
+      return;
+    }
+    const next = changeStatusAutomationEvent({ form, activeConditionKeys }, descriptor);
+    setForm(next.form);
+    setActiveConditionKeys(next.activeConditionKeys);
   };
 
   const handleActionChange = (actionType: StatusAutomationActionType) => {
-    updateForm({
-      actionType,
-      targetStatusId: null,
-      statusMappingEntries: isStatusMappingAction(actionType)
-        ? [{ sourceStatusIds: [], targetStatusId: 0 }]
-        : form.statusMappingEntries,
-    });
+    setForm((current) => changeStatusAutomationAction(current, actionType));
   };
 
   const updateMappingEntry = (
@@ -610,28 +628,21 @@ export function StatusAutomationConfig() {
     }));
   };
 
+  const addCondition = (key: ConditionKey) => {
+    const next = addStatusAutomationCondition({ form, activeConditionKeys }, key);
+    setForm(next.form);
+    setActiveConditionKeys(next.activeConditionKeys);
+  };
+
+  const removeCondition = (key: ConditionKey) => {
+    const next = removeStatusAutomationCondition({ form, activeConditionKeys }, key);
+    setForm(next.form);
+    setActiveConditionKeys(next.activeConditionKeys);
+  };
+
   const handleSave = async () => {
-    if (!form.name.trim()) {
-      message.warning('Укажите название правила');
-      return;
-    }
-    if (!mappingAction && (form.targetStatusId ?? 0) < 1) {
-      message.warning('Выберите целевой статус');
-      return;
-    }
-    if (mappingAction) {
-      if ((form.statusMappingEntries ?? []).some((entry) => entry.sourceStatusIds.length === 0 || entry.targetStatusId < 1)) {
-        message.warning('Заполните строки маппинга');
-        return;
-      }
-      const sourceIds = (form.statusMappingEntries ?? []).flatMap((entry) => entry.sourceStatusIds);
-      if (new Set(sourceIds).size !== sourceIds.length) {
-        message.warning('Один исходный статус нельзя маппить дважды');
-        return;
-      }
-    }
-    if (!selectedEvent || !selectedEvent.allowedActions.includes(form.actionType)) {
-      message.warning('Выберите допустимое действие');
+    if (builderErrors.length > 0) {
+      message.warning(builderErrors[0]);
       return;
     }
 
@@ -869,7 +880,7 @@ export function StatusAutomationConfig() {
 
   const catalogsLoading = orderStatusesLoading || paymentStatusesLoading || productionStatusesLoading;
   const editorOpen = editor.kind !== 'closed';
-  const editorTitle = editor.kind === 'create' ? 'Новое правило автостатусов' : 'Изменить автостатус';
+  const editorTitle = editor.kind === 'create' ? 'Новое правило автостатусов' : 'Изменить правило';
   const rulesImportDisabled =
     !canManage || loading || catalogsLoading || rulesImporting || eventTypes.length === 0;
 
@@ -1124,7 +1135,7 @@ export function StatusAutomationConfig() {
               render: (_, rule) => describeConditions(rule.conditions, catalogs),
             },
             {
-              title: 'Действие → целевой статус',
+              title: 'Результат',
               key: 'action',
               width: 250,
               render: (_, rule) => `${ACTION_LABELS[rule.actionType] ?? rule.actionType} → ${describeAction(rule, catalogs)}`,
@@ -1185,24 +1196,40 @@ export function StatusAutomationConfig() {
         onCancel={closeEditor}
         onOk={() => void handleSave()}
         okButtonProps={{ loading: saving, disabled: !canManage }}
-        okText={editor.kind === 'create' ? 'Создать' : 'Сохранить'}
+        okText={editor.kind === 'create' ? 'Создать правило' : 'Сохранить'}
         cancelText="Отмена"
-        width={760}
+        width={840}
+        bodyStyle={{
+          maxHeight: 'calc(100vh - 180px)',
+          overflowY: 'auto',
+          paddingRight: 6,
+        }}
         destroyOnClose
       >
         <Form layout="vertical">
-          <Form.Item label="Название" required>
+          <Form.Item
+            label="Название правила"
+            required
+            extra="Коротко опишите результат, чтобы правило было легко найти в списке."
+          >
             <Input
+              aria-label="Название правила"
               value={form.name}
               onChange={(event) => updateForm({ name: event.target.value })}
               maxLength={200}
-              placeholder="Например, перевод оплаченного заказа"
+              placeholder="Например: первый платёж подтверждает заказ"
             />
           </Form.Item>
 
-          <Space size={12} style={{ width: '100%' }} align="start">
-            <Form.Item label="Событие" required style={{ flex: 1 }}>
+          <Card size="small" title="1. Когда запускать правило?" style={{ marginBottom: 12 }}>
+            <Form.Item
+              label="Какое событие запускает проверку?"
+              required
+              style={{ marginBottom: 0 }}
+              extra="Условия будут проверены сразу после этого события."
+            >
               <Select<StatusAutomationEventType>
+                aria-label="Событие, запускающее правило"
                 value={form.eventType}
                 onChange={handleEventChange}
                 options={eventTypeOptions}
@@ -1217,8 +1244,160 @@ export function StatusAutomationConfig() {
                 </Text>
               ) : null}
             </Form.Item>
-            <Form.Item label="Действие" required style={{ flex: 1 }}>
+          </Card>
+
+          <Card size="small" title="2. Для каких заказов?" style={{ marginBottom: 12 }}>
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Text type="secondary">
+                Все добавленные условия должны совпасть. Внутри списка достаточно одного из
+                выбранных статусов.
+              </Text>
+              {activeConditionKeys.length === 0 && (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="Без дополнительных условий"
+                  description="Правило будет выполняться для любого заказа после выбранного события."
+                />
+              )}
+              {activeConditionKeys.map((key) => {
+                let control;
+                if (key === 'currentOrderStatusIn' || key === 'currentOrderStatusNotIn') {
+                  const value =
+                    key === 'currentOrderStatusIn'
+                      ? form.currentOrderStatusIn
+                      : form.currentOrderStatusNotIn;
+                  control = (
+                    <Select<number[]>
+                      aria-label={CONDITION_LABELS[key]}
+                      mode="multiple"
+                      value={value ?? []}
+                      onChange={(next) => updateForm({ [key]: next })}
+                      options={activeOrderStatusOptions}
+                      placeholder="Выберите статусы заказа"
+                      style={{ width: '100%' }}
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                  );
+                } else if (
+                  key === 'currentPaymentStatusIn' ||
+                  key === 'currentPaymentStatusNotIn'
+                ) {
+                  const value =
+                    key === 'currentPaymentStatusIn'
+                      ? form.currentPaymentStatusIn
+                      : form.currentPaymentStatusNotIn;
+                  control = (
+                    <Select<number[]>
+                      aria-label={CONDITION_LABELS[key]}
+                      mode="multiple"
+                      value={value ?? []}
+                      onChange={(next) => updateForm({ [key]: next })}
+                      options={activePaymentStatusOptions}
+                      placeholder="Выберите статусы оплаты"
+                      style={{ width: '100%' }}
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                  );
+                } else if (
+                  key === 'currentProductionStatusIn' ||
+                  key === 'currentProductionStatusNotIn'
+                ) {
+                  const value =
+                    key === 'currentProductionStatusIn'
+                      ? form.currentProductionStatusIn
+                      : form.currentProductionStatusNotIn;
+                  control = (
+                    <Select<number[]>
+                      aria-label={CONDITION_LABELS[key]}
+                      mode="multiple"
+                      value={value ?? []}
+                      onChange={(next) => updateForm({ [key]: next })}
+                      options={activeProductionStatusOptions}
+                      placeholder="Выберите общие статусы производства"
+                      style={{ width: '100%' }}
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                  );
+                } else if (key === 'paidShareGte') {
+                  control = (
+                    <InputNumber
+                      aria-label={CONDITION_LABELS[key]}
+                      addonAfter="%"
+                      min={0}
+                      max={100}
+                      value={form.paidShareGte}
+                      onChange={(value) => updateForm({ paidShareGte: value ?? undefined })}
+                      placeholder="50"
+                      style={{ width: 180 }}
+                    />
+                  );
+                } else if (key === 'orderSourceIn') {
+                  control = (
+                    <Select<StatusAutomationOrderSource[]>
+                      aria-label={CONDITION_LABELS[key]}
+                      mode="multiple"
+                      value={form.orderSourceIn ?? []}
+                      onChange={(value) => updateForm({ orderSourceIn: value })}
+                      options={SOURCE_OPTIONS}
+                      placeholder="Выберите источники"
+                      style={{ width: '100%' }}
+                    />
+                  );
+                } else {
+                  control = <Text>Да</Text>;
+                }
+
+                return (
+                  <Card key={key} size="small">
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      <Space
+                        style={{
+                          width: '100%',
+                          justifyContent: 'space-between',
+                        }}
+                        align="start"
+                      >
+                        <Text strong>{CONDITION_LABELS[key]}</Text>
+                        <Button
+                          aria-label={`Удалить условие «${CONDITION_LABELS[key]}»`}
+                          type="text"
+                          danger
+                          size="small"
+                          onClick={() => removeCondition(key)}
+                        >
+                          Удалить
+                        </Button>
+                      </Space>
+                      {control}
+                      {!statusAutomationConditionIsFilled(form, key) && (
+                        <Text type="danger">Заполните значение или удалите это условие.</Text>
+                      )}
+                    </Space>
+                  </Card>
+                );
+              })}
+              {availableConditionOptions.length > 0 && (
+                <Select<ConditionKey>
+                  aria-label="Добавить условие"
+                  key={activeConditionKeys.join('|')}
+                  value={undefined}
+                  onChange={addCondition}
+                  options={availableConditionOptions}
+                  placeholder="+ Добавить условие"
+                  style={{ width: 360, maxWidth: '100%' }}
+                />
+              )}
+            </Space>
+          </Card>
+
+          <Card size="small" title="3. Что сделать?" style={{ marginBottom: 12 }}>
+            <Form.Item label="Что должно произойти?" required>
               <Select<StatusAutomationActionType>
+                aria-label="Действие правила"
                 value={form.actionType}
                 onChange={handleActionChange}
                 options={(selectedEvent?.allowedActions ?? []).map((action) => ({
@@ -1229,196 +1408,129 @@ export function StatusAutomationConfig() {
                 placeholder="Выберите действие"
               />
             </Form.Item>
-          </Space>
 
-          {mappingAction ? (
-            <Form.Item label="Маппинг статусов" required>
+            {mappingAction ? (
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Text type="secondary">
+                  Задайте, какой статус устанавливать для каждой группы исходных статусов.
+                </Text>
                 {(form.statusMappingEntries ?? []).map((entry, index) => (
-                  <Space key={index} align="start" style={{ width: '100%' }}>
-                    <Select<number[]>
-                      mode="multiple"
-                      value={entry.sourceStatusIds}
-                      onChange={(value) => updateMappingEntry(index, { sourceStatusIds: value })}
-                      options={mappingSourceOptions}
-                      style={{ flex: 1, minWidth: 280 }}
-                      placeholder="Исходные статусы"
-                      allowClear
-                      showSearch
-                      optionFilterProp="label"
-                    />
-                    <Select<number>
-                      value={entry.targetStatusId > 0 ? entry.targetStatusId : undefined}
-                      onChange={(value) => updateMappingEntry(index, { targetStatusId: value })}
-                      options={mappingTargetOptions}
-                      style={{ flex: 1, minWidth: 220 }}
-                      placeholder="Целевой статус"
-                      showSearch
-                      optionFilterProp="label"
-                    />
-                    <Button
-                      icon={<DeleteOutlined />}
-                      aria-label="Удалить строку маппинга"
-                      title="Удалить строку"
-                      onClick={() => removeMappingEntry(index)}
-                      disabled={(form.statusMappingEntries ?? []).length <= 1}
-                    />
-                  </Space>
+                  <Card key={index} size="small">
+                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                      <Text strong>
+                        {form.actionType === 'map_order_status_to_details_production_status'
+                          ? 'Если статус заказа один из'
+                          : 'Если общий статус производства один из'}
+                      </Text>
+                      <Select<number[]>
+                        aria-label={`Исходные статусы для соответствия ${index + 1}`}
+                        mode="multiple"
+                        value={entry.sourceStatusIds}
+                        onChange={(value) => updateMappingEntry(index, { sourceStatusIds: value })}
+                        options={mappingSourceOptions}
+                        style={{ width: '100%' }}
+                        placeholder="Выберите исходные статусы"
+                        showSearch
+                        optionFilterProp="label"
+                      />
+                      <Text strong>
+                        {form.actionType === 'map_order_status_to_details_production_status'
+                          ? 'Установить всем деталям статус'
+                          : 'Установить заказу статус'}
+                      </Text>
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        <Select<number>
+                          aria-label={`Целевой статус для соответствия ${index + 1}`}
+                          value={entry.targetStatusId > 0 ? entry.targetStatusId : undefined}
+                          onChange={(value) => updateMappingEntry(index, { targetStatusId: value })}
+                          options={mappingTargetOptions}
+                          style={{ width: '100%' }}
+                          placeholder="Выберите статус"
+                          showSearch
+                          optionFilterProp="label"
+                        />
+                        <Button
+                          aria-label={`Удалить соответствие ${index + 1}`}
+                          danger
+                          onClick={() => removeMappingEntry(index)}
+                          disabled={(form.statusMappingEntries ?? []).length <= 1}
+                        >
+                          Удалить соответствие
+                        </Button>
+                      </Space>
+                    </Space>
+                  </Card>
                 ))}
-                <Button icon={<PlusOutlined />} onClick={addMappingEntry}>Добавить строку</Button>
+                <Button onClick={addMappingEntry}>+ Добавить ещё соответствие</Button>
               </Space>
-            </Form.Item>
-          ) : (
-            <Form.Item label="Целевой статус" required>
-              <Select<number>
-                value={(form.targetStatusId ?? 0) > 0 ? form.targetStatusId ?? undefined : undefined}
-                onChange={(value) => updateForm({ targetStatusId: value })}
-                options={targetStatusOptions}
-                style={{ width: '100%' }}
-                placeholder="Выберите статус"
-                showSearch
-                optionFilterProp="label"
-              />
-            </Form.Item>
-          )}
-
-          <Form.Item label="Условия">
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Form.Item label="Выполнять только при статусах заказа" style={{ marginBottom: 0 }}>
-                <Select<number[]>
-                  mode="multiple"
-                  value={form.currentOrderStatusIn ?? []}
-                  onChange={(value) => updateForm({ currentOrderStatusIn: value })}
-                  options={activeOrderStatusOptions}
-                  disabled={!allowedConditionSet.has('currentOrderStatusIn')}
-                  placeholder="Статусы заказа"
-                  style={{ width: '100%' }}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-              <Form.Item label="Не выполнять при статусах заказа" style={{ marginBottom: 0 }}>
-                <Select<number[]>
-                  mode="multiple"
-                  value={form.currentOrderStatusNotIn ?? []}
-                  onChange={(value) => updateForm({ currentOrderStatusNotIn: value })}
-                  options={activeOrderStatusOptions}
-                  disabled={!allowedConditionSet.has('currentOrderStatusNotIn')}
-                  placeholder="Исключить статусы заказа"
-                  style={{ width: '100%' }}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-              <Form.Item label="Текущие статусы оплаты" style={{ marginBottom: 0 }}>
-                <Select<number[]>
-                  mode="multiple"
-                  value={form.currentPaymentStatusIn ?? []}
-                  onChange={(value) => updateForm({ currentPaymentStatusIn: value })}
-                  options={activePaymentStatusOptions}
-                  disabled={!allowedConditionSet.has('currentPaymentStatusIn')}
-                  placeholder="Статусы оплаты"
-                  style={{ width: '100%' }}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-              <Form.Item label="Исключающие статусы оплаты" style={{ marginBottom: 0 }}>
-                <Select<number[]>
-                  mode="multiple"
-                  value={form.currentPaymentStatusNotIn ?? []}
-                  onChange={(value) => updateForm({ currentPaymentStatusNotIn: value })}
-                  options={activePaymentStatusOptions}
-                  disabled={!allowedConditionSet.has('currentPaymentStatusNotIn')}
-                  placeholder="Исключить статусы оплаты"
-                  style={{ width: '100%' }}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-              <Form.Item label="Текущие статусы производства" style={{ marginBottom: 0 }}>
-                <Select<number[]>
-                  mode="multiple"
-                  value={form.currentProductionStatusIn ?? []}
-                  onChange={(value) => updateForm({ currentProductionStatusIn: value })}
-                  options={activeProductionStatusOptions}
-                  disabled={!allowedConditionSet.has('currentProductionStatusIn')}
-                  placeholder="Статусы производства"
-                  style={{ width: '100%' }}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-              <Form.Item label="Исключающие статусы производства" style={{ marginBottom: 0 }}>
-                <Select<number[]>
-                  mode="multiple"
-                  value={form.currentProductionStatusNotIn ?? []}
-                  onChange={(value) => updateForm({ currentProductionStatusNotIn: value })}
-                  options={activeProductionStatusOptions}
-                  disabled={!allowedConditionSet.has('currentProductionStatusNotIn')}
-                  placeholder="Исключить статусы производства"
-                  style={{ width: '100%' }}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-              <Space wrap align="start">
-                <Form.Item label="Доля оплаты" style={{ marginBottom: 0 }}>
-                  <InputNumber
-                    addonBefore="Оплачено ≥"
-                    addonAfter="%"
-                    min={0}
-                    max={100}
-                    value={form.paidShareGte}
-                    onChange={(value) => updateForm({ paidShareGte: value ?? undefined })}
-                    disabled={!allowedConditionSet.has('paidShareGte')}
-                  />
-                </Form.Item>
-                <Form.Item label="Источник заказа" style={{ marginBottom: 0, minWidth: 230 }}>
-                  <Select<StatusAutomationOrderSource[]>
-                    mode="multiple"
-                    value={form.orderSourceIn ?? []}
-                    onChange={(value) => updateForm({ orderSourceIn: value })}
-                    options={SOURCE_OPTIONS}
-                    disabled={!allowedConditionSet.has('orderSourceIn')}
-                    placeholder="Источник"
-                    style={{ width: '100%' }}
-                    allowClear
-                  />
-                </Form.Item>
-              </Space>
-              <Checkbox
-                checked={form.firstPaymentOnly === true}
-                onChange={(event) => updateForm({ firstPaymentOnly: event.target.checked })}
-                disabled={form.eventType !== 'payment.created' || !allowedConditionSet.has('firstPaymentOnly')}
+            ) : (
+              <Form.Item
+                label={targetStatusQuestion}
+                required
+                style={{ marginBottom: 0 }}
+                extra="Этот статус будет установлен, когда событие произойдёт и все условия совпадут."
               >
-                Только первый платёж
-              </Checkbox>
-            </Space>
-          </Form.Item>
+                <Select<number>
+                  aria-label={targetStatusQuestion}
+                  value={
+                    (form.targetStatusId ?? 0) > 0 ? form.targetStatusId ?? undefined : undefined
+                  }
+                  onChange={(value) => updateForm({ targetStatusId: value })}
+                  options={targetStatusOptions}
+                  style={{ width: '100%' }}
+                  placeholder="Выберите статус"
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            )}
+          </Card>
 
-          <Space size={12} align="start">
-            <Form.Item label="Приоритет" required>
-              <InputNumber
-                min={0}
-                max={100000}
-                value={form.priority}
-                onChange={(value) => updateForm({ priority: value ?? 0 })}
-              />
-            </Form.Item>
-            <Form.Item label="Включено">
-              <Switch
-                checked={form.isEnabled}
-                onChange={(checked) => updateForm({ isEnabled: checked })}
-              />
-            </Form.Item>
-          </Space>
+          <Alert
+            type={rulePreviewComplete ? 'success' : 'info'}
+            showIcon
+            message={rulePreviewComplete ? 'Правило готово' : 'Как будет работать правило'}
+            description={
+              <Space direction="vertical" size={2}>
+                <Text>
+                  <Text strong>КОГДА:</Text> {selectedEvent?.title ?? 'событие не выбрано'}
+                </Text>
+                <Text>
+                  <Text strong>ЕСЛИ:</Text> {describeFormConditions(form, catalogs)}
+                </Text>
+                <Text>
+                  <Text strong>ТО:</Text> {describeFormAction(form, catalogs)}
+                </Text>
+              </Space>
+            }
+            style={{ marginBottom: 12 }}
+          />
+
+          <Collapse style={{ marginBottom: 12 }}>
+            <Collapse.Panel header="Дополнительные настройки" key="advanced">
+              <Form.Item
+                label="Приоритет выполнения"
+                required
+                style={{ marginBottom: 0 }}
+                extra="Из подходящих правил одного типа выполнится только одно — с меньшим числом. Обычно оставьте 100."
+              >
+                <InputNumber
+                  aria-label="Приоритет выполнения"
+                  min={0}
+                  max={100000}
+                  value={form.priority}
+                  onChange={(value) => updateForm({ priority: value ?? 0 })}
+                />
+              </Form.Item>
+            </Collapse.Panel>
+          </Collapse>
+
+          <Checkbox
+            checked={form.isEnabled}
+            onChange={(event) => updateForm({ isEnabled: event.target.checked })}
+          >
+            Активировать правило сразу после сохранения
+          </Checkbox>
         </Form>
       </Modal>
 

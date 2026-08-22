@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { toSheetSelectOptions } from './useSheetMaterialOptions';
+import {
+  isSheetMaterialPickerEnabled,
+  toSheetSelectOptions,
+} from './useSheetMaterialOptions';
 import type { SheetMaterialTypeOption } from './useOrderFormData';
 
 const opts: SheetMaterialTypeOption[] = [
@@ -26,13 +29,28 @@ describe('toSheetSelectOptions', () => {
   });
 });
 
+describe('isSheetMaterialPickerEnabled', () => {
+  it('loads backend references without the legacy Hasura schema flag', () => {
+    expect(isSheetMaterialPickerEnabled(true, true, true, false)).toBe(true);
+  });
+
+  it('keeps the legacy Hasura path behind its schema flag', () => {
+    expect(isSheetMaterialPickerEnabled(true, true, false, false)).toBe(false);
+    expect(isSheetMaterialPickerEnabled(true, true, false, true)).toBe(true);
+  });
+
+  it('still requires backend writes and sheet-material permission', () => {
+    expect(isSheetMaterialPickerEnabled(false, true, true, true)).toBe(false);
+    expect(isSheetMaterialPickerEnabled(true, false, true, true)).toBe(false);
+  });
+});
+
 describe('useSheetMaterialOptions gating (source guard)', () => {
   const src = readFileSync(new URL('./useSheetMaterialOptions.ts', import.meta.url), 'utf8');
 
-  it('gates the picker on backend write AND sheet_materials.view AND the SP3 schema flag', () => {
+  it('gates the picker on backend write and sheet_materials.view', () => {
     expect(src).toContain("can('sheet_materials.view')");
-    expect(src).toMatch(/featureFlags\.useBackendOrdersWrite\s*&&\s*canViewSheetMaterials/);
-    // SP3: the picker must also require the migration 029 Hasura schema flag.
+    expect(src).toContain('featureFlags.useBackendOrdersWrite');
     expect(src).toContain('featureFlags.sheetMaterialsReads');
   });
 

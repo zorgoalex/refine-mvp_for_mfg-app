@@ -154,6 +154,7 @@ async function setupFrontendPageApiMocks(page: Page) {
             contentType: 'application/json',
             body: JSON.stringify({
                 apiUrl: '',
+                hasuraUrl: '/v1/graphql',
                 features: {
                     backendAuth: false,
                     backendPermissions: false,

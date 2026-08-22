@@ -15,10 +15,15 @@ import { useOrderAppSettings } from '../../../../hooks/useOrderAppSettings';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
+import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 
 export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField, payments, details } = useOrderFormStore();
   const { getSetting } = useOrderAppSettings();
+  const businessDetails = useMemo(
+    () => businessOrderDetails(details),
+    [details],
+  );
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 
@@ -28,12 +33,12 @@ export const OrderFinanceSection: React.FC = () => {
   // FIX: Calculate totals directly from details/payments for proper reactivity
   // Previously used useShallow(selectTotals) which didn't react to details changes
   const totals = useMemo(() => ({
-    positions_count: details.length,
-    parts_count: details.reduce((sum, d) => sum + (d.quantity || 0), 0),
-    total_area: calculateOrderTotalArea(details),
+    positions_count: businessDetails.length,
+    parts_count: businessDetails.reduce((sum, d) => sum + (d.quantity || 0), 0),
+    total_area: calculateOrderTotalArea(businessDetails),
     total_paid: payments.reduce((sum, p) => sum + (p.amount || 0), 0),
-    total_amount: details.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
-  }), [details, payments]);
+    total_amount: businessDetails.reduce((sum, d) => sum + (d.detail_cost || 0), 0),
+  }), [businessDetails, payments]);
 
   // State for showing/hiding percent input field
   const [showPercentInput, setShowPercentInput] = useState(false);

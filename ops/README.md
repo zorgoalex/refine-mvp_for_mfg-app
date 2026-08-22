@@ -73,6 +73,21 @@ Rules:
 - Commit non-secret stack changes to `ops/templates/docker-compose.vps.yml`.
 - Commit new env keys with safe defaults/placeholders to
   `ops/templates/env.vps.example`.
+- `ops/deploy-stack.sh` exports `BACKEND_BUILD_SHA` from exact repository HEAD
+  and refuses a dirty checkout, a conflicting caller-provided SHA, or a
+  backend image whose OCI revision label differs from HEAD. Health endpoints
+  publish this identity for immutable rollout qualification.
+- The same deploy script forces `BACKEND_BUILD_CONTEXT` to the `backend/`
+  directory of that exact clean repository; a conflicting caller context is
+  rejected before build.
+- A final Compose identity overlay tags the backend image with exact HEAD and
+  injects the same SHA as Docker build arg. This also covers existing VPS
+  compose files that predate the identity fields in the current template.
+- `ops/install-order-sse-continuous-monitor.sh <40-hex-stage-sha>` requires a
+  clean checkout at that exact SHA and installs an immutable user-level runner
+  bundle. The prepared systemd timer never executes code from a mutable main
+  checkout and is not enabled or started by the installer. Reinstall requires
+  the timer to be both disabled and inactive.
 - Keep real values only in the VPS `.env`.
 - Set `ERP_STACK_ENV=test|prod` explicitly. Test deploys load
   `docker-compose.test.yml` and use `CNC_TELEGRAM_WORKER_ROLE=reader`;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
   CncTelegramBazisCutSetCard,
+  CncTelegramOriginalBoardResponse,
   CncTelegramPacket,
   CncTelegramTodayColumn,
 } from '../../api/types/cncTelegramApi.types';
@@ -11,8 +12,11 @@ import type {
 } from '../../api/types/orderStatusBoardApi.types';
 import {
   applyCncManualMovesToColumns,
+  buildCncOriginalCurrentColumns,
+  buildCncOriginalCurrentLocations,
   buildCncMachineColumnCards,
   buildCncOrderReadiness,
+  buildCncOrderStatusBoardRequestKey,
   cncRelationStatePriority,
   cncManualMoveDestinations,
   cncManualMoveStorageKey,
@@ -51,6 +55,17 @@ import {
 } from './model';
 
 describe('order status board model', () => {
+  it('builds a stable CNC order-board request key for equivalent order sets', () => {
+    const sort = { sortBy: 'priority' as const, sortOrder: 'asc' as const };
+
+    expect(buildCncOrderStatusBoardRequestKey([7, 3, 7], sort)).toBe(
+      buildCncOrderStatusBoardRequestKey([3, 7], sort),
+    );
+    expect(buildCncOrderStatusBoardRequestKey([3, 7], sort)).not.toBe(
+      buildCncOrderStatusBoardRequestKey([3, 7], { ...sort, sortOrder: 'desc' }),
+    );
+  });
+
   it('sorts CNC relation cards by active and related state before dimmed cards', () => {
     const cards: Array<{ id: string; state: CncRelationCardState }> = [
       { id: 'dimmed', state: 'dimmed' },
@@ -227,7 +242,7 @@ describe('order status board model', () => {
   it('keeps CNC today as visual flow without changing status-board API type', () => {
     const disabled = parseOrderStatusBoardViewState(new URLSearchParams('flow=cnc'));
     const state = parseOrderStatusBoardViewState(
-      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712&plannedToday=1'),
+      new URLSearchParams('flow=cnc&date=2026-07-23&period=2w&order=2706&order=2712&plannedToday=1&cardKind=bath&cardId=cut-result%3A42'),
       {
         cncTelegram: true,
       },
@@ -239,11 +254,15 @@ describe('order status board model', () => {
     expect(state.cncOrderSearchPeriod).toBe('2w');
     expect(state.cncOrderFilters).toEqual(['2706', '2712']);
     expect(state.cncPlannedTodayOnly).toBe(true);
+    expect(state.cncCardKind).toBe('bath');
+    expect(state.cncCardId).toBe('cut-result:42');
     const serialized = serializeOrderStatusBoardViewState(state);
     expect(serialized.toString()).toContain('flow=cnc');
     expect(serialized.toString()).toContain('date=2026-07-23');
     expect(serialized.toString()).toContain('period=2w');
     expect(serialized.toString()).toContain('plannedToday=1');
+    expect(serialized.get('cardKind')).toBe('bath');
+    expect(serialized.get('cardId')).toBe('cut-result:42');
     expect(serialized.getAll('order')).toEqual(['2706', '2712']);
     expect(toOrderStatusBoardQuery(state)).toMatchObject({ board: 'order' });
 
@@ -502,6 +521,21 @@ describe('order status board model', () => {
       'b-3000',
     ]);
     expect(filtered[2]?.total).toBe(3);
+
+    const bathColumn = columns[2]!;
+    const withDeepLinkedBath = filterCncBathColumnsByMachineOrderMatches(
+      [
+        ...columns.slice(0, 2),
+        {
+          ...bathColumn,
+          total: 4,
+          baths: [...(bathColumn.baths ?? []), cncBath('cut-result:120', ['9999'])],
+        },
+      ],
+      'cut-result:120',
+    );
+    expect(withDeepLinkedBath[2]?.baths.map((bath) => bath.bathCardId)).toContain('cut-result:120');
+    expect(withDeepLinkedBath[2]?.total).toBe(4);
   });
 
   it('allows MDF manual moves only inside card-specific column groups', () => {
@@ -1227,6 +1261,29 @@ describe('order status board model', () => {
     expect(moved.find((column) => column.key === 'baths')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-mixed']);
     expect(moved.find((column) => column.key === 'baths_laminated')?.baths.map((bath) => bath.bathCardId)).toEqual(['bath-terminal']);
     expect(moved.find((column) => column.key === 'baths_laminated')?.title).toBe('Завершённые ванны');
+  });
+
+  it('reports the Basis cut set location after standard-board hidden-card rules', () => {
+    const response: CncTelegramOriginalBoardResponse = {
+      dateFrom: '2026-06-19',
+      dateTo: '2026-08-19',
+      generatedAt: '2026-08-19T08:00:00.000Z',
+      packets: [],
+      baths: [],
+      bazisCutSets: [{
+        ...cncBazisCutSet(901, [{ orderName: '2700', orderId: 2700, detailId: 1 }]),
+        currentBoardColumn: 'parsed',
+      }],
+    };
+    const currentColumns = applyMdfBoardHiddenCardRulesToColumns(
+      buildCncOriginalCurrentColumns(response),
+      [card(2700, { orderStatusId: 8, orderStatusName: 'Выдан' })],
+      { cardRules: [{ cardKind: 'bazisCutSet', orderStatusIds: [8] }] },
+    );
+
+    expect(buildCncOriginalCurrentLocations(response, currentColumns, {})).toMatchObject({
+      'bazisCutSet:901': 'Распиленные файлы',
+    });
   });
 
   it('removes a bath only when every linked order has left the MDF board', () => {

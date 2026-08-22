@@ -257,6 +257,30 @@ export interface CncTelegramTodayResponseDto {
   columns: CncTelegramTodayColumnDto[];
 }
 
+export interface CncTelegramOriginalPacketDto extends CncTelegramPacketDto {
+  currentBoardVisibility: 'visible' | 'hidden';
+  currentBoardColumn: 'parsed' | 'completed' | 'completed_laminated' | null;
+}
+
+export interface CncTelegramOriginalBathCardDto extends CncTelegramBathCardDto {
+  currentBoardVisibility: 'visible' | 'archived';
+  currentBoardColumn: 'baths' | 'baths_ready' | 'baths_laminated' | 'completed_baths' | null;
+  currentBoardCardId: string | null;
+}
+
+export interface CncTelegramOriginalBazisCutSetCardDto extends CncTelegramBazisCutSetCardDto {
+  currentBoardColumn: 'parsed' | 'completed_laminated';
+}
+
+export interface CncTelegramOriginalBoardResponseDto {
+  dateFrom: string;
+  dateTo: string;
+  generatedAt: string;
+  packets: CncTelegramOriginalPacketDto[];
+  baths: CncTelegramOriginalBathCardDto[];
+  bazisCutSets: CncTelegramOriginalBazisCutSetCardDto[];
+}
+
 export interface CncTelegramOrderCuttingSequenceDto {
   packetId: string;
   externalPacketKey: string;

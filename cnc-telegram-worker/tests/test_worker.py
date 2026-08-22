@@ -285,6 +285,42 @@ class WorkerFingerprintTest(unittest.TestCase):
         self.assertIsNone(groups[0].gcode_message)
         self.assertIs(groups[0].vector_message, vector)
 
+    def test_svg_and_gcode_names_match_cyrillic_filename_lookalikes_only(self) -> None:
+        gcode = FakeMessage(11143, filename="CNC#1_2812-8ММ.TXT")
+        vector = FakeMessage(11144, filename="CNC#1_2812-8MM.svg", mime_type="image/svg+xml")
+
+        groups = group_svg_messages([gcode, vector])
+
+        self.assertEqual(len(groups), 1)
+        self.assertIs(groups[0].gcode_message, gcode)
+
+        unrelated = group_svg_messages([
+            FakeMessage(11143, filename="CNC#1_2813-8ММ.TXT"),
+            vector,
+        ])
+        self.assertEqual(len(unrelated), 1)
+        self.assertIsNone(unrelated[0].gcode_message)
+
+    def test_svg_and_gcode_exact_basename_match_is_preferred(self) -> None:
+        exact = FakeMessage(11143, filename="CNC#1_2812-8MM.TXT")
+        confusable = FakeMessage(11144, filename="CNC#1_2812-8ММ.TXT")
+        vector = FakeMessage(11145, filename="CNC#1_2812-8MM.svg", mime_type="image/svg+xml")
+
+        groups = group_svg_messages([exact, confusable, vector])
+
+        self.assertEqual(len(groups), 1)
+        self.assertIs(groups[0].gcode_message, exact)
+
+    def test_svg_and_gcode_confusable_collision_does_not_attach(self) -> None:
+        first = FakeMessage(11143, filename="CNC#1_2812-8MM.TXT")
+        second = FakeMessage(11144, filename="CNC#1_2812-8МM.TXT")
+        vector = FakeMessage(11145, filename="CNC#1_2812-8ММ.svg", mime_type="image/svg+xml")
+
+        groups = group_svg_messages([first, second, vector])
+
+        self.assertEqual(len(groups), 1)
+        self.assertIsNone(groups[0].gcode_message)
+
     def test_standalone_svg_creates_group_without_image(self) -> None:
         gcode = FakeMessage(70, filename="CNC#1_2700.TXT")
         vector = FakeMessage(71, filename="CNC#1_2700.svg", mime_type="image/svg+xml")

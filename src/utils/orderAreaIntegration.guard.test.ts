@@ -9,7 +9,7 @@ describe('order area aggregate integration', () => {
     const storeSource = read('../stores/orderFormStore.ts');
 
     expect(saveSource).toContain('calculateOrderTotalArea(savedDetails)');
-    expect(storeSource).toContain('total_area: calculateOrderTotalArea(state.details)');
+    expect(storeSource).toContain('total_area: calculateOrderTotalArea(businessDetails)');
     expect(saveSource).not.toMatch(/totalArea\s*=\s*savedDetails\.reduce[\s\S]*?detail\.area/);
     expect(storeSource).not.toMatch(/total_area:\s*state\.details\.reduce[\s\S]*?\.area/);
   });
