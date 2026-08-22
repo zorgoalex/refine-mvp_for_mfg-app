@@ -241,6 +241,9 @@ describe('VPS compose backend runtime flags', () => {
     expect(overlayGlmSegment).toContain('profiles: !override ["cnc-telegram-glm"]');
     expect(overlayGlmSegment).not.toContain('profiles: !override ["cnc-telegram"]');
     expect(overlayWorkerSegment).toContain('profiles: !override ["cnc-telegram"]');
+    expect(overlayWorkerSegment).toContain(
+      'context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:?CNC_TELEGRAM_WORKER_BUILD_CONTEXT must identify the exact repository worker}',
+    );
     expect(overlayWorkerSegment).toContain('command: ["serve"]');
     expect(overlayWorkerSegment).not.toContain('command: ["daemon"]');
     expect(overlay).toContain('ERP_STACK_ENV: ${ERP_STACK_ENV:-test}');

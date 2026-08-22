@@ -121,7 +121,7 @@ services:
   cnc-telegram-worker:
     profiles: !override ["cnc-telegram"]
     build:
-      context: ./repo_erp/cnc-telegram-worker
+      context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:?CNC_TELEGRAM_WORKER_BUILD_CONTEXT must identify the exact repository worker}
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
