@@ -42,7 +42,7 @@ export function buildStyledCutLayoutPreview(
   const palette = cutRenderOrderFillPalette(style);
   const orderIndexByName = new Map<string, number>();
   const fontMm = Math.max(24, Math.round(Math.min(sheet.widthMm, sheet.heightMm) / 40));
-  const pieces = layout.items.map((item) => {
+  const renderedItems = layout.items.map((item, itemIndex) => {
     const background = style.piece.defaultFill;
     const contour = contourForOrderName(item.orderName, orderIndexByName, palette, style.piece.stroke);
     const cx = item.xMm + item.placedWidthMm / 2;
@@ -50,13 +50,15 @@ export function buildStyledCutLayoutPreview(
     const rect = `<rect x="${num(item.xMm)}" y="${num(item.yMm)}" width="${num(item.placedWidthMm)}" height="${num(
       item.placedHeightMm,
     )}" fill="${escapeXml(background)}" stroke="${escapeXml(contour)}" stroke-width="${num(style.piece.strokeWidthMm)}"/>`;
+    const sourceClass = `cut-sheet-piece-source-svg-${itemIndex}`;
     const sourceSvg = renderSourceSvg(
       item.sourceSvg,
       item.xMm,
       item.yMm,
       item.placedWidthMm,
       item.placedHeightMm,
-      cutRenderSourceSvgCss(style, background, contour),
+      cutRenderSourceSvgCss(style, background, contour, `.${sourceClass}`),
+      sourceClass,
     );
     const lines = itemLabelLines(item);
     const labelFill = cutRenderLabelFillForBackground(background, style);
@@ -75,12 +77,18 @@ export function buildStyledCutLayoutPreview(
       fill: labelFill,
       strokeAttrs: labelStrokeAttrs,
     });
-    return `<g>${rect}${sourceSvg}${text}</g>`;
-  }).join('');
+    return {
+      geometry: `<g>${rect}${sourceSvg}</g>`,
+      label: text,
+    };
+  });
+  const geometry = renderedItems.map((item) => item.geometry).join('');
+  const labels = renderedItems.map((item) => item.label).join('');
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${num(sheet.widthMm)} ${num(sheet.heightMm)}">`,
     `<rect x="0" y="0" width="${num(sheet.widthMm)}" height="${num(sheet.heightMm)}" fill="${escapeXml(style.piece.defaultFill)}" stroke="#9aa7b4" stroke-width="3"/>`,
-    pieces,
+    `<g class="cut-sheet-piece-geometry-layer">${geometry}</g>`,
+    `<g class="cut-sheet-piece-label-layer">${labels}</g>`,
     '</svg>',
   ].join('');
 }
@@ -150,10 +158,11 @@ function renderSourceSvg(
   width: number,
   height: number,
   css: string,
+  scopeClass: string,
 ): string {
   if (!sourceSvg?.body.trim()) return '';
   return [
-    `<svg class="cut-sheet-piece-source-svg" x="${num(x)}" y="${num(y)}" width="${num(width)}" height="${num(height)}" viewBox="0 0 ${num(
+    `<svg class="cut-sheet-piece-source-svg ${scopeClass}" x="${num(x)}" y="${num(y)}" width="${num(width)}" height="${num(height)}" viewBox="0 0 ${num(
       sourceSvg.viewBox.widthMm,
     )} ${num(sourceSvg.viewBox.heightMm)}" preserveAspectRatio="none" overflow="hidden">`,
     css ? `<style>${css}</style>` : '',

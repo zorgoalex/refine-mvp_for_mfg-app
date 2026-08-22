@@ -18,9 +18,11 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).toContain('fill="#ffffff" stroke="#dff3d7"');
     expect(rendered).not.toContain('fill="#d7e9ff"');
     expect(rendered).not.toContain('fill="#dff3d7"');
-    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff'));
-    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#dff3d7'));
-    expect(rendered).toContain('<style>.cut-sheet-piece-source-svg *{');
+    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff', '.cut-sheet-piece-source-svg-0'));
+    expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#dff3d7', '.cut-sheet-piece-source-svg-1'));
+    expect(rendered).toContain('class="cut-sheet-piece-source-svg cut-sheet-piece-source-svg-0"');
+    expect(rendered).toContain('class="cut-sheet-piece-source-svg cut-sheet-piece-source-svg-1"');
+    expect(rendered).not.toContain('<style>.cut-sheet-piece-source-svg *{');
     expect(rendered).not.toContain('<style>*{');
     expect(rendered).toContain('fill="#111827" stroke="#ffffff"');
     expect(rendered).toContain('font-weight="800"');
@@ -32,7 +34,13 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).not.toContain('>МДФ 18</tspan>');
     expect(rendered).not.toContain('поз.');
     expect(rendered).not.toContain('300X200');
-    expect(rendered.indexOf('cut-sheet-piece-source-svg')).toBeLessThan(rendered.indexOf('>2723</tspan>'));
+    const geometryLayer = rendered.indexOf('class="cut-sheet-piece-geometry-layer"');
+    const labelLayer = rendered.indexOf('class="cut-sheet-piece-label-layer"');
+    expect(geometryLayer).toBeGreaterThan(-1);
+    expect(labelLayer).toBeGreaterThan(geometryLayer);
+    expect(rendered.lastIndexOf('cut-sheet-piece-source-svg')).toBeLessThan(labelLayer);
+    expect(rendered.indexOf('>2723</tspan>')).toBeGreaterThan(labelLayer);
+    expect(rendered.indexOf('>2724</tspan>')).toBeGreaterThan(labelLayer);
   });
 
   it('uses custom render.styles values in the local upload preview', () => {
@@ -75,8 +83,8 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).toContain('fill="#ffffff" stroke="#e5e7eb" stroke-width="4"');
     expect(rendered).not.toMatch(/<rect[^>]*fill="#111827"/);
     expect(rendered).not.toMatch(/<rect[^>]*fill="#e5e7eb"/);
-    expect(rendered).toContain(cutRenderSourceSvgCss(style, '#ffffff', '#111827'));
-    expect(rendered).toContain(cutRenderSourceSvgCss(style, '#ffffff', '#e5e7eb'));
+    expect(rendered).toContain(cutRenderSourceSvgCss(style, '#ffffff', '#111827', '.cut-sheet-piece-source-svg-0'));
+    expect(rendered).toContain(cutRenderSourceSvgCss(style, '#ffffff', '#e5e7eb', '.cut-sheet-piece-source-svg-1'));
     expect(rendered).not.toContain('vector-effect:non-scaling-stroke!important');
     expect(rendered).toContain('fill="#111827" stroke="#ffffff"');
     expect(rendered).toContain('letter-spacing="-2.4"');

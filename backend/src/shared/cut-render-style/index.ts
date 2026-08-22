@@ -403,6 +403,7 @@ export function cutRenderSourceSvgCss(
   value: CutRenderStyleRef,
   pieceFill?: string | null,
   orderContour?: string | null,
+  scopeSelector = '.cut-sheet-piece-source-svg',
 ): string {
   const style = resolveCutRenderStyle(value);
   const minStrokePx = style.sourceSvg.minStrokePx;
@@ -421,7 +422,7 @@ export function cutRenderSourceSvgCss(
     : '';
   if (vectorEffect) declarations.push(vectorEffect);
   if (declarations.length === 0) return '';
-  return `.cut-sheet-piece-source-svg *{${declarations.join(';')};}`;
+  return `${scopeSelector} *{${declarations.join(';')};}`;
 }
 
 export function cutRenderRawSvgScreenshotMinStrokePx(value: CutRenderStyleRef): number {

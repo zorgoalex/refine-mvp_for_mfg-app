@@ -416,8 +416,8 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
   // from a full-sheet sentinel rect so the function is called once, not per piece.
   const { vw: vbW, vh: vbH } = orientPieceRect({ x: 0, y: 0, w, h }, w, h, rotate90, originTopLeft);
 
-  const pieces = sheet.pieces
-    .map((piece) => {
+  const renderedPieces = sheet.pieces
+    .map((piece, pieceIndex) => {
       const x = sheet.trim_mm.left + piece.x_mm;
       const y = sheet.trim_mm.top + piece.y_mm;
       const pw = piece.width_mm;
@@ -430,9 +430,10 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
       )}" fill="${escapeXml(fill)}" stroke="${escapeXml(stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
-      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect, renderStyle, fill, stroke);
+      const sourceSvgEl = renderPieceSourceSvgFragment(piece, rect, renderStyle, fill, stroke, pieceIndex);
+      const geometry = renderPieceGroup(piece, cx, cy, [rectEl, sourceSvgEl].join(''));
       if (!showLabels) {
-        return renderPieceGroup(piece, cx, cy, [rectEl, sourceSvgEl].join(''));
+        return { geometry, label: '' };
       }
       const resolved = labelFor(piece);
       const lines = Array.isArray(resolved) ? resolved : [resolved];
@@ -441,10 +442,9 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
       const labelStrokeAttrs = labelStroke
         ? ` stroke="${labelStroke.stroke}" stroke-width="${num(labelStroke.strokeWidthMm)}" paint-order="stroke"`
         : '';
-      return renderPieceGroup(piece, cx, cy, [
-        rectEl,
-        sourceSvgEl,
-        renderPieceLabelText({
+      return {
+        geometry,
+        label: renderPieceLabelText({
           lines,
           cx,
           cy,
@@ -455,9 +455,10 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
           fill: labelFill,
           strokeAttrs: labelStrokeAttrs,
         }),
-      ].join(''));
-    })
-    .join('');
+      };
+    });
+  const pieces = renderedPieces.map((piece) => piece.geometry).join('');
+  const labels = renderedPieces.map((piece) => piece.label).join('');
   const guideLabelFontMm = bathMeterGuideLabelFontMm(w, h, input.labelFontMm);
   const bathMeterGuides = input.showBathMeterGuides
     ? renderBathMeterGuides(sheet, rotate90, guideLabelFontMm)
@@ -471,7 +472,8 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     // via resvg fitTo; explicit width/height would make resvg ignore fitTo.
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" data-cut-order-label-font-mm="${num(orderLabelFontMm)}">`,
     `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
-    pieces,
+    `<g class="cut-sheet-piece-geometry-layer">${pieces}</g>`,
+    showLabels ? `<g class="cut-sheet-piece-label-layer">${labels}</g>` : '',
     bathMeterGuides,
     `</svg>`,
   ].join('');
@@ -514,6 +516,7 @@ function renderPieceSourceSvgFragment(
   renderStyle: CutRenderStyleRef = CUT_RENDER_STYLE_DEFAULT,
   pieceFill?: string | null,
   orderContour?: string | null,
+  pieceIndex = 0,
 ): string {
   const source = (piece as {
     source_svg?: {
@@ -539,9 +542,10 @@ function renderPieceSourceSvgFragment(
   ) {
     return '';
   }
-  const css = cutRenderSourceSvgCss(renderStyle, pieceFill, orderContour);
+  const scopeClass = `cut-sheet-piece-source-svg-${pieceIndex}`;
+  const css = cutRenderSourceSvgCss(renderStyle, pieceFill, orderContour, `.${scopeClass}`);
   return [
-    `<svg class="cut-sheet-piece-source-svg" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
+    `<svg class="cut-sheet-piece-source-svg ${scopeClass}" x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(rect.h)}" viewBox="0 0 ${num(width)} ${num(height)}" preserveAspectRatio="none" overflow="hidden">`,
     css ? `<style>${css}</style>` : '',
     body,
     '</svg>',
