@@ -7,8 +7,15 @@ import loadLib from './order-sse-load-lib.js';
 const {
   assertIsolatedLoadAllowed,
   assertIsolatedTargetResolution,
+  assertSharedStageCleanupAllowed,
+  assertSharedStageLoadAllowed,
+  assertSharedStageTargetResolution,
+  calculateCpuBusyPercent,
   consumeSseCommentChunk,
+  consumeSseLoadChunk,
+  evaluateSharedStageCpuSafety,
   parseOrderSseLoadArgs,
+  parseProcStatCpuSnapshot,
   readLoadCredentials,
 } = loadLib;
 
@@ -109,5 +116,122 @@ describe('Order SSE isolated load safety', () => {
     expect(first).toEqual({ remainder: ': keep', heartbeats: 0 });
     const second = consumeSseCommentChunk(first.remainder, '-alive\r\n\n: next\n');
     expect(second).toEqual({ remainder: '', heartbeats: 2 });
+  });
+
+  it('parses split heartbeat and invalidation SSE frames', () => {
+    const first = consumeSseLoadChunk('', ': keep-alive\n\nevent: order.invalidate\nid: cursor-1\nda');
+    expect(first).toMatchObject({ heartbeats: 1, invalidations: [], invalidFrames: 0 });
+    const second = consumeSseLoadChunk(
+      first.remainder,
+      'ta: {"orderId":11569,"cursor":"cursor-1","domains":["detail_status"]}\n\n',
+    );
+    expect(second).toEqual({
+      remainder: '',
+      heartbeats: 0,
+      invalidFrames: 0,
+      invalidations: [{
+        id: 'cursor-1',
+        data: { orderId: 11569, cursor: 'cursor-1', domains: ['detail_status'] },
+      }],
+    });
+    const malformed = consumeSseLoadChunk('', 'event: order.invalidate\nid: cursor-2\ndata: {nope}\n\n');
+    expect(malformed).toMatchObject({ invalidations: [], invalidFrames: 1 });
+  });
+});
+
+describe('Order SSE guarded shared-stage load safety', () => {
+  const validStageConfig = () => parseOrderSseLoadArgs([
+    '--target-env', 'shared-stage',
+    '--backend-url', 'https://backend-test.mebelkz.app/api/v1',
+    '--log-root', '/evidence',
+    '--connections-per-user', '3',
+    '--reconnect-rounds', '2',
+    '--round-seconds', '180',
+    '--expected-stage-sha', 'a'.repeat(40),
+    '--expected-backend-sha', 'b'.repeat(40),
+    '--run-id', '20260822t180000z-stage-load',
+    '--order-id', '11569',
+  ]);
+  const sharedRunner = { hostname: 'vps-01fca05c', sharedMarkerPresent: true };
+  const approval = { ORDER_SSE_LOAD_APPROVE_SHARED_STAGE: 'true' };
+
+  it('accepts only the exact shared runner, stage target and bounded gate shape', () => {
+    expect(() => assertSharedStageLoadAllowed(validStageConfig(), approval, sharedRunner)).not.toThrow();
+    expect(() => assertSharedStageLoadAllowed(validStageConfig(), {}, sharedRunner)).toThrow(/APPROVE_SHARED_STAGE/);
+    expect(() => assertSharedStageLoadAllowed(
+      validStageConfig(),
+      approval,
+      { hostname: 'other-runner', sharedMarkerPresent: false },
+    )).toThrow(/guarded ERP shared host/);
+    expect(() => assertSharedStageLoadAllowed(
+      { ...validStageConfig(), backendUrl: 'https://backend-ovh.mebelkz.app/api/v1' },
+      approval,
+      sharedRunner,
+    )).toThrow(/backend-test/);
+    expect(() => assertSharedStageLoadAllowed(
+      { ...validStageConfig(), clients: 199 },
+      approval,
+      sharedRunner,
+    )).toThrow(/exactly 200/);
+    expect(() => assertSharedStageLoadAllowed(
+      { ...validStageConfig(), connectionsPerUser: 4 },
+      approval,
+      sharedRunner,
+    )).toThrow(/exactly 3 connections/);
+    expect(() => assertSharedStageLoadAllowed(
+      { ...validStageConfig(), rampClients: [50, 100, 200] },
+      approval,
+      sharedRunner,
+    )).toThrow(/ramp must be/);
+  });
+
+  it('requires shared DNS and allows exact-run fixture cleanup only on this host', async () => {
+    await expect(assertSharedStageTargetResolution(
+      validStageConfig(),
+      async () => [{ address: '::ffff:135.125.181.241', family: 6 }],
+    )).resolves.toBeUndefined();
+    await expect(assertSharedStageTargetResolution(
+      validStageConfig(),
+      async () => [{ address: '192.0.2.25', family: 4 }],
+    )).rejects.toThrow(/outside the ERP shared host/);
+
+    const cleanup = parseOrderSseLoadArgs([
+      '--target-env', 'shared-stage',
+      '--cleanup-run-id', '20260822t180000z-stage-load',
+    ]);
+    expect(() => assertSharedStageCleanupAllowed(cleanup, approval, sharedRunner)).not.toThrow();
+    expect(() => assertSharedStageCleanupAllowed(cleanup, approval, {
+      hostname: 'other-runner',
+      sharedMarkerPresent: false,
+    })).toThrow(/ERP shared host/);
+  });
+
+  it('parses four-core samples and fails closed on CPU3 or three saturated cores', () => {
+    const previous = parseProcStatCpuSnapshot([
+      'cpu 0 0 0 0 0 0 0 0 0 0',
+      'cpu0 100 0 100 800 0 0 0 0 0 0',
+      'cpu1 100 0 100 800 0 0 0 0 0 0',
+      'cpu2 100 0 100 800 0 0 0 0 0 0',
+      'cpu3 100 0 100 800 0 0 0 0 0 0',
+    ].join('\n'));
+    const safeCurrent = parseProcStatCpuSnapshot([
+      'cpu 0 0 0 0 0 0 0 0 0 0',
+      'cpu0 190 0 100 810 0 0 0 0 0 0',
+      'cpu1 180 0 100 820 0 0 0 0 0 0',
+      'cpu2 130 0 100 870 0 0 0 0 0 0',
+      'cpu3 110 0 100 890 0 0 0 0 0 0',
+    ].join('\n'));
+    const safeBusy = calculateCpuBusyPercent(previous, safeCurrent);
+    expect(safeBusy).toEqual([90, 80, 30, 10]);
+    expect(evaluateSharedStageCpuSafety(safeBusy)).toMatchObject({ safe: true });
+    expect(evaluateSharedStageCpuSafety([90, 90, 90, 10])).toMatchObject({
+      safe: false,
+      reason: 'three_or_more_cpus_saturated',
+    });
+    expect(evaluateSharedStageCpuSafety([20, 20, 20, 51])).toMatchObject({
+      safe: false,
+      reason: 'reserved_cpu_busy',
+    });
+    expect(() => parseProcStatCpuSnapshot('cpu0 1 2 3 4 5')).toThrow(/exactly four/);
   });
 });
