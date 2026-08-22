@@ -14,7 +14,7 @@ import type {
   OrderStatusBoardType,
 } from '../../api/types/orderStatusBoardApi.types';
 
-const COMPLETED_ORDER_STATUS_NAMES = new Set(['завершен', 'завершён']);
+const COMPLETED_ORDER_STATUS_NAMES = new Set<string>(['завершен', 'завершён']);
 export interface MdfBoardHiddenStatusesSetting {
   productionStatusIds?: number[];
   orderStatusIds?: number[];
@@ -47,7 +47,7 @@ export const DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES = [
   'выдан',
 ] as const;
 
-const MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES = new Set(
+const MDF_DEFAULT_HIDDEN_PRODUCTION_STATUS_NAMES = new Set<string>(
   DEFAULT_MDF_BOARD_HIDDEN_PRODUCTION_STATUS_NAMES,
 );
 const DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES = [
@@ -55,7 +55,7 @@ const DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES = [
   'завершен',
   'завершён',
 ] as const;
-const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set(DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES);
+const MDF_HIDDEN_ORDER_STATUS_NAMES = new Set<string>(DEFAULT_MDF_BOARD_HIDDEN_ORDER_STATUS_NAMES);
 export type OrderStatusBoardVisualFlow = OrderStatusBoardType | 'cnc_today';
 export type CncOrderSearchPeriod = '1d' | '1w' | '2w' | '1m';
 export type CncCardDisplayMode = 'standard' | 'compact' | 'minimal' | 'screenshot';

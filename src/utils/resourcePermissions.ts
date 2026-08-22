@@ -5,7 +5,11 @@ import { can, type PermissionCarrier } from './permissions';
 type RoleAwarePermissionCarrier =
   (PermissionCarrier & { role?: string; role_id?: number; roleId?: number }) | null | undefined;
 
-const PACKER_HASURA_SELECT_RESOURCES = new Set<string>(['order_statuses']);
+const PACKER_HASURA_SELECT_RESOURCES = new Set<string>([
+  'order_statuses',
+  'production_statuses',
+  'production_status_events',
+]);
 const APP_SETTINGS_READ_ROLES = new Set([
   'superadmin',
   'admin',

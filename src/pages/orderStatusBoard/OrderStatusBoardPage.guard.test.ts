@@ -7,6 +7,10 @@ const page = readFileSync(
 );
 const model = readFileSync('src/pages/orderStatusBoard/model.ts', 'utf8');
 const app = readFileSync('src/App.tsx', 'utf8');
+const siderMenuItems = readFileSync('src/utils/siderMenuItems.ts', 'utf8');
+const customSider = readFileSync('src/components/CustomSider.tsx', 'utf8');
+const cncTelegramApi = readFileSync('src/api/cncTelegramApi.ts', 'utf8');
+const orderStatusBoardApi = readFileSync('src/api/orderStatusBoardApi.ts', 'utf8');
 const css = readFileSync(
   'src/pages/orderStatusBoard/orderStatusBoard.css',
   'utf8',
@@ -190,7 +194,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('opens the dedicated MDF work board on today unless a card deep-link provides its workday', () => {
     expect(page).toContain("const todayCncWorkday = dayjs().format('YYYY-MM-DD');");
-    expect(page).toContain("fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current");
+    expect(page).toContain("active && fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current");
     expect(page).toContain('const hasExplicitMdfCardDeepLink = Boolean(');
     expect(page).toMatch(/mdfWorkdayTodayOpenPatchNeeded\s*=\s*[\s\S]*?!hasExplicitMdfCardDeepLink/);
     expect(page).toContain('filterCncBathColumnsByMachineOrderMatches(cncOrderFilteredColumns, preservedCncBathCardId)');
@@ -200,7 +204,11 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page.indexOf('deepLinkFocusAppliedRef.current = key;')).toBeLessThan(page.indexOf('target.focus({ preventScroll: true });'));
     expect(page).toContain('updateViewState({ cncWorkday: todayCncWorkday, cncOrderFilters: [] });');
     expect(page).toContain('if (mdfWorkdayTodayOpenPatchNeeded) return;');
-    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
+    expect(page).toContain('<OrderStatusBoardPage');
+    expect(page).toContain('active={active}');
+    expect(page).toContain('eagerFirstViewport');
+    expect(page).toContain('fixedView="cnc_today"');
+    expect(page).toContain('defaultCncOrderSearchPeriod="1m"');
   });
 
   it('shows click help icons explaining how cards leave columns', () => {
@@ -220,7 +228,7 @@ describe('OrderStatusBoardPage UX guards', () => {
 
   it('refreshes MDF order statuses and forces status-owned order columns', () => {
     expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
-    expect(page).toContain('setCncOrderBoard(orderBoardResponse);');
+    expect(page).toContain('startTransition(() => setCncOrderBoard(orderBoardResponse));');
     expect(page).toContain('function collectCncOrderStatusBoardIds(');
     expect(page).toContain('resolveCncOrderStatusColumn(card) === null');
     expect(page).toContain('const statusColumn = resolveCncOrderStatusColumn(card);');
@@ -395,7 +403,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain("querySelectorAll<HTMLElement>('.status-board-column__cards')");
     expect(page).toContain("cardList.scrollTo({ top: 0, behavior: 'smooth' })");
     expect(page).toContain("activeCncRelation.kind === 'order'");
-    expect(page).toContain('const sortedOrderCards = orderSourceCards;');
+    expect(page).toContain('const sortedOrderCards = deferOverflowCards');
     expect(page).toContain('scrollStatusBoardColumnCardsToTop(boardViewportRef.current)');
     expect(page).toContain('[activeCncRelation, cncRelationsEnabled, isCncToday]');
   });
@@ -601,6 +609,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('Свойство сортировки заказов МДФ-доски');
     expect(page).toContain('Направление сортировки заказов МДФ-доски');
     expect(page).toContain('fetchCncOrderStatusBoard(cncOrderIds, {');
+    expect(page).toContain('orderStatusBoardApi.consumePrefetchedGet(');
+    expect(page).toContain('hasPrefetchedCncOrderStatusBoard(');
+    expect(page).toContain('readMdfInitialSnapshot()');
+    expect(page).toContain('clearMdfInitialSnapshot(initialMdfSnapshot)');
+    expect(page).toContain('CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN = 6');
+    expect(page).toContain('CNC_OVERFLOW_CARD_DELAY_MS = 1_200');
+    expect(page).toContain('onWheel={revealOverflowCards}');
+    expect(page).toContain('export async function prefetchMdfOrderStatusBoard(');
+    expect(page).toContain('manualMoves: mapMdfBoardManualMovesResponse(manualMovesResponse.moves)');
+    expect(page).toContain('if (preserveInitialSnapshot) {');
+    expect(page).toContain('preserveInitialMdfOrderBoardRef.current = false');
+    expect(page).toContain('if (!preserveInitialManualMoves) void loadManualMoves()');
     expect(page).toContain('orderSort={cncOrderSortPreference}');
     expect(page).toContain('compareCncOrderBoardCards');
   });
@@ -611,14 +631,18 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('defaultCncOrderSearchPeriod?: CncOrderSearchPeriod;');
     expect(page).toContain('defaultCncOrderSearchPeriod = DEFAULT_CNC_ORDER_SEARCH_PERIOD');
     expect(page).toContain('defaultCncOrderSearchPeriod,');
-    expect(page).toContain('<OrderStatusBoardPage fixedView="cnc_today" defaultCncOrderSearchPeriod="1m" />');
+    expect(page).toContain('<OrderStatusBoardPage');
+    expect(page).toContain('active={active}');
+    expect(page).toContain('eagerFirstViewport');
+    expect(page).toContain('fixedView="cnc_today"');
+    expect(page).toContain('defaultCncOrderSearchPeriod="1m"');
     expect(page).toContain("{isCncToday ? 'МДФ-работы' : 'Доски статусов'}");
     expect(page).toContain('{!fixedView && (');
     expect(page).not.toContain("{ key: 'cnc_today', label: 'МДФ-работы' }");
     expect(app).toContain('name: "mdf-work-board"');
     expect(app).toContain('list: "/mdf-work-board"');
     expect(app).toContain('<Route path="/mdf-work-board">');
-    expect(page).toContain('cncTelegramApi.today');
+    expect(page).toContain('cncTelegramApi.consumePrefetchedToday');
     expect(page).not.toContain('workday ? { date: workday } : {}');
     expect(page).toContain('<CncTelegramTodayColumns');
     expect(page).toContain("parsed: 'Файлы на станке'");
@@ -1035,12 +1059,12 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('const cncStrongRefreshInFlightRef = useRef(false)');
     expect(page).toContain('const cncAuxiliaryRefreshRevisionRef = useRef(0)');
     expect(page).toContain('const auxiliaryRevision = ++cncAuxiliaryRefreshRevisionRef.current');
-    expect(page).toContain("cncTelegramApi.today({");
+    expect(page).toContain("cncTelegramApi.consumePrefetchedToday({");
     expect(page).toContain("}, { cache: 'no-store' })");
     expect(page).toContain("fetchCncManualMoves({ cache: 'no-store' })");
     expect(page).toContain('refetchMdfBoardSettings()');
     expect(page).toContain('const refreshedOrderIds = collectCncOrderStatusBoardIds(');
-    expect(page).toContain('fetchCncOrderStatusBoard(refreshedOrderIds, {');
+    expect(page).toContain('fetchCncOrderStatusBoard(\n              refreshedOrderIds,');
     expect(page).toContain("}, { cache: 'no-store' });");
     expect(page).toContain('cncAuxiliaryRefreshRevisionRef.current !== auxiliaryRevision');
     expect(page).toContain('cncStrongRefreshInFlightRef.current = false');
@@ -1160,8 +1184,8 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('? buildCncRelationContext(cncShownDataColumns, cncOrderCards, activeCncRelation)');
     expect(page).toContain("key: 'orders' as const");
     expect(page).toContain("orders: 'Заказы'");
-    expect(page).toContain('orderStatusBoardApi.get({');
-    expect(page).toContain('orderIds: chunk');
+    expect(page).toContain('orderStatusBoardApi.consumePrefetchedGet(');
+    expect(page).toContain('cncOrderStatusBoardQuery(chunk, sortPreference)');
     expect(page).toContain('CNC_ORDER_STATUS_REFRESH_MS');
     expect(page).toContain('const alreadyLoaded = cncOrderBoardRequestKeyRef.current === requestKey;');
     expect(page).toContain('if (!alreadyLoaded) void loadOrderBoard();');
@@ -1182,9 +1206,9 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('highlightedOrderKeys.has(orderKey)');
     expect(page).toContain('cncRelationOrderKeys(');
     expect(page).toContain('cnc-order-number--highlighted');
-    expect(page).toContain('const bathCards = relationContext');
-    expect(page).toContain('const machineFileCards = buildCncMachineColumnCards(');
-    expect(page).toContain('machineFileCards.map((entry) =>');
+    expect(page).toContain('const allBathCards = relationContext');
+    expect(page).toContain('const allMachineFileCards = buildCncMachineColumnCards(');
+    expect(page).toContain('machineFileCards.map((entry, cardIndex) =>');
     expect(page).toContain("kind: 'bazisCutSet',");
     expect(page).toContain('id: bazisCutSet.bazisCutSetId');
     expect(page).toContain("active.kind === 'bazisCutSet'");
@@ -1254,6 +1278,45 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('border-color: #722ed1');
     expect(css).toContain('0 0 0 2px #722ed1');
     expect(css).not.toContain('transition: all');
+  });
+
+  it('hydrates only near-viewport MDF cards in standard mode', () => {
+    expect(page).toContain("displayMode !== 'standard'");
+    expect(page).toContain("{ rootMargin: '240px 80px' }");
+    expect(page).toContain('const CNC_INITIAL_EAGER_COLUMNS = 4;');
+    expect(page).toContain('if (initiallyVisible) return false;');
+    expect(page).toContain('columnIndex < CNC_INITIAL_EAGER_COLUMNS');
+    expect(page).toContain('cardIndex < CNC_INITIAL_VISIBLE_CARDS_PER_COLUMN');
+    expect(page).not.toContain('}, 1_500);');
+    expect(page).toContain('const cleanup = observeDeferredCncCard(element, () => setRevealed(true));');
+    expect(page).toContain('fallbackLabel={card.orderName || String(card.orderId)}');
+    expect(page).toContain('onPointerEnter={() => setRevealed(true)}');
+    expect(page).toContain('previous.contentIdentity === next.contentIdentity');
+    expect(page).toContain('previous.renderDependencies.every(');
+    expect(page).toContain('<CncDeferredCard');
+    expect(page).toContain('focusedCardKind={viewState.cncCardKind}');
+    expect(page).toContain('focusedCardId={viewState.cncCardId}');
+    expect(page).toContain('setCncOrderBoardLoading(true);');
+    expect(page).toContain('startTransition(() => setCncOrderBoard(orderBoardResponse));');
+    expect(css).toContain('.cnc-deferred-card--revealed');
+  });
+
+  it('refreshes expired MDF prefetch data when the operator navigates to the board', () => {
+    expect(siderMenuItems).toContain("MDF_BOARD_PREFETCH_EVENT = 'erp:mdf-board-prefetch'");
+    expect(siderMenuItems).toContain('requestMdfBoardPrefetch(route);');
+    expect(customSider).toContain('onClick: () => sider.handleNavigate(item.route)');
+    expect(app).toContain('MDF_PREFETCH_COOLDOWN_MS = 25_000');
+    expect(app).toContain('MDF_PREFETCH_REFRESH_MS = 25_000');
+    expect(cncTelegramApi).toContain('CNC_TODAY_PREFETCH_MAX_AGE_MS = 20_000');
+    expect(orderStatusBoardApi).toContain('STATUS_BOARD_PREFETCH_MAX_AGE_MS = 20_000');
+    expect(app).toContain("document.visibilityState !== 'visible'");
+    expect(app).toContain("window.location.pathname === '/mdf-work-board'");
+    expect(app).toContain('window.setInterval(warmMdfData, MDF_PREFETCH_REFRESH_MS)');
+    expect(app).toContain("document.addEventListener('visibilitychange', warmVisibleMdfData)");
+    expect(app).toContain('window.clearInterval(refreshTimer)');
+    expect(app).toContain("document.removeEventListener('visibilitychange', warmVisibleMdfData)");
+    expect(app).toContain('window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
+    expect(app).toContain('window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
   });
 
   it('opens MDF order cards from the order number without stealing the whole-card relation click', () => {

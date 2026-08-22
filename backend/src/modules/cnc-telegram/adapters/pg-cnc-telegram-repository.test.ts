@@ -34,6 +34,15 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('p.source_chat_id IS DISTINCT FROM $3');
   });
 
+  it('loads independent MDF card sources concurrently', () => {
+    const listTodayStart = repositorySource.indexOf('async listToday(');
+    const listTodayEnd = repositorySource.indexOf('\n  async listOriginalBoard(', listTodayStart);
+    const listTodaySource = repositorySource.slice(listTodayStart, listTodayEnd);
+    expect(listTodaySource).toContain('const [rows, baths, bazisCutSets] = await Promise.all([');
+    expect(listTodaySource).toContain('loadBathCards(this.database, workdayFrom, workdayTo)');
+    expect(listTodaySource).toContain('loadPeriodBazisCutSetCards(this.database, workdayFrom, workdayTo)');
+  });
+
   it('aggregates repeated SVG layout matches before placement-count comparison', () => {
     expect(repositorySource).toContain('existing.quantity + item.quantity');
     expect(repositorySource).toContain('countByLayoutKey.set(key, (countByLayoutKey.get(key) ?? 0) + 1)');

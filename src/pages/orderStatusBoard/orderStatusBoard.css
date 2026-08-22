@@ -1071,6 +1071,26 @@
   overscroll-behavior: contain;
 }
 
+.cnc-deferred-card {
+  width: 100%;
+  min-height: 148px;
+  flex: 0 0 auto;
+}
+
+.cnc-deferred-card--revealed {
+  display: contents;
+}
+
+.cnc-deferred-card__preview {
+  box-sizing: border-box;
+  min-height: 148px;
+  padding: 14px;
+  display: flex;
+  align-items: flex-start;
+  color: var(--app-text-muted);
+  background: color-mix(in srgb, var(--app-surface, #fff) 94%, var(--app-border));
+}
+
 .status-board-column__empty {
   padding: 28px 10px;
   color: var(--app-text-muted);

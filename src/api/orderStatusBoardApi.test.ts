@@ -42,6 +42,38 @@ describe('orderStatusBoardApi MDF manual moves', () => {
     );
   });
 
+  it('reuses a matching prefetched board batch once', async () => {
+    const response = {
+      generatedAt: '2026-08-11T00:00:00.000Z',
+      filterKey: 'production',
+      columns: [],
+    };
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const query = {
+      board: 'production' as const,
+      limit: 60,
+      includeDone: true,
+      orderIds: [1, 2],
+      sortBy: 'orderNumber' as const,
+      sortOrder: 'asc' as const,
+    };
+
+    const prefetched = orderStatusBoardApi.prefetchGet(query);
+    expect(orderStatusBoardApi.hasPrefetchedGet(query)).toBe(true);
+    const consumed = orderStatusBoardApi.consumePrefetchedGet(query, { cache: 'no-store' });
+    expect(orderStatusBoardApi.hasPrefetchedGet(query)).toBe(false);
+    await Promise.all([prefetched, consumed]);
+    await orderStatusBoardApi.consumePrefetchedGet(query, { cache: 'no-store' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('saves and clears a card move with encoded card identity', async () => {
     const upsertResponse = {
       generatedAt: '2026-08-11T00:00:00.000Z',

@@ -6329,6 +6329,19 @@
                     ],
                     "select_permissions": [
                         {
+                            "role": "packer",
+                            "permission": {
+                                "columns": [
+                                    "event_id",
+                                    "order_id",
+                                    "production_status_id",
+                                    "event_at"
+                                ],
+                                "filter": {}
+                            },
+                            "comment": "Read-only production stage markers for order header"
+                        },
+                        {
                             "role": "manager",
                             "permission": {
                                 "columns": "*",
@@ -6457,6 +6470,21 @@
                         }
                     ],
                     "select_permissions": [
+                        {
+                            "role": "packer",
+                            "permission": {
+                                "columns": [
+                                    "production_status_id",
+                                    "production_status_name",
+                                    "production_status_code",
+                                    "sort_order",
+                                    "color",
+                                    "is_active"
+                                ],
+                                "filter": {}
+                            },
+                            "comment": "Read-only production stage catalog for order header"
+                        },
                         {
                             "role": "manager",
                             "permission": {

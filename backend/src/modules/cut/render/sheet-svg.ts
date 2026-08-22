@@ -131,7 +131,6 @@ const BATH_ORDER_FONT_SCALE = 4;
 const BATH_DETAIL_META_FONT_SCALE = 2;
 const BATH_DIMENSION_EDGE_INSET_RATIO = 0.55;
 const BATH_DIMENSION_RESERVED_RATIO = 1.05;
-const BATH_PDF_SHEET_FILL = '#f7f7f7';
 const BATH_DETAIL_META_LINE_SPACING = 0.9;
 const BATH_DETAIL_META_GLYPH_HEIGHT_RATIO = 0.75;
 const BATH_CENTER_PREVIOUS_BASELINE_DISTANCE_RATIO = 1.1;
@@ -471,7 +470,7 @@ export function buildSheetSvg(input: BuildSheetSvgInput): string {
     // viewBox only (no width/height attrs): the px size is chosen at raster time
     // via resvg fitTo; explicit width/height would make resvg ignore fitTo.
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" data-cut-order-label-font-mm="${num(orderLabelFontMm)}">`,
-    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="#9aa7b4" stroke-width="3"/>`,
+    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
     pieces,
     bathMeterGuides,
     `</svg>`,
@@ -571,7 +570,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
       const stroke = fillFor?.(piece) ?? renderStyle.piece.stroke;
       const rectEl = `<rect x="${num(rect.x)}" y="${num(rect.y)}" width="${num(rect.w)}" height="${num(
         rect.h,
-      )}" fill="${BATH_PDF_SHEET_FILL}" stroke="${escapeXml(stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
+      )}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`;
 
       const sideTexts: string[] = [];
       let reservedTop = 0;
@@ -634,7 +633,7 @@ export function buildBathProfileSheetSvg(input: BuildSheetSvgInput): string {
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">`,
-    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${BATH_PDF_SHEET_FILL}" stroke="#9aa7b4" stroke-width="3"/>`,
+    `<rect x="0" y="0" width="${num(vbW)}" height="${num(vbH)}" fill="${escapeXml(renderStyle.piece.defaultFill)}" stroke="${escapeXml(renderStyle.piece.stroke)}" stroke-width="${num(renderStyle.piece.strokeWidthMm)}"/>`,
     pieces,
     bathMeterGuides,
     `</svg>`,

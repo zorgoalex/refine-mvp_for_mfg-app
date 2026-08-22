@@ -8,7 +8,7 @@ import { CheckOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { useDataProvider, useList, useUpdate, useInvalidate } from '@refinedev/core';
 import { useOrderFormStore, useOrderDraftStoreApi } from '../../../stores/orderFormStore';
-import { useProductionStatusEvent } from '../../../hooks/useProductionStatusEvent';
+import type { UseProductionStatusEventResult } from '../../../hooks/useProductionStatusEvent';
 import {
   createProductionActionIdempotencyKey,
   formatProductionActionPermissionDeniedMessage,
@@ -28,6 +28,7 @@ export interface OrderHeaderContextMenuProps {
   x: number;
   y: number;
   onClose: () => void;
+  productionStatusEvents: UseProductionStatusEventResult;
 }
 
 /**
@@ -39,15 +40,13 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
   x,
   y,
   onClose,
+  productionStatusEvents,
 }) => {
   const { header, updateHeaderField } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
   const currentUser = authSession.getUser();
   const packerMode = isPackerUser(currentUser);
-  const { toggleOrderEvent, events, refetch } = useProductionStatusEvent({
-    orderId: header.order_id,
-    enabled: !packerMode,
-  });
+  const { toggleOrderEvent, events, refetch } = productionStatusEvents;
   const { mutate: updateOrder } = useUpdate();
   const invalidate = useInvalidate();
   const dataProvider = useDataProvider();

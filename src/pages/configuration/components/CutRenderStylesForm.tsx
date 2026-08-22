@@ -272,7 +272,8 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
       <Alert
         type="info"
         showIcon
-        message="Эти правила используются для MDF-превью, карточек файлов станка и Telegram-скринов SVG-раскроя."
+        message="SVG-превью использует отдельный профиль."
+        description="Настройки визуала PDF находятся прямо в редакторе PDF-шаблонов, рядом с живым предпросмотром."
       />
 
       <Card
@@ -308,9 +309,9 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
             {
               title: 'Действия',
               key: 'actions',
-              width: 420,
+              width: 570,
               render: (_, template) => (
-                <Space wrap>
+                <Space wrap={false} style={{ whiteSpace: 'nowrap' }}>
                   <Button size="small" onClick={() => setSelectedTemplateId(template.id)}>
                     Редактировать
                   </Button>
@@ -343,6 +344,7 @@ export const CutRenderStylesForm: React.FC<CutRenderStylesFormProps> = ({
               ),
             },
           ]}
+          scroll={{ x: 900 }}
         />
       </Card>
 

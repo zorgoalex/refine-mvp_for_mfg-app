@@ -21,6 +21,12 @@ import type Konva from 'konva';
 import { Group as KonvaGroup, Layer, Line as KonvaLine, Rect as KonvaRect, Stage, Text as KonvaText, Transformer } from 'react-konva';
 import { useList } from '@refinedev/core';
 import {
+  CUT_RENDER_STYLES_SETTING_KEY,
+  CUT_RENDER_STYLE_DEFAULT,
+  parseCutRenderStylesSetting,
+  type CutRenderStyleProfile,
+} from '@shared/cut-render-style';
+import {
   cutConfigApi,
   type CutConfig,
   type CutPdfFieldCatalogItem,
@@ -45,9 +51,11 @@ import {
   buildProfileCopyName,
   detectEngineParamAnomalies,
   extractEligibilityCodes,
+  findCutRenderStylesSetting,
   findSetting,
   formToParams,
   paramsToForm,
+  readCutRenderStylesSetting,
   summarizeParams,
 } from './cutConfigHelpers';
 import { CutDefaultSettingsCard } from './CutDefaultSettingsCard';
@@ -393,11 +401,19 @@ export const CutConfigTab: React.FC = () => {
           {
             key: 'pdf-template-editor',
             label: 'Редактирование шаблонов карт раскроя PDF',
-            children: <PdfTemplateEditor templates={config.pdfTemplates} canManage={canManage} onTemplateSaved={updatePdfTemplateInConfig} />,
+            children: (
+              <PdfTemplateEditor
+                config={config}
+                templates={config.pdfTemplates}
+                canManage={canManage}
+                onTemplateSaved={updatePdfTemplateInConfig}
+                onSettingSaved={updateSettingInConfig}
+              />
+            ),
           },
           {
             key: 'render-style-settings',
-            label: 'Настройки рендера',
+            label: 'Рендер SVG и PDF',
             children: <CutRenderStylesForm config={config} canManage={canManage} onSaved={updateSettingInConfig} />,
           },
         ]}
@@ -479,9 +495,11 @@ interface PdfTemplateDraft {
 }
 
 interface PdfTemplateEditorProps {
+  config: CutConfig;
   templates: CutPdfTemplate[];
   canManage: boolean;
   onTemplateSaved: (template: CutPdfTemplate) => void;
+  onSettingSaved: (setting: CutSettingRow) => void;
 }
 
 type PdfTemplateEditorLayoutMode = 'standard' | 'wide' | 'rightAccordion';
@@ -702,7 +720,12 @@ const BATH_PROFILE_PDF_ELEMENTS: PdfTemplateElement[] = [
   makePdfElement('text', { id: 'bath-label-utilization-unit', label: 'Процент утилизации', text: '%', x: 226, y: 188.4, w: 6, h: 4.8, style: { fontSize: 9, color: '#111111' } }),
 ];
 
-const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canManage, onTemplateSaved }) => {
+const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ config, templates, canManage, onTemplateSaved, onSettingSaved }) => {
+  const renderSettingRow = useMemo(() => findCutRenderStylesSetting(config.settings), [config.settings]);
+  const resolvedRenderSetting = useMemo(() => readCutRenderStylesSetting(config.settings), [config.settings]);
+  const savedPdfRenderProfile = resolvedRenderSetting.profiles[CUT_RENDER_STYLE_DEFAULT];
+  const [pdfRenderProfile, setPdfRenderProfile] = useState<CutRenderStyleProfile>(() => cloneCutRenderProfile(savedPdfRenderProfile));
+  const [savingRenderStyle, setSavingRenderStyle] = useState(false);
   const [drafts, setDrafts] = useState<PdfTemplateDraft[]>(() => loadPdfTemplateDrafts(templates));
   const [savingDraft, setSavingDraft] = useState(false);
   const [selectedCode, setSelectedCode] = useState(() => templates[0]?.code ?? drafts[0]?.code ?? 'standard');
@@ -757,6 +780,14 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     [fieldPaletteColumnWidth],
   );
   const editingCustomField = customFields.find((field) => field.fieldId === editingCustomFieldId) ?? null;
+  const pdfRenderStyleDirty = useMemo(
+    () => JSON.stringify(pdfRenderProfile) !== JSON.stringify(savedPdfRenderProfile),
+    [pdfRenderProfile, savedPdfRenderProfile],
+  );
+
+  useEffect(() => {
+    setPdfRenderProfile(cloneCutRenderProfile(savedPdfRenderProfile));
+  }, [savedPdfRenderProfile]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1063,6 +1094,36 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
     });
   }, [canManage, drafts, publishDraftAsTemplate, savingDraft, selectedCode, templateCodes]);
 
+  const savePdfRenderProfile = useCallback(async (): Promise<boolean> => {
+    if (!pdfRenderStyleDirty) return true;
+    if (!renderSettingRow) {
+      message.error(`Настройка ${CUT_RENDER_STYLES_SETTING_KEY} не создана миграцией`);
+      return false;
+    }
+    setSavingRenderStyle(true);
+    try {
+      const nextSetting = parseCutRenderStylesSetting({
+        ...resolvedRenderSetting,
+        profiles: {
+          ...resolvedRenderSetting.profiles,
+          [CUT_RENDER_STYLE_DEFAULT]: cloneCutRenderProfile(pdfRenderProfile),
+        },
+      });
+      const saved = await cutConfigApi.updateSetting(
+        CUT_RENDER_STYLES_SETTING_KEY,
+        nextSetting,
+        renderSettingRow.version,
+      );
+      onSettingSaved(saved);
+      return true;
+    } catch (error) {
+      message.error(error instanceof ApiError ? error.message : 'Не удалось сохранить визуал PDF');
+      return false;
+    } finally {
+      setSavingRenderStyle(false);
+    }
+  }, [onSettingSaved, pdfRenderProfile, pdfRenderStyleDirty, renderSettingRow, resolvedRenderSetting]);
+
   const saveDrafts = useCallback(async () => {
     if (!selected) return;
     const templateName = selected.name.trim();
@@ -1093,6 +1154,11 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
       setSavingDraft(false);
     }
   }, [publishDraftAsTemplate, selected, templates]);
+
+  const saveEditor = useCallback(async () => {
+    if (!await savePdfRenderProfile()) return;
+    await saveDrafts();
+  }, [saveDrafts, savePdfRenderProfile]);
 
   const addCustomField = useCallback(() => {
     if (!selected) return;
@@ -1358,16 +1424,16 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
           <Text type="secondary">Название</Text>
           <Input
             value={selected.name}
-            disabled={!canManage || savingDraft}
+            disabled={!canManage || savingDraft || savingRenderStyle}
             maxLength={200}
             status={selectedNameValid ? undefined : 'error'}
             placeholder="Название шаблона PDF"
             style={{ width: 280 }}
             onChange={(event) => renameSelectedTemplate(event.target.value)}
-            onPressEnter={() => void saveDrafts()}
+            onPressEnter={() => void saveEditor()}
           />
         </Space>
-        <Button icon={<SaveOutlined />} type="primary" disabled={!canManage || !selectedNameValid} loading={savingDraft} onClick={() => void saveDrafts()}>
+        <Button icon={<SaveOutlined />} type="primary" disabled={!canManage || !selectedNameValid} loading={savingDraft || savingRenderStyle} onClick={() => void saveEditor()}>
           Сохранить
         </Button>
         <Button icon={<CopyOutlined />} disabled={!canManage || savingDraft || !selectedNameValid} loading={savingDraft} onClick={() => void saveTemplateAsCopy()}>
@@ -1402,6 +1468,67 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
         </Button>
       </Space>
 
+      <Card
+        size="small"
+        title="Настройки визуала раскроя в PDF"
+        extra={pdfRenderStyleDirty ? <Tag color="orange">есть изменения</Tag> : <Tag color="green">сохранено</Tag>}
+      >
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Text type="secondary">Изменения сразу видны на миниатюре листа и сохраняются общей кнопкой «Сохранить».</Text>
+          <Row gutter={[12, 10]} align="bottom">
+            <Col xs={24} md={8}>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>Толщина линий PDF</Text>
+              <InputNumber
+                min={0.1}
+                max={20}
+                step={0.1}
+                addonAfter="мм"
+                value={pdfRenderProfile.piece.strokeWidthMm}
+                disabled={!canManage}
+                style={{ width: '100%' }}
+                onChange={(value) => {
+                  const strokeWidthMm = Number(value ?? pdfRenderProfile.piece.strokeWidthMm);
+                  setPdfRenderProfile((current) => ({
+                    ...current,
+                    piece: { ...current.piece, strokeWidthMm },
+                    sourceSvg: { ...current.sourceSvg, minStrokePx: strokeWidthMm },
+                  }));
+                }}
+              />
+            </Col>
+            <Col xs={24} md={8}>
+              <PdfRenderColorControl
+                label="Цвет линий PDF"
+                value={pdfRenderProfile.piece.stroke}
+                disabled={!canManage}
+                onChange={(stroke) => setPdfRenderProfile((current) => ({
+                  ...current,
+                  piece: { ...current.piece, stroke },
+                  sourceSvg: { ...current.sourceSvg, fixedStroke: stroke },
+                }))}
+              />
+            </Col>
+            <Col xs={24} md={8}>
+              <PdfRenderColorControl
+                label="Фон листа PDF"
+                value={pdfRenderProfile.piece.defaultFill}
+                disabled={!canManage}
+                onChange={(defaultFill) => setPdfRenderProfile((current) => ({
+                  ...current,
+                  piece: { ...current.piece, defaultFill },
+                }))}
+              />
+            </Col>
+          </Row>
+          <Button
+            disabled={!canManage || !pdfRenderStyleDirty}
+            onClick={() => setPdfRenderProfile(cloneCutRenderProfile(savedPdfRenderProfile))}
+          >
+            Отменить изменения визуала
+          </Button>
+        </Space>
+      </Card>
+
       <Row gutter={[16, 16]} align="top" className="cut-pdf-template-editor-row" style={editorRowStyle}>
         {!wideCanvas && !rightAccordionLayout && (
           <Col xs={24} className="cut-pdf-template-editor-field-col">
@@ -1429,6 +1556,7 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
             >
               <PdfTemplateCanvas
                 draft={selected}
+                pdfRenderProfile={pdfRenderProfile}
                 fields={fields}
                 previewValues={previewValues}
                 selectedElementIds={selectedElementIds}
@@ -1501,8 +1629,43 @@ const PdfTemplateEditor: React.FC<PdfTemplateEditorProps> = ({ templates, canMan
   );
 };
 
+function PdfRenderColorControl({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const pickerValue = /^#[0-9a-f]{6}$/i.test(value) ? value : '#000000';
+  return (
+    <div>
+      <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>{label}</Text>
+      <Space.Compact block>
+        <input
+          type="color"
+          aria-label={label}
+          value={pickerValue}
+          disabled={disabled}
+          style={{ width: 44, minHeight: 32, padding: 3, border: '1px solid #d9d9d9', borderRadius: '6px 0 0 6px', background: '#fff' }}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <Input value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      </Space.Compact>
+    </div>
+  );
+}
+
+function cloneCutRenderProfile(profile: CutRenderStyleProfile): CutRenderStyleProfile {
+  return JSON.parse(JSON.stringify(profile)) as CutRenderStyleProfile;
+}
+
 const PdfTemplateCanvas: React.FC<{
   draft: PdfTemplateDraft;
+  pdfRenderProfile: CutRenderStyleProfile;
   fields: PdfFieldCatalogItem[];
   previewValues: Record<string, string>;
   selectedElementIds: string[];
@@ -1522,6 +1685,7 @@ const PdfTemplateCanvas: React.FC<{
   onDropField: (field: PdfFieldCatalogItem, x: number, y: number) => void;
 }> = ({
   draft,
+  pdfRenderProfile,
   fields,
   previewValues,
   selectedElementIds,
@@ -1825,6 +1989,7 @@ const PdfTemplateCanvas: React.FC<{
                 <PdfKonvaElement
                   key={element.id}
                   element={element}
+                  pdfRenderProfile={pdfRenderProfile}
                   fieldLabels={fieldLabels}
                   previewValues={previewValues}
                   selected={selectedElementIds.includes(element.id)}
@@ -1963,6 +2128,7 @@ const PdfTemplateCanvas: React.FC<{
 
 const PdfKonvaElement: React.FC<{
   element: PdfTemplateElement;
+  pdfRenderProfile: CutRenderStyleProfile;
   fieldLabels: Map<string, string>;
   previewValues: Record<string, string>;
   selected: boolean;
@@ -1973,7 +2139,7 @@ const PdfKonvaElement: React.FC<{
   onDragStart: (node: Konva.Node, event: Konva.KonvaEventObject<DragEvent>) => void;
   onDragMove: (node: Konva.Node, event: Konva.KonvaEventObject<DragEvent>) => void;
   onDragEnd: () => void;
-}> = ({ element, fieldLabels, previewValues, selected, interactive, showAllBounds, nodeRef, onSelect, onDragStart, onDragMove, onDragEnd }) => {
+}> = ({ element, pdfRenderProfile, fieldLabels, previewValues, selected, interactive, showAllBounds, nodeRef, onSelect, onDragStart, onDragMove, onDragEnd }) => {
   const common = {
     ref: nodeRef,
     x: element.x,
@@ -2012,11 +2178,6 @@ const PdfKonvaElement: React.FC<{
   if (element.type === 'sheet_thumbnail') {
     const w = Math.max(element.w, 1);
     const h = Math.max(element.h, 1);
-    const orderContourColors = new Map([
-      ['11380', '#2563eb'],
-      ['11381', '#15803d'],
-      ['11382', '#d97706'],
-    ]);
     const pieces = [
       { x: w * 0.07, y: h * 0.08, w: w * 0.34, h: h * 0.24, order: '11380', widthLabel: '800', heightLabel: '240', edge: 'ПВХ 2мм', milling: 'Модерн', doweling: true },
       { x: w * 0.45, y: h * 0.08, w: w * 0.46, h: h * 0.18, order: '11380', widthLabel: '780', heightLabel: '180', edge: 'ABS 1мм', milling: 'Паз', doweling: false },
@@ -2026,7 +2187,7 @@ const PdfKonvaElement: React.FC<{
     return (
       <React.Fragment>
         <KonvaGroup {...common} width={w} height={h}>
-          <KonvaRect x={0} y={0} width={w} height={h} fill="#ffffff" stroke={String(element.style.color ?? '#111111')} strokeWidth={Number(element.style.strokeWidth ?? 0.25)} />
+          <KonvaRect x={0} y={0} width={w} height={h} fill={pdfRenderProfile.piece.defaultFill} stroke={pdfRenderProfile.piece.stroke} strokeWidth={pdfRenderProfile.piece.strokeWidthMm} />
           {pieces.map((piece, index) => {
             const detailFontSize = Math.max(1.8, Math.min(3.8, Math.min(piece.w, piece.h) * 0.12));
             const orderFontSize = detailFontSize * 1.25;
@@ -2061,7 +2222,7 @@ const PdfKonvaElement: React.FC<{
                 clipHeight={piece.h}
                 listening={false}
               >
-                <KonvaRect x={0} y={0} width={piece.w} height={piece.h} fill="#ffffff" stroke={orderContourColors.get(piece.order) ?? '#1f2d3d'} strokeWidth={0.35} listening={false} />
+                <KonvaRect x={0} y={0} width={piece.w} height={piece.h} fill={pdfRenderProfile.piece.defaultFill} stroke={pdfRenderProfile.piece.stroke} strokeWidth={pdfRenderProfile.piece.strokeWidthMm} listening={false} />
                 <KonvaText
                   x={1}
                   y={0.5}

@@ -816,6 +816,11 @@ html {
 
 .app-table-horizontal-edge-button .anticon {
   font-size: 18px;
+  transition: transform 150ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.app-table-horizontal-edge-button[data-scrolls-back="true"] .anticon {
+  transform: rotate(180deg);
 }
 
 [data-theme="dark"] .app-table-horizontal-edge-button {

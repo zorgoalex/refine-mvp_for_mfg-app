@@ -459,30 +459,28 @@ export class PgCncTelegramRepository
       await currentDatabaseWorkday(this.database);
     const workdayFrom = command.workdayFrom ?? workday;
     const workdayTo = command.workdayTo ?? workday;
-    const rows = await this.database.query<PacketJoinedRow>(
-      packetSelectSql(`
-        p.workday BETWEEN $1::date AND $2::date
-        AND p.mdf_board_hidden_at IS NULL
-        AND p.mdf_board_card_kind = 'machine_file'
-        AND (
-          p.source_chat_id IS DISTINCT FROM $3
-          OR EXISTS (
-            SELECT 1
-            FROM outbox_events manual_svg_mdf_card
-            WHERE manual_svg_mdf_card.idempotency_key =
-              'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+    const [rows, baths, bazisCutSets] = await Promise.all([
+      this.database.query<PacketJoinedRow>(
+        packetSelectSql(`
+          p.workday BETWEEN $1::date AND $2::date
+          AND p.mdf_board_hidden_at IS NULL
+          AND p.mdf_board_card_kind = 'machine_file'
+          AND (
+            p.source_chat_id IS DISTINCT FROM $3
+            OR EXISTS (
+              SELECT 1
+              FROM outbox_events manual_svg_mdf_card
+              WHERE manual_svg_mdf_card.idempotency_key =
+                'cnc-manual-svg:' || p.packet_id::text || ':source-' || p.source_version::text || ':mdf-card-created'
+            )
           )
-        )
-      `),
-      [workdayFrom, workdayTo, MANUAL_SVG_CHAT_ID],
-    );
+        `),
+        [workdayFrom, workdayTo, MANUAL_SVG_CHAT_ID],
+      ),
+      loadBathCards(this.database, workdayFrom, workdayTo),
+      loadPeriodBazisCutSetCards(this.database, workdayFrom, workdayTo),
+    ]);
     const packets = mapPacketRows(rows.rows);
-    const baths = await loadBathCards(this.database, workdayFrom, workdayTo);
-    const bazisCutSets = await loadPeriodBazisCutSetCards(
-      this.database,
-      workdayFrom,
-      workdayTo,
-    );
     return {
       workday: workdayTo,
       generatedAt: new Date().toISOString(),

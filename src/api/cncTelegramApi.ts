@@ -1,4 +1,5 @@
 import { apiRoutes } from './apiRoutes';
+import { authSession } from './authSession';
 import { httpClient, type RequestOptions } from './httpClient';
 import { withQuery } from './ordersApi';
 import type {
@@ -28,6 +29,27 @@ export interface CncTelegramTodayQuery {
   dateTo?: string;
 }
 
+interface CncTodayPrefetch {
+  key: string;
+  sessionGeneration: number;
+  createdAt: number;
+  promise: Promise<CncTelegramTodayResponse>;
+}
+
+const CNC_TODAY_PREFETCH_MAX_AGE_MS = 20_000;
+let cncTodayPrefetch: CncTodayPrefetch | null = null;
+
+function cncTodayQueryKey(query: CncTelegramTodayQuery): string {
+  return withQuery(apiRoutes.cncTelegram.today, query);
+}
+
+function requestCncToday(
+  query: CncTelegramTodayQuery,
+  options?: RequestOptions,
+): Promise<CncTelegramTodayResponse> {
+  return httpClient.get<CncTelegramTodayResponse>(cncTodayQueryKey(query), options);
+}
+
 export const cncTelegramApi = {
   originalBoard(options?: RequestOptions): Promise<CncTelegramOriginalBoardResponse> {
     return httpClient.get<CncTelegramOriginalBoardResponse>(
@@ -39,10 +61,44 @@ export const cncTelegramApi = {
     query: CncTelegramTodayQuery = {},
     options?: RequestOptions,
   ): Promise<CncTelegramTodayResponse> {
-    return httpClient.get<CncTelegramTodayResponse>(
-      withQuery(apiRoutes.cncTelegram.today, query),
-      options,
-    );
+    return requestCncToday(query, options);
+  },
+  prefetchToday(query: CncTelegramTodayQuery): Promise<CncTelegramTodayResponse> {
+    const key = cncTodayQueryKey(query);
+    const sessionGeneration = authSession.getSessionGeneration();
+    if (
+      cncTodayPrefetch
+      && cncTodayPrefetch.key === key
+      && cncTodayPrefetch.sessionGeneration === sessionGeneration
+      && Date.now() - cncTodayPrefetch.createdAt <= CNC_TODAY_PREFETCH_MAX_AGE_MS
+    ) {
+      return cncTodayPrefetch.promise;
+    }
+    const promise = requestCncToday(query, { cache: 'no-store' });
+    const entry: CncTodayPrefetch = {
+      key,
+      sessionGeneration,
+      createdAt: Date.now(),
+      promise,
+    };
+    cncTodayPrefetch = entry;
+    void promise.catch(() => {
+      if (cncTodayPrefetch === entry) cncTodayPrefetch = null;
+    });
+    return promise;
+  },
+  consumePrefetchedToday(
+    query: CncTelegramTodayQuery = {},
+    options?: RequestOptions,
+  ): Promise<CncTelegramTodayResponse> {
+    const entry = cncTodayPrefetch;
+    const valid = entry
+      && entry.key === cncTodayQueryKey(query)
+      && entry.sessionGeneration === authSession.getSessionGeneration()
+      && Date.now() - entry.createdAt <= CNC_TODAY_PREFETCH_MAX_AGE_MS;
+    if (!valid) return requestCncToday(query, options);
+    cncTodayPrefetch = null;
+    return entry.promise.catch(() => requestCncToday(query, options));
   },
   orderCuttingSequences(orderId: number): Promise<CncTelegramOrderCuttingSequencesResponse> {
     if (!Number.isInteger(orderId) || orderId <= 0) {

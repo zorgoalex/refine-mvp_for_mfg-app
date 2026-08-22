@@ -5,6 +5,14 @@ import type { SidebarMenuOrderPreference } from '../api/types/profileApi.types';
 
 export type SiderResource = IResourceItem;
 
+export const MDF_BOARD_PREFETCH_EVENT = 'erp:mdf-board-prefetch';
+
+export function requestMdfBoardPrefetch(route: string): void {
+  if (typeof window === 'undefined') return;
+  if (route.split(/[?#]/, 1)[0] !== '/mdf-work-board') return;
+  window.dispatchEvent(new Event(MDF_BOARD_PREFETCH_EVENT));
+}
+
 export interface SiderMenuItem {
   name: string;
   label: string;
@@ -491,6 +499,7 @@ export function useSiderMenuItems(input: UseSiderMenuItemsInput): SiderMenuData 
   );
 
   const handleNavigate = (route: string) => {
+    requestMdfBoardPrefetch(route);
     push(route);
   };
 

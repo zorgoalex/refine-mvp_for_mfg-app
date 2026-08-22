@@ -15,6 +15,9 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   const baseConfig = buildFrontendRuntimeConfig();
   const config = {
     ...baseConfig,
+    deployment: {
+      gitCommitSha: normalizeGitCommitSha(process.env.VERCEL_GIT_COMMIT_SHA),
+    },
     apiUrl: baseConfig.apiUrl || inferRuntimeApiUrl(req),
     hasuraUrl: baseConfig.hasuraUrl || inferRuntimeHasuraUrl(req),
     features: {
@@ -31,6 +34,11 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   return res.status(200).json(config);
+}
+
+function normalizeGitCommitSha(value: string | undefined): string | null {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  return /^[0-9a-f]{40}$/.test(normalized) ? normalized : null;
 }
 
 function inferRuntimeApiUrl(req: VercelRequest): string {

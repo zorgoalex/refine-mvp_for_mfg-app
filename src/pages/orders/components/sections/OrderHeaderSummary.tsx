@@ -13,6 +13,7 @@ import { getMaterialColor } from '../../../../config/displayColors';
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from '../../../../utils/materialDisplayName';
 import { ProductionStagesDisplay } from '../../../../components/ProductionStagesDisplay';
 import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { useProductionStatusEvent } from '../../../../hooks/useProductionStatusEvent';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
@@ -22,7 +23,10 @@ import { calculateOrderTotalArea } from '../../../../utils/orderArea';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
 import { collectOrderBasisProjects } from './orderBasisProjects';
 import { buildOrderHeaderMaterialSummaryItems } from '../../orderMaterialsSummary';
-import { resolveCurrentProductionStatusCodes } from '../../currentProductionStatus';
+import {
+  buildActiveProductionStatusCodeMap,
+  resolveActiveProductionEventCodes,
+} from '../../currentProductionStatus';
 import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 
 const { Text } = Typography;
@@ -35,6 +39,9 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
   const isOperational = useOperationalUi();
   const { header, details, hdfDetails, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
   const { getSetting } = useAppSettings();
+  const productionStatusEvents = useProductionStatusEvent({
+    orderId: header.order_id,
+  });
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
@@ -153,27 +160,6 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     },
   });
 
-  // Load production status
-  const { data: productionStatusData } = useOne({
-    resource: 'production_statuses',
-    id: header.production_status_id as number,
-    queryOptions: {
-      enabled: !!header.production_status_id,
-    },
-  });
-
-  // Load production status events for this order (all recorded statuses)
-  const { data: productionEventsData } = useList({
-    resource: 'production_status_events',
-    filters: header.order_id
-      ? [{ field: 'order_id', operator: 'eq', value: header.order_id }]
-      : [],
-    pagination: { pageSize: 100 },
-    queryOptions: {
-      enabled: !!header.order_id,
-    },
-  });
-
   // Load all production statuses for mapping
   const { data: allProductionStatusesData } = useList({
     resource: 'production_statuses',
@@ -185,11 +171,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
 
   // Create maps for production status lookup
   const productionStatusIdToCode = useMemo(() => {
-    const map = new Map<number, string>();
-    (allProductionStatusesData?.data || []).forEach((status: any) => {
-      map.set(status.production_status_id, status.production_status_code);
-    });
-    return map;
+    return buildActiveProductionStatusCodeMap(allProductionStatusesData?.data || []);
   }, [allProductionStatusesData]);
 
   const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
@@ -214,24 +196,15 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
     }).display;
   }, [workflow, statusesForWorkflow]);
 
-  // Production stages are additive: keep every unique event/order/detail status.
+  // The same active-event state drives both these letters and menu marks.
+  // Never infer letters from aggregate order/detail names: that can display a
+  // stage which the context menu correctly considers inactive.
   const passedProductionCodes = useMemo(() => {
-    const events = productionEventsData?.data || [];
-    return resolveCurrentProductionStatusCodes({
-      statusId: header.production_status_id,
-      statusName: productionStatusData?.data?.production_status_name,
-      statusIdToCode: productionStatusIdToCode,
-      passedCodes: events.map((event: any) => (
-        productionStatusIdToCode.get(event.production_status_id)
-      )),
-      detailStatuses: businessDetails
-        .filter((detail: any) => detail.delete_flag !== true)
-        .map((detail: any) => ({
-          statusId: detail.production_status_id,
-          statusName: detail.production_status_name,
-        })),
-    });
-  }, [businessDetails, header.production_status_id, productionEventsData, productionStatusData, productionStatusIdToCode]);
+    return resolveActiveProductionEventCodes(
+      productionStatusEvents.events,
+      productionStatusIdToCode,
+    );
+  }, [productionStatusEvents.events, productionStatusIdToCode]);
 
   // Load materials list
   const { data: materialsData } = useList({
@@ -422,6 +395,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={closeContextMenu}
+          productionStatusEvents={productionStatusEvents}
         />
       </>
     );
@@ -499,6 +473,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={closeContextMenu}
+          productionStatusEvents={productionStatusEvents}
         />
       </>
     );
@@ -882,6 +857,7 @@ export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactS
       x={contextMenu.x}
       y={contextMenu.y}
       onClose={closeContextMenu}
+      productionStatusEvents={productionStatusEvents}
     />
     </>
   );

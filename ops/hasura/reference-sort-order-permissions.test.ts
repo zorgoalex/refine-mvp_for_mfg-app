@@ -15,7 +15,7 @@ describe('reference sort-order Hasura permissions', () => {
     expect(table.update_permissions ?? []).toHaveLength(0);
   });
 
-  it('grants packer read-only Hasura access only to order_statuses', () => {
+  it('grants packer read-only Hasura access to order_statuses', () => {
     const table = tables.find((entry: any) => entry.table.name === 'order_statuses');
     expect(table.select_permissions.some((entry: any) => entry.role === 'packer')).toBe(true);
     expect((table.insert_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
@@ -23,10 +23,10 @@ describe('reference sort-order Hasura permissions', () => {
   });
 
   it.each(['production_statuses', 'production_status_events'])(
-    'does not grant packer Hasura access to %s',
+    'grants packer read-only Hasura access to %s',
     (tableName) => {
       const table = tables.find((entry: any) => entry.table.name === tableName);
-      expect((table.select_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
+      expect((table.select_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(true);
       expect((table.insert_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
       expect((table.update_permissions ?? []).some((entry: any) => entry.role === 'packer')).toBe(false);
     },

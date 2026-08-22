@@ -36,6 +36,7 @@ describe('HealthService readiness', () => {
     const service = new HealthService(
       createConfig({
         APP_NAME: 'erp-backend',
+        BACKEND_BUILD_SHA: 'a154fef554948d9643630a827cb1aa4795117e54',
         READINESS_REQUIRE_DATABASE: false,
         READINESS_REQUIRE_REDIS: false,
       }),
@@ -48,6 +49,7 @@ describe('HealthService readiness', () => {
 
     await expect(service.ready()).resolves.toMatchObject({
       status: 'ready',
+      deployment: { gitCommitSha: 'a154fef554948d9643630a827cb1aa4795117e54' },
       checks: {
         realtime: { status: 'degraded', message: 'listener disconnected' },
       },

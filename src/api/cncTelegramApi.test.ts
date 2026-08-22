@@ -12,7 +12,7 @@ describe('cncTelegramApi', () => {
   });
 
   it('loads the current-day CNC Telegram projection through its own route', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(
         JSON.stringify({
           workday: '2026-07-24',
@@ -75,6 +75,28 @@ describe('cncTelegramApi', () => {
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({ method: 'GET', cache: 'no-store' }),
     );
+  });
+
+  it('reuses a matching prefetched projection once, then returns to the network', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          workday: '2026-07-24',
+          generatedAt: '2026-07-24T08:00:00.000Z',
+          columns: [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const query = { dateFrom: '2026-06-24', dateTo: '2026-07-24' };
+
+    const prefetched = cncTelegramApi.prefetchToday(query);
+    const consumed = cncTelegramApi.consumePrefetchedToday(query, { cache: 'no-store' });
+    await Promise.all([prefetched, consumed]);
+    await cncTelegramApi.consumePrefetchedToday(query, { cache: 'no-store' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('loads DB-bounded original MDF board without client dates', async () => {

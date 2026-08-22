@@ -1,8 +1,13 @@
 export interface LiveHealthResponse {
   status: 'ok';
   service: string;
+  deployment: HealthDeploymentIdentity;
   timestamp: string;
   uptimeSeconds: number;
+}
+
+export interface HealthDeploymentIdentity {
+  gitCommitSha: string | null;
 }
 
 export interface HealthCheckStatus {
@@ -12,6 +17,7 @@ export interface HealthCheckStatus {
 
 export interface ReadyHealthResponse {
   status: 'ready' | 'not_ready';
+  deployment: HealthDeploymentIdentity;
   checks: {
     database: HealthCheckStatus;
     redis: HealthCheckStatus;
@@ -26,10 +32,12 @@ export function createLiveHealthResponse(
   now: Date = new Date(),
   uptimeSeconds: number = process.uptime(),
   service = 'erp-backend',
+  gitCommitSha?: string,
 ): LiveHealthResponse {
   return {
     status: 'ok',
     service,
+    deployment: { gitCommitSha: gitCommitSha ?? null },
     timestamp: now.toISOString(),
     uptimeSeconds: Math.max(0, Math.floor(uptimeSeconds)),
   };
@@ -37,6 +45,7 @@ export function createLiveHealthResponse(
 
 export function createReadyHealthResponse(options: {
   now?: Date;
+  gitCommitSha?: string;
   database: HealthCheckStatus;
   redis: HealthCheckStatus;
   config?: HealthCheckStatus;
@@ -61,6 +70,7 @@ export function createReadyHealthResponse(options: {
 
   return {
     status,
+    deployment: { gitCommitSha: options.gitCommitSha ?? null },
     checks,
     timestamp: (options.now ?? new Date()).toISOString(),
   };

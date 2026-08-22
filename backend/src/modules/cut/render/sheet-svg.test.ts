@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CUT_RENDER_STYLE_DEFAULT,
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
   DEFAULT_CUT_RENDER_STYLES_SETTING,
   cutRenderSourceSvgCss,
@@ -322,6 +323,57 @@ describe('buildSheetSvg multi-line labels', () => {
     expect(svg).toContain('font-size="16.8">100*80</tspan>');
   });
 
+  it('applies the independent PDF profile to sheet, contours and source SVG lines', () => {
+    const renderStyle = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_DEFAULT, {
+      ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      profiles: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+        default: {
+          ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default,
+          piece: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default.piece,
+            defaultFill: '#fff4cc',
+            stroke: '#101010',
+            strokeWidthMm: 5,
+          },
+          sourceSvg: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default.sourceSvg,
+            minStrokePx: 5,
+          },
+        },
+      },
+    });
+    const sourceSheet: SheetPlacementsJson = {
+      trim_mm: { left: 0, top: 0, right: 0, bottom: 0 },
+      sheet_width_mm: 100,
+      sheet_height_mm: 80,
+      pieces: [{
+        item_id: 'det-1',
+        instance: 1,
+        x_mm: 0,
+        y_mm: 0,
+        width_mm: 100,
+        height_mm: 80,
+        rotated: false,
+        source_svg: {
+          viewBox: { x_mm: 0, y_mm: 0, width_mm: 100, height_mm: 80 },
+          body: '<line x1="5" y1="5" x2="95" y2="75" stroke="#cccccc" stroke-width="0.2"/>',
+        },
+      }],
+    };
+
+    const svg = buildSheetSvg({
+      sheet: sourceSheet,
+      labelFor: () => ['11300', '# 5', '100*80'],
+      fillFor: () => renderStyle.piece.stroke,
+      renderStyle,
+    });
+
+    expect(svg).toContain('width="100" height="80" fill="#fff4cc" stroke="#101010" stroke-width="5"');
+    expect(svg).toMatch(/data-detail-id="1"><rect[^>]*fill="#fff4cc"[^>]*stroke="#101010"[^>]*stroke-width="5"/);
+    expect(svg).toContain('stroke-width:5px!important;stroke:#101010!important');
+  });
+
   it('uses deterministic per-order contour colors while keeping the sheet background', () => {
     const svg = buildSheetSvg({
       sheet,
@@ -357,12 +409,40 @@ describe('buildSheetSvg multi-line labels', () => {
       fillFor: () => orderFillColor(12),
     });
 
-    expect(svg).toContain(`fill="#f7f7f7" stroke="${orderFillColor(12)}"`);
+    expect(svg).toContain(`fill="#ffffff" stroke="${orderFillColor(12)}"`);
     expect(svg).not.toContain(`fill="${orderFillColor(12)}"`);
   });
 });
 
 describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
+  it('applies the independent PDF background, line color and width', () => {
+    const profile = {
+      ...DEFAULT_CUT_RENDER_STYLES_SETTING,
+      profiles: {
+        ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles,
+        default: {
+          ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default,
+          piece: {
+            ...DEFAULT_CUT_RENDER_STYLES_SETTING.profiles.default.piece,
+            defaultFill: '#fff4cc',
+            stroke: '#101010',
+            strokeWidthMm: 5,
+          },
+        },
+      },
+    };
+    const renderStyle = resolveCutRenderStyleFromSetting(CUT_RENDER_STYLE_DEFAULT, profile);
+    const svg = buildBathProfileSheetSvg({
+      sheet,
+      labelFor: () => ['11300', '# 5', '600*400'],
+      fillFor: () => renderStyle.piece.stroke,
+      renderStyle,
+    });
+
+    expect(svg).toContain('width="2800" height="2070" fill="#fff4cc" stroke="#101010" stroke-width="5"');
+    expect(svg).toMatch(/data-detail-id="999"><rect[^>]*fill="#fff4cc"[^>]*stroke="#101010"[^>]*stroke-width="5"/);
+  });
+
   it('prints edge, milling and doweling with the doubled standard metadata font when the crosswise side is roomy', () => {
     const svg = buildBathProfileSheetSvg({
       sheet,
@@ -561,8 +641,8 @@ describe('buildBathProfileSheetSvg (PDF-only labels)', () => {
     });
     const normal = buildSheetSvg({ sheet, labelFor: () => 'X', fillFor: () => '#123456' });
 
-    expect(bath).toContain('width="2800" height="2070" fill="#f7f7f7"');
-    expect(bath).toMatch(/data-detail-id="999"><rect[^>]*fill="#f7f7f7"[^>]*stroke="#123456"/);
+    expect(bath).toContain('width="2800" height="2070" fill="#ffffff"');
+    expect(bath).toMatch(/data-detail-id="999"><rect[^>]*fill="#ffffff"[^>]*stroke="#123456"/);
     expect(bath).not.toContain('fill="#123456"');
     expect(normal).toContain('fill="#ffffff" stroke="#123456"');
     expect(normal).not.toContain('fill="#123456"');

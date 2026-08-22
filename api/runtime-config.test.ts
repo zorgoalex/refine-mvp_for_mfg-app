@@ -28,6 +28,7 @@ const RUNTIME_CONFIG_ENV_KEYS = [
   'RUNTIME_CONFIG_UI_FORCE_LEGACY',
   'VERCEL_ENV',
   'VERCEL_GIT_COMMIT_REF',
+  'VERCEL_GIT_COMMIT_SHA',
 ];
 
 describe('runtime-config handler', () => {
@@ -50,6 +51,7 @@ describe('runtime-config handler', () => {
     expect(res.headers['Cache-Control']).toBe('no-store, max-age=0');
     expect(res.headers['Content-Type']).toBe('application/json; charset=utf-8');
     expect(res.body).toMatchObject({
+      deployment: { gitCommitSha: null },
       apiUrl: '',
       hasuraUrl: '',
       ui: {
@@ -77,6 +79,20 @@ describe('runtime-config handler', () => {
         enableLegacyHasura: true,
       },
     });
+  });
+
+  it('publishes only a valid immutable Vercel commit SHA', () => {
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'A154FEF554948D9643630A827CB1AA4795117E54');
+    const validRes = createResponse();
+    handler({ method: 'GET' } as VercelRequest, validRes as unknown as VercelResponse);
+    expect(validRes.body).toMatchObject({
+      deployment: { gitCommitSha: 'a154fef554948d9643630a827cb1aa4795117e54' },
+    });
+
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'not-an-immutable-sha');
+    const invalidRes = createResponse();
+    handler({ method: 'GET' } as VercelRequest, invalidRes as unknown as VercelResponse);
+    expect(invalidRes.body).toMatchObject({ deployment: { gitCommitSha: null } });
   });
 
   it('uses runtime env when explicitly set', () => {

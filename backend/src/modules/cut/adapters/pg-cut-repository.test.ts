@@ -32,12 +32,24 @@ describe('vacuum bath meter-guide render wiring', () => {
 
 describe('frozen bath PDF render wiring', () => {
   it('rebuilds frozen bath SVG with the current renderer when PDF dynamic fields refresh', () => {
+    expect(repositorySource).toContain(
+      'const rebuildStandardPdfSvgWithCurrentRenderer = args.refreshPdfDynamicFields === true',
+    );
+    expect(repositorySource).toContain(
+      'rebuildStandardPdfSvgWithCurrentRenderer || !view.svg.includes',
+    );
     expect(repositorySource).toContain('rebuildBathSvgWithCurrentRenderer = args.refreshPdfDynamicFields === true');
     expect(repositorySource).toContain('baseBathSvg = rebuildBathSvgWithCurrentRenderer');
     expect(repositorySource).toContain('buildBathProfileSheetSvg({');
     expect(repositorySource).toContain('labelFor: (piece) => frozenPieceLabelLines(piece, frozenItemByItemId, frozenQuantities)');
     expect(repositorySource).toContain('addBathMeterGuidesToSvg(baseBathSvg, placements');
     expect(repositorySource).not.toContain('addBathMeterGuidesToSvg(view.bathSvg, placements');
+    expect(repositorySource).toMatch(
+      /renderStyleName === CUT_RENDER_STYLE_DEFAULT\s*\? \(\(\) => renderStyle\.piece\.stroke\)/,
+    );
+    expect(repositorySource).toMatch(
+      /renderStyle === CUT_RENDER_STYLE_DEFAULT\s*\? \(\(\) => renderStyleRule\.piece\.stroke\)/,
+    );
   });
 });
 

@@ -56,6 +56,9 @@ async function main(argv) {
       sampleIntervalSeconds: config.sampleIntervalSeconds,
       cacheWaitSeconds: config.cacheWaitSeconds,
       maxEventLatencyMs: config.maxEventLatencyMs,
+      expectedStageSha: config.expectedStageSha,
+      samples: config.samples,
+      authRefreshEvery: config.authRefreshEvery,
       bypassConfigured: Boolean(config.vercelBypassSecret),
       pid: process.pid,
     });
@@ -77,6 +80,7 @@ async function main(argv) {
       mode: config?.mode || 'unknown',
       error: safeErrorMessage(error),
       rollback: error?.rollback || null,
+      qualification: error?.qualification || null,
       interruptedBy,
       completedAt: new Date().toISOString(),
       ...(evidence ? { evidence: {
@@ -95,10 +99,11 @@ async function main(argv) {
     if (lock) {
       try {
         lockReleased = lock.release();
+        if (!lockReleased) cleanupError = 'rollout lock ownership changed before cleanup';
       } catch (error) {
         cleanupError = safeErrorMessage(error);
-        process.exitCode = 1;
       }
+      if (cleanupError) process.exitCode = 1;
     }
     if (evidence) {
       const cleanup = { lockReleased, pid: process.pid, ...(cleanupError ? { error: cleanupError } : {}) };
@@ -108,7 +113,12 @@ async function main(argv) {
         cleanup,
       };
       if (cleanupError) finalSummary.status = 'cleanup_failed';
-      evidence.writeSummary(finalSummary);
+      try {
+        evidence.validate();
+        evidence.writeSummary(finalSummary);
+      } finally {
+        evidence.close();
+      }
     }
   }
 }
@@ -116,9 +126,11 @@ async function main(argv) {
 function assertGuardedRuntime() {
   const status = readFileSync('/proc/self/status', 'utf8');
   const allowedList = status.match(/^Cpus_allowed_list:\s*(.+)$/m)?.[1]?.trim();
-  if (allowedList !== '0' || getPriority(0) < 10) {
+  const parentCmdline = readFileSync(`/proc/${process.ppid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+  const guardedParent = parentCmdline.includes('/home/ovhtest/.codex/rtk-heavy-guard');
+  if (allowedList !== '0' || getPriority(0) < 10 || !guardedParent) {
     throw new Error(
-      'Refusing unguarded launch: use rtk nice -n 10 taskset -c 0 /home/ovhtest/.codex/rtk-heavy-guard --',
+      'Refusing unguarded launch: use scripts/order-sse-guarded-run.sh so CPU1/CPU2 blockers and guard own the run',
     );
   }
 }
@@ -168,13 +180,16 @@ function printUsage() {
     'Stage-only Order SSE rollout controller.',
     '',
     'Preflight (read-only):',
-    '  rtk nice -n 10 taskset -c 0 /home/ovhtest/.codex/rtk-heavy-guard -- npm run order-sse:rollout -- --mode preflight',
+    '  scripts/order-sse-guarded-run.sh --mode preflight',
     '',
     'Shadow canary for explicit user 83:',
-    '  ORDER_SSE_ROLLOUT_APPROVE_STAGE=true rtk nice -n 10 taskset -c 0 /home/ovhtest/.codex/rtk-heavy-guard -- npm run order-sse:rollout -- --mode shadow-canary --apply',
+    '  ORDER_SSE_ROLLOUT_APPROVE_STAGE=true scripts/order-sse-guarded-run.sh --mode shadow-canary --apply',
     '',
     'Closed-loop stage rollout:',
-    '  ORDER_SSE_ROLLOUT_APPROVE_STAGE=true rtk nice -n 10 taskset -c 0 /home/ovhtest/.codex/rtk-heavy-guard -- npm run order-sse:rollout -- --mode rollout --apply',
+    '  ORDER_SSE_ROLLOUT_APPROVE_STAGE=true scripts/order-sse-guarded-run.sh --mode rollout --apply',
+    '',
+    'Accelerated exact-SHA qualification (90 samples / 60 seconds):',
+    '  ORDER_SSE_ROLLOUT_APPROVE_STAGE=true scripts/order-sse-guarded-run.sh --mode accelerated-soak --apply --expected-stage-sha <40-hex-sha>',
     '',
     'Optional:',
     '  --steps 5,25,50,100',
@@ -182,6 +197,9 @@ function printUsage() {
     '  --sample-interval-seconds 20',
     '  --cache-wait-seconds 6',
     '  --max-event-latency-ms 2000',
+    '  --samples 90',
+    '  --auth-refresh-every 10',
+    '  --expected-stage-sha <40-hex-sha>',
     '  --order-id <id>',
     '  --log-root <directory>',
     '',
