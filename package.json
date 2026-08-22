@@ -75,6 +75,7 @@
     "order-sse:rollout": "scripts/order-sse-guarded-run.sh",
     "order-sse:guarded": "scripts/order-sse-guarded-run.sh",
     "order-sse:load": "node scripts/order-sse-load.js",
+    "order-sse:load:shared-stage": "scripts/order-sse-stage-load-guarded.sh",
     "sheet-materials:copy": "node backend/scripts/sheet-materials-copy/copy-cli.js",
     "sheet-materials:copy-reverse": "node backend/scripts/sheet-materials-copy/reverse-cli.js",
     "groups-inference-backfill:preview": "node scripts/groups-inference-backfill-preview.js",
