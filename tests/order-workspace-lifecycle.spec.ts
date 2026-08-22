@@ -8,7 +8,11 @@ test.describe('order workspace lifecycle', () => {
     test('bounds ten edit workspaces, restores evicted draft and keeps hidden reads silent', async ({ page }, testInfo) => {
         test.setTimeout(900_000);
         const orderCount = Math.max(4, Number(process.env.ORDER_WORKSPACE_TAB_COUNT ?? 10));
+        const initialSurfaceTimeout = Number(process.env.ORDER_WORKSPACE_INITIAL_TIMEOUT_MS ?? 90_000);
         const db = createWorkflowMockDb();
+        let graphqlQueries = 0;
+        const graphqlErrors: string[] = [];
+        const graphqlResourceCounts: Record<string, number> = {};
         let releaseFirstTelegramPreview!: () => void;
         const firstTelegramPreviewGate = new Promise<void>((resolve) => {
             releaseFirstTelegramPreview = resolve;
@@ -19,7 +23,21 @@ test.describe('order workspace lifecycle', () => {
             db.order_details.push(createOrderDetailRow(orderId));
         }
 
-        await setupWorkflowMockApi(page, db, { runtimeConfig: false });
+        await setupWorkflowMockApi(page, db, {
+            runtimeConfig: false,
+            onGraphqlQuery: (query) => {
+                graphqlQueries += 1;
+                for (const resource of [
+                    'orders', 'order_details', 'order_details_view', 'orders_view',
+                    'payments', 'order_statuses', 'payment_statuses', 'production_statuses',
+                ]) {
+                    if (new RegExp(`\\b${resource}\\b`).test(query)) {
+                        graphqlResourceCounts[resource] = (graphqlResourceCounts[resource] ?? 0) + 1;
+                    }
+                }
+            },
+            onGraphqlError: (message) => { graphqlErrors.push(message); },
+        });
         await page.route(/\/runtime-config\.json$/, fulfillTreatmentRuntimeConfig);
         await page.route(/\/api\/v1\/cut-jobs\/detail-last-ready(?:\?.*)?$/, async (route) => {
             const ids = new URL(route.request().url()).searchParams.get('detailIds')
@@ -143,7 +161,22 @@ test.describe('order workspace lifecycle', () => {
             if (orderId === 1) {
                 const detailsTab = page.getByRole('tab', { name: /^(Детали заказа|Состав)$/ });
                 const basicTab = page.getByRole('tab', { name: /^(Основная информация|Обзор)$/ });
-                await expect(detailsTab).toBeVisible({ timeout: 90_000 });
+                try {
+                    await expect(detailsTab).toBeVisible({ timeout: initialSurfaceTimeout });
+                } catch (error) {
+                    const loadingDiagnostics = await readOrderLoadingDiagnostics(page);
+                    console.log(JSON.stringify({
+                        graphqlQueries,
+                        graphqlResourceCounts,
+                        graphqlErrors,
+                        loadingDiagnostics,
+                    }));
+                    await testInfo.attach(`initial-loading-order-${orderId}.json`, {
+                        body: Buffer.from(JSON.stringify(loadingDiagnostics, null, 2)),
+                        contentType: 'application/json',
+                    });
+                    throw error;
+                }
                 await basicTab.click();
                 await expect(basicTab).toHaveAttribute('aria-selected', 'true');
                 const orderNameInput = page.getByPlaceholder('Введите название заказа');
@@ -636,6 +669,37 @@ async function readCheckpointDiagnostics(page: Page): Promise<{
             ...registry.getWorkspaceCheckpointDiagnostics(),
             cohort: cohortStore.getCurrentOrderLifecycleCohort(),
             ...keepAliveDiagnostics.getWorkspaceKeepAliveDiagnostics(),
+        };
+    });
+}
+
+async function readOrderLoadingDiagnostics(page: Page): Promise<unknown> {
+    return page.evaluate(async () => {
+        const { appQueryClient } = await import('/src/query/appQueryClient.ts');
+        const activity = await import('/src/performance/appActivityCoordinator.ts');
+        return {
+            pathname: window.location.pathname,
+            visibilityState: document.visibilityState,
+            appActivity: activity.getAppActivitySnapshot?.(),
+            queries: appQueryClient.getQueryCache().getAll()
+              .filter((query) => query.getObserversCount() > 0 && [
+                  'orders', 'order_details', 'order_details_view', 'orders_view',
+                  'payments', 'order_statuses', 'payment_statuses', 'production_statuses',
+              ].includes(String(query.queryKey[2] ?? '')))
+              .map((query) => ({
+                key: query.queryKey,
+                status: query.state.status,
+                fetchStatus: query.state.fetchStatus,
+                hasData: query.state.data !== undefined,
+                error: query.state.error instanceof Error
+                    ? query.state.error.message
+                    : String(query.state.error ?? ''),
+                observers: query.getObserversCount(),
+                failureCount: query.state.fetchFailureCount,
+                dataUpdatedAt: query.state.dataUpdatedAt,
+                errorUpdatedAt: query.state.errorUpdatedAt,
+                meta: query.meta,
+              })),
         };
     });
 }

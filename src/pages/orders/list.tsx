@@ -307,7 +307,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   const orderLifecycleCohort = useOrderLifecycleCohort();
 
   const { tableProps, tableQueryResult, current, pageSize, setCurrent, setPageSize, sorters, setSorters, filters, setFilters } = useTable({
-    syncWithLocation: true,
+    syncWithLocation: isActive,
     sorters: {
       initial: [
         { field: "order_date", order: "desc" },

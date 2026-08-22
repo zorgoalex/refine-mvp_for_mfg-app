@@ -1,3 +1,5 @@
+import type { DefaultOptionType } from 'antd/es/select';
+
 import type { OrderFormDataResponse } from '../api/types/orderApi.types';
 import { resolveDefaultNewOrderStatusId } from '../domain/orderStatusDefaults';
 
@@ -96,7 +98,10 @@ export function mapOrderFormDataToReferences(
   };
 }
 
-export function createBackendSelectProps(options: ReferenceOption[], isLoading = false) {
+export function createBackendSelectProps(
+  options: ReferenceOption[],
+  isLoading = false,
+): { options: DefaultOptionType[]; loading: boolean } {
   return {
     options,
     loading: isLoading,

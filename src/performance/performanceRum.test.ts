@@ -55,6 +55,15 @@ describe('performance RUM client', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it('drops buffered pre-App timing across auth boundary', () => {
+    recordOrderLifecycleMetric('primary_request_start_ms', 42);
+    authSession.clear();
+    const listener = vi.fn();
+    const unsubscribe = subscribeOrderLifecycleMetrics(listener);
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it('names listener telemetry as coordinator-owned, not app-global', () => {
     expect(PERFORMANCE_RUM_METRICS).toContain('activity_coordinator_listener_count');
     expect(PERFORMANCE_RUM_METRICS).not.toContain('activity_dom_listener_count');

@@ -1,9 +1,5 @@
-import {
-  keys,
-  parseTableParams,
-  type CrudFilters,
-  type CrudSorting,
-} from '@refinedev/core';
+import type { CrudFilters, CrudSorting } from '@refinedev/core';
+import qs from 'qs';
 
 import { normalizePageSize } from '../hooks/usePageSizePreference';
 
@@ -32,10 +28,10 @@ export function createOrderListPrimaryIdentity(input: {
   authCacheNamespace: string;
 }): OrderListPrimaryIdentity {
   const routeParams = input.routeParams ?? {};
-  const { parsedCurrent, parsedPageSize, parsedSorter, parsedFilters } = parseTableParams(
+  const { parsedCurrent, parsedPageSize, parsedSorter, parsedFilters } = parsePrimaryTableParams(
     input.search || '?',
   );
-  const current = positiveInteger(routeParams.current) ?? positiveInteger(parsedCurrent) ?? 1;
+  const current = positiveInteger(routeParams.current) ?? parsedCurrent ?? 1;
   const pageSize = normalizePageSize(routeParams.pageSize)
     ?? normalizePageSize(parsedPageSize)
     ?? normalizePageSize(input.preferredPageSize)
@@ -64,18 +60,20 @@ export function createOrderListPrimaryIdentity(input: {
 }
 
 export function orderListPrimaryQueryKey(identity: OrderListPrimaryIdentity): unknown[] {
-  return keys()
-    .data('default')
-    .resource(identity.resource)
-    .action('list')
-    .params({
+  // Public Refine v4 query-key shape, kept pure for the pre-App bootstrap chunk.
+  return [
+    'data',
+    'default',
+    identity.resource,
+    'list',
+    {
       ...identity.meta,
       filters: identity.filters,
       hasPagination: true,
       pagination: identity.pagination,
       sorters: identity.sorters,
-    })
-    .key();
+    },
+  ];
 }
 
 export function additionalRouteParams(routeParams: RouteParams): RouteParams {
@@ -89,6 +87,17 @@ export function additionalRouteParams(routeParams: RouteParams): RouteParams {
   return additional;
 }
 
+/** Mirrors Refine react-router-v6 parsing without importing its runtime. */
+export function parseRefineRouteParamsFromSearch(search: string): RouteParams {
+  const parsed = qs.parse(search, { ignoreQueryPrefix: true }) as RouteParams;
+  return {
+    ...parsed,
+    current: convertToNumberIfPossible(parsed.current),
+    pageSize: convertToNumberIfPossible(parsed.pageSize),
+    to: parsed.to ? decodeURIComponent(String(parsed.to)) : undefined,
+  };
+}
+
 function positiveInteger(value: unknown): number | null {
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
@@ -100,4 +109,32 @@ function isCrudSorting(value: unknown): value is CrudSorting {
 
 function isCrudFilters(value: unknown): value is CrudFilters {
   return Array.isArray(value);
+}
+
+function convertToNumberIfPossible(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const numeric = Number(value);
+  return `${numeric}` === value ? numeric : value;
+}
+
+function parsePrimaryTableParams(search: string): {
+  parsedCurrent?: number;
+  parsedPageSize?: number;
+  parsedSorter: CrudSorting;
+  parsedFilters: CrudFilters;
+} {
+  const parsed = qs.parse(search, { ignoreQueryPrefix: true }) as {
+    current?: unknown;
+    pageSize?: unknown;
+    sorter?: unknown;
+    sorters?: unknown;
+    filters?: unknown;
+  };
+  const sorter = parsed.sorters ?? parsed.sorter;
+  return {
+    parsedCurrent: positiveInteger(parsed.current) ?? undefined,
+    parsedPageSize: positiveInteger(parsed.pageSize) ?? undefined,
+    parsedSorter: isCrudSorting(sorter) ? sorter : [],
+    parsedFilters: isCrudFilters(parsed.filters) ? parsed.filters : [],
+  };
 }

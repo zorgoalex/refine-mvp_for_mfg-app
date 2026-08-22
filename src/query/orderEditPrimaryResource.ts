@@ -1,4 +1,3 @@
-import { keys } from '@refinedev/core';
 import type { QueryClient } from '@tanstack/react-query';
 
 import type { OrderDto } from '../api/types/orderApi.types';
@@ -104,13 +103,14 @@ export function createOrderEditLegacyPrimaryIdentity(input: {
 export function orderEditLegacyPrimaryQueryKey(
   identity: OrderEditLegacyPrimaryIdentity,
 ): unknown[] {
-  return keys()
-    .data('default')
-    .resource(identity.resource)
-    .action('one')
-    .id(identity.orderId)
-    .params(identity.meta)
-    .key();
+  return [
+    'data',
+    'default',
+    identity.resource,
+    'one',
+    identity.orderId ? String(identity.orderId) : undefined,
+    identity.meta,
+  ];
 }
 
 export function createOrderEditBackendPrimaryIdentity(input: {

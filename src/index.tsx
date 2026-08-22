@@ -22,7 +22,27 @@ async function bootstrap() {
   // Resolve the versioned lifecycle cohort before route rendering. Treatment
   // routes can then start their primary query before React invokes React.lazy;
   // control routes render with their historical page-owned request path.
-  await resolveOrderLifecycleCohort();
+  const orderLifecycleCohort = await resolveOrderLifecycleCohort();
+
+  // Start treatment order reads before downloading and parsing the large App chunk.
+  const initialPathname = window.location.pathname;
+  if (
+    orderLifecycleCohort === 'treatment'
+    && /^\/orders(?:\/?$|\/(?:show|edit)\/)/.test(initialPathname)
+  ) {
+    const initialSearch = window.location.search;
+    const navigationStartedAt = performance.getEntriesByType('navigation')[0]?.startTime ?? 0;
+    try {
+      const { startInitialOrderPrimaryBootstrap } = await import('./query/orderPrimaryBootstrap');
+      void startInitialOrderPrimaryBootstrap({
+        pathname: initialPathname,
+        search: initialSearch,
+        navigationStartedAt,
+      })?.catch(() => undefined);
+    } catch {
+      // App remains the retry owner when optional early bootstrap cannot start.
+    }
+  }
 
   const uiVariant = await resolveInitialUiVariant(getLoadedRuntimeConfig()?.ui);
   setDocumentUiVariant(uiVariant);

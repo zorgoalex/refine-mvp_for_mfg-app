@@ -4,6 +4,7 @@ import {
   createOrderListPrimaryIdentity,
   ORDER_LIST_INITIAL_SORTERS,
   orderListPrimaryQueryKey,
+  parseRefineRouteParamsFromSearch,
 } from './orderListPrimaryResource';
 
 describe('order list primary resource', () => {
@@ -42,5 +43,36 @@ describe('order list primary resource', () => {
       authCacheNamespace: 'actor:7',
     });
     expect(identity.pagination.pageSize).toBe(25);
+  });
+
+  it('falls back safely for malformed pagination', () => {
+    const identity = createOrderListPrimaryIdentity({
+      search: '?current=abc&pageSize=not-a-number',
+      preferredPageSize: 25,
+      authCacheNamespace: 'actor:7',
+    });
+    expect(identity.pagination).toEqual({ current: 1, pageSize: 25, mode: 'server' });
+  });
+
+  it('mirrors Refine nested query parsing without table params in meta', () => {
+    const routeParams = parseRefineRouteParamsFromSearch(
+      '?current=3&pageSize=50&filters[0][field]=client_id&filters[0][operator]=eq'
+      + '&filters[0][value]=17&view[mode]=cards&to=%252Forders',
+    );
+    const identity = createOrderListPrimaryIdentity({
+      search: '?current=3&pageSize=50&filters[0][field]=client_id'
+        + '&filters[0][operator]=eq&filters[0][value]=17',
+      routeParams,
+      authCacheNamespace: 'actor:7',
+    });
+    expect(routeParams).toMatchObject({
+      current: 3,
+      pageSize: 50,
+      filters: [{ field: 'client_id', operator: 'eq', value: '17' }],
+      view: { mode: 'cards' },
+      to: '/orders',
+    });
+    expect(identity.meta).toMatchObject({ view: { mode: 'cards' }, to: '/orders' });
+    expect(identity.meta).not.toHaveProperty('filters');
   });
 });

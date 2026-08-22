@@ -1,5 +1,3 @@
-import { keys } from '@refinedev/core';
-
 export interface OrderPrimaryQueryKeyInput {
   orderId: string | number;
   meta: Record<string, unknown>;
@@ -8,21 +6,21 @@ export interface OrderPrimaryQueryKeyInput {
 }
 
 export function orderPrimaryQueryKey(input: OrderPrimaryQueryKeyInput): unknown[] {
-  return keys()
-    .data(input.dataProviderName ?? 'default')
-    .resource(input.resource ?? 'orders_view')
-    .action('one')
-    .id(input.orderId)
-    .params(input.meta)
-    .key();
+  return publicRefineOrderPrimaryQueryKey(input, false);
 }
 
 export function legacyOrderPrimaryQueryKey(input: OrderPrimaryQueryKeyInput): unknown[] {
-  return keys()
-    .data(input.dataProviderName ?? 'default')
-    .resource(input.resource ?? 'orders_view')
-    .action('one')
-    .id(input.orderId)
-    .params(input.meta)
-    .legacy();
+  return publicRefineOrderPrimaryQueryKey(input, true);
+}
+
+function publicRefineOrderPrimaryQueryKey(
+  input: OrderPrimaryQueryKeyInput,
+  legacy: boolean,
+): unknown[] {
+  const dataProviderName = input.dataProviderName ?? 'default';
+  const resource = input.resource ?? 'orders_view';
+  const orderId = input.orderId ? String(input.orderId) : undefined;
+  return legacy
+    ? [dataProviderName, resource, 'detail', orderId, input.meta]
+    : ['data', dataProviderName, resource, 'one', orderId, input.meta];
 }

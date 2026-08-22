@@ -47,16 +47,19 @@ vi.mock('./authCacheNamespace', () => ({
 
 import {
   cancelInactiveOrderLifecycleQueries,
+  scheduleInactiveOrderLifecycleQueryCancellation,
   useList,
   useMany,
   useOne,
   useOrderAsyncReadGuard,
+  useCancelInactiveOrderQueriesOnDeactivate,
   useSelect,
   useShow,
 } from './orderLifecycleQueries';
 
 describe('order lifecycle query gating', () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     harness.cohort = 'treatment';
     harness.authNamespace = 'actor:a|session:1';
     Object.assign(harness.workspace, {
@@ -109,14 +112,52 @@ describe('order lifecycle query gating', () => {
   });
 
   it('cancels only marked inactive reads and preserves shared active queries', async () => {
+    vi.stubGlobal('window', { location: { pathname: '/orders/edit/42' } });
     await cancelInactiveOrderLifecycleQueries();
     const predicate = harness.cancelQueries.mock.calls[0][0].predicate as (
       query: { meta?: Record<string, unknown>; isActive: () => boolean },
     ) => boolean;
 
-    expect(predicate({ meta: { erpOrderLifecycleRead: true }, isActive: () => false })).toBe(true);
+    expect(predicate({ meta: { erpOrderLifecycleRead: true }, isActive: () => false })).toBe(false);
+    expect(predicate({
+      meta: {
+        erpOrderLifecycleRead: true,
+        erpOrderLifecycleRoutePath: '/orders',
+      },
+      isActive: () => false,
+    })).toBe(true);
     expect(predicate({ meta: { erpOrderLifecycleRead: true }, isActive: () => true })).toBe(false);
+    expect(predicate({
+      meta: {
+        erpOrderLifecycleRead: true,
+        erpOrderLifecycleRoutePath: '/orders/edit/42',
+      },
+      isActive: () => false,
+    })).toBe(false);
     expect(predicate({ meta: {}, isActive: () => false })).toBe(false);
+  });
+
+  it('coalesces nested surface deactivations into one cancellation pass', async () => {
+    scheduleInactiveOrderLifecycleQueryCancellation();
+    scheduleInactiveOrderLifecycleQueryCancellation();
+    scheduleInactiveOrderLifecycleQueryCancellation();
+    await new Promise((resolve) => setTimeout(resolve, 75));
+
+    expect(harness.cancelQueries).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks foreground reads with their route owner', () => {
+    vi.stubGlobal('window', { location: { pathname: '/orders/edit/42' } });
+    useList({ resource: 'order_details', queryOptions: { enabled: true } });
+
+    expect(harness.useList).toHaveBeenCalledWith(expect.objectContaining({
+      queryOptions: expect.objectContaining({
+        meta: expect.objectContaining({
+          erpOrderLifecycleRead: true,
+          erpOrderLifecycleRoutePath: '/orders/edit/42',
+        }),
+      }),
+    }));
   });
 
   it('mounts a cancellation boundary inside every lifecycle read surface', () => {
@@ -124,6 +165,22 @@ describe('order lifecycle query gating', () => {
 
     expect(source).toContain('createElement(OrderLifecycleReadSurfaceCancellationBoundary)');
     expect(source).toContain('useCancelInactiveOrderQueriesOnDeactivate();');
+  });
+
+  it('does not let nested surfaces re-cancel an already hidden workspace', async () => {
+    harness.workspace.workspaceActive = false;
+    harness.workspace.surfaceActive = false;
+    const Probe = () => {
+      useCancelInactiveOrderQueriesOnDeactivate();
+      return null;
+    };
+
+    let renderer: ReactTestRenderer;
+    act(() => { renderer = create(createElement(Probe)); });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+
+    expect(harness.cancelQueries).not.toHaveBeenCalled();
+    act(() => renderer!.unmount());
   });
 
   it('invalidates manual-read tokens on lifecycle, auth, and resource boundaries', () => {

@@ -14,6 +14,9 @@ describe('orders list keep-alive gating', () => {
     expect(src).toContain('useCancelInactiveOrderQueriesOnDeactivate()');
     expect(src).toContain('enabled: isActive && ordinaryReadActive');
   });
+  it('prevents a hidden list from writing its table state into the active route', () => {
+    expect(src).toContain('syncWithLocation: isActive');
+  });
   it('disables refetchOnWindowFocus on the main table', () => {
     expect(src).toContain('refetchOnWindowFocus: false');
   });

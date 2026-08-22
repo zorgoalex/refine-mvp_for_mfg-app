@@ -7,10 +7,7 @@ import {
 } from './helpers/performanceArtifactPrivacy';
 
 const PRIMARY_START_TARGET_MS = 800;
-// Versioned exception: see
-// spec_erp/reviews/2026-08-15-erp-performance-pr10-hard-load-exception-v1.md.
-// The constrained local contour pins preview, browser and runner to one leased CPU.
-const HARD_LOAD_CONSTRAINED_CEILING_MS = 1_500;
+const HARD_LOAD_CONSTRAINED_CEILING_MS = 800;
 const INSTRUMENTED_ARTIFACT_SANITY_CEILING_MS = 2_500;
 
 test.describe('order primary early fetch', () => {
@@ -32,10 +29,14 @@ test.describe('order primary early fetch', () => {
 
         let listPrimaryCount = 0;
         let showPrimaryCount = 0;
+        let editPrimaryCount = 0;
+        let formDataPrimaryCount = 0;
         let resolveListPrimary!: () => void;
         let resolveShowPrimary!: () => void;
         let listPrimaryAt = 0;
         let showPrimaryAt = 0;
+        let editPrimaryAt = 0;
+        let formDataPrimaryAt = 0;
         const listPrimarySeen = new Promise<void>((resolve) => {
             resolveListPrimary = resolve;
         });
@@ -72,6 +73,26 @@ test.describe('order primary early fetch', () => {
                 body: JSON.stringify({ order: createOrderDto(15) }),
             });
         });
+        await page.route(/\/api\/v1\/orders\/form-data$/, async (route) => {
+            if (route.request().method() !== 'GET') return route.fallback();
+            formDataPrimaryCount += 1;
+            formDataPrimaryAt ||= Date.now();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify(createOrderFormData()),
+            });
+        });
+        await page.route(/\/api\/v1\/orders\/23$/, async (route) => {
+            if (route.request().method() !== 'GET') return route.fallback();
+            editPrimaryCount += 1;
+            editPrimaryAt ||= Date.now();
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ order: createOrderDto(23) }),
+            });
+        });
 
         // Warm only the application shell. The orders route modules remain lazy.
         await page.goto('/login', { waitUntil: 'domcontentloaded' });
@@ -102,9 +123,11 @@ test.describe('order primary early fetch', () => {
         const hardNavigationStartedAt = Date.now();
         await page.reload({ waitUntil: 'domcontentloaded' });
         await expect.poll(() => listPrimaryCount).toBe(1);
-        expect(listPrimaryAt - hardNavigationStartedAt).toBeLessThan(
+        const hardListPrimaryRequestStartMs = listPrimaryAt - hardNavigationStartedAt;
+        expect(hardListPrimaryRequestStartMs).toBeLessThan(
             HARD_LOAD_CONSTRAINED_CEILING_MS,
         );
+        await expectPrimaryBeforeApp(page, ['/api/v1/orders']);
         await page.waitForTimeout(250);
         expect(listPrimaryCount).toBe(1);
 
@@ -120,18 +143,64 @@ test.describe('order primary early fetch', () => {
         await navigateSpa(page, '/orders/show/15');
         await expect.poll(() => showPrimaryCount).toBe(1);
         if (showModuleIntercepted) expect(showPrimaryBeforeModuleRelease).toBe(true);
-        expect(showPrimaryAt - internalNavigationStartedAt).toBeLessThan(
+        const internalShowPrimaryRequestStartMs = showPrimaryAt - internalNavigationStartedAt;
+        expect(internalShowPrimaryRequestStartMs).toBeLessThan(
             PRIMARY_START_TARGET_MS,
         );
         await page.waitForTimeout(250);
         expect(showPrimaryCount).toBe(1);
 
+        showPrimaryCount = 0;
+        showPrimaryAt = 0;
+        const hardShowNavigationStartedAt = Date.now();
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect.poll(() => showPrimaryCount).toBe(1);
+        const hardShowPrimaryRequestStartMs = showPrimaryAt - hardShowNavigationStartedAt;
+        expect(hardShowPrimaryRequestStartMs).toBeLessThan(HARD_LOAD_CONSTRAINED_CEILING_MS);
+        await expectPrimaryBeforeApp(page, ['/api/v1/orders/15']);
+
+        const internalEditNavigationStartedAt = Date.now();
+        await navigateSpa(page, '/orders/edit/23');
+        await expect.poll(() => editPrimaryCount).toBe(1);
+        await expect.poll(() => formDataPrimaryCount).toBe(1);
+        const internalEditPrimaryRequestStartMs = editPrimaryAt - internalEditNavigationStartedAt;
+        const internalFormDataPrimaryRequestStartMs = formDataPrimaryAt - internalEditNavigationStartedAt;
+        expect(internalEditPrimaryRequestStartMs).toBeLessThan(PRIMARY_START_TARGET_MS);
+        expect(internalFormDataPrimaryRequestStartMs).toBeLessThan(PRIMARY_START_TARGET_MS);
+
+        editPrimaryCount = 0;
+        formDataPrimaryCount = 0;
+        editPrimaryAt = 0;
+        formDataPrimaryAt = 0;
+        const hardEditNavigationStartedAt = Date.now();
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect.poll(() => editPrimaryCount).toBe(1);
+        await expect.poll(() => formDataPrimaryCount).toBe(1);
+        const hardEditPrimaryRequestStartMs = editPrimaryAt - hardEditNavigationStartedAt;
+        const hardFormDataPrimaryRequestStartMs = formDataPrimaryAt - hardEditNavigationStartedAt;
+        expect(hardEditPrimaryRequestStartMs).toBeLessThan(HARD_LOAD_CONSTRAINED_CEILING_MS);
+        expect(hardFormDataPrimaryRequestStartMs).toBeLessThan(HARD_LOAD_CONSTRAINED_CEILING_MS);
+        await expectPrimaryBeforeApp(page, [
+            '/api/v1/orders/23',
+            '/api/v1/orders/form-data',
+        ]);
+        await page.waitForTimeout(250);
+        expect(editPrimaryCount).toBe(1);
+        expect(formDataPrimaryCount).toBe(1);
+
         console.log(JSON.stringify({
-            hardListPrimaryRequestStartMs: listPrimaryAt - hardNavigationStartedAt,
+            hardListPrimaryRequestStartMs,
+            hardShowPrimaryRequestStartMs,
+            hardEditPrimaryRequestStartMs,
+            hardFormDataPrimaryRequestStartMs,
             internalListPrimaryRequestStartMs: internalListRequestStartMs,
-            internalShowPrimaryRequestStartMs: showPrimaryAt - internalNavigationStartedAt,
+            internalShowPrimaryRequestStartMs,
+            internalEditPrimaryRequestStartMs,
+            internalFormDataPrimaryRequestStartMs,
             listPrimaryCount,
             showPrimaryCount,
+            editPrimaryCount,
+            formDataPrimaryCount,
             listModuleIntercepted,
             listPrimaryBeforeModuleRelease,
             showModuleIntercepted,
@@ -288,7 +357,7 @@ async function fulfillRuntimeConfig(route: Route): Promise<void> {
                 backendPermissions: false,
                 backendOrdersRead: true,
                 backendOrdersWrite: false,
-                backendReferences: false,
+                backendReferences: true,
                 orderRealtime: false,
                 enableLegacyHasura: true,
             },
@@ -302,6 +371,32 @@ async function fulfillRuntimeConfig(route: Route): Promise<void> {
             },
         }),
     });
+}
+
+async function expectPrimaryBeforeApp(page: Page, primaryPaths: string[]): Promise<void> {
+    let timings: { appStart?: number; primaryStarts: Array<number | undefined> } = {
+        primaryStarts: [],
+    };
+    await expect.poll(async () => {
+        timings = await page.evaluate((expectedPaths) => {
+            const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+            const appStart = resources.find((entry) => /\/assets\/App-[^/]+\.js$/.test(new URL(entry.name).pathname))
+                ?.startTime;
+            const primaryStarts = expectedPaths.map((path) => resources.find((entry) => {
+                const url = new URL(entry.name);
+                return url.pathname === path;
+            })?.startTime);
+            return { appStart, primaryStarts };
+        }, primaryPaths);
+        return timings.appStart !== undefined
+            && timings.primaryStarts.every((value) => value !== undefined);
+    }).toBe(true);
+
+    expect(timings.appStart).toBeDefined();
+    for (const primaryStart of timings.primaryStarts) {
+        expect(primaryStart).toBeDefined();
+        expect(primaryStart).toBeLessThanOrEqual(timings.appStart!);
+    }
 }
 
 function createOrderViewRow(orderId: number): Record<string, unknown> {
@@ -378,5 +473,22 @@ function createOrderDto(orderId: number): Record<string, unknown> {
             totalArea: 0,
         },
         version: 1,
+    };
+}
+
+function createOrderFormData(): Record<string, unknown> {
+    return {
+        clients: [],
+        materials: [],
+        millingTypes: [],
+        edgeTypes: [],
+        films: [],
+        orderStatuses: [],
+        paymentStatuses: [],
+        paymentTypes: [],
+        productionStatuses: [],
+        workshops: [],
+        employees: [],
+        units: [],
     };
 }

@@ -18,6 +18,7 @@ import { useAuthCacheNamespace } from './authCacheNamespace';
 import { isCurrentRouteOrderPrimaryQuery } from './orderPrimaryFetchPolicy';
 
 const ORDER_LIFECYCLE_READ_META = 'erpOrderLifecycleRead';
+const ORDER_LIFECYCLE_ROUTE_META = 'erpOrderLifecycleRoutePath';
 
 // Cancellation is deliberately opt-in and read-only. Mutations, saves,
 // uploads and exports never receive this meta flag, so switching workspaces
@@ -134,12 +135,27 @@ export const useSelect = ((props: Parameters<typeof useRefineSelect>[0]) => {
 
 export function useCancelInactiveOrderQueriesOnDeactivate(): void {
   const cohort = useOrderLifecycleCohort();
+  const activity = useKeepAlive();
   const active = useOrderLifecycleReadActive();
 
   useLayoutEffect(() => {
     if (cohort !== 'treatment' || active) return;
+    // Nested surfaces inside an already hidden workspace are owned by the
+    // workspace-level boundary. Letting each one cancel globally creates an
+    // abort/refetch loop for the workspace being activated.
+    if (!activity.workspaceActive && !activity.surfaceActive) return;
+    scheduleInactiveOrderLifecycleQueryCancellation();
+  }, [active, activity.surfaceActive, activity.workspaceActive, cohort]);
+}
+
+let inactiveCancellationTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function scheduleInactiveOrderLifecycleQueryCancellation(): void {
+  if (inactiveCancellationTimer !== null) clearTimeout(inactiveCancellationTimer);
+  inactiveCancellationTimer = setTimeout(() => {
+    inactiveCancellationTimer = null;
     void cancelInactiveOrderLifecycleQueries();
-  }, [active, cohort]);
+  }, 50);
 }
 
 const OrderLifecycleReadSurfaceCancellationBoundary = () => {
@@ -162,11 +178,15 @@ export async function cancelInactiveOrderLifecycleQueries(
 ): Promise<void> {
   const pathname = typeof window === 'undefined' ? '' : window.location.pathname;
   await queryClient.cancelQueries({
-    predicate: (query) => (
-      query.meta?.[ORDER_LIFECYCLE_READ_META] === true
-      && !isCurrentRouteOrderPrimaryQuery(query, pathname)
-      && !query.isActive()
-    ),
+    predicate: (query) => {
+      const routeOwner = query.meta?.[ORDER_LIFECYCLE_ROUTE_META]
+        ?? query.meta?.erpPrimaryRoutePath;
+      return query.meta?.[ORDER_LIFECYCLE_READ_META] === true
+        && typeof routeOwner === 'string'
+        && routeOwner !== pathname
+        && !isCurrentRouteOrderPrimaryQuery(query, pathname)
+        && !query.isActive();
+    },
   });
 }
 
@@ -183,6 +203,9 @@ function withLifecycleGate<T extends { queryOptions?: Record<string, any> }>(
       meta: {
         ...(queryOptions.meta ?? {}),
         [ORDER_LIFECYCLE_READ_META]: true,
+        ...(active && typeof window !== 'undefined'
+          ? { [ORDER_LIFECYCLE_ROUTE_META]: window.location.pathname }
+          : {}),
       },
     },
   };

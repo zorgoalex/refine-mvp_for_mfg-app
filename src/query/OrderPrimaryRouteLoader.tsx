@@ -43,6 +43,7 @@ import {
   ORDER_LIST_DEFAULT_PAGE_SIZE,
   ORDER_LIST_PAGE_SIZE_PREFERENCE_KEY,
   orderListPrimaryQueryKey,
+  parseRefineRouteParamsFromSearch,
 } from './orderListPrimaryResource';
 import {
   createOrderShowPrimaryIdentity,
@@ -373,10 +374,13 @@ function installIntentPrefetch(input: {
       const run = () => {
         idleCallback = null;
         if (!canRunIntent(input.queryClient) || !isLocalAuthReady()) return;
+        const searchParams = parseRefineRouteParamsFromSearch(target.search);
         void prefetchOrderPrimaryRoute({
           route,
           search: target.search,
-          routeParams: routeParamsFromSearch(target.search),
+          routeParams: route.kind === 'list'
+            ? searchParams
+            : { id: String(route.orderId), ...searchParams },
           queryClient: input.queryClient,
           dataProvider: input.dataProvider,
           staleTime: ORDER_PRIMARY_INTENT_STALE_TIME_MS,
@@ -424,14 +428,6 @@ function closestOrderAnchor(target: EventTarget | null): HTMLAnchorElement | nul
   return target instanceof Element ? target.closest<HTMLAnchorElement>('a[href]') : null;
 }
 
-function routeParamsFromSearch(search: string): Record<string, unknown> {
-  const params: Record<string, unknown> = {};
-  new URLSearchParams(search).forEach((value, key) => {
-    if (!['filters', 'sorters', 'current', 'pageSize'].includes(key)) params[key] = value;
-  });
-  return params;
-}
-
 function stableRouteParamsSignature(params: Record<string, unknown>): string {
   try {
     return JSON.stringify(canonicalizeRouteParamValue(params, new WeakSet<object>()));
@@ -465,12 +461,11 @@ function canonicalizeRouteParamValue(value: unknown, seen: WeakSet<object>): unk
 
 function createHardPrimaryRouteKey(
   authCacheNamespace: string,
-  location: { key: string; pathname: string; search: string },
+  location: { pathname: string; search: string },
   routeParamsSignature: string,
 ): string {
   return [
     authCacheNamespace,
-    location.key,
     location.pathname,
     location.search,
     routeParamsSignature,

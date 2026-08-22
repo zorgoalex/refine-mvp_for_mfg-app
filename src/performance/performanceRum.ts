@@ -50,6 +50,10 @@ export interface PerformanceRumBatch {
 
 type MetricListener = (measurement: { name: PerformanceRumMetricName; value: number }) => void;
 const listeners = new Set<MetricListener>();
+const pendingEarlyMeasurements = new Map<PerformanceRumMetricName, number>();
+const EARLY_BUFFERED_METRICS = new Set<PerformanceRumMetricName>([
+  'primary_request_start_ms',
+]);
 const STICKY_SAFETY_METRICS = new Set<PerformanceRumMetricName>([
   'checkpoint_capture_failure_count',
   'unsnapshotted_surface_count',
@@ -57,11 +61,20 @@ const STICKY_SAFETY_METRICS = new Set<PerformanceRumMetricName>([
 ]);
 const pendingSafetyMetrics = new Map<PerformanceRumMetricName, number>();
 
+// Pre-App timings belong only to the current authenticated navigation.
+authSession.subscribeBeforeClear(() => {
+  pendingEarlyMeasurements.clear();
+});
+
 export function recordOrderLifecycleMetric(name: PerformanceRumMetricName, value: number): void {
   if (!Number.isFinite(value) || value < 0 || value > 3_600_000) return;
   const recordedValue = STICKY_SAFETY_METRICS.has(name)
     ? incrementPendingSafetyMetric(name)
     : value;
+  if (listeners.size === 0 && EARLY_BUFFERED_METRICS.has(name)) {
+    pendingEarlyMeasurements.set(name, recordedValue);
+    return;
+  }
   listeners.forEach((listener) => listener({ name, value: recordedValue }));
 }
 
@@ -94,10 +107,13 @@ export function acknowledgePerformanceRumSafetyMetrics(
 
 export function resetPerformanceRumSafetyMetricsForTests(): void {
   pendingSafetyMetrics.clear();
+  pendingEarlyMeasurements.clear();
 }
 
 export function subscribeOrderLifecycleMetrics(listener: MetricListener): () => void {
   listeners.add(listener);
+  pendingEarlyMeasurements.forEach((value, name) => listener({ name, value }));
+  pendingEarlyMeasurements.clear();
   return () => listeners.delete(listener);
 }
 
