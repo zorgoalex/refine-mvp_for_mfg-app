@@ -414,7 +414,9 @@ export function cutRenderSourceSvgCss(
     declarations.push(`stroke:${sourceStroke}!important`);
     declarations.push('fill:none!important');
   }
-  if (style.sourceSvg.strokeOpacity < 1) {
+  if (orderContour) {
+    declarations.push('stroke-opacity:1!important');
+  } else if (style.sourceSvg.strokeOpacity < 1) {
     declarations.push(`stroke-opacity:${formatNumber(style.sourceSvg.strokeOpacity)}!important`);
   }
   const vectorEffect = style.sourceSvg.nonScalingStroke

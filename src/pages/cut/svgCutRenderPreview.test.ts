@@ -20,6 +20,9 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).not.toContain('fill="#dff3d7"');
     expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff', '.cut-sheet-piece-source-svg-0'));
     expect(rendered).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#dff3d7', '.cut-sheet-piece-source-svg-1'));
+    expect(rendered).toContain('stroke:#d7e9ff!important;fill:none!important;stroke-opacity:1!important');
+    expect(rendered).toContain('stroke:#dff3d7!important;fill:none!important;stroke-opacity:1!important');
+    expect(rendered).not.toContain('stroke-opacity:0.72!important');
     expect(rendered).toContain('class="cut-sheet-piece-source-svg cut-sheet-piece-source-svg-0"');
     expect(rendered).toContain('class="cut-sheet-piece-source-svg cut-sheet-piece-source-svg-1"');
     expect(rendered).not.toContain('<style>.cut-sheet-piece-source-svg *{');
