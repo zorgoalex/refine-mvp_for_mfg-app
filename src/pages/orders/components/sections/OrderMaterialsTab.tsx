@@ -4,7 +4,7 @@ import { Table } from '../../../../ui/tooltipDelay';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Row, Col, Typography } from 'antd';
-import { useList } from '@refinedev/core';
+import { useList, useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { resolveDetailMaterialName } from '../../../../utils/materialDisplayName';
@@ -36,8 +36,19 @@ export const OrderMaterialsTab: React.FC = () => {
     [bathCutJobByDetailId],
   );
   const latestCutJobIdsKey = latestCutJobIds.join(',');
-  const [cutJobs, setCutJobs] = useState<CutJobDto[]>([]);
-  const [cutJobsLoading, setCutJobsLoading] = useState(false);
+  const cutJobReadGuard = useOrderAsyncReadGuard(
+    `materials:${header.order_id ?? 'unsaved'}:${latestCutJobIdsKey}`,
+  );
+  const cutJobsScopeKey = `${cutJobReadGuard.authNamespace}|order:${header.order_id ?? 'unsaved'}|jobs:${latestCutJobIdsKey}`;
+  const [cutJobsState, setCutJobsState] = useState<{
+    scopeKey: string;
+    jobs: CutJobDto[];
+    loading: boolean;
+  }>(() => ({ scopeKey: cutJobsScopeKey, jobs: [], loading: false }));
+  const cutJobs = cutJobsState.scopeKey === cutJobsScopeKey
+    ? cutJobsState.jobs
+    : [];
+  const cutJobsLoading = cutJobsState.scopeKey === cutJobsScopeKey && cutJobsState.loading;
 
   // Загружаем справочники — gate: skip when no detail carries a legacy material_id (Variant B normal case)
   const hasLegacyMaterialIds = details.some((d) => d.material_id != null);
@@ -79,14 +90,20 @@ export const OrderMaterialsTab: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    if (!cutViewAllowed || latestCutJobIds.length === 0) {
-      setCutJobs([]);
-      setCutJobsLoading(false);
+    if (!cutJobReadGuard.active) {
       return () => {
         cancelled = true;
       };
     }
-    setCutJobsLoading(true);
+    if (!cutViewAllowed || latestCutJobIds.length === 0) {
+      setCutJobsState({ scopeKey: cutJobsScopeKey, jobs: [], loading: false });
+      return () => {
+        cancelled = true;
+      };
+    }
+    const token = cutJobReadGuard.capture();
+    if (!token) return undefined;
+    setCutJobsState({ scopeKey: cutJobsScopeKey, jobs: [], loading: true });
     Promise.all(
       latestCutJobIds.map(async (cutJobId) => {
         try {
@@ -96,14 +113,34 @@ export const OrderMaterialsTab: React.FC = () => {
         }
       }),
     ).then((jobs) => {
-      if (!cancelled) setCutJobs(jobs.filter((job): job is CutJobDto => job !== null));
+      if (!cancelled && cutJobReadGuard.isCurrent(token)) {
+        setCutJobsState({
+          scopeKey: cutJobsScopeKey,
+          jobs: jobs.filter((job): job is CutJobDto => job !== null),
+          loading: false,
+        });
+      }
     }).finally(() => {
-      if (!cancelled) setCutJobsLoading(false);
+      if (!cancelled && cutJobReadGuard.isCurrent(token)) {
+        setCutJobsState((current) => (
+          current.scopeKey === cutJobsScopeKey
+            ? { ...current, loading: false }
+            : current
+        ));
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [cutViewAllowed, latestCutJobIds, latestCutJobIdsKey]);
+  }, [
+    cutJobReadGuard.active,
+    cutJobReadGuard.capture,
+    cutJobReadGuard.isCurrent,
+    cutJobsScopeKey,
+    cutViewAllowed,
+    latestCutJobIds,
+    latestCutJobIdsKey,
+  ]);
 
   const bathFilmUsage = useMemo(
     () => computeOrderBathFilmUsage(details, cutJobs, filmNameById),

@@ -1,6 +1,7 @@
 import { getPermissionsForRole, mapRoleIdToRole } from '../../permissions/permissions';
 import type { CurrentUser } from '../../permissions/current-user';
 import type { PermissionsService } from '../../permissions/permissions.service';
+import { rolePolicyForUser } from '../../permissions/policies/scope';
 import {
   InvalidCredentialsError,
   LoginMethodNotAllowedError,
@@ -175,6 +176,8 @@ export class AuthService {
         role: user.role,
         roleId: user.roleId,
         permissions: user.permissions,
+        permissionsVersion: user.permissionsVersion ?? 0,
+        policyScopes: rolePolicyForUser(user),
       },
     };
   }

@@ -14,6 +14,7 @@ import { featureFlags } from '../config/featureFlags';
 import { uploadOrderExcelToApi, handleUploadError } from '../utils/excel/uploadToApi';
 import { generateOrderFileName } from '../utils/excel/fileNameGenerator';
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from '../utils/materialDisplayName';
+import type { PageOwnedWorkspaceOperationContext } from '../workspace/workspaceOperationPins';
 
 interface Order {
   order_id: number;
@@ -38,7 +39,10 @@ interface OrderDetail {
 }
 
 interface UseOrderExportResult {
-  exportToDrive: (order: Order) => Promise<void>;
+  exportToDrive: (
+    order: Order,
+    owner?: PageOwnedWorkspaceOperationContext,
+  ) => Promise<void>;
   isUploading: boolean;
 }
 
@@ -67,7 +71,10 @@ export const useOrderExport = (): UseOrderExportResult => {
    * 5. Вызывает uploadOrderExcelToApi()
    * 6. Показывает notification о результате
    */
-  const exportToDrive = async (order: Order): Promise<void> => {
+  const exportToDrive = async (
+    order: Order,
+    owner?: PageOwnedWorkspaceOperationContext,
+  ): Promise<void> => {
     // Проверка наличия order
     if (!order || !order.order_id) {
       console.warn('useOrderExport: order or order_id is missing');
@@ -84,6 +91,7 @@ export const useOrderExport = (): UseOrderExportResult => {
         const result = await exportApi.exportOrderToGoogleDrive(order.order_id, {
           format: 'xlsx',
         });
+        owner?.assertOwnerCurrent();
 
         if (result.success) {
           message.success(
@@ -110,6 +118,7 @@ export const useOrderExport = (): UseOrderExportResult => {
           pagination: { current: 1, pageSize: 1 },
         }),
       ]);
+      owner?.assertOwnerCurrent();
 
       if (!fullOrder) {
         throw new Error(`Order ${order.order_id} not found in database`);
@@ -147,9 +156,11 @@ export const useOrderExport = (): UseOrderExportResult => {
             resource: 'employees',
             id: designEngineerId,
           });
+          owner?.assertOwnerCurrent();
           prisadkaDesignerName = employee?.full_name || '';
           console.log('[useOrderExport] Design engineer name:', prisadkaDesignerName);
         } catch (err) {
+          owner?.assertOwnerCurrent();
           console.warn('[useOrderExport] Failed to load design engineer:', err);
         }
       }
@@ -193,6 +204,7 @@ export const useOrderExport = (): UseOrderExportResult => {
             } as any).catch(() => ({ data: [] as any[] }))
           : Promise.resolve({ data: [] as any[] }),
       ]);
+      owner?.assertOwnerCurrent();
 
       console.log('[useOrderExport] DB response detailsResult:', detailsResult);
       const details = detailsResult.data || [];
@@ -234,6 +246,7 @@ export const useOrderExport = (): UseOrderExportResult => {
             resource: 'clients',
             id: fullOrder.client_id,
           });
+          owner?.assertOwnerCurrent();
           clientData = client;
           console.log('[useOrderExport] Client loaded:', clientData);
 
@@ -243,6 +256,7 @@ export const useOrderExport = (): UseOrderExportResult => {
             filters: [{ field: 'client_id', operator: 'eq', value: fullOrder.client_id }],
             pagination: { current: 1, pageSize: 100 },
           });
+          owner?.assertOwnerCurrent();
           const phones = phonesResult.data || [];
           const primaryPhone = phones.find((p: any) => p.is_primary) || phones[0];
           if (primaryPhone?.phone_number) {
@@ -258,6 +272,7 @@ export const useOrderExport = (): UseOrderExportResult => {
           }
           console.log('[useOrderExport] Client phone:', clientPhone);
         } catch (err) {
+          owner?.assertOwnerCurrent();
           console.warn('[useOrderExport] Failed to load client:', err);
         }
       }
@@ -315,6 +330,7 @@ export const useOrderExport = (): UseOrderExportResult => {
             })
           : { data: [] },
       ]);
+      owner?.assertOwnerCurrent();
 
       console.log(`[useOrderExport] Loaded references: materials=${materialsResult.data?.length || 0}, milling=${millingTypesResult.data?.length || 0}, edge=${edgeTypesResult.data?.length || 0}, films=${filmsResult.data?.length || 0}, paymentTypes=${paymentTypesResult.data?.length || 0}`);
 
@@ -391,6 +407,7 @@ export const useOrderExport = (): UseOrderExportResult => {
         clientPhone, // Телефон клиента (форматированный)
         fileName,
       });
+      owner?.assertOwnerCurrent();
 
       // 7. Показать успешное сообщение
       if (result.success) {
@@ -403,6 +420,7 @@ export const useOrderExport = (): UseOrderExportResult => {
         throw new Error(result.error || 'Неизвестная ошибка');
       }
     } catch (error) {
+      owner?.assertOwnerCurrent();
       console.error('Ошибка экспорта в Google Drive:', error);
 
       // Обработка ошибок через handleUploadError

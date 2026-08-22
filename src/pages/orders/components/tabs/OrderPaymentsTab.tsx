@@ -1,7 +1,7 @@
 // Order Payments Tab
 // Container for managing order payments with inline editing (like OrderDetailsTab)
 
-import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useRef, forwardRef, useImperativeHandle, useEffect } from 'react';
 import { Card, Button, Space, Modal, message } from 'antd';
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { OrderPaymentTable, OrderPaymentTableRef } from '../tables/OrderPaymentTable';
@@ -10,6 +10,10 @@ import { useOrderFormStore, useOrderDraftStoreApi } from '../../../../stores/ord
 import { Payment } from '../../../../types/orders';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import dayjs from 'dayjs';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import { useDeferredWorkspaceEntity } from '../../../../workspace/useDeferredWorkspaceEntity';
 
 // Exposed methods via ref
 export interface OrderPaymentsTabRef {
@@ -27,15 +31,59 @@ const QUICK_ADD_DEFAULTS = {
 export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
   const { payments, addPayment, deletePayment } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
-  const [editingPayment, setEditingPayment] = useState<Payment | undefined>();
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'order-payments-tab'),
+  ).current;
+  const restoredModalOpen = restored?.paymentModalOpen === true;
+  const restoredModalMode = restored?.paymentModalMode === 'edit' ? 'edit' : 'create';
+  const restoredEditingPaymentKey = readPaymentKey(restored?.editingPaymentKey);
+  const restoreEditRequested = restoredModalOpen && restoredModalMode === 'edit';
+  const {
+    entity: editingPayment,
+    setEntity: setEditingPayment,
+    restoreReady: restoredEditReady,
+    restorePending: restoredEditPending,
+    cancelDeferredRestore: cancelDeferredPaymentRestore,
+  } = useDeferredWorkspaceEntity({
+    restoreRequested: restoreEditRequested,
+    restoredKey: restoredEditingPaymentKey,
+    entities: payments,
+    getKey: (payment: Payment) => payment.temp_id ?? payment.payment_id ?? null,
+  });
+  const [modalOpen, setModalOpen] = useState(
+    () => restoredModalOpen && (!restoreEditRequested || restoredEditReady),
+  );
+  const [modalMode, setModalMode] = useState<'create' | 'edit'>(
+    restoredModalMode,
+  );
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>(
+    () => readPaymentKeys(restored?.selectedRowKeys),
+  );
+  const [highlightedRowKey, setHighlightedRowKey] = useState<string | number | null>(
+    () => readPaymentKey(restored?.highlightedRowKey),
+  );
   const tableRef = useRef<OrderPaymentTableRef>(null);
+
+  useEffect(() => {
+    if (restoreEditRequested && restoredEditReady && editingPayment) setModalOpen(true);
+  }, [editingPayment, restoreEditRequested, restoredEditReady]);
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'order-payments-tab', {
+    canCapture: () => !restoredEditPending,
+    capture: () => ({
+      paymentModalOpen: modalOpen,
+      paymentModalMode: modalMode,
+      editingPaymentKey: editingPayment?.temp_id ?? editingPayment?.payment_id ?? null,
+      selectedRowKeys: selectedRowKeys.filter(isSerializablePaymentKey),
+      highlightedRowKey: isSerializablePaymentKey(highlightedRowKey) ? highlightedRowKey : null,
+    }),
+  });
 
   // Handle create new payment via modal
   const handleCreate = () => {
+    cancelDeferredPaymentRestore();
     setModalMode('create');
     setEditingPayment(undefined);
     setModalOpen(true);
@@ -83,6 +131,7 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
 
   // Handle edit existing payment (via modal - legacy support)
   const handleEdit = (payment: Payment) => {
+    cancelDeferredPaymentRestore();
     setModalMode('edit');
     setEditingPayment(payment);
     setModalOpen(true);
@@ -173,7 +222,7 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
 
   // Handle row selection change
   const handleSelectChange = (newSelectedRowKeys: React.Key[]) => {
-    setSelectedRowKeys(newSelectedRowKeys);
+          setSelectedRowKeys(newSelectedRowKeys.filter(isSerializablePaymentKey));
   };
 
   return (
@@ -219,6 +268,7 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
             open={modalOpen}
             onSave={handleSave}
             onCancel={() => {
+              cancelDeferredPaymentRestore();
               setModalOpen(false);
               setEditingPayment(undefined);
             }}
@@ -228,3 +278,17 @@ export const OrderPaymentsTab = forwardRef<OrderPaymentsTabRef>((_, ref) => {
     </Card>
   );
 });
+
+function isSerializablePaymentKey(value: React.Key | null | undefined): value is string | number {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
+}
+
+function readPaymentKey(value: unknown): string | number | null {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))
+    ? value
+    : null;
+}
+
+function readPaymentKeys(value: unknown): Array<string | number> {
+  return Array.isArray(value) ? value.map(readPaymentKey).filter(isSerializablePaymentKey) : [];
+}

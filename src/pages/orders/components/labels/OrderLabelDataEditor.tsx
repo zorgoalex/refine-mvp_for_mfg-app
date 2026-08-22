@@ -11,6 +11,9 @@ import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
 import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
 import { firstLabelPageIndexForDetail } from './orderLabelPreviewIndex';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
+import { useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 
 const { Text } = Typography;
 
@@ -39,17 +42,26 @@ export const OrderLabelInlinePreviewSurface: React.FC<{ svg: string }> = ({ svg 
 );
 
 export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orderId, isOrderDirty }) => {
+  const { tabKey } = useKeepAlive();
   const isOperational = useOperationalUi();
   const canWrite = canAny(['labels.generate', 'labels.manage_templates']);
-  const [templates, setTemplates] = useState<LabelTemplate[]>([]);
-  const [templateId, setTemplateId] = useState<number | null>(null);
-  const [data, setData] = useState<OrderLabelData | null>(null);
+  const readGuard = useOrderAsyncReadGuard(`labels:${orderId ?? 'unsaved'}`);
+  const readScopeKey = `${readGuard.authNamespace}|order:${orderId ?? 'unsaved'}`;
+  const [stateScopeKey, setStateScopeKey] = useState(readScopeKey);
+  const stateIsCurrent = stateScopeKey === readScopeKey;
+  const [storedTemplates, setTemplates] = useState<LabelTemplate[]>([]);
+  const [storedTemplateId, setTemplateId] = useState<number | null>(null);
+  const [storedData, setData] = useState<OrderLabelData | null>(null);
+  const templates = stateIsCurrent ? storedTemplates : [];
+  const templateId = stateIsCurrent ? storedTemplateId : null;
+  const data = stateIsCurrent ? storedData : null;
   const [selectedDetailId, setSelectedDetailId] = useState<number | null>(null);
   const [commentsByDetailId, setCommentsByDetailId] = useState<Record<number, string>>({});
   const [dirtyDetailIds, setDirtyDetailIds] = useState<Set<number>>(new Set());
   const labelDataDirty = dirtyDetailIds.size > 0;
   const [loading, setLoading] = useState(false);
-  const [latestPreview, setLatestPreview] = useState<LatestOrderLabelsPreview | null>(null);
+  const [storedLatestPreview, setLatestPreview] = useState<LatestOrderLabelsPreview | null>(null);
+  const latestPreview = stateIsCurrent ? storedLatestPreview : null;
   const [latestPreviewLoading, setLatestPreviewLoading] = useState(false);
   const [latestPreviewRefreshKey, setLatestPreviewRefreshKey] = useState(0);
   const [selectedLatestPageIndex, setSelectedLatestPageIndex] = useState<number | null>(null);
@@ -60,22 +72,53 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
   );
 
   useEffect(() => {
-    if (!orderId) return;
+    if (stateScopeKey === readScopeKey) return;
+    setStateScopeKey(readScopeKey);
+    setTemplates([]);
+    setTemplateId(null);
+    setData(null);
+    setSelectedDetailId(null);
+    setCommentsByDetailId({});
+    setDirtyDetailIds(new Set());
+    setLoading(false);
+    setLatestPreview(null);
+    setLatestPreviewLoading(false);
+    setSelectedLatestPageIndex(null);
+    setDetailSearch('');
+  }, [readScopeKey, stateScopeKey]);
+
+  useEffect(() => {
+    if (!orderId || !readGuard.active) return undefined;
+    const token = readGuard.capture();
+    if (!token) return undefined;
+    let cancelled = false;
     setLoading(true);
     labelsApi.listTemplates(true)
       .then((next) => {
+        if (cancelled || !readGuard.isCurrent(token)) return;
         setTemplates(next);
         setTemplateId((current) => current ?? next.find((template) => template.isActive)?.labelTemplateId ?? null);
       })
-      .catch(() => message.error('Не удалось загрузить шаблоны бирок'))
-      .finally(() => setLoading(false));
-  }, [orderId]);
+      .catch(() => {
+        if (!cancelled && readGuard.isCurrent(token)) message.error('Не удалось загрузить шаблоны бирок');
+      })
+      .finally(() => {
+        if (!cancelled && readGuard.isCurrent(token)) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, readGuard.active, readGuard.authNamespace, readGuard.capture, readGuard.isCurrent]);
 
   useEffect(() => {
-    if (!orderId || !templateId) return;
+    if (!orderId || !templateId || !readGuard.active) return undefined;
+    const token = readGuard.capture();
+    if (!token) return undefined;
+    let cancelled = false;
     setLoading(true);
     labelsApi.getOrderLabelData(orderId, templateId)
       .then((next) => {
+        if (cancelled || !readGuard.isCurrent(token)) return;
         setData(next);
         setSelectedDetailId((current) =>
           current && next.details.some((detail) => detail.detailId === current)
@@ -87,34 +130,57 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
         ));
         setDirtyDetailIds(new Set());
       })
-      .catch(() => message.error('Не удалось загрузить данные бирок'))
-      .finally(() => setLoading(false));
-  }, [orderId, templateId]);
-
-  useEffect(() => {
-    if (!orderId) {
-      setLatestPreview(null);
-      return;
-    }
-    let cancelled = false;
-    setLatestPreviewLoading(true);
-    labelsApi.getLatest(orderId)
-      .then((latest) => {
-        if (!cancelled) setLatestPreview(latest);
-      })
       .catch(() => {
-        if (!cancelled) setLatestPreview(null);
+        if (!cancelled && readGuard.isCurrent(token)) message.error('Не удалось загрузить данные бирок');
       })
       .finally(() => {
-        if (!cancelled) setLatestPreviewLoading(false);
+        if (!cancelled && readGuard.isCurrent(token)) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [latestPreviewRefreshKey, orderId]);
+  }, [orderId, readGuard.active, readGuard.authNamespace, readGuard.capture, readGuard.isCurrent, templateId]);
+
+  useEffect(() => {
+    if (!orderId) {
+      setLatestPreview(null);
+      return undefined;
+    }
+    if (!readGuard.active) return undefined;
+    const token = readGuard.capture();
+    if (!token) return undefined;
+    let cancelled = false;
+    setLatestPreviewLoading(true);
+    labelsApi.getLatest(orderId)
+      .then((latest) => {
+        if (!cancelled && readGuard.isCurrent(token)) setLatestPreview(latest);
+      })
+      .catch(() => {
+        if (!cancelled && readGuard.isCurrent(token)) setLatestPreview(null);
+      })
+      .finally(() => {
+        if (!cancelled && readGuard.isCurrent(token)) setLatestPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    latestPreviewRefreshKey,
+    orderId,
+    readGuard.active,
+    readGuard.authNamespace,
+    readGuard.capture,
+    readGuard.isCurrent,
+  ]);
 
   const save = async () => {
     if (!orderId || !data || !templateId || isOrderDirty) return;
+    const writeToken = readGuard.capture();
+    if (!writeToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${orderId}`,
+      'order-label-write',
+    );
     setLoading(true);
     try {
       const next = await labelsApi.updateOrderLabelData(orderId, {
@@ -132,13 +198,15 @@ export const OrderLabelDataEditor: React.FC<OrderLabelDataEditorProps> = ({ orde
           })),
         idempotencyKey: `order-label-data-${orderId}-${Date.now()}`,
       });
+      if (!readGuard.isSameResource(writeToken)) return;
       setData(next);
       setDirtyDetailIds(new Set());
       message.success('Данные бирок сохранены');
     } catch {
-      message.error('Не удалось сохранить данные бирок');
+      if (readGuard.isSameResource(writeToken)) message.error('Не удалось сохранить данные бирок');
     } finally {
-      setLoading(false);
+      releaseOperationPin();
+      if (readGuard.isSameResource(writeToken)) setLoading(false);
     }
   };
 

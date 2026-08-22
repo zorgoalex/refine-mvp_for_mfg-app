@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEB_SERVER === 'true';
+const performanceOutputDir = process.env.ORDER_PRIMARY_OUTPUT_DIR;
 
 /**
  * Playwright Configuration
@@ -22,6 +23,7 @@ export default defineConfig({
     retries: process.env.CI ? 2 : 0,
     workers: 1,
     reporter: 'list',
+    outputDir: performanceOutputDir ?? './test-results',
     use: {
         baseURL: 'http://localhost:5173',
         trace: 'on-first-retry',

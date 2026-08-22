@@ -15,7 +15,7 @@ import { useDragSelection } from '../../../../hooks/useDragSelection';
 import { FilmQuickCreate } from '../modals/FilmQuickCreate';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
-import { useSelect } from '@refinedev/antd';
+import { OrderLifecycleReadSurface, useSelect } from '../../../../query/orderLifecycleQueries';
 import type { OrderDetail, OrderHdfDetail } from '../../../../types/orders';
 import { TableTopScroll } from '../../../../components/TableTopScroll';
 import { PAGE_SIZE_OPTIONS, usePageSizePreference } from '../../../../hooks/usePageSizePreference';
@@ -80,6 +80,14 @@ import {
 } from './orderDetailSpreadsheetNavigation';
 import { calculateLiveOrderDetailCostTotal } from './orderDetailSummary';
 import { BasisProjectLink } from '../BasisProjectLink';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import {
+  captureAntFormCheckpoint,
+  restoreAntFormCheckpoint,
+} from '../../../../workspace/workspaceFormCheckpoint';
+import { useDeferredWorkspaceEditingKey } from '../../../../workspace/useDeferredWorkspaceEditingKey';
 
 interface OrderDetailTableProps {
   onEdit: (detail: OrderDetail) => void;
@@ -182,6 +190,37 @@ const isOrderDetailSelectDropdownNavigation = (e: React.KeyboardEvent): boolean 
   return target.closest('.ant-select-open') !== null ||
     target.getAttribute('aria-expanded') === 'true';
 };
+
+function readDetailCheckpointKey(value: unknown): string | number | null {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return null;
+}
+
+function readPositiveCheckpointInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function readDetailSorterCheckpoint(value: unknown): DetailSorterState {
+  const fallback: DetailSorterState = { key: 'detail_number', order: 'ascend' };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback;
+  const candidate = value as Record<string, unknown>;
+  const key = readDetailCheckpointKey(candidate.key);
+  const order = candidate.order;
+  return key !== null && (order === 'ascend' || order === 'descend')
+    ? { key, order }
+    : fallback;
+}
+
+function readSpreadsheetCellCheckpoint(value: unknown): OrderDetailSpreadsheetCell | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.rowKey === 'string' && typeof candidate.columnKey === 'string'
+    ? { rowKey: candidate.rowKey, columnKey: candidate.columnKey }
+    : null;
+}
 
 export function sortOrderDetailsForPagination(
   details: readonly OrderDetail[],
@@ -737,6 +776,11 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   toolbarActions,
 }, ref) => {
   const { header, details, hdfDetails, updateDetail, deleteDetail, setDetailEditing } = useOrderFormStore();
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || `/orders/edit/${header?.order_id ?? 'new'}`;
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'detail-inline-editor'),
+  ).current;
   const saveValidation = useContext(OrderSaveValidationContext);
   const [inlineInvalidDetailKey, setInlineInvalidDetailKey] = useState<string | null>(null);
   const [validationScrollTargetKey, setValidationScrollTargetKey] = useState<React.Key | null>(null);
@@ -851,20 +895,42 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   );
 
   const [form] = Form.useForm();
-  const [editingKey, setEditingKey] = useState<number | string | null>(null);
-  const [editingField, setEditingField] = useState<React.Key | null>(null);
-  const inlineTabFieldsRef = useRef<string[]>(['height']);
-  const [currentFilmId, setCurrentFilmId] = useState<number | null>(null);
-  const [isSumEditable, setIsSumEditable] = useState(false);
-  const [sumContextMenu, setSumContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(null);
-  const { pageSize, setPageSize } = usePageSizePreference('orders:details-edit', 50);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [activeSorter, setActiveSorter] = useState<DetailSorterState>({
-    key: 'detail_number',
-    order: 'ascend',
+  const restoredEditingKey = useRef(readDetailCheckpointKey(restored?.editingKey)).current;
+  const {
+    editingKey,
+    setEditingKey,
+    restorePending: inlineRestorePending,
+    restoredActive: restoredInlineEditActive,
+    canApplyCurrentEdit,
+  } = useDeferredWorkspaceEditingKey({
+    restoredKey: restoredEditingKey,
+    entities: details,
+    getKey: (detail: OrderDetail) => detail.temp_id ?? detail.detail_id ?? null,
   });
-  const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(false);
+  const [editingField, setEditingField] = useState<React.Key | null>(
+    () => readDetailCheckpointKey(restored?.editingField),
+  );
+  const inlineTabFieldsRef = useRef<string[]>(['height']);
+  const [currentFilmId, setCurrentFilmId] = useState<number | null>(
+    () => readPositiveCheckpointInteger(restored?.currentFilmId),
+  );
+  const [isSumEditable, setIsSumEditable] = useState(() => restored?.isSumEditable === true);
+  const [sumContextMenu, setSumContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [dimensionValidationError, setDimensionValidationError] = useState<string | null>(
+    () => typeof restored?.dimensionValidationError === 'string'
+      ? restored.dimensionValidationError
+      : null,
+  );
+  const { pageSize, setPageSize } = usePageSizePreference('orders:details-edit', 50);
+  const [currentPage, setCurrentPage] = useState(
+    () => readPositiveCheckpointInteger(restored?.currentPage) ?? 1,
+  );
+  const [activeSorter, setActiveSorter] = useState<DetailSorterState>(() => (
+    readDetailSorterCheckpoint(restored?.activeSorter)
+  ));
+  const [filmQuickCreateOpen, setFilmQuickCreateOpen] = useState(
+    () => restored?.filmQuickCreateOpen === true,
+  );
   const [rowContextMenu, setRowContextMenu] = useState<{
     x: number;
     y: number;
@@ -877,7 +943,32 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   function getDisplayedField<K extends keyof OrderDetail>(record: OrderDetail, field: K): OrderDetail[K] {
     return isEditing(record) ? form.getFieldValue(field) : record[field];
   }
-  const activeSpreadsheetCellRef = useRef<OrderDetailSpreadsheetCell | null>(null);
+  const activeSpreadsheetCellRef = useRef<OrderDetailSpreadsheetCell | null>(
+    readSpreadsheetCellCheckpoint(restored?.activeCell),
+  );
+  useWorkspaceCheckpointAdapter(workspaceKey, 'detail-inline-editor', {
+    capture: () => ({
+      editingKey: inlineRestorePending ? restoredEditingKey : editingKey,
+      editingField: typeof editingField === 'string' || typeof editingField === 'number'
+        ? editingField
+        : null,
+      currentFilmId,
+      isSumEditable,
+      dimensionValidationError,
+      currentPage,
+      activeSorter,
+      filmQuickCreateOpen,
+      activeCell: activeSpreadsheetCellRef.current,
+      form: inlineRestorePending && restored?.form
+        ? restored.form
+        : captureAntFormCheckpoint(form),
+    }),
+  });
+  useLayoutEffect(() => {
+    if (editingKey === null || !restoredInlineEditActive) return;
+    setDetailEditing?.(true);
+    restoreAntFormCheckpoint(form, restored?.form);
+  }, [editingKey, form, restored, restoredInlineEditActive, setDetailEditing]);
   const spreadsheetFocusFramesRef = useRef<number[]>([]);
   const focusSpreadsheetCell = useCallback((cell: OrderDetailSpreadsheetCell) => {
     activeSpreadsheetCellRef.current = cell;
@@ -1305,12 +1396,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
   const saveCurrentRow = async (
     options: { allowEmptyTailRow?: boolean } = {},
   ): Promise<boolean> => {
+    if (!canApplyCurrentEdit) return false;
     if (editingKey === null) return true; // Nothing to save
 
     // Find the record being edited
     const recordIndex = details.findIndex(d => (d.temp_id || d.detail_id) === editingKey);
     const record = recordIndex >= 0 ? details[recordIndex] : undefined;
-    if (!record) return true;
+    if (!record) return false;
 
     if (options.allowEmptyTailRow) {
       const currentValues = form.getFieldsValue(true);
@@ -1426,7 +1518,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
       }
       startEdit(detail, true);
     },
-    isEditing: () => editingKey !== null,
+    isEditing: () => inlineRestorePending || editingKey !== null,
     saveCurrentAndStartNew: async (newDetail: OrderDetail) => {
       const requestedField = pendingQuickAddFocusFieldRef.current;
       const saved = await saveCurrentRow();
@@ -1451,7 +1543,7 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
     },
     // Apply current edits without starting new row (for form save)
     applyCurrentEdits: async () => {
-      if (editingKey === null) return true; // Nothing to save
+      if (editingKey === null && !inlineRestorePending) return true; // Nothing to save
       return await saveCurrentRow({ allowEmptyTailRow: true });
     },
   }));
@@ -3775,11 +3867,13 @@ export const OrderDetailTable = forwardRef<OrderDetailTableRef, OrderDetailTable
         </Dropdown>
       </div>
     </Form>
-    <FilmQuickCreate
-      open={filmQuickCreateOpen}
-      onClose={() => setFilmQuickCreateOpen(false)}
-      onSuccess={handleFilmCreated}
-    />
+    <OrderLifecycleReadSurface active={filmQuickCreateOpen}>
+      <FilmQuickCreate
+        open={filmQuickCreateOpen}
+        onClose={() => setFilmQuickCreateOpen(false)}
+        onSuccess={handleFilmCreated}
+      />
+    </OrderLifecycleReadSurface>
     </>
   );
 });

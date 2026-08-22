@@ -1,6 +1,7 @@
 import { authSession } from '../api/authSession';
 import { featureFlags } from '../config/featureFlags';
-import { useAppSettings, SETTING_KEYS } from './useAppSettings';
+import { SETTING_KEYS } from './useAppSettings';
+import { useOrderAppSettings } from './useOrderAppSettings';
 import { authStorage } from '../utils/auth';
 import {
   canViewOrderFinancials,
@@ -12,7 +13,7 @@ import {
 export function useOrderFinancialVisibility(
   providedUser?: OrderFinancialVisibilityUser | null,
 ): { canViewFinancials: boolean; isLoading: boolean } {
-  const { getSetting, isLoading } = useAppSettings();
+  const { getSetting, isLoading } = useOrderAppSettings();
   const currentUser = providedUser ?? (
     featureFlags.useBackendPermissions ? authSession.getUser() : authStorage.getUser()
   );

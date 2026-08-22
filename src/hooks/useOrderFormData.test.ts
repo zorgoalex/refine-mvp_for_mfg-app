@@ -6,8 +6,8 @@ describe('useOrderFormData mapping', () => {
   it('maps backend form-data response to select options, maps, and defaults', () => {
     const references = mapOrderFormDataToReferences(createFormDataResponse());
 
-    expect(references.clients).toEqual([{ label: 'Client A', value: 1 }]);
-    expect(references.employees).toEqual([{ label: 'Manager A', value: 11 }]);
+    expect(references.clients).toEqual([{ label: 'Client A', value: 1, sortOrder: 0 }]);
+    expect(references.employees).toEqual([{ label: 'Manager A', value: 11, sortOrder: 0 }]);
     expect(references.defaultOrderStatus).toBe(2);
     expect(references.defaultPaymentStatus).toBe(3);
     expect(references.defaultProductionStatus).toBe(4);

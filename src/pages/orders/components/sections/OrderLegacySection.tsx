@@ -3,7 +3,7 @@
 
 import React, { useMemo } from 'react';
 import { Form, Row, Col, Collapse, Select } from 'antd';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import {
@@ -133,7 +133,7 @@ export const OrderLegacySection: React.FC = () => {
                   allowClear
                   showSearch
                   filterOption={(input, option) =>
-                    (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                    (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
                   }
                 />
               </Form.Item>

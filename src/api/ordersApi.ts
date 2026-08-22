@@ -30,18 +30,23 @@ export const ordersApi = {
     return httpClient.get<OrderListResponse>(withQuery(apiRoutes.orders.list, params));
   },
 
-  getFormData(): Promise<OrderFormDataResponse> {
-    return httpClient.get<OrderFormDataResponse>(apiRoutes.orders.formData);
+  getFormData(opts?: { signal?: AbortSignal }): Promise<OrderFormDataResponse> {
+    return httpClient.get<OrderFormDataResponse>(apiRoutes.orders.formData, {
+      signal: opts?.signal,
+    });
   },
 
   listResourceDemands(params: OrderResourceDemandQuery = {}): Promise<OrderResourceDemandResponse> {
     return httpClient.get<OrderResourceDemandResponse>(withQuery(apiRoutes.orders.resourceDemands, params));
   },
 
-  async getById(orderId: number, opts?: { includeDeleted?: boolean }): Promise<OrderDto> {
+  async getById(
+    orderId: number,
+    opts?: { includeDeleted?: boolean; signal?: AbortSignal },
+  ): Promise<OrderDto> {
     const basePath = apiRoutes.orders.byId(validateOrderId(orderId));
     const path = opts?.includeDeleted ? withQuery(basePath, { includeDeleted: 'true' }) : basePath;
-    const response = await httpClient.get<OrderResponse>(path);
+    const response = await httpClient.get<OrderResponse>(path, { signal: opts?.signal });
     return response.order;
   },
 

@@ -163,7 +163,8 @@ describe('OrderShow sticky detail header guards', () => {
   });
 
   it('keeps show details sortable with a fixed position column and horizontal edge button', () => {
-    expect(showSource).toContain("const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(null);");
+    expect(showSource).toContain('const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(() => (');
+    expect(showSource).toContain('readOrderShowSorterCheckpoint(restoredShowCheckpoint?.activeSorter)');
     expect(showSource).toContain("lockVisible: true, lockPosition: 'start'");
     expect(showSource).toContain("key: 'detail_number',");
     expect(showSource).toContain("fixed: 'left',");

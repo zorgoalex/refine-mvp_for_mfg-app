@@ -1,9 +1,10 @@
 // Hook for loading default statuses from database
 // Loads business defaults for new orders and related form state.
 
-import { useList } from '@refinedev/core';
+import { useCallback } from 'react';
 import { featureFlags } from '../config/featureFlags';
 import { resolveDefaultNewOrderStatusId } from '../domain/orderStatusDefaults';
+import { useList } from '../query/orderLifecycleQueries';
 import { useOrderFormData } from './useOrderFormData';
 
 interface DefaultStatuses {
@@ -12,6 +13,7 @@ interface DefaultStatuses {
   defaultProductionStatus: number | undefined;
   isLoading: boolean;
   error?: Error | null;
+  retry: () => Promise<void>;
 }
 
 /**
@@ -22,9 +24,15 @@ interface DefaultStatuses {
 export const useDefaultStatuses = (): DefaultStatuses => {
   const backendFormData = useOrderFormData(featureFlags.useBackendReferences);
   const useBackendReferences = backendFormData.enabled;
+  const retryBackendFormData = backendFormData.retry;
 
   // Load default order status
-  const { data: orderStatuses, isLoading: orderStatusLoading } = useList({
+  const {
+    data: orderStatuses,
+    isLoading: orderStatusLoading,
+    error: orderStatusError,
+    refetch: refetchOrderStatuses,
+  } = useList({
     resource: 'order_statuses',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'order_status_id', order: 'asc' }],
@@ -33,7 +41,12 @@ export const useDefaultStatuses = (): DefaultStatuses => {
   });
 
   // Load default payment status
-  const { data: paymentStatuses, isLoading: paymentStatusLoading } = useList({
+  const {
+    data: paymentStatuses,
+    isLoading: paymentStatusLoading,
+    error: paymentStatusError,
+    refetch: refetchPaymentStatuses,
+  } = useList({
     resource: 'payment_statuses',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'payment_status_id', order: 'asc' }],
@@ -42,13 +55,36 @@ export const useDefaultStatuses = (): DefaultStatuses => {
   });
 
   // Load default production status
-  const { data: productionStatuses, isLoading: productionStatusLoading } = useList({
+  const {
+    data: productionStatuses,
+    isLoading: productionStatusLoading,
+    error: productionStatusError,
+    refetch: refetchProductionStatuses,
+  } = useList({
     resource: 'production_statuses',
     filters: [{ field: 'is_active', operator: 'eq', value: true }],
     sorters: [{ field: 'sort_order', order: 'asc' }, { field: 'production_status_id', order: 'asc' }],
     pagination: { current: 1, pageSize: 1 },
     queryOptions: { enabled: !useBackendReferences },
   });
+
+  const retry = useCallback(async () => {
+    if (useBackendReferences) {
+      await retryBackendFormData();
+      return;
+    }
+    await Promise.all([
+      refetchOrderStatuses(),
+      refetchPaymentStatuses(),
+      refetchProductionStatuses(),
+    ]);
+  }, [
+    retryBackendFormData,
+    refetchOrderStatuses,
+    refetchPaymentStatuses,
+    refetchProductionStatuses,
+    useBackendReferences,
+  ]);
 
   if (useBackendReferences) {
     return {
@@ -57,6 +93,7 @@ export const useDefaultStatuses = (): DefaultStatuses => {
       defaultProductionStatus: backendFormData.references.defaultProductionStatus,
       isLoading: backendFormData.isLoading,
       error: backendFormData.error,
+      retry,
     };
   }
 
@@ -70,6 +107,12 @@ export const useDefaultStatuses = (): DefaultStatuses => {
     defaultPaymentStatus: paymentStatuses?.data[0]?.payment_status_id,
     defaultProductionStatus: productionStatuses?.data[0]?.production_status_id,
     isLoading: orderStatusLoading || paymentStatusLoading || productionStatusLoading,
-    error: null,
+    error: toError(orderStatusError ?? paymentStatusError ?? productionStatusError),
+    retry,
   };
 };
+
+function toError(error: unknown): Error | null {
+  if (error == null) return null;
+  return error instanceof Error ? error : new Error(String(error));
+}

@@ -42,6 +42,16 @@ export function compareDiagnosticCounts(current, baseline) {
   return { added, removed };
 }
 
+export function groupDiagnosticCountsByFamily(counts) {
+  const grouped = {};
+  for (const [key, count] of Object.entries(counts)) {
+    const [file, code] = key.split('|', 3);
+    const family = `${file}|${code}`;
+    grouped[family] = (grouped[family] ?? 0) + count;
+  }
+  return Object.fromEntries(Object.entries(grouped).sort(([left], [right]) => left.localeCompare(right)));
+}
+
 function loadDiagnostics() {
   const configFile = ts.readConfigFile(CONFIG_PATH, ts.sys.readFile);
   if (configFile.error) return [configFile.error];
@@ -124,7 +134,13 @@ function verifyBaselineAgainstGitRef(gitRef) {
   }
 
   const candidateBaseline = JSON.parse(fs.readFileSync(BASELINE_PATH, 'utf8'));
-  const { added, removed } = compareDiagnosticCounts(candidateBaseline, targetBaseline);
+  // Dependency/type declaration changes can reorder or reword TypeScript's
+  // message while preserving the same diagnostic debt. Promotion policy uses
+  // stable file+code families; the branch-local ratchet above remains exact.
+  const { added, removed } = compareDiagnosticCounts(
+    groupDiagnosticCountsByFamily(candidateBaseline),
+    groupDiagnosticCountsByFamily(targetBaseline),
+  );
   console.log(`TypeScript baseline policy: candidate ${total(candidateBaseline)}, target ${total(targetBaseline)}, removed ${removed.reduce((sum, item) => sum + item.count, 0)}.`);
   if (added.length > 0) {
     console.error('The committed TypeScript baseline may only shrink:');

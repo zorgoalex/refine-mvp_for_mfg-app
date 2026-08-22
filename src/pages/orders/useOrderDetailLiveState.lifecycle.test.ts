@@ -24,6 +24,11 @@ const httpClientMock = vi.hoisted(() => ({
   refreshAuthSession: vi.fn(),
 }));
 
+const performanceRumMock = vi.hoisted(() => ({
+  setPerformanceRumRealtimeMode: vi.fn(),
+}));
+const activityMock = vi.hoisted(() => ({ documentVisible: true }));
+
 const reactHarness = vi.hoisted(() => {
   type EffectSlot = { deps: unknown[] | undefined; cleanup?: void | (() => void) };
   type MemoSlot = { deps: unknown[] | undefined; value: unknown };
@@ -119,6 +124,14 @@ const reactHarness = vi.hoisted(() => {
 vi.mock('react', () => reactHarness.module);
 vi.mock('../../api/authSession', () => ({ authSession: authSessionMock }));
 vi.mock('../../api/httpClient', () => httpClientMock);
+vi.mock('../../performance/PerformanceRumBridge', () => performanceRumMock);
+vi.mock('../../performance/appActivityCoordinator', () => ({
+  useAppActivitySnapshot: () => ({
+    activationRevision: 0,
+    documentVisible: activityMock.documentVisible,
+    windowFocused: true,
+  }),
+}));
 vi.mock('../../api/orderRealtimeApi', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../api/orderRealtimeApi')>();
   return { ...original, orderRealtimeApi: realtimeApiMock };
@@ -127,7 +140,6 @@ vi.mock('../../api/orderRealtimeApi', async (importOriginal) => {
 import { useOrderDetailLiveState } from './useOrderDetailLiveState';
 
 describe('useOrderDetailLiveState lifecycle', () => {
-  let visibilityHandler: (() => void) | undefined;
   let timers: Array<{ id: number; delay: number; handler: () => void }>;
   let nextTimerId: number;
 
@@ -160,20 +172,14 @@ describe('useOrderDetailLiveState lifecycle', () => {
     httpClientMock.getJwtExpirationTime.mockReset().mockReturnValue(null);
     httpClientMock.refreshAuthSession.mockReset();
     authListeners.clear();
+    performanceRumMock.setPerformanceRumRealtimeMode.mockReset();
     authSessionMock.subscribe.mockReset().mockImplementation((handler: () => void) => {
       authListeners.add(handler);
       return () => authListeners.delete(handler);
     });
-    visibilityHandler = undefined;
+    activityMock.documentVisible = true;
     timers = [];
     nextTimerId = 1;
-    vi.stubGlobal('document', {
-      visibilityState: 'visible',
-      addEventListener: vi.fn((type: string, handler: () => void) => {
-        if (type === 'visibilitychange') visibilityHandler = handler;
-      }),
-      removeEventListener: vi.fn(),
-    });
     vi.stubGlobal('window', {
       setTimeout: vi.fn((handler: () => void, delay: number) => {
         const id = nextTimerId++;
@@ -201,7 +207,8 @@ describe('useOrderDetailLiveState lifecycle', () => {
       .mockReturnValueOnce(actorA.promise)
       .mockReturnValueOnce(actorB.promise);
 
-    renderHook(true);
+    renderHook(true, 'actor-a');
+    await flushPromises();
     const actorASignal = realtimeApiMock.getDetailLiveState.mock.calls[0]?.[1].signal as AbortSignal;
     authSessionMock.getSessionGeneration.mockReturnValue(2);
     authSessionMock.getUser.mockReturnValue({
@@ -215,14 +222,18 @@ describe('useOrderDetailLiveState lifecycle', () => {
 
     actorA.resolve(snapshotResponse(2));
     await flushPromises();
-    expect(reactHarness.stateAt<{ loaded: boolean }>(1).loaded).toBe(false);
 
-    const masked = renderHook(true);
+    const masked = renderHook(true, 'actor-b');
+    await flushPromises();
     expect(masked.loaded).toBe(false);
 
     actorB.resolve(snapshotResponse(4));
     await flushPromises();
-    expect(renderHook(true).statusByDetailId.get(7)).toBe(4);
+    expect(renderHook(true, 'actor-b').statusByDetailId.get(7)).toBe(4);
+
+    actorA.resolve(snapshotResponse(2));
+    await flushPromises();
+    expect(renderHook(true, 'actor-b').statusByDetailId.get(7)).toBe(4);
   });
 
   it('aborts the stream when the workspace tab becomes inactive', async () => {
@@ -240,6 +251,56 @@ describe('useOrderDetailLiveState lifecycle', () => {
     expect(signal.aborted).toBe(true);
   });
 
+  it('starts a fresh unconditional snapshot after A deactivates and reactivates', async () => {
+    realtimeApiMock.getDetailLiveState.mockResolvedValue({
+      status: 200,
+      etag: '"state-1"',
+      streamCursor: 'v1;s=1',
+      streamEnabled: false,
+      snapshot: {
+        orderId: 42,
+        streamEnabled: false,
+        streamCursor: 'v1;s=1',
+        cutRefsAccess: 'denied',
+        details: [],
+      },
+    });
+
+    renderHook(true);
+    await flushPromises();
+    renderHook(false);
+    renderHook(true);
+    await flushPromises();
+
+    expect(realtimeApiMock.getDetailLiveState).toHaveBeenCalledTimes(2);
+    expect(realtimeApiMock.getDetailLiveState.mock.calls[0]?.[1]).toMatchObject({ etag: null });
+    expect(realtimeApiMock.getDetailLiveState.mock.calls[1]?.[1]).toMatchObject({ etag: null });
+    expect(realtimeApiMock.openLiveEvents).not.toHaveBeenCalled();
+  });
+
+  it('aborts the owned snapshot when the workspace deactivates without reporting an error', async () => {
+    realtimeApiMock.getDetailLiveState.mockImplementation(
+      (_orderId: number, options: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+        options.signal?.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'));
+        });
+      }),
+    );
+
+    renderHook(true);
+    await flushPromises();
+    const signal = realtimeApiMock.getDetailLiveState.mock.calls[0]?.[1]?.signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    renderHook(false);
+    await flushPromises();
+
+    expect(signal.aborted).toBe(true);
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).not.toHaveBeenCalledWith(
+      'terminal-no-transport',
+    );
+  });
+
   it('aborts the stream when the document becomes hidden', async () => {
     renderHook(true);
     await flushPromises();
@@ -247,8 +308,7 @@ describe('useOrderDetailLiveState lifecycle', () => {
     await flushPromises();
     const signal = realtimeApiMock.openLiveEvents.mock.calls[0]?.[2] as AbortSignal;
 
-    (document as unknown as { visibilityState: string }).visibilityState = 'hidden';
-    visibilityHandler?.();
+    activityMock.documentVisible = false;
     renderHook(true);
 
     expect(signal.aborted).toBe(true);
@@ -276,11 +336,14 @@ describe('useOrderDetailLiveState lifecycle', () => {
 
     expect(signal.aborted).toBe(true);
     expect(timers.some((timer) => timer.delay === 0)).toBe(false);
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenLastCalledWith(
+      'terminal-no-transport',
+    );
   });
 
   it('does not reconnect after proactive refresh expires the auth session', async () => {
     authSessionMock.getAccessToken.mockReturnValue('token-1');
-    httpClientMock.getJwtExpirationTime.mockReturnValue(Date.now() + 30_100);
+    httpClientMock.getJwtExpirationTime.mockImplementation(() => Date.now() + 30_100);
     realtimeApiMock.openLiveEvents.mockImplementation(
       async (_orderId: number, _cursor: string, signal: AbortSignal) => new Response(
         new ReadableStream({
@@ -331,12 +394,100 @@ describe('useOrderDetailLiveState lifecycle', () => {
 
     expect(realtimeApiMock.getDetailLiveState).toHaveBeenCalledTimes(2);
     expect(realtimeApiMock.getDetailLiveState.mock.calls[1]?.[1]).toMatchObject({ etag: null });
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('reconnecting');
+  });
+
+  it('reports compact fallback when the backend disables streaming', async () => {
+    realtimeApiMock.getDetailLiveState.mockResolvedValue({
+      status: 200,
+      etag: '"state-1"',
+      streamCursor: 'v1;s=1',
+      streamEnabled: false,
+      snapshot: {
+        orderId: 42,
+        streamEnabled: false,
+        streamCursor: 'v1;s=1',
+        cutRefsAccess: 'denied',
+        details: [],
+      },
+    });
+
+    renderHook(true);
+    await flushPromises();
+
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('initializing');
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenLastCalledWith(
+      'compact-fallback',
+    );
+    expect(realtimeApiMock.openLiveEvents).not.toHaveBeenCalled();
+  });
+
+  it('reports a connected stream before entering reconnect mode', async () => {
+    realtimeApiMock.openLiveEvents.mockResolvedValue(new Response('', {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
+    renderHook(true);
+    await flushPromises();
+    const reconnect = timers.find((timer) => timer.delay === 0);
+    timers = timers.filter((timer) => timer.id !== reconnect?.id);
+    reconnect?.handler();
+    await flushPromises();
+
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('connected');
+    expect(performanceRumMock.setPerformanceRumRealtimeMode).toHaveBeenCalledWith('reconnecting');
+  });
+
+  it('coalesces a burst of matching invalidations into one snapshot read', async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    realtimeApiMock.openLiveEvents.mockImplementation(
+      async (_orderId: number, _cursor: string, signal: AbortSignal) => new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streamController = controller;
+            signal.addEventListener('abort', () => controller.close());
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ),
+    );
+
+    renderHook(true);
+    await flushPromises();
+    const reconnect = timers.find((timer) => timer.delay === 0);
+    timers = timers.filter((timer) => timer.id !== reconnect?.id);
+    reconnect?.handler();
+    await flushPromises();
+
+    const event = (cursor: number) => [
+      `id: v1;s=${cursor}`,
+      'event: order.invalidate',
+      `data: ${JSON.stringify({
+        schemaVersion: 1,
+        orderId: 42,
+        cursor: `v1;s=${cursor}`,
+        domains: ['detail_status'],
+      })}`,
+      '',
+      '',
+    ].join('\n');
+    streamController?.enqueue(new TextEncoder().encode(event(2) + event(3) + event(4)));
+    await flushPromises();
+
+    const invalidationTimers = timers.filter((timer) => timer.delay === 40);
+    expect(invalidationTimers).toHaveLength(1);
+    timers = timers.filter((timer) => timer.id !== invalidationTimers[0]?.id);
+    invalidationTimers[0]?.handler();
+    await flushPromises();
+
+    expect(realtimeApiMock.getDetailLiveState).toHaveBeenCalledTimes(2);
+    expect(realtimeApiMock.openLiveEvents).toHaveBeenCalledTimes(1);
   });
 });
 
-function renderHook(active: boolean) {
+function renderHook(active: boolean, authScopeKey = 'actor-a') {
   reactHarness.beginRender();
-  const state = useOrderDetailLiveState({ enabled: true, active, orderId: 42 });
+  const state = useOrderDetailLiveState({ enabled: true, active, authScopeKey, orderId: 42 });
   reactHarness.flushEffects();
   return state;
 }

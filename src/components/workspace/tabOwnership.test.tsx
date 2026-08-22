@@ -21,7 +21,14 @@ describe('workspace tab ownership', () => {
     };
 
     renderToStaticMarkup(
-      <KeepAliveContext.Provider value={{ isActive: false, tabKey: '/orders/edit/42' }}>
+      <KeepAliveContext.Provider value={{
+        isActive: false,
+        tabKey: '/orders/edit/42',
+        workspaceActive: false,
+        activationRevision: 1,
+        documentVisible: true,
+        surfaceActive: true,
+      }}>
         <Probe />
       </KeepAliveContext.Provider>,
     );

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../common/errors/api-error';
 import type { BackendEnv } from '../config/env.validation';
 import { DatabaseService } from './database.service';
+import type { PerformanceQueryTelemetryService } from '../performance/performance-query-telemetry.service';
 
 function createConfig(values: Partial<BackendEnv> = {}): ConfigService<BackendEnv, true> {
   const defaults: Partial<BackendEnv> = {
@@ -17,15 +18,19 @@ function createConfig(values: Partial<BackendEnv> = {}): ConfigService<BackendEn
   } as unknown as ConfigService<BackendEnv, true>;
 }
 
+const telemetry = {
+  measure: <T>(_sql: string, operation: () => Promise<T>) => operation(),
+} as PerformanceQueryTelemetryService;
+
 describe('DatabaseService', () => {
   it('stays unconfigured when DATABASE_URL is absent', () => {
-    const database = new DatabaseService(createConfig());
+    const database = new DatabaseService(createConfig(), telemetry);
 
     expect(database.isConfigured).toBe(false);
   });
 
   it('fails closed when queried without a configured pool', async () => {
-    const database = new DatabaseService(createConfig());
+    const database = new DatabaseService(createConfig(), telemetry);
 
     await expect(database.query('SELECT 1')).rejects.toMatchObject({
       code: 'DATABASE_UNAVAILABLE',
@@ -34,7 +39,7 @@ describe('DatabaseService', () => {
   });
 
   it('reports ping false without a configured pool', async () => {
-    const database = new DatabaseService(createConfig());
+    const database = new DatabaseService(createConfig(), telemetry);
 
     await expect(database.ping()).resolves.toBe(false);
   });

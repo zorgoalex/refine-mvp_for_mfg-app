@@ -4,8 +4,9 @@
 import React, { useState } from 'react';
 import { Modal, Form, Input, Select, notification } from 'antd';
 import { useCreate } from '@refinedev/core';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { useWorkspaceModalFormCheckpoint } from '../../../../workspace/workspaceModalFormCheckpoint';
 
 interface DowellingOrderQuickCreateProps {
   open: boolean;
@@ -23,6 +24,7 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
   orderDate,
 }) => {
   const [form] = Form.useForm();
+  const workspaceKey = useWorkspaceModalFormCheckpoint('dowelling-quick-create', open, form);
   const [isCreating, setIsCreating] = useState(false);
   const { mutateAsync: createDowellingOrder } = useCreate();
   const { mutateAsync: createDowelingLink } = useCreate();
@@ -135,7 +137,9 @@ export const DowellingOrderQuickCreate: React.FC<DowellingOrderQuickCreateProps>
       okText="Создать"
       cancelText="Отмена"
       width={500}
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      modalRender={(modal) => (
+        <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>{modal}</DraggableModalWrapper>
+      )}
     >
       <Form form={form} layout="vertical">
         <Form.Item

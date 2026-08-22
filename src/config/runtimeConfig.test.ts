@@ -120,6 +120,44 @@ describe('runtimeConfig', () => {
     });
   });
 
+  it('preserves a valid lifecycle rollout and observability contract', () => {
+    applyRuntimeConfig({
+      build: { sha: 'abcdef123456' },
+      observability: { performanceRum: true },
+      rollouts: {
+        orderLifecycleV2: {
+          enabled: true,
+          percent: 25,
+          allocationSalt: 'salt-v1',
+          configVersion: 'lifecycle-v1',
+        },
+      },
+    });
+
+    expect(getLoadedRuntimeConfig()).toMatchObject({
+      build: { sha: 'abcdef123456' },
+      observability: { performanceRum: true },
+      rollouts: { orderLifecycleV2: { enabled: true, percent: 25 } },
+    });
+  });
+
+  it('rejects enabled lifecycle rollout without safe version and salt', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        rollouts: {
+          orderLifecycleV2: {
+            enabled: true,
+            percent: 25,
+            allocationSalt: '',
+            configVersion: 'v1',
+          },
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+
+    expect(await initializeRuntimeConfig({ fetchImpl: fetchMock, timeoutMs: 10 })).toBeNull();
+  });
+
   it('fails closed when UI runtime shape is malformed', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ ui: { evolutionEnabled: 'true' } }), {

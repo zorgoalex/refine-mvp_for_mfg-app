@@ -1,5 +1,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { authSession } from '../api/authSession';
+import {
+  acquireWorkspaceOperationPin,
+  clearWorkspaceOperationPins,
+  getWorkspaceOperationPinDiagnostics,
+} from '../workspace/workspaceOperationPins';
 
 let mod: typeof import('./tabStore');
 const TEST_USER = { id: '7', username: 'manager', role: 'manager' };
@@ -12,6 +17,7 @@ describe('tabStore', () => {
     mod = await import('./tabStore');
   });
   afterEach(() => {
+    clearWorkspaceOperationPins();
     authSession.setUser(null);
     localStorage.clear();
     sessionStorage.clear();
@@ -124,7 +130,22 @@ describe('tabStore', () => {
     expect(mod.hasAnyDirty([{ key: '/a', path: '/a', label: 'a', resource: 'a', dirty: true }])).toBe(true);
   });
 
-  it('persists tab identity and opener (not dirty) to user-scoped localStorage', () => {
+  it('blocks real tab cleanup while a page-owned operation pins the workspace', () => {
+    const state = mod.useTabStore.getState();
+    const key = '/orders/edit/42';
+    state.openTab({ key, path: key, label: '42', resource: 'orders_view' });
+    const release = acquireWorkspaceOperationPin(key, 'order-save');
+
+    expect(state.closeTab(key)).toBe(false);
+    expect(mod.useTabStore.getState().tabs.some((tab) => tab.key === key)).toBe(true);
+    expect(getWorkspaceOperationPinDiagnostics().evictionPinCount).toBe(1);
+
+    release();
+    expect(mod.useTabStore.getState().closeTab(key)).toBe(true);
+    expect(mod.useTabStore.getState().tabs.some((tab) => tab.key === key)).toBe(false);
+  });
+
+  it('persists {key,path,label,resource} (not dirty) to user-scoped localStorage', () => {
     mod.useTabStore.getState().openTab({ key: '/orders', path: '/orders', label: 'Заказы', resource: 'orders_view' });
     mod.useTabStore.getState().openTab({
       key: '/orders/show/42',

@@ -5,14 +5,15 @@
 import React, { useMemo, useState } from 'react';
 import { Tag, Space, Typography } from 'antd';
 import { StarOutlined } from '@ant-design/icons';
-import { useOne, useList } from '@refinedev/core';
+import { useList, useOne } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
 import { resolveDetailMaterialName, resolveHeaderMaterialName } from '../../../../utils/materialDisplayName';
 import { ProductionStagesDisplay } from '../../../../components/ProductionStagesDisplay';
-import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { useOrderAppSettings } from '../../../../hooks/useOrderAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { OrderHeaderContextMenu } from '../OrderHeaderContextMenu';
@@ -33,7 +34,7 @@ interface OrderHeaderSummaryProps {
 export const OrderHeaderSummary: React.FC<OrderHeaderSummaryProps> = ({ compactSticky = false }) => {
   const isOperational = useOperationalUi();
   const { header, details, hdfDetails, payments, isPaymentStatusManual, dowelingLinks } = useOrderFormStore();
-  const { getSetting } = useAppSettings();
+  const { getSetting } = useOrderAppSettings();
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{

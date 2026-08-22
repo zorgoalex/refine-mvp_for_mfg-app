@@ -47,6 +47,32 @@ describe('useOrderBackendRead helpers', () => {
     expect(store.syncOriginals).toHaveBeenCalledTimes(1);
   });
 
+  it('does not publish a backend load after its auth/resource owner changes', async () => {
+    const order = createOrderDto(15);
+    const formValues = createFormValues(15);
+    let resolveOrder!: (value: OrderDto) => void;
+    let current = true;
+    const store = createStore();
+    const pending = loadOrderViaBackend(15, {
+      flags: { useBackendOrdersRead: true },
+      getOrderById: () => new Promise<OrderDto>((resolve) => {
+        resolveOrder = resolve;
+      }),
+      toFormValues: () => formValues,
+      getOrderStore: () => store,
+      canPublish: () => current,
+    });
+
+    current = false;
+    resolveOrder(order);
+
+    await expect(pending).resolves.toBeNull();
+    expect(store.loadOrder).not.toHaveBeenCalled();
+    expect(store.setDirty).not.toHaveBeenCalled();
+    expect(store.setInitializing).not.toHaveBeenCalled();
+    expect(store.syncOriginals).not.toHaveBeenCalled();
+  });
+
   it('validates order id before backend read call', async () => {
     const getOrderById = vi.fn();
 

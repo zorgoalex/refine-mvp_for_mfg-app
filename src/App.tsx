@@ -29,6 +29,16 @@ import { can } from "./utils/permissions";
 import type { PermissionName } from "./api/types/authApi.types";
 import { useOrderFinancialVisibility } from "./hooks/useOrderFinancialVisibility";
 import { DefaultRootRedirect } from "./components/DefaultRootRedirect";
+import { PerformanceRumBridge } from "./performance/PerformanceRumBridge";
+import { AppActivityCoordinatorBridge } from "./performance/appActivityCoordinator";
+import { appRefineReactQueryOptions } from "./query/appQueryClient";
+import {
+  OrderPrimaryRouteGate,
+  OrderPrimaryRouteLoader,
+} from "./query/OrderPrimaryRouteLoader";
+import { installWorkspaceStateLifecycle } from "./workspace/workspaceStateLifecycle";
+
+installWorkspaceStateLifecycle();
 
 const OrderShow = lazy(async () => ({ default: (await import("./pages/orders/show")).OrderShow }));
 const OrderEdit = lazy(async () => ({ default: (await import("./pages/orders/edit")).OrderEdit }));
@@ -250,6 +260,8 @@ const ThemedApp = () => {
   return (
     <ErrorBoundary>
       <BrowserRouter>
+        <AppActivityCoordinatorBridge />
+        <PerformanceRumBridge />
         <RefineKbarProvider>
           <ConfigProvider
             locale={ruRU}
@@ -678,8 +690,11 @@ const ThemedApp = () => {
                 // (single beforeunload + close-confirm). Disable Refine's per-form prompt.
                 warnWhenUnsavedChanges: false,
                 disableTelemetry: true,
+                useNewQueryKeys: true,
+                reactQuery: appRefineReactQueryOptions,
               }}
             >
+              <OrderPrimaryRouteLoader />
               <Routes>
                 <Route
                   element={
@@ -696,7 +711,14 @@ const ThemedApp = () => {
                     element={<DefaultRootRedirect />}
                   />
                   <Route path="/orders" >
-                    <Route index element={<OrderList />} />
+                    <Route
+                      index
+                      element={(
+                        <OrderPrimaryRouteGate>
+                          <OrderList />
+                        </OrderPrimaryRouteGate>
+                      )}
+                    />
                     <Route
                       path="create"
                       element={(
@@ -709,7 +731,9 @@ const ThemedApp = () => {
                       path="edit/:id"
                       element={(
                         <PermissionRoute permission="orders.update">
-                          <OrderEdit />
+                          <OrderPrimaryRouteGate>
+                            <OrderEdit />
+                          </OrderPrimaryRouteGate>
                         </PermissionRoute>
                       )}
                     />
@@ -721,7 +745,14 @@ const ThemedApp = () => {
                         </PermissionRoute>
                       )}
                     />
-                    <Route path="show/:id" element={<OrderShow />} />
+                    <Route
+                      path="show/:id"
+                      element={(
+                        <OrderPrimaryRouteGate>
+                          <OrderShow />
+                        </OrderPrimaryRouteGate>
+                      )}
+                    />
                   </Route>
                   <Route path="/calendar" >
                     <Route index element={<CalendarList />} />

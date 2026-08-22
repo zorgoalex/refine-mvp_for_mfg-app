@@ -6,9 +6,10 @@ const listSrc = readFileSync(new URL('../list.tsx', import.meta.url), 'utf8');
 
 describe('AddToCutModal wiring (backend-owned, flag-guarded)', () => {
   it('drives only the backend cut-jobs API (no page-level Hasura write)', () => {
-    expect(modalSrc).toMatch(/cutApi\.create/);
-    expect(modalSrc).toMatch(/cutApi\.listEligibleDetails/);
-    expect(modalSrc).toMatch(/cutApi\.addItems/);
+    expect(modalSrc).toContain("typeof cutApi");
+    expect(modalSrc).toMatch(/api\.create/);
+    expect(modalSrc).toMatch(/api\.listEligibleDetails/);
+    expect(modalSrc).toMatch(/api\.addItems/);
     // No direct read-layer/GraphQL write from the page (CLAUDE.md principle 3):
     // it must not import the dataProvider or issue a raw GraphQL mutation.
     expect(modalSrc).not.toMatch(/import[\s\S]*dataProvider/);
@@ -20,7 +21,7 @@ describe('AddToCutModal wiring (backend-owned, flag-guarded)', () => {
   });
 
   it('broadcasts updated cut job refs after adding details', () => {
-    expect(modalSrc).toContain('emitCutJobReady(updated, { detailIds: finalIds, orderIds })');
+    expect(modalSrc).toContain('emitCutJobReady(result.job, { detailIds: result.detailIds, orderIds })');
   });
 
   it('is mounted in the orders list only behind the useBackendCut flag', () => {
@@ -45,7 +46,7 @@ describe('AddToCutModal detail-level mode', () => {
   });
 
   it('rolls back an empty new draft via archive (no orphan job)', () => {
-    expect(modalSrc).toContain('cutApi.archive');
+    expect(modalSrc).toContain('await api.archive(job.cutJobId, job.version)');
   });
 
   it('uses order display names, not raw order ids, in the default cut name when names are provided', () => {

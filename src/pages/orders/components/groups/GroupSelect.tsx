@@ -3,6 +3,7 @@ import { Select } from 'antd';
 import type { SelectProps } from 'antd';
 import { groupsApi } from '../../../../api/groupsApi';
 import type { GroupLookupItem, GroupRef } from '../../../../api/types/groupApi.types';
+import { useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
 
 interface GroupSelectProps extends Omit<SelectProps<string | string[]>, 'options' | 'onSearch'> {
   mode?: 'multiple';
@@ -11,19 +12,28 @@ interface GroupSelectProps extends Omit<SelectProps<string | string[]>, 'options
 
 export const GroupSelect: React.FC<GroupSelectProps> = ({ value, mode, selectedGroups = [], ...props }) => {
   const [search, setSearch] = useState('');
-  const [items, setItems] = useState<GroupLookupItem[]>([]);
+  const readGuard = useOrderAsyncReadGuard(`group-lookup:${search}`);
+  const readScopeKey = `${readGuard.authNamespace}|search:${search}`;
+  const [itemsState, setItemsState] = useState<{
+    scopeKey: string;
+    value: GroupLookupItem[];
+  } | null>(null);
+  const items = itemsState?.scopeKey === readScopeKey ? itemsState.value : [];
 
   useEffect(() => {
-    let cancelled = false;
+    if (!readGuard.active) return;
+    const token = readGuard.capture();
+    if (!token) return;
     void groupsApi.lookupGroups({ search, limit: 20 }).then((response) => {
-      if (!cancelled) setItems(response.data);
+      if (readGuard.isCurrent(token)) {
+        setItemsState({ scopeKey: readScopeKey, value: response.data });
+      }
     }).catch(() => {
-      if (!cancelled) setItems([]);
+      if (readGuard.isCurrent(token)) {
+        setItemsState({ scopeKey: readScopeKey, value: [] });
+      }
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [search]);
+  }, [readGuard.active, readGuard.capture, readGuard.isCurrent, readScopeKey, search]);
 
   const options = useMemo(() => {
     const merged = new Map<string, { value: string; label: string }>();

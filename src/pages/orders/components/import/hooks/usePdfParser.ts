@@ -63,7 +63,22 @@ export interface UsePdfParserReturn {
   ) => void;
   confirmLayouts: () => Promise<ImportRow[] | null>;
   parseFile: (file: File) => Promise<void>;
+  createCheckpoint: () => PdfParserCheckpoint;
+  restoreCheckpoint: (checkpoint: PdfParserCheckpoint) => void;
   reset: () => void;
+}
+
+export interface PdfParserCheckpoint {
+  fileName: string | null;
+  result: PdfParsedResult | null;
+  importRows: ImportRow[];
+  genericTables: PdfGenericTable[];
+  layoutMappings: Record<string, PdfLayoutMapping>;
+  patternMatches: PdfPatternMatch[];
+  needsLayoutMapping: boolean;
+  layoutIssues: string[];
+  patternSaveWarning: string | null;
+  unresolvedLineActions: Record<string, Record<number, PdfUnresolvedLineAction>>;
 }
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -357,6 +372,51 @@ export const usePdfParser = (): UsePdfParserReturn => {
     return completedRows;
   }, [genericTables, layoutMappings, patternMatches, result, unresolvedLineActions]);
 
+  const createCheckpoint = useCallback((): PdfParserCheckpoint => ({
+    fileName,
+    result,
+    importRows,
+    genericTables: genericTables.map((table) => ({
+      ...table,
+      columns: table.columns.map((column) => ({
+        ...column,
+        maxX: Number.isFinite(column.maxX) ? column.maxX : Number.MAX_SAFE_INTEGER,
+      })),
+    })),
+    layoutMappings,
+    patternMatches,
+    needsLayoutMapping,
+    layoutIssues,
+    patternSaveWarning,
+    unresolvedLineActions,
+  }), [
+    fileName,
+    genericTables,
+    importRows,
+    layoutIssues,
+    layoutMappings,
+    needsLayoutMapping,
+    patternMatches,
+    patternSaveWarning,
+    result,
+    unresolvedLineActions,
+  ]);
+
+  const restoreCheckpoint = useCallback((checkpoint: PdfParserCheckpoint): void => {
+    setIsLoading(false);
+    setError(null);
+    setFileName(checkpoint.fileName);
+    setResult(checkpoint.result);
+    setImportRows(checkpoint.importRows);
+    setGenericTables(checkpoint.genericTables);
+    setLayoutMappings(checkpoint.layoutMappings);
+    setPatternMatches(checkpoint.patternMatches);
+    setNeedsLayoutMapping(checkpoint.needsLayoutMapping);
+    setLayoutIssues(checkpoint.layoutIssues);
+    setPatternSaveWarning(checkpoint.patternSaveWarning);
+    setUnresolvedLineActions(checkpoint.unresolvedLineActions);
+  }, []);
+
   const reset = useCallback((): void => {
     setIsLoading(false);
     setError(null);
@@ -389,6 +449,8 @@ export const usePdfParser = (): UsePdfParserReturn => {
     setUnresolvedLineAction,
     confirmLayouts,
     parseFile,
+    createCheckpoint,
+    restoreCheckpoint,
     reset,
   };
 };

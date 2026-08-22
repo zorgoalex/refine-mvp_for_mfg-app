@@ -7,6 +7,7 @@ import {
   seedLegacyAuthSession,
 } from "./ui-variant/uiVariantBootstrap";
 import { reloadPageOnceForStaleChunk } from "./utils/staleChunkReload";
+import { resolveOrderLifecycleCohort } from "./performance/orderLifecycleCohortStore";
 
 async function bootstrap() {
   try {
@@ -18,6 +19,10 @@ async function bootstrap() {
   // Legacy auth persists user/token in localStorage while permission helpers
   // read authSession. Seed it even when UI evolution is unavailable.
   seedLegacyAuthSession();
+  // Resolve the versioned lifecycle cohort before route rendering. Treatment
+  // routes can then start their primary query before React invokes React.lazy;
+  // control routes render with their historical page-owned request path.
+  await resolveOrderLifecycleCohort();
 
   const uiVariant = await resolveInitialUiVariant(getLoadedRuntimeConfig()?.ui);
   setDocumentUiVariant(uiVariant);

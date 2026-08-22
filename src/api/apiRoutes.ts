@@ -22,6 +22,11 @@ const groupsRoutes = {
 } as const;
 
 export const apiRoutes = {
+  performance: {
+    rum: backendApiPath('/performance/rum'),
+    rumSummary: backendApiPath('/performance/rum-summary'),
+    queryHistograms: backendApiPath('/performance/query-histograms'),
+  },
   auth: {
     login: backendApiPath('/auth/login'),
     refresh: backendApiPath('/auth/refresh'),

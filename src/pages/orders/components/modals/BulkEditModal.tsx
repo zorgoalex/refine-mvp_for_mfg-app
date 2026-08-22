@@ -1,9 +1,9 @@
 // Bulk Edit Modal
 // Modal for bulk editing multiple order details at once
 
-import React, { useEffect, useState } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Modal, Form, Input, InputNumber, Row, Col, Select, Checkbox, Alert, Divider, Typography } from 'antd';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { OrderDetail } from '../../../../types/orders';
 import { numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
@@ -14,6 +14,13 @@ import {
   toSheetSelectOptions,
   filterCuttableOptions,
 } from '../../../../hooks/useSheetMaterialOptions';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import {
+  captureAntFormCheckpoint,
+  restoreAntFormCheckpoint,
+} from '../../../../workspace/workspaceFormCheckpoint';
 
 const { Text } = Typography;
 
@@ -57,6 +64,21 @@ interface EnabledFields {
   doweling: boolean;
 }
 
+const EMPTY_ENABLED_FIELDS: EnabledFields = {
+  height: false,
+  width: false,
+  quantity: false,
+  sheet_material_type_id: false,
+  note: false,
+  milling_type_id: false,
+  edge_type_id: false,
+  film_id: false,
+  milling_cost_per_sqm: false,
+  production_status_id: false,
+  priority: false,
+  doweling: false,
+};
+
 export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   open,
   selectedCount,
@@ -65,21 +87,14 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   onCancel,
 }) => {
   const [form] = Form.useForm<BulkEditFields>();
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'bulk-edit-modal'),
+  ).current;
+  const restorePendingRef = useRef(restored?.open === true);
   const [applyToAll, setApplyToAll] = useState(false);
-  const [enabledFields, setEnabledFields] = useState<EnabledFields>({
-    height: false,
-    width: false,
-    quantity: false,
-    sheet_material_type_id: false,
-    note: false,
-    milling_type_id: false,
-    edge_type_id: false,
-    film_id: false,
-    milling_cost_per_sqm: false,
-    production_status_id: false,
-    priority: false,
-    doweling: false,
-  });
+  const [enabledFields, setEnabledFields] = useState<EnabledFields>(EMPTY_ENABLED_FIELDS);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 
@@ -140,27 +155,36 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     ? createBackendSelectProps(orderFormData.references.productionStatuses, orderFormData.isLoading)
     : productionStatusSelectProps;
 
-  // Reset form when modal opens
-  useEffect(() => {
-    if (open) {
-      form.resetFields();
-      setApplyToAll(false);
-      setEnabledFields({
-        height: false,
-        width: false,
-        quantity: false,
-        sheet_material_type_id: false,
-        note: false,
-        milling_type_id: false,
-        edge_type_id: false,
-        film_id: false,
-        milling_cost_per_sqm: false,
-        production_status_id: false,
-        priority: false,
-        doweling: false,
-      });
+  useWorkspaceCheckpointAdapter(workspaceKey, 'bulk-edit-modal', {
+    capture: () => ({
+      open,
+      selectedCount,
+      totalCount,
+      applyToAll,
+      enabledFields,
+      form: captureAntFormCheckpoint(form),
+    }),
+  });
+
+  // Restore once after workspace remount; ordinary close/reopen starts clean.
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (
+      restorePendingRef.current
+      && restored?.selectedCount === selectedCount
+      && restored.totalCount === totalCount
+      && restoreAntFormCheckpoint(form, restored.form)
+    ) {
+      setApplyToAll(restored.applyToAll === true);
+      setEnabledFields(readEnabledFields(restored.enabledFields));
+      restorePendingRef.current = false;
+      return;
     }
-  }, [open, form]);
+    restorePendingRef.current = false;
+    form.resetFields();
+    setApplyToAll(false);
+    setEnabledFields(EMPTY_ENABLED_FIELDS);
+  }, [open, form, restored, selectedCount, totalCount]);
 
   // Toggle field enabled state
   const toggleField = (field: keyof EnabledFields) => {
@@ -245,7 +269,11 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
       okButtonProps={{
         disabled: enabledCount === 0 || !hasSelection
       }}
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      modalRender={(modal) => (
+        <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>
+          {modal}
+        </DraggableModalWrapper>
+      )}
     >
       {/* Info alert */}
       <Alert
@@ -608,3 +636,13 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     </Modal>
   );
 };
+
+function readEnabledFields(value: unknown): EnabledFields {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return EMPTY_ENABLED_FIELDS;
+  }
+  const candidate = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(EMPTY_ENABLED_FIELDS).map((key) => [key, candidate[key] === true]),
+  ) as unknown as EnabledFields;
+}

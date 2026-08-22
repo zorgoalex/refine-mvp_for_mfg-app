@@ -1,10 +1,99 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Form, Input, Modal, Radio, Select, Space, message } from 'antd';
 import { cutApi } from '../../../api/cutApi';
 import { ApiError } from '../../../api/httpClient';
 import type { CutDetailPlacements, CutJobDto } from '../../../api/types/cutApi.types';
 import { emitCutJobReady } from '../../cut/cutJobEvents';
 import { buildCutAddWarning, formatPlacementsMessage, restrictDetailIds, selectableDetailIds } from '../../cut/cutPageHelpers';
+import { useKeepAlive } from '../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../workspace/workspaceCheckpointRegistry';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+  type PageOwnedWorkspaceOperationContext,
+} from '../../../workspace/workspaceOperationPins';
+
+type AddToCutWorkflowApi = Pick<
+  typeof cutApi,
+  'addItems' | 'archive' | 'create' | 'get' | 'listEligibleDetails'
+>;
+
+interface AddToCutWorkflowInput {
+  mode: 'new' | 'existing';
+  name: string;
+  orderIds: number[];
+  detailIds?: number[];
+  hdfDetailIds?: number[];
+  targetJobId: number | null;
+}
+
+export type AddToCutWorkflowResult =
+  | { kind: 'empty'; warningText: string }
+  | { kind: 'updated'; detailIds: number[]; job: CutJobDto };
+
+export async function executeAddToCutWorkflow(
+  input: AddToCutWorkflowInput,
+  owner: PageOwnedWorkspaceOperationContext,
+  api: AddToCutWorkflowApi = cutApi,
+): Promise<AddToCutWorkflowResult> {
+  const detailMode = Array.isArray(input.detailIds);
+  const hdfMode = Array.isArray(input.hdfDetailIds);
+  const job = input.mode === 'new'
+    ? await api.create({
+        name: input.name.trim() || 'Раскрой',
+        criteria: { orderIds: input.orderIds },
+      })
+    : await resolveExistingJob(input.targetJobId, api);
+  owner.assertOwnerCurrent();
+
+  if (hdfMode) {
+    const finalHdfIds = input.hdfDetailIds ?? [];
+    if (finalHdfIds.length === 0) {
+      if (input.mode === 'new') {
+        await api.archive(job.cutJobId, job.version).catch(() => undefined);
+        owner.assertOwnerCurrent();
+      }
+      return { kind: 'empty', warningText: 'Выберите ХДФ-детали' };
+    }
+    const updated = await api.addItems(job.cutJobId, {
+      hdfDetailIds: finalHdfIds,
+      version: job.version,
+    });
+    owner.assertOwnerCurrent();
+    return { kind: 'updated', detailIds: [], job: updated };
+  }
+
+  const eligible = await api.listEligibleDetails(job.cutJobId, { orderIds: input.orderIds });
+  owner.assertOwnerCurrent();
+  const selectable = selectableDetailIds(eligible.details);
+  const finalIds = detailMode
+    ? restrictDetailIds(selectable, input.detailIds!)
+    : selectable;
+  if (finalIds.length === 0) {
+    const candidates = detailMode
+      ? eligible.details.filter((detail) => input.detailIds!.includes(detail.orderDetailId))
+      : eligible.details;
+    let warningText = buildCutAddWarning(candidates);
+    if (input.mode === 'new') {
+      try {
+        await api.archive(job.cutJobId, job.version);
+        owner.assertOwnerCurrent();
+      } catch {
+        owner.assertOwnerCurrent();
+        warningText += ` Пустой раскрой #${job.cutJobId} не удалён — удалите его вручную.`;
+      }
+    }
+    return { kind: 'empty', warningText };
+  }
+
+  const updated = await api.addItems(job.cutJobId, {
+    detailIds: finalIds,
+    version: job.version,
+  });
+  owner.assertOwnerCurrent();
+  return { kind: 'updated', detailIds: finalIds, job: updated };
+}
 
 interface AddToCutModalProps {
   open: boolean;
@@ -28,6 +117,12 @@ interface AddToCutModalProps {
  * details are resolved on the backend and reserved.
  */
 export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, orderNames, detailIds, hdfDetailIds, nameSuffix, onClose, onDone }) => {
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'add-to-cut-modal'),
+  ).current;
+  const restorePendingRef = useRef(restored?.open === true);
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [name, setName] = useState('');
   const [jobs, setJobs] = useState<CutJobDto[]>([]);
@@ -41,19 +136,45 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
   const detailMode = Array.isArray(detailIds);
   const hdfMode = Array.isArray(hdfDetailIds);
 
+  useWorkspaceCheckpointAdapter(workspaceKey, 'add-to-cut-modal', {
+    canCapture: () => !busy,
+    capture: () => ({
+      open,
+      orderIds,
+      detailIds: detailIds ?? null,
+      hdfDetailIds: hdfDetailIds ?? null,
+      mode,
+      name,
+      targetJobId,
+    }),
+  });
+
   useEffect(() => {
     if (!open) return;
     const orderLabel = formatOrderLabelForCutName(orderIds, orderNames);
-    setName(
-      buildDefaultCutName(
-        hdfMode
-          ? `Раскрой ХДФ заказ ${orderLabel}`
-          : detailMode
-            ? `Раскрой заказ ${orderLabel}`
-            : `Раскрой ${orderLabel}`,
-        nameSuffix,
-      ),
-    );
+    const canRestore = restorePendingRef.current
+      && equalPositiveIntegerArray(restored?.orderIds, orderIds)
+      && equalOptionalPositiveIntegerArray(restored?.detailIds, detailIds)
+      && equalOptionalPositiveIntegerArray(restored?.hdfDetailIds, hdfDetailIds);
+    if (canRestore) {
+      setMode(restored?.mode === 'existing' ? 'existing' : 'new');
+      setName(typeof restored?.name === 'string' ? restored.name : '');
+      setTargetJobId(readPositiveInteger(restored?.targetJobId));
+    } else {
+      setMode('new');
+      setName(
+        buildDefaultCutName(
+          hdfMode
+            ? `Раскрой ХДФ заказ ${orderLabel}`
+            : detailMode
+              ? `Раскрой заказ ${orderLabel}`
+              : `Раскрой ${orderLabel}`,
+          nameSuffix,
+        ),
+      );
+      setTargetJobId(null);
+    }
+    restorePendingRef.current = false;
     cutApi
       .list()
       .then((list) => setJobs(list.filter((j) => j.status === 'draft')))
@@ -66,66 +187,39 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
         .then(setPlacements)
         .catch(() => setPlacements(null));
     }
-  }, [open, orderIds, orderNames, detailMode, hdfMode, detailIds, nameSuffix]);
+  }, [open, orderIds, orderNames, detailMode, hdfMode, detailIds, hdfDetailIds, nameSuffix]);
 
   const submit = useCallback(async () => {
     if (orderIds.length === 0) return;
     setBusy(true);
     try {
-      const job =
-        mode === 'new'
-          ? await cutApi.create({ name: name.trim() || 'Раскрой', criteria: { orderIds } })
-          : await resolveExistingJob(targetJobId);
-
-      if (hdfMode) {
-        const finalHdfIds = hdfDetailIds ?? [];
-        if (finalHdfIds.length === 0) {
-          if (mode === 'new') await cutApi.archive(job.cutJobId, job.version).catch(() => undefined);
-          message.warning('Выберите ХДФ-детали');
+      await runPageOwnedWorkspaceOperation(workspaceKey, 'order-add-to-cut', async (owner) => {
+        const result = await executeAddToCutWorkflow({
+          mode,
+          name,
+          orderIds,
+          detailIds,
+          hdfDetailIds,
+          targetJobId,
+        }, owner);
+        if (result.kind === 'empty') {
+          message.warning(result.warningText);
           return;
         }
-        const updated = await cutApi.addItems(job.cutJobId, { hdfDetailIds: finalHdfIds, version: job.version });
-        emitCutJobReady(updated, { detailIds: [], orderIds });
-        message.success(`Раскрой #${updated.cutJobId} обновлён`);
-        onDone?.(updated);
+        emitCutJobReady(result.job, { detailIds: result.detailIds, orderIds });
+        // Count-free: a same-job re-add is a no-op server-side, so we don't claim a
+        // precise "added N" that may not reflect newly-inserted rows.
+        message.success(`Раскрой #${result.job.cutJobId} обновлён`);
+        onDone?.(result.job);
         onClose();
-        return;
-      }
-
-      const eligible = await cutApi.listEligibleDetails(job.cutJobId, { orderIds });
-      const selectable = selectableDetailIds(eligible.details);
-      const finalIds = detailMode ? restrictDetailIds(selectable, detailIds!) : selectable;
-      if (finalIds.length === 0) {
-        // Don't leave an empty draft behind: a job created above for a brand-new
-        // raskroi must be rolled back (archived) when nothing eligible was added.
-        // If rollback fails, tell the operator the empty draft remains (no silent orphan).
-        const candidates = detailMode
-          ? eligible.details.filter((d) => detailIds!.includes(d.orderDetailId))
-          : eligible.details;
-        let warningText = buildCutAddWarning(candidates);
-        if (mode === 'new') {
-          try {
-            await cutApi.archive(job.cutJobId, job.version);
-          } catch {
-            warningText += ` Пустой раскрой #${job.cutJobId} не удалён — удалите его вручную.`;
-          }
-        }
-        message.warning(warningText);
-        return;
-      }
-      const updated = await cutApi.addItems(job.cutJobId, { detailIds: finalIds, version: job.version });
-      emitCutJobReady(updated, { detailIds: finalIds, orderIds });
-      // Count-free: a same-job re-add is a no-op server-side, so we don't claim a
-      // precise "added N" that may not reflect newly-inserted rows.
-      message.success(`Раскрой #${updated.cutJobId} обновлён`);
-      onDone?.(updated);
-      onClose();
+      });
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       message.error(error instanceof ApiError ? error.message : 'Не удалось добавить в раскрой');
     } finally {
       setBusy(false);
     }
-  }, [mode, name, orderIds, detailMode, hdfMode, detailIds, hdfDetailIds, targetJobId, onClose, onDone]);
+  }, [mode, name, orderIds, detailIds, hdfDetailIds, targetJobId, onClose, onDone, workspaceKey]);
 
   return (
     <Modal
@@ -137,6 +231,9 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
       okText="Добавить"
       cancelText="Отмена"
       okButtonProps={{ disabled: mode === 'existing' && targetJobId === null }}
+      modalRender={(modal) => (
+        <div data-workspace-portal-key={workspaceKey}>{modal}</div>
+      )}
     >
       <Space direction="vertical" style={{ width: '100%' }}>
         <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}>
@@ -149,7 +246,12 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
         {mode === 'new' ? (
           <Form layout="vertical">
             <Form.Item label="Название раскроя">
-              <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} />
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={200}
+                data-workspace-field="cut-name"
+              />
             </Form.Item>
           </Form>
         ) : (
@@ -182,12 +284,15 @@ export const AddToCutModal: React.FC<AddToCutModalProps> = ({ open, orderIds, or
   );
 };
 
-async function resolveExistingJob(targetJobId: number | null): Promise<CutJobDto> {
+async function resolveExistingJob(
+  targetJobId: number | null,
+  api: Pick<typeof cutApi, 'get'> = cutApi,
+): Promise<CutJobDto> {
   if (targetJobId === null) {
     throw new ApiError(400, 'NO_JOB_SELECTED', 'Выберите черновик раскроя');
   }
   // Re-fetch for the freshest optimistic version before reserving.
-  return cutApi.get(targetJobId);
+  return api.get(targetJobId);
 }
 
 function buildDefaultCutName(baseName: string, suffix?: string | null): string {
@@ -203,4 +308,25 @@ function formatOrderLabelForCutName(orderIds: number[], orderNames?: Array<strin
       return orderName || String(orderId);
     })
     .join(', ');
+}
+
+function readPositiveInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
+}
+
+function equalPositiveIntegerArray(value: unknown, expected: readonly number[]): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && value.every((item, index) => item === expected[index]);
+}
+
+function equalOptionalPositiveIntegerArray(
+  value: unknown,
+  expected: readonly number[] | undefined,
+): boolean {
+  return expected === undefined
+    ? value === null
+    : equalPositiveIntegerArray(value, expected);
 }
