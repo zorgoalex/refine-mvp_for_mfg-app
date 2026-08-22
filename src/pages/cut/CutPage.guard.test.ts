@@ -107,6 +107,12 @@ describe('CutPage source guards', () => {
     expect(source).toMatch(/minHeight:\s*Math\.round\(basis/);
   });
 
+  it('uses the configured per-order contour palette for every task sheet screen render', () => {
+    expect(source).toContain("import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style'");
+    expect(source).toContain('const CUT_TASK_SHEET_RENDER_STYLE = CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;');
+    expect(source.match(/CUT_TASK_SHEET_RENDER_STYLE/g)).toHaveLength(4);
+  });
+
   it('per-sheet button toggles Развернуть/Свернуть and collapses an opened sheet', () => {
     expect(source).toContain("'Свернуть' : 'Развернуть'");
     expect(source).toMatch(/sheetImages\[key\]\s*\?\s*collapseSheet\(key\)/);
@@ -493,7 +499,7 @@ describe('CutPage source guards', () => {
     expect(source).toContain('<Radio.Button value={false} aria-label="Альбомная ориентация">');
     expect(source).toContain('axisOrigin={sheetAxisOrigin}');
     expect(source).toContain('buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin)');
-    expect(source).toContain('renderVersion, originTopLeft, sheetAxisOrigin');
+    expect(source).toMatch(/renderVersion,\s+originTopLeft,\s+sheetAxisOrigin/);
     // Legacy layout transform remains independent from the new display-axis option.
     expect(source).toContain("placements?.coordinate_contract === 'native_portrait_v1' ? false : legacyOriginTopLeft");
     // Editor rotate decision aligned with the preview (sheetPreviewRotate90), not bare !sheetPortrait.

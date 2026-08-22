@@ -24,6 +24,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import dayjs, { type Dayjs } from 'dayjs';
+import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import { subscribeCutPdfTemplatesChanged } from '../../api/cutPdfTemplateEvents';
@@ -123,6 +124,8 @@ import {
   OperationalPageHeader,
   useOperationalUi,
 } from '../../ui-operational/OperationalPrimitives';
+
+const CUT_TASK_SHEET_RENDER_STYLE = CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;
 const { Panel } = Collapse;
 
 // Built-in fallback preset names (used until the backend config list loads).
@@ -2361,7 +2364,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined);
+        const blob = await cutApi.fetchSheetPng(
+          job.cutJobId,
+          group.cutGroupId,
+          sheetIndex,
+          preset,
+          rotate90,
+          variant,
+          renderVersion,
+          originTopLeft,
+          sheetAxisOrigin,
+          isHistoricalResult ? selectedResult?.resultNo : undefined,
+          false,
+          false,
+          CUT_TASK_SHEET_RENDER_STYLE,
+        );
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetImages((prev) => {
@@ -2399,7 +2416,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined);
+        const blob = await cutApi.fetchSheetPng(
+          cutJobId,
+          group.cutGroupId,
+          sheetIndex,
+          'thumb',
+          rotate90,
+          variant,
+          renderVersion,
+          originTopLeft,
+          sheetAxisOrigin,
+          isHistoricalResult ? selectedResult?.resultNo : undefined,
+          false,
+          false,
+          CUT_TASK_SHEET_RENDER_STYLE,
+        );
         // Discard a completion that lands after a job switch/reset (stale blob).
         if (viewEpochRef.current !== epoch) return;
         setSheetThumbs((prev) => {
@@ -2440,7 +2471,19 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
           : sheetPortrait;
         const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
-        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined);
+        const blob = await cutApi.fetchSheetSvg(
+          job.cutJobId,
+          group.cutGroupId,
+          sheetIndex,
+          rotate90,
+          variant,
+          renderVersion,
+          originTopLeft,
+          sheetAxisOrigin,
+          isHistoricalResult ? selectedResult?.resultNo : undefined,
+          false,
+          CUT_TASK_SHEET_RENDER_STYLE,
+        );
         // Filename uses the displayed sheet number (dense 1..N) so it matches the
         // "Лист N" the operator sees, not the possibly-sparse real sheetIndex.
         const fileNo = displayNo ?? sheetIndex + 1;
