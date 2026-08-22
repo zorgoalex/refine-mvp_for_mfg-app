@@ -596,6 +596,18 @@ export async function setupWorkflowMockApi(
         });
     });
 
+    await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                data: [],
+                pagination: { page: 1, pageSize: 50, total: 0, totalPages: 0 },
+                unreadCount: 0,
+            }),
+        });
+    });
+
     if (options.runtimeConfig !== false) {
         await page.route(/\/runtime-config\.json$/, async (route) => {
             await route.fulfill({

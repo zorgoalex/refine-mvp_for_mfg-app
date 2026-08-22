@@ -124,10 +124,9 @@ test.describe('order workspace lifecycle', () => {
             if (telegramPreviewRequests === 1) await firstTelegramPreviewGate;
             await route.fulfill({ status: 200, contentType: 'image/png', body: 'preview' });
         });
-        await page.goto('/login', { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('input[autocomplete="username"]')).toBeVisible({
-            timeout: 90_000,
-        });
+        await page.goto('/orders', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('[data-workspace-key="/orders"]:not([hidden])'))
+            .toBeVisible({ timeout: 90_000 });
 
         for (let orderId = 1; orderId <= orderCount; orderId += 1) {
             await navigateSpa(page, `/orders/edit/${orderId}`);
@@ -345,8 +344,9 @@ test.describe('order workspace lifecycle', () => {
             });
         });
 
-        await page.goto('/login', { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('input[autocomplete="username"]')).toBeVisible({ timeout: 90_000 });
+        await page.goto('/orders', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('[data-workspace-key="/orders"]:not([hidden])'))
+            .toBeVisible({ timeout: 90_000 });
         await navigateSpa(page, '/orders/edit/1');
         await expect(page.locator('[data-workspace-key="/orders/edit/1"]'))
             .toHaveCount(1, { timeout: 90_000 });
@@ -452,8 +452,9 @@ test.describe('order workspace lifecycle', () => {
         };
         page.on('request', countRefreshRead);
 
-        await page.goto('/login', { waitUntil: 'domcontentloaded' });
-        await expect(page.locator('input[autocomplete="username"]')).toBeVisible({ timeout: 90_000 });
+        await page.goto('/orders', { waitUntil: 'domcontentloaded' });
+        await expect(page.locator('[data-workspace-key="/orders"]:not([hidden])'))
+            .toBeVisible({ timeout: 90_000 });
         await installControllableDateNow(page);
         await navigateSpa(page, '/orders/show/1');
         await expect(page).toHaveURL(/\/orders\/show\/1$/, { timeout: 90_000 });
@@ -645,6 +646,7 @@ async function fulfillTreatmentRuntimeConfig(route: Route): Promise<void> {
         contentType: 'application/json',
         body: JSON.stringify({
             apiUrl: '',
+            hasuraUrl: '/v1/graphql',
             observability: { performanceRum: false },
             features: {
                 backendAuth: false,
@@ -673,6 +675,7 @@ async function fulfillTreatmentBackendReadRuntimeConfig(route: Route): Promise<v
         contentType: 'application/json',
         body: JSON.stringify({
             apiUrl: '',
+            hasuraUrl: '/v1/graphql',
             observability: { performanceRum: false },
             features: {
                 backendAuth: false,
