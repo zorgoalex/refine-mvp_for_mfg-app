@@ -2853,6 +2853,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 relationsEnabled={!cncOriginalView && cncRelationsEnabled}
                 detailedContext={cncDetailedContext}
                 detailedEnabled={!cncOriginalView && cncDetailedEnabled}
+                autoRevealOverflowCards={active}
                 eagerFirstViewport={eagerFirstViewport}
                 canViewCut={canViewCncCutMaps}
                 cardDisplayMode={cncCardDisplayMode}
@@ -2998,6 +2999,7 @@ interface CncTelegramTodayColumnsProps {
   relationsEnabled: boolean;
   detailedContext: CncDetailedContext | null;
   detailedEnabled: boolean;
+  autoRevealOverflowCards: boolean;
   eagerFirstViewport: boolean;
   canViewCut: boolean;
   cardDisplayMode: CncCardDisplayMode;
@@ -3370,6 +3372,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   relationsEnabled,
   detailedContext,
   detailedEnabled,
+  autoRevealOverflowCards,
   eagerFirstViewport,
   canViewCut,
   cardDisplayMode,
@@ -3405,12 +3408,13 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
       return;
     }
     setOverflowCardsVisible(false);
+    if (!autoRevealOverflowCards) return;
     const timer = window.setTimeout(
       () => setOverflowCardsVisible(true),
       CNC_OVERFLOW_CARD_DELAY_MS,
     );
     return () => window.clearTimeout(timer);
-  }, [cardDisplayMode, columns, orderCards]);
+  }, [autoRevealOverflowCards, cardDisplayMode, columns, orderCards]);
 
   useEffect(() => {
     if (cardDisplayMode !== 'standard') return;
@@ -3662,7 +3666,6 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
           detailedBathActive ? 'status-board-columns--cnc-detailed' : '',
         ].filter(Boolean).join(' ')}
         onWheel={revealOverflowCards}
-        onPointerEnter={revealOverflowCards}
         onFocusCapture={revealOverflowCards}
         style={
           {
