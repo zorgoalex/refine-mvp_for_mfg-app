@@ -30,6 +30,16 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-23",
+    title: "Раскрой: фильтры списка рядом с заданиями",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Фильтры заданий перенесены непосредственно над списком заданий; подбор деталей остаётся выше фильтров и по умолчанию скрыт под кнопкой «Подбор деталей на раскрой».",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-22",
     title: "Раскрой: цвета заказов в задании",
     services: ["ERP", "Cutting"],
