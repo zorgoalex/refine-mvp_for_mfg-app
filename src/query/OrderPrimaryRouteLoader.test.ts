@@ -13,7 +13,10 @@ import {
 } from './orderFormDataCache';
 import { appQueryClient } from './appQueryClient';
 import { cancelInactiveOrderLifecycleQueries } from './orderLifecycleQueries';
-import { prefetchOrderPrimaryRoute } from './OrderPrimaryRouteLoader';
+import {
+  createStableOrderPrimaryRouteParams,
+  prefetchOrderPrimaryRoute,
+} from './OrderPrimaryRouteLoader';
 
 const originalFlags = { ...featureFlags };
 
@@ -42,6 +45,17 @@ describe('OrderPrimaryRouteLoader primary fetch contract', () => {
     resetOrderFormDataCacheForTests();
     appQueryClient.clear();
     vi.restoreAllMocks();
+  });
+
+  it('derives detail params from the current URL without lagging Refine route params', () => {
+    expect(createStableOrderPrimaryRouteParams(
+      { kind: 'edit', orderId: 23 },
+      '?tab=finance',
+    )).toEqual({ id: '23', tab: 'finance' });
+    expect(createStableOrderPrimaryRouteParams(
+      { kind: 'show', orderId: '42' },
+      '',
+    )).toEqual({ id: '42' });
   });
 
   it('deduplicates early show and page-equivalent consumers without touching realtime', async () => {
