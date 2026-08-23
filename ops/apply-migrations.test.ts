@@ -103,6 +103,14 @@ describe('apply-migrations.sh auto — classification completeness guard', () =>
     expect(scriptText).toMatch(/verify_applied_effect "\$f"[\s\S]*INSERT INTO schema_migrations/);
   });
 
+  it('requires migration 140 end-state markers before advancing the ledger', () => {
+    expect(scriptText).toMatch(/140_cnc_telegram_worker_operation_display_number\*\) probe_all/);
+    expect(scriptText).toContain('q_col cnc_telegram_worker_operations cut_job_display_number');
+    expect(scriptText).toContain(
+      'q_con_on cnc_telegram_worker_operations chk_cnc_tg_worker_operation_display_number',
+    );
+  });
+
   it('requires migration 136 end-state probe before advancing the ledger', () => {
     const verifyStart = scriptText.indexOf('verify_applied_effect() {');
     const verifyEnd = scriptText.indexOf('probe_076_endstate()', verifyStart);
