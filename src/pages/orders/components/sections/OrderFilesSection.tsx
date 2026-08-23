@@ -9,8 +9,9 @@ import { OrderTelegramScreenshots } from './OrderTelegramScreenshots';
 
 const { Panel } = Collapse;
 
-export const OrderFilesSection: React.FC = () => {
+export const OrderFilesSection: React.FC<{ orderId?: number | null }> = ({ orderId }) => {
   const { header, updateHeaderField } = useOrderFormStore();
+  const resolvedOrderId = header.order_id ?? orderId;
 
   return (
     <Collapse>
@@ -63,7 +64,7 @@ export const OrderFilesSection: React.FC = () => {
               </Form.Item>
             </Col>
           </Row>
-          <OrderTelegramScreenshots orderId={Number(header.order_id)} />
+          <OrderTelegramScreenshots orderId={Number(resolvedOrderId)} />
         </Form>
       </Panel>
     </Collapse>

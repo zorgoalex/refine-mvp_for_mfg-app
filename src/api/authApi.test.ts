@@ -2,18 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authApi } from './authApi';
 import { authSession } from './authSession';
 import { httpClient } from './httpClient';
+import { appQueryClient } from '../query/appQueryClient';
 
 describe('authApi', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_API_URL', '');
     vi.stubGlobal('fetch', vi.fn());
     authSession.clear();
+    appQueryClient.clear();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     authSession.clear();
+    appQueryClient.clear();
   });
 
   it('logs in through backend auth endpoint and stores only access token/user in memory', async () => {
@@ -338,6 +341,60 @@ describe('authApi', () => {
 
     expect(authSession.getAccessToken()).toBe('access-token');
     expect(authSession.getUser()).toMatchObject({ username: 'manager' });
+  });
+
+  it('does not publish a late actor-A /me response over actor B', async () => {
+    let releaseMe!: () => void;
+    const meBlocked = new Promise<void>((resolve) => {
+      releaseMe = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await meBlocked;
+      return new Response(
+        JSON.stringify({
+          user: { id: '1', username: 'actor-a', role: 'admin', permissions: ['orders.view'] },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }));
+    authSession.setAccessToken('actor-a-token');
+    authSession.setUser({ id: '1', username: 'actor-a', role: 'admin' });
+
+    const staleMe = authApi.me();
+    authSession.clear();
+    authSession.setAccessToken('actor-b-token');
+    authSession.setUser({ id: '2', username: 'actor-b', role: 'manager' });
+    const actorBCacheKey = ['private-order', 'actor-b'] as const;
+    appQueryClient.setQueryData(actorBCacheKey, { order: 42 });
+    releaseMe();
+
+    await expect(staleMe).resolves.toMatchObject({ user: { id: '2', username: 'actor-b' } });
+    expect(authSession.getUser()).toMatchObject({ id: '2', username: 'actor-b' });
+    expect(appQueryClient.getQueryData(actorBCacheKey)).toEqual({ order: 42 });
+  });
+
+  it('rejects a late /me response after logout without a replacement session', async () => {
+    let releaseMe!: () => void;
+    const meBlocked = new Promise<void>((resolve) => {
+      releaseMe = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await meBlocked;
+      return new Response(
+        JSON.stringify({ user: { id: '1', username: 'actor-a', role: 'admin', permissions: [] } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }));
+    authSession.setAccessToken('actor-a-token');
+    authSession.setUser({ id: '1', username: 'actor-a', role: 'admin' });
+
+    const staleMe = authApi.me();
+    authSession.clear();
+    releaseMe();
+
+    await expect(staleMe).rejects.toMatchObject({ code: 'AUTH_ME_SUPERSEDED' });
+    expect(authSession.getAccessToken()).toBeNull();
+    expect(authSession.getUser()).toBeNull();
   });
 
   it('requests an SSO account chooser only for an explicit account-switch retry', async () => {

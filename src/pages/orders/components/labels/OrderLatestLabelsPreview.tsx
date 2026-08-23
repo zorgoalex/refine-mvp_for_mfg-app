@@ -9,6 +9,7 @@ import { OrderLabelGenerateAction } from './OrderLabelGenerateAction';
 import { LabelSvgPreviewFrame } from './LabelSvgPreviewFrame';
 import { OrderLabelPagesViewer } from './OrderLabelPagesViewer';
 import { useOperationalUi } from '../../../../ui-operational/OperationalPrimitives';
+import { useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
 
 const { Text } = Typography;
 
@@ -39,27 +40,49 @@ export const OrderLatestLabelPreviewSurface: React.FC<{
 export const OrderLatestLabelsPreview: React.FC<OrderLatestLabelsPreviewProps> = ({ orderId }) => {
   const isOperational = useOperationalUi();
   const canGenerate = can('labels.generate');
-  const [latest, setLatest] = useState<LatestOrderLabelsPreview | null>(null);
+  const readGuard = useOrderAsyncReadGuard(`labels-latest:${orderId}`);
+  const latestScopeKey = `${readGuard.authNamespace}|order:${orderId}`;
+  const [latestState, setLatestState] = useState<{
+    scopeKey: string;
+    value: LatestOrderLabelsPreview | null;
+  } | null>(null);
+  const latest = latestState?.scopeKey === latestScopeKey ? latestState.value : null;
   const [loading, setLoading] = useState(false);
 
   const loadLatest = useCallback(() => {
+    const token = readGuard.capture();
+    if (!token) return;
     setLoading(true);
     labelsApi.getLatest(orderId)
-      .then(setLatest)
-      .catch(() => setLatest(null))
-      .finally(() => setLoading(false));
-  }, [orderId]);
+      .then((next) => {
+        if (readGuard.isCurrent(token)) {
+          setLatestState({ scopeKey: latestScopeKey, value: next });
+        }
+      })
+      .catch(() => {
+        if (readGuard.isCurrent(token)) {
+          setLatestState({ scopeKey: latestScopeKey, value: null });
+        }
+      })
+      .finally(() => {
+        if (readGuard.isCurrent(token)) setLoading(false);
+      });
+  }, [latestScopeKey, orderId, readGuard.capture, readGuard.isCurrent]);
 
   useEffect(() => {
+    if (!readGuard.active) return;
     loadLatest();
-  }, [loadLatest]);
+  }, [loadLatest, readGuard.active]);
 
   const downloadLatest = async () => {
+    const downloadToken = readGuard.capture();
+    if (!downloadToken) return;
     try {
       const downloaded = await labelsApi.downloadLatest(orderId);
+      if (!readGuard.isSameResource(downloadToken)) return;
       saveLabelBlob(downloaded.blob, downloaded.fileName ?? `order-${orderId}-labels.zip`);
     } catch {
-      message.error('Не удалось скачать бирки');
+      if (readGuard.isSameResource(downloadToken)) message.error('Не удалось скачать бирки');
     }
   };
 

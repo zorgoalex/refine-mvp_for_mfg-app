@@ -4,17 +4,22 @@ import type { Dayjs } from "dayjs";
 import {
   IResourceComponentsProps,
   useInvalidate,
-  useMany,
   useNavigation,
-  useList,
 } from "@refinedev/core";
 import {
   List,
   ShowButton,
   EditButton,
   CreateButton,
-  useSelect,
 } from "@refinedev/antd";
+import {
+  OrderLifecycleReadSurface,
+  useCancelInactiveOrderQueriesOnDeactivate,
+  useList,
+  useMany,
+  useOrderLifecycleReadActive,
+  useSelect,
+} from "../../query/orderLifecycleQueries";
 import { usePersistentTable as useTable } from "../../hooks/usePersistentTable";
 import { Space, Button, Input, message, Form, Row, Col, Select, DatePicker, InputNumber, Card, Typography, Checkbox, Modal, Upload, Dropdown, Spin, Badge, Segmented } from "antd";
 import {
@@ -84,7 +89,9 @@ import {
 import { useOrderFinancialVisibility } from "../../hooks/useOrderFinancialVisibility";
 import { GroupFilter } from "./components/groups/GroupFilter";
 import { AddToCutModal } from "./components/AddToCutModal";
-import { useKeepAlive } from "../../components/workspace/KeepAliveContext";
+import {
+  useKeepAlive,
+} from "../../components/workspace/KeepAliveContext";
 import {
   isTabletTier,
   SHORT_TABLET_LANDSCAPE_VIEWPORT_QUERY,
@@ -92,6 +99,10 @@ import {
 } from "../../hooks/useDeviceTier";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { OrderCardList } from "./mobile/OrderCardList";
+import {
+  deriveOrderProgressiveLoadingState,
+  OrderListProgressiveSurface,
+} from './components/OrderProgressiveLoading';
 import { buildOrderCardStatusColorMap } from "./mobile/orderCardModel";
 import {
   ordersViewStorageKey,
@@ -107,6 +118,10 @@ import {
 } from "./components/tables/OrderDetailColumnSettings";
 import { resolveOrderListBasisProjectValues } from "./orderListBasisProjects";
 import { normalizeOrderListProductionNumbers } from "./orderListProductionNumbers";
+import { useAuthCacheNamespace } from "../../query/authCacheNamespace";
+import { getOrdersReadBackendMode } from "../../query/orderPrimaryResource";
+import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from "../../query/orderPrimaryFetchPolicy";
+import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortStore";
 import "./list.css";
 
 const ORDER_LIST_COLUMN_DEFINITIONS: OrderDetailColumnDefinition[] = [
@@ -259,7 +274,11 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
   // Keep-alive: when this /orders tab is hidden (another tab active) every data
   // hook is disabled so the cached list stops reacting to invalidateQueries.
   const { isActive } = useKeepAlive();
-  const { getSetting, isLoading: appSettingsLoading } = useAppSettings({ enabled: isActive });
+  const ordinaryReadActive = useOrderLifecycleReadActive();
+  useCancelInactiveOrderQueriesOnDeactivate();
+  const { getSetting, isLoading: appSettingsLoading } = useAppSettings({
+    enabled: isActive && ordinaryReadActive,
+  });
   const navigationUser = featureFlags.useBackendPermissions
     ? authSession.getUser()
     : currentUser;
@@ -283,9 +302,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       getCurrentUserRoleKey(navigationUser),
       roleVisibilityMatrix,
     );
+  const ordersReadBackendMode = getOrdersReadBackendMode(useBackendOrdersRead);
+  const authCacheNamespace = useAuthCacheNamespace(ordersReadBackendMode);
+  const orderLifecycleCohort = useOrderLifecycleCohort();
 
   const { tableProps, tableQueryResult, current, pageSize, setCurrent, setPageSize, sorters, setSorters, filters, setFilters } = useTable({
-    syncWithLocation: true,
+    syncWithLocation: isActive,
     sorters: {
       initial: [
         { field: "order_date", order: "desc" },
@@ -296,7 +318,14 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
       mode: "server",
       pageSize: 20,
     },
-    queryOptions: { enabled: isActive, refetchOnWindowFocus: false },
+    meta: { authCacheNamespace },
+    queryOptions: {
+      enabled: isActive && ordinaryReadActive,
+      refetchOnWindowFocus: false,
+      staleTime: orderLifecycleCohort === 'treatment'
+        ? ORDER_PRIMARY_HARD_STALE_TIME_MS
+        : undefined,
+    },
   });
 
   const invalidate = useInvalidate();
@@ -859,6 +888,12 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
     useOrderDetailColumnPreferences('orderList', orderListDefaultOrder, orderListColumnDefinitions);
   const snapshotImportBusy = snapshotImporting || snapshotReferenceMappingSubmitting;
   const snapshotImportBusyFileName = snapshotImportFileName ?? snapshotReferenceMapping?.file.name ?? null;
+  const hasOrderListData = tableQueryResult.data !== undefined;
+  const orderListLoading = deriveOrderProgressiveLoadingState({
+    hasPrimaryData: hasOrderListData,
+    primaryPending: tableQueryResult.isLoading,
+    primaryFetching: tableQueryResult.isFetching,
+  });
 
   // Количество записей
   const totalRecords = tableProps?.pagination && typeof tableProps.pagination === 'object' ? tableProps.pagination.total || 0 : 0;
@@ -1853,11 +1888,17 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             </Form>
           </Card>
         )}
-        {(isMobile || isTablet) && ordersViewMode === 'cards' ? (
+        <OrderListProgressiveSurface
+          state={orderListLoading}
+          hasPrimaryData={hasOrderListData}
+          queryError={tableQueryResult.isError}
+          onRetry={() => { void tableQueryResult.refetch(); }}
+        >
+          {(isMobile || isTablet) && ordersViewMode === 'cards' ? (
           <div className={isTablet ? 'order-card-list--tablet' : 'order-card-list--mobile'}>
             <OrderCardList
               rows={tableProps.dataSource ?? []}
-              loading={!!tableProps.loading}
+              loading={false}
               pagination={tableProps.pagination ?? false}
               onPaginationChange={(nextPage, nextPageSize) => {
                 if (nextPageSize !== pageSize) {
@@ -1874,6 +1915,7 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
         ) : (
           <Table
             {...tableProps}
+            loading={false}
             rowKey="order_id"
             sticky
             rowSelection={
@@ -1899,21 +1941,26 @@ export const OrderList: React.FC<IResourceComponentsProps> = () => {
             })}
             columns={visibleOrderListColumns}
           />
-        )}
+          )}
+        </OrderListProgressiveSurface>
       </List>
 
-      <OrderCreateModal
-        open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
-      />
+      <OrderLifecycleReadSurface active={createModalOpen}>
+        <OrderCreateModal
+          open={createModalOpen}
+          onClose={() => setCreateModalOpen(false)}
+        />
+      </OrderLifecycleReadSurface>
 
       {useBackendCut && (
-        <AddToCutModal
-          open={addToCutOpen}
-          orderIds={selectedCutOrderIds}
-          onClose={() => setAddToCutOpen(false)}
-          onDone={() => setSelectedCutOrderIds([])}
-        />
+        <OrderLifecycleReadSurface active={addToCutOpen}>
+          <AddToCutModal
+            open={addToCutOpen}
+            orderIds={selectedCutOrderIds}
+            onClose={() => setAddToCutOpen(false)}
+            onDone={() => setSelectedCutOrderIds([])}
+          />
+        </OrderLifecycleReadSurface>
       )}
 
     </>

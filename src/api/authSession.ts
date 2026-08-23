@@ -9,6 +9,7 @@ let currentIdentityScopeKey = '';
 let expired = false;
 const listeners = new Set<() => void>();
 const expiredListeners = new Set<() => void>();
+const beforeClearListeners = new Set<() => void>();
 
 function notifyListeners(): void {
   listeners.forEach((listener) => listener());
@@ -43,6 +44,7 @@ export const authSession = {
     const nextIdentityScopeKey = identityScopeKey(user);
     if (currentUser === user && currentIdentityScopeKey === nextIdentityScopeKey) return;
     if (currentIdentityScopeKey !== nextIdentityScopeKey) {
+      beforeClearListeners.forEach((listener) => listener());
       sessionGeneration += 1;
     }
     currentUser = user;
@@ -54,6 +56,7 @@ export const authSession = {
     // Clearing is also an explicit invalidation boundary for any in-flight
     // refresh, even when local state is already empty (cookie-only bootstrap).
     accessTokenVersion += 1;
+    beforeClearListeners.forEach((listener) => listener());
     sessionGeneration += 1;
     accessToken = null;
     currentUser = null;
@@ -79,6 +82,13 @@ export const authSession = {
     expiredListeners.add(listener);
     return () => {
       expiredListeners.delete(listener);
+    };
+  },
+
+  subscribeBeforeClear(listener: () => void): () => void {
+    beforeClearListeners.add(listener);
+    return () => {
+      beforeClearListeners.delete(listener);
     };
   },
 };

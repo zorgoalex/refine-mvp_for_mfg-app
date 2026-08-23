@@ -9,14 +9,16 @@ import { ordersApi } from '../api/ordersApi';
 import { paymentsApi } from '../api/paymentsApi';
 import { usersApi } from '../api/usersApi';
 import { notifyOrderFormReferencesChanged } from '../api/orderFormReferenceEvents';
-import { mapOrderDtoToFormValues, mapOrderListItemToLegacyRow } from '../api/mappers/orderMapper';
-import type { OrderListQuery, OrderSortBy, SortOrder } from '../api/types/orderApi.types';
 import type { ClientPhoneDto } from '../api/types/clientPhoneApi.types';
 import type { PaymentDto } from '../api/types/paymentApi.types';
 import type { UserDto, UserListQuery } from '../api/types/userApi.types';
 import type { UserRole } from '../api/types/authApi.types';
 import { featureFlags } from '../config/featureFlags';
 import { getRuntimeHasuraUrl } from '../config/runtimeConfig';
+import {
+  getBackendOrderOneIfEnabled,
+  getBackendOrdersListIfEnabled,
+} from '../query/orderPrimaryBootstrap';
 import { canMutateHasuraResource, canQueryHasuraResource } from './resourcePermissions';
 import { getCurrentUserRoleKey } from './resourceVisibility';
 
@@ -1254,24 +1256,6 @@ export const buildGqlInput = (obj: AnyObject) => {
   };
 };
 
-const ORDER_SORT_FIELD_MAP: Record<string, OrderSortBy> = {
-  order_id: 'orderId',
-  order_name: 'orderName',
-  order_date: 'orderDate',
-  planned_completion_date: 'plannedCompletionDate',
-  completion_date: 'completionDate',
-  issue_date: 'issueDate',
-  client_name: 'clientName',
-  project_code: 'projectCode',
-  order_status_name: 'orderStatusName',
-  payment_status_name: 'paymentStatusName',
-  production_status_name: 'productionStatusName',
-  final_amount: 'finalAmount',
-  paid_amount: 'paidAmount',
-  debt_amount: 'debtAmount',
-  updated_at: 'updatedAt',
-};
-
 const USER_ROLE_ID_MAP: Record<number, UserRole> = {
   1: 'admin',
   2: 'superadmin',
@@ -1293,156 +1277,6 @@ const USER_ROLE_LABELS: Record<UserRole, string> = {
   packer: 'Упаковщик',
   viewer: 'Наблюдатель',
 };
-
-function mapOrdersViewQueryToBackend(
-  pagination?: AnyObject,
-  sorters?: AnyObject[],
-  filters?: AnyObject[],
-): OrderListQuery | null {
-  const query: OrderListQuery = {
-    page: pagination?.current ?? 1,
-    pageSize: pagination?.pageSize ?? 10,
-  };
-
-  const sorter = sorters?.find((item) => ORDER_SORT_FIELD_MAP[item.field]);
-  if (sorter) {
-    query.sortBy = ORDER_SORT_FIELD_MAP[sorter.field];
-    query.sortOrder = (sorter.order === 'asc' ? 'asc' : 'desc') as SortOrder;
-  }
-
-  const currentUser = authStorage.getUser();
-
-  for (const filter of filters ?? []) {
-    const field = filter.field;
-    const value = filter.value;
-    if (value === null || value === undefined || value === '') continue;
-
-    switch (field) {
-      case 'order_name':
-        query.search = String(value);
-        break;
-      case 'client_id':
-        query.clientId = Number(value);
-        break;
-      case 'project_id':
-        query.projectId = Number(value);
-        break;
-      case 'order_status_id':
-        query.orderStatusId = Number(value);
-        break;
-      case 'payment_status_id':
-        query.paymentStatusId = Number(value);
-        break;
-      case 'production_status_id':
-        query.productionStatusId = Number(value);
-        break;
-      case 'order_date':
-        if (filter.operator === 'gte') {
-          query.dateFrom = String(value);
-          break;
-        }
-        if (filter.operator === 'lte') {
-          query.dateTo = String(value);
-          break;
-        }
-        return null;
-      case 'planned_completion_date':
-        if (filter.operator === 'gte') {
-          query.plannedCompletionDateFrom = String(value);
-          break;
-        }
-        if (filter.operator === 'lte') {
-          query.plannedCompletionDateTo = String(value);
-          break;
-        }
-        return null;
-      case 'created_by':
-        if (currentUser?.id && Number(value) === Number(currentUser.id)) {
-          query.onlyMyOrders = true;
-          break;
-        }
-        return null;
-      case 'group_ids': {
-        const groupIds = Array.isArray(value) ? value.map(String) : String(value).split(',');
-        query.groupIds = groupIds.map((item) => item.trim()).filter(Boolean);
-        break;
-      }
-      case 'group_mode':
-        if (value === 'any' || value === 'all' || value === 'primary' || value === 'none') {
-          query.groupMode = value;
-          break;
-        }
-        return null;
-      default:
-        return null;
-    }
-  }
-
-  return query;
-}
-
-async function getBackendOrdersListIfEnabled(
-  resource: string,
-  pagination?: AnyObject,
-  sorters?: AnyObject[],
-  filters?: AnyObject[],
-) {
-  if (!featureFlags.useBackendOrdersRead || resource !== 'orders_view') {
-    return null;
-  }
-
-  const query = mapOrdersViewQueryToBackend(pagination, sorters, filters);
-  if (!query) {
-    return null;
-  }
-
-  const requestedPage = query.page ?? 1;
-  const requestedPageSize = query.pageSize ?? 10;
-  const backendPageSize = Math.min(requestedPageSize, 200);
-  const requestedStart = (requestedPage - 1) * requestedPageSize;
-  const firstBackendPage = Math.floor(requestedStart / backendPageSize) + 1;
-  const firstPageOffset = requestedStart % backendPageSize;
-  const response = await ordersApi.list({
-    ...query,
-    page: firstBackendPage,
-    pageSize: backendPageSize,
-  });
-
-  const lastBackendPage = Math.min(
-    Math.ceil((requestedStart + requestedPageSize) / backendPageSize),
-    response.pagination.totalPages,
-  );
-  const remainingPages = Array.from(
-    { length: Math.max(0, lastBackendPage - firstBackendPage) },
-    (_, index) => firstBackendPage + index + 1,
-  );
-  const remainingResponses = await Promise.all(
-    remainingPages.map((page) => ordersApi.list({ ...query, page, pageSize: backendPageSize })),
-  );
-  const requestedData = [response, ...remainingResponses]
-    .flatMap((page) => page.data)
-    .slice(firstPageOffset, firstPageOffset + requestedPageSize);
-
-  return {
-    data: requestedData.map(mapOrderListItemToLegacyRow),
-    total: response.pagination.total,
-  };
-}
-
-async function getBackendOrderOneIfEnabled(resource: string, id: number | string) {
-  if (!featureFlags.useBackendOrdersRead || (resource !== 'orders_view' && resource !== 'orders')) {
-    return null;
-  }
-
-  const order = await ordersApi.getById(Number(id));
-  const formValues = mapOrderDtoToFormValues(order);
-  return {
-    data: {
-      ...formValues.header,
-      __backendOrder: formValues,
-    },
-  };
-}
 
 function mapUsersQueryToBackend(
   pagination?: AnyObject,

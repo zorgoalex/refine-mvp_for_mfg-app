@@ -2,6 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Radio, Select, Space, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { bazisCutApi, type BazisCutSetListItemDto } from '../../api/bazisCutApi';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+  type PageOwnedWorkspaceOperationContext,
+} from '../../workspace/workspaceOperationPins';
 
 interface Props {
   open: boolean;
@@ -13,6 +19,7 @@ interface Props {
 }
 
 export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds = [], hdfDetailIds = [], onClose, onDone }) => {
+  const { tabKey } = useKeepAlive();
   const navigate = useNavigate();
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [search, setSearch] = useState('');
@@ -49,9 +56,13 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds =
     setSubmitting(true);
     try {
       const idempotencyKey = commandKey('bazis-cut-add');
-      const result = mode === 'new'
-        ? await bazisCutApi.create({ orderId, detailIds, hdfDetailIds }, { idempotencyKey })
-        : await addToExisting(setId, orderId, detailIds, hdfDetailIds, idempotencyKey);
+      const result = await runPageOwnedWorkspaceOperation(
+        tabKey || `/orders/show/${orderId}`,
+        'order-bazis-cut',
+        (owner) => mode === 'new'
+          ? bazisCutApi.create({ orderId, detailIds, hdfDetailIds }, { idempotencyKey })
+          : addToExisting(setId, orderId, detailIds, hdfDetailIds, idempotencyKey, owner),
+      );
       message.success(result.addedCount === 0 ? 'Эти детали уже есть в наборе' : `Добавлено деталей: ${result.addedCount ?? selectedCount}`);
       onDone?.(); onClose();
       Modal.confirm({
@@ -60,9 +71,10 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds =
         onOk: () => navigate(`/bazis-cut/${result.set.bazisCutSetId}`),
       });
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       message.error(error instanceof Error ? error.message : 'Не удалось добавить детали');
     } finally { setSubmitting(false); }
-  }, [detailIds, hdfDetailIds, mode, onClose, onDone, orderId, navigate, selectedCount, setId]);
+  }, [detailIds, hdfDetailIds, mode, onClose, onDone, orderId, navigate, selectedCount, setId, tabKey]);
 
   return (
     <Modal title={`Добавить в Базис раскрой (${selectedCount})`} open={open}
@@ -87,9 +99,17 @@ export const AddToBazisCutModal: React.FC<Props> = ({ open, orderId, detailIds =
   );
 };
 
-async function addToExisting(setId: number | undefined, orderId: number, detailIds: number[], hdfDetailIds: number[], idempotencyKey: string) {
+async function addToExisting(
+  setId: number | undefined,
+  orderId: number,
+  detailIds: number[],
+  hdfDetailIds: number[],
+  idempotencyKey: string,
+  owner: PageOwnedWorkspaceOperationContext,
+) {
   if (!setId) throw new Error('Выберите набор');
   const current = await bazisCutApi.get(setId);
+  owner.assertOwnerCurrent();
   return bazisCutApi.addDetails(setId, { orderId, detailIds, hdfDetailIds, expectedVersion: current.version }, { idempotencyKey });
 }
 

@@ -114,6 +114,8 @@ export const envSchema = z
     DATABASE_POOL_MIN: z.coerce.number().int().min(0).default(1),
     DATABASE_POOL_MAX: z.coerce.number().int().positive().max(100).default(10),
     DATABASE_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
+    BACKEND_PERFORMANCE_QUERY_TELEMETRY: booleanFromEnv.default(false),
+    BACKEND_ENABLE_PERFORMANCE_RUM: booleanFromEnv.default(false),
     REDIS_URL: optionalUrlFromEnv,
     RATE_LIMIT_REDIS_URL: optionalUrlFromEnv,
     BACKEND_RATE_LIMIT_STORE: z.enum(['memory', 'redis']).default('memory'),

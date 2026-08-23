@@ -13,6 +13,29 @@ const appCss = readFileSync(fileURLToPath(new URL('../../styles/app.css', import
 const pdfTemplateEventsSource = readFileSync(fileURLToPath(new URL('../../api/cutPdfTemplateEvents.ts', import.meta.url)), 'utf8');
 
 describe('CutPage source guards', () => {
+  it('pauses automatic reads for inactive lifecycle surfaces without gating commands', () => {
+    expect(source).toContain('useOrderLifecycleReadActive');
+    expect(source).toContain('useOrderAsyncReadGuard(cutPageResourceScope)');
+    expect(source).toContain('cutPageReadGuard.isCurrent(token)');
+    expect(source).toContain('cutPageReadGuard.isSameResource(token)');
+    expect(source).toContain('canPublishCutWrite(writeToken, targetJobId)');
+    expect(source).toMatch(/deleteJob[\s\S]*let jobContextId = currentJobIdRef\.current;[\s\S]*const jobContextSeq = openSeqRef\.current;[\s\S]*canPublishDelete/);
+    expect(source).toMatch(/createJobFromPreview[\s\S]*let jobContextId = currentJobIdRef\.current;[\s\S]*const jobContextSeq = openSeqRef\.current;[\s\S]*canPublishCreate/);
+    expect(source).toContain('jobContextId = created.cutJobId;');
+    expect(source).toContain('currentJobIdRef.current = created.cutJobId;');
+    expect(source).toContain('jobContextId = null;');
+    expect(source).toMatch(/previewCreateJob[\s\S]*const seq = \+\+openSeqRef\.current;[\s\S]*openSeqRef\.current !== seq/);
+    expect(source).toContain('pdfPreviewRequestSeqRef.current += 1;');
+    expect(source).toMatch(/fetchGroupPdf[\s\S]*canPublishCutWrite\(token, targetJobId\)/);
+    expect(source).toMatch(/fetchJobPdf[\s\S]*canPublishCutWrite\(token, targetJobId\)/);
+    expect(source).toContain('useLayoutEffect(() => {');
+    expect(source).toContain('cutPageScopeKey,');
+    expect(source).toContain('const ordinaryReadActiveRef = useRef(ordinaryReadActive)');
+    expect(source).toContain('if (!ordinaryReadActiveRef.current) return;');
+    expect(source).toContain('if (ordinaryReadActive && canViewCut) void loadJobs();');
+    expect(source).toContain('if (!ordinaryReadActive) return;');
+  });
+
   it('keeps manual-editor zoom controls in the sticky group navbar', () => {
     expect(source).toMatch(/sticky-editor-zoom-controls/);
     expect(source).toMatch(/MinusOutlined/);
@@ -105,6 +128,12 @@ describe('CutPage source guards', () => {
     expect(source).toContain('key={elemKey}');
     // Thumbnail container reserves height so a reload does not collapse the row.
     expect(source).toMatch(/minHeight:\s*Math\.round\(basis/);
+  });
+
+  it('uses the configured per-order contour palette for every task sheet screen render', () => {
+    expect(source).toContain("import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style'");
+    expect(source).toContain('const CUT_TASK_SHEET_RENDER_STYLE = CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;');
+    expect(source.match(/CUT_TASK_SHEET_RENDER_STYLE/g)).toHaveLength(4);
   });
 
   it('per-sheet button toggles Развернуть/Свернуть and collapses an opened sheet', () => {
@@ -493,7 +522,7 @@ describe('CutPage source guards', () => {
     expect(source).toContain('<Radio.Button value={false} aria-label="Альбомная ориентация">');
     expect(source).toContain('axisOrigin={sheetAxisOrigin}');
     expect(source).toContain('buildSheetPieceOverlays(sheet.placements, job.items, rotate90, originTopLeft, sheetAxisOrigin)');
-    expect(source).toContain('renderVersion, originTopLeft, sheetAxisOrigin');
+    expect(source).toMatch(/renderVersion,\s+originTopLeft,\s+sheetAxisOrigin/);
     // Legacy layout transform remains independent from the new display-axis option.
     expect(source).toContain("placements?.coordinate_contract === 'native_portrait_v1' ? false : legacyOriginTopLeft");
     // Editor rotate decision aligned with the preview (sheetPreviewRotate90), not bare !sheetPortrait.

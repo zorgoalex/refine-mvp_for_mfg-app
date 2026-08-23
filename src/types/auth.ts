@@ -18,6 +18,14 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
+export type AuthorizationScope = 'all' | 'own' | 'assigned' | 'none';
+
+export interface AuthorizationPolicyScopes {
+  orders: Record<'view' | 'update' | 'export' | 'delete', AuthorizationScope>;
+  payments: Record<'view' | 'create' | 'update' | 'delete', AuthorizationScope>;
+  productionTasks: Record<'view' | 'update', AuthorizationScope>;
+}
+
 /**
  * Информация о пользователе
  */
@@ -28,6 +36,8 @@ export interface UserIdentity {
   roleId?: number;
   role_id?: number; // Legacy DB role id: 2=superadmin, 1=admin, 10=manager, 11=operator, 15=top_manager, 20=worker, 30=packer, 100=viewer
   permissions?: string[];
+  permissionsVersion?: number;
+  policyScopes?: AuthorizationPolicyScopes;
 }
 
 /**

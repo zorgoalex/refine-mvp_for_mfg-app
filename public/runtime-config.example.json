@@ -1,5 +1,8 @@
 {
   "apiUrl": "",
+  "build": {
+    "sha": ""
+  },
   "features": {
     "backendAuth": false,
     "backendPermissions": false,
@@ -22,5 +25,16 @@
     "cncTelegram": false,
     "enableLegacyHasura": true,
     "workosAuth": false
+  },
+  "observability": {
+    "performanceRum": false
+  },
+  "rollouts": {
+    "orderLifecycleV2": {
+      "enabled": false,
+      "percent": 0,
+      "allocationSalt": "",
+      "configVersion": ""
+    }
   }
 }

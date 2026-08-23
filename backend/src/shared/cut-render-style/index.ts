@@ -403,6 +403,7 @@ export function cutRenderSourceSvgCss(
   value: CutRenderStyleRef,
   pieceFill?: string | null,
   orderContour?: string | null,
+  scopeSelector = '.cut-sheet-piece-source-svg',
 ): string {
   const style = resolveCutRenderStyle(value);
   const minStrokePx = style.sourceSvg.minStrokePx;
@@ -413,7 +414,9 @@ export function cutRenderSourceSvgCss(
     declarations.push(`stroke:${sourceStroke}!important`);
     declarations.push('fill:none!important');
   }
-  if (style.sourceSvg.strokeOpacity < 1) {
+  if (orderContour) {
+    declarations.push('stroke-opacity:1!important');
+  } else if (style.sourceSvg.strokeOpacity < 1) {
     declarations.push(`stroke-opacity:${formatNumber(style.sourceSvg.strokeOpacity)}!important`);
   }
   const vectorEffect = style.sourceSvg.nonScalingStroke
@@ -421,7 +424,7 @@ export function cutRenderSourceSvgCss(
     : '';
   if (vectorEffect) declarations.push(vectorEffect);
   if (declarations.length === 0) return '';
-  return `.cut-sheet-piece-source-svg *{${declarations.join(';')};}`;
+  return `${scopeSelector} *{${declarations.join(';')};}`;
 }
 
 export function cutRenderRawSvgScreenshotMinStrokePx(value: CutRenderStyleRef): number {

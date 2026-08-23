@@ -12,7 +12,7 @@ vi.mock('react', async (importOriginal) => {
   };
 });
 
-vi.mock('@refinedev/antd', () => ({
+vi.mock('../../../../query/orderLifecycleQueries', () => ({
   useSelect: useSelectMock,
 }));
 

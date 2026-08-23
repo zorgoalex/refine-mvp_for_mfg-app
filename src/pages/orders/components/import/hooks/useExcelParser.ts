@@ -21,8 +21,9 @@ export interface UseExcelParserReturn {
   sheetData: ParsedSheet | null;
   isLoading: boolean;
   error: string | null;
-  parseFile: (file: File) => Promise<void>;
+  parseFile: (file: File, preferredSheet?: string | null) => Promise<void>;
   selectSheet: (sheetName: string) => void;
+  restoreWorkbook: (workbook: WorkBook, selectedSheet?: string | null) => boolean;
   reset: () => void;
 }
 
@@ -79,7 +80,7 @@ export const useExcelParser = (): UseExcelParserReturn => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const parseFile = useCallback(async (file: File): Promise<void> => {
+  const parseFile = useCallback(async (file: File, preferredSheet?: string | null): Promise<void> => {
     setIsLoading(true);
     setError(null);
 
@@ -109,11 +110,13 @@ export const useExcelParser = (): UseExcelParserReturn => {
       setSheets(wb.SheetNames);
 
       if (wb.SheetNames.length > 0) {
-        const firstSheet = wb.SheetNames[0];
-        setSelectedSheet(firstSheet);
-        const ws = wb.Sheets[firstSheet];
+        const nextSheet = preferredSheet && wb.SheetNames.includes(preferredSheet)
+          ? preferredSheet
+          : wb.SheetNames[0];
+        setSelectedSheet(nextSheet);
+        const ws = wb.Sheets[nextSheet];
         const parsed = parseWorksheet(ws, XLSX.utils);
-        parsed.name = firstSheet;
+        parsed.name = nextSheet;
         setSheetData(parsed);
       }
     } catch (err) {
@@ -145,6 +148,22 @@ export const useExcelParser = (): UseExcelParserReturn => {
     setSheetData(parsed);
   }, [workbook]);
 
+  const restoreWorkbook = useCallback((restored: WorkBook, sheetName?: string | null): boolean => {
+    if (!xlsxModule || restored.SheetNames.length === 0) return false;
+    const nextSheet = sheetName && restored.SheetNames.includes(sheetName)
+      ? sheetName
+      : restored.SheetNames[0];
+    setWorkbook(restored);
+    setSheets(restored.SheetNames);
+    setSelectedSheet(nextSheet);
+    const parsed = parseWorksheet(restored.Sheets[nextSheet], xlsxModule.utils);
+    parsed.name = nextSheet;
+    setSheetData(parsed);
+    setIsLoading(false);
+    setError(null);
+    return true;
+  }, []);
+
   const reset = useCallback((): void => {
     setWorkbook(null);
     setSheets([]);
@@ -157,5 +176,16 @@ export const useExcelParser = (): UseExcelParserReturn => {
     // same session.
   }, []);
 
-  return { workbook, sheets, selectedSheet, sheetData, isLoading, error, parseFile, selectSheet, reset };
+  return {
+    workbook,
+    sheets,
+    selectedSheet,
+    sheetData,
+    isLoading,
+    error,
+    parseFile,
+    selectSheet,
+    restoreWorkbook,
+    reset,
+  };
 };

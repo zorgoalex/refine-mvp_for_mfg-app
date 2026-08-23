@@ -10,9 +10,10 @@ const tabs: WorkspaceTab[] = [
 
 describe('evolution workspace tab close interaction', () => {
   it('closes a clean active tab immediately and navigates to its neighbor', () => {
-    const closeTab = vi.fn();
+    const closeTab = vi.fn(() => true);
     const navigate = vi.fn();
     const confirmDiscard = vi.fn();
+    const onBlocked = vi.fn();
 
     requestEvolutionTabClose({
       targetKey: '/orders',
@@ -21,11 +22,13 @@ describe('evolution workspace tab close interaction', () => {
       closeTab,
       navigate,
       confirmDiscard,
+      onBlocked,
     });
 
     expect(confirmDiscard).not.toHaveBeenCalled();
     expect(closeTab).toHaveBeenCalledWith('/orders', undefined);
     expect(navigate).toHaveBeenCalledWith('/orders/create?from=list');
+    expect(onBlocked).not.toHaveBeenCalled();
   });
 
   it('returns to the opener tab when the closed active tab was opened from another tab', () => {
@@ -60,7 +63,7 @@ describe('evolution workspace tab close interaction', () => {
   });
 
   it('keeps a dirty tab open until confirmation then discards its draft', () => {
-    const closeTab = vi.fn();
+    const closeTab = vi.fn(() => true);
     const navigate = vi.fn();
     let confirm: (() => void) | undefined;
 
@@ -70,6 +73,7 @@ describe('evolution workspace tab close interaction', () => {
       tabs,
       closeTab,
       navigate,
+      onBlocked: vi.fn(),
       confirmDiscard: (onConfirm) => {
         confirm = onConfirm;
       },
@@ -82,5 +86,23 @@ describe('evolution workspace tab close interaction', () => {
 
     expect(closeTab).toHaveBeenCalledWith('/orders/create', { discard: true });
     expect(navigate).toHaveBeenCalledWith('/calendar');
+  });
+
+  it('does not navigate when a page-owned operation pins the tab', () => {
+    const navigate = vi.fn();
+    const onBlocked = vi.fn();
+
+    requestEvolutionTabClose({
+      targetKey: '/orders',
+      activeKey: '/orders',
+      tabs,
+      closeTab: vi.fn(() => false),
+      navigate,
+      confirmDiscard: vi.fn(),
+      onBlocked,
+    });
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onBlocked).toHaveBeenCalledOnce();
   });
 });

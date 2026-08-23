@@ -1,15 +1,22 @@
 // Payment Modal
 // Modal for creating/editing payments
 
-import React, { useEffect } from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import { Modal, Form, InputNumber, Row, Col, Select, Input, DatePicker } from 'antd';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { Payment } from '../../../../types/orders';
 import { numberParser } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import dayjs from 'dayjs';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import {
+  captureAntFormCheckpoint,
+  restoreAntFormCheckpoint,
+} from '../../../../workspace/workspaceFormCheckpoint';
 
 interface PaymentModalProps {
   open: boolean;
@@ -27,6 +34,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   onCancel,
 }) => {
   const [form] = Form.useForm();
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'payment-modal'),
+  ).current;
+  const restorePendingRef = useRef(restored?.open === true);
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 
@@ -45,22 +58,40 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     : paymentTypeSelectProps;
 
   // Initialize form when payment changes
-  useEffect(() => {
-    if (open) {
-      if (mode === 'edit' && payment) {
-        form.setFieldsValue({
-          ...payment,
-          payment_date: payment.payment_date ? dayjs(payment.payment_date) : undefined,
-        });
-      } else {
-        form.resetFields();
-        // Set default payment date to today
-        form.setFieldsValue({
-          payment_date: dayjs(),
-        });
-      }
+  useWorkspaceCheckpointAdapter(workspaceKey, 'payment-modal', {
+    capture: () => ({
+      open,
+      mode,
+      paymentKey: paymentIdentity(payment),
+      form: captureAntFormCheckpoint(form),
+    }),
+  });
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    if (
+      restorePendingRef.current
+      && restored?.mode === mode
+      && restored.paymentKey === paymentIdentity(payment)
+      && restoreAntFormCheckpoint(form, restored.form)
+    ) {
+      restorePendingRef.current = false;
+      return;
     }
-  }, [open, mode, payment, form]);
+    restorePendingRef.current = false;
+    if (mode === 'edit' && payment) {
+      form.setFieldsValue({
+        ...payment,
+        payment_date: payment.payment_date ? dayjs(payment.payment_date) : undefined,
+      });
+    } else {
+      form.resetFields();
+      // Set default payment date to today
+      form.setFieldsValue({
+        payment_date: dayjs(),
+      });
+    }
+  }, [open, mode, payment, form, restored]);
 
   const handleOk = async () => {
     try {
@@ -81,7 +112,6 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   };
 
   return (
-    <DraggableModalWrapper>
       <Modal
         title={mode === 'create' ? 'Создать оплату' : 'Редактировать оплату'}
         open={open}
@@ -90,6 +120,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         width={600}
         okText={mode === 'create' ? 'Создать' : 'Сохранить'}
         cancelText="Отмена"
+        modalRender={(modal) => (
+          <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>
+            {modal}
+          </DraggableModalWrapper>
+        )}
       >
         <Form
           form={form}
@@ -183,6 +218,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           </Row>
         </Form>
       </Modal>
-    </DraggableModalWrapper>
   );
 };
+
+function paymentIdentity(payment: Payment | undefined): string | number | null {
+  return payment?.payment_id ?? payment?.temp_id ?? null;
+}

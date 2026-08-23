@@ -11,6 +11,7 @@ describe('makeOrderDeleteHandler', () => {
     const onError = vi.fn();
 
     const handler = makeOrderDeleteHandler({
+      capturePublicationGuard: () => () => true,
       deleteFn,
       onSuccess,
       onVersionConflict,
@@ -38,6 +39,7 @@ describe('makeOrderDeleteHandler', () => {
     const onError = vi.fn();
 
     const handler = makeOrderDeleteHandler({
+      capturePublicationGuard: () => () => true,
       deleteFn,
       onSuccess,
       onVersionConflict,
@@ -58,6 +60,7 @@ describe('makeOrderDeleteHandler', () => {
     const onError = vi.fn();
 
     const handler = makeOrderDeleteHandler({
+      capturePublicationGuard: () => () => true,
       deleteFn,
       onSuccess,
       onVersionConflict,
@@ -69,5 +72,48 @@ describe('makeOrderDeleteHandler', () => {
     expect(onError).toHaveBeenCalledWith('custom failure');
     expect(onSuccess).not.toHaveBeenCalled();
     expect(onVersionConflict).not.toHaveBeenCalled();
+  });
+
+  it('suppresses every completion callback after owner/resource drift', async () => {
+    let resolveDelete!: () => void;
+    let canPublish = true;
+    const deleteFn = vi.fn(() => new Promise<void>((resolve) => {
+      resolveDelete = resolve;
+    }));
+    const onSuccess = vi.fn();
+    const onVersionConflict = vi.fn();
+    const onError = vi.fn();
+    const handler = makeOrderDeleteHandler({
+      capturePublicationGuard: () => () => canPublish,
+      deleteFn,
+      onSuccess,
+      onVersionConflict,
+      onError,
+    });
+
+    const pending = handler();
+    canPublish = false;
+    resolveDelete();
+    await pending;
+
+    expect(deleteFn).toHaveBeenCalledTimes(1);
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onVersionConflict).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('does not start deletion when no active owner can be captured', async () => {
+    const deleteFn = vi.fn().mockResolvedValue(undefined);
+    const handler = makeOrderDeleteHandler({
+      capturePublicationGuard: () => null,
+      deleteFn,
+      onSuccess: vi.fn(),
+      onVersionConflict: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    await handler();
+
+    expect(deleteFn).not.toHaveBeenCalled();
   });
 });

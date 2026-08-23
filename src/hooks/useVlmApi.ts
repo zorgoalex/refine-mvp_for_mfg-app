@@ -13,7 +13,6 @@ import { legacyApiRoutes } from '../api/legacyApiRoutes';
 import type { VlmAnalyzeRequest, VlmAnalyzeResponse } from '../api/types/vlmApi.types';
 import { featureFlags } from '../config/featureFlags';
 import {
-  useAppSettings,
   SETTING_KEYS,
   VlmSettings,
   DEFAULT_VLM_SETTINGS,
@@ -21,6 +20,7 @@ import {
   VlmDefaultSettings,
   DEFAULT_VLM_DEFAULTS,
 } from './useAppSettings';
+import { useOrderAppSettings } from './useOrderAppSettings';
 
 // ============================================================================
 // Types
@@ -113,7 +113,7 @@ function getLegacyAuthToken(): string | null {
 // ============================================================================
 
 export const useVlmApi = (): UseVlmApiResult => {
-  const { getSetting } = useAppSettings();
+  const { getSetting } = useOrderAppSettings();
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

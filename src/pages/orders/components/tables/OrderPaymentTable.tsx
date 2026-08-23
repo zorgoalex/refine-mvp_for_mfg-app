@@ -3,18 +3,26 @@ import { Table, Tooltip } from '../../../../ui/tooltipDelay';
 // Displays list of order payments with inline editing capabilities
 // Pattern: same as OrderDetailTable for consistency
 
-import React, { useMemo, useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { Button, Space, Form, InputNumber, Input, Select, DatePicker, Typography, Dropdown } from 'antd';
 import { EditOutlined, CheckOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { Payment } from '../../../../types/orders';
 import { formatNumber, numberParser, currencySmartFormatter } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import dayjs from 'dayjs';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import {
+  captureAntFormCheckpoint,
+  restoreAntFormCheckpoint,
+} from '../../../../workspace/workspaceFormCheckpoint';
+import { useDeferredWorkspaceEditingKey } from '../../../../workspace/useDeferredWorkspaceEditingKey';
 
 const { Text } = Typography;
 
@@ -46,6 +54,11 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
   const { payments, updatePayment, deletePayment, setPaymentEditing } = useOrderFormStore();
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'payment-inline-editor'),
+  ).current;
 
   // Sort payments by date (newest first)
   const sortedPayments = useMemo(
@@ -58,13 +71,38 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
   );
 
   const [form] = Form.useForm();
-  const [editingKey, setEditingKey] = useState<number | string | null>(null);
+  const restoredEditingKey = useRef(readInlineEditingKey(restored?.editingKey)).current;
+  const {
+    editingKey,
+    setEditingKey,
+    restorePending: inlineRestorePending,
+    restoredActive: restoredInlineEditActive,
+    canApplyCurrentEdit,
+  } = useDeferredWorkspaceEditingKey({
+    restoredKey: restoredEditingKey,
+    entities: payments,
+    getKey: (payment: Payment) => payment.temp_id ?? payment.payment_id ?? null,
+  });
   const [paymentContextMenu, setPaymentContextMenu] = useState<{
     x: number;
     y: number;
     record: Payment;
   } | null>(null);
   const highlightedRowRef = useRef<HTMLElement | null>(null);
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'payment-inline-editor', {
+    capture: () => ({
+      editingKey: inlineRestorePending ? restoredEditingKey : editingKey,
+      form: inlineRestorePending && restored?.form
+        ? restored.form
+        : captureAntFormCheckpoint(form),
+    }),
+  });
+  useLayoutEffect(() => {
+    if (editingKey === null || !restoredInlineEditActive) return;
+    setPaymentEditing?.(true);
+    restoreAntFormCheckpoint(form, restored?.form);
+  }, [editingKey, form, restored, restoredInlineEditActive, setPaymentEditing]);
 
   const isEditing = (record: Payment) => (record.temp_id || record.payment_id) === editingKey;
 
@@ -131,11 +169,12 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
 
   // Save current editing row and return success status
   const saveCurrentRow = async (): Promise<boolean> => {
+    if (!canApplyCurrentEdit) return false;
     if (editingKey === null) return true; // Nothing to save
 
     // Find the record being edited
     const record = payments.find(p => (p.temp_id || p.payment_id) === editingKey);
-    if (!record) return true;
+    if (!record) return false;
 
     // Check if this is an "empty" payment (amount is empty or zero)
     // Must check BEFORE validation to avoid validation errors on empty rows
@@ -201,7 +240,7 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
   // Expose methods via ref for external calls
   useImperativeHandle(ref, () => ({
     startEditRow: startEdit,
-    isEditing: () => editingKey !== null,
+    isEditing: () => inlineRestorePending || editingKey !== null,
     saveCurrentAndStartNew: async (newPayment: Payment) => {
       const saved = await saveCurrentRow();
       if (saved) {
@@ -212,10 +251,16 @@ export const OrderPaymentTable = forwardRef<OrderPaymentTableRef, OrderPaymentTa
       return saved;
     },
     applyCurrentEdits: async () => {
-      if (editingKey === null) return true;
+      if (editingKey === null && !inlineRestorePending) return true;
       return await saveCurrentRow();
     },
-  }));
+}));
+
+function readInlineEditingKey(value: unknown): number | string | null {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))
+    ? value
+    : null;
+}
 
   const cancelEdit = () => {
     setEditingKey(null);

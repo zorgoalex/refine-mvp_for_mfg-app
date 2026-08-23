@@ -6,9 +6,31 @@ import {
 
 export interface FrontendRuntimeConfig {
   apiUrl?: string | null;
+  build?: FrontendBuildRuntimeConfig | null;
   hasuraUrl?: string | null;
   features?: RuntimeFeatureFlagSource | null;
   ui?: FrontendUiRuntimeConfig | null;
+  observability?: FrontendObservabilityRuntimeConfig | null;
+  rollouts?: FrontendRolloutsRuntimeConfig | null;
+}
+
+export interface FrontendBuildRuntimeConfig {
+  sha?: string;
+}
+
+export interface FrontendObservabilityRuntimeConfig {
+  performanceRum?: boolean;
+}
+
+export interface OrderLifecycleRuntimeConfig {
+  enabled: boolean;
+  percent: number;
+  allocationSalt: string;
+  configVersion: string;
+}
+
+export interface FrontendRolloutsRuntimeConfig {
+  orderLifecycleV2?: OrderLifecycleRuntimeConfig | null;
 }
 
 export interface FrontendUiRuntimeConfig {
@@ -145,6 +167,13 @@ function isRuntimeConfig(value: unknown): value is FrontendRuntimeConfig {
     config.features === undefined ||
     config.features === null ||
     (typeof config.features === 'object' && !Array.isArray(config.features));
+  const buildIsValid =
+    config.build === undefined ||
+    config.build === null ||
+    (typeof config.build === 'object' &&
+      !Array.isArray(config.build) &&
+      (config.build.sha === undefined ||
+        (typeof config.build.sha === 'string' && /^[a-zA-Z0-9._-]{0,64}$/.test(config.build.sha))));
   const uiIsValid =
     config.ui === undefined ||
     config.ui === null ||
@@ -152,6 +181,30 @@ function isRuntimeConfig(value: unknown): value is FrontendRuntimeConfig {
       !Array.isArray(config.ui) &&
       (config.ui.evolutionEnabled === undefined || typeof config.ui.evolutionEnabled === 'boolean') &&
       (config.ui.forceLegacy === undefined || typeof config.ui.forceLegacy === 'boolean'));
+  const observabilityIsValid =
+    config.observability === undefined ||
+    config.observability === null ||
+    (typeof config.observability === 'object' &&
+      !Array.isArray(config.observability) &&
+      (config.observability.performanceRum === undefined ||
+        typeof config.observability.performanceRum === 'boolean'));
+  const rolloutsAreValid = validateRollouts(config.rollouts);
 
-  return apiUrlIsValid && hasuraUrlIsValid && featuresAreValid && uiIsValid;
+  return apiUrlIsValid && hasuraUrlIsValid && buildIsValid && featuresAreValid && uiIsValid &&
+    observabilityIsValid && rolloutsAreValid;
+}
+
+function validateRollouts(value: FrontendRolloutsRuntimeConfig | null | undefined): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  const rollout = value.orderLifecycleV2;
+  if (rollout === undefined || rollout === null) return true;
+  if (typeof rollout !== 'object' || Array.isArray(rollout)) return false;
+  return typeof rollout.enabled === 'boolean' &&
+    Number.isInteger(rollout.percent) && rollout.percent >= 0 && rollout.percent <= 100 &&
+    typeof rollout.allocationSalt === 'string' &&
+    /^[a-zA-Z0-9._-]{0,64}$/.test(rollout.allocationSalt) &&
+    typeof rollout.configVersion === 'string' &&
+    /^[a-zA-Z0-9._-]{0,64}$/.test(rollout.configVersion) &&
+    (!rollout.enabled || (rollout.allocationSalt.length > 0 && rollout.configVersion.length > 0));
 }

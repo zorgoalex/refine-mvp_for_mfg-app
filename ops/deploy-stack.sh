@@ -153,15 +153,27 @@ assert_backend_image_revision() {
     || fail "backend image revision does not match exact repository HEAD"
 }
 
-ensure_worker_image_revision() {
-  local revision
+ensure_worker_build_identity() {
+  local revision worker_context requested_context resolved_context
   revision="$(git -C "$REPO_DIR" rev-parse --verify HEAD 2>/dev/null || true)"
   if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
     revision="${CNC_TELEGRAM_WORKER_IMAGE_REVISION:-$(env_file_value CNC_TELEGRAM_WORKER_IMAGE_REVISION)}"
   fi
   [[ "$revision" =~ ^[0-9a-f]{7,64}$ ]] \
     || fail "CNC_TELEGRAM_WORKER_IMAGE_REVISION must be an immutable git revision"
+  worker_context="$(cd "$REPO_DIR/cnc-telegram-worker" && pwd -P)"
+  requested_context="${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:-}"
+  if [[ -n "$requested_context" ]]; then
+    if [[ "$requested_context" = /* ]]; then
+      resolved_context="$(cd "$requested_context" 2>/dev/null && pwd -P || true)"
+    else
+      resolved_context="$(cd "$PROJECT_DIR/$requested_context" 2>/dev/null && pwd -P || true)"
+    fi
+    [[ "$resolved_context" == "$worker_context" ]] \
+      || fail "CNC_TELEGRAM_WORKER_BUILD_CONTEXT must resolve to this exact repository worker"
+  fi
   export CNC_TELEGRAM_WORKER_IMAGE_REVISION="$revision"
+  export CNC_TELEGRAM_WORKER_BUILD_CONTEXT="$worker_context"
 }
 
 assert_rendered_worker_serve_command() {
@@ -208,7 +220,7 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
 fi
 prepare_compose_file_args
 if compose_profile_enabled cnc-telegram; then
-  ensure_worker_image_revision
+  ensure_worker_build_identity
   assert_rendered_worker_serve_command
 fi
 

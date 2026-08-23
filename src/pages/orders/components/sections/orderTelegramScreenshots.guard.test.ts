@@ -10,8 +10,10 @@ const css = readFileSync(new URL('../../../../styles/app.css', import.meta.url),
 describe('order Telegram screenshot UI wiring', () => {
   it('mounts permanent thumbnails in read and edit file surfaces', () => {
     expect(filesBlock).toMatch(/OrderTelegramScreenshots orderId=\{Number\(record\?\.order_id\)\}/);
-    expect(filesSection).toMatch(/OrderTelegramScreenshots orderId=\{Number\(header\.order_id\)\}/);
+    expect(filesSection).toMatch(/const resolvedOrderId = header\.order_id \?\? orderId/);
+    expect(filesSection).toMatch(/OrderTelegramScreenshots orderId=\{Number\(resolvedOrderId\)\}/);
     expect(orderForm).toMatch(/OrderTelegramScreenshots orderId=\{header\.order_id \?\? orderId\}/);
+    expect(orderForm).toMatch(/OrderFilesSection orderId=\{header\.order_id \?\? orderId\}/);
     expect(component).toContain('Скрины раскроя');
     expect(component).toMatch(/downloadOrderScreenshotPreview/);
     expect(component).toMatch(/fetchSvgCutScreenshotBlob/);
@@ -36,6 +38,20 @@ describe('order Telegram screenshot UI wiring', () => {
     expect(component).toContain('Восстанавливаем оригинал из Telegram');
     expect(component).toContain('Сохранённое превью');
     expect(component).toMatch(/item\.restore\?\.status === 'failed'/);
+  });
+
+  it('gates automatic reads and rejects stale lifecycle/auth publication', () => {
+    expect(component).toMatch(/useOrderAsyncReadGuard/);
+    expect(component).toMatch(/readGuard\.capture\(\)/);
+    expect(component).toMatch(/readGuard\.isCurrent\(token\)/);
+    expect(component).toMatch(/!readGuard\.active \|\| !validOrderId/);
+    expect(component).toMatch(/responseState\?\.scopeKey === readScopeKey/);
+    expect(component).toMatch(/thumbnailGuard\.capture\(\)/);
+    expect(component).toMatch(/thumbnailGuard\.isCurrent\(token\)/);
+    expect(component).toMatch(/thumbnailState\?\.scopeKey === thumbnailScopeKey/);
+    expect(component).toMatch(/downloadGuard\.capture\(\)/);
+    expect(component).toMatch(/downloadGuard\.isSameResource\(downloadToken\)/);
+    expect(component).toMatch(/downloadState\?\.scopeKey === downloadScopeKey/);
   });
 
   it('applies image outlines, 40px controls and interruptible explicit transitions', () => {

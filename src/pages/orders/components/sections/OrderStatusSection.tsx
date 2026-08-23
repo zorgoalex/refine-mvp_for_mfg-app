@@ -3,7 +3,7 @@
 
 import React from 'react';
 import { Form, Row, Col, Select } from 'antd';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 
 export const OrderStatusSection: React.FC = () => {

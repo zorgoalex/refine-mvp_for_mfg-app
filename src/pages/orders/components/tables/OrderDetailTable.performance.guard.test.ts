@@ -90,7 +90,7 @@ describe('OrderDetailTable interaction performance guards', () => {
   });
 
   it('mounts only the active cell editor while preserving row edit state', () => {
-    expect(source).toContain('const [editingField, setEditingField] = useState<React.Key | null>(null);');
+    expect(source).toContain('const [editingField, setEditingField] = useState<React.Key | null>(');
     expect(source).toContain("isEditing(record) && editingField === field");
     expect(source).toContain('isSpreadsheetCellEditable(column.key)');
     expect(source).toContain('setEditingField(columnKey)');

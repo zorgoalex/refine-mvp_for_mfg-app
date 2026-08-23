@@ -67,8 +67,13 @@ describe('useCutSheetTypeOptions gating (source guard)', () => {
     expect(source).toMatch(/const\s+canViewCut\s*=\s*can\(['"]cut\.view['"]\)/);
     // The fetch effect early-returns on the cut.view-only gate (not on `enabled`).
     expect(source).toMatch(/if\s*\(\s*!canViewCut\s*\)/);
-    // The effect depends on the cut.view-only gate, so sheetMaterialsReads does not clear rawOptions.
-    expect(source).toMatch(/\}\s*,\s*\[canViewCut\]\s*\)/);
+    // Lifecycle activity may pause the read; schema flags still do not clear rawOptions.
+    expect(source).toContain('if (!ordinaryReadActive) return;');
+    expect(source).toContain("useOrderAsyncReadGuard('cut-sheet-type-options')");
+    expect(source).toContain('sheetTypesReadGuard.capture()');
+    expect(source).toContain('sheetTypesReadGuard.isCurrent(token)');
+    expect(source).toContain('rawOptionsState?.scopeKey === sheetTypesScopeKey');
+    expect(source).toContain('useLayoutEffect(() => {');
     // Guard against a regression that re-gates the fetch effect on `enabled`.
     expect(source).not.toMatch(/if\s*\(\s*!enabled\s*\)/);
     expect(source).not.toMatch(/\}\s*,\s*\[enabled\]\s*\)/);

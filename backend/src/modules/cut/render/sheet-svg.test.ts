@@ -214,9 +214,11 @@ describe('buildSheetSvg multi-line labels', () => {
 
     const svg = buildSheetSvg({ sheet: sourceSheet, labelFor: () => ['2777', '# 3', '40*30'] });
 
-    expect(svg).toContain('class="cut-sheet-piece-source-svg"');
+    expect(svg).toContain('class="cut-sheet-piece-source-svg cut-sheet-piece-source-svg-0"');
     expect(svg).toContain('<line x1="2" y1="2" x2="38" y2="28"');
-    expect(svg.indexOf('cut-sheet-piece-source-svg')).toBeLessThan(svg.indexOf('<text x="30" y="35"'));
+    expect(svg.indexOf('class="cut-sheet-piece-geometry-layer"')).toBeLessThan(svg.indexOf('class="cut-sheet-piece-label-layer"'));
+    expect(svg.lastIndexOf('cut-sheet-piece-source-svg')).toBeLessThan(svg.indexOf('class="cut-sheet-piece-label-layer"'));
+    expect(svg.indexOf('<text x="30" y="35"')).toBeGreaterThan(svg.indexOf('class="cut-sheet-piece-label-layer"'));
   });
 
   it('applies the MDF board preview render profile to source strokes and labels', () => {
@@ -246,8 +248,11 @@ describe('buildSheetSvg multi-line labels', () => {
       renderStyle: CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
     });
 
-    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff'));
-    expect(svg).toContain('<style>.cut-sheet-piece-source-svg *{');
+    expect(svg).toContain(cutRenderSourceSvgCss(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW, '#ffffff', '#d7e9ff', '.cut-sheet-piece-source-svg-0'));
+    expect(svg).toContain('<style>.cut-sheet-piece-source-svg-0 *{');
+    expect(svg).not.toContain('<style>.cut-sheet-piece-source-svg *{');
+    expect(svg).toContain('stroke:#d7e9ff!important;fill:none!important;stroke-opacity:1!important');
+    expect(svg).not.toContain('stroke-opacity:0.72!important');
     expect(svg).not.toContain('<style>*{');
     expect(svg).toContain('fill="#111827" stroke="#ffffff"');
     expect(svg).toContain('font-weight="800"');
@@ -314,7 +319,7 @@ describe('buildSheetSvg multi-line labels', () => {
     });
 
     expect(svg).toContain('fill="#ffffff" stroke="#111827" stroke-width="4"');
-    expect(svg).toContain(cutRenderSourceSvgCss(customStyle, '#ffffff', '#111827'));
+    expect(svg).toContain(cutRenderSourceSvgCss(customStyle, '#ffffff', '#111827', '.cut-sheet-piece-source-svg-0'));
     expect(svg).not.toContain('vector-effect:non-scaling-stroke!important');
     expect(svg).toContain('fill="#111827" stroke="#ffffff"');
     expect(svg).toContain('letter-spacing="-2.4"');

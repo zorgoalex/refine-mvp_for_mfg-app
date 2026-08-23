@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useLayoutEffect } from 'react';
 import { can } from '../utils/permissions';
 import { featureFlags } from '../config/featureFlags';
 import { cutApi } from '../api/cutApi';
 import type { CutSheetTypeOption } from '../api/types/cutApi.types';
+import { useOrderAsyncReadGuard, useOrderLifecycleReadActive } from '../query/orderLifecycleQueries';
 
 export interface SheetTypeOption {
   value: number;
@@ -42,10 +43,23 @@ export interface UseCutSheetTypeOptionsResult {
  *   must not be gated behind a read-layer schema flag).
  */
 export function useCutSheetTypeOptions(): UseCutSheetTypeOptionsResult {
+  const ordinaryReadActive = useOrderLifecycleReadActive();
+  const sheetTypesReadGuard = useOrderAsyncReadGuard('cut-sheet-type-options');
+  const sheetTypesScopeKey = `${sheetTypesReadGuard.authNamespace}|cut-sheet-type-options`;
   const canViewCut = can('cut.view');
   // FILTER gate: cut.view + the sheetMaterialsReads schema-read flag.
   const enabled = can('cut.view') && featureFlags.sheetMaterialsReads;
-  const [rawOptions, setRawOptions] = useState<CutSheetTypeOption[]>([]);
+  const [rawOptionsState, setRawOptionsState] = useState<{
+    scopeKey: string;
+    value: CutSheetTypeOption[];
+  } | null>(null);
+  const rawOptions = rawOptionsState?.scopeKey === sheetTypesScopeKey
+    ? rawOptionsState.value
+    : [];
+
+  useLayoutEffect(() => {
+    setRawOptionsState({ scopeKey: sheetTypesScopeKey, value: [] });
+  }, [sheetTypesScopeKey]);
 
   useEffect(() => {
     // Options come from the cut.view-gated backend endpoint (not the read-layer),
@@ -53,26 +67,37 @@ export function useCutSheetTypeOptions(): UseCutSheetTypeOptionsResult {
     // This lets the per-job sheet selector work under useBackendCut even when the
     // sheet schema-read flag is off (Codex regression fix).
     if (!canViewCut) {
-      setRawOptions([]);
+      setRawOptionsState({ scopeKey: sheetTypesScopeKey, value: [] });
       return;
     }
+    if (!ordinaryReadActive) return;
+    const token = sheetTypesReadGuard.capture();
+    if (!token) return;
     let cancelled = false;
     cutApi
       .listSheetTypes()
       .then((types) => {
-        if (!cancelled) {
-          setRawOptions(types);
+        if (!cancelled && sheetTypesReadGuard.isCurrent(token)) {
+          setRawOptionsState({ scopeKey: sheetTypesScopeKey, value: types });
         }
       })
       .catch(() => {
         // Best-effort: if the endpoint is unavailable the filter shows no options
         // (the cut job can still be created without a sheet-type filter).
-        if (!cancelled) setRawOptions([]);
+        if (!cancelled && sheetTypesReadGuard.isCurrent(token)) {
+          setRawOptionsState({ scopeKey: sheetTypesScopeKey, value: [] });
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [canViewCut]);
+  }, [
+    canViewCut,
+    ordinaryReadActive,
+    sheetTypesReadGuard.capture,
+    sheetTypesReadGuard.isCurrent,
+    sheetTypesScopeKey,
+  ]);
 
   const options = rawOptions.map((t) => ({ value: t.sheetMaterialTypeId, label: t.name }));
   const byId = new Map(options.map((o) => [o.value, o]));

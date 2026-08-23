@@ -7,6 +7,10 @@ import { describe, expect, it } from 'vitest';
  * Node-env без jsdom — UI-обработка фиксируется source-text guard'ами.
  */
 const useOrderSave = readFileSync(new URL('./useOrderSave.ts', import.meta.url), 'utf8');
+const orderForm = readFileSync(
+  new URL('../pages/orders/components/OrderForm.tsx', import.meta.url),
+  'utf8',
+);
 const bazisModal = readFileSync(
   new URL('../pages/bazis/CreateOrderModal.tsx', import.meta.url),
   'utf8',
@@ -16,7 +20,12 @@ describe('order-name duplicate handling guards', () => {
   it('order form save offers the suggested number and has NO save-anyway path', () => {
     expect(useOrderSave).toContain("isApiError(err, 'ORDER_NAME_DUPLICATE')");
     expect(useOrderSave).toContain('suggestedOrderName');
-    expect(useOrderSave).toMatch(/onOk: \(\) => void saveOrder\(\{ \.\.\.values, order_name: suggested \}/);
+    expect(useOrderSave).toContain('retryPageOwnedSave(');
+    expect(useOrderSave).toContain("runPageOwnedWorkspaceOperation(");
+    expect(useOrderSave).toContain('options.isWorkspaceOwnerCurrent?.() === false');
+    expect(orderForm).toContain('isWorkspaceOwnerCurrent: () => workspaceOwnerMountedRef.current');
+    expect(orderForm).toContain('const workspaceKey = orderWorkspaceKey;');
+    expect(useOrderSave).not.toMatch(/onOk: \(\) => void saveOrder\(/);
     expect(useOrderSave).not.toMatch(/allowDuplicate/i);
   });
 

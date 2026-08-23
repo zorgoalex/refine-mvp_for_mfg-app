@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../common/errors/api-error';
 import { MemoryRateLimitStore } from './memory-rate-limit.store';
 import { createRateLimitKey } from './rate-limit-keys';
@@ -6,6 +6,10 @@ import { RateLimitService } from './rate-limit.service';
 import type { RateLimitStore } from './rate-limit.types';
 
 describe('RateLimitService', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('allows requests inside a window and blocks over-limit requests', async () => {
     const service = new RateLimitService(new MemoryRateLimitStore());
     const input = {
@@ -90,5 +94,25 @@ describe('RateLimitService', () => {
         subject: { route: 'auth/login', ipAddress: '127.0.0.1', username: 'manager' },
       }),
     ).rejects.toMatchObject({ statusCode: 503, code: 'RATE_LIMIT_UNAVAILABLE' });
+  });
+
+  it('bounds memory keys, fails closed at capacity, and reclaims expired buckets', async () => {
+    let now = 1_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const service = new RateLimitService(new MemoryRateLimitStore({ maxBuckets: 2, sweepEvery: 1 }));
+    const input = (userId: string) => ({
+      rule: { feature: 'performance-rum-nonce', maxRequests: 1, windowMs: 100 },
+      subject: { route: 'performance-rum', userId, resourceId: `nonce-${userId}` },
+    });
+
+    await expect(service.assertAllowed(input('one'))).resolves.toBeUndefined();
+    await expect(service.assertAllowed(input('two'))).resolves.toBeUndefined();
+    await expect(service.assertAllowed(input('three'))).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'RATE_LIMIT_UNAVAILABLE',
+    });
+
+    now += 101;
+    await expect(service.assertAllowed(input('three'))).resolves.toBeUndefined();
   });
 });

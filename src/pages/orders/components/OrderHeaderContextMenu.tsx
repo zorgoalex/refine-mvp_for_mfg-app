@@ -6,7 +6,8 @@ import React, { useEffect, useCallback, useMemo, useRef } from 'react';
 import { Menu, notification } from 'antd';
 import { CheckOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
-import { useDataProvider, useList, useUpdate, useInvalidate } from '@refinedev/core';
+import { useDataProvider, useUpdate, useInvalidate } from '@refinedev/core';
+import { useList } from '../../../query/orderLifecycleQueries';
 import { useOrderFormStore, useOrderDraftStoreApi } from '../../../stores/orderFormStore';
 import type { UseProductionStatusEventResult } from '../../../hooks/useProductionStatusEvent';
 import {
@@ -22,6 +23,11 @@ import {
   filterOrderStatusesForPacker,
   isPackerUser,
 } from '../../../utils/packerStatusAccess';
+import { useKeepAlive } from '../../../components/workspace/KeepAliveContext';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+} from '../../../workspace/workspaceOperationPins';
 
 export interface OrderHeaderContextMenuProps {
   visible: boolean;
@@ -42,6 +48,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
   onClose,
   productionStatusEvents,
 }) => {
+  const { tabKey } = useKeepAlive();
   const { header, updateHeaderField } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
   const currentUser = authSession.getUser();
@@ -185,8 +192,13 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
       const dbField = fieldMapping[fieldName];
       if (!dbField) return;
 
+      const workspaceKey = tabKey || `/orders/edit/${header.order_id}`;
       try {
-        if (featureFlags.useBackendProductionActions) {
+        await runPageOwnedWorkspaceOperation(
+          workspaceKey,
+          'order-production-action',
+          async (owner) => {
+          if (featureFlags.useBackendProductionActions) {
           if (!Number.isInteger(header.version)) {
             notification.warning({
               message: 'Обновите заказ',
@@ -195,6 +207,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
             });
             await refreshHeaderFromOrder();
             await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+            owner.assertOwnerCurrent();
             return;
           }
 
@@ -202,7 +215,9 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
             const currentHeader = storeApi.getState().header;
             if (!Number.isInteger(currentHeader.version)) {
               await refreshHeaderFromOrder();
+              owner.assertOwnerCurrent();
               await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+              owner.assertOwnerCurrent();
               return;
             }
 
@@ -222,11 +237,13 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
                   });
               updateHeaderField('version', commandVersion + 1);
               const response = await responsePromise;
+              owner.assertOwnerCurrent();
               rollbackVersion = null;
 
               updateHeaderField(dbField as any, statusId);
               updateHeaderField('version', response.order.version);
               await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+              owner.assertOwnerCurrent();
 
               notification.success({
                 message: 'Статус обновлён',
@@ -236,6 +253,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
                 duration: 2,
               });
             } catch (error) {
+              owner.assertOwnerCurrent();
               if (rollbackVersion !== null) {
                 updateHeaderField('version', rollbackVersion);
               }
@@ -250,6 +268,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
           id: header.order_id,
           values: { [dbField]: statusId },
         });
+        owner.assertOwnerCurrent();
 
         updateHeaderField(dbField as any, statusId);
 
@@ -260,10 +279,25 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
           }: ${statusName}`,
           duration: 2,
         });
+          },
+        );
       } catch (error) {
+        if (isWorkspaceOperationOwnershipLost(error)) return;
         if (isProductionActionVersionConflict(error)) {
-          await refreshHeaderFromOrder();
-          await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+          try {
+            await runPageOwnedWorkspaceOperation(
+              workspaceKey,
+              'order-production-action',
+              async (owner) => {
+                await refreshHeaderFromOrder();
+                owner.assertOwnerCurrent();
+                await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+              },
+            );
+          } catch (recoveryError) {
+            if (isWorkspaceOperationOwnershipLost(recoveryError)) return;
+            throw recoveryError;
+          }
           notification.warning({
             message: 'Данные заказа изменились',
             description: 'Заказ обновлён. Повторите действие.',
@@ -283,7 +317,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         });
       }
     },
-    [header.order_id, header.version, updateOrder, updateHeaderField, invalidate, refreshHeaderFromOrder, queueHeaderAction]
+    [header.order_id, header.version, updateOrder, updateHeaderField, invalidate, refreshHeaderFromOrder, queueHeaderAction, tabKey]
   );
 
   // Handle production status toggle (add if not exists, remove if exists)
@@ -297,58 +331,72 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         return;
       }
 
+      const workspaceKey = tabKey || `/orders/edit/${header.order_id}`;
       try {
-        let wasAdded: boolean | null = null;
-        if (featureFlags.useBackendProductionActions) {
-          await queueHeaderAction(header.order_id, async () => {
-            const currentHeader = storeApi.getState().header;
-            if (!Number.isInteger(currentHeader.version)) {
-              await refreshHeaderFromOrder();
-              await invalidate({ resource: 'orders_view', invalidates: ['list'] });
-              return;
-            }
+        const wasAdded = await runPageOwnedWorkspaceOperation(
+          workspaceKey,
+          'order-production-action',
+          async (owner) => {
+            let result: boolean | null = null;
+            if (featureFlags.useBackendProductionActions) {
+              await queueHeaderAction(header.order_id!, async () => {
+                const currentHeader = storeApi.getState().header;
+                if (!Number.isInteger(currentHeader.version)) {
+                  await refreshHeaderFromOrder();
+                  owner.assertOwnerCurrent();
+                  await invalidate({ resource: 'orders_view', invalidates: ['list'] });
+                  owner.assertOwnerCurrent();
+                  return;
+                }
 
-            const commandVersion = currentHeader.version;
-            let rollbackVersion: number | null = commandVersion;
-            try {
-              updateHeaderField('version', commandVersion + 1);
-              wasAdded = await toggleOrderEvent(header.order_id, statusId, {
-                version: commandVersion,
-                onResponse: (response) => {
-                  updateHeaderField('version', response.order.version);
-                },
-                onVersionConflict: refreshHeaderFromOrder,
+                const commandVersion = currentHeader.version;
+                let rollbackVersion: number | null = commandVersion;
+                try {
+                  updateHeaderField('version', commandVersion + 1);
+                  result = await toggleOrderEvent(header.order_id!, statusId, {
+                    version: commandVersion,
+                    onResponse: (response) => {
+                      updateHeaderField('version', response.order.version);
+                    },
+                    onVersionConflict: refreshHeaderFromOrder,
+                  });
+                  owner.assertOwnerCurrent();
+                  rollbackVersion = null;
+                } catch (error) {
+                  owner.assertOwnerCurrent();
+                  if (rollbackVersion !== null) {
+                    updateHeaderField('version', rollbackVersion);
+                  }
+                  throw error;
+                }
               });
-              rollbackVersion = null;
-            } catch (error) {
-              if (rollbackVersion !== null) {
-                updateHeaderField('version', rollbackVersion);
-              }
-              throw error;
+            } else {
+              result = await toggleOrderEvent(header.order_id!, statusId);
+              owner.assertOwnerCurrent();
             }
-          });
-        } else {
-          wasAdded = await toggleOrderEvent(header.order_id, statusId);
-        }
 
-        if (wasAdded === null) {
-          return;
-        }
+            if (result === null) return null;
 
-        // Refetch events to update the context menu
-        refetch();
+            // Refetch events to update the context menu
+            refetch();
 
-        // Invalidate to refresh all displays
-        await Promise.all([
-          invalidate({
-            resource: 'production_status_events',
-            invalidates: ['list'],
-          }),
-          invalidate({
-            resource: 'orders_view',
-            invalidates: ['list'],
-          }),
-        ]);
+            // Invalidate to refresh all displays
+            await Promise.all([
+              invalidate({
+                resource: 'production_status_events',
+                invalidates: ['list'],
+              }),
+              invalidate({
+                resource: 'orders_view',
+                invalidates: ['list'],
+              }),
+            ]);
+            owner.assertOwnerCurrent();
+            return result;
+          },
+        );
+
+        if (wasAdded === null) return;
 
         notification.success({
           message: wasAdded ? 'Этап установлен' : 'Этап снят',
@@ -356,6 +404,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
           duration: 2,
         });
       } catch (error) {
+        if (isWorkspaceOperationOwnershipLost(error)) return;
         console.error('[OrderHeaderContextMenu] Error toggling production status:', error);
         notification.error({
           message: 'Ошибка изменения этапа',
@@ -365,7 +414,7 @@ export const OrderHeaderContextMenu: React.FC<OrderHeaderContextMenuProps> = ({
         });
       }
     },
-    [header.order_id, toggleOrderEvent, updateHeaderField, refetch, invalidate, refreshHeaderFromOrder, queueHeaderAction]
+    [header.order_id, toggleOrderEvent, updateHeaderField, refetch, invalidate, refreshHeaderFromOrder, queueHeaderAction, tabKey]
   );
 
   if (!visible) return null;

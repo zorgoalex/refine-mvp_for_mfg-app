@@ -4,7 +4,7 @@ import { Table } from '../../../../ui/tooltipDelay';
 
 import React, { useMemo } from 'react';
 import { Typography } from 'antd';
-import { useList } from '@refinedev/core';
+import { useList } from '../../../../query/orderLifecycleQueries';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { useOrderFinancialVisibility } from '../../../../hooks/useOrderFinancialVisibility';

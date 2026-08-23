@@ -3,6 +3,7 @@ import type { DatabaseService } from '../../../database/database.service';
 import { JwtAccessTokenIssuer } from './jwt-access-token-issuer';
 import { PgAuthSessionManager } from './pg-auth-session-manager';
 import { TokenService } from '../token.service';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 
 class FixedTokenService extends TokenService {
   private index = 0;
@@ -196,6 +197,8 @@ describe('PgAuthSessionManager', () => {
         user: {
           id: '42',
           role: 'manager',
+          permissionsVersion: 0,
+          policyScopes: ROLE_POLICIES.manager,
         },
       },
       refreshToken: 'refresh-login',

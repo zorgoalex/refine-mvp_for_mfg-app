@@ -2,11 +2,11 @@ import { Tooltip } from '../../../ui/tooltipDelay';
 // Main Order Form Component
 // Master-Detail form with Tabs for child entities
 
-import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Alert, Card, Tabs, Button, Empty, Space, Spin, notification, Modal, Form, Select, Tag, Popconfirm, message } from 'antd';
+import { Alert, Card, Tabs, Button, Empty, Space, notification, Modal, Form, Select, Tag, Popconfirm, message } from 'antd';
 import { SaveOutlined, CloseOutlined, EyeOutlined, DeleteOutlined } from '@ant-design/icons';
-import { useOne, useList, useNavigation } from '@refinedev/core';
+import { useNavigation, useParsed } from '@refinedev/core';
 import { toClientKey } from '../../../api/mappers/orderMapper';
 import type { BazisOrderDraftResponse } from '../../../api/types/bazisApi.types';
 import {
@@ -19,7 +19,9 @@ import {
 import { useTabStore, computeCloseTargetPath } from '../../../stores/tabStore';
 import { useTabDirty } from '../../../hooks/useTabDirty';
 import { DraggableModalWrapper } from '../../../components/DraggableModalWrapper';
-import { useWorkspaceTabKey } from '../../../components/workspace/KeepAliveContext';
+import {
+  useWorkspaceTabKey,
+} from '../../../components/workspace/KeepAliveContext';
 import { useDefaultStatuses } from '../../../hooks/useDefaultStatuses';
 import { loadOrderViaBackend } from '../../../hooks/useOrderBackendRead';
 import { useOrderSave } from '../../../hooks/useOrderSave';
@@ -43,6 +45,34 @@ import {
   shouldApplyComputedPlannedCompletion,
 } from '../../configuration/components/deadlineDefaultScheduleView';
 import dayjs from 'dayjs';
+import { useAuthCacheNamespace } from '../../../query/authCacheNamespace';
+import { createOrderEditLegacyPrimaryIdentity } from '../../../query/orderEditPrimaryResource';
+import { additionalRouteParams } from '../../../query/orderListPrimaryResource';
+import { getOrdersReadBackendMode } from '../../../query/orderPrimaryResource';
+import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from '../../../query/orderPrimaryFetchPolicy';
+import {
+  useOrderLifecycleCohort,
+} from '../../../performance/orderLifecycleCohortStore';
+import {
+  OrderLifecycleReadSurface,
+  useCancelInactiveOrderQueriesOnDeactivate,
+  useList,
+  useOne,
+  useOrderAsyncReadGuard,
+  useOrderLifecycleReadActive,
+} from '../../../query/orderLifecycleQueries';
+import { useWorkspaceCheckpointAdapter } from '../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../workspace/workspaceCheckpointRegistry';
+import {
+  restoreWorkspaceDomCheckpoint,
+} from '../../../workspace/workspaceDomCheckpoint';
+import { useWorkspaceDomCheckpointCapture } from '../../../workspace/workspaceDomCheckpointReact';
+import type { WorkspaceSerializableRecord } from '../../../workspace/workspaceUiStateStore';
+import {
+  acquireWorkspaceOperationPin,
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+} from '../../../workspace/workspaceOperationPins';
 
 // Sections
 import { OrderHeaderSummary } from './sections/OrderHeaderSummary';
@@ -57,6 +87,11 @@ import { OrderTelegramScreenshots } from './sections/OrderTelegramScreenshots';
 import { OrderAggregatesDisplay } from './sections/OrderAggregatesDisplay';
 import { OrderLabelDataEditor } from './labels/OrderLabelDataEditor';
 import { makeOrderDeleteHandler } from '../orderDeleteAction';
+import { isAuthoritativeDirtyOrderDraft } from '../orderDraftAuthority';
+import {
+  OrderFormProgressiveSurface,
+  OrderInitialSkeleton,
+} from './OrderProgressiveLoading';
 
 // Tabs
 import { OrderDetailsTab, OrderDetailsTabRef } from './tabs/OrderDetailsTab';
@@ -160,8 +195,11 @@ function computeOrderSaveSignature(values: unknown): string {
 }
 
 export const OrderForm: React.FC<OrderFormProps> = (props) => {
+  useCancelInactiveOrderQueriesOnDeactivate();
   const { canViewFinancials, isLoading } = useOrderFinancialVisibility();
-  if (isLoading) return <Spin />;
+  if (isLoading) {
+    return <OrderInitialSkeleton variant="form" label="Проверяем доступ к форме заказа" />;
+  }
   if (!canViewFinancials) {
     return (
       <Alert
@@ -182,6 +220,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   onSaveSuccess,
   onCancel,
 }) => {
+  const ordinaryReadActive = useOrderLifecycleReadActive();
   const location = useLocation();
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
@@ -189,6 +228,16 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderKey = mode === 'create' ? NEW_ORDER_KEY : String(orderId);
   const tabKey = useWorkspaceTabKey(location.pathname);
+  const orderWorkspaceKey = tabKey
+    || (orderKey === NEW_ORDER_KEY ? '/orders/create' : `/orders/edit/${orderKey}`);
+  const restoredOrderFormCheckpoint = useMemo(
+    () => readWorkspaceCheckpointAdapterState(tabKey, 'order-form'),
+    [tabKey],
+  );
+  const captureOrderFormDomCheckpoint = useWorkspaceDomCheckpointCapture(
+    tabKey,
+    asWorkspaceRecord(restoredOrderFormCheckpoint?.dom),
+  );
   const bazisDraft = readBazisDraftFromLocationState(location.state);
 
   const {
@@ -248,12 +297,20 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   const automaticPlannedCompletionRef = useRef<string | null>(null);
   const projectClientRef = useRef<number | undefined>(undefined);
   const projectRequestIdRef = useRef(0);
-  const [projectOptions, setProjectOptions] = useState<Array<{ label: string; value: number }>>(
-    [],
-  );
-  const [projectsLoading, setProjectsLoading] = useState(false);
+  const workspaceOwnerMountedRef = useRef(true);
+  const [projectOptionsState, setProjectOptionsState] = useState<{
+    scopeKey: string;
+    value: Array<{ label: string; value: number }>;
+    loading: boolean;
+  } | null>(null);
   const [orderFormStickyEnabled, setOrderFormStickyEnabled] = useState(false);
   const [orderFormSummaryStuck, setOrderFormSummaryStuck] = useState(false);
+  useEffect(() => {
+    workspaceOwnerMountedRef.current = true;
+    return () => {
+      workspaceOwnerMountedRef.current = false;
+    };
+  }, []);
   const orderFormStickyStyle = useMemo<OrderFormStickyStyle>(() => ({
     '--order-show-sticky-top': `${workspaceTabsHeight}px`,
     '--order-show-compact-header-height': `${ORDER_FORM_COMPACT_HEADER_STICKY_HEIGHT}px`,
@@ -273,18 +330,16 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     defaultPaymentStatus,
     isLoading: statusesLoading,
     error: statusesError,
+    retry: retryStatuses,
   } =
     useDefaultStatuses();
-  const [deadlineDefaultSchedule, setDeadlineDefaultSchedule] = useState<{
-    loaded: boolean;
-    schedule: DeadlineDefaultScheduleDto | null;
-  }>({
-    loaded:
-      mode !== 'create' ||
-      !featureFlags.useBackendDeadlines ||
-      !featureFlags.useBackendOrdersWrite,
-    schedule: null,
-  });
+  const [deadlineDefaultScheduleState, setDeadlineDefaultScheduleState] = useState<{
+    scopeKey: string;
+    value: {
+      loaded: boolean;
+      schedule: DeadlineDefaultScheduleDto | null;
+    };
+  } | null>(null);
   const {
     saveOrder,
     isSaving,
@@ -292,6 +347,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     showValidationErrors,
     clearValidation,
   } = useOrderSave(orderKey, {
+    workspaceKey: orderWorkspaceKey,
+    isWorkspaceOwnerCurrent: () => workspaceOwnerMountedRef.current,
     getBazisDraftSaveContext: () => {
       const runtime = bazisDraftRuntimeRef.current;
       if (!runtime) {
@@ -381,9 +438,70 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Read sub-tab reactively from the URL (do NOT strip/replace it — the workspace
   // tab keeps its query so deep-links into an already-open tab still work).
   const activeTabFromUrl = new URLSearchParams(location.search).get('tab') || 'details';
-  const [activeTab, setActiveTab] = useState(activeTabFromUrl);
-  const [backendOrderLoading, setBackendOrderLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState(() => (
+    typeof restoredOrderFormCheckpoint?.activeTab === 'string'
+      ? restoredOrderFormCheckpoint.activeTab
+      : activeTabFromUrl
+  ));
+  useWorkspaceCheckpointAdapter(tabKey, 'order-form', {
+    capture: () => ({
+      activeTab,
+      dirty: getOrderDraftStore(orderKey).getState().isDirty,
+      draftVersion: getOrderDraftStore(orderKey).getState().version,
+      dom: captureOrderFormDomCheckpoint(),
+    }),
+  });
+  useLayoutEffect(() => restoreWorkspaceDomCheckpoint(
+    tabKey,
+    asWorkspaceRecord(restoredOrderFormCheckpoint?.dom),
+  ), [restoredOrderFormCheckpoint, tabKey]);
   const useBackendOrderRead = featureFlags.useBackendOrdersRead;
+  const ordersReadBackendMode = getOrdersReadBackendMode(useBackendOrderRead);
+  const authCacheNamespace = useAuthCacheNamespace(ordersReadBackendMode);
+  const backendOrderLoadGuard = useOrderAsyncReadGuard(
+    `order-form-backend-load:${orderId ?? 'new'}`,
+  );
+  const backendOrderLoadScopeKey = `${backendOrderLoadGuard.authNamespace}|order:${orderId ?? 'new'}`;
+  const projectOptionsResourceScope = `order-form-project-options:${mode}:${normalizedClientId ?? 'missing'}`;
+  const projectOptionsReadGuard = useOrderAsyncReadGuard(projectOptionsResourceScope);
+  const projectOptionsScopeKey = `${projectOptionsReadGuard.authNamespace}|${projectOptionsResourceScope}`;
+  const projectOptions = projectOptionsState?.scopeKey === projectOptionsScopeKey
+    ? projectOptionsState.value
+    : [];
+  const projectsLoading = projectOptionsState?.scopeKey === projectOptionsScopeKey
+    && projectOptionsState.loading;
+  const bazisNameHintGuard = useOrderAsyncReadGuard(
+    `order-form-bazis-name-hint:${mode}:${orderKey}:${location.key}`,
+  );
+  const deadlineDefaultsResourceScope = `order-form-deadline-defaults:${mode}:${orderKey}`;
+  const deadlineDefaultsGuard = useOrderAsyncReadGuard(deadlineDefaultsResourceScope);
+  const deadlineDefaultsScopeKey = `${deadlineDefaultsGuard.authNamespace}|${deadlineDefaultsResourceScope}`;
+  const deadlineDefaultSchedule = deadlineDefaultScheduleState?.scopeKey === deadlineDefaultsScopeKey
+    ? deadlineDefaultScheduleState.value
+    : {
+        loaded:
+          mode !== 'create'
+          || !featureFlags.useBackendDeadlines
+          || !featureFlags.useBackendOrdersWrite,
+        schedule: null,
+      };
+  const [backendOrderLoadingState, setBackendOrderLoadingState] = useState<{
+    scopeKey: string;
+    value: boolean;
+  } | null>(null);
+  const backendOrderLoading = backendOrderLoadingState?.scopeKey === backendOrderLoadScopeKey
+    && backendOrderLoadingState.value;
+  const orderLifecycleCohort = useOrderLifecycleCohort();
+  const { params: parsedRouteParams } = useParsed();
+  const orderEditLegacyPrimaryIdentity = useMemo(
+    () => createOrderEditLegacyPrimaryIdentity({
+      orderId: orderId ?? '',
+      projectsEnabled: featureFlags.projects,
+      authCacheNamespace,
+      additionalParams: additionalRouteParams(parsedRouteParams ?? {}),
+    }),
+    [authCacheNamespace, orderId, parsedRouteParams],
+  );
   const labelsEnabled = featureFlags.labels && can('labels.view');
   const cutTabEnabled = featureFlags.useBackendCut && can('cut.view');
   const canManageOrderTrash = !featureFlags.useBackendPermissions || can('orders.delete');
@@ -412,7 +530,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
     if (!normalizedClientId) {
       projectClientRef.current = undefined;
-      setProjectOptions([]);
+      setProjectOptionsState({ scopeKey: projectOptionsScopeKey, value: [], loading: false });
       if (header.project_id !== undefined && header.project_id !== null) {
         updateHeaderField('project_id', undefined as never);
       }
@@ -429,33 +547,50 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     }
 
     projectClientRef.current = normalizedClientId;
-  }, [mode, normalizedClientId, header.project_id, updateHeaderField]);
+  }, [header.project_id, mode, normalizedClientId, projectOptionsScopeKey, updateHeaderField]);
 
   const loadProjectOptions = useCallback(async (search = '') => {
     if (!featureFlags.projects || !normalizedClientId) {
-      setProjectOptions([]);
+      setProjectOptionsState({ scopeKey: projectOptionsScopeKey, value: [], loading: false });
       return;
     }
+    if (!ordinaryReadActive) return;
 
+    const token = projectOptionsReadGuard.capture();
+    if (!token) return;
+    const scopeKey = projectOptionsScopeKey;
+    const clientId = normalizedClientId;
     const requestId = ++projectRequestIdRef.current;
-    setProjectsLoading(true);
+    setProjectOptionsState((current) => ({
+      scopeKey,
+      value: current?.scopeKey === scopeKey ? current.value : [],
+      loading: true,
+    }));
 
     try {
       const response = await projectsApi.list({
-        clientId: normalizedClientId,
+        clientId,
         search: search.trim() || undefined,
       });
-      if (requestId !== projectRequestIdRef.current) {
+      if (
+        requestId !== projectRequestIdRef.current
+        || !projectOptionsReadGuard.isCurrent(token)
+      ) {
         return;
       }
-      setProjectOptions(
-        response.map((project: ProjectDto) => ({
+      setProjectOptionsState({
+        scopeKey,
+        value: response.map((project: ProjectDto) => ({
           value: project.projectId,
           label: `${project.code} — ${project.name}`,
         })),
-      );
+        loading: false,
+      });
     } catch (error) {
-      if (requestId === projectRequestIdRef.current) {
+      if (
+        requestId === projectRequestIdRef.current
+        && projectOptionsReadGuard.isCurrent(token)
+      ) {
         notification.error({
           message: 'Не удалось загрузить проекты',
           description:
@@ -463,11 +598,22 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         });
       }
     } finally {
-      if (requestId === projectRequestIdRef.current) {
-        setProjectsLoading(false);
+      if (
+        requestId === projectRequestIdRef.current
+        && projectOptionsReadGuard.isCurrent(token)
+      ) {
+        setProjectOptionsState((current) => current?.scopeKey === scopeKey
+          ? { ...current, loading: false }
+          : current);
       }
     }
-  }, [normalizedClientId]);
+  }, [
+    normalizedClientId,
+    ordinaryReadActive,
+    projectOptionsReadGuard.capture,
+    projectOptionsReadGuard.isCurrent,
+    projectOptionsScopeKey,
+  ]);
 
   useEffect(() => {
     if (!featureFlags.projects || mode !== 'create' || !normalizedClientId) {
@@ -528,78 +674,23 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Load existing order data in edit mode
   // Use relationship to load doweling links via order_doweling_links (many-to-many)
   const shouldLoadOrder = mode === 'edit' && !!orderId && !useBackendOrderRead;
-  const { data: orderData, isLoading: orderLoading } = useOne({
-    resource: 'orders',
-    id: orderId,
+  const { data: orderData, isLoading: orderLoading, isFetching: orderFetching } = useOne({
+    resource: orderEditLegacyPrimaryIdentity.resource,
+    id: orderEditLegacyPrimaryIdentity.orderId,
     queryOptions: {
       enabled: shouldLoadOrder,
+      staleTime: orderLifecycleCohort === 'treatment'
+        ? ORDER_PRIMARY_HARD_STALE_TIME_MS
+        : undefined,
     },
-    meta: {
-      fields: [
-        'order_id',
-        'order_name',
-        'client_id',
-        'order_date',
-        'priority',
-        'completion_date',
-        'planned_completion_date',
-        'issue_date',
-        'order_status_id',
-        'payment_status_id',
-        'production_status_id',
-        'production_status_from_details_enabled',
-        'total_amount',
-        'final_amount',
-        'discount',
-        'surcharge',
-        'paid_amount',
-        'payment_date',
-        'parts_count',
-        'total_area',
-        'milling_type_id',
-        'edge_type_id',
-        'film_id',
-        'material_id',
-        // SP3: header sheet material + durable SP3-era eligibility marker
-        'sheet_material_type_id',
-        'sheet_eligible',
-        'link_cutting_file',
-        'link_cutting_image_file',
-        'link_cad_file',
-        'link_pdf_file',
-        'notes',
-        'manager_id',
-        'delete_flag',
-        'version',
-        'ref_key_1c',
-        'created_by',
-        'edited_by',
-        'created_at',
-        'updated_at',
-        ...(featureFlags.projects ? ['project_id'] : []),
-        {
-          order_doweling_links: [
-            'order_doweling_link_id',
-            'order_id',
-            'doweling_order_id',
-            {
-              doweling_order: [
-                'doweling_order_id',
-                'doweling_order_name',
-                'design_engineer_id',
-              ],
-            },
-          ],
-        },
-      ],
-    },
+    meta: orderEditLegacyPrimaryIdentity.meta,
   });
 
   // Load order details in edit mode (only if orderId is valid number)
   const canLoadOrderChildren = mode === 'edit' && typeof orderId === 'number' && orderId > 0;
   const shouldLoadDetails = canLoadOrderChildren && !useBackendOrderRead;
 
-  const { data: detailsData, isLoading: detailsLoading } = useList({
+  const { data: detailsData, isLoading: detailsLoading, isFetching: detailsFetching } = useList({
     resource: 'order_details',
     filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
     pagination: { pageSize: 1000 },
@@ -611,7 +702,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // SP3: server-resolved per-detail material name (COALESCE sheet/material) from
   // order_details_view, merged into the store as material_name_resolved so the edit
   // workspace shows the sheet name in mixed read mode without a shadow materials row.
-  const { data: detailNamesData, isLoading: detailNamesLoading } = useList({
+  const { data: detailNamesData, isLoading: detailNamesLoading, isFetching: detailNamesFetching } = useList({
     resource: 'order_details_view',
     filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
     pagination: { pageSize: 1000 },
@@ -622,7 +713,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   });
 
   // SP3: server-resolved header material name (COALESCE sheet/material) from orders_view.
-  const { data: headerNameData, isLoading: headerNameLoading } = useOne({
+  const { data: headerNameData, isLoading: headerNameLoading, isFetching: headerNameFetching } = useOne({
     resource: 'orders_view',
     id: orderId,
     meta: {
@@ -641,7 +732,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
   // Load payments in edit mode (only if orderId is valid number)
   const shouldLoadPayments = canLoadOrderChildren && !useBackendOrderRead;
 
-  const { data: paymentsData, isLoading: paymentsLoading } = useList({
+  const { data: paymentsData, isLoading: paymentsLoading, isFetching: paymentsFetching } = useList({
     resource: 'payments',
     filters: [{ field: 'order_id', operator: 'eq', value: orderId || 0 }],
     pagination: { pageSize: 1000 },
@@ -658,23 +749,51 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       !featureFlags.useBackendDeadlines ||
       !featureFlags.useBackendOrdersWrite
     ) {
-      setDeadlineDefaultSchedule({ loaded: true, schedule: null });
+      setDeadlineDefaultScheduleState({
+        scopeKey: deadlineDefaultsScopeKey,
+        value: { loaded: true, schedule: null },
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (!ordinaryReadActive) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const token = deadlineDefaultsGuard.capture();
+    if (!token) {
       return () => {
         cancelled = true;
       };
     }
 
-    setDeadlineDefaultSchedule((current) => ({ ...current, loaded: false }));
+    setDeadlineDefaultScheduleState((current) => ({
+      scopeKey: deadlineDefaultsScopeKey,
+      value: {
+        loaded: false,
+        schedule: current?.scopeKey === deadlineDefaultsScopeKey
+          ? current.value.schedule
+          : null,
+      },
+    }));
     void deadlinesApi
       .getDefaultSchedule()
       .then((response) => {
-        if (!cancelled) {
-          setDeadlineDefaultSchedule({ loaded: true, schedule: response.schedule });
+        if (!cancelled && deadlineDefaultsGuard.isCurrent(token)) {
+          setDeadlineDefaultScheduleState({
+            scopeKey: deadlineDefaultsScopeKey,
+            value: { loaded: true, schedule: response.schedule },
+          });
         }
       })
       .catch(() => {
-        if (!cancelled) {
-          setDeadlineDefaultSchedule({ loaded: true, schedule: null });
+        if (!cancelled && deadlineDefaultsGuard.isCurrent(token)) {
+          setDeadlineDefaultScheduleState({
+            scopeKey: deadlineDefaultsScopeKey,
+            value: { loaded: true, schedule: null },
+          });
           notification.warning({
             message: 'Срок по умолчанию не применён',
             description: 'Плановую дату можно указать вручную. Сервер повторит проверку при сохранении.',
@@ -685,7 +804,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [mode]);
+  }, [
+    deadlineDefaultsGuard.capture,
+    deadlineDefaultsGuard.isCurrent,
+    deadlineDefaultsScopeKey,
+    mode,
+    ordinaryReadActive,
+  ]);
 
   useEffect(() => {
     if (mode === 'create' && !bazisDraft) {
@@ -772,6 +897,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
   useEffect(() => {
     if (
+      !ordinaryReadActive ||
       mode !== 'create' ||
       !bazisDraft ||
       !defaultOrderStatus ||
@@ -839,6 +965,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
 
     // Подсказка номера заказа: асинхронно после seed, только если поле пусто
     // (ручной ввод юзера не затираем). Финальная уникальность — серверный гейт.
+    const nameHintToken = bazisNameHintGuard.capture();
+    if (!nameHintToken) return;
     void (async () => {
       try {
         const response = await ordersApi.list({
@@ -848,11 +976,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           sortOrder: 'desc',
         });
         const next = buildNextOrderNameFromList(response.data.map((item) => item.orderName));
-        if (!next) {
+        if (!next || !bazisNameHintGuard.isCurrent(nameHintToken)) {
           return;
         }
         const store = getOrderDraftStore(orderKey).getState();
-        if (!store.header.order_name) {
+        if (!store.header.order_name && bazisNameHintGuard.isCurrent(nameHintToken)) {
           store.updateHeaderField('order_name', next);
         }
       } catch {
@@ -861,12 +989,15 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     })();
   }, [
     bazisDraft,
+    bazisNameHintGuard.capture,
+    bazisNameHintGuard.isCurrent,
     deadlineDefaultSchedule.schedule,
     defaultOrderStatus,
     defaultPaymentStatus,
     loadOrder,
     location.key,
     mode,
+    ordinaryReadActive,
     reset,
     setDirty,
     setInitializing,
@@ -925,18 +1056,20 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     updateHeaderField,
   ]);
 
-  useEffect(() => {
-    if (!statusesError) return;
-    notification.error({
-      message: 'Ошибка загрузки справочников формы',
-      description: statusesError.message,
-      duration: 0,
-    });
-  }, [statusesError]);
-
   // Reset store and didInit when orderId changes (handles navigation between orders)
   const didInit = useRef(false);
+  const backendOrderLoadAttemptedRef = useRef(false);
   const prevOrderIdRef = useRef<number | undefined>(undefined);
+  const prevAuthNamespaceRef = useRef(authCacheNamespace);
+
+  useLayoutEffect(() => {
+    if (prevAuthNamespaceRef.current === authCacheNamespace) return;
+    // Actor/permission-scope changes must never preserve another auth owner's draft.
+    reset();
+    didInit.current = false;
+    backendOrderLoadAttemptedRef.current = false;
+    prevAuthNamespaceRef.current = authCacheNamespace;
+  }, [authCacheNamespace, reset]);
 
   useEffect(() => {
     // If orderId changed, reset the store and allow re-initialization
@@ -946,40 +1079,54 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         reset();
       }
       didInit.current = false;
+      backendOrderLoadAttemptedRef.current = false;
       prevOrderIdRef.current = orderId;
     }
   }, [orderId, reset]);
 
   useEffect(() => {
-    if (!useBackendOrderRead || didInit.current || mode !== 'edit' || !orderId) {
+    if (
+      !ordinaryReadActive
+      || !useBackendOrderRead
+      || didInit.current
+      || mode !== 'edit'
+      || !orderId
+    ) {
       return;
     }
 
     // A restored dirty draft (sessionStorage rehydration) is authoritative —
     // do not clobber it via a backend reload.
-    if (getOrderDraftStore(orderKey).getState().isDirty) {
+    if (
+      !backendOrderLoadAttemptedRef.current
+      && isAuthoritativeDirtyOrderDraft(getOrderDraftStore(orderKey).getState(), orderId)
+    ) {
       didInit.current = true;
       return;
     }
 
+    const loadToken = backendOrderLoadGuard.capture();
+    if (!loadToken) return;
+    backendOrderLoadAttemptedRef.current = true;
     let cancelled = false;
-    setBackendOrderLoading(true);
+    setBackendOrderLoadingState({ scopeKey: backendOrderLoadScopeKey, value: true });
 
     loadOrderViaBackend(orderId, {
       // peek (non-creating): a load resolving after discard must not resurrect the slice.
       getOrderStore: () => peekOrderDraftStore(orderKey)?.getState() ?? null,
-    })
+      canPublish: () => backendOrderLoadGuard.isCurrent(loadToken),
+      })
       .then((formValues) => {
-        if (cancelled || !formValues) return;
+        if (cancelled || !backendOrderLoadGuard.isCurrent(loadToken) || !formValues) return;
         didInit.current = true;
         setTimeout(() => {
-          if (!cancelled) {
+          if (!cancelled && backendOrderLoadGuard.isCurrent(loadToken)) {
             finalizeInitialization();
           }
         }, 200);
       })
       .catch((error) => {
-        if (cancelled) return;
+        if (cancelled || !backendOrderLoadGuard.isCurrent(loadToken)) return;
         console.error('[OrderForm] Backend order load failed:', error);
         notification.error({
           message: 'Ошибка загрузки заказа',
@@ -987,21 +1134,39 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         });
       })
       .finally(() => {
-        if (!cancelled) {
-          setBackendOrderLoading(false);
+        if (!cancelled && backendOrderLoadGuard.isCurrent(loadToken)) {
+          setBackendOrderLoadingState({ scopeKey: backendOrderLoadScopeKey, value: false });
         }
       });
 
     return () => {
       cancelled = true;
+      setBackendOrderLoadingState((current) => current?.scopeKey === backendOrderLoadScopeKey
+        ? { ...current, value: false }
+        : current);
     };
-  }, [useBackendOrderRead, mode, orderId, finalizeInitialization]);
+  }, [
+    backendOrderLoadGuard.active,
+    backendOrderLoadGuard.capture,
+    backendOrderLoadGuard.isCurrent,
+    backendOrderLoadScopeKey,
+    finalizeInitialization,
+    mode,
+    orderId,
+    orderKey,
+    ordinaryReadActive,
+    useBackendOrderRead,
+  ]);
 
   // Load order data in edit mode (one-time per orderId)
   useEffect(() => {
-    if (didInit.current) return;
+    if (useBackendOrderRead || didInit.current) return;
     // A restored dirty draft is authoritative — do not clobber it via loadOrder().
-    if (mode === 'edit' && getOrderDraftStore(orderKey).getState().isDirty) {
+    if (
+      mode === 'edit'
+      && orderId
+      && isAuthoritativeDirtyOrderDraft(getOrderDraftStore(orderKey).getState(), orderId)
+    ) {
       didInit.current = true;
       return;
     }
@@ -1082,6 +1247,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       }
     }
   }, [
+    useBackendOrderRead,
     mode,
     orderData,
     detailsData,
@@ -1297,6 +1463,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       console.log('[OrderForm] handleSave - payment edits applied successfully');
     }
 
+    const workspaceKey = orderWorkspaceKey;
+    const releaseOperationPin = acquireWorkspaceOperationPin(workspaceKey, 'order-save');
     try {
       const formValues = getFormValues();
       console.log('[OrderForm] handleSave - formValues:', formValues);
@@ -1350,9 +1518,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         formValues.idempotencyKey = saveKeyRef.current;
       }
 
-        console.log('[OrderForm] handleSave - calling saveOrder...');
-        const savedOrderId = await saveOrder(formValues, mode === 'edit');
-        console.log('[OrderForm] handleSave - saveOrder returned:', savedOrderId);
+      console.log('[OrderForm] handleSave - calling saveOrder...');
+      const savedOrderId = await runPageOwnedWorkspaceOperation(
+        workspaceKey,
+        'order-save',
+        () => saveOrder(formValues, mode === 'edit'),
+      );
+      console.log('[OrderForm] handleSave - saveOrder returned:', savedOrderId);
 
       if (savedOrderId) {
         saveKeyRef.current = undefined;
@@ -1404,27 +1576,31 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           console.warn('[OrderForm] handleSave - WARNING: onSaveSuccess callback is not defined!');
         }
 
-        // Auto-export to Google Drive in background. Order persistence and HDF
-        // reconciliation are already complete, so optional export must not keep
-        // save actions (including the HDF bulk button) in a loading state.
+        // Export is optional and runs in background, but remains owned by its
+        // workspace/auth scope so stale completions cannot publish.
         console.log('[OrderForm] handleSave - starting background auto-export to Google Drive');
-        void exportToDrive({
-          order_id: savedOrderId,
-          order_name: formValues.header.order_name,
-          order_date: formValues.header.order_date,
-          client: formValues.header.client,
-        })
+        void runPageOwnedWorkspaceOperation(
+            workspaceKey,
+            'order-excel-export',
+            (owner) => exportToDrive({
+              order_id: savedOrderId,
+              order_name: formValues.header.order_name,
+              order_date: formValues.header.order_date,
+              client: formValues.header.client,
+            }, owner),
+          )
           .then(() => {
             console.log('[OrderForm] handleSave - background auto-export completed successfully');
           })
           .catch((exportError) => {
-            // Error already handled in useOrderExport hook (shows message.error).
+            if (isWorkspaceOperationOwnershipLost(exportError)) return;
             console.error('[OrderForm] handleSave - background auto-export failed:', exportError);
           });
         return true;
       }
       return false;
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       console.error('[OrderForm] handleSave - CATCH block, error:', error);
       notification.error({
         message: 'Ошибка при сохранении',
@@ -1433,6 +1609,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       });
       return false;
     } finally {
+      releaseOperationPin();
       console.log('[OrderForm] ========== handleSave ENDED ==========');
     }
   };
@@ -1503,44 +1680,50 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         key: 'basic',
         label: isOperational ? 'Обзор' : 'Основная информация',
         children: (
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <OrderBasicInfo
-              clientLocked={bazisDraftClientLocked}
-              projectField={projectField}
-            />
-            <OrderNotesSection />
-          </Space>
+          <OrderLifecycleReadSurface active={activeTab === 'basic'}>
+            <Space direction="vertical" style={{ width: '100%' }} size="large">
+              <OrderBasicInfo
+                clientLocked={bazisDraftClientLocked}
+                projectField={projectField}
+              />
+              <OrderNotesSection />
+            </Space>
+          </OrderLifecycleReadSurface>
         ),
       },
       {
         key: 'details',
         label: isOperational ? 'Состав' : 'Детали заказа',
         children: (
-          <div ref={orderFormDetailsBlockRef} className="order-form-details-section">
-            <OrderSaveValidationContext.Provider value={saveValidation}>
-              <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />
-            </OrderSaveValidationContext.Provider>
-          </div>
+          <OrderLifecycleReadSurface active={activeTab === 'details'}>
+            <div ref={orderFormDetailsBlockRef} className="order-form-details-section">
+              <OrderSaveValidationContext.Provider value={saveValidation}>
+                <OrderDetailsTab ref={detailsTabRef} isSaving={isSaving} />
+              </OrderSaveValidationContext.Provider>
+            </div>
+          </OrderLifecycleReadSurface>
         ),
       },
       {
         key: 'hdf',
         label: 'ХДФ',
-        children: <OrderHdfTab onSave={handleSave} isSaving={isSaving} />,
+        children: <OrderLifecycleReadSurface active={activeTab === 'hdf'}><OrderHdfTab onSave={handleSave} isSaving={isSaving} /></OrderLifecycleReadSurface>,
       },
       {
         key: 'dates',
         label: isOperational ? 'Логистика' : 'Даты',
-        children: <OrderDatesSection />,
+        children: <OrderLifecycleReadSurface active={activeTab === 'dates'}><OrderDatesSection /></OrderLifecycleReadSurface>,
       },
       {
         key: 'finance',
         label: 'Финансы',
         children: (
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <OrderFinanceSection />
-            <OrderPaymentsTab ref={paymentsTabRef} />
-          </Space>
+          <OrderLifecycleReadSurface active={activeTab === 'finance'}>
+            <Space direction="vertical" style={{ width: '100%' }} size="large">
+              <OrderFinanceSection />
+              <OrderPaymentsTab ref={paymentsTabRef} />
+            </Space>
+          </OrderLifecycleReadSurface>
         ),
       },
       ...(cutTabEnabled
@@ -1548,7 +1731,11 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
             {
               key: 'cut',
               label: 'Раскрой',
-              children: header.order_id ? <CutPage embeddedOrderId={header.order_id} /> : null,
+              children: header.order_id ? (
+                <OrderLifecycleReadSurface active={activeTab === 'cut'}>
+                  <CutPage embeddedOrderId={header.order_id} />
+                </OrderLifecycleReadSurface>
+              ) : null,
               disabled: mode === 'create' && !header.order_id,
             },
           ]
@@ -1568,29 +1755,37 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
       {
         key: 'requirements',
         label: 'Материалы',
-        children: <OrderMaterialsTab />,
+        children: (
+          <OrderLifecycleReadSurface active={activeTab === 'requirements'}>
+            <OrderMaterialsTab />
+          </OrderLifecycleReadSurface>
+        ),
         disabled: mode === 'create' && !header.order_id,
       },
       {
         key: 'additional',
         label: isOperational ? 'Бирки' : 'Дополнительно',
-        children: isOperational ? (
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <OrderTelegramScreenshots orderId={header.order_id ?? orderId} />
-            {labelsEnabled ? (
-              <OrderLabelDataEditor orderId={header.order_id ?? orderId} isOrderDirty={isDirty} />
+        children: (
+          <OrderLifecycleReadSurface active={activeTab === 'additional'}>
+            {isOperational ? (
+              <Space direction="vertical" style={{ width: '100%' }} size="large">
+                <OrderTelegramScreenshots orderId={header.order_id ?? orderId} />
+                {labelsEnabled ? (
+                  <OrderLabelDataEditor orderId={header.order_id ?? orderId} isOrderDirty={isDirty} />
+                ) : (
+                  <span>Бирки недоступны</span>
+                )}
+              </Space>
             ) : (
-              <span>Бирки недоступны</span>
+              <Space direction="vertical" style={{ width: '100%' }} size="large">
+                <OrderLegacySection />
+                <OrderFilesSection orderId={header.order_id ?? orderId} />
+                {labelsEnabled && (
+                  <OrderLabelDataEditor orderId={header.order_id ?? orderId} isOrderDirty={isDirty} />
+                )}
+              </Space>
             )}
-          </Space>
-        ) : (
-          <Space direction="vertical" style={{ width: '100%' }} size="large">
-            <OrderLegacySection />
-            <OrderFilesSection />
-            {labelsEnabled && (
-              <OrderLabelDataEditor orderId={header.order_id ?? orderId} isOrderDirty={isDirty} />
-            )}
-          </Space>
+          </OrderLifecycleReadSurface>
         ),
       },
       ];
@@ -1614,6 +1809,7 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     },
     [
       mode,
+      activeTab,
       header.order_id,
       header.project_code,
       header.project_id,
@@ -1729,7 +1925,14 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     const closeAndLeave = (discard: boolean) => {
       // Resolve from the PRE-removal tab list — closeTab mutates it.
       const closeTargetPath = computeCloseTargetPath(useTabStore.getState().tabs, tabKey);
-      closeTab(tabKey, discard ? { discard: true } : undefined);
+      const closed = closeTab(tabKey, discard ? { discard: true } : undefined);
+      if (!closed) {
+        notification.warning({
+          message: 'Операция выполняется',
+          description: 'Дождитесь завершения операции перед закрытием вкладки',
+        });
+        return;
+      }
       navigate(closeTargetPath);
     };
     if (isDirty) confirmDiscard(() => closeAndLeave(true));
@@ -1743,28 +1946,56 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
     (shouldLoadOrder && orderLoading) ||
     (shouldLoadDetails && detailsLoading) ||
     (shouldLoadPayments && paymentsLoading);
-
-
-  if (isLoadingEssential) {
-    return (
-      <OrderDraftStoreProvider orderKey={orderKey}>
-        <Card>
-          <div style={{ textAlign: 'center', padding: '50px' }}>
-            <Spin size="large" />
-            <div style={{ marginTop: '16px' }}>
-              {backendOrderLoading || orderLoading ? 'Загрузка заказа...' : 'Загрузка формы...'}
-            </div>
-          </div>
-        </Card>
-      </OrderDraftStoreProvider>
-    );
-  }
+  const isInitialLoading = isLoadingEssential;
+  const isRefreshing = !isInitialLoading && (
+    orderFetching
+    || detailsFetching
+    || paymentsFetching
+    || detailNamesFetching
+    || headerNameFetching
+  );
+  const formProgressiveLoading = {
+    isInitialLoading,
+    isRefreshing,
+    isSectionLoading: false,
+  };
 
   const orderName = header.order_name?.trim();
   const cardTitle =
     mode === 'create'
       ? `Создание заказа${orderName ? ` «${orderName}»` : ''}`
       : `Редактирование заказа${orderName ? ` «${orderName}»` : ''}`;
+
+  if (isInitialLoading) {
+    return (
+      <OrderDraftStoreProvider orderKey={orderKey}>
+        {isOperational ? (
+          <div className="order-form-operational">
+            <OperationalPageHeader
+              breadcrumbs={<Space split={<span>›</span>} size={6}><Link to="/orders">Заказы</Link><span>Редактирование</span></Space>}
+              title={mode === 'create' ? 'Создание заказа' : 'Редактирование заказа'}
+              description="Основные данные появятся без перезагрузки рабочего пространства."
+            />
+            <div className="order-form-operational__workspace">
+              <OrderFormProgressiveSurface
+                state={formProgressiveLoading}
+                error={statusesError ?? null}
+                onRetry={() => { void retryStatuses(); }}
+              />
+            </div>
+          </div>
+        ) : (
+          <Card title={cardTitle}>
+            <OrderFormProgressiveSurface
+              state={formProgressiveLoading}
+              error={statusesError ?? null}
+              onRetry={() => { void retryStatuses(); }}
+            />
+          </Card>
+        )}
+      </OrderDraftStoreProvider>
+    );
+  }
 
   if (isOperational) {
     return (
@@ -1799,9 +2030,17 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                     okButtonProps={{ danger: true }}
                     cancelText="Отмена"
                     onConfirm={makeOrderDeleteHandler({
-                      deleteFn: () => ordersApi.delete(Number(orderId), {
-                        version: Number(header.version ?? 0),
-                      }),
+                      capturePublicationGuard: () => {
+                        const token = backendOrderLoadGuard.capture();
+                        return token ? () => backendOrderLoadGuard.isSameResource(token) : null;
+                      },
+                      deleteFn: () => runPageOwnedWorkspaceOperation(
+                        tabKey,
+                        'order-delete',
+                        () => ordersApi.delete(Number(orderId), {
+                          version: Number(header.version ?? 0),
+                        }),
+                      ),
                       onSuccess: () => {
                         message.success('Заказ перемещён в корзину');
                         navigate('/orders');
@@ -1825,7 +2064,12 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               </>
             )}
           />
-          <div className="order-form-operational__workspace">
+          <OrderFormProgressiveSurface
+            state={formProgressiveLoading}
+            error={statusesError ?? null}
+            onRetry={() => { void retryStatuses(); }}
+          >
+            <div className="order-form-operational__workspace">
             <div className={orderFormPageClassName} style={orderFormStickyStyle}>
               <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
               <div
@@ -1840,7 +2084,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
                 type="card"
               />
             </div>
-          </div>
+            </div>
+          </OrderFormProgressiveSurface>
         </div>
       </OrderDraftStoreProvider>
     );
@@ -1869,9 +2114,17 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
               okButtonProps={{ danger: true }}
               cancelText="Отмена"
               onConfirm={makeOrderDeleteHandler({
-                deleteFn: () => ordersApi.delete(Number(orderId), {
-                  version: Number(header.version ?? 0),
-                }),
+                capturePublicationGuard: () => {
+                  const token = backendOrderLoadGuard.capture();
+                  return token ? () => backendOrderLoadGuard.isSameResource(token) : null;
+                },
+                deleteFn: () => runPageOwnedWorkspaceOperation(
+                  tabKey,
+                  'order-delete',
+                  () => ordersApi.delete(Number(orderId), {
+                    version: Number(header.version ?? 0),
+                  }),
+                ),
                 onSuccess: () => {
                   message.success('Заказ перемещён в корзину');
                   navigate('/orders');
@@ -1917,8 +2170,13 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
         </Space>
       }
     >
-      {/* Read-only header with order summary (both create and edit modes) */}
-      <div className={orderFormPageClassName} style={orderFormStickyStyle}>
+      <OrderFormProgressiveSurface
+        state={formProgressiveLoading}
+        error={statusesError ?? null}
+        onRetry={() => { void retryStatuses(); }}
+      >
+        {/* Read-only header with order summary (both create and edit modes) */}
+        <div className={orderFormPageClassName} style={orderFormStickyStyle}>
         <div ref={orderFormStickySentinelRef} className="order-show-sticky-sentinel" aria-hidden />
         <div
           className={`order-show-summary-tabs-sticky${orderFormSummaryStuck ? ' order-show-summary-tabs-sticky--stuck' : ''}`}
@@ -1933,7 +2191,8 @@ const OrderFormContent: React.FC<OrderFormProps> = ({
           items={headerTabItems}
           type="card"
         />
-      </div>
+        </div>
+      </OrderFormProgressiveSurface>
     </Card>
     </OrderDraftStoreProvider>
   );
@@ -1950,4 +2209,10 @@ function readBazisDraftFromLocationState(state: unknown): BazisOrderDraftRespons
   }
 
   return draft;
+}
+
+function asWorkspaceRecord(value: unknown): WorkspaceSerializableRecord | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as WorkspaceSerializableRecord
+    : null;
 }
