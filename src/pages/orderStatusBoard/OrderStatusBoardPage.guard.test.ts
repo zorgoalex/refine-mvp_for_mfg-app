@@ -1303,22 +1303,29 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('.cnc-deferred-card--revealed');
   });
 
-  it('refreshes expired MDF prefetch data when the operator navigates to the board', () => {
+  it('prefetches MDF data only when the operator navigates to the board', () => {
     expect(siderMenuItems).toContain("MDF_BOARD_PREFETCH_EVENT = 'erp:mdf-board-prefetch'");
     expect(siderMenuItems).toContain('requestMdfBoardPrefetch(route);');
     expect(customSider).toContain('onClick: () => sider.handleNavigate(item.route)');
     expect(app).toContain('MDF_PREFETCH_COOLDOWN_MS = 25_000');
-    expect(app).toContain('MDF_PREFETCH_REFRESH_MS = 25_000');
     expect(cncTelegramApi).toContain('CNC_TODAY_PREFETCH_MAX_AGE_MS = 20_000');
     expect(orderStatusBoardApi).toContain('STATUS_BOARD_PREFETCH_MAX_AGE_MS = 20_000');
     expect(app).toContain("document.visibilityState !== 'visible'");
     expect(app).toContain("window.location.pathname === '/mdf-work-board'");
-    expect(app).toContain('window.setInterval(warmMdfData, MDF_PREFETCH_REFRESH_MS)');
-    expect(app).toContain("document.addEventListener('visibilitychange', warmVisibleMdfData)");
-    expect(app).toContain('window.clearInterval(refreshTimer)');
-    expect(app).toContain("document.removeEventListener('visibilitychange', warmVisibleMdfData)");
     expect(app).toContain('window.addEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
     expect(app).toContain('window.removeEventListener(MDF_BOARD_PREFETCH_EVENT, warmMdfData)');
+    expect(app).not.toContain('warmMdfData();');
+    expect(app).not.toContain('authSession.subscribe(warmMdfData)');
+    expect(app).not.toContain('window.setInterval(warmMdfData');
+    expect(app).not.toContain("document.addEventListener('visibilitychange', warmVisibleMdfData)");
+  });
+
+  it('pauses MDF requests while the persistent board is hidden', () => {
+    expect(page).toContain('useAppSettings({ enabled: active && isCncToday })');
+    expect(page).toMatch(/useEffect\(\(\) => \{\s*if \(!active\) return;\s*if \(mdfWorkdayTodayOpenPatchNeeded\) return;/);
+    expect(page).toMatch(/useEffect\(\(\) => \{\s*if \(!active\) return undefined;\s*const refreshWhenVisible/);
+    expect(page).toContain('if (!active) return undefined;');
+    expect(page).toContain('if (!isCncToday || cncOrderIds.length === 0)');
   });
 
   it('opens MDF order cards from the order number without stealing the whole-card relation click', () => {

@@ -611,7 +611,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const {
     getSetting: getAppSetting,
     refetch: refetchAppSettings,
-  } = useAppSettings({ enabled: isCncToday });
+  } = useAppSettings({ enabled: active && isCncToday });
   const mdfBoardHiddenStatusesSetting =
     getAppSetting<MdfBoardHiddenStatusesSetting>(
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
@@ -1039,6 +1039,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   );
 
   useEffect(() => {
+    if (!active) return;
     if (mdfWorkdayTodayOpenPatchNeeded) return;
     const preserveInitialSnapshot = preserveInitialMdfSnapshotRef.current;
     preserveInitialMdfSnapshotRef.current = false;
@@ -1059,7 +1060,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     void fetchInitial();
     // datasetKey is the canonical backend data revision trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetKey, mdfWorkdayTodayOpenPatchNeeded]);
+  }, [active, datasetKey, mdfWorkdayTodayOpenPatchNeeded]);
 
   useEffect(() => {
     setCncCardDisplayMode(readCncCardDisplayPreference(currentUser?.id));
@@ -1071,6 +1072,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   }, [currentUser?.id]);
 
   useEffect(() => {
+    if (!active) return undefined;
     const refreshWhenVisible = () => {
       if (
         document.visibilityState === 'visible' &&
@@ -1082,7 +1084,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     };
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => document.removeEventListener('visibilitychange', refreshWhenVisible);
-  }, [fetchInitial, stale]);
+  }, [active, fetchInitial, stale]);
 
   const loadMore = useCallback(
     async (column: OrderStatusBoardColumn): Promise<boolean> => {
@@ -1717,11 +1719,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   }, [cncRelationsEnabled]);
 
   useEffect(() => {
+    if (!active) return undefined;
     if (!isCncToday || cncOrderIds.length === 0) {
       cncOrderBoardRequestKeyRef.current = null;
       setCncOrderBoard(null);
       setCncOrderBoardLoading(false);
-      return;
+      return undefined;
     }
 
     const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState);
@@ -1773,9 +1776,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
+  }, [active, cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
 
   useEffect(() => {
+    if (!active) return undefined;
     if (!isCncToday) {
       cncManualMovesRef.current = {};
       setCncManualMoves({});
@@ -1819,7 +1823,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [fetchCncManualMoves, isCncToday]);
+  }, [active, fetchCncManualMoves, isCncToday]);
 
   const toggleCncRelation = useCallback((target: CncRelationTarget) => {
     setActiveCncRelation((current) =>
