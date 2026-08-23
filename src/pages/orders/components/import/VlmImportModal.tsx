@@ -1,20 +1,32 @@
 // Main VLM Import Modal with wizard steps (2 steps: upload+analyze + validation)
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { Modal, Steps, Button, Space, message } from 'antd';
 import { CameraOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
-import { useList } from '@refinedev/core';
+import { useList } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
 import { ResizableModalWrapper } from '../../../../components/ResizableModalWrapper';
-import { useVlmImport, ImportedOrderDetail } from '../../../../hooks/useVlmImport';
+import {
+  useVlmImport,
+  type ImportedOrderDetail,
+  type VlmImportResult,
+} from '../../../../hooks/useVlmImport';
 import { useImportValidation } from './hooks';
 import { PhotoUploadStep } from './steps/PhotoUploadStep';
 import { ValidationStep } from './steps';
-import type { ReferenceData, ImportRow } from './types/importTypes';
+import type { ReferenceData, ImportRow, ValidatedRow } from './types/importTypes';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { calculateOrderDetailArea } from '../../../../utils/orderArea';
 import { sortOptionsByRecency, useRecentReferences } from '../../../../hooks/useRecentReferences';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import {
+  deleteWorkspaceCheckpointAdapterState,
+  readWorkspaceCheckpointAdapterState,
+} from '../../../../workspace/workspaceCheckpointRegistry';
+import { releaseWorkspaceAttachment } from '../../../../workspace/workspaceAttachmentRegistry';
+import { runPageOwnedWorkspaceOperation } from '../../../../workspace/workspaceOperationPins';
 
 type VlmImportStep = 'upload' | 'validation';
 
@@ -47,6 +59,12 @@ function vlmItemsToImportRows(items: ImportedOrderDetail[]): ImportRow[] {
 }
 
 export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose }) => {
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'vlm-import-wizard'),
+  ).current;
+  const restoreStartedRef = useRef(false);
   const [currentStep, setCurrentStep] = useState<VlmImportStep>('upload');
 
   const vlmImport = useVlmImport();
@@ -55,6 +73,25 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
   const addDetail = useOrderFormStore((state) => state.addDetail);
   const recalculateFinancials = useOrderFormStore((state) => state.recalculateFinancials);
   const materialRecency = useRecentReferences('sheet_material_types');
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'vlm-import-wizard', {
+    canCapture: () => !['uploading', 'analyzing', 'parsing'].includes(vlmImport.status),
+    capture: () => ({
+      open,
+      currentStep,
+      result: checkpointVlmResult(vlmImport.result),
+      validatedRows: importValidation.validatedRows,
+    }),
+  });
+
+  useLayoutEffect(() => {
+    if (!open || restoreStartedRef.current || restored?.open !== true) return;
+    restoreStartedRef.current = true;
+    const result = readVlmResult(restored.result);
+    if (result) vlmImport.restoreResult(result);
+    importValidation.restoreValidatedRows(readVlmValidatedRows(restored.validatedRows));
+    setCurrentStep(result ? readVlmImportStep(restored.currentStep) : 'upload');
+  }, [importValidation, open, restored, vlmImport]);
 
   // Load reference data
   const { data: edgeTypesData } = useList({
@@ -125,6 +162,15 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
     return vlmItemsToImportRows(vlmImport.result.items);
   }, [vlmImport.result]);
 
+  const handleVlmUpload = useCallback(
+    (file: File | Blob) => runPageOwnedWorkspaceOperation(
+      workspaceKey,
+      'order-vlm-import',
+      () => vlmImport.importFromImage(file),
+    ),
+    [vlmImport.importFromImage, workspaceKey],
+  );
+
   const handleNext = useCallback(() => {
     const idx = currentStepIndex;
     if (idx < STEPS.length - 1) {
@@ -158,8 +204,16 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
     vlmImport.reset();
     importValidation.reset();
     setCurrentStep('upload');
+    releaseWorkspaceAttachment(workspaceKey, 'vlm-photo-file');
+    deleteWorkspaceCheckpointAdapterState(workspaceKey, 'vlm-import-wizard');
+    deleteWorkspaceCheckpointAdapterState(workspaceKey, 'vlm-photo-crop');
     onClose();
-  }, [vlmImport, importValidation, onClose]);
+  }, [vlmImport, importValidation, onClose, workspaceKey]);
+
+  const handleVlmReset = useCallback(() => {
+    releaseWorkspaceAttachment(workspaceKey, 'vlm-photo-file');
+    vlmImport.reset();
+  }, [vlmImport, workspaceKey]);
 
   const handleImport = useCallback(() => {
     const validRows = importValidation.getValidRows();
@@ -237,8 +291,8 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
             error={vlmImport.error}
             result={vlmImport.result}
             importRows={importRows}
-            onFileUpload={vlmImport.importFromImage}
-            onReset={vlmImport.reset}
+            onFileUpload={handleVlmUpload}
+            onReset={handleVlmReset}
           />
         );
 
@@ -262,8 +316,6 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
   };
 
   return (
-    <DraggableModalWrapper open={open}>
-      <ResizableModalWrapper open={open} minHeight={400} defaultHeight={550}>
         <Modal
           title={
             <Space>
@@ -318,7 +370,14 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
               )}
             </Space>
           </div>
-        }
+          }
+          modalRender={(modal) => (
+            <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>
+              <ResizableModalWrapper open={open} minHeight={400} defaultHeight={550}>
+                {React.isValidElement(modal) ? modal : <>{modal}</>}
+              </ResizableModalWrapper>
+            </DraggableModalWrapper>
+          )}
       >
         <Steps
           current={currentStepIndex}
@@ -331,7 +390,47 @@ export const VlmImportModal: React.FC<VlmImportModalProps> = ({ open, onClose })
           {renderStepContent()}
         </div>
         </Modal>
-      </ResizableModalWrapper>
-    </DraggableModalWrapper>
   );
 };
+
+function readVlmImportStep(value: unknown): VlmImportStep {
+  return value === 'validation' ? 'validation' : 'upload';
+}
+
+function checkpointVlmResult(result: VlmImportResult | null): Record<string, unknown> | null {
+  if (!result) return null;
+  return {
+    success: result.success,
+    items: result.items,
+    parseError: result.parseError ?? null,
+    error: result.error ?? null,
+    provider: result.provider ?? null,
+    model: result.model ?? null,
+    duration: result.duration ?? null,
+  };
+}
+
+function readVlmResult(value: unknown): VlmImportResult | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.success !== true || !Array.isArray(candidate.items)) return null;
+  return {
+    success: true,
+    items: candidate.items as ImportedOrderDetail[],
+    ...(typeof candidate.parseError === 'string' ? { parseError: candidate.parseError } : {}),
+    ...(typeof candidate.provider === 'string' ? { provider: candidate.provider } : {}),
+    ...(typeof candidate.model === 'string' ? { model: candidate.model } : {}),
+    ...(typeof candidate.duration === 'number' ? { duration: candidate.duration } : {}),
+  };
+}
+
+function readVlmValidatedRows(value: unknown): ValidatedRow[] {
+  return Array.isArray(value)
+    ? value.filter((row): row is ValidatedRow => (
+        !!row && typeof row === 'object' && !Array.isArray(row)
+        && typeof row.isValid === 'boolean'
+        && Array.isArray(row.errors)
+        && Array.isArray(row.warnings)
+      ))
+    : [];
+}

@@ -64,12 +64,13 @@ describe('ordersApi', () => {
       units: [{ id: 12, code: 'pcs', name: 'Pieces', symbol: 'pcs' }],
     };
     const fetchMock = mockFetch(response);
+    const controller = new AbortController();
 
-    await expect(ordersApi.getFormData()).resolves.toEqual(response);
+    await expect(ordersApi.getFormData({ signal: controller.signal })).resolves.toEqual(response);
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/orders/form-data',
-      expect.objectContaining({ method: 'GET' }),
+      expect.objectContaining({ method: 'GET', signal: controller.signal }),
     );
   });
 

@@ -12,6 +12,9 @@ export interface WorkflowMockApiOptions {
     themeMode?: 'light' | 'dark';
     uiVariant?: 'legacy' | 'evolution' | 'line' | 'air';
     tabletMode?: boolean;
+    authToken?: string;
+    authRefreshToken?: string;
+    authUser?: Row;
 }
 
 const AUTH_TOKEN =
@@ -433,51 +436,51 @@ export async function setupWorkflowMockApi(
     options: WorkflowMockApiOptions = {},
 ): Promise<WorkflowMockDb> {
     let tabletMode = options.tabletMode ?? false;
-    await page.addInitScript((token) => {
+    const authToken = options.authToken ?? AUTH_TOKEN;
+    const authRefreshToken = options.authRefreshToken ?? 'mock-refresh-token';
+    const authUser = options.authUser ?? {
+        id: '1',
+        user_id: 1,
+        username: 'admin',
+        role: 'admin',
+        role_id: 1,
+        // Variant B: include permissions so can('sheet_materials.view') returns true
+        // even when backendAuth=false (legacy localStorage path). Without permissions
+        // here, useSheetMaterialOptions.enabled stays false and the picker has no
+        // options in mocked tests.
+        permissions: [
+            'orders.view',
+            'orders.create',
+            'orders.update',
+            'orders.export',
+            'payments.view',
+            'payments.create',
+            'payments.update',
+            'payments.delete',
+            'clients.view',
+            'clients.create',
+            'clients.update',
+            'production.actions',
+            'settings.view',
+            'labels.view',
+            'sheet_materials.view',
+            'sheet_materials.manage',
+        ],
+    };
+    await page.addInitScript(({ token, refreshToken, user }) => {
         localStorage.clear();
         localStorage.setItem('access_token', token);
-        localStorage.setItem('refresh_token', 'mock-refresh-token');
-        localStorage.setItem(
-            'user',
-            JSON.stringify({
-                id: '1',
-                user_id: 1,
-                username: 'admin',
-                role: 'admin',
-                role_id: 1,
-                // Variant B: include permissions so can('sheet_materials.view') returns true
-                // even when backendAuth=false (legacy localStorage path). Without permissions
-                // here, useSheetMaterialOptions.enabled stays false and the picker has no
-                // options in mocked tests.
-                permissions: [
-                    'orders.view',
-                    'orders.create',
-                    'orders.update',
-                    'orders.export',
-                    'payments.view',
-                    'payments.create',
-                    'payments.update',
-                    'payments.delete',
-                    'clients.view',
-                    'clients.create',
-                    'clients.update',
-                    'production.actions',
-                    'settings.view',
-                    'labels.view',
-                    'sheet_materials.view',
-                    'sheet_materials.manage',
-                ],
-            }),
-        );
-    }, AUTH_TOKEN);
+        localStorage.setItem('refresh_token', refreshToken);
+        localStorage.setItem('user', JSON.stringify(user));
+    }, { token: authToken, refreshToken: authRefreshToken, user: authUser });
 
     await page.route(/\/api\/refresh$/, async (route) => {
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({
-                accessToken: AUTH_TOKEN,
-                refreshToken: 'mock-refresh-token',
+                accessToken: authToken,
+                refreshToken: authRefreshToken,
             }),
         });
     });
@@ -487,7 +490,7 @@ export async function setupWorkflowMockApi(
             status: 200,
             contentType: 'application/json',
             body: JSON.stringify({
-                accessToken: AUTH_TOKEN,
+                accessToken: authToken,
                 accessTokenExpiresAt: '2030-01-01T00:00:00.000Z',
                 user: {
                     id: '1',
@@ -589,6 +592,18 @@ export async function setupWorkflowMockApi(
                     tabletMode,
                     ...(uiVariant ? { uiVariant } : {}),
                 },
+            }),
+        });
+    });
+
+    await page.route(/\/api\/v1\/notifications(?:\?.*)?$/, async (route) => {
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                data: [],
+                pagination: { page: 1, pageSize: 50, total: 0, totalPages: 0 },
+                unreadCount: 0,
             }),
         });
     });

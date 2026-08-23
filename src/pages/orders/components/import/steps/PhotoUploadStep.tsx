@@ -3,13 +3,21 @@ import { Table } from '../../../../../ui/tooltipDelay';
 // Supports optional image crop before analysis
 
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { Upload, Typography, Space, Alert, Progress, Descriptions, Tag, Button, Image, Checkbox } from 'antd';
+import { Upload, Typography, Space, Alert, Progress, Descriptions, Tag, Button, Image, Checkbox, message } from 'antd';
 import { InboxOutlined, CameraOutlined, CloudUploadOutlined, ScanOutlined, CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined, ScissorOutlined, ZoomInOutlined, ZoomOutOutlined, } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import type { Crop, PixelCrop } from 'react-image-crop';
 import type { ImportStatus, VlmImportResult } from '../../../../../hooks/useVlmImport';
 import type { ImportRow } from '../types/importTypes';
 import { ImageCropArea, cropImageToBlob } from '../components/ImageCropArea';
+import { useKeepAlive } from '../../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../../workspace/workspaceCheckpointRegistry';
+import {
+  readWorkspaceAttachment,
+  releaseWorkspaceAttachment,
+  retainWorkspaceAttachment,
+} from '../../../../../workspace/workspaceAttachmentRegistry';
 
 const { Dragger } = Upload;
 const { Text, Title } = Typography;
@@ -55,16 +63,43 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
   onFileUpload,
   onReset,
 }) => {
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'vlm-photo-crop'),
+  ).current;
+  const retainedFile = useRef(
+    readWorkspaceAttachment<File>(workspaceKey, 'vlm-photo-file'),
+  ).current;
+  const [previewUrl, setPreviewUrl] = useState<string | null>(() => (
+    retainedFile && typeof URL !== 'undefined' ? URL.createObjectURL(retainedFile) : null
+  ));
+  const [selectedFile, setSelectedFile] = useState<File | null>(retainedFile);
 
   // Crop states
-  const [useFullImage, setUseFullImage] = useState(true);
-  const [showCropPreview, setShowCropPreview] = useState(false);
-  const [crop, setCrop] = useState<Crop>();
-  const [completedCrop, setCompletedCrop] = useState<PixelCrop>();
-  const [scale, setScale] = useState(1);
+  const [useFullImage, setUseFullImage] = useState(() => restored?.useFullImage !== false);
+  const [showCropPreview, setShowCropPreview] = useState(
+    () => !!retainedFile && restored?.showCropPreview === true,
+  );
+  const [crop, setCrop] = useState<Crop | undefined>(() => readCrop(restored?.crop));
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop | undefined>(
+    () => readPixelCrop(restored?.completedCrop),
+  );
+  const [scale, setScale] = useState(() => readScale(restored?.scale));
   const imgRef = useRef<HTMLImageElement | null>(null);
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'vlm-photo-crop', {
+    canCapture: () => !selectedFile
+      || readWorkspaceAttachment<File>(workspaceKey, 'vlm-photo-file') === selectedFile,
+    capture: () => ({
+      hasFile: selectedFile !== null,
+      useFullImage,
+      showCropPreview,
+      crop: crop ? checkpointCrop(crop) : null,
+      completedCrop: completedCrop ? checkpointCrop(completedCrop) : null,
+      scale,
+    }),
+  });
 
   // Zoom constants
   const MIN_SCALE = 0.25;
@@ -99,8 +134,20 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
 
   // Handle file selection - show preview first
   const handleFileSelect: UploadProps['customRequest'] = useCallback(async (options) => {
-    const { file, onSuccess } = options;
+    const { file, onSuccess, onError } = options;
     const fileObj = file as File;
+    const retained = retainWorkspaceAttachment({
+      workspaceKey,
+      attachmentKey: 'vlm-photo-file',
+      value: fileObj,
+      kind: 'file',
+    });
+    if (!retained) {
+      const error = new Error('Лимит памяти черновиков исчерпан. Закройте другой импорт и повторите.');
+      message.error(error.message);
+      onError?.(error);
+      return;
+    }
 
     // Create preview URL
     const url = URL.createObjectURL(fileObj);
@@ -112,7 +159,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
     setScale(1);
 
     onSuccess?.({});
-  }, []);
+  }, [workspaceKey]);
 
   // Handle analyze button click
   const handleAnalyze = useCallback(async () => {
@@ -149,7 +196,8 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
     setCrop(undefined);
     setCompletedCrop(undefined);
     setScale(1);
-  }, [previewUrl]);
+    releaseWorkspaceAttachment(workspaceKey, 'vlm-photo-file');
+  }, [previewUrl, workspaceKey]);
 
   // Zoom handlers
   const handleZoomIn = useCallback(() => {
@@ -171,13 +219,27 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
       // Create preview URL
       const url = URL.createObjectURL(file as File);
       setPreviewUrl(url);
+      const retained = retainWorkspaceAttachment({
+        workspaceKey,
+        attachmentKey: 'vlm-photo-file',
+        value: file as File,
+        kind: 'file',
+      });
+      if (!retained) {
+        throw new Error('Лимит памяти черновиков исчерпан. Закройте другой импорт и повторите.');
+      }
 
       await onFileUpload(file as File);
       onSuccess?.({});
     } catch (err) {
       onError?.(err as Error);
     }
-  }, [onFileUpload]);
+  }, [onFileUpload, workspaceKey]);
+
+  const handleReset = useCallback(() => {
+    releaseWorkspaceAttachment(workspaceKey, 'vlm-photo-file');
+    onReset();
+  }, [onReset, workspaceKey]);
 
   const uploadProps: UploadProps = {
     name: 'file',
@@ -447,7 +509,7 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
               <Button
                 type="link"
                 icon={<ReloadOutlined />}
-                onClick={onReset}
+                onClick={handleReset}
                 style={{ padding: 0 }}
               >
                 Попробовать снова
@@ -558,3 +620,40 @@ export const PhotoUploadStep: React.FC<PhotoUploadStepProps> = ({
     </div>
   );
 };
+
+function checkpointCrop(crop: Crop | PixelCrop): Record<string, unknown> {
+  return {
+    unit: crop.unit,
+    x: crop.x,
+    y: crop.y,
+    width: crop.width,
+    height: crop.height,
+  };
+}
+
+function readCrop(value: unknown): Crop | undefined {
+  const crop = readCropRecord(value);
+  return crop && (crop.unit === '%' || crop.unit === 'px') ? crop as Crop : undefined;
+}
+
+function readPixelCrop(value: unknown): PixelCrop | undefined {
+  const crop = readCropRecord(value);
+  return crop?.unit === 'px' ? crop as PixelCrop : undefined;
+}
+
+function readCropRecord(value: unknown): Crop | PixelCrop | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const crop = value as Record<string, unknown>;
+  return (crop.unit === '%' || crop.unit === 'px')
+    && [crop.x, crop.y, crop.width, crop.height].every((item) => (
+      typeof item === 'number' && Number.isFinite(item)
+    ))
+    ? crop as unknown as Crop | PixelCrop
+    : null;
+}
+
+function readScale(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0.25 && value <= 3
+    ? value
+    : 1;
+}

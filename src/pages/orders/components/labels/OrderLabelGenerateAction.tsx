@@ -26,6 +26,9 @@ import {
   saveAppendBlankLabelOnPrintPreference,
   saveLabelTemplatePreference,
 } from './labelTemplatePreference';
+import { useOrderAsyncReadGuard } from '../../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 
 const { Text } = Typography;
 
@@ -65,26 +68,57 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   initialDetailId = null,
   detailOptions = [],
 }) => {
+  const { tabKey } = useKeepAlive();
   const canGenerate = can('labels.generate');
   const canViewCut = can('cut.view');
   const labelTemplatePreferenceUserId = authSession.getUser()?.id ?? 'anon';
   const [open, setOpen] = useState(false);
-  const [templates, setTemplates] = useState<LabelTemplate[]>([]);
-  const [templateId, setTemplateId] = useState<number | null>(null);
+  const readGuard = useOrderAsyncReadGuard(`label-generate:${orderId}:${open ? 'open' : 'closed'}`);
+  const writeGuard = useOrderAsyncReadGuard(`label-generate-write:${orderId}`);
+  const readScopeKey = `${readGuard.authNamespace}|order:${orderId}`;
+  const [stateScopeKey, setStateScopeKey] = useState(readScopeKey);
+  const stateIsCurrent = stateScopeKey === readScopeKey;
+  const [storedTemplates, setTemplates] = useState<LabelTemplate[]>([]);
+  const [storedTemplateId, setTemplateId] = useState<number | null>(null);
+  const templates = stateIsCurrent ? storedTemplates : [];
+  const templateId = stateIsCurrent ? storedTemplateId : null;
   const [previewDetailId, setPreviewDetailId] = useState<number | null>(initialDetailId);
   const [useBasisFields, setUseBasisFields] = useState(true);
   const [appendBlankLabelOnPrint, setAppendBlankLabelOnPrint] = useState(false);
-  const [preview, setPreview] = useState<OrderLabelsPreview | null>(null);
-  const [generatedPreview, setGeneratedPreview] = useState<OrderLabelsPreview | null>(null);
-  const [generatedGenerationId, setGeneratedGenerationId] = useState<number | null>(null);
+  const [storedPreview, setPreview] = useState<OrderLabelsPreview | null>(null);
+  const [storedGeneratedPreview, setGeneratedPreview] = useState<OrderLabelsPreview | null>(null);
+  const [storedGeneratedGenerationId, setGeneratedGenerationId] = useState<number | null>(null);
+  const preview = stateIsCurrent ? storedPreview : null;
+  const generatedPreview = stateIsCurrent ? storedGeneratedPreview : null;
+  const generatedGenerationId = stateIsCurrent ? storedGeneratedGenerationId : null;
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [cutMapOptions, setCutMapOptions] = useState<OrderLabelCutMapOptions | null>(null);
+  const [storedCutMapOptions, setCutMapOptions] = useState<OrderLabelCutMapOptions | null>(null);
+  const cutMapOptions = stateIsCurrent ? storedCutMapOptions : null;
   const [cutMapOptionsLoading, setCutMapOptionsLoading] = useState(false);
   const [cutMapSource, setCutMapSource] = useState<OrderCutMapSelectionSource>('regular');
   const [cutMapSelection, setCutMapSelection] = useState<OrderCutMapSelectionState>({});
   const templateRequestRef = useRef(0);
   const previewRequestRef = useRef(0);
+
+  useEffect(() => {
+    if (stateScopeKey === readScopeKey) return;
+    templateRequestRef.current += 1;
+    previewRequestRef.current += 1;
+    setStateScopeKey(readScopeKey);
+    setOpen(false);
+    setTemplates([]);
+    setTemplateId(null);
+    setPreview(null);
+    setGeneratedPreview(null);
+    setGeneratedGenerationId(null);
+    setLoading(false);
+    setGenerating(false);
+    setCutMapOptions(null);
+    setCutMapOptionsLoading(false);
+    setCutMapSource('regular');
+    setCutMapSelection({});
+  }, [readScopeKey, stateScopeKey]);
   const selectedTemplate = useMemo(
     () => templates.find((template) => template.labelTemplateId === templateId) ?? null,
     [templateId, templates],
@@ -160,12 +194,15 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
   );
 
   const loadTemplates = useCallback(async () => {
+    if (!open || !stateIsCurrent || !readGuard.active) return;
+    const token = readGuard.capture();
+    if (!token) return;
     const requestId = templateRequestRef.current + 1;
     templateRequestRef.current = requestId;
     setLoading(true);
     try {
       const next = await labelsApi.listTemplates();
-      if (templateRequestRef.current !== requestId) return;
+      if (templateRequestRef.current !== requestId || !readGuard.isCurrent(token)) return;
       const activeTemplates = next.filter((template) => template.isActive);
       setTemplates((current) => {
         const currentById = new Map(current.map((template) => [template.labelTemplateId, template]));
@@ -180,28 +217,35 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
           : resolvePreferredLabelTemplateId(labelTemplatePreferenceUserId, activeTemplates)
       ));
     } catch {
-      if (templateRequestRef.current === requestId) {
+      if (templateRequestRef.current === requestId && readGuard.isCurrent(token)) {
         message.error('Не удалось загрузить шаблоны бирок');
       }
     } finally {
-      if (templateRequestRef.current === requestId) {
+      if (templateRequestRef.current === requestId && readGuard.isCurrent(token)) {
         setLoading(false);
       }
     }
-  }, [labelTemplatePreferenceUserId]);
+  }, [
+    labelTemplatePreferenceUserId,
+    open,
+    readGuard.active,
+    readGuard.capture,
+    readGuard.isCurrent,
+    stateIsCurrent,
+  ]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !stateIsCurrent || !readGuard.active) return;
     setPreviewDetailId(initialDetailId);
     setPreview(null);
     setGeneratedPreview(null);
     setGeneratedGenerationId(null);
     setAppendBlankLabelOnPrint(loadAppendBlankLabelOnPrintPreference(labelTemplatePreferenceUserId));
     void loadTemplates();
-  }, [initialDetailId, labelTemplatePreferenceUserId, loadTemplates, open]);
+  }, [initialDetailId, labelTemplatePreferenceUserId, loadTemplates, open, readGuard.active, stateIsCurrent]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !stateIsCurrent || !readGuard.active) return;
     const reload = (changedTemplateId?: number) => {
       if (changedTemplateId === templateId) {
         // An old in-flight preview must not win after the saved template changed.
@@ -219,16 +263,19 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
       unsubscribe();
       window.removeEventListener('focus', onFocus);
     };
-  }, [loadTemplates, open, templateId]);
+  }, [loadTemplates, open, readGuard.active, stateIsCurrent, templateId]);
 
   useEffect(() => {
-    if (!open || !hasCutMap || !canViewCut) {
+    if (!readGuard.active) return undefined;
+    if (!open || !stateIsCurrent || !hasCutMap || !canViewCut) {
       setCutMapOptions(null);
       setCutMapSource('regular');
       setCutMapSelection({});
       setCutMapOptionsLoading(false);
       return;
     }
+    const token = readGuard.capture();
+    if (!token) return undefined;
     let active = true;
     setPreview(null);
     setGeneratedPreview(null);
@@ -239,7 +286,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
     setCutMapOptionsLoading(true);
     labelsApi.listOrderCutMapOptions(orderId, 'v1')
       .then((next) => {
-        if (!active) return;
+        if (!active || !readGuard.isCurrent(token)) return;
         const rows = buildOrderCutMapLabelRows(next);
         const source = pickDefaultOrderCutMapSource(rows);
         setCutMapOptions(next);
@@ -247,15 +294,25 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         setCutMapSelection(buildOrderCutMapSelectionForSource(rows, source));
       })
       .catch(() => {
-        if (active) message.error('Не удалось загрузить раскрои для бирок');
+        if (active && readGuard.isCurrent(token)) message.error('Не удалось загрузить раскрои для бирок');
       })
       .finally(() => {
-        if (active) setCutMapOptionsLoading(false);
+        if (active && readGuard.isCurrent(token)) setCutMapOptionsLoading(false);
       });
     return () => {
       active = false;
     };
-  }, [canViewCut, hasCutMap, open, orderId, selectedTemplate?.labelTemplateId]);
+  }, [
+    canViewCut,
+    hasCutMap,
+    open,
+    orderId,
+    readGuard.active,
+    readGuard.capture,
+    readGuard.isCurrent,
+    selectedTemplate?.labelTemplateId,
+    stateIsCurrent,
+  ]);
 
   useEffect(() => {
     if (!open) return;
@@ -270,11 +327,16 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
 
   const runPreview = useCallback(async () => {
     if (
-      !selectedTemplate
+      !open
+      || !stateIsCurrent
+      || !readGuard.active
+      || !selectedTemplate
       || isOrderDirty
       || cutMapOptionsLoading
       || (hasCutMap && (cutMapOptions === null || missingPreviewCutMaps.length > 0))
     ) return;
+    const token = readGuard.capture();
+    if (!token) return;
     const requestId = previewRequestRef.current + 1;
     previewRequestRef.current = requestId;
     setPreview(null);
@@ -291,27 +353,58 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         cutMapSelections: previewCutMapSelections,
         telegramCutMapFallbackVersion: hasCutMap ? 'v1' : undefined,
       });
-      if (previewRequestRef.current === requestId) {
+      if (previewRequestRef.current === requestId && readGuard.isCurrent(token)) {
         setPreview(nextPreview);
       }
     } catch {
-      if (previewRequestRef.current === requestId) {
+      if (previewRequestRef.current === requestId && readGuard.isCurrent(token)) {
         message.error('Не удалось построить предпросмотр бирок');
       }
     } finally {
-      if (previewRequestRef.current === requestId) {
+      if (previewRequestRef.current === requestId && readGuard.isCurrent(token)) {
         setLoading(false);
       }
     }
-  }, [cutMapOptions, cutMapOptionsLoading, cutMapSource, detailFilters, hasCutMap, isOrderDirty, missingPreviewCutMaps.length, orderId, previewCutMapSelections, selectedTemplate, useBasisFields]);
+  }, [
+    cutMapOptions,
+    cutMapOptionsLoading,
+    cutMapSource,
+    detailFilters,
+    hasCutMap,
+    isOrderDirty,
+    missingPreviewCutMaps.length,
+    open,
+    orderId,
+    previewCutMapSelections,
+    readGuard.active,
+    readGuard.capture,
+    readGuard.isCurrent,
+    selectedTemplate,
+    stateIsCurrent,
+    useBasisFields,
+  ]);
 
   useEffect(() => {
-    if (!open || !selectedTemplate || isOrderDirty || generating || cutMapOptionsLoading) return;
+    if (!open || !stateIsCurrent || !readGuard.active || !selectedTemplate || isOrderDirty || generating || cutMapOptionsLoading) return;
     void runPreview();
-  }, [cutMapOptionsLoading, generating, open, previewDetailId, runPreview, selectedTemplate, isOrderDirty, useBasisFields]);
+  }, [cutMapOptionsLoading, generating, open, previewDetailId, readGuard.active, runPreview, selectedTemplate, stateIsCurrent, isOrderDirty, useBasisFields]);
 
   const runGenerate = async () => {
-    if (!selectedTemplate || !preview || isOrderDirty || cutMapOptionsLoading || missingGenerationCutMaps.length > 0) return;
+    if (
+      !readGuard.active
+      || !stateIsCurrent
+      || !selectedTemplate
+      || !preview
+      || isOrderDirty
+      || cutMapOptionsLoading
+      || missingGenerationCutMaps.length > 0
+    ) return;
+    const writeToken = writeGuard.capture();
+    if (!writeToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(
+      tabKey || `/orders/show/${orderId}`,
+      'order-label-write',
+    );
     setGenerating(true);
     try {
       const generationPreview = await labelsApi.previewOrderLabels(orderId, {
@@ -322,6 +415,7 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         cutMapSelections: generationCutMapSelections,
         telegramCutMapFallbackVersion: hasCutMap ? 'v1' : undefined,
       });
+      if (!writeGuard.isSameResource(writeToken)) return;
       const generation = await labelsApi.generateOrderLabels(orderId, {
         templateId: selectedTemplate.labelTemplateId,
         templateVersion: selectedTemplate.version,
@@ -333,7 +427,9 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
         telegramCutMapFallbackVersion: hasCutMap ? 'v1' : undefined,
         idempotencyKey: `order-labels-generate-${orderId}-${Date.now()}`,
       });
+      if (!writeGuard.isSameResource(writeToken)) return;
       const downloaded = await labelsApi.downloadGeneration(orderId, generation.generationId);
+      if (!writeGuard.isSameResource(writeToken)) return;
       saveLabelBlob(downloaded.blob, downloaded.fileName ?? `order-${orderId}-labels-${generation.generationId}.zip`);
       setGeneratedPreview(generationPreview);
       setGeneratedGenerationId(generation.generationId);
@@ -341,9 +437,10 @@ export const OrderLabelGenerateAction: React.FC<OrderLabelGenerateActionProps> =
       onGenerated?.();
       message.success('Бирки сформированы: список доступен для просмотра и печати');
     } catch {
-      message.error('Не удалось сформировать бирки');
+      if (writeGuard.isSameResource(writeToken)) message.error('Не удалось сформировать бирки');
     } finally {
-      setGenerating(false);
+      releaseOperationPin();
+      if (writeGuard.isSameResource(writeToken)) setGenerating(false);
     }
   };
 

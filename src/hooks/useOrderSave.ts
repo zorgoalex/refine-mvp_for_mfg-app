@@ -18,6 +18,12 @@ import {
   type OrderSaveValidationSummary,
   type OrderValidationDetailRef,
 } from './orderSaveValidation';
+import { getWorkspaceStateNamespace } from '../workspace/workspaceStateNamespace';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+  WorkspaceOperationOwnershipLostError,
+} from '../workspace/workspaceOperationPins';
 
 interface UseOrderSaveResult {
   saveOrder: (values: OrderFormValues, isEdit: boolean) => Promise<number | null>;
@@ -39,6 +45,8 @@ interface BazisDraftSaveContext {
 
 interface UseOrderSaveOptions {
   getBazisDraftSaveContext?: () => BazisDraftSaveContext | null;
+  workspaceKey?: string;
+  isWorkspaceOwnerCurrent?: () => boolean;
 }
 
 /**
@@ -63,6 +71,28 @@ export const useOrderSave = (
   const [error, setError] = useState<Error | null>(null);
   const [validation, setValidation] = useState<OrderSaveValidationSummary | null>(null);
   const validationNotificationKey = `order-save-validation:${orderKey}`;
+  const workspaceKey = options.workspaceKey?.trim()
+    || (orderKey === 'new' ? '/orders/create' : `/orders/edit/${orderKey}`);
+
+  const retryPageOwnedSave = (
+    values: OrderFormValues,
+    isEdit: boolean,
+    ownerNamespace: string,
+  ): void => {
+    if (
+      getWorkspaceStateNamespace() !== ownerNamespace
+      || options.isWorkspaceOwnerCurrent?.() === false
+    ) return;
+    void runPageOwnedWorkspaceOperation(
+      workspaceKey,
+      'order-save',
+      () => saveOrder(values, isEdit),
+    ).catch((error) => {
+      if (!isWorkspaceOperationOwnershipLost(error)) {
+        console.error('[useOrderSave] Unexpected retry ownership error:', error);
+      }
+    });
+  };
 
   const showValidationErrors = useCallback((
     source: unknown,
@@ -120,6 +150,12 @@ export const useOrderSave = (
     values: OrderFormValues,
     isEdit: boolean
   ): Promise<number | null> => {
+    const saveOwnerNamespace = getWorkspaceStateNamespace();
+    const assertSaveOwnerCurrent = () => {
+      if (getWorkspaceStateNamespace() !== saveOwnerNamespace) {
+        throw new WorkspaceOperationOwnershipLostError();
+      }
+    };
     let createdOrderId: number | null = null;
     const bazisDraftSaveContext =
       !isEdit ? options.getBazisDraftSaveContext?.() ?? null : null;
@@ -157,6 +193,7 @@ export const useOrderSave = (
             idempotencyKey:
               values.idempotencyKey ?? bazisDraftSaveContext.regenerateIdempotencyKey(),
           });
+          assertSaveOwnerCurrent();
 
           await Promise.all([
             invalidate({ resource: 'orders', invalidates: ['list', 'detail'], id: response.orderId }),
@@ -166,6 +203,7 @@ export const useOrderSave = (
               id: response.orderId,
             }),
           ]);
+          assertSaveOwnerCurrent();
 
           notification.success({
             message: 'Заказ успешно создан',
@@ -181,6 +219,7 @@ export const useOrderSave = (
           // peek (non-creating): a completion after discard must not resurrect the slice.
           getOrderStore: () => peekOrderDraftStore(orderKey)?.getState() ?? null,
         });
+        assertSaveOwnerCurrent();
 
         notification.success({
           message: `Заказ успешно ${isEdit ? 'обновлен' : 'создан'}`,
@@ -283,6 +322,7 @@ export const useOrderSave = (
           id: values.header.order_id,
           variables: headerData,
         });
+        assertSaveOwnerCurrent();
         createdOrderId = orderResult.data.order_id;
 
         // NOTE: Proper optimistic locking should be implemented server-side
@@ -344,6 +384,7 @@ export const useOrderSave = (
           resource: 'orders',
           variables: headerData,
         });
+        assertSaveOwnerCurrent();
 
         console.log('[useOrderSave] Order created successfully:', orderResult.data);
         createdOrderId = orderResult.data.order_id;
@@ -441,19 +482,23 @@ export const useOrderSave = (
         });
 
         await Promise.all(detailPromises);
+        assertSaveOwnerCurrent();
 
         // Update detail_id in store for newly created details (prevents duplicates on next save)
         for (const { tempId, promise } of newDetailsToCreate) {
           try {
             const result = await promise;
+            assertSaveOwnerCurrent();
             if (result?.data?.detail_id) {
               peekOrderDraftStore(orderKey)?.getState().updateDetailId(tempId, result.data.detail_id);
               console.log(`[useOrderSave] Updated detail_id in store: temp_id=${tempId} -> detail_id=${result.data.detail_id}`);
             }
           } catch (e) {
+            assertSaveOwnerCurrent();
             // Ignore - detail creation might have failed
           }
         }
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 3: Delete removed details ==========
@@ -465,6 +510,7 @@ export const useOrderSave = (
           })
         );
         await Promise.all(deleteDetailPromises);
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 3.5: Recalculate and update total_amount ==========
@@ -476,6 +522,7 @@ export const useOrderSave = (
         filters: [{ field: 'order_id', operator: 'eq', value: createdOrderId }],
         pagination: { current: 1, pageSize: 1000 },
       });
+      assertSaveOwnerCurrent();
 
       const savedDetails = savedDetailsResult.data || [];
       console.log('[useOrderSave] Fetched', savedDetails.length, 'details from DB');
@@ -516,6 +563,7 @@ export const useOrderSave = (
             final_amount: finalAmount,
           },
         });
+        assertSaveOwnerCurrent();
 
         console.log('[useOrderSave] Order totals updated successfully');
       } else {
@@ -535,6 +583,7 @@ export const useOrderSave = (
             final_amount: finalAmount,
           },
         });
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 4: Save payments ==========
@@ -600,19 +649,23 @@ export const useOrderSave = (
         });
 
         await Promise.all(paymentPromises);
+        assertSaveOwnerCurrent();
 
         // Update payment_id in store for newly created payments (prevents duplicates on next save)
         for (const { tempId, promise } of newPaymentsToCreate) {
           try {
             const result = await promise;
+            assertSaveOwnerCurrent();
             if (result?.data?.payment_id) {
               peekOrderDraftStore(orderKey)?.getState().updatePaymentId(tempId, result.data.payment_id);
               console.log(`[useOrderSave] Updated payment_id in store: temp_id=${tempId} -> payment_id=${result.data.payment_id}`);
             }
           } catch (e) {
+            assertSaveOwnerCurrent();
             // Ignore - payment creation might have failed
           }
         }
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 5: Delete removed payments ==========
@@ -624,6 +677,7 @@ export const useOrderSave = (
           })
         );
         await Promise.all(deletePaymentPromises);
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 6: Save workshops ==========
@@ -654,6 +708,7 @@ export const useOrderSave = (
         });
 
         await Promise.all(workshopPromises);
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 7: Delete removed workshops ==========
@@ -665,6 +720,7 @@ export const useOrderSave = (
           })
         );
         await Promise.all(deleteWorkshopPromises);
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 8: Save requirements ==========
@@ -695,6 +751,7 @@ export const useOrderSave = (
         });
 
         await Promise.all(requirementPromises);
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 9: Delete removed requirements ==========
@@ -706,6 +763,7 @@ export const useOrderSave = (
           })
         );
         await Promise.all(deleteRequirementPromises);
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 10: Delete removed doweling links ==========
@@ -717,6 +775,7 @@ export const useOrderSave = (
           })
         );
         await Promise.all(deleteDowelingLinkPromises);
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 10.1: Create new order_doweling_links ==========
@@ -735,6 +794,7 @@ export const useOrderSave = (
             })
           );
           await Promise.all(createLinkPromises);
+          assertSaveOwnerCurrent();
         }
       }
 
@@ -752,6 +812,7 @@ export const useOrderSave = (
             })
           );
         await Promise.all(updateDowelingOrderPromises);
+        assertSaveOwnerCurrent();
       }
 
       // ========== STEP 11: Invalidate queries ==========
@@ -760,19 +821,26 @@ export const useOrderSave = (
         invalidates: ['list', 'detail'],
         id: createdOrderId,
       });
+      assertSaveOwnerCurrent();
 
       await invalidate({
         resource: 'orders_view',
         invalidates: ['list', 'detail'],
         id: createdOrderId,
       });
+      assertSaveOwnerCurrent();
 
       // Ensure child lists are refreshed for the current order
       await invalidate({ resource: 'order_details', invalidates: ['list'] });
+      assertSaveOwnerCurrent();
       await invalidate({ resource: 'payments', invalidates: ['list'] });
+      assertSaveOwnerCurrent();
       await invalidate({ resource: 'order_doweling_links', invalidates: ['list'] });
+      assertSaveOwnerCurrent();
       await invalidate({ resource: 'doweling_orders', invalidates: ['list'] });
+      assertSaveOwnerCurrent();
       await invalidate({ resource: 'doweling_orders_view', invalidates: ['list'] });
+      assertSaveOwnerCurrent();
 
       // ========== SUCCESS ==========
       notification.success({
@@ -791,6 +859,10 @@ export const useOrderSave = (
       }
       return createdOrderId;
     } catch (err: any) {
+      if (getWorkspaceStateNamespace() !== saveOwnerNamespace) {
+        setIsSaving(false);
+        return null;
+      }
       // Handle error silently in UI notifications
       console.error('[useOrderSave] Error saving order:', err);
       console.error('[useOrderSave] Error details:', JSON.stringify(err, null, 2));
@@ -807,6 +879,11 @@ export const useOrderSave = (
         } catch (rollbackError) {
           // ignore rollback errors in console
         }
+      }
+
+      if (getWorkspaceStateNamespace() !== saveOwnerNamespace) {
+        setIsSaving(false);
+        return null;
       }
 
       // ========== HANDLE DUPLICATE ORDER NAME ==========
@@ -832,7 +909,9 @@ export const useOrderSave = (
               content: `Номер «${values.header.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Свободный номер: ${suggested}. Сохранить заказ под номером ${suggested}?`,
               okText: `Сохранить как ${suggested}`,
               cancelText: 'Изменить вручную',
-              onOk: () => void saveOrder(nextValues, isEdit),
+              onOk: () => {
+                retryPageOwnedSave(nextValues, isEdit, saveOwnerNamespace);
+              },
             });
           } else {
             bazisDraftSaveContext.regenerateIdempotencyKey();
@@ -849,7 +928,13 @@ export const useOrderSave = (
             content: `Номер «${values.order_name}» уже используется заказом #${details?.existingOrderId ?? '—'}. Свободный номер: ${suggested}. Сохранить заказ под номером ${suggested}?`,
             okText: `Сохранить как ${suggested}`,
             cancelText: 'Изменить вручную',
-            onOk: () => void saveOrder({ ...values, order_name: suggested }, isEdit),
+            onOk: () => {
+              retryPageOwnedSave(
+                { ...values, order_name: suggested },
+                isEdit,
+                saveOwnerNamespace,
+              );
+            },
           });
         } else {
           Modal.warning({

@@ -7,6 +7,13 @@ import type {
   TransferOrderDetailsResponse,
 } from '../../../api/types/orderApi.types';
 import { formatDate } from '../../../utils/dateFormat';
+import { useKeepAlive } from '../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../workspace/workspaceCheckpointRegistry';
+import {
+  isWorkspaceOperationOwnershipLost,
+  runPageOwnedWorkspaceOperation,
+} from '../../../workspace/workspaceOperationPins';
 
 interface OrderDetailTransferModalProps {
   open: boolean;
@@ -31,6 +38,12 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
   onClose,
   onDone,
 }) => {
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || `/orders/edit/${sourceOrderId}`;
+  const restored = React.useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'detail-transfer-modal'),
+  ).current;
+  const restorePendingRef = React.useRef(restored?.open === true);
   const [mode, setMode] = React.useState<TargetMode>('new');
   const [orderName, setOrderName] = React.useState('');
   const [targets, setTargets] = React.useState<OrderTransferTarget[]>([]);
@@ -39,12 +52,41 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
   const [loadingTargets, setLoadingTargets] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
 
+  useWorkspaceCheckpointAdapter(workspaceKey, 'detail-transfer-modal', {
+    canCapture: () => !submitting,
+    capture: () => ({
+      open,
+      sourceOrderId,
+      detailIds,
+      mode,
+      orderName,
+      targetId,
+      search,
+    }),
+  });
+
   React.useEffect(() => {
     if (!open) return;
-    setMode(canCreateTarget ? 'new' : 'existing');
-    setOrderName(nextSplitName(sourceOrderName));
-    setTargetId(null);
-    setSearch('');
+    const canRestore = restorePendingRef.current
+      && restored?.sourceOrderId === sourceOrderId
+      && equalDetailIds(restored.detailIds, detailIds);
+    if (canRestore) {
+      const restoredMode = restored?.mode === 'existing' ? 'existing' : 'new';
+      setMode(restoredMode === 'new' && !canCreateTarget ? 'existing' : restoredMode);
+      setOrderName(
+        typeof restored?.orderName === 'string'
+          ? restored.orderName
+          : nextSplitName(sourceOrderName),
+      );
+      setTargetId(readTargetId(restored?.targetId));
+      setSearch(typeof restored?.search === 'string' ? restored.search : '');
+    } else {
+      setMode(canCreateTarget ? 'new' : 'existing');
+      setOrderName(nextSplitName(sourceOrderName));
+      setTargetId(null);
+      setSearch('');
+    }
+    restorePendingRef.current = false;
     setTargets([]);
   }, [canCreateTarget, open, sourceOrderName]);
 
@@ -85,20 +127,25 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
     if (!canSubmit) return;
     setSubmitting(true);
     try {
-      const response = await ordersApi.transferDetails(sourceOrderId, {
-        sourceVersion,
-        detailIds,
-        target:
-          mode === 'new'
-            ? { mode: 'new', orderName: orderName.trim() }
-            : {
-                mode: 'existing',
-                orderId: selectedTarget!.orderId,
-                version: selectedTarget!.version,
-              },
-      });
+      const response = await runPageOwnedWorkspaceOperation(
+        workspaceKey,
+        'order-detail-transfer',
+        () => ordersApi.transferDetails(sourceOrderId, {
+          sourceVersion,
+          detailIds,
+          target:
+            mode === 'new'
+              ? { mode: 'new', orderName: orderName.trim() }
+              : {
+                  mode: 'existing',
+                  orderId: selectedTarget!.orderId,
+                  version: selectedTarget!.version,
+                },
+        }),
+      );
       onDone(response);
     } catch (error) {
+      if (isWorkspaceOperationOwnershipLost(error)) return;
       message.error(error instanceof Error ? error.message : 'Не удалось перенести детали');
     } finally {
       setSubmitting(false);
@@ -116,6 +163,9 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
       onOk={handleSubmit}
       onCancel={submitting ? undefined : onClose}
       destroyOnClose
+      modalRender={(modal) => (
+        <div data-workspace-portal-key={workspaceKey}>{modal}</div>
+      )}
     >
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <Alert
@@ -147,6 +197,7 @@ export const OrderDetailTransferModal: React.FC<OrderDetailTransferModalProps> =
               maxLength={200}
               onChange={(event) => setOrderName(event.target.value)}
               autoFocus
+              data-workspace-field="transfer-order-name"
             />
           </Space>
         ) : (
@@ -196,4 +247,16 @@ function formatTargetOptionLabel(target: OrderTransferTarget): string {
     formatDate(target.orderDate),
     target.orderStatusName ?? '—',
   ].join(' · ');
+}
+
+function equalDetailIds(value: unknown, expected: readonly number[]): boolean {
+  return Array.isArray(value)
+    && value.length === expected.length
+    && value.every((item, index) => item === expected[index]);
+}
+
+function readTargetId(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
 }

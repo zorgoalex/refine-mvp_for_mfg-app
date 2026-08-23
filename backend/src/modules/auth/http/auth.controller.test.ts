@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../common/errors/api-error';
 import type { CurrentUser } from '../../../permissions/current-user';
 import { getPermissionsForRole } from '../../../permissions/permissions';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 import type { AuthService } from '../auth.service';
 import type { AuthResponse, LoginCommand, LoginResult } from '../auth.types';
 import { REFRESH_COOKIE_NAME } from '../refresh-cookie';
@@ -264,6 +265,8 @@ describe('AuthController HTTP shell', () => {
         role: 'manager',
         roleId: 10,
         permissions: getPermissionsForRole('manager'),
+        permissionsVersion: 0,
+        policyScopes: ROLE_POLICIES.manager,
       },
     });
   });
@@ -381,6 +384,8 @@ function createAuthResponse(overrides: Partial<AuthResponse> = {}): AuthResponse
       role: 'manager',
       roleId: 10,
       permissions: getPermissionsForRole('manager'),
+      permissionsVersion: 0,
+      policyScopes: ROLE_POLICIES.manager,
     },
   };
 }
@@ -392,5 +397,7 @@ function currentUser(): CurrentUser {
     role: 'manager',
     roleId: 10,
     permissions: getPermissionsForRole('manager'),
+    permissionsVersion: 0,
+    policyScopes: ROLE_POLICIES.manager,
   };
 }

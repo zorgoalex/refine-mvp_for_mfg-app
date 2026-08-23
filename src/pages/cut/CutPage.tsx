@@ -1,5 +1,5 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -24,6 +24,7 @@ import {
 } from '@ant-design/icons';
 import { useNavigation } from '@refinedev/core';
 import dayjs, { type Dayjs } from 'dayjs';
+import { CUT_RENDER_STYLE_MDF_BOARD_PREVIEW } from '@shared/cut-render-style';
 import { cutApi } from '../../api/cutApi';
 import { cutConfigApi } from '../../api/cutConfigApi';
 import { subscribeCutPdfTemplatesChanged } from '../../api/cutPdfTemplateEvents';
@@ -115,14 +116,16 @@ import { can } from '../../utils/permissions';
 import { featureFlags } from '../../config/featureFlags';
 import { useCutSheetTypeOptions } from '../../hooks/useCutSheetTypeOptions';
 import { useTabStore } from '../../stores/tabStore';
-import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import { emitCutJobReady } from './cutJobEvents';
+import { useOrderAsyncReadGuard, useOrderLifecycleReadActive } from '../../query/orderLifecycleQueries';
 import {
   OperationalKpi,
   OperationalKpiGrid,
   OperationalPageHeader,
   useOperationalUi,
 } from '../../ui-operational/OperationalPrimitives';
+
+const CUT_TASK_SHEET_RENDER_STYLE = CUT_RENDER_STYLE_MDF_BOARD_PREVIEW;
 const { Panel } = Collapse;
 
 // Built-in fallback preset names (used until the backend config list loads).
@@ -994,6 +997,12 @@ interface CutPageProps {
 }
 
 export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
+  const ordinaryReadActive = useOrderLifecycleReadActive();
+  const cutPageResourceScope = `cut-page:${embeddedOrderId ?? 'root'}`;
+  const cutPageReadGuard = useOrderAsyncReadGuard(cutPageResourceScope);
+  const cutPageScopeKey = `${cutPageReadGuard.authNamespace}|${cutPageResourceScope}`;
+  const ordinaryReadActiveRef = useRef(ordinaryReadActive);
+  ordinaryReadActiveRef.current = ordinaryReadActive;
   const isOperational = useOperationalUi();
   const canViewCut = can('cut.view');
   const canManage = can('cut.manage');
@@ -1048,6 +1057,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const orderDateFrom = orderDateCriteria.dateFrom;
   const orderDateTo = orderDateCriteria.dateTo;
   const [job, setJob] = useState<CutJobDto | null>(null);
+  const currentJobIdRef = useRef<number | null>(null);
+  currentJobIdRef.current = job?.cutJobId ?? null;
+  const canPublishCutWrite = useCallback((
+    token: NonNullable<ReturnType<typeof cutPageReadGuard.capture>>,
+    targetJobId?: number,
+  ) => (
+    cutPageReadGuard.isSameResource(token)
+    && (targetJobId === undefined || currentJobIdRef.current === targetJobId)
+  ), [cutPageReadGuard.isSameResource]);
   const [isEditingJobName, setIsEditingJobName] = useState(false);
   const [jobNameDraft, setJobNameDraft] = useState('');
   const [jobNameSaving, setJobNameSaving] = useState(false);
@@ -1253,6 +1271,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [filmOptions, setFilmOptions] = useState<CutFilmSelectOption[]>([]);
   const [filmsLoading, setFilmsLoading] = useState(false);
   const filmOptionsSeqRef = useRef(0);
+  const openSeqRef = useRef(0);
   const currentJobOrderOptions = useMemo(() => cutJobOrderOptions(job), [job]);
   const currentJobFilmOptions = useMemo(() => cutJobFilmOptions(job), [job]);
   const currentJobSheetTypeOptions = useMemo(() => cutJobSheetTypeOptions(job), [job]);
@@ -1371,11 +1390,56 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setPdfTemplateByGroup(Object.fromEntries(nextJob.groups.map((group) => [group.cutGroupId, group.pdfTemplate ?? 'standard'])));
   }, []);
 
+  useLayoutEffect(() => {
+    orderOptionsSeqRef.current += 1;
+    filmOptionsSeqRef.current += 1;
+    openSeqRef.current += 1;
+    pdfPreviewRequestSeqRef.current += 1;
+    currentJobIdRef.current = null;
+    form.resetFields();
+    setJob(null);
+    setSelectedResult(null);
+    setIsFrozenResultSelection(false);
+    setEligible(null);
+    setNoSheetSpecCount(0);
+    setSelected([]);
+    setBusy(false);
+    setProfiles([]);
+    setPresetOptions(DEFAULT_PRESET_OPTIONS);
+    setPdfTemplateOptions(DEFAULT_PDF_TEMPLATE_OPTIONS);
+    setCutSettings([]);
+    setJobs([]);
+    setEmbeddedJobIds(null);
+    setJobsLoading(false);
+    setOrderOptions([]);
+    setOrdersLoading(false);
+    setFilmOptions([]);
+    setFilmsLoading(false);
+    setEditingGroupId(null);
+    setWorkingSheets([]);
+    setViolations([]);
+    setEditorHistory([]);
+    setShowAlternativeByGroup({});
+    applyPdfTemplateState(null);
+    revokePdfPreviewUrl();
+    setPdfPreview(EMPTY_PDF_PREVIEW);
+    resetSheetViews();
+  }, [
+    applyPdfTemplateState,
+    cutPageScopeKey,
+    form,
+    resetSheetViews,
+    revokePdfPreviewUrl,
+  ]);
+
   // Render presets and cut profiles are config-driven (/configuration "Раскрой").
   // Load active names from the backend, falling back to the built-ins.
   const loadCutConfig = useCallback(async () => {
+    const token = cutPageReadGuard.capture();
+    if (!token) return;
     try {
       const cfg = await cutConfigApi.get();
+      if (!cutPageReadGuard.isCurrent(token)) return;
       const options = cfg.renderPresets
         .filter((p) => p.isActive)
         .map((p) => ({ value: p.name, label: p.name }));
@@ -1389,31 +1453,22 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } catch {
       // keep the current/built-in options on failure
     }
-  }, []);
+  }, [cutPageReadGuard.capture, cutPageReadGuard.isCurrent, cutPageScopeKey]);
 
   const refreshCutConfigOnPdfTemplateOpen = useCallback((open: boolean) => {
     if (open) void loadCutConfig();
   }, [loadCutConfig]);
 
   useEffect(() => {
-    void loadCutConfig();
-  }, [loadCutConfig]);
+    if (ordinaryReadActive) void loadCutConfig();
+  }, [loadCutConfig, ordinaryReadActive]);
 
-  useEffect(() => subscribeCutPdfTemplatesChanged(() => {
-    void loadCutConfig();
-  }), [loadCutConfig]);
-
-  // The /cut tab is kept alive (not remounted) when switching tabs, so profiles
-  // created elsewhere (e.g. /configuration "Раскрой") would otherwise stay stale.
-  // Refetch the config whenever this tab is re-activated.
-  const { isActive } = useKeepAlive();
-  const wasActiveRef = useRef(isActive);
   useEffect(() => {
-    if (isActive && !wasActiveRef.current) {
+    if (!ordinaryReadActive) return undefined;
+    return subscribeCutPdfTemplatesChanged(() => {
       void loadCutConfig();
-    }
-    wasActiveRef.current = isActive;
-  }, [isActive, loadCutConfig]);
+    });
+  }, [loadCutConfig, ordinaryReadActive]);
 
   const criteriaFromForm = useCallback(() => {
     const values = form.getFieldsValue();
@@ -1451,31 +1506,57 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const filmCriteriaSheetMaterialTypeIdsKey = filmCriteriaSheetMaterialTypeIds?.join(',') ?? '';
 
   useEffect(() => {
+    if (!ordinaryReadActive) {
+      orderOptionsSeqRef.current += 1;
+      setOrdersLoading(false);
+      return;
+    }
     if (isEmbeddedOrder || !canViewOrders || !orderDateFrom || !orderDateTo) {
       setOrderOptions([]);
       return;
     }
+    const token = cutPageReadGuard.capture();
+    if (!token) return;
     const seq = ++orderOptionsSeqRef.current;
     setOrdersLoading(true);
     fetchCutOrderOptions(orderDateFrom, orderDateTo)
       .then((options) => {
-        if (orderOptionsSeqRef.current !== seq) return;
+        if (orderOptionsSeqRef.current !== seq || !cutPageReadGuard.isCurrent(token)) return;
         setOrderOptions(options);
       })
       .catch((error) => {
-        if (orderOptionsSeqRef.current !== seq) return;
+        if (orderOptionsSeqRef.current !== seq || !cutPageReadGuard.isCurrent(token)) return;
         handleError(error, 'Не удалось загрузить заказы для раскроя');
       })
       .finally(() => {
-        if (orderOptionsSeqRef.current === seq) setOrdersLoading(false);
+        if (orderOptionsSeqRef.current === seq && cutPageReadGuard.isCurrent(token)) {
+          setOrdersLoading(false);
+        }
       });
-  }, [canViewOrders, handleError, isEmbeddedOrder, orderDateFrom, orderDateTo]);
+  }, [
+    canViewOrders,
+    cutPageReadGuard.capture,
+    cutPageReadGuard.isCurrent,
+    cutPageScopeKey,
+    handleError,
+    isEmbeddedOrder,
+    orderDateFrom,
+    orderDateTo,
+    ordinaryReadActive,
+  ]);
 
   useEffect(() => {
+    if (!ordinaryReadActive) {
+      filmOptionsSeqRef.current += 1;
+      setFilmsLoading(false);
+      return;
+    }
     if (!isEmbeddedOrder && (!orderDateFrom || !orderDateTo)) {
       setFilmOptions([]);
       return;
     }
+    const token = cutPageReadGuard.capture();
+    if (!token) return;
     const seq = ++filmOptionsSeqRef.current;
     setFilmsLoading(true);
     cutApi.listFilmOptions({
@@ -1484,24 +1565,30 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       ...(!isEmbeddedOrder ? { dateFrom: orderDateFrom, dateTo: orderDateTo } : {}),
     })
       .then((options) => {
-        if (filmOptionsSeqRef.current !== seq) return;
+        if (filmOptionsSeqRef.current !== seq || !cutPageReadGuard.isCurrent(token)) return;
         setFilmOptions(options.map(buildCutFilmOption));
       })
       .catch((error) => {
-        if (filmOptionsSeqRef.current !== seq) return;
+        if (filmOptionsSeqRef.current !== seq || !cutPageReadGuard.isCurrent(token)) return;
         setFilmOptions([]);
         handleError(error, 'Не удалось загрузить плёнки для раскроя');
       })
       .finally(() => {
-        if (filmOptionsSeqRef.current === seq) setFilmsLoading(false);
+        if (filmOptionsSeqRef.current === seq && cutPageReadGuard.isCurrent(token)) {
+          setFilmsLoading(false);
+        }
       });
   }, [
+    cutPageReadGuard.capture,
+    cutPageReadGuard.isCurrent,
+    cutPageScopeKey,
     filmCriteriaOrderIds,
     filmCriteriaOrderIdsKey,
     filmCriteriaSheetMaterialTypeIds,
     filmCriteriaSheetMaterialTypeIdsKey,
     handleError,
     isEmbeddedOrder,
+    ordinaryReadActive,
     orderDateFrom,
     orderDateTo,
   ]);
@@ -1516,6 +1603,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   );
 
   const loadJobs = useCallback(async (filtersOverride?: CutJobListFilters) => {
+    if (!ordinaryReadActiveRef.current) return;
+    const token = cutPageReadGuard.capture();
+    if (!token) return;
     setJobsLoading(true);
     try {
       const baseFilters = filtersOverride ?? (isEmbeddedOrder ? {} : listFiltersRef.current);
@@ -1527,14 +1617,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         cutApi.list(filters),
         isEmbeddedOrder ? cutApi.listPlacements({ orderIds: [embeddedOrderId!] }) : Promise.resolve(null),
       ]);
-      setJobs(nextJobs);
-      setEmbeddedJobIds(placements ? new Set(placements.jobs.map((ref) => ref.cutJobId)) : null);
+      if (cutPageReadGuard.isCurrent(token)) {
+        setJobs(nextJobs);
+        setEmbeddedJobIds(placements ? new Set(placements.jobs.map((ref) => ref.cutJobId)) : null);
+      }
     } catch (error) {
-      handleError(error, 'Не удалось загрузить список раскроев');
+      if (cutPageReadGuard.isCurrent(token)) {
+        handleError(error, 'Не удалось загрузить список раскроев');
+      }
     } finally {
-      setJobsLoading(false);
+      if (cutPageReadGuard.isCurrent(token)) setJobsLoading(false);
     }
   }, [
+    cutPageReadGuard.capture,
+    cutPageReadGuard.isCurrent,
+    cutPageScopeKey,
     embeddedOrderId,
     handleError,
     isEmbeddedOrder,
@@ -1559,16 +1656,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // while this page is hidden, so refresh the list when the /cut tab is opened
   // or its path changes via useTabSync/deep-link.
   useEffect(() => {
+    if (!ordinaryReadActive) return;
     if (!can('cut.view')) return;
     if (!cutTabPath) return;
     if (cutTabPath === lastListRefreshPathRef.current) return;
     lastListRefreshPathRef.current = cutTabPath;
     void loadJobs();
-  }, [cutTabPath, loadJobs]);
+  }, [cutTabPath, loadJobs, ordinaryReadActive]);
 
   const setJobProfile = useCallback(
     async (paramProfileId: number | null) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const syncProfileDrivenName = !manualNamePrefixJobIdsRef.current.has(job.cutJobId);
@@ -1586,18 +1687,22 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
             setSheetMaterial: cutApi.setSheetMaterial,
           },
           onUpdated: (updated) => {
+            if (!canPublishCutWrite(writeToken, targetJobId)) return;
             setJob(updated);
             applyPdfTemplateState(updated);
           },
         });
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         if (bathSheetMissing) {
           message.warning('Не найден материал листа, название которого начинается с «Ванна»');
         }
         void loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось применить профиль раскроя');
+        if (canPublishCutWrite(writeToken, targetJobId)) {
+          handleError(error, 'Не удалось применить профиль раскроя');
+        }
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [applyPdfTemplateState, job, loadJobs, handleError, profiles, sheetOptions],
@@ -1606,16 +1711,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const setJobSheetMaterial = useCallback(
     async (sheetMaterialTypeId: number | null) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.setSheetMaterial(job.cutJobId, sheetMaterialTypeId, job.version);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setJob(updated);
         applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось изменить лист раскроя');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось изменить лист раскроя');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [applyPdfTemplateState, job, handleError, loadJobs],
@@ -1624,16 +1733,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const setJobCombineFilms = useCallback(
     async (combineFilms: boolean) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.setCombineFilms(job.cutJobId, combineFilms, job.version);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setJob(updated);
         applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось изменить объединение плёнок');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось изменить объединение плёнок');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [applyPdfTemplateState, job, handleError, loadJobs],
@@ -1642,16 +1755,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const setJobRotationAllowed = useCallback(
     async (rotationAllowed: boolean) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.setRotationAllowed(job.cutJobId, rotationAllowed, job.version);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setJob(updated);
         applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось изменить разрешение поворота');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось изменить разрешение поворота');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [applyPdfTemplateState, job, handleError, loadJobs],
@@ -1660,16 +1777,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const setJobTextureDirection = useCallback(
     async (textureDirection: CutTextureDirection) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.setTextureDirection(job.cutJobId, textureDirection, job.version);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setJob(updated);
         applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось сохранить направление текстуры');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось сохранить направление текстуры');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [applyPdfTemplateState, job, handleError, loadJobs],
@@ -1678,16 +1799,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const setJobSplitByMaterial = useCallback(
     async (splitByMaterial: boolean) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.setSplitByMaterial(job.cutJobId, splitByMaterial, job.version);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setJob(updated);
         applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось изменить разделение по материалу');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось изменить разделение по материалу');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [applyPdfTemplateState, job, handleError, loadJobs],
@@ -1696,15 +1821,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const setJobPdfTemplate = useCallback(
     async (pdfTemplate: string) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       const previous = pdfTemplateForJob;
       setPdfTemplateForJob(pdfTemplate);
       if (pdfTemplateIsRequestOnly) return;
       try {
         const updated = await cutApi.setJobPdfTemplate(job.cutJobId, pdfTemplate);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setJob(updated);
         applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setPdfTemplateForJob(previous);
         handleError(error, 'Не удалось сохранить шаблон PDF раскроя');
       }
@@ -1715,15 +1845,20 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const setGroupPdfTemplate = useCallback(
     async (group: CutGroupDto, pdfTemplate: string) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       const previous = pdfTemplateByGroup[group.cutGroupId] ?? group.pdfTemplate ?? 'standard';
       setPdfTemplateByGroup((prev) => ({ ...prev, [group.cutGroupId]: pdfTemplate }));
       if (pdfTemplateIsRequestOnly) return;
       try {
         const updated = await cutApi.setGroupPdfTemplate(job.cutJobId, group.cutGroupId, pdfTemplate);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setJob(updated);
         applyPdfTemplateState(updated);
         void loadJobs();
       } catch (error) {
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setPdfTemplateByGroup((prev) => ({ ...prev, [group.cutGroupId]: previous }));
         handleError(error, 'Не удалось сохранить шаблон PDF группы');
       }
@@ -1744,6 +1879,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const saveJobName = useCallback(async () => {
     if (!job) return;
+    const writeToken = cutPageReadGuard.capture();
+    if (!writeToken) return;
+    const targetJobId = job.cutJobId;
     const name = jobNameDraft.trim();
     if (!name) {
       message.warning('Введите название задания на раскрой');
@@ -1760,6 +1898,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setJobNameSaving(true);
     try {
       const updated = await cutApi.setName(job.cutJobId, name, job.version);
+      if (!canPublishCutWrite(writeToken, targetJobId)) return;
       if (firstWordChanged) {
         manualNamePrefixJobIdsRef.current.add(job.cutJobId);
       }
@@ -1770,10 +1909,12 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       void loadJobs();
       message.success('Название задания сохранено');
     } catch (error) {
-      handleError(error, 'Не удалось сохранить название задания');
+      if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось сохранить название задания');
     } finally {
-      setJobNameSaving(false);
-      setBusy(false);
+      if (canPublishCutWrite(writeToken, targetJobId)) {
+        setJobNameSaving(false);
+        setBusy(false);
+      }
     }
   }, [applyPdfTemplateState, handleError, job, jobNameDraft, loadJobs]);
 
@@ -1781,26 +1922,29 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // job created earlier — including jobs staged from the Orders "Добавить в
   // раскрой" action, which previously had no surface to be reopened on.
   useEffect(() => {
-    if (canViewCut) void loadJobs();
-  }, [canViewCut, loadJobs]);
+    if (ordinaryReadActive && canViewCut) void loadJobs();
+  }, [canViewCut, loadJobs, ordinaryReadActive]);
 
   // Last-write-wins guard for openJob: a stale in-flight cutApi.get (e.g. rapid
   // deep-link /cut?job=45 -> 46, or fast successive row opens) must not overwrite
   // the UI with an older job after a newer open started. Each call captures its
   // sequence; only the latest applies its result/error/busy reset.
-  const openSeqRef = useRef(0);
   const openJob = useCallback(
     async (cutJobId: number, resultNo?: number) => {
+      const token = cutPageReadGuard.capture();
+      if (!token) return;
       const seq = ++openSeqRef.current;
       setBusy(true);
       try {
         const fresh = await cutApi.get(cutJobId);
-        if (openSeqRef.current !== seq) return; // superseded by a newer openJob
+        if (openSeqRef.current !== seq) return;
+        if (!cutPageReadGuard.isCurrent(token)) return;
         let openedJob = fresh;
         let openedResult: CutResultSummary | null = fresh.currentCutResult ?? null;
         if (resultNo !== undefined) {
           const frozen = await cutApi.getResult(cutJobId, resultNo);
           if (openSeqRef.current !== seq) return;
+          if (!cutPageReadGuard.isCurrent(token)) return;
           openedJob = {
             ...frozen.job,
             cutResults: fresh.cutResults,
@@ -1842,13 +1986,26 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         resetSheetViews();
         void loadJobs();
       } catch (error) {
-        if (openSeqRef.current !== seq) return; // superseded; swallow the stale error
-        handleError(error, 'Не удалось открыть раскрой');
+        if (openSeqRef.current !== seq || !cutPageReadGuard.isCurrent(token)) return;
+        if (ordinaryReadActiveRef.current) {
+          handleError(error, 'Не удалось открыть раскрой');
+        }
       } finally {
-        if (openSeqRef.current === seq) setBusy(false);
+        if (openSeqRef.current === seq && cutPageReadGuard.isCurrent(token)) setBusy(false);
       }
     },
-    [canViewOrders, embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, resetSheetViews],
+    [
+      canViewOrders,
+      cutPageReadGuard.capture,
+      cutPageReadGuard.isCurrent,
+      cutPageScopeKey,
+      embeddedOrderId,
+      form,
+      handleError,
+      isEmbeddedOrder,
+      loadJobs,
+      resetSheetViews,
+    ],
   );
 
   const openResult = useCallback(
@@ -1901,16 +2058,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const setCurrentResult = useCallback(
     async (result: CutResultSummary) => {
       if (!job || result.isCurrent || result.isArchived) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.setCurrentResult(job.cutJobId, result.resultNo);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         emitCutJobUpdate(updated, job);
         message.success(`Раскрой ${result.cutNumber} назначен действующим`);
         await refreshAfterResultStateChange();
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
       } catch (error) {
-        handleError(error, 'Не удалось назначить действующий раскрой');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось назначить действующий раскрой');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [emitCutJobUpdate, handleError, job, refreshAfterResultStateChange],
@@ -1919,16 +2081,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const archiveResult = useCallback(
     async (result: CutResultSummary) => {
       if (!job || result.isCurrent || result.isArchived) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.archiveResult(job.cutJobId, result.resultNo);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         emitCutJobUpdate(updated, job);
         message.success(`Раскрой ${result.cutNumber} отправлен в архив`);
         await refreshAfterResultStateChange(selectedResult?.resultNo === result.resultNo ? result.resultNo : undefined);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
       } catch (error) {
-        handleError(error, 'Не удалось архивировать раскрой');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось архивировать раскрой');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [emitCutJobUpdate, handleError, job, refreshAfterResultStateChange, selectedResult?.resultNo],
@@ -1937,16 +2104,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const unarchiveResult = useCallback(
     async (result: CutResultSummary) => {
       if (!job || !result.isArchived) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.unarchiveResult(job.cutJobId, result.resultNo);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         emitCutJobUpdate(updated, job);
         message.success(`Раскрой ${result.cutNumber} возвращён из архива`);
         await refreshAfterResultStateChange(selectedResult?.resultNo === result.resultNo ? result.resultNo : undefined);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
       } catch (error) {
-        handleError(error, 'Не удалось вернуть раскрой из архива');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось вернуть раскрой из архива');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [emitCutJobUpdate, handleError, job, refreshAfterResultStateChange, selectedResult?.resultNo],
@@ -2045,13 +2217,14 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const deepLinkResultNo = storeDeepLinkResultNo === liveDeepLinkResultNo ? storeDeepLinkResultNo : null;
   const lastDeepLinkRef = useRef<string | null>(null);
   useEffect(() => {
+    if (!ordinaryReadActive) return;
     if (!can('cut.view')) return;
     if (deepLinkJobId === null) return;
     const key = `${deepLinkJobId}:${deepLinkResultNo ?? 'current'}`;
     if (lastDeepLinkRef.current === key) return;
     lastDeepLinkRef.current = key;
     void openJob(deepLinkJobId, deepLinkResultNo ?? undefined);
-  }, [deepLinkJobId, deepLinkResultNo, openJob]);
+  }, [deepLinkJobId, deepLinkResultNo, openJob, ordinaryReadActive]);
 
   const confirmDeleteJob = useCallback((target: CutJobDto, impact: CutJobDeleteImpact) => new Promise<boolean>((resolve) => {
     const linkedPackets = impact.linkedMdfPackets;
@@ -2098,18 +2271,32 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const deleteJob = useCallback(
     async (target: CutJobDto) => {
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      let jobContextId = currentJobIdRef.current;
+      const jobContextSeq = openSeqRef.current;
+      const canPublishDelete = () => (
+        canPublishCutWrite(writeToken)
+        && currentJobIdRef.current === jobContextId
+        && openSeqRef.current === jobContextSeq
+      );
       setBusy(true);
       try {
         const fresh = await cutApi.get(target.cutJobId);
+        if (!canPublishDelete()) return;
         const impact = await cutApi.getDeleteImpact(fresh.cutJobId);
+        if (!canPublishDelete()) return;
         const confirmed = await confirmDeleteJob(fresh, impact);
-        if (!confirmed) return;
+        if (!confirmed || !canPublishDelete()) return;
         const deleted = await cutApi.archive(fresh.cutJobId, fresh.version, {
           deleteLinkedMdfPackets: impact.linkedMdfPackets.length > 0,
         });
+        if (!canPublishDelete()) return;
         emitCutJobUpdate(deleted, fresh);
         message.success('Задание удалено');
-        if (job?.cutJobId === target.cutJobId) {
+        if (currentJobIdRef.current === target.cutJobId) {
+          jobContextId = null;
+          currentJobIdRef.current = null;
           setJob(null);
           setEligible(null);
           setSelected([]);
@@ -2117,24 +2304,30 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         }
         await loadJobs();
       } catch (error) {
+        if (!canPublishDelete()) return;
         if (error instanceof ApiError && error.code === 'CUT_JOB_LINKED_MDF_PACKETS') {
           message.error('Есть связанные карточки файлов станка. Повторите удаление с подтверждением.');
         } else {
           handleError(error, 'Не удалось удалить задание');
         }
       } finally {
-        setBusy(false);
+        if (canPublishDelete()) setBusy(false);
       }
     },
-    [confirmDeleteJob, emitCutJobUpdate, job, loadJobs, handleError, resetSheetViews],
+    [canPublishCutWrite, confirmDeleteJob, emitCutJobUpdate, loadJobs, handleError, resetSheetViews],
   );
 
   const previewCreateJob = useCallback(async () => {
+    const token = cutPageReadGuard.capture();
+    if (!token) return;
+    const seq = ++openSeqRef.current;
     setBusy(true);
     try {
       const response = await cutApi.listEligibleDetailsPreview(criteriaFromForm());
+      if (openSeqRef.current !== seq || !cutPageReadGuard.isCurrent(token)) return;
       const selectable = selectableDetailIds(response.details);
       setPreviewName(buildSuggestedCutName(response.details));
+      currentJobIdRef.current = null;
       setJob(null);
       setSelectedResult(null);
       setIsFrozenResultSelection(false);
@@ -2147,9 +2340,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         message.warning('По выбранным критериям деталей не найдено');
       }
     } catch (error) {
-      handleError(error, 'Не удалось загрузить детали для проверки');
+      if (openSeqRef.current === seq && cutPageReadGuard.isCurrent(token)) {
+        handleError(error, 'Не удалось загрузить детали для проверки');
+      }
     } finally {
-      setBusy(false);
+      if (openSeqRef.current === seq && cutPageReadGuard.isCurrent(token)) setBusy(false);
     }
   }, [applyPdfTemplateState, criteriaFromForm, handleError, resetSheetViews]);
 
@@ -2163,9 +2358,21 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       message.warning('Укажите название раскроя');
       return;
     }
+    const writeToken = cutPageReadGuard.capture();
+    if (!writeToken) return;
+    let jobContextId = currentJobIdRef.current;
+    const jobContextSeq = openSeqRef.current;
+    const canPublishCreate = () => (
+      canPublishCutWrite(writeToken)
+      && currentJobIdRef.current === jobContextId
+      && openSeqRef.current === jobContextSeq
+    );
     setBusy(true);
     try {
       const created = await cutApi.create({ name, detailIds: selected });
+      if (!canPublishCreate()) return;
+      jobContextId = created.cutJobId;
+      currentJobIdRef.current = created.cutJobId;
       setJob(created);
       applyPdfTemplateState(created);
       const createdOrderOptions = cutJobOrderOptions(created);
@@ -2186,24 +2393,30 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       message.success('Раскрой создан');
       await loadJobs();
     } catch (error) {
-      handleError(error, 'Не удалось создать раскрой');
+      if (canPublishCreate()) handleError(error, 'Не удалось создать раскрой');
     } finally {
-      setBusy(false);
+      if (canPublishCreate()) setBusy(false);
     }
-  }, [applyPdfTemplateState, canViewOrders, embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, previewName, resetSheetViews, selected]);
+  }, [applyPdfTemplateState, canPublishCutWrite, canViewOrders, embeddedOrderId, form, handleError, isEmbeddedOrder, loadJobs, previewName, resetSheetViews, selected]);
 
   const loadEligible = useCallback(async () => {
     if (!job) return;
+    const token = cutPageReadGuard.capture();
+    if (!token) return;
+    const targetJobId = job.cutJobId;
     setBusy(true);
     try {
       const response = await cutApi.listEligibleDetails(job.cutJobId, criteriaFromForm());
+      if (!cutPageReadGuard.isCurrent(token) || currentJobIdRef.current !== targetJobId) return;
       setEligible(response.details);
       setNoSheetSpecCount(response.noSheetSpecCount);
       setSelected(selectableDetailIds(response.details));
     } catch (error) {
-      handleError(error, 'Не удалось загрузить детали');
+      if (cutPageReadGuard.isCurrent(token) && currentJobIdRef.current === targetJobId) {
+        handleError(error, 'Не удалось загрузить детали');
+      }
     } finally {
-      setBusy(false);
+      if (cutPageReadGuard.isCurrent(token) && currentJobIdRef.current === targetJobId) setBusy(false);
     }
   }, [job, criteriaFromForm, handleError]);
 
@@ -2215,9 +2428,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const addToBasket = useCallback(async () => {
     if (!job || selected.length === 0) return;
+    const writeToken = cutPageReadGuard.capture();
+    if (!writeToken) return;
+    const targetJobId = job.cutJobId;
     setBusy(true);
     try {
       const updated = await cutApi.addItems(job.cutJobId, { detailIds: selected, version: job.version });
+      if (!canPublishCutWrite(writeToken, targetJobId)) return;
       setJob(updated);
       applyPdfTemplateState(updated);
       emitCutJobUpdate(updated, job);
@@ -2227,27 +2444,31 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       setSelected([]);
       await loadJobs();
     } catch (error) {
-      handleError(error, 'Не удалось добавить детали');
+      if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось добавить детали');
     } finally {
-      setBusy(false);
+      if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
     }
   }, [applyPdfTemplateState, emitCutJobUpdate, job, selected, loadJobs, handleError]);
 
   const removeJobItem = useCallback(
     async (cutJobItemId: number) => {
       if (!job) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       setBusy(true);
       try {
         const updated = await cutApi.removeItem(job.cutJobId, cutJobItemId, job.version);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         setJob(updated);
         applyPdfTemplateState(updated);
         emitCutJobUpdate(updated, job);
         message.success('Деталь убрана из раскроя');
         await loadJobs();
       } catch (error) {
-        handleError(error, 'Не удалось убрать деталь');
+        if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось убрать деталь');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [applyPdfTemplateState, emitCutJobUpdate, job, loadJobs, handleError],
@@ -2277,6 +2498,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const calculate = useCallback(async () => {
     if (!job) return;
+    const writeToken = cutPageReadGuard.capture();
+    if (!writeToken) return;
+    const targetJobId = job.cutJobId;
     if (calcCommandRef.current?.cutJobId !== job.cutJobId) {
       calcCommandRef.current = {
         cutJobId: job.cutJobId,
@@ -2288,6 +2512,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     setBusy(true);
     try {
       const calculated = await cutApi.calculate(job.cutJobId, commandVersion, commandId);
+      if (!canPublishCutWrite(writeToken, targetJobId)) return;
       calcCommandRef.current = null;
       setJob(calculated);
       setSelectedResult(calculated.currentCutResult ?? null);
@@ -2298,11 +2523,13 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       message.success('Раскрой рассчитан');
       await loadJobs();
     } catch (error) {
+      if (!canPublishCutWrite(writeToken, targetJobId)) return;
       // Reload so the now-failed job shows its persisted reason (Alert) and a
       // fresh version for an immediate retry — the failure bumped the version
       // server-side, so the stale in-memory job would otherwise 409 on retry.
       try {
         const fresh = await cutApi.get(job.cutJobId);
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         const responseWasLostAfterSuccess =
           fresh.status === 'ready'
           && fresh.currentCutResult !== null
@@ -2335,15 +2562,18 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       } catch {
         // best-effort refresh; retain commandId so a transport retry dedupes
       }
-      handleError(error, 'Не удалось рассчитать раскрой');
+      if (canPublishCutWrite(writeToken, targetJobId)) handleError(error, 'Не удалось рассчитать раскрой');
     } finally {
-      setBusy(false);
+      if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
     }
   }, [applyPdfTemplateState, job, loadJobs, handleError, resetSheetViews]);
 
   const loadSheet = useCallback(
     async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
       if (!job) return;
+      const token = cutPageReadGuard.capture();
+      if (!token) return;
+      const targetJobId = job.cutJobId;
       // Client cache key = group:sheet:variant:orientation:origin. NO renderVersion —
       // a version bump that does not recompute the layout (profile/material change)
       // re-uses the cached blob instead of re-fetching/flickering. Orientation AND
@@ -2361,15 +2591,29 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(job.cutJobId, group.cutGroupId, sheetIndex, preset, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined);
+        const blob = await cutApi.fetchSheetPng(
+          job.cutJobId,
+          group.cutGroupId,
+          sheetIndex,
+          preset,
+          rotate90,
+          variant,
+          renderVersion,
+          originTopLeft,
+          sheetAxisOrigin,
+          isHistoricalResult ? selectedResult?.resultNo : undefined,
+          false,
+          false,
+          CUT_TASK_SHEET_RENDER_STYLE,
+        );
         // Discard a completion that lands after a job switch/reset (stale blob).
-        if (viewEpochRef.current !== epoch) return;
+        if (viewEpochRef.current !== epoch || !canPublishCutWrite(token, targetJobId)) return;
         setSheetImages((prev) => {
           if (prev[key]) URL.revokeObjectURL(prev[key]);
           return { ...prev, [key]: URL.createObjectURL(blob) };
         });
       } catch (error) {
-        handleError(error, 'Не удалось загрузить лист раскроя');
+        if (canPublishCutWrite(token, targetJobId)) handleError(error, 'Не удалось загрузить лист раскроя');
       }
     },
     [handleError, isHistoricalResult, job, preset, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait],
@@ -2385,6 +2629,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // key so a no-recalc version bump (profile/material change) does not re-fetch/flicker.
   const loadThumb = useCallback(
     async (cutJobId: number, group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string) => {
+      const token = cutPageReadGuard.capture();
+      if (!token) return;
       // origin in the key too (same rehydration reason as orientation — a persisted
       // RAW-origin job opening with the stale default-TL state must re-fetch, not
       // dedupe to a TL thumb; Codex code-review R1 [REGRESSION-DEBT]).
@@ -2399,16 +2645,36 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
       const epoch = viewEpochRef.current;
       try {
-        const blob = await cutApi.fetchSheetPng(cutJobId, group.cutGroupId, sheetIndex, 'thumb', rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined);
+        const blob = await cutApi.fetchSheetPng(
+          cutJobId,
+          group.cutGroupId,
+          sheetIndex,
+          'thumb',
+          rotate90,
+          variant,
+          renderVersion,
+          originTopLeft,
+          sheetAxisOrigin,
+          isHistoricalResult ? selectedResult?.resultNo : undefined,
+          false,
+          false,
+          CUT_TASK_SHEET_RENDER_STYLE,
+        );
         // Discard a completion that lands after a job switch/reset (stale blob).
-        if (viewEpochRef.current !== epoch) return;
+        if (
+          viewEpochRef.current !== epoch
+          || !cutPageReadGuard.isCurrent(token)
+          || currentJobIdRef.current !== cutJobId
+        ) return;
         setSheetThumbs((prev) => {
           if (prev[key]) URL.revokeObjectURL(prev[key]);
           return { ...prev, [key]: URL.createObjectURL(blob) };
         });
       } catch {
         // Preview is best-effort; the full-size "Лист N" view still works on click.
-        thumbReqRef.current.delete(reqKey);
+        if (cutPageReadGuard.isCurrent(token) && currentJobIdRef.current === cutJobId) {
+          thumbReqRef.current.delete(reqKey);
+        }
       }
     },
     [isHistoricalResult, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait],
@@ -2419,6 +2685,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   // Passes the current per-group variant so toggling auto↔manual immediately
   // requests the correct thumb (variant changes cause the effect to re-run).
   useEffect(() => {
+    if (!ordinaryReadActive) return;
     if (!job || job.status !== 'ready') return;
     for (const group of job.groups) {
       const showAlt = showAlternativeByGroup[group.cutGroupId] ?? false;
@@ -2429,24 +2696,40 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         void loadThumb(job.cutJobId, group, sheet.sheetIndex, groupVariant, groupRenderVersion);
       }
     }
-  }, [job, showAlternativeByGroup, loadThumb]);
+  }, [job, showAlternativeByGroup, loadThumb, ordinaryReadActive]);
 
   const downloadSheetSvg = useCallback(
     async (group: CutGroupDto, sheetIndex: number, variant: 'auto' | 'manual' | 'active' = 'active', renderVersion?: string, displayNo?: number) => {
       if (!job) return;
+      const token = cutPageReadGuard.capture();
+      if (!token) return;
+      const targetJobId = job.cutJobId;
       try {
         const sheet = group.sheets.find((candidate) => candidate.sheetIndex === sheetIndex);
         const rotate90 = sheet
           ? sheetPreviewRotate90(sheet.placements.sheet_width_mm, sheet.placements.sheet_height_mm, sheetPortrait)
           : sheetPortrait;
         const originTopLeft = effectiveSheetOrigin(sheet?.placements, sheetOriginTopLeft, sheetAxisOrigin);
-        const blob = await cutApi.fetchSheetSvg(job.cutJobId, group.cutGroupId, sheetIndex, rotate90, variant, renderVersion, originTopLeft, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined);
+        const blob = await cutApi.fetchSheetSvg(
+          job.cutJobId,
+          group.cutGroupId,
+          sheetIndex,
+          rotate90,
+          variant,
+          renderVersion,
+          originTopLeft,
+          sheetAxisOrigin,
+          isHistoricalResult ? selectedResult?.resultNo : undefined,
+          false,
+          CUT_TASK_SHEET_RENDER_STYLE,
+        );
+        if (!canPublishCutWrite(token, targetJobId)) return;
         // Filename uses the displayed sheet number (dense 1..N) so it matches the
         // "Лист N" the operator sees, not the possibly-sparse real sheetIndex.
         const fileNo = displayNo ?? sheetIndex + 1;
         triggerBlobDownload(blob, `cut-${job.cutJobId}-g${group.cutGroupId}-s${fileNo}.svg`);
       } catch (error) {
-        handleError(error, 'Не удалось выгрузить SVG');
+        if (canPublishCutWrite(token, targetJobId)) handleError(error, 'Не удалось выгрузить SVG');
       }
     },
     [handleError, isHistoricalResult, job, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait],
@@ -2455,6 +2738,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const openGroupPdfPreview = useCallback(
     async (group: CutGroupDto) => {
       if (!job) return;
+      const token = cutPageReadGuard.capture();
+      if (!token) return;
+      const targetJobId = job.cutJobId;
       const requestSeq = pdfPreviewRequestSeqRef.current + 1;
       pdfPreviewRequestSeqRef.current = requestSeq;
       setBusy(true);
@@ -2464,7 +2750,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         // Pass renderToken so the backend uses the active layout variant; PDF bytes are rendered fresh.
         const pdfTemplate = pdfTemplateByGroup[group.cutGroupId] ?? 'standard';
         const result = await pollPdf(() => cutApi.fetchGroupPdf(job.cutJobId, group.cutGroupId, sheetPortrait, group.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplate, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined));
-        if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
+        if (
+          pdfPreviewRequestSeqRef.current !== requestSeq
+          || !canPublishCutWrite(token, targetJobId)
+        ) return;
         const url = URL.createObjectURL(result.blob);
         pdfPreviewUrlRef.current = url;
         setPdfPreview({
@@ -2477,12 +2766,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           fileName: result.fileName ?? `cut-group-${group.cutGroupId}.pdf`,
         });
       } catch (error) {
-        if (pdfPreviewRequestSeqRef.current === requestSeq) {
+        if (
+          pdfPreviewRequestSeqRef.current === requestSeq
+          && canPublishCutWrite(token, targetJobId)
+        ) {
           setPdfPreview((prev) => ({ ...prev, loading: false }));
+          handleError(error, 'Не удалось выгрузить PDF группы');
         }
-        handleError(error, 'Не удалось выгрузить PDF группы');
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(token, targetJobId)) setBusy(false);
       }
     },
     [handleError, isHistoricalResult, job, pdfTemplateByGroup, revokePdfPreviewUrl, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait],
@@ -2518,6 +2810,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   const openJobPdfPreview = useCallback(async () => {
     if (!job) return;
+    const token = cutPageReadGuard.capture();
+    if (!token) return;
+    const targetJobId = job.cutJobId;
     const requestSeq = pdfPreviewRequestSeqRef.current + 1;
     pdfPreviewRequestSeqRef.current = requestSeq;
     setBusy(true);
@@ -2532,7 +2827,10 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     try {
       // Pass renderToken so the backend uses the active layout variant; PDF bytes are rendered fresh.
       const result = await pollPdf(() => cutApi.fetchJobPdf(job.cutJobId, sheetPortrait, job.renderToken, sheetAxisOrigin === 'bottom-left' ? false : sheetOriginTopLeft, pdfTemplateForJob, sheetAxisOrigin, isHistoricalResult ? selectedResult?.resultNo : undefined));
-      if (pdfPreviewRequestSeqRef.current !== requestSeq) return;
+      if (
+        pdfPreviewRequestSeqRef.current !== requestSeq
+        || !canPublishCutWrite(token, targetJobId)
+      ) return;
       const url = URL.createObjectURL(result.blob);
       pdfPreviewUrlRef.current = url;
       setPdfPreview({
@@ -2545,12 +2843,15 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         fileName: result.fileName ?? `cut-job-${job.cutJobId}.pdf`,
       });
     } catch (error) {
-      if (pdfPreviewRequestSeqRef.current === requestSeq) {
+      if (
+        pdfPreviewRequestSeqRef.current === requestSeq
+        && canPublishCutWrite(token, targetJobId)
+      ) {
         setPdfPreview((prev) => ({ ...prev, loading: false }));
+        handleError(error, 'Не удалось выгрузить PDF раскроя');
       }
-      handleError(error, 'Не удалось выгрузить PDF раскроя');
     } finally {
-      setBusy(false);
+      if (canPublishCutWrite(token, targetJobId)) setBusy(false);
     }
   }, [handleError, isHistoricalResult, job, pdfTemplateForJob, profiles, revokePdfPreviewUrl, selectedResult?.resultNo, sheetAxisOrigin, sheetOriginTopLeft, sheetPortrait]);
 
@@ -2682,6 +2983,9 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const saveManualLayoutForGroup = useCallback(
     async (group: CutGroupDto) => {
       if (!job || !job.editorParams) return;
+      const writeToken = cutPageReadGuard.capture();
+      if (!writeToken) return;
+      const targetJobId = job.cutJobId;
       const moves = movesFromSheets(workingSheets);
       const request = {
         jobVersion: job.version,
@@ -2706,6 +3010,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           ...request,
           commandId: manualCommandRef.current.commandId,
         });
+        if (!canPublishCutWrite(writeToken, targetJobId)) return;
         manualCommandRef.current = null;
         setJob(updated);
         setSelectedResult(updated.currentCutResult ?? null);
@@ -2721,9 +3026,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         setEditorHistory([]);
       } catch (error) {
         // Surface 422 violations + 409 recalc/stale with the backend message.
-        handleError(error, 'Не удалось сохранить ручной раскрой');
+        if (canPublishCutWrite(writeToken, targetJobId)) {
+          handleError(error, 'Не удалось сохранить ручной раскрой');
+        }
       } finally {
-        setBusy(false);
+        if (canPublishCutWrite(writeToken, targetJobId)) setBusy(false);
       }
     },
     [applyPdfTemplateState, editorSheetMirrors, editorSheetRotations, emitCutJobUpdate, job, workingSheets, loadJobs, handleError, resetSheetViews],
@@ -2834,7 +3141,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
 
   useEffect(() => {
     if (
-      !isOperational
+      !ordinaryReadActive
+      || !isOperational
       || !isEmbeddedOrder
       || jobsLoading
       || busy
@@ -2844,7 +3152,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       return;
     }
     void openJob(filteredJobs[0].cutJobId);
-  }, [busy, filteredJobs, isEmbeddedOrder, isOperational, job, jobsLoading, openJob]);
+  }, [busy, filteredJobs, isEmbeddedOrder, isOperational, job, jobsLoading, openJob, ordinaryReadActive]);
 
   const jobsSummary = useMemo(() => ({
     total: jobs.filter((candidate) => candidate.status !== 'archived').length,
@@ -3302,6 +3610,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   );
   const { bathCutJobByDetailId: jobBathCutJobByDetailId } = useCutDetailLastReady({
     enabled: canViewCut && jobItemDetailIds.length > 0,
+    active: ordinaryReadActive,
     detailIds: jobItemDetailIds,
   });
 

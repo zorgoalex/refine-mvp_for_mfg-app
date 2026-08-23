@@ -5,14 +5,15 @@ import React, { useMemo, useState } from 'react';
 import { Tag, Space, Typography, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import { StarOutlined, EyeOutlined } from '@ant-design/icons';
-import { useList } from '@refinedev/core';
+import { useList } from '../../../../query/orderLifecycleQueries';
 import { useNavigate } from 'react-router-dom';
 import { formatNumber } from '../../../../utils/numberFormat';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
 import { getMaterialColor } from '../../../../config/displayColors';
 import { resolveHeaderMaterialName } from '../../../../utils/materialDisplayName';
 import { ProductionStagesDisplay } from '../../../../components/ProductionStagesDisplay';
-import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { useOrderAppSettings } from '../../../../hooks/useOrderAppSettings';
 import { buildProductionStagesDisplayConfig } from '../../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../../types/productionWorkflow';
 import { RowSeparator } from './RowSeparator';
@@ -54,7 +55,7 @@ export const OrderShowHeader: React.FC<OrderShowHeaderProps> = ({
 }) => {
   const navigate = useNavigate();
   const isOperational = useOperationalUi();
-  const { getSetting } = useAppSettings();
+  const { getSetting } = useOrderAppSettings();
   const canViewEmployees = !featureFlags.useBackendPermissions || can('employees.view');
   const canViewReferences = !featureFlags.useBackendPermissions || can('references.view');
   const canViewProductionReferences = !featureFlags.useBackendPermissions || can('production.view');

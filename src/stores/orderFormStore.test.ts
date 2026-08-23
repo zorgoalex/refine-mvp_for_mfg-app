@@ -244,8 +244,9 @@ describe('orderFormStore per-order isolation', () => {
   it('persists each draft + dirty marker under its own sessionStorage key', () => {
     const a = mod.getOrderDraftStore('7');
     a.getState().updateHeaderField('order_name', 'persist-me');
-    expect(sessionStorage.getItem('order-form-storage:7')).toContain('persist-me');
-    expect(sessionStorage.getItem('order-form-storage:7')).toContain('"isDirty":true');
+    const storageKey = mod.getOrderDraftStorageKey('7');
+    expect(sessionStorage.getItem(storageKey)).toContain('persist-me');
+    expect(sessionStorage.getItem(storageKey)).toContain('"isDirty":true');
   });
 
   it('keeps PDF-import candidate ids transient and clears them after save sync', () => {
@@ -266,7 +267,7 @@ describe('orderFormStore per-order isolation', () => {
 
     expect(store.getState().pdfImportCandidateTempIds).toHaveLength(1);
     expect(store.getState().getFormValues().pdfImportCandidateTempIds).toHaveLength(1);
-    expect(sessionStorage.getItem('order-form-storage:pdf-import')).not.toContain(
+    expect(sessionStorage.getItem(mod.getOrderDraftStorageKey('pdf-import'))).not.toContain(
       'pdfImportCandidateTempIds',
     );
 
@@ -277,8 +278,9 @@ describe('orderFormStore per-order isolation', () => {
   it('destroyOrderDraftStore removes the registry entry and its sessionStorage', () => {
     const a = mod.getOrderDraftStore('9');
     a.getState().updateHeaderField('order_name', 'gone');
+    const storageKey = mod.getOrderDraftStorageKey('9');
     mod.destroyOrderDraftStore('9');
-    expect(sessionStorage.getItem('order-form-storage:9')).toBeNull();
+    expect(sessionStorage.getItem(storageKey)).toBeNull();
     // re-create is a fresh slice
     expect(mod.getOrderDraftStore('9').getState().header.order_name).toBeUndefined();
   });

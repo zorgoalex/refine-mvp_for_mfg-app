@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { compareDiagnosticCounts, countDiagnostics, diagnosticKey } from './typecheck-ratchet.mjs';
+import {
+  compareDiagnosticCounts,
+  countDiagnostics,
+  diagnosticKey,
+  groupDiagnosticCountsByFamily,
+} from './typecheck-ratchet.mjs';
 
 function diagnostic(fileName, code, messageText) {
   return {
@@ -50,6 +55,17 @@ describe('typecheck ratchet', () => {
     )).toEqual({
       added: [{ key: 'new', count: 2 }],
       removed: [{ key: 'existing', count: 1 }],
+    });
+  });
+
+  it('groups reworded diagnostics by stable file and code', () => {
+    expect(groupDiagnosticCountsByFamily({
+      'src/App.tsx|TS2322|old wording': 1,
+      'src/App.tsx|TS2322|new wording': 2,
+      'src/App.tsx|TS2339|another error': 1,
+    })).toEqual({
+      'src/App.tsx|TS2322': 3,
+      'src/App.tsx|TS2339': 1,
     });
   });
 });

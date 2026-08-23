@@ -191,9 +191,11 @@ describe('up-all.sh provision', () => {
     expect(deploySource).toMatch(/docker compose --env-file "\$ENV_FILE" "\$\{COMPOSE_FILE_ARGS\[@\]\}"/);
     expect(deploySource).toMatch(/git -C "\$REPO_DIR" rev-parse --verify HEAD/);
     expect(deploySource).toMatch(/export CNC_TELEGRAM_WORKER_IMAGE_REVISION="\$revision"/);
+    expect(deploySource).toMatch(/export CNC_TELEGRAM_WORKER_BUILD_CONTEXT="\$worker_context"/);
+    expect(deploySource).toContain('CNC_TELEGRAM_WORKER_BUILD_CONTEXT must resolve to this exact repository worker');
     expect(deploySource).toMatch(/docker_compose config --format json/);
     expect(deploySource).toContain('command != ["serve"]');
-    expect(deploySource).toMatch(/ensure_worker_image_revision[\s\S]*assert_rendered_worker_serve_command/);
+    expect(deploySource).toMatch(/ensure_worker_build_identity[\s\S]*assert_rendered_worker_serve_command/);
   });
 
   it('requires an explicit stack env and blocks non-prod Telegram writers', () => {

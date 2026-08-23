@@ -6,6 +6,7 @@ import { Modal, Form, Input, InputNumber, notification, Collapse } from 'antd';
 import { useCreate } from '@refinedev/core';
 import { numberFormatter, numberParser } from '../../../../utils/numberFormat';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
+import { useWorkspaceModalFormCheckpoint } from '../../../../workspace/workspaceModalFormCheckpoint';
 
 interface EdgeTypeQuickCreateProps {
   open: boolean;
@@ -19,6 +20,7 @@ export const EdgeTypeQuickCreate: React.FC<EdgeTypeQuickCreateProps> = ({
   onSuccess,
 }) => {
   const [form] = Form.useForm();
+  const workspaceKey = useWorkspaceModalFormCheckpoint('edge-quick-create', open, form);
   const { mutate: createEdgeType, isLoading } = useCreate();
 
   const handleOk = async () => {
@@ -72,7 +74,9 @@ export const EdgeTypeQuickCreate: React.FC<EdgeTypeQuickCreateProps> = ({
       okText="Создать"
       cancelText="Отмена"
       width={500}
-      modalRender={(modal) => <DraggableModalWrapper open={open}>{modal}</DraggableModalWrapper>}
+      modalRender={(modal) => (
+        <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>{modal}</DraggableModalWrapper>
+      )}
     >
       <Form form={form} layout="vertical" initialValues={{ sort_order: 100 }}>
         <Form.Item

@@ -5,6 +5,7 @@ import CalendarBoard from './components/CalendarBoard';
 import type { CalendarFilters } from './types/calendar';
 import { getCalendarActiveFilterCount } from './utils/calendarFilters';
 import { OperationalPageHeader, useOperationalUi } from '../../ui-operational/OperationalPrimitives';
+import { useKeepAlive } from '../../components/workspace/KeepAliveContext';
 import './styles/calendar.css';
 import './styles/calendar-mobile.css';
 
@@ -13,6 +14,7 @@ import './styles/calendar-mobile.css';
  * Без List wrapper для полного контроля над layout
  */
 export const CalendarList: React.FC = () => {
+  const { workspaceActive } = useKeepAlive();
   const isOperational = useOperationalUi();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<CalendarFilters>({});
@@ -20,15 +22,17 @@ export const CalendarList: React.FC = () => {
   // Убираем скролл у родительского контейнера при монтировании
   useEffect(() => {
     const content = document.querySelector('.ant-layout-content');
-    if (content) {
+    if (content && workspaceActive) {
       content.classList.add('calendar-page-active');
+    } else {
+      content?.classList.remove('calendar-page-active');
     }
     return () => {
       if (content) {
         content.classList.remove('calendar-page-active');
       }
     };
-  }, []);
+  }, [workspaceActive]);
 
   return (
     <div className="calendar-page-wrapper">

@@ -43,6 +43,10 @@ describe('order labels UI wiring', () => {
     expect(generateSrc).toMatch(/labelsApi\.generateOrderLabels/);
     expect(generateSrc).toMatch(/labelsApi\.downloadGeneration\(orderId,\s*generation\.generationId\)/);
     expect(generateSrc).not.toMatch(/downloadLatest/);
+    expect(generateSrc).toContain('useOrderAsyncReadGuard(`label-generate-write:${orderId}`)');
+    expect(generateSrc).toContain('writeGuard.isSameResource(writeToken)');
+    expect(latestSrc).toContain('readGuard.isSameResource(downloadToken)');
+    expect(dataEditorSrc).toContain('readGuard.isSameResource(writeToken)');
   });
 
   it('generates the whole order even when modal preview is focused on one detail', () => {
@@ -172,6 +176,22 @@ describe('order labels UI wiring', () => {
     expect(dataEditorSrc).toMatch(/Последняя генерация/);
     expect(dataEditorSrc).toMatch(/latestPreview\.svgPages/);
     expect(dataEditorSrc).not.toMatch(/data\?\.details\[0\]\?\.detailId/);
+  });
+
+  it('gates automatic label reads and rejects stale lifecycle/resource publication', () => {
+    expect(dataEditorSrc).toMatch(/useOrderAsyncReadGuard/);
+    expect(dataEditorSrc).toMatch(/!orderId \|\| !readGuard\.active/);
+    expect(dataEditorSrc).toMatch(/readGuard\.capture\(\)/);
+    expect(dataEditorSrc).toMatch(/readGuard\.isCurrent\(token\)/);
+    expect(dataEditorSrc).toMatch(/readGuard\.isSameResource\(writeToken\)/);
+    expect(dataEditorSrc).toMatch(/stateScopeKey === readScopeKey/);
+    expect(generateSrc).toMatch(/useOrderAsyncReadGuard/);
+    expect(generateSrc).toMatch(/readGuard\.capture\(\)/);
+    expect(generateSrc).toMatch(/readGuard\.isCurrent\(token\)/);
+    expect(generateSrc).toMatch(/writeGuard\.isSameResource\(writeToken\)/);
+    expect(latestSrc).toMatch(/useOrderAsyncReadGuard/);
+    expect(latestSrc).toMatch(/readGuard\.isCurrent\(token\)/);
+    expect(latestSrc).toMatch(/latestState\?\.scopeKey === latestScopeKey/);
   });
 
   it('outlines every order-card label preview with the shared neutral frame', () => {

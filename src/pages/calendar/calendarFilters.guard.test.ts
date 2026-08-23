@@ -41,6 +41,8 @@ describe('calendar filters integration', () => {
     expect(tabletStyles).toMatch(/data-modern-route="calendar"[^}]+\.calendar-navigation \{[\s\S]*position: sticky;[\s\S]*height: var\(--tablet-sticky-row\);/);
     expect(tabletStyles).toContain('.calendar-navigation__tablet-filter');
     expect(tabletStyles).toContain('.calendar-navigation__mode-text');
+    expect(calendarList).toContain('const { workspaceActive } = useKeepAlive()');
+    expect(calendarList).toContain('if (content && workspaceActive)');
   });
 
   it('collapses every phone calendar control under one disclosure and hides the page title', () => {

@@ -1,4 +1,5 @@
 import { authSession } from './authSession';
+import { ApiError } from './apiError';
 import { apiRoutes } from './apiRoutes';
 import { httpClient, refreshAuthSession } from './httpClient';
 import type {
@@ -50,7 +51,33 @@ export const authApi = {
   },
 
   async me(): Promise<MeResponse> {
+    const sessionVersionAtStart = authSession.getAccessTokenVersion();
+    const sessionGenerationAtStart = authSession.getSessionGeneration();
     const response = await httpClient.get<MeResponse>(apiRoutes.auth.me);
+
+    // /me may finish after logout, login as another actor, or transparent
+    // refresh. Never publish its older identity into the newer session.
+    if (
+      authSession.getAccessTokenVersion() !== sessionVersionAtStart
+      || authSession.getSessionGeneration() !== sessionGenerationAtStart
+    ) {
+      const currentAccessToken = authSession.getAccessToken();
+      const currentUser = authSession.getUser();
+      if (currentAccessToken && currentUser) return { user: currentUser as MeResponse['user'] };
+      throw new ApiError({
+        code: 'AUTH_ME_SUPERSEDED',
+        message: 'Загрузка пользователя отменена более новым состоянием сессии',
+        status: 409,
+      });
+    }
+
+    if (!authSession.getAccessToken()) {
+      throw new ApiError({
+        code: 'AUTH_ME_SUPERSEDED',
+        message: 'Загрузка пользователя отменена завершением сессии',
+        status: 409,
+      });
+    }
     authSession.setUser(response.user);
     return response;
   },

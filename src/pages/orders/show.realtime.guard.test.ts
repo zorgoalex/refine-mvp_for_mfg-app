@@ -8,11 +8,16 @@ describe('order show realtime guard', () => {
     expect(source).toContain('featureFlags.orderRealtime && useBackendOrdersRead');
     expect(source).toContain('useOrderDetailLiveState({');
     expect(source).toContain('active: isWorkspaceTabActive');
+    expect(source).toContain('authScopeKey: authCacheNamespace');
   });
 
   it('disables both legacy full-order status polling and cut polling', () => {
-    expect(source).toMatch(/refreshLiveDetailProductionStatuses = useCallback[\s\S]*if \(orderRealtimeEnabled\) return/);
+    expect(source).toMatch(/refreshLiveDetailProductionStatuses = useCallback[\s\S]*if \(!ordinaryReadActive \|\| orderRealtimeEnabled\) return/);
     expect(source).toContain('enabled: cutColumnEnabled && !orderRealtimeEnabled');
+    expect(source).toContain('active: ordinaryReadActive');
+    expect(source).toMatch(/refreshLiveDetailProductionStatuses = useCallback[\s\S]*showAsyncReadGuard\.capture\(\)/);
+    expect(source).toMatch(/setLiveDetailProductionStatusState[\s\S]*showAsyncReadGuard\.isCurrent\(token\)/);
+    expect(source).toContain('liveDetailProductionStatusState?.scopeKey === showAsyncReadScopeKey');
   });
 
   it('versions only the changed live cell while preserving other row references', () => {

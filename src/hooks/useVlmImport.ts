@@ -61,6 +61,7 @@ export interface UseVlmImportResult {
   // Methods
   importFromImage: (file: File | Blob) => Promise<VlmImportResult>;
   reset: () => void;
+  restoreResult: (result: VlmImportResult) => void;
 }
 
 // ============================================================================
@@ -269,6 +270,14 @@ export const useVlmImport = (): UseVlmImportResult => {
     }
   }, [vlmApi, reset, startProgressTimer, clearProgressTimer]);
 
+  const restoreResult = useCallback((restored: VlmImportResult): void => {
+    clearProgressTimer();
+    setResult(restored);
+    setError(restored.success ? null : restored.error ?? 'Import failed');
+    setProgress(restored.success ? 100 : 0);
+    setStatus(restored.success ? 'success' : 'error');
+  }, [clearProgressTimer]);
+
   return {
     status,
     progress,
@@ -277,6 +286,7 @@ export const useVlmImport = (): UseVlmImportResult => {
     result,
     importFromImage,
     reset,
+    restoreResult,
   };
 };
 

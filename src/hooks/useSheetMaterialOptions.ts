@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
-import { useSelect } from '@refinedev/antd';
 import { can } from '../utils/permissions';
 import { featureFlags } from '../config/featureFlags';
+import { useSelect } from '../query/orderLifecycleQueries';
 import { useOrderFormData, type SheetMaterialTypeOption } from './useOrderFormData';
 import { sortOptionsByRecency, useRecentReferences } from './useRecentReferences';
 

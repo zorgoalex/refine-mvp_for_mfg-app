@@ -21,6 +21,11 @@ describe('order area aggregate integration', () => {
 
     expect(materialsTabSource).toContain('buildOrderFilmMaterialRows');
     expect(materialsTabSource).toContain('buildOrderSheetMaterialRows');
+    expect(materialsTabSource).toContain('useOrderAsyncReadGuard');
+    expect(materialsTabSource).toContain('cutJobReadGuard.capture()');
+    expect(materialsTabSource).toContain('cutJobsState.scopeKey === cutJobsScopeKey');
+    expect(materialsTabSource).toContain('scopeKey: cutJobsScopeKey');
+    expect(materialsTabSource).toContain('cutJobReadGuard.isCurrent(token)');
     expect(materialsSummarySource).toContain('calculateOrderTotalArea(row.areaDetails)');
     expect(materialsSummarySource).not.toMatch(/totalArea\s*\+=\s*area/);
     expect(importValidationSource).toContain(

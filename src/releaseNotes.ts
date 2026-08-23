@@ -30,6 +30,29 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-23",
+    title: "Авторизация: сессия без внезапных ошибок",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Срок пользовательской сессии увеличен до 48 часов без повторного ввода пароля.",
+    ],
+    fixed: [
+      "Access token теперь обновляется заранее, поэтому первый запрос после длительного простоя больше не получает промежуточную ошибку 401.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-22",
+    title: "Раскрой: цвета заказов в задании",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Миниатюры, развёрнутые листы и SVG-файлы внутри задания на раскрой теперь используют настроенную палитру контуров заказов и совпадающие с ними цвета фрезеровок.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-21",
     title: "Раскрой: отдельные настройки PDF-шаблонов",
     services: ["ERP", "Cutting"],

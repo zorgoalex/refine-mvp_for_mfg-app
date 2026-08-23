@@ -11,4 +11,16 @@ describe('OrderForm deadline defaults', () => {
     expect(source).toContain('workshop.production_status_id');
     expect(source).toMatch(/deadlinesApi\s*\.\s*getDefaultSchedule/);
   });
+
+  it('preserves the last-good schedule while the workspace is inactive', () => {
+    const effectStart = source.indexOf('// Initialize form with default values for create mode');
+    const fetchStart = source.indexOf('deadlinesApi\n      .getDefaultSchedule()', effectStart);
+    const effectSource = source.slice(effectStart, fetchStart);
+
+    expect(effectSource).toContain("if (!ordinaryReadActive) {");
+    expect(effectSource.indexOf("setDeadlineDefaultScheduleState({"))
+      .toBeLessThan(effectSource.indexOf("if (!ordinaryReadActive) {"));
+    expect(effectSource.slice(effectSource.indexOf("if (!ordinaryReadActive) {")))
+      .not.toContain("setDeadlineDefaultScheduleState({");
+  });
 });

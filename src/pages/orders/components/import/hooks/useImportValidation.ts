@@ -45,6 +45,7 @@ export interface UseImportValidationReturn {
   removeRow: (index: number) => void;
   getValidRows: () => ValidatedRow[];
   reset: () => void;
+  restoreValidatedRows: (rows: ValidatedRow[]) => void;
   autoDetectMapping: (sheet: ParsedSheet, range: SelectionRange, hasHeaders: boolean) => FieldMapping;
   batchReplaceReference: (field: 'edge_type' | 'film' | 'material' | 'milling_type', originalValue: string, newId: number) => void;
 }
@@ -631,6 +632,11 @@ export const useImportValidation = (): UseImportValidationReturn => {
     setIsLoading(false);
   }, []);
 
+  const restoreValidatedRows = useCallback((rows: ValidatedRow[]): void => {
+    setValidatedRows(rows);
+    setIsLoading(false);
+  }, []);
+
   return {
     validatedRows,
     referenceData,
@@ -644,6 +650,7 @@ export const useImportValidation = (): UseImportValidationReturn => {
     removeRow,
     getValidRows,
     reset,
+    restoreValidatedRows,
     autoDetectMapping,
     batchReplaceReference,
   };

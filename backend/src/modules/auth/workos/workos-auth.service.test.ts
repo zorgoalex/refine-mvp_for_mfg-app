@@ -8,6 +8,7 @@ import { LoginMethodNotAllowedError } from '../auth.errors';
 import type { AuthUserRecord } from '../auth.types';
 import type { WorkosIdentity } from './workos-api.client';
 import { WorkosAuthService, type WorkosAuthServicePorts } from './workos-auth.service';
+import { ROLE_POLICIES } from '../../../permissions/policies/role-policies';
 
 const IDENTITY: WorkosIdentity = {
   sub: 'workos-sub-1',
@@ -196,13 +197,13 @@ function createHarness(overrides: Partial<Harness['ports']> = {}): Harness {
           return {
             permissions: [],
             scopes: ROLE_POLICIES.viewer,
-            version: 'static',
+            version: 7,
           };
         }
         return {
           permissions: getPermissionsForRole(role),
           scopes: ROLE_POLICIES[role],
-          version: 'static',
+          version: 7,
         };
       }),
     } as WorkosAuthServicePorts['permissions'],
@@ -220,7 +221,11 @@ describe('WorkosAuthService.loginWithCode', () => {
     const harness = createHarness();
     const result = await harness.service.loginWithCode({ code: 'code-1', requestId: 'req-1' });
 
-    expect(result.response.user.id).toBe('42');
+    expect(result.response.user).toMatchObject({
+      id: '42',
+      permissionsVersion: 7,
+      policyScopes: ROLE_POLICIES.manager,
+    });
     expect(harness.ports.sessions).toHaveBeenCalledWith(
       expect.objectContaining({ id: '42' }),
       expect.objectContaining({ authSource: 'workos', providerSessionId: 'sid-1', requestId: 'req-1' }),

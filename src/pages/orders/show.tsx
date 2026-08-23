@@ -1,10 +1,10 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
-import { useShow, useList, useOne, useDataProvider, IResourceComponentsProps } from "@refinedev/core";
+import { useDataProvider, useParsed, IResourceComponentsProps } from "@refinedev/core";
 import { Show, BreadcrumbProps, EditButton } from "@refinedev/antd";
-import { Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
+import { Alert, Button, Checkbox, Breadcrumb, message, Dropdown, Space, Modal, Select } from "antd";
 import { PrinterOutlined, HomeOutlined, FileExcelOutlined, ReloadOutlined, DownloadOutlined, DownOutlined, UpOutlined, FilePdfOutlined, FileTextOutlined, EllipsisOutlined, DeleteOutlined, PlusOutlined, EyeOutlined, EditOutlined, CheckOutlined, SwapOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { forwardRef, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useReactToPrint } from "react-to-print";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTabStore } from "../../stores/tabStore";
@@ -22,6 +22,10 @@ import { OrderDatesBlock } from "./components/sections/OrderDatesBlock";
 import { OrderFinanceBlock } from "./components/sections/OrderFinanceBlock";
 import { OrderProductionBlock } from "./components/sections/OrderProductionBlock";
 import { OrderFilesBlock } from "./components/sections/OrderFilesBlock";
+import {
+  deriveOrderProgressiveLoadingState,
+  OrderShowProgressiveSurface,
+} from './components/OrderProgressiveLoading';
 import { OrderMetaBlock } from "./components/sections/OrderMetaBlock";
 import { featureFlags } from "../../config/featureFlags";
 import { isApiError } from "../../api/apiError";
@@ -54,7 +58,10 @@ import {
 } from "./cutColumnHelpers";
 import { calculateOrderTotalArea } from "../../utils/orderArea";
 import { TableTopScroll } from "../../components/TableTopScroll";
-import { useKeepAlive, useWorkspaceTabKey } from "../../components/workspace/KeepAliveContext";
+import {
+  useKeepAlive,
+  useWorkspaceTabKey,
+} from "../../components/workspace/KeepAliveContext";
 import { OrderLatestLabelsPreview } from "./components/labels/OrderLatestLabelsPreview";
 import { CutPage } from "../cut/CutPage";
 import {
@@ -95,9 +102,45 @@ import { OperationalPageHeader, useOperationalUi } from "../../ui-operational/Op
 import { buildCutJobNameById, CutJobLinks } from "./CutJobLinks";
 import { buildOrderFilmMaterialRows, buildOrderSheetMaterialRows } from "./orderMaterialsSummary";
 import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
+import {
+  isOrderDetailStatusRefreshDue,
+  mergeOrderDetailStatusFreshness,
+} from "./orderDetailStatusRefresh";
 import { BasisProjectLink } from "./components/BasisProjectLink";
 import type { OrderHdfDetail } from "../../types/orders";
 import { formatOrderRefreshSuccessMessage } from './orderRefresh';
+import { useAuthCacheNamespace } from "../../query/authCacheNamespace";
+import {
+  createOrderShowPrimaryIdentity,
+  getOrderShowBackendMode,
+} from "../../query/orderPrimaryResource";
+import { additionalRouteParams } from "../../query/orderListPrimaryResource";
+import { ORDER_PRIMARY_HARD_STALE_TIME_MS } from "../../query/orderPrimaryFetchPolicy";
+import { useOrderLifecycleCohort } from "../../performance/orderLifecycleCohortStore";
+import {
+  recordAppActivityRefreshTrigger,
+  useAppActivitySnapshot,
+} from "../../performance/appActivityCoordinator";
+import {
+  OrderLifecycleReadSurface,
+  useCancelInactiveOrderQueriesOnDeactivate,
+  useList,
+  useOne,
+  useOrderAsyncReadGuard,
+  useOrderLifecycleReadActive,
+  useShow,
+} from "../../query/orderLifecycleQueries";
+import { useWorkspaceCheckpointAdapter } from '../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../workspace/workspaceCheckpointRegistry';
+import {
+  restoreWorkspaceDomCheckpoint,
+} from '../../workspace/workspaceDomCheckpoint';
+import { useWorkspaceDomCheckpointCapture } from '../../workspace/workspaceDomCheckpointReact';
+import type { WorkspaceSerializableRecord } from '../../workspace/workspaceUiStateStore';
+import {
+  acquireWorkspaceOperationPin,
+  runPageOwnedWorkspaceOperation,
+} from '../../workspace/workspaceOperationPins';
 
 type OrderInfoPanelKey = 'groups' | 'deadlines' | 'finance' | 'cut' | 'additional';
 type OrderExcelExportMode = 'full' | 'without-prices';
@@ -128,6 +171,7 @@ const ORDER_DETAIL_SHOW_BAZIS_CUT_COLUMN_WIDTH = 104;
 const ORDER_DETAIL_SHOW_HDF_COLUMN_WIDTH = 86;
 const ORDER_SHOW_COMPACT_HEADER_STICKY_HEIGHT = 40;
 const ORDER_DETAIL_STATUS_REFRESH_MS = 15_000;
+const EMPTY_DETAIL_PRODUCTION_STATUS_MAP = new Map<number, number | null>();
 const ORDER_SHOW_SORT_COLLATOR = new Intl.Collator('ru', { numeric: true, sensitivity: 'base' });
 
 type OrderShowHdfDisplay = {
@@ -612,71 +656,115 @@ const modalConfirm = (content: string): Promise<boolean> =>
     });
   });
 
+function readOrderInfoPanelCheckpoint(value: unknown): OrderInfoPanelKey | null {
+  return typeof value === 'string' && orderInfoTabs.some((tab) => tab.key === value)
+    ? value as OrderInfoPanelKey
+    : null;
+}
+
+function readOrderShowSorterCheckpoint(value: unknown): OrderShowActiveSorter {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const sorter = value as { key?: unknown; order?: unknown };
+  return typeof sorter.key === 'string'
+    && (sorter.order === 'ascend' || sorter.order === 'descend')
+    ? { key: sorter.key, order: sorter.order }
+    : null;
+}
+
+function readPositiveIntegerArray(value: unknown): number[] {
+  return Array.isArray(value)
+    ? [...new Set(value.map(Number).filter((item) => Number.isSafeInteger(item) && item > 0))]
+    : [];
+}
+
+function asWorkspaceRecord(value: unknown): WorkspaceSerializableRecord | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as WorkspaceSerializableRecord
+    : null;
+}
+
 export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const navigate = useNavigate();
   const dataProvider = useDataProvider();
   const isOperational = useOperationalUi();
   const isMobile = useIsMobile();
   const { isActive: isWorkspaceTabActive } = useKeepAlive();
+  const ordinaryReadActive = useOrderLifecycleReadActive();
+  const { activationRevision, documentVisible } = useAppActivitySnapshot();
+  useCancelInactiveOrderQueriesOnDeactivate();
   const { id: currentOrderId } = useParams();
+  const location = useLocation();
+  const tabKey = useWorkspaceTabKey(location.pathname);
+  const restoredShowCheckpoint = useMemo(
+    () => readWorkspaceCheckpointAdapterState(tabKey, 'order-show'),
+    [tabKey],
+  );
+  const captureOrderShowDomCheckpoint = useWorkspaceDomCheckpointCapture(
+    tabKey,
+    asWorkspaceRecord(restoredShowCheckpoint?.dom),
+  );
   const [searchParams] = useSearchParams();
   const highlightDetail = Number(searchParams.get('highlightDetail')) || null;
-  const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(null);
-  const [activeOperationalTab, setActiveOperationalTab] = useState('overview');
-  const [moveModalOpen, setMoveModalOpen] = useState(false);
-  const [moveCandidates, setMoveCandidates] = useState<ProjectDto[]>([]);
-  const [moveCandidatesLoading, setMoveCandidatesLoading] = useState(false);
-  const [moveSubmitting, setMoveSubmitting] = useState(false);
-  const [moveTargetProjectId, setMoveTargetProjectId] = useState<number | undefined>(undefined);
-  const [moveCreateNew, setMoveCreateNew] = useState(false);
-  const [deletedOrder, setDeletedOrder] = useState<OrderDto | null>(null);
-  const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(null);
+  const [activeInfoPanel, setActiveInfoPanel] = useState<OrderInfoPanelKey | null>(() => (
+    readOrderInfoPanelCheckpoint(restoredShowCheckpoint?.activeInfoPanel)
+  ));
+  const [activeOperationalTab, setActiveOperationalTab] = useState(() => (
+    typeof restoredShowCheckpoint?.activeOperationalTab === 'string'
+      ? restoredShowCheckpoint.activeOperationalTab
+      : 'overview'
+  ));
+  const [moveModalOpen, setMoveModalOpen] = useState(
+    () => restoredShowCheckpoint?.moveModalOpen === true,
+  );
+  const [moveCandidatesState, setMoveCandidatesState] = useState<{
+    scopeKey: string;
+    value: ProjectDto[];
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+  const [moveSubmittingState, setMoveSubmittingState] = useState<{
+    scopeKey: string;
+    inFlight: boolean;
+  } | null>(null);
+  const [moveUiState, setMoveUiState] = useState<{
+    scopeKey: string;
+    targetProjectId?: number;
+    createNew: boolean;
+  } | null>(null);
+  const [orderShowActiveSorter, setOrderShowActiveSorter] = useState<OrderShowActiveSorter>(() => (
+    readOrderShowSorterCheckpoint(restoredShowCheckpoint?.activeSorter)
+  ));
+  const orderShowBackendMode = getOrderShowBackendMode(featureFlags.useBackendOrdersRead);
+  const authCacheNamespace = useAuthCacheNamespace(orderShowBackendMode);
+  const showAsyncReadGuard = useOrderAsyncReadGuard(`order-show:${currentOrderId ?? 'missing'}`);
+  const showAsyncReadScopeKey = `${showAsyncReadGuard.authNamespace}|order:${currentOrderId ?? 'missing'}`;
+  const [deletedOrderState, setDeletedOrderState] = useState<{
+    scopeKey: string;
+    value: OrderDto | null;
+  } | null>(null);
+  const deletedOrder = deletedOrderState?.scopeKey === showAsyncReadScopeKey
+    ? deletedOrderState.value
+    : null;
+  const orderLifecycleCohort = useOrderLifecycleCohort();
+  const { params: parsedRouteParams } = useParsed();
+  const orderShowPrimaryIdentity = useMemo(
+    () => createOrderShowPrimaryIdentity({
+      orderId: currentOrderId ?? '',
+      projectsEnabled: featureFlags.projects,
+      authCacheNamespace,
+      additionalParams: additionalRouteParams(parsedRouteParams ?? {}),
+    }),
+    [authCacheNamespace, currentOrderId, parsedRouteParams],
+  );
 
   const { queryResult } = useShow({
-    meta: {
-      idColumnName: "order_id",
-      fields: [
-        "order_id",
-        "order_name",
-        "client_id",
-        "client_name",
-        "order_date",
-        "planned_completion_date",
-        "completion_date",
-        "issue_date",
-        "payment_date",
-        "total_amount",
-        "final_amount",
-        "discount",
-        "paid_amount",
-        "priority",
-        "order_status_name",
-        "payment_status_name",
-        "production_status_id",
-        "production_status_name",
-        "manager_id",
-        "material_name",
-        "milling_type_name",
-        "edge_type_name",
-        "film_name",
-        "notes",
-        "parts_count",
-        "total_area",
-        "link_cutting_file",
-        "link_cutting_image_file",
-        "link_cad_file",
-        "link_pdf_file",
-        "doweling_order_id",
-        "doweling_order_name",
-        "ref_key_1c",
-        "version",
-        "delete_flag",
-        "created_at",
-        "updated_at",
-        "created_by",
-        "edited_by",
-        ...(featureFlags.projects ? ["project_id", "project_code", "order_full_number"] : []),
-      ],
+    resource: orderShowPrimaryIdentity.resource,
+    id: orderShowPrimaryIdentity.orderId,
+    meta: orderShowPrimaryIdentity.meta,
+    queryOptions: {
+      staleTime: orderLifecycleCohort === 'treatment'
+        ? ORDER_PRIMARY_HARD_STALE_TIME_MS
+        : undefined,
     },
   });
   const { data, isLoading } = queryResult;
@@ -719,15 +807,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       : 'Просмотр заказа';
 
   useEffect(() => {
-    setDeletedOrder(null);
-  }, [currentOrderId]);
+    setDeletedOrderState({ scopeKey: showAsyncReadScopeKey, value: null });
+  }, [currentOrderId, showAsyncReadScopeKey]);
 
   useEffect(() => {
-    if (queryResult.data?.data) setDeletedOrder(null);
-  }, [queryResult.data]);
+    if (queryResult.data?.data) {
+      setDeletedOrderState({ scopeKey: showAsyncReadScopeKey, value: null });
+    }
+  }, [queryResult.data, showAsyncReadScopeKey]);
 
   useEffect(() => {
-    if (!(featureFlags.useBackendOrdersRead && canManageOrderTrash)) {
+    if (!ordinaryReadActive || !(featureFlags.useBackendOrdersRead && canManageOrderTrash)) {
       return;
     }
     if (!queryResult.isError || !currentOrderId) {
@@ -742,16 +832,22 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       return;
     }
 
+    const token = showAsyncReadGuard.capture();
+    if (!token) return;
+    const controller = new AbortController();
     let cancelled = false;
 
     void ordersApi
-      .getById(Number(currentOrderId), { includeDeleted: true })
+      .getById(Number(currentOrderId), {
+        includeDeleted: true,
+        signal: controller.signal,
+      })
       .then((o) => {
-        if (cancelled) {
+        if (cancelled || !showAsyncReadGuard.isCurrent(token)) {
           return;
         }
         if (o.header.deleteFlag === true && o.header.orderId === Number(currentOrderId)) {
-          setDeletedOrder(o);
+          setDeletedOrderState({ scopeKey: showAsyncReadScopeKey, value: o });
         }
       })
       .catch(() => {
@@ -760,12 +856,20 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [canManageOrderTrash, currentOrderId, queryResult.error, queryResult.isError]);
+  }, [
+    canManageOrderTrash,
+    currentOrderId,
+    ordinaryReadActive,
+    queryResult.error,
+    queryResult.isError,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isCurrent,
+    showAsyncReadScopeKey,
+  ]);
 
   // The workspace tab shows only the user-facing order name, never its database id.
-  const location = useLocation();
-  const tabKey = useWorkspaceTabKey(location.pathname);
   const setTabTitle = useTabStore((s) => s.setTabTitle);
   useEffect(() => {
     if (record?.order_name) {
@@ -790,30 +894,88 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       ? record.project_id
       : null;
   const projectLabel = projectCode || '—';
+  const moveCandidatesResourceScope = [
+    'order-project-move-options',
+    currentOrderId ?? 'missing',
+    record?.client_id ?? 'missing',
+    projectId ?? 'missing',
+  ].join(':');
+  const moveCandidatesReadGuard = useOrderAsyncReadGuard(moveCandidatesResourceScope);
+  const moveCandidatesScopeKey = `${moveCandidatesReadGuard.authNamespace}|${moveCandidatesResourceScope}`;
+  const moveCandidates = moveCandidatesState?.scopeKey === moveCandidatesScopeKey
+    ? moveCandidatesState.value
+    : [];
+  const moveCandidatesLoading = moveCandidatesState?.scopeKey === moveCandidatesScopeKey
+    && moveCandidatesState.loading;
+  const moveCandidatesError = moveCandidatesState?.scopeKey === moveCandidatesScopeKey
+    ? moveCandidatesState.error
+    : null;
+  const moveSubmitting = moveSubmittingState?.scopeKey === moveCandidatesScopeKey
+    && moveSubmittingState.inFlight;
+  const moveUi = moveUiState?.scopeKey === moveCandidatesScopeKey ? moveUiState : null;
+  const moveTargetProjectId = moveUi?.targetProjectId;
+  const moveCreateNew = moveUi?.createNew ?? false;
+  const restoredMoveAppliedRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!restoredMoveAppliedRef.current) {
+      restoredMoveAppliedRef.current = true;
+      const targetProjectId = Number(restoredShowCheckpoint?.moveTargetProjectId);
+      setMoveUiState({
+        scopeKey: moveCandidatesScopeKey,
+        ...(Number.isSafeInteger(targetProjectId) && targetProjectId > 0
+          ? { targetProjectId }
+          : {}),
+        createNew: restoredShowCheckpoint?.moveCreateNew === true,
+      });
+      return;
+    }
+    setMoveModalOpen(false);
+    setMoveUiState({ scopeKey: moveCandidatesScopeKey, createNew: false });
+  }, [moveCandidatesScopeKey, restoredShowCheckpoint]);
 
   useEffect(() => {
-    if (!featureFlags.projects || !moveModalOpen || !record?.client_id) {
+    if (!ordinaryReadActive || !featureFlags.projects || !moveModalOpen || !record?.client_id) {
       return;
     }
 
+    const token = moveCandidatesReadGuard.capture();
+    if (!token) return;
+    const scopeKey = moveCandidatesScopeKey;
+    const clientId = record.client_id;
     let cancelled = false;
 
     const loadMoveCandidates = async () => {
-      setMoveCandidatesLoading(true);
+      setMoveCandidatesState((current) => ({
+        scopeKey,
+        value: current?.scopeKey === scopeKey ? current.value : [],
+        loading: true,
+        error: null,
+      }));
       try {
-        const response = await projectsApi.list({ clientId: record.client_id });
-        if (!cancelled) {
-          setMoveCandidates(
-            response.filter((candidate) => candidate.projectId !== projectId),
-          );
+        const response = await projectsApi.list({ clientId });
+        if (!cancelled && moveCandidatesReadGuard.isCurrent(token)) {
+          setMoveCandidatesState({
+            scopeKey,
+            value: response.filter((candidate) => candidate.projectId !== projectId),
+            loading: false,
+            error: null,
+          });
         }
       } catch (error) {
-        if (!cancelled) {
-          message.error(error instanceof Error ? error.message : 'Не удалось загрузить проекты');
+        if (!cancelled && moveCandidatesReadGuard.isCurrent(token)) {
+          setMoveCandidatesState((current) => ({
+            scopeKey,
+            value: current?.scopeKey === scopeKey ? current.value : [],
+            loading: false,
+            error: error instanceof Error ? error.message : 'Не удалось загрузить проекты',
+          }));
         }
       } finally {
-        if (!cancelled) {
-          setMoveCandidatesLoading(false);
+        if (!cancelled && moveCandidatesReadGuard.isCurrent(token)) {
+          setMoveCandidatesState((current) => current?.scopeKey === scopeKey
+            ? { ...current, loading: false }
+            : current);
         }
       }
     };
@@ -823,7 +985,15 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     return () => {
       cancelled = true;
     };
-  }, [moveModalOpen, projectId, record?.client_id]);
+  }, [
+    moveCandidatesReadGuard.capture,
+    moveCandidatesReadGuard.isCurrent,
+    moveCandidatesScopeKey,
+    moveModalOpen,
+    ordinaryReadActive,
+    projectId,
+    record?.client_id,
+  ]);
 
   const moveProjectOptions = useMemo(
     () =>
@@ -835,7 +1005,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   );
 
   // Загрузка деталей заказа
-  const { data: detailsData, isLoading: detailsLoading } = useList({
+  const {
+    data: detailsData,
+    dataUpdatedAt: detailsDataUpdatedAt,
+    isLoading: detailsLoading,
+    isError: detailsError,
+    refetch: refetchDetails,
+  } = useList({
     resource: "order_details",
     filters: [
       {
@@ -874,25 +1050,56 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     backendOrder?.details ??
     (detailsData?.data || []).sort((a, b) => (a.detail_number || 0) - (b.detail_number || 0))
   );
-  const [legacyBazisCutSetsByDetailId, setLegacyBazisCutSetsByDetailId] = useState<Map<number, Array<{
-    bazisCutSetId: number;
-    name: string;
-  }>>>(() => new Map());
+  const [legacyBazisMembershipState, setLegacyBazisMembershipState] = useState<{
+    scopeKey: string;
+    value: Map<number, Array<{
+      bazisCutSetId: number;
+      name: string;
+    }>>;
+  } | null>(null);
+  const legacyBazisCutSetsByDetailId = useMemo(
+    () => legacyBazisMembershipState?.scopeKey === showAsyncReadScopeKey
+      ? legacyBazisMembershipState.value
+      : new Map<number, Array<{ bazisCutSetId: number; name: string }>>(),
+    [legacyBazisMembershipState, showAsyncReadScopeKey],
+  );
   useEffect(() => {
     let cancelled = false;
     const orderId = Number(record?.order_id);
-    if (!featureFlags.bazisCut || useBackendOrdersRead || !Number.isInteger(orderId) || orderId <= 0) {
-      setLegacyBazisCutSetsByDetailId(new Map());
+    if (!ordinaryReadActive) {
       return () => { cancelled = true; };
     }
+    if (
+      !featureFlags.bazisCut
+      || useBackendOrdersRead
+      || !Number.isInteger(orderId)
+      || orderId <= 0
+    ) {
+      setLegacyBazisMembershipState({ scopeKey: showAsyncReadScopeKey, value: new Map() });
+      return () => { cancelled = true; };
+    }
+    const token = showAsyncReadGuard.capture();
+    if (!token) return () => { cancelled = true; };
     void bazisCutApi.orderMemberships(orderId).then((response) => {
-      if (cancelled) return;
-      setLegacyBazisCutSetsByDetailId(new Map(response.details.map((detail) => [detail.detailId, detail.bazisCutSets])));
+      if (cancelled || !showAsyncReadGuard.isCurrent(token)) return;
+      setLegacyBazisMembershipState({
+        scopeKey: showAsyncReadScopeKey,
+        value: new Map(response.details.map((detail) => [detail.detailId, detail.bazisCutSets])),
+      });
     }).catch(() => {
-      if (!cancelled) setLegacyBazisCutSetsByDetailId(new Map());
+      if (!cancelled && showAsyncReadGuard.isCurrent(token)) {
+        setLegacyBazisMembershipState({ scopeKey: showAsyncReadScopeKey, value: new Map() });
+      }
     });
     return () => { cancelled = true; };
-  }, [record?.order_id, useBackendOrdersRead]);
+  }, [
+    ordinaryReadActive,
+    record?.order_id,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isCurrent,
+    showAsyncReadScopeKey,
+    useBackendOrdersRead,
+  ]);
   const details = useMemo(() => {
     if (useBackendOrdersRead) return rawDetails;
     return rawDetails.map((detail: any) => ({
@@ -913,11 +1120,24 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     detailsLoading,
     useBackendOrdersRead,
   });
-  const [liveDetailProductionStatusById, setLiveDetailProductionStatusById] = useState<Map<number, number | null>>(
-    () => new Map(),
-  );
+  const hasOrderShowData = Boolean(record || deletedOrderModel);
+  const orderShowLoading = deriveOrderProgressiveLoadingState({
+    hasPrimaryData: hasOrderShowData,
+    primaryPending: showLoading,
+    primaryFetching: queryResult.isFetching,
+    sectionPending: !useBackendOrdersRead && detailsLoading,
+  });
+  const [liveDetailProductionStatusState, setLiveDetailProductionStatusState] = useState<{
+    scopeKey: string;
+    value: Map<number, number | null>;
+  } | null>(null);
+  const liveDetailProductionStatusById = liveDetailProductionStatusState?.scopeKey === showAsyncReadScopeKey
+    ? liveDetailProductionStatusState.value
+    : EMPTY_DETAIL_PRODUCTION_STATUS_MAP;
   const liveDetailProductionStatusByIdRef = useRef(liveDetailProductionStatusById);
   const detailStatusPollInFlightRef = useRef(false);
+  const detailStatusLastSuccessfulAtRef = useRef(0);
+  const handledActivityRevisionRef = useRef(activationRevision);
   const detailProductionStatusBaseById = useMemo(() => {
     const map = new Map<number, number | null>();
     (details || []).forEach((detail: any) => {
@@ -927,9 +1147,13 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     });
     return map;
   }, [details]);
+  const detailStatusBaselineUpdatedAt = useBackendOrdersRead
+    ? queryResult.dataUpdatedAt
+    : detailsDataUpdatedAt;
   const orderDetailLiveState = useOrderDetailLiveState({
     enabled: orderRealtimeEnabled,
     active: isWorkspaceTabActive,
+    authScopeKey: authCacheNamespace,
     orderId: record?.order_id,
   });
   const detailProductionStatusBaseByIdRef = useRef(detailProductionStatusBaseById);
@@ -953,15 +1177,29 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   }, [detailProductionStatusBaseById]);
 
   useEffect(() => {
-    setLiveDetailProductionStatusById((current) => (current.size === 0 ? current : new Map()));
-  }, [record?.order_id]);
+    detailStatusLastSuccessfulAtRef.current = 0;
+    setLiveDetailProductionStatusState({
+      scopeKey: showAsyncReadScopeKey,
+      value: new Map(),
+    });
+  }, [record?.order_id, showAsyncReadScopeKey]);
+
+  useEffect(() => {
+    if (detailProductionStatusBaseById.size === 0) return;
+    detailStatusLastSuccessfulAtRef.current = mergeOrderDetailStatusFreshness(
+      detailStatusLastSuccessfulAtRef.current,
+      detailStatusBaselineUpdatedAt,
+    );
+  }, [detailProductionStatusBaseById.size, detailStatusBaselineUpdatedAt, showAsyncReadScopeKey]);
 
   const refreshLiveDetailProductionStatuses = useCallback(async () => {
-    if (orderRealtimeEnabled) return;
+    if (!ordinaryReadActive || orderRealtimeEnabled) return;
     const orderId = Number(record?.order_id);
     if (!Number.isInteger(orderId) || orderId <= 0) return;
     if (detailProductionStatusBaseByIdRef.current.size === 0) return;
     if (detailStatusPollInFlightRef.current) return;
+    const token = showAsyncReadGuard.capture();
+    if (!token) return;
 
     detailStatusPollInFlightRef.current = true;
     try {
@@ -996,45 +1234,66 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         }
       });
 
-      if (!areDetailProductionStatusMapsEqual(liveDetailProductionStatusByIdRef.current, nextLiveStatuses)) {
-        setLiveDetailProductionStatusById(nextLiveStatuses);
+      if (showAsyncReadGuard.isCurrent(token)) {
+        detailStatusLastSuccessfulAtRef.current = Date.now();
+        if (!areDetailProductionStatusMapsEqual(liveDetailProductionStatusByIdRef.current, nextLiveStatuses)) {
+          setLiveDetailProductionStatusState({
+            scopeKey: showAsyncReadScopeKey,
+            value: nextLiveStatuses,
+          });
+        }
       }
     } catch {
       // Keep the last visible statuses; the next poll/focus event can recover.
     } finally {
       detailStatusPollInFlightRef.current = false;
     }
-  }, [dataProvider, orderRealtimeEnabled, record?.order_id, useBackendOrdersRead]);
+  }, [
+    dataProvider,
+    orderRealtimeEnabled,
+    ordinaryReadActive,
+    record?.order_id,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isCurrent,
+    showAsyncReadScopeKey,
+    useBackendOrdersRead,
+  ]);
 
   useEffect(() => {
     if (
-      orderRealtimeEnabled
+      !ordinaryReadActive
+      || orderRealtimeEnabled
       || !record?.order_id
       || typeof window === 'undefined'
-      || typeof document === 'undefined'
+      || !documentVisible
     ) {
       return undefined;
     }
 
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'hidden') return;
+      if (detailStatusPollInFlightRef.current) return;
+      recordAppActivityRefreshTrigger();
       void refreshLiveDetailProductionStatuses();
     };
-    const refreshOnVisibilityChange = () => {
-      if (document.visibilityState !== 'visible') return;
-      void refreshLiveDetailProductionStatuses();
-    };
-
-    window.addEventListener('focus', refreshWhenVisible);
-    document.addEventListener('visibilitychange', refreshOnVisibilityChange);
     const intervalId = window.setInterval(refreshWhenVisible, ORDER_DETAIL_STATUS_REFRESH_MS);
 
     return () => {
-      window.removeEventListener('focus', refreshWhenVisible);
-      document.removeEventListener('visibilitychange', refreshOnVisibilityChange);
       window.clearInterval(intervalId);
     };
-  }, [orderRealtimeEnabled, record?.order_id, refreshLiveDetailProductionStatuses]);
+  }, [documentVisible, orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
+
+  useEffect(() => {
+    if (handledActivityRevisionRef.current === activationRevision) return;
+    handledActivityRevisionRef.current = activationRevision;
+    if (!ordinaryReadActive || orderRealtimeEnabled || !record?.order_id) return;
+    if (!isOrderDetailStatusRefreshDue(
+      detailStatusLastSuccessfulAtRef.current,
+      ORDER_DETAIL_STATUS_REFRESH_MS,
+    )) return;
+    if (detailStatusPollInFlightRef.current) return;
+    recordAppActivityRefreshTrigger();
+    void refreshLiveDetailProductionStatuses();
+  }, [activationRevision, orderRealtimeEnabled, ordinaryReadActive, record?.order_id, refreshLiveDetailProductionStatuses]);
   const workspaceTabsHeight = useWorkspaceTabsHeight();
   const orderShowStickySentinelRef = useRef<HTMLDivElement>(null);
   const orderShowDetailsBlockRef = useRef<HTMLDivElement>(null);
@@ -1265,6 +1524,11 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const isAnyExcelExporting = activeExcelExport !== null;
   const [isSnapshotExporting, setIsSnapshotExporting] = useState(false);
 
+  useLayoutEffect(() => {
+    setActiveExcelExport(null);
+    setIsSnapshotExporting(false);
+  }, [showAsyncReadScopeKey]);
+
   // Состояние для выбора деталей в раскрой
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
   const bazisCutVisible = featureFlags.bazisCut;
@@ -1272,16 +1536,48 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const bazisCutLinkEnabled = bazisCutVisible && can('cut.view');
   const bazisProjectLinkEnabled = featureFlags.useBackendBazis && can('bazis.view');
   const detailSelectionEnabled = cutEnabled || bazisCutVisible;
-  const [cutSelectMode, setCutSelectMode] = useState(false);
-  const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>([]);
-  const [cutModalOpen, setCutModalOpen] = useState(false);
-  const [bazisCutModalOpen, setBazisCutModalOpen] = useState(false);
+  const [cutSelectMode, setCutSelectMode] = useState(
+    () => restoredShowCheckpoint?.cutSelectMode === true,
+  );
+  const [cutSelectedDetailIds, setCutSelectedDetailIds] = useState<number[]>(() => (
+    readPositiveIntegerArray(restoredShowCheckpoint?.cutSelectedDetailIds)
+  ));
+  const [cutModalOpen, setCutModalOpen] = useState(
+    () => restoredShowCheckpoint?.cutModalOpen === true,
+  );
+  const [bazisCutModalOpen, setBazisCutModalOpen] = useState(
+    () => restoredShowCheckpoint?.bazisCutModalOpen === true,
+  );
+
+  useWorkspaceCheckpointAdapter(tabKey, 'order-show', {
+    capture: () => ({
+      activeInfoPanel,
+      activeOperationalTab,
+      activeSorter: orderShowActiveSorter,
+      moveModalOpen,
+      moveTargetProjectId: moveTargetProjectId ?? null,
+      moveCreateNew,
+      cutSelectMode,
+      cutSelectedDetailIds,
+      cutModalOpen,
+      bazisCutModalOpen,
+      dom: captureOrderShowDomCheckpoint(),
+    }),
+  });
+  useLayoutEffect(() => restoreWorkspaceDomCheckpoint(
+    tabKey,
+    asWorkspaceRecord(restoredShowCheckpoint?.dom),
+  ), [restoredShowCheckpoint, tabKey]);
 
   useEffect(() => {
     if (!cutSelectMode) setCutSelectedDetailIds([]);
   }, [cutSelectMode]);
 
+  const cutSelectionOrderIdRef = useRef(Number(currentOrderId) || null);
   useEffect(() => {
+    const nextOrderId = Number(record?.order_id) || null;
+    if (nextOrderId === null || cutSelectionOrderIdRef.current === nextOrderId) return;
+    cutSelectionOrderIdRef.current = nextOrderId;
     setCutSelectMode(false);
     setCutSelectedDetailIds([]);
   }, [record?.order_id]);
@@ -1302,6 +1598,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const embeddedCutJobMaps = useMemo(() => buildCutJobLinkMapsFromDetails(details), [details]);
   const fetchedCutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled && !orderRealtimeEnabled,
+    active: ordinaryReadActive,
     detailIds: cutDetailIds,
     orderId: record?.order_id,
     pollIntervalMs: ORDER_DETAIL_STATUS_REFRESH_MS,
@@ -1329,19 +1626,42 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     [bathCutJobByDetailId],
   );
   const latestReadyCutJobIdsKey = latestReadyCutJobIds.join(',');
-  const [bathCutJobs, setBathCutJobs] = useState<CutJobDto[]>([]);
-  const [bathCutJobsLoading, setBathCutJobsLoading] = useState(false);
+  const bathCutJobsReadGuard = useOrderAsyncReadGuard(
+    `order-show-bath-jobs:${currentOrderId ?? 'missing'}:${latestReadyCutJobIdsKey}`,
+  );
+  const bathCutJobsScopeKey = `${bathCutJobsReadGuard.authNamespace}|order:${currentOrderId ?? 'missing'}|jobs:${latestReadyCutJobIdsKey}`;
+  const [bathCutJobsState, setBathCutJobsState] = useState<{
+    scopeKey: string;
+    value: CutJobDto[];
+  } | null>(null);
+  const bathCutJobs = bathCutJobsState?.scopeKey === bathCutJobsScopeKey
+    ? bathCutJobsState.value
+    : [];
+  const [bathCutJobsLoadingState, setBathCutJobsLoadingState] = useState<{
+    scopeKey: string;
+    value: boolean;
+  } | null>(null);
+  const bathCutJobsLoading = bathCutJobsLoadingState?.scopeKey === bathCutJobsScopeKey
+    && bathCutJobsLoadingState.value;
 
   useEffect(() => {
     let cancelled = false;
-    if (!cutColumnEnabled || latestReadyCutJobIds.length === 0) {
-      setBathCutJobs([]);
-      setBathCutJobsLoading(false);
+    if (!ordinaryReadActive) {
+      setBathCutJobsLoadingState({ scopeKey: bathCutJobsScopeKey, value: false });
       return () => {
         cancelled = true;
       };
     }
-    setBathCutJobsLoading(true);
+    if (!cutColumnEnabled || latestReadyCutJobIds.length === 0) {
+      setBathCutJobsState({ scopeKey: bathCutJobsScopeKey, value: [] });
+      setBathCutJobsLoadingState({ scopeKey: bathCutJobsScopeKey, value: false });
+      return () => {
+        cancelled = true;
+      };
+    }
+    const token = bathCutJobsReadGuard.capture();
+    if (!token) return () => { cancelled = true; };
+    setBathCutJobsLoadingState({ scopeKey: bathCutJobsScopeKey, value: true });
     Promise.all(
       latestReadyCutJobIds.map(async (cutJobId) => {
         try {
@@ -1351,45 +1671,98 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         }
       }),
     ).then((jobs) => {
-      if (!cancelled) setBathCutJobs(jobs.filter((job): job is CutJobDto => job !== null));
+      if (!cancelled && bathCutJobsReadGuard.isCurrent(token)) {
+        setBathCutJobsState({
+          scopeKey: bathCutJobsScopeKey,
+          value: jobs.filter((job): job is CutJobDto => job !== null),
+        });
+      }
     }).finally(() => {
-      if (!cancelled) setBathCutJobsLoading(false);
+      if (!cancelled && bathCutJobsReadGuard.isCurrent(token)) {
+        setBathCutJobsLoadingState({ scopeKey: bathCutJobsScopeKey, value: false });
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [cutColumnEnabled, latestReadyCutJobIds, latestReadyCutJobIdsKey]);
+  }, [
+    cutColumnEnabled,
+    latestReadyCutJobIds,
+    latestReadyCutJobIdsKey,
+    ordinaryReadActive,
+    bathCutJobsReadGuard.capture,
+    bathCutJobsReadGuard.isCurrent,
+    bathCutJobsScopeKey,
+  ]);
 
   // All distinct active cut jobs that contain details from THIS order (a detail
   // may be placed in several jobs — list them all). Same cut.view gate as the
   // column; powers the «Раскрой» sub-block in the additional-info panel.
-  const [cutOrderJobs, setCutOrderJobs] = useState<CutJobRef[]>([]);
-  const [cncOrderCuttingSequences, setCncOrderCuttingSequences] = useState<CncTelegramOrderCuttingSequence[]>([]);
+  const [cutOrderJobsState, setCutOrderJobsState] = useState<{
+    scopeKey: string;
+    value: CutJobRef[];
+  } | null>(null);
+  const cutOrderJobs = cutOrderJobsState?.scopeKey === showAsyncReadScopeKey
+    ? cutOrderJobsState.value
+    : [];
+  const [cncOrderCuttingSequencesState, setCncOrderCuttingSequencesState] = useState<{
+    scopeKey: string;
+    value: CncTelegramOrderCuttingSequence[];
+  } | null>(null);
+  const cncOrderCuttingSequences = cncOrderCuttingSequencesState?.scopeKey === showAsyncReadScopeKey
+    ? cncOrderCuttingSequencesState.value
+    : [];
   const refreshCutOrderJobs = useCallback(async (orderId?: number | null) => {
+    if (!ordinaryReadActive) return;
     if (!cutColumnEnabled || !orderId) {
-      setCutOrderJobs([]);
+      setCutOrderJobsState({ scopeKey: showAsyncReadScopeKey, value: [] });
       return;
     }
+    const token = showAsyncReadGuard.capture();
+    if (!token) return;
     try {
       const res = await cutApi.listPlacements({ orderIds: [orderId] });
-      setCutOrderJobs(res.jobs);
+      if (showAsyncReadGuard.isCurrent(token)) {
+        setCutOrderJobsState({ scopeKey: showAsyncReadScopeKey, value: res.jobs });
+      }
     } catch {
-      setCutOrderJobs([]);
+      if (showAsyncReadGuard.isCurrent(token)) {
+        setCutOrderJobsState({ scopeKey: showAsyncReadScopeKey, value: [] });
+      }
     }
-  }, [cutColumnEnabled]);
+  }, [
+    cutColumnEnabled,
+    ordinaryReadActive,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isCurrent,
+    showAsyncReadScopeKey,
+  ]);
 
   const refreshCncOrderCuttingSequences = useCallback(async (orderId?: number | null) => {
+    if (!ordinaryReadActive) return;
     if (!cutColumnEnabled || !orderId) {
-      setCncOrderCuttingSequences([]);
+      setCncOrderCuttingSequencesState({ scopeKey: showAsyncReadScopeKey, value: [] });
       return;
     }
+    const token = showAsyncReadGuard.capture();
+    if (!token) return;
     try {
       const res = await cncTelegramApi.orderCuttingSequences(orderId);
-      setCncOrderCuttingSequences(res.sequences);
+      if (showAsyncReadGuard.isCurrent(token)) {
+        setCncOrderCuttingSequencesState({ scopeKey: showAsyncReadScopeKey, value: res.sequences });
+      }
     } catch {
-      setCncOrderCuttingSequences([]);
+      if (showAsyncReadGuard.isCurrent(token)) {
+        setCncOrderCuttingSequencesState({ scopeKey: showAsyncReadScopeKey, value: [] });
+      }
     }
-  }, [cutColumnEnabled]);
+  }, [
+    cutColumnEnabled,
+    ordinaryReadActive,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isCurrent,
+    showAsyncReadScopeKey,
+  ]);
 
   useEffect(() => {
     void refreshCutOrderJobs(record?.order_id);
@@ -1400,7 +1773,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   }, [record?.order_id, refreshCncOrderCuttingSequences]);
 
   useEffect(() => {
-    if (!cutColumnEnabled || typeof window === 'undefined') return undefined;
+    if (!ordinaryReadActive || !cutColumnEnabled || typeof window === 'undefined') return undefined;
     const handler = (event: Event) => {
       const payload = readCutJobReadyEvent(event);
       if (!payload || !cutJobReadyAffects(payload, { detailIds: cutDetailIds, orderId: record?.order_id })) return;
@@ -1411,7 +1784,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     return () => {
       window.removeEventListener(CUT_JOB_READY_EVENT, handler);
     };
-  }, [cutColumnEnabled, cutDetailIds, record?.order_id, refreshCutOrderJobs, refreshCncOrderCuttingSequences]);
+  }, [cutColumnEnabled, cutDetailIds, ordinaryReadActive, record?.order_id, refreshCutOrderJobs, refreshCncOrderCuttingSequences]);
 
   const bathFilmUsage = useMemo(
     () => computeOrderBathFilmUsage(
@@ -1754,21 +2127,36 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     (employeesData?.data || []).map((item: any) => [item.employee_id, item.full_name])
   );
 
-  const [isRefreshingOrder, setIsRefreshingOrder] = useState(false);
+  const [refreshOrderState, setRefreshOrderState] = useState<{
+    scopeKey: string;
+    inFlight: boolean;
+  } | null>(null);
+  const isRefreshingOrder = refreshOrderState?.scopeKey === showAsyncReadScopeKey
+    && refreshOrderState.inFlight;
   const handleRefreshOrder = async () => {
     const orderId = Number(record?.order_id);
     const currentVersion = Number(backendOrder?.version ?? record?.version);
     if (!Number.isInteger(orderId) || orderId <= 0 || !Number.isInteger(currentVersion) || currentVersion < 0) return;
-    setIsRefreshingOrder(true);
+    const refreshToken = showAsyncReadGuard.capture();
+    if (!refreshToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(tabKey, 'order-refresh');
+    setRefreshOrderState({ scopeKey: showAsyncReadScopeKey, inFlight: true });
     try {
       const response = await ordersApi.refresh(orderId, { version: currentVersion });
+      if (!showAsyncReadGuard.isSameResource(refreshToken)) return;
       await queryResult.refetch();
+      if (!showAsyncReadGuard.isSameResource(refreshToken)) return;
       message.success(formatOrderRefreshSuccessMessage(response));
     } catch (error) {
-      console.error('Order refresh failed:', error);
-      message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+      if (showAsyncReadGuard.isSameResource(refreshToken)) {
+        console.error('Order refresh failed:', error);
+        message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+      }
     } finally {
-      setIsRefreshingOrder(false);
+      releaseOperationPin();
+      if (showAsyncReadGuard.isSameResource(refreshToken)) {
+        setRefreshOrderState({ scopeKey: showAsyncReadScopeKey, inFlight: false });
+      }
     }
   };
 
@@ -1831,6 +2219,9 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   // Функция экспорта в Excel
   const handleExportExcel = async (exportMode: OrderExcelExportMode = 'full') => {
     if (!record || isAnyExcelExporting || (exportMode === 'full' && !canViewFinancials)) return;
+    const exportToken = showAsyncReadGuard.capture();
+    if (!exportToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(tabKey, 'order-excel-export');
 
     const withoutPrices = exportMode === 'without-prices';
     setActiveExcelExport(exportMode);
@@ -1889,30 +2280,39 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         fileName
       );
 
+      if (!showAsyncReadGuard.isSameResource(exportToken)) return;
       message.success(withoutPrices
         ? 'Excel для производства успешно сгенерирован'
         : 'Excel файл успешно сгенерирован');
     } catch (error) {
+      if (!showAsyncReadGuard.isSameResource(exportToken)) return;
       const errorMessage = handleExcelError(error);
       message.error(errorMessage);
       console.error('Ошибка экспорта:', error);
     } finally {
-      setActiveExcelExport(null);
+      releaseOperationPin();
+      if (showAsyncReadGuard.isSameResource(exportToken)) setActiveExcelExport(null);
     }
   };
 
   const handleExportSnapshot = async () => {
     if (!record?.order_id || !canViewFinancials) return;
+    const exportToken = showAsyncReadGuard.capture();
+    if (!exportToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(tabKey, 'order-snapshot-export');
 
     setIsSnapshotExporting(true);
     try {
       await ordersApi.downloadSnapshot(record.order_id);
+      if (!showAsyncReadGuard.isSameResource(exportToken)) return;
       message.success('JSON snapshot заказа выгружен');
     } catch (error) {
+      if (!showAsyncReadGuard.isSameResource(exportToken)) return;
       message.error('Не удалось выгрузить JSON snapshot');
       console.error('Ошибка snapshot export:', error);
     } finally {
-      setIsSnapshotExporting(false);
+      releaseOperationPin();
+      if (showAsyncReadGuard.isSameResource(exportToken)) setIsSnapshotExporting(false);
     }
   };
 
@@ -1926,24 +2326,52 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       return;
     }
 
-    setMoveSubmitting(true);
+    const moveToken = moveCandidatesReadGuard.capture();
+    const showToken = showAsyncReadGuard.capture();
+    if (!moveToken || !showToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(tabKey, 'order-project-move');
+    const scopeKey = moveCandidatesScopeKey;
+    setMoveSubmittingState({ scopeKey, inFlight: true });
     try {
       await projectsApi.move(record.order_id, {
         targetProjectId: moveCreateNew ? undefined : moveTargetProjectId,
         createNew: moveCreateNew,
         idempotencyKey: createProjectMoveIdempotencyKey(),
       });
+      if (
+        !moveCandidatesReadGuard.isSameResource(moveToken)
+        || !showAsyncReadGuard.isSameResource(showToken)
+      ) return;
       setMoveModalOpen(false);
-      setMoveCreateNew(false);
-      setMoveTargetProjectId(undefined);
+      setMoveUiState({ scopeKey, createNew: false });
       await queryResult.refetch();
+      if (!showAsyncReadGuard.isSameResource(showToken)) return;
       message.success('Заказ перенесён в другой проект');
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Не удалось перенести заказ');
+      if (
+        moveCandidatesReadGuard.isSameResource(moveToken)
+        && showAsyncReadGuard.isSameResource(showToken)
+      ) {
+        message.error(error instanceof Error ? error.message : 'Не удалось перенести заказ');
+      }
     } finally {
-      setMoveSubmitting(false);
+      releaseOperationPin();
+      if (moveCandidatesReadGuard.isSameResource(moveToken)) {
+        setMoveSubmittingState({ scopeKey, inFlight: false });
+      }
     }
-  }, [moveCreateNew, moveTargetProjectId, queryResult, record?.order_id]);
+  }, [
+    moveCreateNew,
+    moveTargetProjectId,
+    moveCandidatesReadGuard.capture,
+    moveCandidatesReadGuard.isSameResource,
+    moveCandidatesScopeKey,
+    queryResult,
+    record?.order_id,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isSameResource,
+    tabKey,
+  ]);
 
   const canMoveOrderProject = Boolean(
     canEditOrderContent && featureFlags.projects && record?.order_id && record?.client_id,
@@ -1964,10 +2392,17 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
       okButtonProps: { danger: true },
       cancelText: 'Отмена',
       onOk: makeOrderDeleteHandler({
-        deleteFn: () =>
-          ordersApi.delete(Number(record.order_id), {
+        capturePublicationGuard: () => {
+          const token = showAsyncReadGuard.capture();
+          return token ? () => showAsyncReadGuard.isSameResource(token) : null;
+        },
+        deleteFn: () => runPageOwnedWorkspaceOperation(
+          tabKey,
+          'order-delete',
+          () => ordersApi.delete(Number(record.order_id), {
             version: Number(record.version ?? backendOrder?.version ?? 0),
           }),
+        ),
         onSuccess: () => {
           message.success('Заказ перемещён в корзину');
           navigate('/orders');
@@ -1982,7 +2417,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         onError: (m) => message.error(m),
       }),
     });
-  }, [backendOrder?.version, navigate, record?.order_id, record?.order_name, record?.version]);
+  }, [
+    backendOrder?.version,
+    navigate,
+    record?.order_id,
+    record?.order_name,
+    record?.version,
+    showAsyncReadGuard.capture,
+    showAsyncReadGuard.isSameResource,
+    tabKey,
+  ]);
 
   const { settings: showColumnSettings, saveSettings: saveShowColumnSettings } = useOrderDetailColumnPreferences(
     'orderShow',
@@ -2342,7 +2786,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           error: (msg) => message.error(msg),
         },
         onRestored: () => {
-          setDeletedOrder(null);
+          setDeletedOrderState({ scopeKey: showAsyncReadScopeKey, value: null });
           void queryResult.refetch();
         },
         onStale: () => {
@@ -2469,7 +2913,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   return (
     <Show
-      isLoading={showLoading}
+      isLoading={false}
       title={isOperational ? ' ' : showTitle}
       breadcrumb={isOperational ? false : (
         <Breadcrumb>
@@ -2719,7 +3163,16 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
         )
       )}
     >
-      {deletedOrderModel && deletedOrderRestoreHandler ? (
+      <OrderShowProgressiveSurface
+        state={orderShowLoading}
+        hasDeletedOrder={Boolean(deletedOrderModel)}
+        hasPrimaryData={hasOrderShowData}
+        queryError={queryResult.isError}
+        sectionError={!useBackendOrdersRead && detailsError}
+        onRetry={() => { void queryResult.refetch(); }}
+        onSectionRetry={() => { void refetchDetails(); }}
+      >
+        {deletedOrderModel && deletedOrderRestoreHandler ? (
         <DeletedOrderCard
           model={deletedOrderModel}
           onRestore={deletedOrderRestoreHandler}
@@ -2924,21 +3377,25 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
                   background: 'var(--app-surface)',
                 }}
               >
-                {activeInfoPanel === 'groups' && (
-                  useBackendOrdersRead && featureFlags.useBackendGroups && record?.order_id ? (
-                    <GroupLinksEditor
-                      orderId={record.order_id}
-                      version={record.version ?? backendOrder?.version ?? 0}
-                      initialGroups={record.groups ?? backendOrder?.groups ?? []}
-                    />
-                  ) : (
-                    <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>Группы недоступны</span>
-                  )
-                )}
+                <OrderLifecycleReadSurface active={activeInfoPanel === 'groups'}>
+                  {activeInfoPanel === 'groups' && (
+                    useBackendOrdersRead && featureFlags.useBackendGroups && record?.order_id ? (
+                      <GroupLinksEditor
+                        orderId={record.order_id}
+                        version={record.version ?? backendOrder?.version ?? 0}
+                        initialGroups={record.groups ?? backendOrder?.groups ?? []}
+                      />
+                    ) : (
+                      <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>Группы недоступны</span>
+                    )
+                  )}
+                </OrderLifecycleReadSurface>
 
-                {activeInfoPanel === 'deadlines' && (
-                  <OrderDeadlinePanel orderId={record.order_id} embedded />
-                )}
+                <OrderLifecycleReadSurface active={activeInfoPanel === 'deadlines'}>
+                  {activeInfoPanel === 'deadlines' && (
+                    <OrderDeadlinePanel orderId={record.order_id} embedded />
+                  )}
+                </OrderLifecycleReadSurface>
 
                 {canViewFinancials && activeInfoPanel === 'finance' && (
                   <div
@@ -3508,75 +3965,94 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
             client={exportClient ?? undefined}
           />}
           {cutEnabled && record?.order_id && (
-            <AddToCutModal
-              open={cutModalOpen}
-              orderIds={[record.order_id]}
-              orderNames={[record.order_name]}
-              detailIds={cutSelectedDetailIds}
-              nameSuffix={cutSelectedGroupName}
-              onClose={() => setCutModalOpen(false)}
-              onDone={() => {
-                setCutModalOpen(false);
-                setCutSelectMode(false);
-                setCutSelectedDetailIds([]);
-              }}
-            />
+            <OrderLifecycleReadSurface active={cutModalOpen}>
+              <AddToCutModal
+                open={cutModalOpen}
+                orderIds={[record.order_id]}
+                orderNames={[record.order_name]}
+                detailIds={cutSelectedDetailIds}
+                nameSuffix={cutSelectedGroupName}
+                onClose={() => setCutModalOpen(false)}
+                onDone={() => {
+                  setCutModalOpen(false);
+                  setCutSelectMode(false);
+                  setCutSelectedDetailIds([]);
+                }}
+              />
+            </OrderLifecycleReadSurface>
           )}
           {bazisCutVisible && record?.order_id && (
-            <AddToBazisCutModal
-              open={bazisCutModalOpen}
-              orderId={record.order_id}
-              detailIds={cutSelectedDetailIds}
-              onClose={() => setBazisCutModalOpen(false)}
-              onDone={() => {
-                setBazisCutModalOpen(false);
-                setCutSelectMode(false);
-                setCutSelectedDetailIds([]);
-              }}
-            />
+            <OrderLifecycleReadSurface active={bazisCutModalOpen}>
+              <AddToBazisCutModal
+                open={bazisCutModalOpen}
+                orderId={record.order_id}
+                detailIds={cutSelectedDetailIds}
+                onClose={() => setBazisCutModalOpen(false)}
+                onDone={() => {
+                  setBazisCutModalOpen(false);
+                  setCutSelectMode(false);
+                  setCutSelectedDetailIds([]);
+                }}
+              />
+            </OrderLifecycleReadSurface>
           )}
           {featureFlags.projects && record?.order_id && record?.client_id && (
-            <Modal
-              title="Перенести в другой проект"
-              open={moveModalOpen}
-              onCancel={() => {
-                setMoveModalOpen(false);
-                setMoveCreateNew(false);
-                setMoveTargetProjectId(undefined);
-              }}
-              onOk={() => void handleMoveProject()}
-              okText="Перенести"
-              cancelText="Отмена"
-              okButtonProps={{ loading: moveSubmitting }}
-            >
-              <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                <Checkbox
-                  checked={moveCreateNew}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setMoveCreateNew(checked);
-                    if (checked) {
-                      setMoveTargetProjectId(undefined);
-                    }
-                  }}
-                >
-                  Создать новый
-                </Checkbox>
-                <Select
-                  showSearch
-                  disabled={moveCreateNew}
-                  loading={moveCandidatesLoading}
-                  placeholder="Выберите проект"
-                  value={moveTargetProjectId}
-                  onChange={(value) => setMoveTargetProjectId(value)}
-                  options={moveProjectOptions}
-                  optionFilterProp="label"
-                />
-              </Space>
-            </Modal>
+            <OrderLifecycleReadSurface active={moveModalOpen}>
+              <Modal
+                title="Перенести в другой проект"
+                open={moveModalOpen}
+                onCancel={() => {
+                  setMoveModalOpen(false);
+                  setMoveUiState({ scopeKey: moveCandidatesScopeKey, createNew: false });
+                }}
+                onOk={() => void handleMoveProject()}
+                okText="Перенести"
+                cancelText="Отмена"
+                okButtonProps={{ loading: moveSubmitting }}
+              >
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <Checkbox
+                    checked={moveCreateNew}
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setMoveUiState({
+                        scopeKey: moveCandidatesScopeKey,
+                        createNew: checked,
+                        targetProjectId: checked ? undefined : moveTargetProjectId,
+                      });
+                    }}
+                  >
+                    Создать новый
+                  </Checkbox>
+                  <Select
+                    showSearch
+                    disabled={moveCreateNew}
+                    loading={moveCandidatesLoading}
+                    placeholder="Выберите проект"
+                    value={moveTargetProjectId}
+                    onChange={(value) => setMoveUiState({
+                      scopeKey: moveCandidatesScopeKey,
+                      createNew: false,
+                      targetProjectId: value,
+                    })}
+                    options={moveProjectOptions}
+                    optionFilterProp="label"
+                  />
+                  {moveCandidatesError ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message="Не удалось загрузить проекты"
+                      description={moveCandidatesError}
+                    />
+                  ) : null}
+                </Space>
+              </Modal>
+            </OrderLifecycleReadSurface>
           )}
         </div>
-      )}
+        )}
+      </OrderShowProgressiveSurface>
     </Show>
   );
 };

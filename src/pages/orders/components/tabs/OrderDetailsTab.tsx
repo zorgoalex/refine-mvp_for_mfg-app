@@ -2,7 +2,7 @@ import { Tooltip } from '../../../../ui/tooltipDelay';
 // Order Details Tab
 // Container for managing order details with toolbar and CRUD operations
 
-import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
+import React, { useState, useRef, forwardRef, useImperativeHandle, useCallback, useMemo, useEffect } from 'react';
 import { Card, Button, Space, Modal, message, Alert } from 'antd';
 import {
   PlusOutlined,
@@ -52,6 +52,15 @@ import { mapOrderDtoToFormValues } from '../../../../api/mappers/orderMapper';
 import type { TransferOrderDetailsResponse } from '../../../../api/types/orderApi.types';
 import { ordersApi } from '../../../../api/ordersApi';
 import { formatOrderRefreshSuccessMessage, mergeOrderRefreshDetails } from '../../orderRefresh';
+import {
+  OrderLifecycleReadSurface,
+  useOrderAsyncReadGuard,
+} from '../../../../query/orderLifecycleQueries';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import { readWorkspaceCheckpointAdapterState } from '../../../../workspace/workspaceCheckpointRegistry';
+import { useDeferredWorkspaceEntity } from '../../../../workspace/useDeferredWorkspaceEntity';
+import { acquireWorkspaceOperationPin } from '../../../../workspace/workspaceOperationPins';
 import {
   businessOrderDetails,
   isOrderDetailPlaceholder,
@@ -116,6 +125,13 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     applyOrderRefresh,
   } = useOrderFormStore();
   const storeApi = useOrderDraftStoreApi();
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || `/orders/edit/${header?.order_id ?? 'new'}`;
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'order-details-tab'),
+  ).current;
+  const refreshGuard = useOrderAsyncReadGuard(`order-details-refresh:${header?.order_id ?? 'new'}`);
+  const refreshScopeKey = `${refreshGuard.authNamespace}|order:${header?.order_id ?? 'new'}`;
 
   const groupingUserId = authSession.getUser()?.id ?? 'anon';
   const grouping = useDetailGrouping(groupingUserId, header?.order_id ?? 'new');
@@ -139,18 +155,47 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     [defaultSheetMaterialTypeId],
   );
 
+  const restoredModalOpen = restored?.detailModalOpen === true;
+  const restoredModalMode = restored?.detailModalMode === 'edit' ? 'edit' : 'create';
+  const restoredEditingDetailKey = readReactKey(restored?.editingDetailKey);
+  const restoreEditRequested = restoredModalOpen && restoredModalMode === 'edit';
+  const {
+    entity: editingDetail,
+    setEntity: setEditingDetail,
+    restoreReady: restoredEditReady,
+    restorePending: restoredEditPending,
+    cancelDeferredRestore: cancelDeferredDetailRestore,
+  } = useDeferredWorkspaceEntity({
+    restoreRequested: restoreEditRequested,
+    restoredKey: restoredEditingDetailKey,
+    entities: details,
+    getKey: (detail: OrderDetail) => detail.temp_id ?? detail.detail_id ?? null,
+  });
+  const [modalOpen, setModalOpen] = useState(
+    () => restoredModalOpen && (!restoreEditRequested || restoredEditReady),
+  );
+  const [refreshState, setRefreshState] = useState<{
+    scopeKey: string;
+    inFlight: boolean;
+  } | null>(null);
+  const isRefreshing = refreshState?.scopeKey === refreshScopeKey
+    && refreshState.inFlight;
+  const [modalMode, setModalMode] = useState<'create' | 'edit'>(
+    restoredModalMode,
+  );
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>(
+    () => readReactKeys(restored?.selectedRowKeys),
+  );
+  const [highlightedRowKey, setHighlightedRowKey] = useState<string | number | null>(
+    () => readReactKey(restored?.highlightedRowKey),
+  );
+  const [bulkEditModalOpen, setBulkEditModalOpen] = useState(
+    () => restored?.bulkEditModalOpen === true,
+  );
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
   );
-
-  const [modalOpen, setModalOpen] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
-  const [editingDetail, setEditingDetail] = useState<OrderDetail | undefined>();
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [highlightedRowKey, setHighlightedRowKey] = useState<React.Key | null>(null);
-  const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
   const [dragSelectionState, setDragSelectionState] = useState<DragSelectionState | null>(null);
   const tableRef = useRef<OrderDetailTableRef>(null);
   const didFocusInitialPlaceholderRef = useRef(false);
@@ -170,13 +215,19 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
     return () => cancelAnimationFrame(frame);
   }, [details, header?.order_id]);
 
+  useEffect(() => {
+    if (restoreEditRequested && restoredEditReady && editingDetail) setModalOpen(true);
+  }, [editingDetail, restoreEditRequested, restoredEditReady]);
+
   const cutEnabled = featureFlags.useBackendCut && can('cut.manage');
   const cutColumnEnabled = featureFlags.useBackendCut && can('cut.view');
-  const [addToCutOpen, setAddToCutOpen] = useState(false);
+  const [addToCutOpen, setAddToCutOpen] = useState(() => restored?.addToCutOpen === true);
   const bazisCutVisible = featureFlags.bazisCut;
   const bazisCutManage = can('cut.manage');
   const canRefreshOrder = !featureFlags.useBackendPermissions || can('orders.update');
-  const [addToBazisCutOpen, setAddToBazisCutOpen] = useState(false);
+  const [addToBazisCutOpen, setAddToBazisCutOpen] = useState(
+    () => restored?.addToBazisCutOpen === true,
+  );
   const selectedPersistedDetailIds = useMemo(
     () => selectedDetailIds(details as any[], selectedRowKeys),
     [details, selectedRowKeys],
@@ -193,7 +244,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         .filter((detailId): detailId is number => Number.isInteger(detailId) && detailId > 0),
     [details],
   );
-  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(() => restored?.transferOpen === true);
   const transferDetailIds = selectedPersistedDetailIds;
   const canTransferDetails = can('orders.update') && can('orders.view_financials');
   const canCreateTransferTarget = can('orders.create');
@@ -225,6 +276,21 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
   const transferDisabledReason = getTransferRowsDisabledReason(selectedRowKeys);
   const transferDisabled = !!transferDisabledReason;
   const transferTooltip = transferDisabledReason ?? `Перенести детали (${transferDetailIds.length})`;
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'order-details-tab', {
+    canCapture: () => dragSelectionState === null && !restoredEditPending,
+    capture: () => ({
+      detailModalOpen: modalOpen,
+      detailModalMode: modalMode,
+      editingDetailKey: editingDetail?.temp_id ?? editingDetail?.detail_id ?? null,
+      selectedRowKeys: selectedRowKeys.filter(isSerializableReactKey),
+      highlightedRowKey: isSerializableReactKey(highlightedRowKey) ? highlightedRowKey : null,
+      bulkEditModalOpen,
+      addToCutOpen,
+      addToBazisCutOpen,
+      transferOpen,
+    }),
+  });
   const embeddedCutJobMaps = useMemo(() => buildCutJobLinkMapsFromDetails(details), [details]);
   const fetchedCutJobMaps = useCutDetailLastReady({
     enabled: cutColumnEnabled,
@@ -351,6 +417,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
 
   // Handle create new detail via modal
   const handleCreate = () => {
+    cancelDeferredDetailRestore();
     setModalMode('create');
     setEditingDetail(undefined);
     setModalOpen(true);
@@ -377,6 +444,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
 
   // Handle edit existing detail
   const handleEdit = (detail: OrderDetail) => {
+    cancelDeferredDetailRestore();
     setModalMode('edit');
     setEditingDetail(detail);
     setModalOpen(true);
@@ -478,7 +546,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
 
   // Handle row selection change
   const handleSelectChange = (newSelectedRowKeys: React.Key[]) => {
-    setSelectedRowKeys(newSelectedRowKeys);
+          setSelectedRowKeys(newSelectedRowKeys.filter(isSerializableReactKey));
     // Clear drag selection state when selection changes
     setDragSelectionState(null);
   };
@@ -504,7 +572,7 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
       message.warning(disabledReason);
       return;
     }
-    setSelectedRowKeys(rowKeys);
+      setSelectedRowKeys(rowKeys.filter(isSerializableReactKey));
     setDragSelectionState(null);
     setTransferOpen(true);
   }, [getTransferRowsDisabledReason]);
@@ -667,6 +735,9 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
       message.warning('Сначала сохраните заказ');
       return;
     }
+    const refreshToken = refreshGuard.capture();
+    if (!refreshToken) return;
+    const releaseOperationPin = acquireWorkspaceOperationPin(workspaceKey, 'order-refresh');
 
     recalculateSums();
     const afterRecalculate = storeApi.getState();
@@ -675,10 +746,11 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
       afterRecalculate.version,
     );
 
-    setIsRefreshing(true);
+    setRefreshState({ scopeKey: refreshScopeKey, inFlight: true });
     try {
       const baseVersion = storeApi.getState().version;
       const response = await ordersApi.refresh(orderId, { version: baseVersion });
+      if (!refreshGuard.isSameResource(refreshToken)) return;
       if (response.order.version !== response.version) {
         message.error('Заказ изменён другим пользователем. Перезагрузите карточку перед сохранением.');
         return;
@@ -691,10 +763,15 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
       );
       message.success(formatOrderRefreshSuccessMessage(response));
     } catch (error) {
-      console.error('Order refresh failed:', error);
-      message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+      if (refreshGuard.isSameResource(refreshToken)) {
+        console.error('Order refresh failed:', error);
+        message.error('Не удалось обновить заказ. Обновите карточку и повторите действие.');
+      }
     } finally {
-      setIsRefreshing(false);
+      releaseOperationPin();
+      if (refreshGuard.isSameResource(refreshToken)) {
+        setRefreshState({ scopeKey: refreshScopeKey, inFlight: false });
+      }
     }
   };
 
@@ -961,60 +1038,85 @@ export const OrderDetailsTab = forwardRef<OrderDetailsTabRef, { isSaving?: boole
         />
 
         {/* Modal */}
-        <OrderDetailModal
-          open={modalOpen}
-          mode={modalMode}
-          detail={editingDetail}
-          onSave={handleSave}
-          onCancel={() => {
-            setModalOpen(false);
-            setEditingDetail(undefined);
-          }}
-        />
+        <OrderLifecycleReadSurface active={modalOpen}>
+          <OrderDetailModal
+            open={modalOpen}
+            mode={modalMode}
+            detail={editingDetail}
+            onSave={handleSave}
+            onCancel={() => {
+              cancelDeferredDetailRestore();
+              setModalOpen(false);
+              setEditingDetail(undefined);
+            }}
+          />
+        </OrderLifecycleReadSurface>
 
         {/* Bulk Edit Modal */}
-        <BulkEditModal
-          open={bulkEditModalOpen}
-          selectedCount={selectedRowKeys.length}
-          totalCount={businessDetails.length}
-          onApply={handleBulkEditApply}
-          onCancel={() => setBulkEditModalOpen(false)}
-        />
+        <OrderLifecycleReadSurface active={bulkEditModalOpen}>
+          <BulkEditModal
+            open={bulkEditModalOpen}
+            selectedCount={selectedRowKeys.length}
+            totalCount={businessDetails.length}
+            onApply={handleBulkEditApply}
+            onCancel={() => setBulkEditModalOpen(false)}
+          />
+        </OrderLifecycleReadSurface>
 
         {/* Add to Cut Modal */}
         {cutEnabled && header?.order_id != null && (
-          <AddToCutModal
-            open={addToCutOpen}
-            orderIds={[header.order_id]}
-            orderNames={[header.order_name]}
-            detailIds={eligibleCutDetailIds}
-            nameSuffix={cutSelectedGroupName}
-            onClose={() => setAddToCutOpen(false)}
-            onDone={() => { setAddToCutOpen(false); handleSelectChange([]); }}
-          />
+          <OrderLifecycleReadSurface active={addToCutOpen}>
+            <AddToCutModal
+              open={addToCutOpen}
+              orderIds={[header.order_id]}
+              orderNames={[header.order_name]}
+              detailIds={eligibleCutDetailIds}
+              nameSuffix={cutSelectedGroupName}
+              onClose={() => setAddToCutOpen(false)}
+              onDone={() => { setAddToCutOpen(false); handleSelectChange([]); }}
+            />
+          </OrderLifecycleReadSurface>
         )}
         {bazisCutVisible && header?.order_id != null && (
-          <AddToBazisCutModal
-            open={addToBazisCutOpen}
-            orderId={header.order_id}
-            detailIds={bazisCutDetailIds}
-            onClose={() => setAddToBazisCutOpen(false)}
-            onDone={() => handleSelectChange([])}
-          />
+          <OrderLifecycleReadSurface active={addToBazisCutOpen}>
+            <AddToBazisCutModal
+              open={addToBazisCutOpen}
+              orderId={header.order_id}
+              detailIds={bazisCutDetailIds}
+              onClose={() => setAddToBazisCutOpen(false)}
+              onDone={() => handleSelectChange([])}
+            />
+          </OrderLifecycleReadSurface>
         )}
         {header?.order_id != null && (
-          <OrderDetailTransferModal
-            open={transferOpen}
-            sourceOrderId={header.order_id}
-            sourceOrderName={header.order_name || ''}
-            sourceVersion={sourceVersion}
-            detailIds={transferDetailIds}
-            canCreateTarget={canCreateTransferTarget}
-            onClose={() => setTransferOpen(false)}
-            onDone={handleTransferDone}
-          />
+          <OrderLifecycleReadSurface active={transferOpen}>
+            <OrderDetailTransferModal
+              open={transferOpen}
+              sourceOrderId={header.order_id}
+              sourceOrderName={header.order_name || ''}
+              sourceVersion={sourceVersion}
+              detailIds={transferDetailIds}
+              canCreateTarget={canCreateTransferTarget}
+              onClose={() => setTransferOpen(false)}
+              onDone={handleTransferDone}
+            />
+          </OrderLifecycleReadSurface>
         )}
       </Space>
     </Card>
   );
 });
+
+function isSerializableReactKey(value: React.Key | null | undefined): value is string | number {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
+}
+
+function readReactKey(value: unknown): string | number | null {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))
+    ? value
+    : null;
+}
+
+function readReactKeys(value: unknown): Array<string | number> {
+  return Array.isArray(value) ? value.map(readReactKey).filter(isSerializableReactKey) : [];
+}

@@ -1448,6 +1448,34 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/orders/name-suggestion:
+    get:
+      tags:
+        - Orders
+      operationId: getNextOrderName
+      summary: Предложить следующий числовой номер заказа
+      security:
+        - bearerAuth: []
+      x-permission: orders.view
+      responses:
+        '200':
+          description: Следующий доступный числовой номер заказа
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - suggestedOrderName
+                properties:
+                  suggestedOrderName:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/orders/form-data:
     get:
       tags:

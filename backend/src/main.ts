@@ -6,15 +6,25 @@ import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { ApiErrorFilter } from './common/errors/api-error.filter';
 import { createRequestIdMiddleware } from './common/request-id/request-id.middleware';
+import {
+  createRequestContextMiddleware,
+  RequestContextService,
+} from './common/request-context/request-context.service';
 import { toNestGlobalPrefix } from './config/api-prefix';
 import { createCorsRuntimeOptions, isOriginAllowed } from './config/cors';
 import type { BackendEnv } from './config/env.validation';
 import { setupSwagger } from './config/swagger';
 import { assertFontAvailable } from './modules/cut/render/sheet-png';
+import {
+  createPerformanceRumBodyParser,
+  createPerformanceRumFormBodyParser,
+  performanceRumBodyPath,
+} from './performance/performance-rum-body-parser';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true, bodyParser: false });
   const config = app.get(ConfigService<BackendEnv, true>);
+  const apiPrefix = config.get('API_PREFIX', { infer: true });
 
   // Fail-fast if the cut-render font is missing while cut jobs are enabled:
   // resvg silently drops <text> without it (plan §7 MINOR-16).
@@ -27,11 +37,19 @@ async function bootstrap(): Promise<void> {
     CORS_ALLOW_CREDENTIALS: config.get('CORS_ALLOW_CREDENTIALS', { infer: true }),
   });
 
+  // RUM is a tiny, fixed-shape payload. Mount its parser first so oversized
+  // unauthenticated or invalid traffic cannot consume the global 50 MiB budget.
+  app.use(
+    performanceRumBodyPath(apiPrefix),
+    createPerformanceRumBodyParser(),
+    createPerformanceRumFormBodyParser(),
+  );
   app.use(json({ limit: '50mb' }));
   app.use(urlencoded({ limit: '50mb', extended: true }));
   app.use(createRequestIdMiddleware(config.get('REQUEST_ID_HEADER', { infer: true })));
+  app.use(createRequestContextMiddleware(app.get(RequestContextService)));
   app.useGlobalFilters(new ApiErrorFilter());
-  app.setGlobalPrefix(toNestGlobalPrefix(config.get('API_PREFIX', { infer: true })), {
+  app.setGlobalPrefix(toNestGlobalPrefix(apiPrefix), {
     exclude: [
       { path: 'health/live', method: RequestMethod.GET },
       { path: 'health/ready', method: RequestMethod.GET },

@@ -1,15 +1,15 @@
 // Main PDF Import Modal with wizard steps (2 steps: upload + validation)
 
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef, useLayoutEffect } from 'react';
 import { Alert, Modal, Steps, Button, Space, message } from 'antd';
 import { FilePdfOutlined, CheckCircleOutlined, ArrowLeftOutlined, ArrowRightOutlined, TableOutlined } from '@ant-design/icons';
-import { useList } from '@refinedev/core';
+import { useList } from '../../../../query/orderLifecycleQueries';
 import { DraggableModalWrapper } from '../../../../components/DraggableModalWrapper';
-import { usePdfParser } from './hooks/usePdfParser';
+import { usePdfParser, type PdfParserCheckpoint } from './hooks/usePdfParser';
 import { useImportValidation } from './hooks';
 import { PdfUploadStep } from './steps/PdfUploadStep';
 import { PdfLayoutMappingStep, ValidationStep } from './steps';
-import type { ReferenceData } from './types/importTypes';
+import type { ReferenceData, ValidatedRow } from './types/importTypes';
 import { IMPORT_DEFAULTS } from './types/importTypes';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { calculateOrderDetailArea } from '../../../../utils/orderArea';
@@ -19,6 +19,17 @@ import {
   pdfSectionMaterialKey,
   type PdfSectionMaterialOverrides,
 } from './utils/pdfSectionMaterialMapping';
+import { useKeepAlive } from '../../../../components/workspace/KeepAliveContext';
+import { useWorkspaceCheckpointAdapter } from '../../../../workspace/workspaceCheckpointReact';
+import {
+  deleteWorkspaceCheckpointAdapterState,
+  readWorkspaceCheckpointAdapterState,
+} from '../../../../workspace/workspaceCheckpointRegistry';
+import {
+  releaseWorkspaceAttachment,
+  retainWorkspaceAttachment,
+} from '../../../../workspace/workspaceAttachmentRegistry';
+import { runPageOwnedWorkspaceOperation } from '../../../../workspace/workspaceOperationPins';
 
 type PdfImportStep = 'upload' | 'mapping' | 'validation';
 
@@ -34,16 +45,48 @@ const STEPS: { key: PdfImportStep; title: string; icon: React.ReactNode }[] = [
 ];
 
 export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose }) => {
+  const { tabKey } = useKeepAlive();
+  const workspaceKey = tabKey || '/orders/create';
+  const restored = useRef(
+    readWorkspaceCheckpointAdapterState(workspaceKey, 'pdf-import-wizard'),
+  ).current;
+  const restoreStartedRef = useRef(false);
   const [currentStep, setCurrentStep] = useState<PdfImportStep>('upload');
 
   const pdfParser = usePdfParser();
   const importValidation = useImportValidation();
   const [sectionMaterialOverrides, setSectionMaterialOverrides] =
-    useState<PdfSectionMaterialOverrides>({});
+    useState<PdfSectionMaterialOverrides>(() => readPdfSectionOverrides(
+      restored?.sectionMaterialOverrides,
+    ));
 
   const addPdfImportedDetail = useOrderFormStore((state) => state.addPdfImportedDetail);
   const recalculateFinancials = useOrderFormStore((state) => state.recalculateFinancials);
   const materialRecency = useRecentReferences('sheet_material_types');
+
+  useWorkspaceCheckpointAdapter(workspaceKey, 'pdf-import-wizard', {
+    canCapture: () => !pdfParser.isLoading,
+    capture: () => ({
+      open,
+      currentStep,
+      sectionMaterialOverrides,
+      parser: pdfParser.createCheckpoint(),
+      validatedRows: importValidation.validatedRows,
+    }),
+  });
+
+  useLayoutEffect(() => {
+    if (!open || restoreStartedRef.current || restored?.open !== true) return;
+    restoreStartedRef.current = true;
+    const parserCheckpoint = readPdfParserCheckpoint(restored.parser);
+    if (!parserCheckpoint) {
+      setCurrentStep('upload');
+      return;
+    }
+    pdfParser.restoreCheckpoint(parserCheckpoint);
+    importValidation.restoreValidatedRows(readPdfValidatedRows(restored.validatedRows));
+    setCurrentStep(readPdfImportStep(restored.currentStep));
+  }, [importValidation, open, pdfParser, restored]);
 
   // Load reference data
   const { data: edgeTypesData } = useList({
@@ -114,9 +157,22 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
   const currentStepIndex = visibleSteps.findIndex(s => s.key === currentStep);
 
   const handlePdfUpload = useCallback((file: File) => {
-    setSectionMaterialOverrides({});
-    return pdfParser.parseFile(file);
-  }, [pdfParser.parseFile]);
+    return runPageOwnedWorkspaceOperation(workspaceKey, 'order-pdf-import', async () => {
+      setSectionMaterialOverrides({});
+      const retained = retainWorkspaceAttachment({
+        workspaceKey,
+        attachmentKey: 'pdf-file',
+        value: file,
+        kind: 'file',
+      });
+      if (!retained) {
+        const error = new Error('Лимит памяти черновиков исчерпан. Закройте другой импорт и повторите.');
+        message.error(error.message);
+        throw error;
+      }
+      return pdfParser.parseFile(file);
+    });
+  }, [pdfParser.parseFile, workspaceKey]);
 
   const handleSectionMaterialMappingChange = useCallback((
     sourceName: string,
@@ -141,7 +197,11 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
       return;
     }
     if (currentStep === 'mapping') {
-      const rows = await pdfParser.confirmLayouts();
+      const rows = await runPageOwnedWorkspaceOperation(
+        workspaceKey,
+        'order-pdf-import',
+        pdfParser.confirmLayouts,
+      );
       if (!rows) return;
       importValidation.processDirectRows(applyPdfSectionMaterialOverrides(
         rows,
@@ -150,7 +210,7 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
       ));
       setCurrentStep('validation');
     }
-  }, [currentStep, pdfParser, importValidation, sectionMaterialOverrides]);
+  }, [currentStep, pdfParser, importValidation, sectionMaterialOverrides, workspaceKey]);
 
   const handleBack = useCallback(() => {
     const idx = currentStepIndex;
@@ -172,8 +232,10 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
     importValidation.reset();
     setSectionMaterialOverrides({});
     setCurrentStep('upload');
+    releaseWorkspaceAttachment(workspaceKey, 'pdf-file');
+    deleteWorkspaceCheckpointAdapterState(workspaceKey, 'pdf-import-wizard');
     onClose();
-  }, [pdfParser, importValidation, onClose]);
+  }, [pdfParser, importValidation, onClose, workspaceKey]);
 
   const handleImport = useCallback(() => {
     const validRows = importValidation.getValidRows();
@@ -303,7 +365,6 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
   };
 
   return (
-    <DraggableModalWrapper open={open}>
       <Modal
         title={
           <Space>
@@ -361,6 +422,11 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
             </Space>
           </div>
         }
+        modalRender={(modal) => (
+          <DraggableModalWrapper open={open} workspaceKey={workspaceKey}>
+            {modal}
+          </DraggableModalWrapper>
+        )}
       >
         <Steps
           current={currentStepIndex}
@@ -381,6 +447,44 @@ export const PdfImportModal: React.FC<PdfImportModalProps> = ({ open, onClose })
           {renderStepContent()}
         </div>
       </Modal>
-    </DraggableModalWrapper>
   );
 };
+
+function readPdfImportStep(value: unknown): PdfImportStep {
+  return value === 'mapping' || value === 'validation' ? value : 'upload';
+}
+
+function readPdfSectionOverrides(value: unknown): PdfSectionMaterialOverrides {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).flatMap(([key, materialId]) => (
+    typeof materialId === 'number' && Number.isSafeInteger(materialId) && materialId > 0
+      ? [[key, materialId]]
+      : []
+  )));
+}
+
+function readPdfParserCheckpoint(value: unknown): PdfParserCheckpoint | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const checkpoint = value as unknown as PdfParserCheckpoint;
+  return Array.isArray(checkpoint.importRows)
+    && Array.isArray(checkpoint.genericTables)
+    && checkpoint.layoutMappings !== null
+    && typeof checkpoint.layoutMappings === 'object'
+    && Array.isArray(checkpoint.patternMatches)
+    && Array.isArray(checkpoint.layoutIssues)
+    && checkpoint.unresolvedLineActions !== null
+    && typeof checkpoint.unresolvedLineActions === 'object'
+    ? checkpoint
+    : null;
+}
+
+function readPdfValidatedRows(value: unknown): ValidatedRow[] {
+  return Array.isArray(value)
+    ? value.filter((row): row is ValidatedRow => (
+        !!row && typeof row === 'object' && !Array.isArray(row)
+        && typeof row.isValid === 'boolean'
+        && Array.isArray(row.errors)
+        && Array.isArray(row.warnings)
+      ))
+    : [];
+}

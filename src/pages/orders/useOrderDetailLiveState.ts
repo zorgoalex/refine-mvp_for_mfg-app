@@ -9,7 +9,10 @@ import {
   type OrderDetailLiveStateSnapshot,
 } from '../../api/orderRealtimeApi';
 import type { CutDetailLastReadyJobRef } from '../../api/types/cutApi.types';
+import { setPerformanceRumRealtimeMode } from '../../performance/PerformanceRumBridge';
+import { useAppActivitySnapshot } from '../../performance/appActivityCoordinator';
 import { areCutJobLinkMapsEqual, buildCutJobLinkMaps } from './cutColumnHelpers';
+import { scheduleOrderRead } from '../../query/orderReadPriority';
 
 const INVALIDATION_COALESCE_MS = 40;
 const DISCONNECTED_POLL_GRACE_MS = 10_000;
@@ -24,6 +27,7 @@ const AUTH_RECONNECT_LEAD_MS = 30_000;
 interface UseOrderDetailLiveStateArgs {
   enabled: boolean;
   active: boolean;
+  authScopeKey: string;
   orderId?: number | null;
 }
 
@@ -46,20 +50,22 @@ const EMPTY_STATE: OrderDetailLiveStateMaps = {
 export function useOrderDetailLiveState({
   enabled,
   active,
+  authScopeKey,
   orderId,
 }: UseOrderDetailLiveStateArgs): OrderDetailLiveStateMaps {
-  const visible = useDocumentVisible();
-  const authScopeKey = useOrderRealtimeAuthScopeKey();
+  const { documentVisible: visible } = useAppActivitySnapshot();
   const normalizedOrderId = Number(orderId);
   const scopeKey = Number.isSafeInteger(normalizedOrderId) && normalizedOrderId > 0
-    ? JSON.stringify([authScopeKey, normalizedOrderId])
+    ? `${authScopeKey}|order:${normalizedOrderId}`
     : '';
   const [state, setState] = useState<OrderDetailLiveStateMaps>(() => EMPTY_STATE);
 
   useEffect(() => {
     if (!enabled || !active || !visible || !scopeKey) return undefined;
+    setPerformanceRumRealtimeMode('initializing');
 
-    const isCurrentScope = () => authScopeKey === getOrderRealtimeAuthScopeKey();
+    const sessionScopeAtStart = getOrderRealtimeAuthScopeKey();
+    const isCurrentScope = () => sessionScopeAtStart === getOrderRealtimeAuthScopeKey();
 
     let disposed = false;
     let terminal = false;
@@ -81,6 +87,7 @@ export function useOrderDetailLiveState({
     let invalidationBarrier: Promise<boolean> | null = null;
     let invalidationRequiresUnconditionalSnapshot = false;
     let authTimer: number | null = null;
+    let cancelInitialRead = () => undefined;
 
     setState((current) => current.scopeKey === scopeKey
       ? current
@@ -100,6 +107,8 @@ export function useOrderDetailLiveState({
     };
 
     const stopAll = () => {
+      cancelInitialRead();
+      cancelInitialRead = () => undefined;
       stopTransport();
       snapshotAbort?.abort();
       snapshotAbort = null;
@@ -111,6 +120,7 @@ export function useOrderDetailLiveState({
 
     const failTerminal = () => {
       terminal = true;
+      setPerformanceRumRealtimeMode('terminal-no-transport');
       stopAll();
     };
 
@@ -150,6 +160,7 @@ export function useOrderDetailLiveState({
           etag = response.etag ?? etag;
           snapshotCursor = response.streamCursor || snapshotCursor;
           streamEnabled = response.streamEnabled;
+          if (!streamEnabled) setPerformanceRumRealtimeMode('compact-fallback');
           if (response.snapshot) applySnapshot(response.snapshot);
           return true;
         } catch (error) {
@@ -183,6 +194,9 @@ export function useOrderDetailLiveState({
       periodicTimer = window.setTimeout(async () => {
         periodicTimer = null;
         if (!isCurrentScope()) return;
+        if (!connected && Date.now() - disconnectedAt >= DISCONNECTED_POLL_GRACE_MS) {
+          setPerformanceRumRealtimeMode('compact-fallback');
+        }
         const refreshed = await refreshSnapshot();
         if (!isCurrentScope()) return;
         if (refreshed && streamEnabled && !connected) scheduleReconnect(0);
@@ -193,6 +207,7 @@ export function useOrderDetailLiveState({
     const markDisconnected = () => {
       if (connected) disconnectedAt = Date.now();
       connected = false;
+      setPerformanceRumRealtimeMode(streamEnabled ? 'reconnecting' : 'compact-fallback');
       schedulePeriodic();
     };
 
@@ -224,6 +239,7 @@ export function useOrderDetailLiveState({
       if (action === 'reset') queueInvalidationSnapshot(true);
       if (action === 'disabled') {
         streamEnabled = false;
+        setPerformanceRumRealtimeMode('compact-fallback');
         streamAbort?.abort();
       }
       if (action === 'protocol_error') {
@@ -308,6 +324,7 @@ export function useOrderDetailLiveState({
         if (disposed || !isCurrentScope() || controller.signal.aborted) return;
         if (response.status === 204) {
           streamEnabled = false;
+          setPerformanceRumRealtimeMode('compact-fallback');
           return;
         }
         if (response.status === 429) {
@@ -325,6 +342,7 @@ export function useOrderDetailLiveState({
 
         connected = true;
         connectedAt = Date.now();
+        setPerformanceRumRealtimeMode('connected');
         schedulePeriodic();
         scheduleAuthReconnect(controller, tokenAtOpen);
         await consumeStream(response, controller);
@@ -386,12 +404,14 @@ export function useOrderDetailLiveState({
       streamAbort.abort();
     });
 
-    void (async () => {
-      const ready = await refreshSnapshot();
-      if (disposed || terminal || !isCurrentScope()) return;
-      schedulePeriodic();
-      if (ready && streamEnabled) scheduleReconnect(0);
-    })();
+    cancelInitialRead = scheduleOrderRead('after-first-frame', () => {
+      void (async () => {
+        const ready = await refreshSnapshot();
+        if (disposed || terminal || !isCurrentScope()) return;
+        schedulePeriodic();
+        if (ready && streamEnabled) scheduleReconnect(0);
+      })();
+    });
 
     return () => {
       disposed = true;
@@ -497,19 +517,6 @@ function isOrderRealtimeResetReason(value: unknown): boolean {
     || value === 'buffer_overflow'
     || value === 'schema_unsupported'
     || value === 'listener_recovered_with_gap';
-}
-
-function useDocumentVisible(): boolean {
-  const [visible, setVisible] = useState(() => (
-    typeof document === 'undefined' || document.visibilityState !== 'hidden'
-  ));
-  useEffect(() => {
-    if (typeof document === 'undefined') return undefined;
-    const update = () => setVisible(document.visibilityState !== 'hidden');
-    document.addEventListener('visibilitychange', update);
-    return () => document.removeEventListener('visibilitychange', update);
-  }, []);
-  return visible;
 }
 
 function areNumberMapsEqual(

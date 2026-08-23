@@ -5,12 +5,13 @@ import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import { Form, InputNumber, DatePicker, Row, Col, Select, Switch, Dropdown } from 'antd';
 import type { MenuProps } from 'antd';
 import { CalculatorOutlined, DownOutlined } from '@ant-design/icons';
-import { useSelect } from '@refinedev/antd';
+import { useSelect } from '../../../../query/orderLifecycleQueries';
 import { useOrderFormStore } from '../../../../stores/orderFormStore';
 import { formatNumber, numberParser } from '../../../../utils/numberFormat';
 import { CurrencyInput } from '../../../../components/CurrencyInput';
 import { CURRENCY_SYMBOL } from '../../../../config/currency';
-import { useAppSettings, SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { SETTING_KEYS } from '../../../../hooks/useAppSettings';
+import { useOrderAppSettings } from '../../../../hooks/useOrderAppSettings';
 import { createBackendSelectProps, useOrderFormData } from '../../../../hooks/useOrderFormData';
 import dayjs from 'dayjs';
 import { calculateOrderTotalArea } from '../../../../utils/orderArea';
@@ -18,11 +19,11 @@ import { businessOrderDetails } from '../../../../utils/orderDetailRows';
 
 export const OrderFinanceSection: React.FC = () => {
   const { header, updateHeaderField, payments, details } = useOrderFormStore();
+  const { getSetting } = useOrderAppSettings();
   const businessDetails = useMemo(
     () => businessOrderDetails(details),
     [details],
   );
-  const { getSetting } = useAppSettings();
   const orderFormData = useOrderFormData();
   const useBackendReferences = orderFormData.enabled;
 

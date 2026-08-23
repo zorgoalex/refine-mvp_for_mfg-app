@@ -1,5 +1,6 @@
 import type { CurrentUser } from '../../permissions/current-user';
 import type { PermissionName, UserRole } from '../../permissions/permissions';
+import type { RolePolicy } from '../../permissions/policies/role-policies';
 
 export interface LoginCommand {
   username: string;
@@ -101,6 +102,8 @@ export interface AuthResponseUser {
   role: UserRole;
   roleId: number;
   permissions: readonly PermissionName[];
+  permissionsVersion: number;
+  policyScopes: RolePolicy;
 }
 
 export interface AuthResponse {
