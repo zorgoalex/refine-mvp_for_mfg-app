@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isOrderDetailStatusRefreshDue,
   mergeOrderDetailStatusFreshness,
+  shouldStopOrderDetailStatusRefresh,
 } from './orderDetailStatusRefresh';
 
 describe('legacy order detail status activity refresh', () => {
@@ -21,5 +22,11 @@ describe('legacy order detail status activity refresh', () => {
 
   it('keeps a newer successful poll when an older cached baseline is observed', () => {
     expect(mergeOrderDetailStatusFreshness(20_000, 10_000)).toBe(20_000);
+  });
+
+  it('stops polling a stale order after backend confirms it does not exist', () => {
+    expect(shouldStopOrderDetailStatusRefresh({ status: 404, code: 'ORDER_NOT_FOUND' })).toBe(true);
+    expect(shouldStopOrderDetailStatusRefresh({ status: 503, code: 'INTERNAL_ERROR' })).toBe(false);
+    expect(shouldStopOrderDetailStatusRefresh(new TypeError('network unavailable'))).toBe(false);
   });
 });
