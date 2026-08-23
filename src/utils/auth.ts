@@ -1,7 +1,11 @@
 import type { AuthTokens, UserIdentity } from '../types/auth';
 import { authApi } from '../api/authApi';
 import { authSession } from '../api/authSession';
-import { getJwtExpirationTime } from '../api/httpClient';
+import {
+  ACCESS_TOKEN_REFRESH_WINDOW_MS,
+  canUseAccessTokenAfterEarlyRefreshFailure,
+  getJwtExpirationTime,
+} from '../api/httpClient';
 import { legacyApiRoutes } from '../api/legacyApiRoutes';
 import { featureFlags } from '../config/featureFlags';
 
@@ -112,13 +116,13 @@ export const authStorage = {
 };
 
 /**
- * Проверяет, истек ли срок действия JWT токена
+ * Проверяет, истёк ли JWT или вошёл в окно заблаговременного обновления.
  * @param token JWT токен
- * @returns true если токен истек или невалиден
+ * @returns true если токен пора обновить или он невалиден
  */
 export function isTokenExpired(token: string): boolean {
   const expiresAt = getJwtExpirationTime(token);
-  return expiresAt === null || expiresAt <= Date.now();
+  return expiresAt === null || expiresAt <= Date.now() + ACCESS_TOKEN_REFRESH_WINDOW_MS;
 }
 
 /**
@@ -133,6 +137,10 @@ export async function refreshAccessToken(): Promise<string | null> {
       const data = await authApi.refresh();
       return data.accessToken;
     } catch (error) {
+      const currentToken = authSession.getAccessToken();
+      if (currentToken && canUseAccessTokenAfterEarlyRefreshFailure(currentToken, error)) {
+        return currentToken;
+      }
       console.error('Backend token refresh error:', error);
       authStorage.clear();
       authSession.expire();

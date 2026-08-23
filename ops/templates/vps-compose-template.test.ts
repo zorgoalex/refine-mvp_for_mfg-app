@@ -10,6 +10,16 @@ function readTemplate(path: string): string {
 }
 
 describe('VPS compose backend runtime flags', () => {
+  it('keeps browser auth sessions active for 48 hours by default', () => {
+    const compose = readTemplate('ops/templates/docker-compose.vps.yml');
+    const envExample = readTemplate('ops/templates/env.vps.example');
+
+    expect(compose).toContain(
+      'AUTH_SESSION_TTL_SECONDS: ${AUTH_SESSION_TTL_SECONDS:-172800}',
+    );
+    expect(envExample).toContain('AUTH_SESSION_TTL_SECONDS=172800');
+  });
+
   it('injects exact identity and realtime gates into the backend runtime environment', () => {
     const identityOverlay = readTemplate(
       'ops/templates/docker-compose.backend-build-identity.yml',

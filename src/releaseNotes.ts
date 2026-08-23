@@ -31,6 +31,19 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-23",
+    title: "Авторизация: сессия без внезапных ошибок",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    changed: [
+      "Срок пользовательской сессии увеличен до 48 часов без повторного ввода пароля.",
+    ],
+    fixed: [
+      "Access token теперь обновляется заранее, поэтому первый запрос после длительного простоя больше не получает промежуточную ошибку 401.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-23",
     title: "Раскрой: фильтры списка рядом с заданиями",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

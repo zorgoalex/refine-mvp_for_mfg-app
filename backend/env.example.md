@@ -131,7 +131,7 @@ files or deployment secret storage.
 JWT_ACCESS_SECRET=change-me-dev-access-secret-at-least-32-chars
 REFRESH_TOKEN_PEPPER=change-me-dev-refresh-pepper-at-least-32-chars
 ACCESS_TOKEN_TTL_SECONDS=900
-AUTH_SESSION_TTL_SECONDS=36000
+AUTH_SESSION_TTL_SECONDS=172800
 REFRESH_TOKEN_TTL_DAYS=7
 BACKEND_ENABLE_AUTH=true
 ```
