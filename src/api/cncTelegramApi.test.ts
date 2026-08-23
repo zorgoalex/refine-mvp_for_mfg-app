@@ -118,6 +118,27 @@ describe('cncTelegramApi', () => {
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(expect.objectContaining({ method: 'GET' }));
   });
 
+  it('searches orders independently and loads one MDF causal history', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({ data: [], generatedAt: '2026-08-23T08:00:00.000Z' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await cncTelegramApi.searchMdfBoardHistoryOrders('2711', 15, { cache: 'no-store' });
+    await cncTelegramApi.mdfBoardHistory(2711, '2026-08-23', { cache: 'no-store' });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      '/api/v1/cnc-telegram/mdf-board/history/orders?query=2711&limit=15',
+    );
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      '/api/v1/cnc-telegram/mdf-board/history/2711?date=2026-08-23',
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: 'GET', cache: 'no-store' }));
+  });
+
   it('loads machine-file cutting sequence numbers for an order card', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ orderId: 2700, sequences: [] }), {

@@ -179,6 +179,8 @@ export const apiRoutes = {
   cncTelegram: {
     today: backendApiPath('/cnc-telegram/today'),
     originalBoard: backendApiPath('/cnc-telegram/mdf-board/original'),
+    mdfBoardHistoryOrders: backendApiPath('/cnc-telegram/mdf-board/history/orders'),
+    mdfBoardHistory: (orderId: number) => backendApiPath(`/cnc-telegram/mdf-board/history/${orderId}`),
     ingest: backendApiPath('/cnc-telegram/ingest'),
     manualSvgUpload: backendApiPath('/cnc-telegram/manual-svg-upload'),
     manualSvgCommentPresets: backendApiPath('/cnc-telegram/manual-svg-comment-presets'),

@@ -74,6 +74,7 @@ import type {
   CncTelegramPacketCutSheet,
   CncTelegramTodayColumn,
   CncTelegramTodayResponse,
+  MdfBoardHistorySubjectKind,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { SETTING_KEYS, useAppSettings } from '../../hooks/useAppSettings';
@@ -133,6 +134,7 @@ import {
   type OrderDetailColumnDefinition,
 } from '../orders/components/tables/OrderDetailColumnSettings';
 import { StatusBoardColumnSettingsButton } from './StatusBoardColumnSettings';
+import { MdfBoardHistoryPanel } from './MdfBoardHistoryPanel';
 import {
   CNC_STATUS_BOARD_COLUMN_DEFINITIONS,
   CNC_TERMINAL_COLUMN_DEFINITIONS,
@@ -600,8 +602,8 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const hasExplicitMdfCardDeepLink = Boolean(
     viewState.cncCardKind && viewState.cncCardId && viewState.cncWorkday,
   );
-  const [cncPlacementMode, setCncPlacementMode] =
-    useState<CncBoardPlacementMode>('current');
+  const [cncPlacementMode] = useState<CncBoardPlacementMode>('current');
+  const [cncHistoryOpen, setCncHistoryOpen] = useState(false);
   const shouldApplyMdfWorkdayTodayOnOpen =
     active && fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
   const mdfWorkdayTodayOpenPatchNeeded =
@@ -781,6 +783,17 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     },
     [setSearchParams, viewState],
   );
+  const focusMdfHistoryCard = useCallback((
+    kind: MdfBoardHistorySubjectKind,
+    cardId: string,
+  ) => {
+    deepLinkFocusAppliedRef.current = null;
+    updateViewState({
+      cncCardKind: kind,
+      cncCardId: cardId,
+      cncWorkday: viewState.cncWorkday ?? todayCncWorkday,
+    });
+  }, [todayCncWorkday, updateViewState, viewState.cncWorkday]);
   useEffect(() => {
     if (!shouldApplyMdfWorkdayTodayOnOpen) return;
     mdfWorkdayOpenSyncedRef.current = true;
@@ -2170,19 +2183,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       <label className="status-board-toolbar__switch">
         <Switch
           size="small"
-          checked={cncOriginalView}
-          onChange={(checked) => {
-            setCncPlacementMode(checked ? 'original' : 'current');
-            if (checked && viewState.cncOrderFilters.length > 0) {
-              updateViewState({ cncOrderFilters: [] });
-            }
-          }}
+          checked={cncHistoryOpen}
+          onChange={setCncHistoryOpen}
         />
-        Исходный (2 месяца)
+        История
       </label>
-      {cncOriginalView && (
+      {cncHistoryOpen && (
         <Typography.Text type="secondary">
-          Карточки в стартовых колонках, новые сверху. Перемещение отключено.
+          Поиск и путь заказа откроются под доской.
         </Typography.Text>
       )}
       <label className="status-board-toolbar__switch">
@@ -2914,6 +2922,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             </div>
           )}
         </section>
+        {isCncToday && cncHistoryOpen && (
+          <MdfBoardHistoryPanel
+            boardDate={viewState.cncWorkday ?? todayCncWorkday}
+            onFocusCard={focusMdfHistoryCard}
+          />
+        )}
         {isCncToday && cncHasRenderableColumns && cncBoardScrollTopState.visible && (
           <Button
             className="cnc-board-scroll-top"
@@ -7782,6 +7796,8 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         highlightEnabled,
       )}
       data-status-board-order-id={card.orderId}
+      data-cnc-card-kind={cncOrderCard ? 'order' : undefined}
+      data-cnc-card-id={cncOrderCard ? String(card.orderId) : undefined}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-card-view={
         cncOrderCard

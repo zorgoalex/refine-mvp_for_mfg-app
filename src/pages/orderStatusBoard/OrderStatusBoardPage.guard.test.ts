@@ -1801,13 +1801,22 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(css).toContain('word-break: normal');
   });
 
-  it('keeps original MDF placement behind gear settings with read-only current-location tooltips', () => {
-    expect(page).toContain("useState<CncBoardPlacementMode>('current')");
-    expect(page).toContain('Исходный (2 месяца)');
-    expect(page).toContain("cncTelegramApi.originalBoard({ cache: 'no-store' })");
-    expect(page).toContain('buildCncOriginalSourceColumns(cncOriginalBoard)');
-    expect(page).toContain('movesEnabled={!originalMode}');
-    expect(page).toContain("trigger={['hover', 'focus']}");
-    expect(page).toContain('Текущее положение:');
+  it('keeps MDF history activation inside the gear settings and focuses current cards', () => {
+    const settingsContentStart = page.indexOf('const cncSettingsContent = (');
+    const settingsContentEnd = page.indexOf('const cardSortSettingsContent = (', settingsContentStart);
+    const settingsContent = page.slice(settingsContentStart, settingsContentEnd);
+
+    expect(settingsContentStart).toBeGreaterThanOrEqual(0);
+    expect(settingsContentEnd).toBeGreaterThan(settingsContentStart);
+    expect(settingsContent).toContain('История');
+    expect(settingsContent).toContain('onChange={setCncHistoryOpen}');
+    expect(page).toContain('extraContent={cncSettingsContent}');
+    expect(columnSettings).toContain('icon={');
+    expect(columnSettings).toContain('<SettingOutlined');
+    expect(page).toContain('<MdfBoardHistoryPanel');
+    expect(page).toContain('onFocusCard={focusMdfHistoryCard}');
+    expect(page).toContain("data-cnc-card-kind={cncOrderCard ? 'order' : undefined}");
+    expect(page).toContain('data-cnc-card-id={cncOrderCard ? String(card.orderId) : undefined}');
+    expect(page).toContain('Поиск и путь заказа откроются под доской.');
   });
 });
