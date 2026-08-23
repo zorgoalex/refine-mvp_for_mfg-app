@@ -74,6 +74,7 @@ import type {
   CncTelegramPacketCutSheet,
   CncTelegramTodayColumn,
   CncTelegramTodayResponse,
+  MdfBoardHistorySubjectKind,
 } from '../../api/types/cncTelegramApi.types';
 import { featureFlags } from '../../config/featureFlags';
 import { SETTING_KEYS, useAppSettings } from '../../hooks/useAppSettings';
@@ -133,6 +134,7 @@ import {
   type OrderDetailColumnDefinition,
 } from '../orders/components/tables/OrderDetailColumnSettings';
 import { StatusBoardColumnSettingsButton } from './StatusBoardColumnSettings';
+import { MdfBoardHistoryPanel } from './MdfBoardHistoryPanel';
 import {
   CNC_STATUS_BOARD_COLUMN_DEFINITIONS,
   CNC_TERMINAL_COLUMN_DEFINITIONS,
@@ -600,8 +602,11 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const hasExplicitMdfCardDeepLink = Boolean(
     viewState.cncCardKind && viewState.cncCardId && viewState.cncWorkday,
   );
-  const [cncPlacementMode, setCncPlacementMode] =
-    useState<CncBoardPlacementMode>('current');
+  const [cncPlacementMode] = useState<CncBoardPlacementMode>('current');
+  const [cncHistoryOpen, setCncHistoryOpen] = useState(false);
+  const [cncHistoryCollapsed, setCncHistoryCollapsed] = useState(false);
+  const [cncHistoryOrderId, setCncHistoryOrderId] = useState<number | null>(null);
+  const [cncHistoryOrderNumber, setCncHistoryOrderNumber] = useState<string | null>(null);
   const shouldApplyMdfWorkdayTodayOnOpen =
     active && fixedView === 'cnc_today' && !mdfWorkdayOpenSyncedRef.current;
   const mdfWorkdayTodayOpenPatchNeeded =
@@ -611,7 +616,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   const {
     getSetting: getAppSetting,
     refetch: refetchAppSettings,
-  } = useAppSettings({ enabled: isCncToday });
+  } = useAppSettings({ enabled: active && isCncToday });
   const mdfBoardHiddenStatusesSetting =
     getAppSetting<MdfBoardHiddenStatusesSetting>(
       SETTING_KEYS.STATUS_AUTOMATION_MDF_BOARD_HIDDEN_PRODUCTION_STATUSES,
@@ -781,6 +786,29 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     },
     [setSearchParams, viewState],
   );
+  const focusMdfHistoryCard = useCallback((
+    kind: MdfBoardHistorySubjectKind,
+    cardId: string,
+  ) => {
+    deepLinkFocusAppliedRef.current = null;
+    updateViewState({
+      cncCardKind: kind,
+      cncCardId: cardId,
+      cncWorkday: viewState.cncWorkday ?? todayCncWorkday,
+    });
+  }, [todayCncWorkday, updateViewState, viewState.cncWorkday]);
+  const selectMdfHistoryOrder = useCallback((
+    orderId: number | null,
+    orderNumber: string | null,
+  ) => {
+    setCncHistoryOrderId(orderId);
+    setCncHistoryOrderNumber(orderNumber);
+    if (orderId !== null) setCncHistoryCollapsed(false);
+  }, []);
+  const toggleMdfHistory = useCallback((checked: boolean) => {
+    setCncHistoryOpen(checked);
+    if (checked) setCncHistoryCollapsed(false);
+  }, []);
   useEffect(() => {
     if (!shouldApplyMdfWorkdayTodayOnOpen) return;
     mdfWorkdayOpenSyncedRef.current = true;
@@ -1039,6 +1067,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   );
 
   useEffect(() => {
+    if (!active) return;
     if (mdfWorkdayTodayOpenPatchNeeded) return;
     const preserveInitialSnapshot = preserveInitialMdfSnapshotRef.current;
     preserveInitialMdfSnapshotRef.current = false;
@@ -1059,7 +1088,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     void fetchInitial();
     // datasetKey is the canonical backend data revision trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [datasetKey, mdfWorkdayTodayOpenPatchNeeded]);
+  }, [active, datasetKey, mdfWorkdayTodayOpenPatchNeeded]);
 
   useEffect(() => {
     setCncCardDisplayMode(readCncCardDisplayPreference(currentUser?.id));
@@ -1071,6 +1100,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   }, [currentUser?.id]);
 
   useEffect(() => {
+    if (!active) return undefined;
     const refreshWhenVisible = () => {
       if (
         document.visibilityState === 'visible' &&
@@ -1082,7 +1112,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
     };
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => document.removeEventListener('visibilitychange', refreshWhenVisible);
-  }, [fetchInitial, stale]);
+  }, [active, fetchInitial, stale]);
 
   const loadMore = useCallback(
     async (column: OrderStatusBoardColumn): Promise<boolean> => {
@@ -1717,11 +1747,12 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
   }, [cncRelationsEnabled]);
 
   useEffect(() => {
+    if (!active) return undefined;
     if (!isCncToday || cncOrderIds.length === 0) {
       cncOrderBoardRequestKeyRef.current = null;
       setCncOrderBoard(null);
       setCncOrderBoardLoading(false);
-      return;
+      return undefined;
     }
 
     const requestKey = buildCncOrderStatusBoardRequestKey(cncOrderIds, viewState);
@@ -1773,9 +1804,10 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
+  }, [active, cncOrderIds, isCncToday, viewState.sortBy, viewState.sortOrder]);
 
   useEffect(() => {
+    if (!active) return undefined;
     if (!isCncToday) {
       cncManualMovesRef.current = {};
       setCncManualMoves({});
@@ -1819,7 +1851,7 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [fetchCncManualMoves, isCncToday]);
+  }, [active, fetchCncManualMoves, isCncToday]);
 
   const toggleCncRelation = useCallback((target: CncRelationTarget) => {
     setActiveCncRelation((current) =>
@@ -2170,19 +2202,14 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
       <label className="status-board-toolbar__switch">
         <Switch
           size="small"
-          checked={cncOriginalView}
-          onChange={(checked) => {
-            setCncPlacementMode(checked ? 'original' : 'current');
-            if (checked && viewState.cncOrderFilters.length > 0) {
-              updateViewState({ cncOrderFilters: [] });
-            }
-          }}
+          checked={cncHistoryOpen}
+          onChange={toggleMdfHistory}
         />
-        Исходный (2 месяца)
+        История
       </label>
-      {cncOriginalView && (
+      {cncHistoryOpen && (
         <Typography.Text type="secondary">
-          Карточки в стартовых колонках, новые сверху. Перемещение отключено.
+          Поиск и путь заказа откроются под доской.
         </Typography.Text>
       )}
       <label className="status-board-toolbar__switch">
@@ -2866,6 +2893,9 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
                 onSelectDetailedBath={selectCncDetailedBath}
                 onCloseDetailedBath={closeCncDetailedBath}
                 onSelectDetailedDetail={selectCncDetailedDetail}
+                onSelectOrderHistory={cncHistoryOpen
+                  ? (orderId, orderNumber) => selectMdfHistoryOrder(orderId, orderNumber)
+                  : undefined}
                 onOpenOrder={(orderId) => navigate(`/orders/show/${orderId}`)}
                 onOpenBazisCut={(setId) => navigate(`/bazis-cut/${setId}`)}
                 onMove={moveCncCard}
@@ -2914,6 +2944,18 @@ export const OrderStatusBoardPage: React.FC<OrderStatusBoardPageProps> = ({
             </div>
           )}
         </section>
+        {isCncToday && cncHistoryOpen && (
+          <MdfBoardHistoryPanel
+            boardDate={viewState.cncWorkday ?? todayCncWorkday}
+            collapsed={cncHistoryCollapsed}
+            selectedOrderId={cncHistoryOrderId}
+            selectedOrderNumber={cncHistoryOrderNumber}
+            onCollapsedChange={setCncHistoryCollapsed}
+            onClose={() => setCncHistoryOpen(false)}
+            onFocusCard={focusMdfHistoryCard}
+            onSelectedOrderChange={selectMdfHistoryOrder}
+          />
+        )}
         {isCncToday && cncHasRenderableColumns && cncBoardScrollTopState.visible && (
           <Button
             className="cnc-board-scroll-top"
@@ -3003,7 +3045,7 @@ interface CncTelegramTodayColumnsProps {
   eagerFirstViewport: boolean;
   canViewCut: boolean;
   cardDisplayMode: CncCardDisplayMode;
-  focusedCardKind?: 'packet' | 'bath';
+  focusedCardKind?: CncManualCardKind;
   focusedCardId?: string;
   showOrdersColumn: boolean;
   loading: boolean;
@@ -3012,6 +3054,7 @@ interface CncTelegramTodayColumnsProps {
   onSelectDetailedBath: (bathId: string) => void;
   onCloseDetailedBath: (bathId: string) => void;
   onSelectDetailedDetail: (target: CncDetailedDetailTarget) => void;
+  onSelectOrderHistory?: (orderId: number, orderNumber: string) => void;
   onOpenOrder: (orderId: number) => void;
   onOpenBazisCut: (setId: number) => void;
   onMove: (
@@ -3385,6 +3428,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
   onSelectDetailedBath,
   onCloseDetailedBath,
   onSelectDetailedDetail,
+  onSelectOrderHistory,
   onOpenOrder,
   onOpenBazisCut,
   onMove,
@@ -3861,6 +3905,7 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                           orderStatusColumns,
                           relationContext,
                           relationsEnabled,
+                          Boolean(onSelectOrderHistory),
                           originalMode,
                           currentOrderLocations,
                         ]}
@@ -3901,6 +3946,12 @@ const CncTelegramTodayColumns: React.FC<CncTelegramTodayColumnsProps> = ({
                         onSelectRelation={() =>
                           onSelectRelation({ kind: 'order', id: card.orderId })
                         }
+                        onSelectCard={onSelectOrderHistory
+                          ? () => onSelectOrderHistory(
+                              card.orderId,
+                              card.orderName || String(card.orderId),
+                            )
+                          : undefined}
                         openOrderOnNumber={!relationsEnabled}
                         onMove={() => undefined}
                         onOpenOrder={onOpenOrder}
@@ -4246,7 +4297,7 @@ export function shouldDeferCncCard(
   displayMode: CncCardDisplayMode,
   cardKind: CncManualCardKind,
   cardId: string,
-  focusedCardKind?: 'packet' | 'bath',
+  focusedCardKind?: CncManualCardKind,
   focusedCardId?: string,
   initiallyVisible = false,
 ): boolean {
@@ -7571,6 +7622,7 @@ interface StatusBoardCardViewProps {
   relationsEnabled?: boolean;
   highlightEnabled?: boolean;
   onSelectRelation?: () => void;
+  onSelectCard?: () => void;
   openOrderOnNumber?: boolean;
   touchDragEnabled?: boolean;
   onMove: StatusBoardColumnViewProps['onMove'];
@@ -7601,6 +7653,7 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   relationsEnabled = false,
   highlightEnabled = false,
   onSelectRelation,
+  onSelectCard,
   openOrderOnNumber = true,
   touchDragEnabled = false,
   onMove,
@@ -7703,6 +7756,8 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
   const showOverdueFlag = card.pastPlannedDate;
   const showFlags = showUrgentFlag;
   const relationClickEnabled = relationsEnabled && Boolean(onSelectRelation);
+  const cardClickAction = onSelectCard ?? (relationClickEnabled ? onSelectRelation : undefined);
+  const cardClickEnabled = Boolean(cardClickAction);
   const compactFlagText = [
     showUrgentFlag ? 'Срочный' : null,
   ].filter((item): item is string => item !== null);
@@ -7782,22 +7837,26 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
         highlightEnabled,
       )}
       data-status-board-order-id={card.orderId}
+      data-cnc-card-kind={cncOrderCard ? 'order' : undefined}
+      data-cnc-card-id={cncOrderCard ? String(card.orderId) : undefined}
       data-cnc-relation-state={highlightEnabled ? relationState : undefined}
       data-cnc-card-view={
         cncOrderCard
           ? cncNumberOnly ? 'minimal' : cncSummaryOnly ? 'compact' : 'standard'
           : undefined
       }
-      data-cnc-clickable={relationClickEnabled ? 'true' : undefined}
-      role={relationClickEnabled || moveAvailable ? 'button' : undefined}
-      tabIndex={relationClickEnabled || moveAvailable ? 0 : -1}
-      aria-label={moveAvailable ? `Меню перемещения заказа ${orderNumber}` : undefined}
+      data-cnc-clickable={cardClickEnabled ? 'true' : undefined}
+      role={cardClickEnabled || moveAvailable ? 'button' : undefined}
+      tabIndex={cardClickEnabled || moveAvailable ? 0 : -1}
+      aria-label={onSelectCard
+        ? `Показать историю заказа ${orderNumber}`
+        : moveAvailable ? `Меню перемещения заказа ${orderNumber}` : undefined}
       aria-busy={pending}
       aria-haspopup={moveAvailable ? 'menu' : undefined}
       aria-expanded={moveAvailable ? menuOpen : undefined}
       aria-describedby={!moveAvailable ? readonlyReasonId : undefined}
-      aria-disabled={!moveAvailable && !relationClickEnabled ? true : undefined}
-      onClick={relationClickEnabled ? onSelectRelation : undefined}
+      aria-disabled={!moveAvailable && !cardClickEnabled ? true : undefined}
+      onClick={cardClickAction}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (moveAvailable && isKeyboardMoveMenuTrigger(event)) {
@@ -7805,9 +7864,9 @@ const StatusBoardCardView = memo<StatusBoardCardViewProps>(({
           setMenuOpen(true);
           return;
         }
-        if (!relationClickEnabled || (event.key !== 'Enter' && event.key !== ' ')) return;
+        if (!cardClickEnabled || (event.key !== 'Enter' && event.key !== ' ')) return;
         event.preventDefault();
-        onSelectRelation?.();
+        cardClickAction?.();
       }}
       onMouseDownCapture={updateDragSuppression}
       onMouseUpCapture={clearDragSuppression}

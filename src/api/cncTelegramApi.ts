@@ -13,6 +13,8 @@ import type {
   CncTelegramOrderScreenshotsResponse,
   CncTelegramTodayResponse,
   CreateCncTelegramManualSvgCommentPresetRequest,
+  MdfBoardHistoryOrderOptionsResponse,
+  MdfBoardHistoryResponse,
 } from './types/cncTelegramApi.types';
 import type {
   TelegramWorkerAuditExportQuery,
@@ -51,6 +53,27 @@ function requestCncToday(
 }
 
 export const cncTelegramApi = {
+  searchMdfBoardHistoryOrders(
+    query: string,
+    limit = 20,
+    options?: RequestOptions,
+  ): Promise<MdfBoardHistoryOrderOptionsResponse> {
+    return httpClient.get<MdfBoardHistoryOrderOptionsResponse>(withQuery(
+      apiRoutes.cncTelegram.mdfBoardHistoryOrders,
+      { query, limit },
+    ), options);
+  },
+  mdfBoardHistory(
+    orderId: number,
+    date?: string,
+    options?: RequestOptions,
+  ): Promise<MdfBoardHistoryResponse> {
+    assertOrderId(orderId);
+    return httpClient.get<MdfBoardHistoryResponse>(withQuery(
+      apiRoutes.cncTelegram.mdfBoardHistory(orderId),
+      { date },
+    ), options);
+  },
   originalBoard(options?: RequestOptions): Promise<CncTelegramOriginalBoardResponse> {
     return httpClient.get<CncTelegramOriginalBoardResponse>(
       apiRoutes.cncTelegram.originalBoard,

@@ -270,6 +270,98 @@ export interface CncTelegramOriginalBoardResponse {
   bazisCutSets: CncTelegramOriginalBazisCutSetCard[];
 }
 
+export type MdfBoardHistorySubjectKind = 'order' | 'packet' | 'bazisCutSet' | 'bath';
+export type MdfBoardHistoryColumn =
+  | 'parsed' | 'completed' | 'completed_laminated'
+  | 'baths' | 'baths_ready' | 'baths_laminated' | 'completed_baths'
+  | 'orders' | 'orders_ready' | 'orders_issued';
+
+export interface MdfBoardHistoryOrderOption {
+  orderId: number;
+  orderName: string;
+  fullNumber: string;
+  deleted: boolean;
+  createdAt: string;
+}
+
+export interface MdfBoardHistoryOrderOptionsResponse {
+  data: MdfBoardHistoryOrderOption[];
+  generatedAt: string;
+}
+
+export interface MdfBoardHistoryCurrentCard {
+  subjectKind: MdfBoardHistorySubjectKind;
+  subjectId: string;
+  existsNow: boolean;
+  cardKind: MdfBoardHistorySubjectKind | null;
+  cardId: string | null;
+  label: string;
+  currentColumn: MdfBoardHistoryColumn | null;
+  automaticColumn: MdfBoardHistoryColumn | null;
+  reasonUnavailable: string | null;
+}
+
+export interface MdfBoardHistoryBlocker {
+  code: 'NO_MDF_SOURCES' | 'MACHINE_FILES_NOT_CUT' | 'BATHS_NOT_ROLLED' | 'ORDER_DELETED';
+  text: string;
+  count: number | null;
+  relatedSubjectIds: string[];
+}
+
+export interface MdfBoardHistoryDiagnosis {
+  presence: 'on_board' | 'not_on_board' | 'deleted';
+  currentColumn: MdfBoardHistoryColumn | null;
+  automaticColumn: MdfBoardHistoryColumn | null;
+  manualOverride: {
+    targetColumn: MdfBoardHistoryColumn;
+    updatedAt: string;
+    actorName: string | null;
+  } | null;
+  title: string;
+  explanation: string;
+  blockers: MdfBoardHistoryBlocker[];
+  relatedCurrentCards: MdfBoardHistoryCurrentCard[];
+}
+
+export interface MdfBoardHistoryEvent {
+  eventId: string;
+  occurredAt: string;
+  subjectKind: MdfBoardHistorySubjectKind;
+  subjectId: string;
+  subjectLabel: string;
+  eventKind: 'appeared' | 'moved' | 'progress' | 'disappeared' | 'not_on_board' | 'first_known';
+  fromColumn: MdfBoardHistoryColumn | null;
+  toColumn: MdfBoardHistoryColumn | null;
+  reasonCode: string;
+  reason: string;
+  consequence: string;
+  actor: { kind: 'user' | 'system'; displayName: string };
+  provenance: 'recorded' | 'reconstructed' | 'net_reconstructed';
+  relatedCurrentCards: MdfBoardHistoryCurrentCard[];
+}
+
+export interface MdfBoardHistoryEpisode {
+  episodeId: string;
+  occurredAt: string;
+  title: string;
+  primaryEvent: MdfBoardHistoryEvent;
+  relatedEvents: MdfBoardHistoryEvent[];
+}
+
+export interface MdfBoardHistoryResponse {
+  window: { dateFrom: string; dateTo: string; boardDate: string };
+  generatedAt: string;
+  order: MdfBoardHistoryOrderOption;
+  diagnosis: MdfBoardHistoryDiagnosis;
+  coverage: {
+    status: 'recorded_exact' | 'reconstructed_complete' | 'partial' | 'none';
+    label: string;
+    evidenceFrom: string | null;
+    gaps: string[];
+  };
+  episodes: MdfBoardHistoryEpisode[];
+}
+
 export interface CncTelegramOrderCuttingSequence {
   packetId: string;
   externalPacketKey: string;

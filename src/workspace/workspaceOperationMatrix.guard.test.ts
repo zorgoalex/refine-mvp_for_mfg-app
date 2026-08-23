@@ -35,6 +35,7 @@ const readSource = (relativePath: string): string =>
 function readMatrix(): OperationMatrix {
   const relativePath = 'spec_erp/reviews/order-operation-owner-matrix.json';
   const candidates = [
+    resolve(__dirname, 'fixtures/order-operation-owner-matrix.json'),
     resolve(process.cwd(), relativePath),
     resolve(process.cwd(), '..', relativePath),
     resolve(process.cwd(), '..', '..', relativePath),

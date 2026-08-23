@@ -238,7 +238,12 @@ describe('CutPage source guards', () => {
 
   it('keeps list filters and sortable cut-job production columns', () => {
     expect(source).toContain('aria-label="Фильтры заданий на раскрой"');
-    expect(source).toContain('{!isEmbeddedOrder ? (');
+    const criteriaIndex = source.indexOf('className="cut-page-modern__criteria"');
+    const filtersIndex = source.indexOf('aria-label="Фильтры заданий на раскрой"');
+    const jobsIndex = source.indexOf('className="cut-page-modern__jobs"');
+    expect(criteriaIndex).toBeGreaterThan(-1);
+    expect(filtersIndex).toBeGreaterThan(criteriaIndex);
+    expect(jobsIndex).toBeGreaterThan(filtersIndex);
     expect(source).toContain('<span>Номер заказа</span>');
     expect(source).toContain('<span>Материал</span>');
     expect(source).toContain('<span>Название задания</span>');
@@ -250,6 +255,13 @@ describe('CutPage source guards', () => {
     expect(source).toContain('a.totals.details - b.totals.details');
     expect(source).toContain('a.totals.area - b.totals.area');
     expect(source).toContain('totalFilmUsageMeters(a.totals.filmUsage) - totalFilmUsageMeters(b.totals.filmUsage)');
+  });
+
+  it('keeps cut-detail selection collapsed until the existing header button opens it', () => {
+    expect(source).toContain('const [criteriaOpen, setCriteriaOpen] = useState(false)');
+    expect(source).toContain('onClick={() => setCriteriaOpen((open) => !open)}');
+    expect(source).toContain("{criteriaOpen ? 'Скрыть подбор' : 'Подбор деталей на раскрой'}");
+    expect(source).toContain('{(!isOperational || isEmbeddedOrder || criteriaOpen) ? (');
   });
 
   it('fail-closes detail file links against javascript:/data: stored-link XSS', () => {

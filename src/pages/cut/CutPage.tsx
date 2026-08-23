@@ -4040,99 +4040,8 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ) : null}
         {!isEmbeddedOrder && !isOperational && <Title level={3}>Раскрой</Title>}
 
-      {!isEmbeddedOrder ? (
-        <section className="cut-operational-filters operational-panel" aria-label="Фильтры заданий на раскрой">
-          <label className="cut-operational-filter cut-operational-filter--period">
-            <span>Дата создания</span>
-            <RangePicker
-              allowClear
-              format="DD.MM.YYYY"
-              value={cutListDateRange ?? null}
-              placeholder={['Создано от', 'Создано до']}
-              onChange={(value) => setCutListDateRange(value)}
-            />
-          </label>
-          <label className="cut-operational-filter cut-operational-filter--order">
-            <span>Номер заказа</span>
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder="2700"
-              value={jobOrderSearch}
-              onChange={(event) => setJobOrderSearch(event.target.value)}
-            />
-          </label>
-          <label className="cut-operational-filter cut-operational-filter--search">
-            <span>Название задания</span>
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder="текст названия"
-              value={jobSearch}
-              onChange={(event) => setJobSearch(event.target.value)}
-            />
-          </label>
-          <label className="cut-operational-filter">
-            <span>Материал</span>
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder="Все материалы"
-              options={visibleSheetTypeOptions}
-              value={operationalSheetFilter}
-              onChange={setOperationalSheetFilter}
-            />
-          </label>
-          <label className="cut-operational-filter">
-            <span>Пленка</span>
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder="Все пленки"
-              options={visibleFilmOptions}
-              value={operationalFilmFilter}
-              onChange={setOperationalFilmFilter}
-            />
-          </label>
-          <label className="cut-operational-filter">
-            <span>Профиль раскроя</span>
-            <Select<CutJobProfileFilter>
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              aria-label="Фильтр по профилю раскроя"
-              placeholder="Все профили"
-              options={jobProfileFilterOptions}
-              value={profileFilter}
-              onChange={setProfileFilter}
-            />
-          </label>
-          <Space className="cut-operational-filter-actions">
-            <Button
-              icon={<FilterOutlined />}
-              onClick={() => {
-                const trimmedJobSearch = jobSearch.trim();
-                const trimmedOrderSearch = jobOrderSearch.trim();
-                const filters = buildOperationalListFilters(trimmedOrderSearch, cutListDateRange);
-                setJobSearch(trimmedJobSearch);
-                setJobOrderSearch(trimmedOrderSearch);
-                setAppliedJobOrderSearch(trimmedOrderSearch);
-                setAppliedCutListDateRange(cutListDateRange);
-                listFiltersRef.current = filters;
-                void loadJobs(filters);
-              }}
-            >
-              Применить
-            </Button>
-            <Button onClick={resetCutJobListFilters} disabled={!cutJobListFiltersActive}>
-              Сбросить
-            </Button>
-          </Space>
-        </section>
-      ) : null}
-
+      {(!isOperational || isEmbeddedOrder || criteriaOpen) ? (
+        <>
       <Card
         className="cut-page-modern__criteria"
         title={isOperational && isEmbeddedOrder ? 'Критерии' : 'Критерии выборки'}
@@ -4288,6 +4197,101 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
           </Space>
         </Card>
       )}
+        </>
+      ) : null}
+
+      {!isEmbeddedOrder ? (
+        <section className="cut-operational-filters operational-panel" aria-label="Фильтры заданий на раскрой">
+          <label className="cut-operational-filter cut-operational-filter--period">
+            <span>Дата создания</span>
+            <RangePicker
+              allowClear
+              format="DD.MM.YYYY"
+              value={cutListDateRange ?? null}
+              placeholder={['Создано от', 'Создано до']}
+              onChange={(value) => setCutListDateRange(value)}
+            />
+          </label>
+          <label className="cut-operational-filter cut-operational-filter--order">
+            <span>Номер заказа</span>
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="2700"
+              value={jobOrderSearch}
+              onChange={(event) => setJobOrderSearch(event.target.value)}
+            />
+          </label>
+          <label className="cut-operational-filter cut-operational-filter--search">
+            <span>Название задания</span>
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="текст названия"
+              value={jobSearch}
+              onChange={(event) => setJobSearch(event.target.value)}
+            />
+          </label>
+          <label className="cut-operational-filter">
+            <span>Материал</span>
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="Все материалы"
+              options={visibleSheetTypeOptions}
+              value={operationalSheetFilter}
+              onChange={setOperationalSheetFilter}
+            />
+          </label>
+          <label className="cut-operational-filter">
+            <span>Пленка</span>
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="Все пленки"
+              options={visibleFilmOptions}
+              value={operationalFilmFilter}
+              onChange={setOperationalFilmFilter}
+            />
+          </label>
+          <label className="cut-operational-filter">
+            <span>Профиль раскроя</span>
+            <Select<CutJobProfileFilter>
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              aria-label="Фильтр по профилю раскроя"
+              placeholder="Все профили"
+              options={jobProfileFilterOptions}
+              value={profileFilter}
+              onChange={setProfileFilter}
+            />
+          </label>
+          <Space className="cut-operational-filter-actions">
+            <Button
+              icon={<FilterOutlined />}
+              onClick={() => {
+                const trimmedJobSearch = jobSearch.trim();
+                const trimmedOrderSearch = jobOrderSearch.trim();
+                const filters = buildOperationalListFilters(trimmedOrderSearch, cutListDateRange);
+                setJobSearch(trimmedJobSearch);
+                setJobOrderSearch(trimmedOrderSearch);
+                setAppliedJobOrderSearch(trimmedOrderSearch);
+                setAppliedCutListDateRange(cutListDateRange);
+                listFiltersRef.current = filters;
+                void loadJobs(filters);
+              }}
+            >
+              Применить
+            </Button>
+            <Button onClick={resetCutJobListFilters} disabled={!cutJobListFiltersActive}>
+              Сбросить
+            </Button>
+          </Space>
+        </section>
+      ) : null}
 
       <Card
         className="cut-page-modern__jobs"

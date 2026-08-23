@@ -10,7 +10,7 @@ vi.mock('@nestjs/common', () => ({
 }));
 
 describe('MdfBoardManualMoveService', () => {
-  it('uses production task permissions, not order visibility, for shared MDF manual moves', async () => {
+  it('uses order visibility for reads and production task permission for writes', async () => {
     const moves: MdfBoardManualMoveRepositoryPort = {
       list: vi.fn().mockResolvedValue({ generatedAt: now(), moves: [] }),
       upsert: vi.fn().mockResolvedValue({ generatedAt: now(), changed: false, move: move() }),
@@ -18,7 +18,7 @@ describe('MdfBoardManualMoveService', () => {
     };
     const service = new MdfBoardManualMoveService({ moves });
 
-    await expect(service.list({ currentUser: user(['production.tasks.view']) })).resolves.toMatchObject({ moves: [] });
+    await expect(service.list({ currentUser: user(['orders.view']) })).resolves.toMatchObject({ moves: [] });
     await expect(service.upsert({
       currentUser: user(['production.tasks.update']),
       cardKind: 'packet',
@@ -31,7 +31,7 @@ describe('MdfBoardManualMoveService', () => {
       cardId: 'p1',
     })).resolves.toMatchObject({ deleted: false });
 
-    await expect(service.list({ currentUser: user(['orders.view']) })).rejects.toMatchObject({
+    await expect(service.list({ currentUser: user(['production.tasks.view']) })).rejects.toMatchObject({
       statusCode: 403,
       code: 'PERMISSION_DENIED',
     } satisfies Partial<ApiError>);

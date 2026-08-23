@@ -105,6 +105,7 @@ import { useOrderDetailLiveState } from "./useOrderDetailLiveState";
 import {
   isOrderDetailStatusRefreshDue,
   mergeOrderDetailStatusFreshness,
+  shouldStopOrderDetailStatusRefresh,
 } from "./orderDetailStatusRefresh";
 import { BasisProjectLink } from "./components/BasisProjectLink";
 import type { OrderHdfDetail } from "../../types/orders";
@@ -1137,6 +1138,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
   const liveDetailProductionStatusByIdRef = useRef(liveDetailProductionStatusById);
   const detailStatusPollInFlightRef = useRef(false);
   const detailStatusLastSuccessfulAtRef = useRef(0);
+  const detailStatusPollingStoppedOrderIdRef = useRef<number | null>(null);
   const handledActivityRevisionRef = useRef(activationRevision);
   const detailProductionStatusBaseById = useMemo(() => {
     const map = new Map<number, number | null>();
@@ -1178,6 +1180,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
 
   useEffect(() => {
     detailStatusLastSuccessfulAtRef.current = 0;
+    detailStatusPollingStoppedOrderIdRef.current = null;
     setLiveDetailProductionStatusState({
       scopeKey: showAsyncReadScopeKey,
       value: new Map(),
@@ -1196,6 +1199,7 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
     if (!ordinaryReadActive || orderRealtimeEnabled) return;
     const orderId = Number(record?.order_id);
     if (!Number.isInteger(orderId) || orderId <= 0) return;
+    if (detailStatusPollingStoppedOrderIdRef.current === orderId) return;
     if (detailProductionStatusBaseByIdRef.current.size === 0) return;
     if (detailStatusPollInFlightRef.current) return;
     const token = showAsyncReadGuard.capture();
@@ -1243,8 +1247,18 @@ export const OrderShow: React.FC<IResourceComponentsProps> = () => {
           });
         }
       }
-    } catch {
-      // Keep the last visible statuses; the next poll/focus event can recover.
+    } catch (error) {
+      if (
+        showAsyncReadGuard.isCurrent(token)
+        && shouldStopOrderDetailStatusRefresh(error)
+      ) {
+        // The primary record can outlive its DB row in a kept-alive/restored
+        // workspace tab. A confirmed 404 is terminal for this order: retrying
+        // every 15 seconds only creates an endless stream of failed requests.
+        detailStatusPollingStoppedOrderIdRef.current = orderId;
+      }
+      // Keep the last visible statuses. Transient failures can recover on the
+      // next poll/focus event; a confirmed missing order stays stopped.
     } finally {
       detailStatusPollInFlightRef.current = false;
     }
