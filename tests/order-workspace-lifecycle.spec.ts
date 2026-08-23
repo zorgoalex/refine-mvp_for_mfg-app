@@ -466,7 +466,15 @@ test.describe('order workspace lifecycle', () => {
                 body: JSON.stringify({
                     details: ids.map((detailId) => ({
                         orderDetailId: detailId,
-                        cutJob: null,
+                        cutJob: {
+                            cutJobId: 7_000 + detailId,
+                            resultNo: 1,
+                            cutNumber: `FOCUS-${detailId}`,
+                            name: `Focus refresh ${detailId}`,
+                            paramProfileId: null,
+                            profileName: null,
+                            profileIsActive: null,
+                        },
                         bathCutJob: null,
                     })),
                 }),
@@ -493,6 +501,9 @@ test.describe('order workspace lifecycle', () => {
         await expect(page).toHaveURL(/\/orders\/show\/1$/, { timeout: 90_000 });
         await expect(page.getByRole('heading', { name: 'Просмотр заказа' }))
             .toBeVisible({ timeout: 90_000 });
+        const showWorkspace = page.locator('[data-workspace-key="/orders/show/1"]:not([hidden])');
+        await expect(showWorkspace.getByText('Focus refresh 1', { exact: true }))
+            .toBeVisible({ timeout: 30_000 });
         await expect.poll(() => cutReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
         await page.waitForTimeout(500);
 
@@ -524,6 +535,9 @@ test.describe('order workspace lifecycle', () => {
             await editDetailsTab.click();
             await expect(editDetailsTab).toHaveAttribute('aria-selected', 'true');
         }
+        const editWorkspace = page.locator('[data-workspace-key="/orders/edit/1"]:not([hidden])');
+        await expect(editWorkspace.getByText('Focus refresh 1', { exact: true }))
+            .toBeVisible({ timeout: 30_000 });
         await expect.poll(() => cutReads, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
         await page.waitForTimeout(500);
         legacyStatusReads = 0;
