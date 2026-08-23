@@ -1,6 +1,8 @@
 import type { QueryResultRow } from 'pg';
 import { ApiError } from '../../../common/errors/api-error';
 import { DatabaseService } from '../../../database/database.service';
+import { appendOrderReadScopeSql } from '../../../permissions/policies/order-read-scope-sql';
+import { rolePolicyForUser } from '../../../permissions/policies/scope';
 import type {
   GetMdfBoardHistoryCommand,
   MdfBoardHistoryRepositoryPort,
@@ -100,6 +102,8 @@ export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPor
     command: SearchMdfBoardHistoryOrdersCommand,
   ): Promise<MdfBoardHistoryOrderOptionsResponseDto> {
     const search = command.query.trim();
+    const params: unknown[] = [search, command.limit];
+    const visibility = appendMdfHistoryOrderVisibilitySql(params, command.currentUser);
     const result = await this.database.query<OrderRow>(
       `
       SELECT
@@ -110,7 +114,8 @@ export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPor
         o.created_at
       FROM orders o
       LEFT JOIN projects p ON p.project_id = o.project_id
-      WHERE (
+      WHERE ${visibility}
+        AND (
         $1 = ''
         OR o.order_id::text = $1
         OR o.order_name ILIKE '%' || $1 || '%'
@@ -123,7 +128,7 @@ export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPor
         o.order_id DESC
       LIMIT $2
       `,
-      [search, command.limit],
+      params,
     );
     return {
       data: result.rows.map(mapOrderOption),
@@ -132,6 +137,8 @@ export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPor
   }
 
   async getHistory(command: GetMdfBoardHistoryCommand): Promise<MdfBoardHistoryResponseDto> {
+    const orderParams: unknown[] = [command.orderId];
+    const visibility = appendMdfHistoryOrderVisibilitySql(orderParams, command.currentUser);
     const orderResult = await this.database.query<OrderRow>(
       `
         SELECT
@@ -147,8 +154,9 @@ export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPor
         LEFT JOIN projects p ON p.project_id = o.project_id
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         WHERE o.order_id = $1
+          AND ${visibility}
       `,
-      [command.orderId],
+      orderParams,
     );
     const orderRow = orderResult.rows[0];
     if (!orderRow) {
@@ -227,7 +235,7 @@ export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPor
         log.audit_id, log.event, log.entity_type, log.entity_id, log.username, log.source,
         log.request_id, log.status_name, log.status_code, log.before_json, log.after_json,
         log.diff_json, log.metadata_json, log.created_at,
-        CASE WHEN recorded.history_event_id IS NULL THEN 'reconstructed' ELSE 'recorded' END AS provenance
+        COALESCE(recorded.provenance, 'reconstructed') AS provenance
       FROM audit_log log
       LEFT JOIN mdf_board_history_events recorded
         ON recorded.source_event_type = 'audit_log'
@@ -252,6 +260,20 @@ export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPor
     );
     return result.rows;
   }
+}
+
+export function appendMdfHistoryOrderVisibilitySql(
+  params: unknown[],
+  currentUser: SearchMdfBoardHistoryOrdersCommand['currentUser'],
+  orderAlias = 'o',
+): string {
+  const readScope = appendOrderReadScopeSql(params, currentUser, orderAlias);
+  const canReadDeleted = currentUser.permissions.includes('orders.delete')
+    && rolePolicyForUser(currentUser).orders.delete === 'all';
+  const deletionPredicate = canReadDeleted
+    ? 'TRUE'
+    : `COALESCE(${orderAlias}.delete_flag, false) = false`;
+  return `(${readScope.predicate}) AND (${deletionPredicate})`;
 }
 
 function mapOrderOption(row: OrderRow): MdfBoardHistoryOrderOptionDto {

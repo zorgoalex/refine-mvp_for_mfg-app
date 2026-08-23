@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS mdf_board_history_events (
   source_event_type TEXT NOT NULL,
   source_event_id TEXT,
   rule_version INTEGER NOT NULL DEFAULT 1,
-  provenance TEXT NOT NULL DEFAULT 'recorded',
+  provenance TEXT NOT NULL DEFAULT 'reconstructed',
   evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
   occurred_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -181,7 +181,7 @@ BEGIN
     'audit_log',
     NEW.audit_id::text,
     1,
-    'recorded',
+    'reconstructed',
     jsonb_build_array(jsonb_build_object('auditId', NEW.audit_id::text)),
     NEW.created_at
   )
@@ -259,7 +259,7 @@ BEGIN
     'audit_log',
     log.audit_id::text,
     1,
-    'recorded',
+    'reconstructed',
     jsonb_build_array(jsonb_build_object('auditId', log.audit_id::text)),
     log.created_at
   FROM audit_log log

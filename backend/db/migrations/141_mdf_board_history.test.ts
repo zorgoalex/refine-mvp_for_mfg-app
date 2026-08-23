@@ -18,6 +18,8 @@ describe('141 MDF board history migration', () => {
     expect(sql).toContain('CREATE TRIGGER trg_mdf_board_history_events_append_only');
     expect(sql).toContain("'audit:' || NEW.audit_id::text || ':order:' || NEW.related_order_id::text");
     expect(sql).toContain("provenance, evidence_refs, occurred_at");
+    expect(sql).toContain("provenance TEXT NOT NULL DEFAULT 'reconstructed'");
+    expect(sql.match(/'reconstructed',\n\s+jsonb_build_array/g)).toHaveLength(2);
     expect(sql).not.toMatch(/\b(TRUNCATE|DROP TABLE)\b/i);
     expect(runner).toContain('141_mdf_board_history*');
   });
