@@ -224,9 +224,23 @@ async function assertStagePageReady(page: Page, route: StageRoute) {
     if (route.waitForText) {
         await expect(page.getByText(route.waitForText).first()).toBeVisible({ timeout: 30000 });
     } else {
-        await expect(page.locator('main').getByText(stagePageContentPattern).first()).toBeVisible({
-            timeout: 10000,
-        });
+        await expect
+            .poll(
+                async () => {
+                    const candidates = await page
+                        .locator('main')
+                        .getByText(stagePageContentPattern)
+                        .all();
+
+                    for (const candidate of candidates) {
+                        if (await candidate.isVisible()) return true;
+                    }
+
+                    return false;
+                },
+                { timeout: 10000 },
+            )
+            .toBe(true);
     }
 }
 
