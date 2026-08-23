@@ -167,7 +167,7 @@ describe('OrderPrimaryRouteGate integration', () => {
     renderer?.unmount();
   });
 
-  it('starts the corrected primary query when route meta changes at the same location', async () => {
+  it('does not restart the primary query when lagging parsed meta changes at the same URL', async () => {
     const getList = vi.fn().mockResolvedValue({ data: [], total: 0 });
     const dataProvider = {
       getList,
@@ -213,7 +213,7 @@ describe('OrderPrimaryRouteGate integration', () => {
       await Promise.resolve();
     });
 
-    expect(getList).toHaveBeenCalledTimes(2);
+    expect(getList).toHaveBeenCalledTimes(1);
     renderer?.unmount();
   });
 });

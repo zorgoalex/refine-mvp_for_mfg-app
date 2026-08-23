@@ -1,6 +1,5 @@
 import {
   useDataProvider,
-  useParsed,
   type GetListResponse,
   type GetOneResponse,
 } from '@refinedev/core';
@@ -78,20 +77,17 @@ const INTENT_DELAY_MS = 80;
 
 export function OrderPrimaryRouteLoader(): null {
   const location = useLocation();
-  const parsed = useParsed();
   const getDataProvider = useDataProvider();
   const cohort = useOrderLifecycleCohort();
   const authCacheNamespace = useAuthCacheNamespace(
     getOrdersReadBackendMode(featureFlags.useBackendOrdersRead),
   );
   const route = useMemo(() => matchOrderPrimaryRoute(location.pathname), [location.pathname]);
-  const routeParams = parsed?.params ?? {};
-  const routeParamsSignature = stableRouteParamsSignature(routeParams);
-  const routeKey = createHardPrimaryRouteKey(
-    authCacheNamespace,
-    location,
-    routeParamsSignature,
+  const routeParams = useMemo(
+    () => createStableOrderPrimaryRouteParams(route, location.search),
+    [location.search, route],
   );
+  const routeKey = createHardPrimaryRouteKey(authCacheNamespace, location);
   observeNavigationStart(location.key);
 
   useLayoutEffect(() => {
@@ -112,7 +108,6 @@ export function OrderPrimaryRouteLoader(): null {
     location.search,
     route,
     routeKey,
-    routeParamsSignature,
   ]);
 
   useEffect(() => {
@@ -129,7 +124,6 @@ export function OrderPrimaryRouteLoader(): null {
 
 export function OrderPrimaryRouteGate({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const parsed = useParsed();
   const getDataProvider = useDataProvider();
   const cohort = useOrderLifecycleCohort();
   const cohortResolved = useOrderLifecycleCohortResolved();
@@ -137,13 +131,11 @@ export function OrderPrimaryRouteGate({ children }: { children: ReactNode }) {
     getOrdersReadBackendMode(featureFlags.useBackendOrdersRead),
   );
   const route = useMemo(() => matchOrderPrimaryRoute(location.pathname), [location.pathname]);
-  const routeParams = parsed?.params ?? {};
-  const routeParamsSignature = stableRouteParamsSignature(routeParams);
-  const routeKey = createHardPrimaryRouteKey(
-    authCacheNamespace,
-    location,
-    routeParamsSignature,
+  const routeParams = useMemo(
+    () => createStableOrderPrimaryRouteParams(route, location.search),
+    [location.search, route],
   );
+  const routeKey = createHardPrimaryRouteKey(authCacheNamespace, location);
   const [armedRouteKey, setArmedRouteKey] = useState<string | null>(null);
   const rolloutEligible = isLocalAuthReady() && isUsableOrderLifecycleConfig(
     getLoadedRuntimeConfig()?.rollouts?.orderLifecycleV2,
@@ -176,7 +168,6 @@ export function OrderPrimaryRouteGate({ children }: { children: ReactNode }) {
     location.search,
     route,
     routeKey,
-    routeParamsSignature,
   ]);
 
   return shouldHoldLazyRoute ? null : children;
@@ -428,48 +419,27 @@ function closestOrderAnchor(target: EventTarget | null): HTMLAnchorElement | nul
   return target instanceof Element ? target.closest<HTMLAnchorElement>('a[href]') : null;
 }
 
-function stableRouteParamsSignature(params: Record<string, unknown>): string {
-  try {
-    return JSON.stringify(canonicalizeRouteParamValue(params, new WeakSet<object>()));
-  } catch {
-    return '';
-  }
-}
-
-function canonicalizeRouteParamValue(value: unknown, seen: WeakSet<object>): unknown {
-  if (Array.isArray(value)) {
-    if (seen.has(value)) throw new TypeError('Cyclic route params');
-    seen.add(value);
-    const result = value.map((item) => canonicalizeRouteParamValue(item, seen));
-    seen.delete(value);
-    return result;
-  }
-  if (value && typeof value === 'object') {
-    if (seen.has(value)) throw new TypeError('Cyclic route params');
-    seen.add(value);
-    const record = value as Record<string, unknown>;
-    const result = Object.fromEntries(
-      Object.keys(record)
-        .sort()
-        .map((key) => [key, canonicalizeRouteParamValue(record[key], seen)]),
-    );
-    seen.delete(value);
-    return result;
-  }
-  return value;
-}
-
 function createHardPrimaryRouteKey(
   authCacheNamespace: string,
   location: { pathname: string; search: string },
-  routeParamsSignature: string,
 ): string {
   return [
     authCacheNamespace,
     location.pathname,
     location.search,
-    routeParamsSignature,
   ].join(':');
+}
+
+export function createStableOrderPrimaryRouteParams(
+  route: PrimaryRoute | null,
+  search: string,
+): Record<string, unknown> {
+  const searchParams = parseRefineRouteParamsFromSearch(search);
+  if (!route || route.kind === 'list') return searchParams;
+  const definedSearchParams = Object.fromEntries(
+    Object.entries(searchParams).filter(([, value]) => value !== undefined),
+  );
+  return { id: String(route.orderId), ...definedSearchParams };
 }
 
 function isLocalAuthReady(): boolean {
