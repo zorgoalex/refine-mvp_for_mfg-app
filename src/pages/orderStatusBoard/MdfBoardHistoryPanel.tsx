@@ -107,7 +107,7 @@ export const MdfBoardHistoryPanel: React.FC<MdfBoardHistoryPanelProps> = ({
           </Typography.Text>
         </div>
         <Tag icon={<ClockCircleOutlined />} className="mdf-history__period">
-          Последние 2 месяца
+          С создания заказа
         </Tag>
       </header>
 

@@ -3021,7 +3021,7 @@ interface CncTelegramTodayColumnsProps {
   eagerFirstViewport: boolean;
   canViewCut: boolean;
   cardDisplayMode: CncCardDisplayMode;
-  focusedCardKind?: 'packet' | 'bath';
+  focusedCardKind?: CncManualCardKind;
   focusedCardId?: string;
   showOrdersColumn: boolean;
   loading: boolean;
@@ -4264,7 +4264,7 @@ export function shouldDeferCncCard(
   displayMode: CncCardDisplayMode,
   cardKind: CncManualCardKind,
   cardId: string,
-  focusedCardKind?: 'packet' | 'bath',
+  focusedCardKind?: CncManualCardKind,
   focusedCardId?: string,
   initiallyVisible = false,
 ): boolean {

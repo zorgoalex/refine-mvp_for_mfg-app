@@ -1298,6 +1298,7 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(page).toContain('<CncDeferredCard');
     expect(page).toContain('focusedCardKind={viewState.cncCardKind}');
     expect(page).toContain('focusedCardId={viewState.cncCardId}');
+    expect(page).toContain('focusedCardKind?: CncManualCardKind;');
     expect(page).toContain('setCncOrderBoardLoading(true);');
     expect(page).toContain('startTransition(() => setCncOrderBoard(orderBoardResponse));');
     expect(css).toContain('.cnc-deferred-card--revealed');

@@ -13,6 +13,8 @@ describe('MdfBoardHistoryPanel UX guards', () => {
     expect(panel).toContain('history.episodes.map');
     expect(panel).toContain('Связанные изменения:');
     expect(panel).toContain('Показать карточку на доске');
+    expect(panel).toContain('С создания заказа');
+    expect(panel).not.toContain('Последние 2 месяца');
   });
 
   it('has responsive, accessible interaction and reduced-motion treatment', () => {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { MdfBoardHistoryOrderOptionDto } from '../dto/mdf-board-history.dto';
 import {
@@ -6,6 +7,13 @@ import {
 } from './pg-mdf-board-history-repository';
 
 describe('MDF board current diagnosis', () => {
+  it('loads history from the order creation date instead of a rolling window', () => {
+    const source = readFileSync(new URL('./pg-mdf-board-history-repository.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain('o.created_at::date::text AS history_date_from');
+    expect(source).not.toContain("CURRENT_DATE - INTERVAL '2 months'");
+  });
+
   it('explains why an ERP order has not appeared on the board', () => {
     const diagnosis = buildDiagnosis(order(), 'Новый', [], new Map());
 

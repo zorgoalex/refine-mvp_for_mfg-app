@@ -32,12 +32,9 @@ interface OrderRow extends QueryResultRow {
   full_number: string;
   delete_flag: boolean;
   created_at: string | Date;
+  history_date_from?: string;
+  history_date_to?: string;
   order_status_name?: string | null;
-}
-
-interface RangeRow extends QueryResultRow {
-  date_from: string;
-  date_to: string;
 }
 
 interface ManualMoveRow extends QueryResultRow {
@@ -135,35 +132,32 @@ export class PgMdfBoardHistoryRepository implements MdfBoardHistoryRepositoryPor
   }
 
   async getHistory(command: GetMdfBoardHistoryCommand): Promise<MdfBoardHistoryResponseDto> {
-    const [orderResult, rangeResult] = await Promise.all([
-      this.database.query<OrderRow>(
-        `
+    const orderResult = await this.database.query<OrderRow>(
+      `
         SELECT
           o.order_id,
           COALESCE(NULLIF(BTRIM(o.order_name), ''), o.order_id::text) AS order_name,
           COALESCE(NULLIF(BTRIM(p.code || '-' || o.order_name), ''), NULLIF(BTRIM(o.order_name), ''), o.order_id::text) AS full_number,
           COALESCE(o.delete_flag, false) AS delete_flag,
           o.created_at,
+          o.created_at::date::text AS history_date_from,
+          CURRENT_DATE::date::text AS history_date_to,
           os.order_status_name
         FROM orders o
         LEFT JOIN projects p ON p.project_id = o.project_id
         LEFT JOIN order_statuses os ON os.order_status_id = o.order_status_id
         WHERE o.order_id = $1
-        `,
-        [command.orderId],
-      ),
-      this.database.query<RangeRow>(`
-        SELECT
-          (CURRENT_DATE - INTERVAL '2 months')::date::text AS date_from,
-          CURRENT_DATE::date::text AS date_to
-      `),
-    ]);
+      `,
+      [command.orderId],
+    );
     const orderRow = orderResult.rows[0];
     if (!orderRow) {
       throw new ApiError(404, 'ORDER_NOT_FOUND', 'Заказ не найден');
     }
-    const range = rangeResult.rows[0];
-    if (!range) throw new ApiError(500, 'MDF_HISTORY_RANGE_UNAVAILABLE', 'Период истории недоступен');
+    const range = {
+      date_from: orderRow.history_date_from ?? toIso(orderRow.created_at).slice(0, 10),
+      date_to: orderRow.history_date_to ?? new Date().toISOString().slice(0, 10),
+    };
 
     const boardDate = command.boardDate ?? range.date_to;
     const [board, manualMoves, auditRows] = await Promise.all([
