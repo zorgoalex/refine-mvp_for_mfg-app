@@ -130,17 +130,45 @@ describe('auth refresh cutover behavior', () => {
     expect(expiredListener).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a still-valid backend token when early refresh fails transiently', async () => {
+    vi.doMock('../config/featureFlags', () => ({
+      featureFlags: {
+        useBackendAuth: true,
+        useBackendPermissions: true,
+        enableLegacyHasura: true,
+      },
+    }));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Network unavailable')));
+    const { refreshAccessToken } = await import('./auth');
+    const { authSession } = await import('../api/authSession');
+    const validToken = jwtWithPayload({ exp: Math.floor(Date.now() / 1000) + 10 });
+    authSession.setAccessToken(validToken);
+    authSession.setUser({ id: '1', username: 'manager', role: 'manager' });
+
+    await expect(refreshAccessToken()).resolves.toBe(validToken);
+    expect(authSession.getAccessToken()).toBe(validToken);
+    expect(authSession.getUser()).toMatchObject({ id: '1' });
+  });
+
   it('validates base64url JWT payloads without console validation noise', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     try {
       const { isTokenExpired } = await import('./auth');
-      const token = jwtWithPayload({ exp: Math.floor(Date.now() / 1000) + 60, filler: 'о' });
+      const token = jwtWithPayload({ exp: Math.floor(Date.now() / 1000) + 120, filler: 'о' });
 
       expect(isTokenExpired(token)).toBe(false);
       expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it('treats a JWT inside the refresh safety window as expired', async () => {
+    const { isTokenExpired } = await import('./auth');
+    const token = jwtWithPayload({ exp: Math.floor(Date.now() / 1000) + 10 });
+
+    expect(isTokenExpired(token)).toBe(true);
   });
 
   it('treats malformed JWTs as expired without console validation noise', async () => {

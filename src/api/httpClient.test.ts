@@ -136,8 +136,32 @@ describe('httpClient', () => {
     ]);
   });
 
-  it('uses a still-valid JWT without making availability depend on refresh', async () => {
+  it('refreshes a JWT inside the expiry safety window before sending the backend request', async () => {
     const validToken = jwtWithExpiry(Math.floor(Date.now() / 1000) + 10);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/refresh') {
+        return jsonResponse(200, {
+          accessToken: 'new-token',
+          user: { id: '1', username: 'admin', role: 'superadmin' },
+        });
+      }
+
+      expect(url).toBe('/api/v1/orders/form-data');
+      expect((init?.headers as Headers).get('Authorization')).toBe('Bearer new-token');
+      return jsonResponse(200, { ok: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    authSession.setAccessToken(validToken);
+
+    await expect(httpClient.get('/api/v1/orders/form-data')).resolves.toEqual({ ok: true });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/auth/refresh',
+      '/api/v1/orders/form-data',
+    ]);
+  });
+
+  it('uses a JWT outside the expiry safety window without refreshing', async () => {
+    const validToken = jwtWithExpiry(Math.floor(Date.now() / 1000) + 120);
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       expect(url).toBe('/api/v1/orders/form-data');
       expect((init?.headers as Headers).get('Authorization')).toBe(`Bearer ${validToken}`);
@@ -148,6 +172,31 @@ describe('httpClient', () => {
 
     await expect(httpClient.get('/api/v1/orders/form-data')).resolves.toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a still-valid JWT when an early refresh has a transient failure', async () => {
+    const validToken = jwtWithExpiry(Math.floor(Date.now() / 1000) + 10);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/v1/auth/refresh') {
+        return jsonResponse(
+          503,
+          { error: { code: 'AUTH_TEMPORARILY_UNAVAILABLE', message: 'Try later' } },
+          'Service Unavailable',
+        );
+      }
+
+      expect((init?.headers as Headers).get('Authorization')).toBe(`Bearer ${validToken}`);
+      return jsonResponse(200, { ok: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    authSession.setAccessToken(validToken);
+
+    await expect(httpClient.get('/api/v1/orders/form-data')).resolves.toEqual({ ok: true });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/auth/refresh',
+      '/api/v1/orders/form-data',
+    ]);
+    expect(authSession.getAccessToken()).toBe(validToken);
   });
 
   it('clears session and throws ApiError when refresh fails', async () => {

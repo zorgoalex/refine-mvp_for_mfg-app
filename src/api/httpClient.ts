@@ -9,6 +9,7 @@ export interface RequestOptions extends RequestInit {
 }
 
 let refreshPromise: Promise<RefreshResponse> | null = null;
+export const ACCESS_TOKEN_REFRESH_WINDOW_MS = 60_000;
 
 export function getApiBaseUrl(): string {
   const runtimeApiUrl = getRuntimeApiUrl();
@@ -197,7 +198,7 @@ async function getRequestAccessToken(options: RequestOptions): Promise<string | 
   if (
     !accessToken
     || options.skipAuthRefresh
-    || !isJwtExpired(accessToken)
+    || !isJwtExpiringSoon(accessToken)
   ) {
     return accessToken;
   }
@@ -205,6 +206,9 @@ async function getRequestAccessToken(options: RequestOptions): Promise<string | 
   try {
     return (await refreshAuthSession()).accessToken;
   } catch (error) {
+    if (canUseAccessTokenAfterEarlyRefreshFailure(accessToken, error)) {
+      return accessToken;
+    }
     if (error instanceof ApiError && error.status === 401) {
       authSession.expire();
     }
@@ -226,10 +230,27 @@ export function getJwtExpirationTime(token: string): number | null {
   }
 }
 
-function isJwtExpired(token: string): boolean {
+export function canUseAccessTokenAfterEarlyRefreshFailure(
+  token: string,
+  error: unknown,
+): boolean {
+  const expiresAt = getJwtExpirationTime(token);
+  if (expiresAt === null || expiresAt <= Date.now()) return false;
+
+  // A refresh-side outage must not reject a business request whose bearer is
+  // still valid. Auth/client failures stay fail-closed; 401 retry remains the
+  // fallback if the server rejects this bearer anyway.
+  return !(error instanceof ApiError)
+    || error.status >= 500
+    || error.code === 'RESPONSE_PARSE_ERROR';
+}
+
+function isJwtExpiringSoon(token: string): boolean {
   const expiresAt = getJwtExpirationTime(token);
   // Preserve support for opaque/non-JWT tokens; backend 401 retry remains the fallback.
-  return expiresAt !== null && expiresAt <= Date.now();
+  // Refresh before the boundary so network latency or small client/server clock
+  // differences cannot turn the first business request into a visible 401.
+  return expiresAt !== null && expiresAt <= Date.now() + ACCESS_TOKEN_REFRESH_WINDOW_MS;
 }
 
 function buildRequestInit(options: RequestOptions, token = authSession.getAccessToken()): RequestInit {
