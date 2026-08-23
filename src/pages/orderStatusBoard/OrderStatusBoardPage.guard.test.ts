@@ -1817,14 +1817,26 @@ describe('OrderStatusBoardPage UX guards', () => {
     expect(settingsContentStart).toBeGreaterThanOrEqual(0);
     expect(settingsContentEnd).toBeGreaterThan(settingsContentStart);
     expect(settingsContent).toContain('История');
-    expect(settingsContent).toContain('onChange={setCncHistoryOpen}');
+    expect(settingsContent).toContain('onChange={toggleMdfHistory}');
     expect(page).toContain('extraContent={cncSettingsContent}');
     expect(columnSettings).toContain('icon={');
     expect(columnSettings).toContain('<SettingOutlined');
     expect(page).toContain('<MdfBoardHistoryPanel');
     expect(page).toContain('onFocusCard={focusMdfHistoryCard}');
+    expect(page).toContain('onClose={() => setCncHistoryOpen(false)}');
+    expect(page).toContain('onCollapsedChange={setCncHistoryCollapsed}');
+    expect(page).toContain('onSelectedOrderChange={selectMdfHistoryOrder}');
     expect(page).toContain("data-cnc-card-kind={cncOrderCard ? 'order' : undefined}");
     expect(page).toContain('data-cnc-card-id={cncOrderCard ? String(card.orderId) : undefined}');
     expect(page).toContain('Поиск и путь заказа откроются под доской.');
+  });
+
+  it('loads order history from a whole-card click while history is open', () => {
+    expect(page).toContain('onSelectOrderHistory={cncHistoryOpen');
+    expect(page).toContain('onSelectCard={onSelectOrderHistory');
+    expect(page).toContain('setCncHistoryOrderId(orderId)');
+    expect(page).toContain('setCncHistoryCollapsed(false)');
+    expect(page).toContain('aria-label={onSelectCard');
+    expect(page).toContain('Показать историю заказа');
   });
 });

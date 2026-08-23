@@ -3959,14 +3959,29 @@
 }
 
 .mdf-history {
-  margin: 18px 16px 28px;
-  padding: 20px;
+  display: flex;
+  min-height: 210px;
+  height: clamp(210px, 30dvh, 320px);
+  flex: 0 0 clamp(210px, 30dvh, 320px);
+  flex-direction: column;
+  margin: 8px 16px 12px;
+  padding: 0;
+  overflow: hidden;
   border-radius: 18px;
   background: var(--ant-color-bg-container, #fff);
   box-shadow:
     0 0 0 1px rgb(15 23 42 / 6%),
     0 1px 2px -1px rgb(15 23 42 / 8%),
     0 8px 24px -12px rgb(15 23 42 / 18%);
+  transition-property: height, min-height, flex-basis;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.mdf-history--collapsed {
+  min-height: 64px;
+  height: 64px;
+  flex-basis: 64px;
 }
 
 .mdf-history__header,
@@ -3984,6 +3999,33 @@
   text-wrap: balance;
 }
 
+.mdf-history__header {
+  min-height: 64px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 12px 16px 12px 20px;
+}
+
+.mdf-history__header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.mdf-history__header-button.ant-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  transition-property: scale, background-color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.mdf-history__header-button.ant-btn:active {
+  scale: 0.96;
+}
+
 .mdf-history__period,
 .mdf-history-event__meta,
 .mdf-history-event__transition,
@@ -3993,7 +4035,15 @@
 
 .mdf-history__search {
   width: min(620px, 100%);
-  margin-top: 18px;
+}
+
+.mdf-history__body {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 4px 20px 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .mdf-history-search-option {
@@ -4182,9 +4232,30 @@
 
 @media (max-width: 700px) {
   .mdf-history {
-    margin: 12px 8px 22px;
-    padding: 14px;
+    margin: 8px 8px 12px;
+    min-height: 200px;
+    height: min(36dvh, 300px);
+    flex-basis: min(36dvh, 300px);
     border-radius: 16px;
+  }
+
+  .mdf-history--collapsed {
+    min-height: 64px;
+    height: 64px;
+    flex-basis: 64px;
+  }
+
+  .mdf-history__header {
+    padding-inline: 14px 8px;
+  }
+
+  .mdf-history__header > div:first-child > .ant-typography-secondary,
+  .mdf-history__period {
+    display: none;
+  }
+
+  .mdf-history__body {
+    padding: 4px 14px 14px;
   }
 
   .mdf-history__header,
@@ -4195,6 +4266,12 @@
     flex-direction: column;
   }
 
+  .mdf-history__header {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+  }
+
   .mdf-history-event__transition {
     width: fit-content;
     white-space: normal;
@@ -4202,7 +4279,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mdf-history-event {
+  .mdf-history,
+  .mdf-history-event,
+  .mdf-history__header-button.ant-btn {
     transition: none;
   }
 }

@@ -10,8 +10,11 @@ import {
 import {
   BranchesOutlined,
   ClockCircleOutlined,
+  CloseOutlined,
+  DownOutlined,
   HistoryOutlined,
   SearchOutlined,
+  UpOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -27,16 +30,27 @@ import type {
 
 interface MdfBoardHistoryPanelProps {
   boardDate: string;
+  collapsed: boolean;
+  selectedOrderId: number | null;
+  selectedOrderNumber: string | null;
+  onCollapsedChange: (collapsed: boolean) => void;
+  onClose: () => void;
   onFocusCard: (kind: MdfBoardHistorySubjectKind, cardId: string) => void;
+  onSelectedOrderChange: (orderId: number | null, orderNumber: string | null) => void;
 }
 
 export const MdfBoardHistoryPanel: React.FC<MdfBoardHistoryPanelProps> = ({
   boardDate,
+  collapsed,
+  selectedOrderId,
+  selectedOrderNumber,
+  onCollapsedChange,
+  onClose,
   onFocusCard,
+  onSelectedOrderChange,
 }) => {
   const [search, setSearch] = useState('');
   const [options, setOptions] = useState<MdfBoardHistoryOrderOption[]>([]);
-  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [history, setHistory] = useState<MdfBoardHistoryResponse | null>(null);
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -64,7 +78,9 @@ export const MdfBoardHistoryPanel: React.FC<MdfBoardHistoryPanelProps> = ({
 
   useEffect(() => {
     if (selectedOrderId === null) {
+      ++historyRevision.current;
       setHistory(null);
+      setLoading(false);
       setError(null);
       return;
     }
@@ -85,18 +101,34 @@ export const MdfBoardHistoryPanel: React.FC<MdfBoardHistoryPanelProps> = ({
       });
   }, [boardDate, selectedOrderId]);
 
-  const selectOptions = useMemo(() => options.map((order) => ({
-    value: order.orderId,
-    label: (
-      <span className="mdf-history-search-option">
-        <span>{order.fullNumber}</span>
-        {order.deleted && <Tag color="default">Удалён</Tag>}
-      </span>
-    ),
-  })), [options]);
+  const selectOptions = useMemo(() => {
+    const source = selectedOrderId !== null
+      && selectedOrderNumber
+      && !options.some((order) => order.orderId === selectedOrderId)
+      ? [{
+          orderId: selectedOrderId,
+          orderName: selectedOrderNumber,
+          fullNumber: selectedOrderNumber,
+          deleted: false,
+          createdAt: '',
+        }, ...options]
+      : options;
+    return source.map((order) => ({
+      value: order.orderId,
+      label: (
+        <span className="mdf-history-search-option">
+          <span>{order.orderName}</span>
+          {order.deleted && <Tag color="default">Удалён</Tag>}
+        </span>
+      ),
+    }));
+  }, [options, selectedOrderId, selectedOrderNumber]);
 
   return (
-    <section className="mdf-history" aria-labelledby="mdf-history-title">
+    <section
+      className={`mdf-history${collapsed ? ' mdf-history--collapsed' : ''}`}
+      aria-labelledby="mdf-history-title"
+    >
       <header className="mdf-history__header">
         <div>
           <Typography.Title id="mdf-history-title" level={4} className="mdf-history__title">
@@ -106,42 +138,71 @@ export const MdfBoardHistoryPanel: React.FC<MdfBoardHistoryPanelProps> = ({
             Найдите заказ и посмотрите, что привело его в текущую колонку.
           </Typography.Text>
         </div>
-        <Tag icon={<ClockCircleOutlined />} className="mdf-history__period">
-          С создания заказа
-        </Tag>
+        <div className="mdf-history__header-actions">
+          {!collapsed && (
+            <Tag icon={<ClockCircleOutlined />} className="mdf-history__period">
+              С создания заказа
+            </Tag>
+          )}
+          <Button
+            type="text"
+            className="mdf-history__header-button"
+            icon={collapsed ? <DownOutlined /> : <UpOutlined />}
+            aria-label={collapsed ? 'Развернуть историю' : 'Свернуть историю'}
+            aria-expanded={!collapsed}
+            onClick={() => onCollapsedChange(!collapsed)}
+          />
+          <Button
+            type="text"
+            className="mdf-history__header-button"
+            icon={<CloseOutlined />}
+            aria-label="Закрыть историю"
+            onClick={onClose}
+          />
+        </div>
       </header>
 
-      <Select
-        className="mdf-history__search"
-        size="large"
-        showSearch
-        allowClear
-        filterOption={false}
-        value={selectedOrderId ?? undefined}
-        options={selectOptions}
-        loading={searching}
-        placeholder="Номер или название заказа"
-        suffixIcon={<SearchOutlined />}
-        notFoundContent={searching ? 'Поиск…' : 'Заказы не найдены'}
-        onSearch={setSearch}
-        onClear={() => setSelectedOrderId(null)}
-        onChange={(value: number | undefined) => setSelectedOrderId(value ?? null)}
-        aria-label="Поиск заказа в истории МДФ-доски"
-      />
+      {!collapsed && (
+        <div className="mdf-history__body">
+          <Select
+            className="mdf-history__search"
+            size="large"
+            showSearch
+            allowClear
+            filterOption={false}
+            value={selectedOrderId ?? undefined}
+            options={selectOptions}
+            loading={searching}
+            placeholder="Номер заказа"
+            suffixIcon={<SearchOutlined />}
+            notFoundContent={searching ? 'Поиск…' : 'Заказы не найдены'}
+            onSearch={setSearch}
+            onClear={() => onSelectedOrderChange(null, null)}
+            onChange={(value: number | undefined) => {
+              const order = options.find((candidate) => candidate.orderId === value);
+              onSelectedOrderChange(
+                value ?? null,
+                value === undefined ? null : order?.orderName ?? selectedOrderNumber ?? String(value),
+              );
+            }}
+            aria-label="Поиск заказа в истории МДФ-доски"
+          />
 
-      {loading && <HistorySkeleton />}
-      {!loading && error && (
-        <Alert type="error" showIcon message="История недоступна" description={error} />
-      )}
-      {!loading && !error && !history && (
-        <Empty
-          className="mdf-history__empty"
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="Выберите заказ — здесь появится его путь и причина текущего положения"
-        />
-      )}
-      {!loading && !error && history && (
-        <HistoryContent history={history} onFocusCard={onFocusCard} />
+          {loading && <HistorySkeleton />}
+          {!loading && error && (
+            <Alert type="error" showIcon message="История недоступна" description={error} />
+          )}
+          {!loading && !error && !history && (
+            <Empty
+              className="mdf-history__empty"
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="Выберите заказ — здесь появится его путь и причина текущего положения"
+            />
+          )}
+          {!loading && !error && history && (
+            <HistoryContent history={history} onFocusCard={onFocusCard} />
+          )}
+        </div>
       )}
     </section>
   );
