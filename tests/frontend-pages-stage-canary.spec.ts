@@ -1,7 +1,9 @@
-import { expect, test, type Page, type Response } from '@playwright/test';
+import { expect, test, type Page, type Request, type Response } from '@playwright/test';
 import bcrypt from 'bcryptjs';
 import { execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 type StageRoute = {
     path: string;
@@ -11,6 +13,15 @@ type StageRoute = {
 };
 
 type StageIds = Record<string, number | null>;
+
+type StageRouteMeasurement = {
+    label: string;
+    path: string;
+    readyMs: number;
+    backendRequests: number;
+    graphqlRequests: number;
+    slowestRequests: Array<{ label: string; durationMs: number }>;
+};
 
 const canaryEnabled = process.env.FRONTEND_PAGES_STAGE_CANARY === 'true';
 const createUserEnabled = process.env.FRONTEND_PAGES_STAGE_CREATE_USER === 'true';
@@ -22,6 +33,9 @@ const stageBackendApiUrl = trimTrailingSlash(
 );
 const vercelAutomationBypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET?.trim();
 const publicPreviewEnabled = process.env.FRONTEND_PAGES_STAGE_PUBLIC_PREVIEW === 'true';
+const routeStartIndex = parseRouteIndex('FRONTEND_PAGES_STAGE_ROUTE_START_INDEX') ?? 0;
+const routeEndIndex = parseRouteIndex('FRONTEND_PAGES_STAGE_ROUTE_END_INDEX');
+const benchmarkOutputPath = process.env.FRONTEND_PAGES_STAGE_BENCHMARK_OUTPUT?.trim();
 const stagePostgresContainer =
     process.env.FRONTEND_PAGES_STAGE_POSTGRES_CONTAINER ?? 'erp_dev-postgresdb-1';
 const ORDERS_VIEW_VERSION_SCHEMA_ERROR = "field 'version' not found in type: 'orders_view'";
@@ -64,10 +78,17 @@ test.describe('Frontend pages stage canary', () => {
         });
         expect(unexpectedMissingRecords, 'stage resources without edit/show fixture rows').toEqual([]);
 
-        const routes = buildStageRoutes(ids);
+        const allRoutes = buildStageRoutes(ids);
+        const routes = selectStageRoutes(allRoutes, routeStartIndex, routeEndIndex);
+        test.info().annotations.push({
+            type: 'stage-route-range',
+            description: `${routeStartIndex}:${routeStartIndex + routes.length}/${allRoutes.length}`,
+        });
         const credentials = getStageCredentials();
         const recorder = recordGraphqlResponses(page);
         const httpErrors = recordHttpErrors(page);
+        const requestCounter = recordBenchmarkRequests(page);
+        const measurements: StageRouteMeasurement[] = [];
         const pageErrors: string[] = [];
         const consoleErrors: string[] = [];
 
@@ -86,26 +107,54 @@ test.describe('Frontend pages stage canary', () => {
 
         await loginThroughUi(page, credentials.username, credentials.password);
 
-        for (const route of routes) {
-            await test.step(route.label, async () => {
-                await flushGraphqlResponses(recorder);
-                recorder.errors.length = 0;
-                httpErrors.length = 0;
-                pageErrors.length = 0;
-                consoleErrors.length = 0;
+        try {
+            for (const route of routes) {
+                await test.step(route.label, async () => {
+                    await flushGraphqlResponses(recorder);
+                    recorder.errors.length = 0;
+                    httpErrors.length = 0;
+                    pageErrors.length = 0;
+                    consoleErrors.length = 0;
+                    requestCounter.reset();
+                    const startedAt = Date.now();
 
-                await navigateWithinApp(page, route.path);
-                await assertStagePageReady(page, route);
-                await flushGraphqlResponses(recorder);
+                    await navigateWithinApp(page, route.path);
+                    await assertStagePageReady(page, route);
+                    await flushGraphqlResponses(recorder);
 
-                expect(recorder.errors, `${route.label} GraphQL errors`).toEqual([]);
-                expect(httpErrors, `${route.label} REST/runtime HTTP errors`).toEqual([]);
-                expect(pageErrors, `${route.label} page errors`).toEqual([]);
-                expect(
-                    consoleErrors.filter((message) => !isAllowedConsoleError(message)),
-                    `${route.label} console errors`,
-                ).toEqual([]);
+                    const counts = requestCounter.snapshot();
+                    measurements.push({
+                        label: route.label,
+                        path: normalizeBenchmarkPath(route.path),
+                        readyMs: Date.now() - startedAt,
+                        ...counts,
+                    });
+                    expect(recorder.errors, `${route.label} GraphQL errors`).toEqual([]);
+                    expect(httpErrors, `${route.label} REST/runtime HTTP errors`).toEqual([]);
+                    expect(pageErrors, `${route.label} page errors`).toEqual([]);
+                    expect(
+                        consoleErrors.filter((message) => !isAllowedConsoleError(message)),
+                        `${route.label} console errors`,
+                    ).toEqual([]);
+                });
+            }
+        } finally {
+            requestCounter.stop();
+            const benchmarkEvidence = JSON.stringify({
+                buildSha: process.env.FRONTEND_PAGES_STAGE_BUILD_SHA ?? 'runtime-verified',
+                routeRange: [routeStartIndex, routeStartIndex + routes.length],
+                measurements,
+            }, null, 2);
+            await test.info().attach('stage-route-performance.json', {
+                body: Buffer.from(benchmarkEvidence),
+                contentType: 'application/json',
             });
+            if (benchmarkOutputPath) {
+                mkdirSync(dirname(benchmarkOutputPath), { recursive: true });
+                const temporaryPath = `${benchmarkOutputPath}.${process.pid}.tmp`;
+                writeFileSync(temporaryPath, `${benchmarkEvidence}\n`, { mode: 0o600 });
+                renameSync(temporaryPath, benchmarkOutputPath);
+            }
         }
     });
 });
@@ -168,6 +217,112 @@ function buildStageRoutes(ids: StageIds): StageRoute[] {
     ];
 
     return routes;
+}
+
+function parseRouteIndex(name: string): number | undefined {
+    const raw = process.env[name]?.trim();
+    if (!raw) return undefined;
+
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0) {
+        throw new Error(`${name} must be a non-negative integer.`);
+    }
+    return value;
+}
+
+function selectStageRoutes(
+    routes: StageRoute[],
+    startIndex: number | undefined,
+    endIndex: number | undefined,
+): StageRoute[] {
+    const start = startIndex ?? 0;
+    const end = endIndex ?? routes.length;
+    if (start >= routes.length || end <= start || end > routes.length) {
+        throw new Error(
+            `Invalid stage route range ${start}:${end}; available routes: ${routes.length}.`,
+        );
+    }
+    return routes.slice(start, end);
+}
+
+function normalizeBenchmarkPath(path: string): string {
+    return path.replace(/\/\d+(?=\/|$)/g, '/:id');
+}
+
+function recordBenchmarkRequests(page: Page) {
+    let backendRequests = 0;
+    let graphqlRequests = 0;
+    let generation = 0;
+    let completedRequests: Array<{ label: string; durationMs: number }> = [];
+    const requestStarts = new WeakMap<Request, {
+        generation: number;
+        label: string;
+        startedAt: number;
+    }>();
+    const onRequest = (request: Request) => {
+        const url = request.url();
+        const isBackend = url.startsWith(stageBackendApiUrl);
+        const isGraphql = url.includes('/v1/graphql');
+        if (isBackend) backendRequests += 1;
+        if (isGraphql) {
+            graphqlRequests += 1;
+        }
+        if (isBackend || isGraphql) {
+            requestStarts.set(request, {
+                generation,
+                label: benchmarkRequestLabel(request, isGraphql),
+                startedAt: Date.now(),
+            });
+        }
+    };
+    const onRequestFinished = (request: Request) => {
+        const start = requestStarts.get(request);
+        if (!start || start.generation !== generation) return;
+        completedRequests.push({
+            label: start.label,
+            durationMs: Date.now() - start.startedAt,
+        });
+    };
+    page.on('request', onRequest);
+    page.on('requestfinished', onRequestFinished);
+
+    return {
+        reset() {
+            generation += 1;
+            backendRequests = 0;
+            graphqlRequests = 0;
+            completedRequests = [];
+        },
+        snapshot() {
+            return {
+                backendRequests,
+                graphqlRequests,
+                slowestRequests: [...completedRequests]
+                    .sort((left, right) => right.durationMs - left.durationMs)
+                    .slice(0, 5),
+            };
+        },
+        stop() {
+            page.off('request', onRequest);
+            page.off('requestfinished', onRequestFinished);
+        },
+    };
+}
+
+function benchmarkRequestLabel(request: Request, isGraphql: boolean): string {
+    if (isGraphql) {
+        const operation = request.postData()?.match(
+            /\b(?:query|mutation)(?:\s+\w+)?(?:\s*\([^)]*\))?\s*\{\s*(\w+)/,
+        )?.[1];
+        return `graphql:${operation ?? 'operation'}`;
+    }
+
+    const url = new URL(request.url());
+    const path = url.pathname
+        .replace(/\/[0-9]+(?=\/|$)/g, '/:id')
+        .replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,}(?=\/|$)/gi, '/:id');
+    const queryKeys = Array.from(new Set(url.searchParams.keys())).sort();
+    return `backend:${path}${queryKeys.length ? `?${queryKeys.join(',')}` : ''}`;
 }
 
 function crudRoutes(basePath: string, label: string, id: number | null): StageRoute[] {
