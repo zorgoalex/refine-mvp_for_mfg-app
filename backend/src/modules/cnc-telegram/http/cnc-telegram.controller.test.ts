@@ -7,11 +7,24 @@ import {
   parseIdempotencyKey,
   parseManualSvgCommentPreset,
   parseManualSvgUpload,
+  parseMdfHistoryOrderSearch,
+  parseMdfHistoryQuery,
   parseStructuredIngest,
   parseTodayQuery,
 } from './cnc-telegram.controller';
 
 describe('CncTelegramController parsing', () => {
+  it('validates MDF history search and optional board date', () => {
+    expect(parseMdfHistoryOrderSearch({ query: '  2711  ', limit: '15' })).toEqual({
+      query: '2711',
+      limit: 15,
+    });
+    expect(parseMdfHistoryOrderSearch({})).toEqual({ query: '', limit: 20 });
+    expect(parseMdfHistoryQuery({ date: '2026-08-23' })).toEqual({ date: '2026-08-23' });
+    expect(() => parseMdfHistoryOrderSearch({ limit: '51' })).toThrow(ApiError);
+    expect(() => parseMdfHistoryQuery({ date: '23.08.2026' })).toThrow(ApiError);
+  });
+
   it('accepts structured packet ingest and rejects raw fields', () => {
     const payload = structuredPayload();
 

@@ -20,6 +20,8 @@ import { PgCncTelegramWorkerSessionRepository } from './adapters/pg-cnc-telegram
 import { PgCncTelegramImportRepository } from './adapters/pg-cnc-telegram-import-repository';
 import { CncTelegramImportService } from './application/cnc-telegram-import.service';
 import { CncTelegramImportController } from './http/cnc-telegram-import.controller';
+import { MdfBoardHistoryService } from './application/mdf-board-history.service';
+import { PgMdfBoardHistoryRepository } from './adapters/pg-mdf-board-history-repository';
 
 @Module({
   imports: [DatabaseModule],
@@ -32,6 +34,12 @@ import { CncTelegramImportController } from './http/cnc-telegram-import.controll
   ],
   providers: [
     CncTelegramRuntimeConfigService,
+    {
+      provide: MdfBoardHistoryService,
+      useFactory: (database: DatabaseService) =>
+        new MdfBoardHistoryService(new PgMdfBoardHistoryRepository(database)),
+      inject: [DatabaseService],
+    },
     {
       provide: CncTelegramWorkerSessionService,
       useFactory: (database: DatabaseService, config: ConfigService<BackendEnv, true>) => (

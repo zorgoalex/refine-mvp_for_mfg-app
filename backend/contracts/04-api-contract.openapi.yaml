@@ -11231,6 +11231,49 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/FeatureDisabled' }
 
+  /api/v1/cnc-telegram/mdf-board/history/orders:
+    get:
+      tags: [CncTelegram]
+      operationId: searchMdfBoardHistoryOrders
+      summary: Search ERP orders for MDF board history, including orders absent from the board
+      security: [{ bearerAuth: [] }]
+      x-permission: orders.view
+      parameters:
+        - { in: query, name: query, required: false, schema: { type: string, maxLength: 120 } }
+        - { in: query, name: limit, required: false, schema: { type: integer, minimum: 1, maximum: 20, default: 20 } }
+      responses:
+        '200':
+          description: ERP order search results for the history panel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MdfBoardHistoryOrderOptionsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
+  /api/v1/cnc-telegram/mdf-board/history/{orderId}:
+    get:
+      tags: [CncTelegram]
+      operationId: getMdfBoardHistory
+      summary: Explain an order path and current position on the MDF board
+      security: [{ bearerAuth: [] }]
+      x-permission: orders.view
+      parameters:
+        - { in: path, name: orderId, required: true, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: date, required: false, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Causal MDF board history and current diagnosis
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MdfBoardHistoryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '503': { $ref: '#/components/responses/FeatureDisabled' }
+
   /api/v1/cnc-telegram/manual-svg-upload:
     post:
       tags: [CncTelegram]
@@ -14128,6 +14171,113 @@ components:
                   requestId: req_01HZX8K5T3M2F5F7K9A2S1QW3E
 
   schemas:
+    MdfBoardHistoryColumn:
+      type: string
+      enum: [parsed, completed, completed_laminated, baths, baths_ready, baths_laminated, completed_baths, orders, orders_ready, orders_issued]
+    MdfBoardHistoryOrderOption:
+      type: object
+      additionalProperties: false
+      required: [orderId, orderName, fullNumber, deleted, createdAt]
+      properties:
+        orderId: { type: integer, minimum: 1 }
+        orderName: { type: string }
+        fullNumber: { type: string }
+        deleted: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    MdfBoardHistoryOrderOptionsResponse:
+      type: object
+      additionalProperties: false
+      required: [data, generatedAt]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/MdfBoardHistoryOrderOption' }
+        generatedAt: { type: string, format: date-time }
+    MdfBoardHistoryCurrentCard:
+      type: object
+      required: [subjectKind, subjectId, existsNow, cardKind, cardId, label, currentColumn, automaticColumn, reasonUnavailable]
+      properties:
+        subjectKind: { type: string, enum: [order, packet, bazisCutSet, bath] }
+        subjectId: { type: string }
+        existsNow: { type: boolean }
+        cardKind: { type: string, enum: [order, packet, bazisCutSet, bath], nullable: true }
+        cardId: { type: string, nullable: true }
+        label: { type: string }
+        currentColumn: { allOf: [{ $ref: '#/components/schemas/MdfBoardHistoryColumn' }], nullable: true }
+        automaticColumn: { allOf: [{ $ref: '#/components/schemas/MdfBoardHistoryColumn' }], nullable: true }
+        reasonUnavailable: { type: string, nullable: true }
+    MdfBoardHistoryEvent:
+      type: object
+      required: [eventId, occurredAt, subjectKind, subjectId, subjectLabel, eventKind, fromColumn, toColumn, reasonCode, reason, consequence, actor, provenance, relatedCurrentCards]
+      properties:
+        eventId: { type: string }
+        occurredAt: { type: string, format: date-time }
+        subjectKind: { type: string, enum: [order, packet, bazisCutSet, bath] }
+        subjectId: { type: string }
+        subjectLabel: { type: string }
+        eventKind: { type: string, enum: [appeared, moved, progress, disappeared, not_on_board, first_known] }
+        fromColumn: { allOf: [{ $ref: '#/components/schemas/MdfBoardHistoryColumn' }], nullable: true }
+        toColumn: { allOf: [{ $ref: '#/components/schemas/MdfBoardHistoryColumn' }], nullable: true }
+        reasonCode: { type: string }
+        reason: { type: string }
+        consequence: { type: string }
+        actor:
+          type: object
+          required: [kind, displayName]
+          properties:
+            kind: { type: string, enum: [user, system] }
+            displayName: { type: string }
+        provenance: { type: string, enum: [recorded, reconstructed, net_reconstructed] }
+        relatedCurrentCards:
+          type: array
+          items: { $ref: '#/components/schemas/MdfBoardHistoryCurrentCard' }
+    MdfBoardHistoryResponse:
+      type: object
+      additionalProperties: false
+      required: [window, generatedAt, order, diagnosis, coverage, episodes]
+      properties:
+        window:
+          type: object
+          required: [dateFrom, dateTo, boardDate]
+          properties:
+            dateFrom: { type: string, format: date }
+            dateTo: { type: string, format: date }
+            boardDate: { type: string, format: date }
+        generatedAt: { type: string, format: date-time }
+        order: { $ref: '#/components/schemas/MdfBoardHistoryOrderOption' }
+        diagnosis:
+          type: object
+          required: [presence, currentColumn, automaticColumn, manualOverride, title, explanation, blockers, relatedCurrentCards]
+          properties:
+            presence: { type: string, enum: [on_board, not_on_board, deleted] }
+            currentColumn: { allOf: [{ $ref: '#/components/schemas/MdfBoardHistoryColumn' }], nullable: true }
+            automaticColumn: { allOf: [{ $ref: '#/components/schemas/MdfBoardHistoryColumn' }], nullable: true }
+            manualOverride: { type: object, nullable: true }
+            title: { type: string }
+            explanation: { type: string }
+            blockers: { type: array, items: { type: object } }
+            relatedCurrentCards:
+              type: array
+              items: { $ref: '#/components/schemas/MdfBoardHistoryCurrentCard' }
+        coverage:
+          type: object
+          required: [status, label, evidenceFrom, gaps]
+          properties:
+            status: { type: string, enum: [recorded_exact, reconstructed_complete, partial, none] }
+            label: { type: string }
+            evidenceFrom: { type: string, format: date-time, nullable: true }
+            gaps: { type: array, items: { type: string } }
+        episodes:
+          type: array
+          items:
+            type: object
+            required: [episodeId, occurredAt, title, primaryEvent, relatedEvents]
+            properties:
+              episodeId: { type: string }
+              occurredAt: { type: string, format: date-time }
+              title: { type: string }
+              primaryEvent: { $ref: '#/components/schemas/MdfBoardHistoryEvent' }
+              relatedEvents: { type: array, items: { $ref: '#/components/schemas/MdfBoardHistoryEvent' } }
     CncTelegramOriginalBoardResponse:
       type: object
       additionalProperties: false

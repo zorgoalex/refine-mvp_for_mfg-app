@@ -40,9 +40,9 @@ export class MdfBoardManualMoveService {
   }
 
   private assertCanView(user: ListMdfBoardManualMovesCommand['currentUser']): void {
-    if (!this.permissions.canUser(user, 'production.tasks.view')) {
+    if (!this.permissions.canUser(user, 'orders.view')) {
       throw new ApiError(403, 'PERMISSION_DENIED', 'Недостаточно прав для просмотра МДФ-доски', {
-        requiredPermissions: ['production.tasks.view'],
+        requiredPermissions: ['orders.view'],
       });
     }
   }
