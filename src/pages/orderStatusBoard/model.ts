@@ -96,7 +96,7 @@ export interface OrderStatusBoardViewState {
   cncOrderSearchPeriod?: CncOrderSearchPeriod;
   cncOrderFilters: string[];
   cncPlannedTodayOnly: boolean;
-  cncCardKind?: 'packet' | 'bath';
+  cncCardKind?: 'order' | 'packet' | 'bazisCutSet' | 'bath';
   cncCardId?: string;
   hideEmpty: boolean;
   sortBy: OrderStatusBoardSortBy;
@@ -186,10 +186,10 @@ export function parseOrderStatusBoardViewState(
     ...(view === 'cnc_today' && cncOrderSearchPeriod ? { cncOrderSearchPeriod } : {}),
     cncOrderFilters: normalizeCncOrderFilterValues(params.getAll('order')),
     cncPlannedTodayOnly: view === 'cnc_today' && params.get('plannedToday') === '1',
-    ...(view === 'cnc_today' && (params.get('cardKind') === 'packet' || params.get('cardKind') === 'bath')
+    ...(view === 'cnc_today' && isCncBoardCardKind(params.get('cardKind'))
       && params.get('cardId')?.trim()
       ? {
-          cncCardKind: params.get('cardKind') as 'packet' | 'bath',
+          cncCardKind: params.get('cardKind') as 'order' | 'packet' | 'bazisCutSet' | 'bath',
           cncCardId: params.get('cardId')!.trim(),
         }
       : {}),
@@ -197,6 +197,10 @@ export function parseOrderStatusBoardViewState(
     sortBy,
     sortOrder,
   };
+}
+
+function isCncBoardCardKind(value: string | null): value is 'order' | 'packet' | 'bazisCutSet' | 'bath' {
+  return value === 'order' || value === 'packet' || value === 'bazisCutSet' || value === 'bath';
 }
 
 export function serializeOrderStatusBoardViewState(

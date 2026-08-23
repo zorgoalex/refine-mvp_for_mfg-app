@@ -14,6 +14,7 @@ import { ApiError } from '../../../common/errors/api-error';
 import type { BackendEnv } from '../../../config/env.validation';
 import type { RequestWithCurrentUser } from '../../../permissions/current-user';
 import { CncTelegramService } from '../application/cnc-telegram.service';
+import { MdfBoardHistoryService } from '../application/mdf-board-history.service';
 import type {
   CncAutoCutStatusConfigureResponseDto,
   CncTelegramIngestResponseDto,
@@ -26,6 +27,10 @@ import type {
   CncTelegramTodayResponseDto,
   CreateCncTelegramManualSvgCommentPresetDto,
 } from '../dto/cnc-telegram.dto';
+import type {
+  MdfBoardHistoryOrderOptionsResponseDto,
+  MdfBoardHistoryResponseDto,
+} from '../dto/mdf-board-history.dto';
 import { CncTelegramRuntimeConfigService } from './cnc-telegram-runtime-config.service';
 import { openTelegramMedia } from '../application/telegram-media-reader';
 
@@ -305,6 +310,15 @@ const autoCutStatusConfigureSchema = z.object({
   enabled: z.boolean(),
 }).strict();
 
+const mdfHistoryOrderSearchSchema = z.object({
+  query: z.string().trim().max(120).default(''),
+  limit: z.coerce.number().int().min(1).max(20).default(20),
+}).strict();
+
+const mdfHistoryQuerySchema = z.object({
+  date: z.string().regex(DATE_ONLY).optional(),
+}).strict();
+
 @ApiTags('CncTelegram')
 @ApiBearerAuth()
 @Controller('cnc-telegram')
@@ -312,6 +326,8 @@ export class CncTelegramController {
   constructor(
     @Inject(CncTelegramService)
     private readonly cncTelegram: CncTelegramService,
+    @Inject(MdfBoardHistoryService)
+    private readonly mdfBoardHistory: MdfBoardHistoryService,
     @Inject(CncTelegramRuntimeConfigService)
     private readonly runtimeConfig: CncTelegramRuntimeConfigService,
     @Inject(ConfigService)
@@ -364,6 +380,53 @@ export class CncTelegramController {
     return this.cncTelegram.listOriginalBoard({
       currentUser,
       requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
+    operationId: 'searchMdfBoardHistoryOrders',
+    summary: 'Search ERP orders for MDF board history, including orders absent from the board',
+  })
+  @ApiQuery({ name: 'query', required: false, type: String })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({ status: 200, description: 'MDF board history order options' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 422, description: 'Invalid search query' })
+  @Get('mdf-board/history/orders')
+  searchMdfBoardHistoryOrders(
+    @Req() request: RequestWithCurrentUser,
+    @Query() query: Record<string, unknown>,
+  ): Promise<MdfBoardHistoryOrderOptionsResponseDto> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseMdfHistoryOrderSearch(query);
+    return this.mdfBoardHistory.searchOrders({ currentUser, ...parsed });
+  }
+
+  @ApiOperation({
+    operationId: 'getMdfBoardHistory',
+    summary: 'Explain an order path and current position on the MDF board',
+  })
+  @ApiQuery({ name: 'date', required: false, type: String })
+  @ApiResponse({ status: 200, description: 'Causal MDF board history and current diagnosis' })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: 404, description: 'Order not found' })
+  @ApiResponse({ status: 422, description: 'Invalid order id or board date' })
+  @Get('mdf-board/history/:orderId')
+  getMdfBoardHistory(
+    @Req() request: RequestWithCurrentUser,
+    @Param('orderId') orderId: string,
+    @Query() query: Record<string, unknown>,
+  ): Promise<MdfBoardHistoryResponseDto> {
+    this.assertEnabled();
+    const currentUser = this.requireCurrentUser(request);
+    const parsed = parseMdfHistoryQuery(query);
+    return this.mdfBoardHistory.getHistory({
+      currentUser,
+      orderId: parsePositiveIntegerParam(orderId, 'orderId'),
+      boardDate: parsed.date ?? null,
     });
   }
 
@@ -638,6 +701,32 @@ export function parseIdempotencyKey(value: string | string[] | undefined): strin
     });
   }
   return key;
+}
+
+export function parseMdfHistoryOrderSearch(query: Record<string, unknown>): {
+  query: string;
+  limit: number;
+} {
+  const parsed = mdfHistoryOrderSearchSchema.safeParse(query);
+  if (!parsed.success) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Некорректный поиск по истории МДФ-доски', {
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    });
+  }
+  return parsed.data;
+}
+
+export function parseMdfHistoryQuery(query: Record<string, unknown>): { date?: string } {
+  const parsed = mdfHistoryQuerySchema.safeParse(query);
+  if (!parsed.success || (parsed.data.date && !isValidDateOnly(parsed.data.date))) {
+    throw new ApiError(422, 'VALIDATION_ERROR', 'Дата доски должна быть в формате YYYY-MM-DD', {
+      field: 'date',
+    });
+  }
+  return parsed.data;
 }
 
 function parsePositiveIntegerParam(value: string, field: string): number {

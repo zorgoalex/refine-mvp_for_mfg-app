@@ -10,7 +10,7 @@ describe('CNC Telegram original-board OpenAPI contract', () => {
   it('documents the read-only orders.view route and exact current-location fields', () => {
     const route = contract.slice(
       contract.indexOf('/api/v1/cnc-telegram/mdf-board/original:'),
-      contract.indexOf('/api/v1/cnc-telegram/media/{storageKey}:'),
+      contract.indexOf('/api/v1/cnc-telegram/mdf-board/history/orders:'),
     );
 
     expect(route).toContain('operationId: listCncTelegramOriginalBoard');
