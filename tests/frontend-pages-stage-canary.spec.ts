@@ -326,7 +326,11 @@ function loadStageIds(): StageIds {
     return JSON.parse(
         psql(`
             SELECT jsonb_build_object(
-                'orders', (SELECT min(order_id) FROM orders),
+                'orders', (
+                    SELECT min(order_id)
+                    FROM orders
+                    WHERE COALESCE(delete_flag, false) = false
+                ),
                 'doweling_orders_view', (SELECT min(doweling_order_id) FROM doweling_orders_view),
                 'materials', (SELECT min(material_id) FROM materials),
                 'milling_types', (SELECT min(milling_type_id) FROM milling_types),
