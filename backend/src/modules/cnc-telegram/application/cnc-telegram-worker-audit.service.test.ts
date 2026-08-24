@@ -126,6 +126,17 @@ describe('CncTelegramWorkerAuditService', () => {
   it('exports a readable full-fidelity JSON envelope for audit viewers', async () => {
     const exportDetailed = vi.fn().mockResolvedValue({
       scans: [{ scanId }],
+      runtimeSessions: [{
+        sourceChatId: '-100', workerInstanceId: '00000000-0000-4000-8000-000000000077',
+        workerImageRevision: 'a'.repeat(40), active: true, stackEnv: 'prod', workerRole: 'writer',
+        canSendManualSvgUploads: true, manualSvgSendPollIntervalSeconds: 5, parserVersion: 'worker-v1',
+      }],
+      manualSvgTelegramSends: [{
+        requestId: 'send-1', packetId: 'packet-1', packetSourceChatId: 'erp-manual-svg-upload',
+        destinationChatId: '-100', status: 'pending', attemptCount: 0,
+        requestedAt: '2026-08-01T00:00:00.000Z', svgCutImportStatus: 'imported', cutJobId: '77',
+        cutJobDisplayNumber: '104', hasMdfEvent: true, liveFileCount: 3, events: [], files: [],
+      }],
       messages: [{
         logId: 'log-1',
         observations: [{ observationId: 'observation-1' }],
@@ -148,7 +159,7 @@ describe('CncTelegramWorkerAuditService', () => {
     expect(file.content.endsWith('\n')).toBe(true);
     expect(payload).toMatchObject({
       format: 'erp.cnc-telegram-worker-audit',
-      schemaVersion: 1,
+      schemaVersion: 2,
       detailLevel: 'full',
       exportedBy: { userId: currentUser.id, username: 'auditor', role: currentUser.role },
       period: {
@@ -157,7 +168,21 @@ describe('CncTelegramWorkerAuditService', () => {
         scanDateField: 'workday', inclusive: true,
       },
       filters: { status: 'failed', messageType: null, reasonCode: null, search: null },
-      totals: { scans: 1, messages: 1, observations: 1, operations: 1, steps: 1, responses: 2 },
+      totals: {
+        scans: 1, messages: 1, observations: 1, operations: 1, steps: 1, responses: 2,
+        runtimeSessions: 1, manualSvgTelegramSends: 1, activeManualSvgTelegramSends: 1,
+      },
+    });
+    expect(payload).toMatchObject({
+      runtimeSnapshot: { sessions: [expect.objectContaining({ sourceChatId: '-100', runtimeEvidenceComplete: true })] },
+      findings: { pendingCount: 1, claimablePendingCount: 1, stuckPendingCount: 1 },
+      manualSvgTelegramSends: [expect.objectContaining({
+        routing: expect.objectContaining({ destinationMatchesActiveWorker: true }),
+        eligibility: expect.objectContaining({ claimableNow: true, stuck: true }),
+      })],
+    });
+    expect(payload).toMatchObject({
+      runtimeSnapshot: { sessions: [expect.objectContaining({ revisionMatchesBackend: true })] },
     });
     expect(payload.scans).toEqual([{ scanId }]);
     expect(payload.messages).toEqual([expect.objectContaining({
@@ -165,6 +190,45 @@ describe('CncTelegramWorkerAuditService', () => {
         responses: [{ responseId: 'response-1' }, { responseId: 'response-2' }],
       })],
     })]);
+  });
+
+  it('exports blocking reason codes sufficient to diagnose an unroutable manual send', async () => {
+    const service = createService(deniedAuditPort(), {
+      exportDetailed: vi.fn().mockResolvedValue({
+        scans: [], messages: [], runtimeSessions: [],
+        manualSvgTelegramSends: [{
+          requestId: 'send-broken', packetId: 'packet-broken',
+          packetSourceChatId: 'erp-manual-svg-upload', destinationChatId: null,
+          status: 'pending', attemptCount: 0, requestedAt: '2026-08-24T00:00:00.000Z',
+          svgCutImportStatus: 'pending', cutJobId: null, cutJobDisplayNumber: null,
+          hasMdfEvent: false, liveFileCount: 0, events: [], files: [],
+        }],
+      }),
+    });
+
+    const file = await service.exportDetailed(
+      user('auditor', ['audit.view']),
+      { dateFrom: '2026-08-24', dateTo: '2026-08-24' },
+    );
+    const payload = JSON.parse(file.content) as {
+      manualSvgTelegramSends: Array<{
+        routing: { packetSourceIsSynthetic: boolean; destinationChatId: string | null };
+        eligibility: { claimableNow: boolean; reasonCodes: string[] };
+      }>;
+    };
+
+    expect(payload.manualSvgTelegramSends[0]).toMatchObject({
+      routing: { packetSourceIsSynthetic: true, destinationChatId: null },
+      eligibility: { claimableNow: false },
+    });
+    expect(payload.manualSvgTelegramSends[0]?.eligibility.reasonCodes).toEqual([
+      'DESTINATION_CHAT_MISSING',
+      'SVG_IMPORT_NOT_READY',
+      'CUT_JOB_MISSING',
+      'CUT_JOB_DISPLAY_NUMBER_MISSING',
+      'MDF_EVENT_MISSING',
+      'NO_LIVE_FILES',
+    ]);
   });
 
   it('denies detailed export without audit.view before reading the repository', async () => {
@@ -262,6 +326,7 @@ function createService(
     get: vi.fn((key: keyof BackendEnv) => ({
       CNC_TELEGRAM_WORKER_USERNAME: 'cnc-bot',
       CNC_TELEGRAM_ALLOWED_CHAT_IDS: '-100123',
+      BACKEND_BUILD_SHA: 'a'.repeat(40),
     })[key]),
   } as unknown as ConfigService<BackendEnv, true>;
   return new CncTelegramWorkerAuditService(repository, config, deniedAudit);

@@ -74,6 +74,9 @@ const calculateBodySchema = z.object({
   version: z.number().int().min(0),
   commandId: z.string().uuid(),
 }).strict();
+const mdfBoardCardBodySchema = z.object({
+  expectedCutResultId: z.number().int().positive(),
+}).strict();
 
 const setProfileBodySchema = z
   .object({
@@ -293,11 +296,34 @@ export class CutController {
   async createMdfBoardCard(
     @Req() request: RequestWithCurrentUser,
     @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
   ): Promise<CutJobDto> {
     const currentUser = this.requireMutation(request);
+    const parsed = parseMdfBoardCardBody(body);
     return this.cut.createMdfBoardCard({
       currentUser,
       cutJobId: parseCutJobId(cutJobId),
+      expectedCutResultId: parsed.expectedCutResultId,
+      requestId: request.requestId,
+    });
+  }
+
+  @ApiOperation({
+    operationId: 'deleteCutJobMdfBoardCard',
+    summary: 'Remove the current vacuum bath card from the MDF board',
+  })
+  @Delete(':cutJobId/mdf-board-card')
+  async deleteMdfBoardCard(
+    @Req() request: RequestWithCurrentUser,
+    @Param('cutJobId') cutJobId: string,
+    @Body() body: unknown,
+  ): Promise<CutJobDto> {
+    const currentUser = this.requireMutation(request);
+    const parsed = parseMdfBoardCardBody(body);
+    return this.cut.deleteMdfBoardCard({
+      currentUser,
+      cutJobId: parseCutJobId(cutJobId),
+      expectedCutResultId: parsed.expectedCutResultId,
       requestId: request.requestId,
     });
   }
@@ -1100,6 +1126,10 @@ export function parseDeleteCutJobBody(body: unknown): { version: number; deleteL
 
 export function parseCalculateBody(body: unknown): { version: number; commandId: string } {
   return parse(calculateBodySchema, body);
+}
+
+export function parseMdfBoardCardBody(body: unknown): { expectedCutResultId: number } {
+  return parse(mdfBoardCardBodySchema, body);
 }
 
 export function parseSetProfileBody(body: unknown): { paramProfileId: number | null; version: number } {

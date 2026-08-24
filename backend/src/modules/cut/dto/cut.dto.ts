@@ -274,11 +274,15 @@ export interface CutJobMdfBoardTargetDto {
 export interface CutJobMdfBoardStatusDto {
   state: CutJobMdfBoardState;
   cardKind: CutJobMdfBoardCardKind;
+  /** Current cut result guarded by create/delete commands. */
+  cutResultId: number | null;
   reason: string;
   activePacketCount: number;
   hiddenPacketCount: number;
   /** True when a single linked manual-SVG packet is missing the MDF-board marker and can be created safely. */
   canCreateCard?: boolean;
+  /** True only for a visible current-result bath card that may be removed from the MDF board. */
+  canDeleteCard?: boolean;
   packets: CutJobLinkedMdfPacketDto[];
   target: CutJobMdfBoardTargetDto | null;
 }

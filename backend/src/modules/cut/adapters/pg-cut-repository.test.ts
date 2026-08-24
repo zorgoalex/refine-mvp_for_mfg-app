@@ -8,6 +8,7 @@ import type { CutConfigPort } from '../application/cut-config';
 import { StaticCutConfig } from '../application/cut-config';
 import {
   PgCutRepository,
+  buildMdfBoardStatus,
   nameChangedOutboxKey,
   planCutResultAllocation,
   profileChangedOutboxKey,
@@ -17,6 +18,43 @@ import {
 } from './pg-cut-repository';
 
 const repositorySource = readFileSync(new URL('./pg-cut-repository.ts', import.meta.url), 'utf8');
+
+describe('vacuum MDF bath-card lifecycle', () => {
+  it('offers delete for a visible bath and create for a hidden bath', () => {
+    const common = {
+      cut_job_id: 42,
+      status: 'ready',
+      selection_criteria: null,
+      manual_pending_packet_count: 0,
+      active_packets_json: [],
+      card_kind: 'bath',
+    };
+    expect(buildMdfBoardStatus({
+      ...common,
+      active_packet_count: 1,
+      hidden_packet_count: 0,
+      card_id: 'cut-result:9',
+      target_workday: '2026-08-24',
+    } as never)).toMatchObject({ state: 'created', canCreateCard: false, canDeleteCard: true });
+    expect(buildMdfBoardStatus({
+      ...common,
+      active_packet_count: 0,
+      hidden_packet_count: 1,
+      card_id: null,
+      target_workday: null,
+    } as never)).toMatchObject({ state: 'hidden', canCreateCard: true, canDeleteCard: false });
+  });
+
+  it('auto-creates against the exact calculated result and records non-atomic failures', () => {
+    expect(repositorySource).toContain("prep.calcParams.layout_mode === 'vacuum_table'");
+    expect(repositorySource).toContain('await this.ensureAutoBathCard(command, prep.cutResultId)');
+    expect(repositorySource).toContain('current.current_cut_result_id');
+    expect(repositorySource).toContain('CUT_JOB_MDF_BOARD_RESULT_STALE');
+    expect(repositorySource).toContain('MDF_BATH_CARD_EVENTS.autoCreateFailed');
+    expect(repositorySource).toContain("action: 'delete_tombstone'");
+    expect(repositorySource).toContain('hidden_seed.svg_cut_result_id = j.current_cut_result_id');
+  });
+});
 
 describe('vacuum bath meter-guide render wiring', () => {
   it('resolves catalog identity + frozen calculation mode and applies guides to current and historical renders', () => {
@@ -389,6 +427,20 @@ function createDatabase(options: FakeDbOptions = {}) {
 
     if (sql.startsWith('SELECT cut_job_id FROM cut_job WHERE cut_job_id = $1 FOR UPDATE')) {
       return { rows: [{ cut_job_id: options.cutJob?.cut_job_id ?? 42 }], rowCount: 1 };
+    }
+
+    if (sql.startsWith('SELECT job.cut_job_id, job.name, job.status, job.current_cut_result_id,')) {
+      return {
+        rows: [{
+          cut_job_id: options.cutJob?.cut_job_id ?? 42,
+          name: options.cutJob?.name ?? 'J',
+          status: options.cutJob?.status ?? 'ready',
+          current_cut_result_id: currentResultId,
+          result_no: storedResult?.result_no ?? null,
+          snapshot_job: storedResult?.snapshot_job ?? null,
+        }],
+        rowCount: 1,
+      };
     }
 
     // setProfile FOR UPDATE

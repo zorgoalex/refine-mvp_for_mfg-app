@@ -78,6 +78,28 @@ describe('CncTelegramMediaService', () => {
       code: 'CNC_TELEGRAM_MEDIA_EXPIRED', statusCode: 410,
     });
   });
+
+  it('rejects a manual send completion for a chat outside the active session', async () => {
+    const repository = repositoryMock();
+    const service = new CncTelegramMediaService(repository as never, config() as never);
+
+    await expect(service.completeManualSvgTelegramSend({
+      currentUser: user(['cut.manage'], 'cnc-worker'),
+      requestId: 'request-1',
+      completion: {
+        sentChatId: '-1000000000000',
+        sentMessageIds: [10],
+        itemLeaseToken: 'item-token',
+        itemLeaseGeneration: 1,
+        itemLeaseOwner: 'worker-1',
+      },
+      lease,
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'CNC_TELEGRAM_SEND_DESTINATION_MISMATCH',
+    });
+    expect(repository.completeManualSvgTelegramSend).not.toHaveBeenCalled();
+  });
 });
 
 function repositoryMock() {

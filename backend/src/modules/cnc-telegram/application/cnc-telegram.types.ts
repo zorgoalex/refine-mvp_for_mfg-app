@@ -47,6 +47,7 @@ export interface ConfigureCncAutoCutStatusCommand {
 export interface ManualSvgUploadCommand {
   currentUser: CurrentUser;
   dto: CncTelegramManualSvgUploadDto;
+  telegramDestinationChatId?: string;
   requestId?: string;
 }
 

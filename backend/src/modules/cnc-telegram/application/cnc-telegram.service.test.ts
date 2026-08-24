@@ -338,7 +338,62 @@ describe('CncTelegramService', () => {
       }),
     );
   });
+
+  it('assigns the single configured destination to a manual SVG send request', async () => {
+    const response = { packetId: 'packet-1' };
+    const manualSvgUpload = vi.fn().mockResolvedValue(response);
+    const service = new CncTelegramService({
+      packets: packetPorts({ manualSvgUpload }),
+      manualSvgDestinationChatIds: ['-1001996415689'],
+    });
+    const command = {
+      currentUser: user(['cut.manage']),
+      dto: { ...manualSvgDto(), telegramSend: { enabled: true } },
+      requestId: 'request-1',
+    };
+
+    await expect(service.manualSvgUpload(command)).resolves.toBe(response);
+    expect(manualSvgUpload).toHaveBeenCalledWith({
+      ...command,
+      telegramDestinationChatId: '-1001996415689',
+    });
+  });
+
+  it.each([[[]], [['-1001', '-1002']]])(
+    'fails closed when manual SVG destination is ambiguous: %j',
+    async (manualSvgDestinationChatIds) => {
+      const manualSvgUpload = vi.fn();
+      const service = new CncTelegramService({
+        packets: packetPorts({ manualSvgUpload }),
+        manualSvgDestinationChatIds,
+      });
+
+      await expect(service.manualSvgUpload({
+        currentUser: user(['cut.manage']),
+        dto: { ...manualSvgDto(), telegramSend: { enabled: true } },
+        requestId: 'request-1',
+      })).rejects.toMatchObject({
+        statusCode: 503,
+        code: 'CNC_TELEGRAM_MANUAL_SEND_DESTINATION_UNAVAILABLE',
+      });
+      expect(manualSvgUpload).not.toHaveBeenCalled();
+    },
+  );
 });
+
+function packetPorts(overrides: Record<string, unknown> = {}) {
+  return {
+    listToday: vi.fn(),
+    listOriginalBoard: vi.fn(),
+    listOrderCuttingSequences: vi.fn(),
+    ingest: vi.fn(),
+    manualSvgUpload: vi.fn(),
+    listManualSvgCommentPresets: vi.fn(),
+    createManualSvgCommentPreset: vi.fn(),
+    configureAutoCutStatus: vi.fn(),
+    ...overrides,
+  };
+}
 
 function user(permissions: CurrentUser['permissions']): CurrentUser {
   return {

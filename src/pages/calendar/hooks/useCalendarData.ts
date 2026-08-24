@@ -8,6 +8,10 @@ import { useAppSettings, SETTING_KEYS } from '../../../hooks/useAppSettings';
 import { resolveDetailMaterialName } from '../../../utils/materialDisplayName';
 import { buildProductionStagesDisplayConfig } from '../../../utils/productionWorkflow';
 import type { ProductionStatusRef, ProductionWorkflowConfig } from '../../../types/productionWorkflow';
+import {
+  buildProductionStatusCodeLookup,
+  resolveCalendarProductionStatusCodes,
+} from '../utils/productionStatusCodes';
 
 const toSortedOptions = (values: Iterable<string>): CalendarFilterOption[] =>
   Array.from(new Set(Array.from(values).map((value) => value.trim()).filter(Boolean)))
@@ -239,17 +243,6 @@ export const useCalendarData = (
     return map;
   }, [productionStatusesData]);
 
-  // Создаём Map для быстрого поиска кода статуса производства по ID
-  const productionStatusIdToCode = useMemo(() => {
-    const map = new Map<number, string>();
-    (productionStatusesData?.data || []).forEach((ps: any) => {
-      if (ps.production_status_code) {
-        map.set(ps.production_status_id, ps.production_status_code);
-      }
-    });
-    return map;
-  }, [productionStatusesData]);
-
   const statusesForWorkflow: ProductionStatusRef[] = useMemo(() => {
     return (productionStatusesData?.data || []).map((ps: any) => ({
       production_status_id: ps.production_status_id,
@@ -260,6 +253,11 @@ export const useCalendarData = (
       is_active: !!ps.is_active,
     }));
   }, [productionStatusesData]);
+
+  // Сопоставление кодов по ID и только по однозначным нормализованным названиям.
+  const productionStatusIdToCode = useMemo(() => {
+    return buildProductionStatusCodeLookup(statusesForWorkflow);
+  }, [statusesForWorkflow]);
 
   const workflow = getSetting<ProductionWorkflowConfig>(SETTING_KEYS.PRODUCTION_WORKFLOW_DEFAULT);
 
@@ -280,7 +278,7 @@ export const useCalendarData = (
         if (!map[event.order_id]) {
           map[event.order_id] = [];
         }
-        const code = productionStatusIdToCode.get(event.production_status_id);
+        const code = productionStatusIdToCode.idToCode.get(event.production_status_id);
         if (code && !map[event.order_id].includes(code)) {
           map[event.order_id].push(code);
         }
@@ -369,14 +367,17 @@ export const useCalendarData = (
         doweling_order_name: dowelingByOrderId[order.order_id] || undefined,
         // Приоритет: статус уровня заказа (из orders_view), затем агрегация из деталей
         production_status_name: order.production_status_name || aggregatedProductionStatus,
-        // Пройденные этапы производства из production_status_events
-        passedProductionCodes:
-          passedCodesByOrderId[order.order_id] || order.passed_production_status_codes || [],
+        passedProductionCodes: resolveCalendarProductionStatusCodes({
+          order,
+          details,
+          eventCodes: passedCodesByOrderId[order.order_id],
+          lookup: productionStatusIdToCode,
+        }),
       };
     });
 
     return groupOrdersByDate(applyCalendarFilters(ordersWithDetails, filters));
-  }, [data?.data, detailsByOrderId, dowelingByOrderId, filters, passedCodesByOrderId]);
+  }, [data?.data, detailsByOrderId, dowelingByOrderId, filters, passedCodesByOrderId, productionStatusIdToCode]);
 
   return {
     ordersByDate,

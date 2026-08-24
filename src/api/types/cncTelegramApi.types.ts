@@ -192,6 +192,8 @@ export interface CncTelegramBathCard {
   displayCutNumber?: string | null;
   cutJobName: string;
   createdAt: string;
+  forced?: boolean;
+  mdfBoardHidden?: boolean;
   ready: boolean;
   orderCount: number;
   positionCount: number;
@@ -252,7 +254,7 @@ export interface CncTelegramOriginalPacket extends CncTelegramPacket {
 }
 
 export interface CncTelegramOriginalBathCard extends CncTelegramBathCard {
-  currentBoardVisibility: 'visible' | 'archived';
+  currentBoardVisibility: 'visible' | 'hidden' | 'archived';
   currentBoardColumn: 'baths' | 'baths_ready' | 'baths_laminated' | 'completed_baths' | null;
   currentBoardCardId: string | null;
 }

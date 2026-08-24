@@ -5,6 +5,7 @@ import { OrderCardProps, DragItem } from '../types/calendar';
 import { getCardBorderColor, getMillingDisplayValue } from '../utils/statusColors';
 import { formatDateKey } from '../utils/dateUtils';
 import { buildCalendarOrderDragPreview } from './calendarDragPreview';
+import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
 
 /**
  * Компактный вид карточки заказа
@@ -21,6 +22,7 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
   order,
   sourceDate,
   cardScale = 1.0,
+  productionWorkflowDisplay,
   onContextMenu,
   isDragging: isDraggingProp = false,
   showFinancials = true,
@@ -285,6 +287,19 @@ const OrderCardCompact: React.FC<OrderCardProps> = ({
           }}
         >
           {paymentStatus}
+        </div>
+      )}
+
+      {(order.passedProductionCodes?.length ?? 0) > 0 && (
+        <div className="order-card-compact__line order-card-compact__production-stages">
+          <ProductionStagesDisplay
+            passedCodes={order.passedProductionCodes}
+            displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+            codeToLetter={productionWorkflowDisplay?.codeToLetter}
+            codeToName={productionWorkflowDisplay?.codeToName}
+            fontSize={11}
+            passedColor="#fa8c16"
+          />
         </div>
       )}
     </div>

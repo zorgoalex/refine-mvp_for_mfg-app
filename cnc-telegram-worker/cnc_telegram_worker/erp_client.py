@@ -133,6 +133,7 @@ class ErpClient:
         chat_id: str,
         image_revision: str,
         lease_ttl_seconds: int,
+        runtime_evidence: dict[str, Any] | None = None,
     ) -> WorkerSessionLease:
         if not self.worker_instance_id:
             raise RuntimeError("worker instance id is missing")
@@ -142,6 +143,7 @@ class ErpClient:
                 "chatId": chat_id,
                 "workerInstanceId": self.worker_instance_id,
                 "imageRevision": image_revision,
+                **({"runtime": runtime_evidence} if runtime_evidence is not None else {}),
             },
             session_bound=False,
         )

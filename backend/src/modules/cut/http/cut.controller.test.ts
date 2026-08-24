@@ -24,6 +24,7 @@ import {
   parseAxisOrigin,
   canonicalOriginTopLeft,
   parseCalculateBody,
+  parseMdfBoardCardBody,
 } from './cut.controller';
 import { CutPdfCache } from '../application/cut-pdf-cache';
 import type { CutRuntimeConfigService } from './cut-runtime-config.service';
@@ -36,6 +37,11 @@ it('requires a stable commandId for calculate retries', () => {
     commandId: TEST_COMMAND_ID,
   });
   expect(() => parseCalculateBody({ version: 1 })).toThrow();
+});
+
+it('requires an expected result id for MDF-board card mutations', () => {
+  expect(parseMdfBoardCardBody({ expectedCutResultId: 9 })).toEqual({ expectedCutResultId: 9 });
+  expect(() => parseMdfBoardCardBody({})).toThrow();
 });
 
 function currentUser(id = '7'): CurrentUser {
@@ -166,6 +172,7 @@ describe('CutController', () => {
         calculate: vi.fn(async (c) => { calls.push(`calc:${c.cutJobId}:${c.version}`); return jobDto(); }),
         archive: vi.fn(async (c) => { calls.push(`archive:${c.cutJobId}:${c.version}`); return jobDto(); }),
         createMdfBoardCard: vi.fn(async (c) => { calls.push(`mdf:${c.cutJobId}`); return jobDto(); }),
+        deleteMdfBoardCard: vi.fn(async (c) => { calls.push(`mdfDelete:${c.cutJobId}`); return jobDto(); }),
         setCurrentResult: vi.fn(async (c) => { calls.push(`current:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
         archiveResult: vi.fn(async (c) => { calls.push(`archiveResult:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
         unarchiveResult: vi.fn(async (c) => { calls.push(`unarchiveResult:${c.cutJobId}:${c.resultNo}`); return jobDto(); }),
@@ -175,7 +182,8 @@ describe('CutController', () => {
     await expect(controller.create({ user: currentUser() } as never, { name: 'Тест' })).resolves.toMatchObject({ cutJobId: 42 });
     await controller.calculate({ user: currentUser() } as never, '42', { version: 3, commandId: TEST_COMMAND_ID });
     await controller.archive({ user: currentUser() } as never, '42', { version: 5 });
-    await controller.createMdfBoardCard({ user: currentUser(), requestId: 'req-mdf' } as never, '42');
+    await controller.createMdfBoardCard({ user: currentUser(), requestId: 'req-mdf' } as never, '42', { expectedCutResultId: 9 });
+    await controller.deleteMdfBoardCard({ user: currentUser(), requestId: 'req-mdf-delete' } as never, '42', { expectedCutResultId: 9 });
     await controller.setResultCurrent({ user: currentUser() } as never, '42', '2');
     await controller.archiveResult({ user: currentUser() } as never, '42', '3');
     await controller.unarchiveResult({ user: currentUser() } as never, '42', '4');
@@ -184,6 +192,7 @@ describe('CutController', () => {
       'calc:42:3',
       'archive:42:5',
       'mdf:42',
+      'mdfDelete:42',
       'current:42:2',
       'archiveResult:42:3',
       'unarchiveResult:42:4',

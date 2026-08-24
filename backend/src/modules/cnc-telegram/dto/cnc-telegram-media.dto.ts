@@ -98,6 +98,7 @@ export interface CncTelegramManualSvgTelegramFileTaskDto {
 export interface CncTelegramManualSvgTelegramSendTaskDto {
   requestId: string;
   packetId: string;
+  destinationChatId: string;
   cutJobId: number;
   cutJobDisplayNumber: string;
   messageText: string;

@@ -421,6 +421,7 @@ export function filterCncBathColumnsByMachineOrderMatches(
     if (!isCncBathColumnKey(column.key)) return column;
     const baths = (column.baths ?? []).filter((bath) =>
       bath.bathCardId === preservedBathCardId
+      || bath.forced === true
       || bath.items.some((item) => machineOrderKeys.has(normalizeCncOrderKey(item.orderName))),
     );
     return { ...column, baths, total: baths.length };

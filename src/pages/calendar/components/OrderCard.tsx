@@ -404,20 +404,22 @@ const OrderCard: React.FC<OrderCardProps> = ({
         {isOperational ? (
           <span className="order-card__due">Срок {dueDate ?? '—'}</span>
         ) : null}
-        <div
-          className="order-card__production-stages"
-          style={{ background: allProductionReady && !isOperational ? '#ffd9bf' : 'transparent' }}
-        >
-          <ProductionStagesDisplay
-            passedCodes={passedProductionCodes}
-            displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
-            codeToLetter={productionWorkflowDisplay?.codeToLetter}
-            codeToName={productionWorkflowDisplay?.codeToName}
-            fontSize={11}
-            showTooltip={true}
-            passedColor="#fa8c16"
-          />
-        </div>
+        {passedProductionCodes.length > 0 && (
+          <div
+            className="order-card__production-stages"
+            style={{ background: allProductionReady && !isOperational ? '#ffd9bf' : 'transparent' }}
+          >
+            <ProductionStagesDisplay
+              passedCodes={passedProductionCodes}
+              displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+              codeToLetter={productionWorkflowDisplay?.codeToLetter}
+              codeToName={productionWorkflowDisplay?.codeToName}
+              fontSize={11}
+              showTooltip={true}
+              passedColor="#fa8c16"
+            />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -26,6 +26,49 @@ describe('CNC Telegram worker session DTOs', () => {
     })).toThrow(ApiError);
   });
 
+  it('accepts and maps worker runtime evidence for audit diagnostics', () => {
+    expect(parseWorkerSessionLease({
+      chatId: '-100123',
+      workerInstanceId,
+      imageRevision: 'd0e683b40744',
+      runtime: {
+        stackEnv: 'prod',
+        workerRole: 'writer',
+        canSendManualSvgUploads: true,
+        manualSvgSendPollIntervalSeconds: 5,
+        parserVersion: '2026-08-24',
+      },
+    })).toMatchObject({
+      runtimeEvidence: {
+        stackEnv: 'prod',
+        workerRole: 'writer',
+        canSendManualSvgUploads: true,
+        manualSvgSendPollIntervalSeconds: 5,
+        parserVersion: '2026-08-24',
+      },
+    });
+  });
+
+  it.each([
+    { manualSvgSendPollIntervalSeconds: 0 },
+    { workerRole: 'admin' },
+    { extra: true },
+  ])('rejects invalid or non-strict runtime evidence: %o', (runtimeOverride) => {
+    expect(() => parseWorkerSessionLease({
+      chatId: '-100123',
+      workerInstanceId,
+      imageRevision: 'd0e683b40744',
+      runtime: {
+        stackEnv: 'prod',
+        workerRole: 'writer',
+        canSendManualSvgUploads: true,
+        manualSvgSendPollIntervalSeconds: 5,
+        parserVersion: '2026-08-24',
+        ...runtimeOverride,
+      },
+    })).toThrow(ApiError);
+  });
+
   it('keeps heartbeat body strict and fences headers to a UUID worker instance', () => {
     expect(parseWorkerSessionHeartbeat({ workerInstanceId })).toEqual({ workerInstanceId });
     expect(() => parseWorkerSessionHeartbeat({ workerInstanceId, sourceChatId: '-100123' })).toThrow(ApiError);

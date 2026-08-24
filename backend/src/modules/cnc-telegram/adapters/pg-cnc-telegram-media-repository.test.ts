@@ -170,6 +170,8 @@ describe('PgCncTelegramMediaRepository', () => {
           return { rows: [{
             request_id: manualSvgSendRequestId(),
             packet_id: packetId(),
+            destination_chat_id: '-100',
+            packet_source_chat_id: 'erp-manual-svg-upload',
             previous_status: 'processing',
             state_at: '2026-08-14T04:00:00.000Z',
             attempt_count: 1,
@@ -188,6 +190,8 @@ describe('PgCncTelegramMediaRepository', () => {
           return { rows: [{
             request_id: manualSvgSendRequestId(),
             packet_id: packetId(),
+            destination_chat_id: '-100',
+            packet_source_chat_id: 'erp-manual-svg-upload',
             cut_job_id: 212,
             cut_job_display_number: '67',
             message_text: 'Фрезы для ХДФ: 8',
@@ -211,6 +215,7 @@ describe('PgCncTelegramMediaRepository', () => {
     })).resolves.toEqual([{
       requestId: manualSvgSendRequestId(),
       packetId: packetId(),
+      destinationChatId: '-100',
       cutJobId: 212,
       cutJobDisplayNumber: '67',
       messageText: 'Фрезы для ХДФ: 8',
@@ -229,7 +234,8 @@ describe('PgCncTelegramMediaRepository', () => {
     expect(reconcileQuery?.text).toContain("sent_message_ids_json='[]'::jsonb");
     const claimQuery = queries.find(({ text }) => text.includes('WITH candidates AS'));
     expect(claimQuery?.params).toEqual([5, '-100', sessionLease.workerInstanceId]);
-    expect(claimQuery?.text).toContain('packet.source_chat_id=$2');
+    expect(claimQuery?.text).toContain('request.destination_chat_id=$2');
+    expect(claimQuery?.text).not.toContain('packet.source_chat_id=$2');
     expect(claimQuery?.text).toContain('LIMIT $1::integer');
     expect(claimQuery?.text).toContain("WHERE request.status='pending'");
     expect(claimQuery?.text).toContain('JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id');
@@ -240,9 +246,13 @@ describe('PgCncTelegramMediaRepository', () => {
     expect(claimQuery?.text).toContain('FOR UPDATE OF request SKIP LOCKED');
     expect(claimQuery?.text).toContain("encode(file.content_bytes, 'base64')");
     expect(staleQuery?.params).toEqual(['-100']);
-    expect(staleQuery?.text).toContain('packet.source_chat_id=$1');
+    expect(staleQuery?.text).toContain('request.destination_chat_id=$1');
     expect(reconcileQuery?.params).toEqual(['-100']);
-    expect(reconcileQuery?.text).toContain('packet.source_chat_id=$1');
+    expect(reconcileQuery?.text).toContain('request.destination_chat_id=$1');
+    const claimAudit = queries.find(({ params }) => params.includes('cnc.manual_svg_upload.telegram_send_claimed'));
+    expect(claimAudit?.params).toContain('claim-request-1');
+    expect(claimAudit?.params.some((param) => typeof param === 'string' && param.includes('"destinationChatId":"-100"'))).toBe(true);
+    expect(claimAudit?.params.some((param) => typeof param === 'string' && param.includes('"packetSourceChatId":"erp-manual-svg-upload"'))).toBe(true);
   });
 
   it('rejects manual-send completion from a stale item lease inside the fenced transaction', async () => {

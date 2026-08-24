@@ -16,16 +16,17 @@ const databaseUrl =
   process.env.PRODUCTION_ACTIONS_INTEGRATION_DATABASE_URL ?? process.env.TEST_DATABASE_URL;
 const describeIntegration = databaseUrl ? describe : describe.skip;
 
-// Valid erp_test FK ids (probed 2026-06-23).
-const CLIENT_ID = 1007;
-const USER_ID = 7;
-const MILLING_TYPE_ID = 41;
-const EDGE_TYPE_ID = 28;
-const SHEET_MATERIAL_TYPE_ID = 2;
-// production_statuses: 1=drawn(sort 10), 16=new(sort 5), 9=film_purchase(sort 15).
-const STATUS_INITIAL = 1;
-const STATUS_NEW_MIN = 16; // lower sort_order than initial → becomes the order's min-status in auto
-const STATUS_FILM = 9;
+let CLIENT_ID: number;
+let PROJECT_ID: number;
+let ORDER_STATUS_ID: number;
+let PAYMENT_STATUS_ID: number;
+let USER_ID: number;
+let MILLING_TYPE_ID: number;
+let EDGE_TYPE_ID: number;
+let SHEET_MATERIAL_TYPE_ID: number;
+let STATUS_INITIAL: number;
+let STATUS_NEW_MIN: number;
+let STATUS_FILM: number;
 
 function realService(pool: Pool): DatabaseService {
   return {
@@ -65,22 +66,60 @@ describeIntegration('changeBatchDetailProductionStatus (real erp_test DB)', () =
   let repository: PgProductionActionRepository;
   let orderId: number;
   let detailIds: number[];
+  let hdfDetailId: number | undefined;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 4 });
     repository = new PgProductionActionRepository(realService(pool));
+    const orderRefs = (await pool.query(
+      `SELECT client_id, project_id, order_status_id, payment_status_id, created_by
+       FROM orders
+       WHERE client_id IS NOT NULL AND project_id IS NOT NULL
+         AND order_status_id IS NOT NULL AND payment_status_id IS NOT NULL AND created_by IS NOT NULL
+       ORDER BY order_id LIMIT 1`,
+    )).rows[0];
+    CLIENT_ID = Number(orderRefs.client_id);
+    PROJECT_ID = Number(orderRefs.project_id);
+    ORDER_STATUS_ID = Number(orderRefs.order_status_id);
+    PAYMENT_STATUS_ID = Number(orderRefs.payment_status_id);
+    USER_ID = Number(orderRefs.created_by);
+
+    const detailRefs = (await pool.query(
+      `SELECT milling_type_id, edge_type_id, sheet_material_type_id
+       FROM order_details
+       WHERE milling_type_id IS NOT NULL AND edge_type_id IS NOT NULL
+         AND sheet_material_type_id IS NOT NULL
+       ORDER BY detail_id LIMIT 1`,
+    )).rows[0];
+    MILLING_TYPE_ID = Number(detailRefs.milling_type_id);
+    EDGE_TYPE_ID = Number(detailRefs.edge_type_id);
+    SHEET_MATERIAL_TYPE_ID = Number(detailRefs.sheet_material_type_id);
+
+    const productionStatuses = await pool.query<{ production_status_code: string; production_status_id: number }>(
+      `SELECT production_status_code, production_status_id
+       FROM production_statuses
+       WHERE production_status_code = ANY($1::text[])`,
+      [['drawn', 'new', 'film_purchase']],
+    );
+    const productionStatusByCode = new Map(
+      productionStatuses.rows.map((row) => [row.production_status_code, Number(row.production_status_id)]),
+    );
+    STATUS_INITIAL = productionStatusByCode.get('drawn')!;
+    STATUS_NEW_MIN = productionStatusByCode.get('new')!;
+    STATUS_FILM = productionStatusByCode.get('film_purchase')!;
 
     const orderRow = await pool.query<{ order_id: string | number }>(
       `INSERT INTO orders
-         (order_name, client_id, order_status_id, payment_status_id, created_by,
+         (order_name, client_id, project_id, order_status_id, payment_status_id, created_by,
           production_status_id, production_status_from_details_enabled)
-       VALUES ($1, $2, $3, $4, $5, $6, true)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, true)
        RETURNING order_id`,
       [
         `E2E-Тест batch §7.2 ${randomUUID().slice(0, 8)}`,
         CLIENT_ID,
-        1,
-        1,
+        PROJECT_ID,
+        ORDER_STATUS_ID,
+        PAYMENT_STATUS_ID,
         USER_ID,
         STATUS_INITIAL,
       ],
@@ -121,8 +160,23 @@ describeIntegration('changeBatchDetailProductionStatus (real erp_test DB)', () =
             [detailIds],
           );
         }
+        await pool.query(`DELETE FROM order_hdf_details WHERE order_id = $1`, [orderId]);
         await pool.query(`DELETE FROM order_details WHERE order_id = $1`, [orderId]);
-        await pool.query(`DELETE FROM orders WHERE order_id = $1`, [orderId]);
+        const cleanupClient = await pool.connect();
+        try {
+          await cleanupClient.query('BEGIN');
+          await cleanupClient.query('SET LOCAL session_replication_role = replica');
+          await cleanupClient.query(`DELETE FROM mdf_board_history_state WHERE order_id = $1`, [orderId]);
+          await cleanupClient.query(`DELETE FROM mdf_board_history_coverage WHERE order_id = $1`, [orderId]);
+          await cleanupClient.query(`DELETE FROM mdf_board_history_events WHERE order_id = $1`, [orderId]);
+          await cleanupClient.query(`DELETE FROM orders WHERE order_id = $1`, [orderId]);
+          await cleanupClient.query('COMMIT');
+        } catch (error) {
+          await cleanupClient.query('ROLLBACK');
+          throw error;
+        } finally {
+          cleanupClient.release();
+        }
       }
     } finally {
       await pool.end();
@@ -235,5 +289,80 @@ describeIntegration('changeBatchDetailProductionStatus (real erp_test DB)', () =
       [orderId],
     );
     expect(details.rows.every((row) => Number(row.production_status_id) === STATUS_FILM)).toBe(true);
+  });
+
+  it('ignores fresh HDF status when recalculating the parent from ordinary details', async () => {
+    const revision = Number((
+      await pool.query<{ revision: string | number }>(
+        `SELECT revision FROM hdf_calculation_config_state WHERE id = 1`,
+      )
+    ).rows[0].revision);
+    const inserted = await pool.query<{ order_hdf_detail_id: string | number }>(
+      `INSERT INTO order_hdf_details (
+         order_id, source_order_detail_id, source_order_detail_id_snapshot,
+         hdf_enabled, edge_mm, threshold_mm, hdf_sheet_material_type_id,
+         hdf_height_mm, hdf_width_mm, quantity, area_m2, status,
+         source_snapshot_hash, source_snapshot_json, config_revision,
+         production_status_id, created_by
+       ) VALUES (
+         $1, $2, $2, true, 67, 15, $3,
+         100, 200, 1, 0.02, 'ok',
+         $4, '{}'::jsonb, $5, $6, $7
+       )
+       RETURNING order_hdf_detail_id`,
+      [
+        orderId,
+        detailIds[0],
+        SHEET_MATERIAL_TYPE_ID,
+        `e2e-hdf-${randomUUID()}`,
+        revision,
+        STATUS_NEW_MIN,
+        USER_ID,
+      ],
+    );
+    hdfDetailId = Number(inserted.rows[0].order_hdf_detail_id);
+
+    await pool.query(
+      `UPDATE order_details SET production_status_id = $2 WHERE order_id = $1`,
+      [orderId, STATUS_FILM],
+    );
+    await pool.query(`SELECT recalc_order_production_status($1)`, [orderId]);
+
+    const parent = await pool.query<{ production_status_id: number }>(
+      `SELECT production_status_id FROM orders WHERE order_id = $1`,
+      [orderId],
+    );
+    expect(Number(parent.rows[0].production_status_id)).toBe(STATUS_FILM);
+
+    await pool.query(
+      `UPDATE order_hdf_details SET production_status_id = $2, version = version + 1
+       WHERE order_hdf_detail_id = $1`,
+      [hdfDetailId, STATUS_INITIAL],
+    );
+    await pool.query(`SELECT recalc_order_production_status($1)`, [orderId]);
+    const afterHdfRegeneration = await pool.query<{ production_status_id: number }>(
+      `SELECT production_status_id FROM orders WHERE order_id = $1`,
+      [orderId],
+    );
+    expect(Number(afterHdfRegeneration.rows[0].production_status_id)).toBe(STATUS_FILM);
+  });
+
+  it('manual parent production status cascades only to ordinary details', async () => {
+    await pool.query(`UPDATE orders SET production_status_id = $2 WHERE order_id = $1`, [
+      orderId,
+      STATUS_NEW_MIN,
+    ]);
+
+    const details = await pool.query<{ production_status_id: number }>(
+      `SELECT production_status_id FROM order_details WHERE order_id = $1`,
+      [orderId],
+    );
+    expect(details.rows.every((row) => Number(row.production_status_id) === STATUS_NEW_MIN)).toBe(true);
+
+    const hdf = await pool.query<{ production_status_id: number }>(
+      `SELECT production_status_id FROM order_hdf_details WHERE order_hdf_detail_id = $1`,
+      [hdfDetailId],
+    );
+    expect(Number(hdf.rows[0].production_status_id)).toBe(STATUS_INITIAL);
   });
 });
