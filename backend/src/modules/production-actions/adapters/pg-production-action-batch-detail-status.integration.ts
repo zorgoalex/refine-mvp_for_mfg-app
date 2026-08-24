@@ -65,6 +65,7 @@ describeIntegration('changeBatchDetailProductionStatus (real erp_test DB)', () =
   let repository: PgProductionActionRepository;
   let orderId: number;
   let detailIds: number[];
+  let hdfDetailId: number | undefined;
 
   beforeAll(async () => {
     pool = new Pool({ connectionString: databaseUrl, max: 4 });
@@ -121,6 +122,7 @@ describeIntegration('changeBatchDetailProductionStatus (real erp_test DB)', () =
             [detailIds],
           );
         }
+        await pool.query(`DELETE FROM order_hdf_details WHERE order_id = $1`, [orderId]);
         await pool.query(`DELETE FROM order_details WHERE order_id = $1`, [orderId]);
         await pool.query(`DELETE FROM orders WHERE order_id = $1`, [orderId]);
       }
@@ -235,5 +237,80 @@ describeIntegration('changeBatchDetailProductionStatus (real erp_test DB)', () =
       [orderId],
     );
     expect(details.rows.every((row) => Number(row.production_status_id) === STATUS_FILM)).toBe(true);
+  });
+
+  it('ignores fresh HDF status when recalculating the parent from ordinary details', async () => {
+    const revision = Number((
+      await pool.query<{ revision: string | number }>(
+        `SELECT revision FROM hdf_calculation_config_state WHERE id = 1`,
+      )
+    ).rows[0].revision);
+    const inserted = await pool.query<{ order_hdf_detail_id: string | number }>(
+      `INSERT INTO order_hdf_details (
+         order_id, source_order_detail_id, source_order_detail_id_snapshot,
+         hdf_enabled, edge_mm, threshold_mm, hdf_sheet_material_type_id,
+         hdf_height_mm, hdf_width_mm, quantity, area_m2, status,
+         source_snapshot_hash, source_snapshot_json, config_revision,
+         production_status_id, created_by
+       ) VALUES (
+         $1, $2, $2, true, 67, 15, $3,
+         100, 200, 1, 0.02, 'ok',
+         $4, '{}'::jsonb, $5, $6, $7
+       )
+       RETURNING order_hdf_detail_id`,
+      [
+        orderId,
+        detailIds[0],
+        SHEET_MATERIAL_TYPE_ID,
+        `e2e-hdf-${randomUUID()}`,
+        revision,
+        STATUS_NEW_MIN,
+        USER_ID,
+      ],
+    );
+    hdfDetailId = Number(inserted.rows[0].order_hdf_detail_id);
+
+    await pool.query(
+      `UPDATE order_details SET production_status_id = $2 WHERE order_id = $1`,
+      [orderId, STATUS_FILM],
+    );
+    await pool.query(`SELECT recalc_order_production_status($1)`, [orderId]);
+
+    const parent = await pool.query<{ production_status_id: number }>(
+      `SELECT production_status_id FROM orders WHERE order_id = $1`,
+      [orderId],
+    );
+    expect(Number(parent.rows[0].production_status_id)).toBe(STATUS_FILM);
+
+    await pool.query(
+      `UPDATE order_hdf_details SET production_status_id = $2, version = version + 1
+       WHERE order_hdf_detail_id = $1`,
+      [hdfDetailId, STATUS_INITIAL],
+    );
+    await pool.query(`SELECT recalc_order_production_status($1)`, [orderId]);
+    const afterHdfRegeneration = await pool.query<{ production_status_id: number }>(
+      `SELECT production_status_id FROM orders WHERE order_id = $1`,
+      [orderId],
+    );
+    expect(Number(afterHdfRegeneration.rows[0].production_status_id)).toBe(STATUS_FILM);
+  });
+
+  it('manual parent production status cascades only to ordinary details', async () => {
+    await pool.query(`UPDATE orders SET production_status_id = $2 WHERE order_id = $1`, [
+      orderId,
+      STATUS_NEW_MIN,
+    ]);
+
+    const details = await pool.query<{ production_status_id: number }>(
+      `SELECT production_status_id FROM order_details WHERE order_id = $1`,
+      [orderId],
+    );
+    expect(details.rows.every((row) => Number(row.production_status_id) === STATUS_NEW_MIN)).toBe(true);
+
+    const hdf = await pool.query<{ production_status_id: number }>(
+      `SELECT production_status_id FROM order_hdf_details WHERE order_hdf_detail_id = $1`,
+      [hdfDetailId],
+    );
+    expect(Number(hdf.rows[0].production_status_id)).toBe(STATUS_INITIAL);
   });
 });

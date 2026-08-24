@@ -204,6 +204,10 @@ export interface CncTelegramBathCardDto {
   displayCutNumber?: string;
   cutJobName: string;
   createdAt: string;
+  /** True when the bath is anchored by a cut-result bath_seed packet. */
+  forced?: boolean;
+  /** True only in history/original-board reads when the result was removed from the live board. */
+  mdfBoardHidden?: boolean;
   ready: boolean;
   orderCount: number;
   positionCount: number;
@@ -263,7 +267,7 @@ export interface CncTelegramOriginalPacketDto extends CncTelegramPacketDto {
 }
 
 export interface CncTelegramOriginalBathCardDto extends CncTelegramBathCardDto {
-  currentBoardVisibility: 'visible' | 'archived';
+  currentBoardVisibility: 'visible' | 'hidden' | 'archived';
   currentBoardColumn: 'baths' | 'baths_ready' | 'baths_laminated' | 'completed_baths' | null;
   currentBoardCardId: string | null;
 }

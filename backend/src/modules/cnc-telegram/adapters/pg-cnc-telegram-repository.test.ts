@@ -13,6 +13,14 @@ import {
 const repositorySource = readFileSync(new URL('./pg-cnc-telegram-repository.ts', import.meta.url), 'utf8');
 
 describe('PgCncTelegramRepository', () => {
+  it('keeps forced baths visible and preserves hidden bath history', () => {
+    expect(repositorySource).toContain("forced_seed.mdf_board_card_kind = 'bath_seed'");
+    expect(repositorySource).toContain("hidden_seed.mdf_board_card_kind = 'bath_seed'");
+    expect(repositorySource).toContain("COALESCE(r.snapshot_job ->> 'isVacuum', 'false') = 'true'");
+    expect(repositorySource).toContain("? 'hidden' as const");
+    expect(repositorySource).toContain('currentByResult.get(bath.cutResultId)');
+  });
+
   it('returns bath display cut numbers without result version', () => {
     expect(repositorySource).toContain('j.source_display_number');
     expect(repositorySource).toContain('result.source_display_number');
@@ -1128,7 +1136,7 @@ describe('PgCncTelegramRepository', () => {
     const result = await repo.listToday({ currentUser: user(), workday: '2026-07-24' });
     const sql = queries.join('\n');
 
-    expect(sql).toContain("= 'vacuum_table'");
+    expect(sql).toContain("COALESCE(r.snapshot_job ->> 'isVacuum', 'false') = 'true'");
     expect(sql).toContain('cut_result_placement');
     expect(sql).toContain('cut_result_sheet_map');
     expect(sql).toContain('cut_result_label_map_projection');

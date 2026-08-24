@@ -1,12 +1,13 @@
 import { Table, Tooltip } from '../../ui/tooltipDelay';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
+import { Alert, Button, Card, Checkbox, Collapse, DatePicker, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Spin, Tabs, Tag, Typography, message, theme } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   CheckOutlined,
   CloseOutlined,
   ColumnHeightOutlined,
   DownloadOutlined,
+  DeleteOutlined,
   EditOutlined,
   FilterOutlined,
   HistoryOutlined,
@@ -473,9 +474,11 @@ const CutJobMdfBoardCell: React.FC<{
   job: CutJobDto;
   canOpenBoard: boolean;
   canCreate: boolean;
-  creating: boolean;
+  canDelete: boolean;
+  action: 'create' | 'delete' | null;
   onCreate: (job: CutJobDto) => void;
-}> = ({ job, canOpenBoard, canCreate, creating, onCreate }) => {
+  onDelete: (job: CutJobDto) => void;
+}> = ({ job, canOpenBoard, canCreate, canDelete, action, onCreate, onDelete }) => {
   const { push } = useNavigation();
   const status = job.mdfBoardStatus;
   const state = status?.state ?? 'unknown';
@@ -502,16 +505,41 @@ const CutJobMdfBoardCell: React.FC<{
     <Tooltip title={<span style={{ whiteSpace: 'pre-line' }}>{tooltip}</span>}>
       <span className="cut-job-mdf-board-cell">
         {linkedStatus}
-        {state === 'not_created' && canCreate ? (
+        {canCreate ? (
           <Button
             size="small"
             className="cut-job-mdf-board-cell__create"
-            loading={creating}
-            disabled={creating}
+            loading={action === 'create'}
+            disabled={action !== null}
             onClick={() => onCreate(job)}
           >
             Создать карточку
           </Button>
+        ) : null}
+        {state === 'created' && canDelete ? (
+          <Popconfirm
+            title={(
+              <span>
+                Удалить карточку ванны с МДФ-доски?<br />
+                <Text type="secondary">Карточка останется в истории и её можно будет создать снова.</Text>
+              </span>
+            )}
+            okText="Удалить"
+            cancelText="Отмена"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => onDelete(job)}
+          >
+            <Button
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              className="cut-job-mdf-board-cell__delete"
+              loading={action === 'delete'}
+              disabled={action !== null}
+            >
+              Удалить карточку
+            </Button>
+          </Popconfirm>
         ) : null}
         <Text type="secondary" className="cut-job-mdf-board-cell__reason">{reason}</Text>
       </span>
@@ -1098,7 +1126,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   const [selected, setSelected] = useState<number[]>([]);
   const [previewName, setPreviewName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [creatingMdfBoardCard, setCreatingMdfBoardCard] = useState(false);
+  const [mdfBoardCardActions, setMdfBoardCardActions] = useState<Record<number, 'create' | 'delete'>>({});
   const [sheetImages, setSheetImages] = useState<Record<string, string>>({});
   // Auto-loaded small layout previews (preset 'thumb') for a ready job's sheets,
   // keyed `${cutGroupId}:${sheetIndex}`. thumbReqRef dedupes in-flight/done fetches.
@@ -2475,10 +2503,17 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
   );
 
   const createMdfBoardCard = useCallback(async (targetJob: CutJobDto) => {
-    setBusy(true);
-    setCreatingMdfBoardCard(true);
+    const expectedCutResultId = targetJob.mdfBoardStatus?.cutResultId ?? targetJob.currentCutResult?.cutResultId;
+    if (!expectedCutResultId) {
+      message.error('Сначала рассчитайте раскрой');
+      return;
+    }
+    setMdfBoardCardActions((current) => ({ ...current, [targetJob.cutJobId]: 'create' }));
     try {
-      const updated = await cutApi.createMdfBoardCard(targetJob.cutJobId);
+      const updated = await cutApi.createMdfBoardCard(targetJob.cutJobId, expectedCutResultId);
+      setJobs((current) => current.map((candidate) => (
+        candidate.cutJobId === updated.cutJobId ? updated : candidate
+      )));
       if (job?.cutJobId === targetJob.cutJobId) {
         setJob(updated);
         applyPdfTemplateState(updated);
@@ -2491,8 +2526,41 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
     } catch (error) {
       handleError(error, 'Не удалось создать карточку на МДФ-доске');
     } finally {
-      setCreatingMdfBoardCard(false);
-      setBusy(false);
+      setMdfBoardCardActions((current) => {
+        const next = { ...current };
+        delete next[targetJob.cutJobId];
+        return next;
+      });
+    }
+  }, [applyPdfTemplateState, emitCutJobUpdate, handleError, job, loadJobs]);
+
+  const deleteMdfBoardCard = useCallback(async (targetJob: CutJobDto) => {
+    const expectedCutResultId = targetJob.mdfBoardStatus?.cutResultId ?? targetJob.currentCutResult?.cutResultId;
+    if (!expectedCutResultId) {
+      message.error('Текущий результат раскроя не найден');
+      return;
+    }
+    setMdfBoardCardActions((current) => ({ ...current, [targetJob.cutJobId]: 'delete' }));
+    try {
+      const updated = await cutApi.deleteMdfBoardCard(targetJob.cutJobId, expectedCutResultId);
+      setJobs((current) => current.map((candidate) => (
+        candidate.cutJobId === updated.cutJobId ? updated : candidate
+      )));
+      if (job?.cutJobId === targetJob.cutJobId) {
+        setJob(updated);
+        applyPdfTemplateState(updated);
+        emitCutJobUpdate(updated, job);
+      }
+      message.success('Карточка ванны удалена с МДФ-доски');
+      await loadJobs();
+    } catch (error) {
+      handleError(error, 'Не удалось удалить карточку ванны с МДФ-доски');
+    } finally {
+      setMdfBoardCardActions((current) => {
+        const next = { ...current };
+        delete next[targetJob.cutJobId];
+        return next;
+      });
     }
   }, [applyPdfTemplateState, emitCutJobUpdate, handleError, job, loadJobs]);
 
@@ -2520,7 +2588,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       applyPdfTemplateState(calculated);
       resetSheetViews();
       emitCutJobReady(calculated);
-      message.success('Раскрой рассчитан');
+      if (calculated.isVacuum && calculated.mdfBoardStatus?.state !== 'created') {
+        message.warning('Раскрой рассчитан, но карточка ванны не создана. Используйте «Создать карточку».');
+      } else {
+        message.success('Раскрой рассчитан');
+      }
       await loadJobs();
     } catch (error) {
       if (!canPublishCutWrite(writeToken, targetJobId)) return;
@@ -2556,7 +2628,11 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         await loadJobs();
         if (responseWasLostAfterSuccess) {
           emitCutJobReady(fresh);
-          message.success('Раскрой рассчитан');
+          if (fresh.isVacuum && fresh.mdfBoardStatus?.state !== 'created') {
+            message.warning('Раскрой рассчитан, но карточка ванны не создана. Используйте «Создать карточку».');
+          } else {
+            message.success('Раскрой рассчитан');
+          }
           return;
         }
       } catch {
@@ -3319,14 +3395,16 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
       {
         title: 'МДФ-доска',
         key: 'mdfBoard',
-        width: 132,
+        width: 168,
         render: (_: unknown, row: CutJobDto) => (
           <CutJobMdfBoardCell
             job={row}
             canOpenBoard={canViewOrders}
             canCreate={canManage && row.mdfBoardStatus?.canCreateCard === true}
-            creating={creatingMdfBoardCard && row.cutJobId === job?.cutJobId}
+            canDelete={canManage && row.mdfBoardStatus?.canDeleteCard === true}
+            action={mdfBoardCardActions[row.cutJobId] ?? null}
             onCreate={createMdfBoardCard}
+            onDelete={deleteMdfBoardCard}
           />
         ),
       },
@@ -3437,7 +3515,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
         ),
       },
     ],
-    [busy, canManage, canViewOrders, createMdfBoardCard, creatingMdfBoardCard, job?.cutJobId, openJob, deleteJob, profiles, cutSettings, isOperational, show],
+    [busy, canManage, canViewOrders, createMdfBoardCard, deleteMdfBoardCard, mdfBoardCardActions, openJob, deleteJob, profiles, cutSettings, isOperational, show],
   );
 
   const eligibleColumns: ColumnsType<EligibleDetailDto> = useMemo(
@@ -4471,7 +4549,7 @@ export const CutPage: React.FC<CutPageProps> = ({ embeddedOrderId }) => {
                 size="small"
                 icon={<PlusOutlined />}
                 onClick={() => void createMdfBoardCard(job)}
-                loading={creatingMdfBoardCard}
+                loading={mdfBoardCardActions[job.cutJobId] === 'create'}
                 disabled={
                   !canManage ||
                   busy ||

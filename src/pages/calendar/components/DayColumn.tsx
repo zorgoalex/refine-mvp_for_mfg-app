@@ -55,7 +55,14 @@ const DayColumn: React.FC<DayColumnProps> = ({
 
   // Если выбран краткий вид - используем специальный компонент
   if (viewMode === ViewMode.BRIEF) {
-    return <DayColumnBrief date={date} orders={orders} columnWidth={columnWidth} />;
+    return (
+      <DayColumnBrief
+        date={date}
+        orders={orders}
+        columnWidth={columnWidth}
+        productionWorkflowDisplay={productionWorkflowDisplay}
+      />
+    );
   }
 
   // Выбираем компонент карточки в зависимости от режима

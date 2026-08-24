@@ -274,6 +274,8 @@ interface BathJoinedRow extends QueryResultRow {
   revision_no: string | number;
   result_created_at: string | Date;
   cut_job_name: string | null;
+  forced_bath_seed: boolean | null;
+  hidden_bath_seed: boolean | null;
   order_id: string | number;
   order_detail_id: string | number;
   order_name: string | null;
@@ -7354,6 +7356,15 @@ async function loadBathCards(
         AND r.created_at < ($2::date + INTERVAL '1 day')`
     : `AND j.status <> 'archived'
         AND archive.archived_at IS NULL`;
+  const hiddenTombstonePredicate = options.includeHistory
+    ? ''
+    : `AND NOT EXISTS (
+          SELECT 1
+          FROM cnc_telegram_packets hidden_seed
+          WHERE hidden_seed.svg_cut_result_id = r.cut_result_id
+            AND hidden_seed.mdf_board_card_kind = 'bath_seed'
+            AND hidden_seed.mdf_board_hidden_at IS NOT NULL
+        )`;
   const forcedHistoryPredicate = options.includeHistory
     ? `OR EXISTS (
             SELECT 1
@@ -7546,13 +7557,25 @@ async function loadBathCards(
         r.revision_no,
         r.created_at AS result_created_at,
         COALESCE(r.snapshot_job ->> 'name', j.name, 'Раскрой ' || j.cut_job_id::text) AS cut_job_name,
-        (current_result.result_no = r.result_no) AS is_current_result
+        (current_result.result_no = r.result_no) AS is_current_result,
+        EXISTS (
+          SELECT 1
+          FROM cnc_telegram_packets forced_seed
+          WHERE forced_seed.svg_cut_result_id = r.cut_result_id
+            AND forced_seed.mdf_board_card_kind = 'bath_seed'
+            AND forced_seed.mdf_board_hidden_at IS NULL
+        ) AS forced_bath_seed,
+        EXISTS (
+          SELECT 1
+          FROM cnc_telegram_packets hidden_seed
+          WHERE hidden_seed.svg_cut_result_id = r.cut_result_id
+            AND hidden_seed.mdf_board_card_kind = 'bath_seed'
+            AND hidden_seed.mdf_board_hidden_at IS NOT NULL
+        ) AS hidden_bath_seed
       FROM cut_job j
       JOIN cut_result r ON r.cut_job_id = j.cut_job_id
       LEFT JOIN cut_result current_result
         ON current_result.cut_result_id = j.current_cut_result_id
-      LEFT JOIN cut_param_profiles profile
-        ON profile.cut_param_profile_id = j.param_profile_id
       LEFT JOIN cut_result_archive_state archive
         ON archive.cut_job_id = r.cut_job_id
        AND archive.result_no = r.result_no
@@ -7560,8 +7583,9 @@ async function loadBathCards(
         ON projection.cut_result_id = r.cut_result_id
        AND projection.snapshot_digest = r.snapshot_digest
       WHERE r.snapshot_job IS NOT NULL
-        AND COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+        AND COALESCE(r.snapshot_job ->> 'isVacuum', 'false') = 'true'
         ${candidateVisibilityPredicate}
+        ${hiddenTombstonePredicate}
         AND (
           EXISTS (
             SELECT 1
@@ -7597,6 +7621,8 @@ async function loadBathCards(
       result.revision_no,
       result.result_created_at,
       result.cut_job_name,
+      result.forced_bath_seed,
+      result.hidden_bath_seed,
       placement.order_id,
       placement.order_detail_id,
       COALESCE(NULLIF(trim(o.order_name), ''), placement.order_id::text) AS order_name,
@@ -7659,10 +7685,10 @@ function mapOriginalBathCards(
   historicalBaths: CncTelegramBathCardDto[],
   currentBaths: CncTelegramBathCardDto[],
 ): CncTelegramOriginalBathCardDto[] {
-  const currentByJob = new Map(currentBaths.map((bath) => [bath.cutJobId, bath]));
+  const currentByResult = new Map(currentBaths.map((bath) => [bath.cutResultId, bath]));
   return historicalBaths
     .map((bath) => {
-      const current = currentByJob.get(bath.cutJobId);
+      const current = currentByResult.get(bath.cutResultId);
       const currentColumn = current
         ? allItemsPackedOrLater(current.items)
           ? 'completed_baths' as const
@@ -7674,7 +7700,11 @@ function mapOriginalBathCards(
         : null;
       return {
         ...bath,
-        currentBoardVisibility: current ? 'visible' as const : 'archived' as const,
+        currentBoardVisibility: current
+          ? 'visible' as const
+          : bath.mdfBoardHidden
+            ? 'hidden' as const
+            : 'archived' as const,
         currentBoardColumn: currentColumn,
         currentBoardCardId: current?.bathCardId ?? null,
       };
@@ -7965,6 +7995,8 @@ function mapBathRows(rows: BathJoinedRow[]): CncTelegramBathCardDto[] {
         displayCutNumber: formatCutJobNumber(cutJobId, true, row.source_display_number),
         cutJobName: normalizeOptional(row.cut_job_name) ?? `Раскрой ${cutJobId}`,
         createdAt: toIso(row.result_created_at),
+        forced: row.forced_bath_seed === true,
+        mdfBoardHidden: row.hidden_bath_seed === true,
         ready: false,
         orderCount: 0,
         positionCount: 0,

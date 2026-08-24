@@ -55,6 +55,7 @@ export interface CalendarOrder {
   order_status_name?: string;
   payment_status_id?: number | null;
   payment_status_name?: string;
+  production_status_id?: number | null;
   production_status_name?: string;
 
   // Детали заказа для вычисления фрезеровки (добавляются в useCalendarData)

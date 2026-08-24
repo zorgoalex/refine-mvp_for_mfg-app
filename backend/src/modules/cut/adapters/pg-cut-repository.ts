@@ -72,6 +72,7 @@ import type {
   CalculateCutJobCommand,
   CreateCutJobCommand,
   CreateCutJobMdfBoardCardCommand,
+  DeleteCutJobMdfBoardCardCommand,
   CutRepositoryPort,
   CutResultStateCommand,
   DetailLastReadyQuery,
@@ -174,6 +175,15 @@ const AUDIT_SOURCE = 'backend-cut-command';
 const MANUAL_SVG_CHAT_ID = 'erp-manual-svg-upload';
 const MDF_BOARD_CARD_CREATED_EVENT = 'cnc.manual_svg_upload.mdf_card_created';
 const MDF_BOARD_CARD_CREATED_SOURCE = 'backend-cut-job-mdf-board-command';
+const MDF_BATH_CARD_EVENTS = {
+  autoCreated: 'cut_job.mdf_bath_card.auto_created',
+  autoCreateFailed: 'cut_job.mdf_bath_card.auto_create_failed',
+  created: 'cut_job.mdf_bath_card.created',
+  hidden: 'cut_job.mdf_bath_card.hidden',
+  restored: 'cut_job.mdf_bath_card.restored',
+} as const;
+const MDF_BATH_CARD_SOURCE = 'backend-cut-job-mdf-bath-card';
+const MDF_BATH_CARD_HIDDEN_REASON = 'cut_job_mdf_bath_card_deleted';
 
 /**
  * Ready-to-cut statuses and the default freecut params are sourced from the
@@ -312,6 +322,7 @@ interface DeleteImpactPacketRow extends QueryResultRow {
 
 interface MdfBoardStatusRow extends QueryResultRow {
   cut_job_id: string | number;
+  current_cut_result_id: string | number | null;
   status: string;
   selection_criteria: Record<string, unknown> | null;
   active_packet_count: string | number | null;
@@ -321,6 +332,15 @@ interface MdfBoardStatusRow extends QueryResultRow {
   card_kind: 'machine_file' | 'bath';
   card_id: string | null;
   target_workday: string | Date | null;
+}
+
+interface CurrentMdfResultRow extends QueryResultRow {
+  cut_job_id: string | number;
+  name: string;
+  status: string;
+  current_cut_result_id: string | number | null;
+  result_no: string | number | null;
+  snapshot_job: CutJobDto | null;
 }
 
 interface MdfBoardCardPacketRow extends QueryResultRow {
@@ -974,7 +994,7 @@ export class PgCutRepository implements CutRepositoryPort {
           throw new ApiError(409, 'CUT_RESULT_COMMAND_CONFLICT', 'commandId уже использован с другим запросом');
         }
         if (prior.status === 'completed' && prior.cut_result_id !== null) {
-          return { kind: 'completed' as const };
+          return { kind: 'completed' as const, cutResultId: toNum(prior.cut_result_id) };
         }
         if (prior.status === 'failed') {
           throw new ApiError(409, 'CUT_RESULT_COMMAND_FAILED', 'Команда раскроя уже завершилась ошибкой', {
@@ -1198,6 +1218,7 @@ export class PgCutRepository implements CutRepositoryPort {
       .catch((error) => this.markCalcFailed(error, command, phase1Related, command.version));
 
     if (prep.kind === 'completed') {
+      await this.ensureAutoBathCard(command, prep.cutResultId);
       return this.getJob({
         currentUser: command.currentUser,
         cutJobId: command.cutJobId,
@@ -1268,8 +1289,9 @@ export class PgCutRepository implements CutRepositoryPort {
     }
 
     // Phase 3 — persist ALL groups + a single audit + a single outbox row.
+    let persistedResult: CutResultSummaryDto | null = null;
     try {
-      await this.database.transaction(async (tx) => {
+      persistedResult = await this.database.transaction(async (tx) => {
       await setSessionUser(tx, command.currentUser.id);
       const job = await loadJobForUpdate(tx, command.cutJobId);
       assertVersion(job, prep.expectedVersion);
@@ -1476,6 +1498,7 @@ export class PgCutRepository implements CutRepositoryPort {
           `${CUT_AUDIT_EVENTS.calculated}:${command.cutJobId}:${cutResult.resultNo}`,
         ],
       );
+      return cutResult;
       });
     } catch (error) {
       await this.markCalcFailed(
@@ -1486,12 +1509,63 @@ export class PgCutRepository implements CutRepositoryPort {
       );
     }
 
+    if (persistedResult && prep.calcParams.layout_mode === 'vacuum_table') {
+      await this.ensureAutoBathCard(command, persistedResult.cutResultId);
+    }
+
     // All cut commands (calculate + setters) return the fully enriched job via a
     // post-commit getJob read (with editorParams, requiresRecalc, renderToken).
     // The FE does setJob(response) after each command, so it must always receive
     // complete enriched data — including the correct requiresRecalc state so the
     // «устарел» badge and PDF/edit button guards reflect reality without a reload.
     return this.getJob({ currentUser: command.currentUser, cutJobId: command.cutJobId });
+  }
+
+  private async ensureAutoBathCard(command: CalculateCutJobCommand, cutResultId: number): Promise<void> {
+    try {
+      await this.database.transaction(async (tx) => {
+        await setSessionUser(tx, command.currentUser.id);
+        const current = await loadCurrentMdfResultForUpdate(tx, command.cutJobId);
+        if (numOrNull(current.current_cut_result_id) !== cutResultId) return;
+        if (!cutJobSnapshotUsesVacuumTable(current.snapshot_job)) return;
+        if (!(await hasMdfBoardHiddenColumns(tx))) {
+          throw new ApiError(503, 'CUT_JOB_MDF_BOARD_SCHEMA_UNAVAILABLE', 'Схема МДФ-доски недоступна');
+        }
+        await createForcedMdfBoardPacket(tx, {
+          cutJobId: command.cutJobId,
+          cutResultId,
+          jobName: current.name,
+          actorUserId: command.currentUser.id,
+          cardKind: 'bath',
+          action: 'auto_create',
+          requestId: command.requestId ?? 'cut-job-mdf-bath-card-auto-create',
+          currentUser: command.currentUser,
+        });
+      });
+    } catch (error) {
+      // Card creation is deliberately non-atomic with calculation. The ready
+      // result stays usable and the operator can retry through «Создать карточку».
+      try {
+        await this.database.transaction(async (tx) => {
+          await setSessionUser(tx, command.currentUser.id);
+          await recordMdfBathCardEvent(tx, {
+            event: MDF_BATH_CARD_EVENTS.autoCreateFailed,
+            cutJobId: command.cutJobId,
+            cutResultId,
+            packetId: null,
+            actor: command.currentUser,
+            requestId: command.requestId ?? 'cut-job-mdf-bath-card-auto-create',
+            metadata: {
+              errorCode: error instanceof ApiError ? error.code : 'MDF_BATH_CARD_AUTO_CREATE_FAILED',
+              error: error instanceof Error ? error.message : 'Неизвестная ошибка создания карточки ванны',
+            },
+          });
+        });
+      } catch {
+        // The calculation response must remain successful even if diagnostic
+        // persistence is temporarily unavailable.
+      }
+    }
   }
 
   /**
@@ -1591,8 +1665,12 @@ export class PgCutRepository implements CutRepositoryPort {
     return this.database.transaction(async (tx) => {
       const requestId = command.requestId ?? 'cut-job-mdf-board-card-create';
       await setSessionUser(tx, command.currentUser.id);
-      const job = await loadJobForUpdate(tx, command.cutJobId);
-      if (job.status === 'archived') {
+      const current = await requireExpectedCurrentMdfResult(
+        tx,
+        command.cutJobId,
+        command.expectedCutResultId,
+      );
+      if (current.status === 'archived') {
         throw new ApiError(409, 'CUT_JOB_ARCHIVED', 'Удалённое задание нельзя вывести на МДФ-доску');
       }
       if (!(await hasMdfBoardHiddenColumns(tx))) {
@@ -1606,9 +1684,11 @@ export class PgCutRepository implements CutRepositoryPort {
       if (status?.cardKind === 'bath') {
         await createForcedMdfBoardPacket(tx, {
           cutJobId: command.cutJobId,
-          jobName: job.name,
+          cutResultId: command.expectedCutResultId,
+          jobName: current.name,
           actorUserId: command.currentUser.id,
           cardKind: 'bath',
+          action: 'manual_create',
           requestId,
           currentUser: command.currentUser,
         });
@@ -1625,9 +1705,11 @@ export class PgCutRepository implements CutRepositoryPort {
         ].includes(error.code)) throw error;
         await createForcedMdfBoardPacket(tx, {
           cutJobId: command.cutJobId,
-          jobName: job.name,
+          cutResultId: command.expectedCutResultId,
+          jobName: current.name,
           actorUserId: command.currentUser.id,
           cardKind: 'machine_file',
+          action: 'manual_create',
           requestId,
           currentUser: command.currentUser,
         });
@@ -1697,6 +1779,73 @@ export class PgCutRepository implements CutRepositoryPort {
         sourceIdempotencyKey: `cnc-manual-svg:${packet.packet_id}:source-${packet.source_version}:machine-files`,
       });
 
+      return loadJobWithMdfBoardStatus(tx, command.cutJobId);
+    });
+  }
+
+  deleteMdfBoardCard(command: DeleteCutJobMdfBoardCardCommand): Promise<CutJobDto> {
+    return this.database.transaction(async (tx) => {
+      const requestId = command.requestId ?? 'cut-job-mdf-bath-card-delete';
+      await setSessionUser(tx, command.currentUser.id);
+      const current = await requireExpectedCurrentMdfResult(
+        tx,
+        command.cutJobId,
+        command.expectedCutResultId,
+      );
+      if (current.status === 'archived') {
+        throw new ApiError(409, 'CUT_JOB_ARCHIVED', 'У удалённого задания нельзя изменить карточку ванны');
+      }
+      if (!cutJobSnapshotUsesVacuumTable(current.snapshot_job)) {
+        throw new ApiError(422, 'CUT_JOB_MDF_BOARD_BATH_ONLY', 'Удалять этой командой можно только карточку ванны');
+      }
+      if (!(await hasMdfBoardHiddenColumns(tx))) {
+        throw new ApiError(503, 'CUT_JOB_MDF_BOARD_SCHEMA_UNAVAILABLE', 'Схема МДФ-доски недоступна');
+      }
+
+      const status = (await loadMdfBoardStatuses(tx, [command.cutJobId])).get(command.cutJobId);
+      if (status?.state === 'hidden') {
+        return loadJobWithMdfBoardStatus(tx, command.cutJobId);
+      }
+      if (status?.cardKind !== 'bath' || status.state !== 'created') {
+        throw new ApiError(409, 'CUT_JOB_MDF_BOARD_CARD_NOT_FOUND', 'Карточка ванны уже отсутствует на МДФ-доске');
+      }
+
+      const packetId = await createForcedMdfBoardPacket(tx, {
+        cutJobId: command.cutJobId,
+        cutResultId: command.expectedCutResultId,
+        jobName: current.name,
+        actorUserId: command.currentUser.id,
+        cardKind: 'bath',
+        action: 'delete_tombstone',
+        requestId,
+        currentUser: command.currentUser,
+      });
+      await tx.query(
+        `UPDATE cnc_telegram_packets
+         SET mdf_board_hidden_at = COALESCE(mdf_board_hidden_at, now()),
+             mdf_board_hidden_by = $3,
+             mdf_board_hidden_reason = $4,
+             mdf_board_hidden_cut_job_id = $1,
+             updated_at = now()
+         WHERE svg_cut_job_id = $1
+           AND svg_cut_result_id = $2
+           AND mdf_board_card_kind = 'bath_seed'`,
+        [
+          command.cutJobId,
+          command.expectedCutResultId,
+          numOrNull(command.currentUser.id),
+          MDF_BATH_CARD_HIDDEN_REASON,
+        ],
+      );
+      await recordMdfBathCardEvent(tx, {
+        event: MDF_BATH_CARD_EVENTS.hidden,
+        cutJobId: command.cutJobId,
+        cutResultId: command.expectedCutResultId,
+        packetId,
+        actor: command.currentUser,
+        requestId,
+        metadata: { hiddenReason: MDF_BATH_CARD_HIDDEN_REASON },
+      });
       return loadJobWithMdfBoardStatus(tx, command.cutJobId);
     });
   }
@@ -6753,35 +6902,65 @@ async function loadSingleMdfBoardCardPacket(
   return result.rows[0]!;
 }
 
+async function loadCurrentMdfResultForUpdate(
+  tx: TransactionClient,
+  cutJobId: number,
+): Promise<CurrentMdfResultRow> {
+  const result = await tx.query<CurrentMdfResultRow>(
+    `SELECT job.cut_job_id, job.name, job.status, job.current_cut_result_id,
+            current_result.result_no, current_result.snapshot_job
+     FROM cut_job job
+     LEFT JOIN cut_result current_result
+       ON current_result.cut_result_id = job.current_cut_result_id
+      AND current_result.cut_job_id = job.cut_job_id
+     WHERE job.cut_job_id = $1
+     FOR UPDATE OF job`,
+    [cutJobId],
+  );
+  const row = result.rows[0];
+  if (!row) throw new CutJobNotFoundError(cutJobId);
+  return row;
+}
+
+async function requireExpectedCurrentMdfResult(
+  tx: TransactionClient,
+  cutJobId: number,
+  expectedCutResultId: number,
+): Promise<CurrentMdfResultRow> {
+  const current = await loadCurrentMdfResultForUpdate(tx, cutJobId);
+  const actualCutResultId = numOrNull(current.current_cut_result_id);
+  if (actualCutResultId === null) {
+    throw new ApiError(422, 'CUT_JOB_CURRENT_RESULT_REQUIRED', 'Сначала рассчитайте раскрой', { cutJobId });
+  }
+  if (actualCutResultId !== expectedCutResultId) {
+    throw new ApiError(
+      409,
+      'CUT_JOB_MDF_BOARD_RESULT_STALE',
+      'Результат раскроя изменился; обновите задание и повторите действие',
+      { cutJobId, expectedCutResultId, actualCutResultId },
+    );
+  }
+  return current;
+}
+
 async function createForcedMdfBoardPacket(
   tx: TransactionClient,
   input: {
     cutJobId: number;
+    cutResultId: number;
     jobName: string;
     actorUserId: string | number;
     cardKind: 'machine_file' | 'bath';
+    action: 'auto_create' | 'manual_create' | 'delete_tombstone';
     requestId: string;
     currentUser: CurrentUser;
   },
-): Promise<void> {
-  const currentResult = await tx.query<{ cut_result_id: string | number; result_no: string | number }>(
-    `SELECT result.cut_result_id, result.result_no
-     FROM cut_job job
-     JOIN cut_result result ON result.cut_result_id = job.current_cut_result_id
-     WHERE job.cut_job_id = $1
-     FOR UPDATE OF result`,
-    [input.cutJobId],
-  );
-  const result = currentResult.rows[0];
-  if (!result) {
-    throw new ApiError(422, 'CUT_JOB_CURRENT_RESULT_REQUIRED', 'Сначала рассчитайте раскрой', {
-      cutJobId: input.cutJobId,
-    });
-  }
-  const cutResultId = toNum(result.cut_result_id);
+): Promise<string> {
+  const cutResultId = input.cutResultId;
   const storageKind = forcedMdfCardStorageKind(input.cardKind);
   const externalPacketKey = `erp-cut-mdf-card:${storageKind}:${input.cutJobId}:${cutResultId}`;
   await tx.query('SELECT pg_advisory_xact_lock(hashtext($1))', [externalPacketKey]);
+  const initiallyHidden = input.action === 'delete_tombstone';
 
   const inserted = await tx.query<{ packet_id: string }>(
     `INSERT INTO cnc_telegram_packets (
@@ -6790,13 +6969,18 @@ async function createForcedMdfBoardPacket(
        completion_status, comments_json, tools_json, doweling_links_json,
        analysis_warnings_json, parser_version, created_by, updated_by,
        svg_cut_job_id, svg_cut_result_id, svg_cut_import_status,
-       svg_cut_import_note, mdf_board_card_kind
+       svg_cut_import_note, mdf_board_card_kind, mdf_board_hidden_at,
+       mdf_board_hidden_by, mdf_board_hidden_reason, mdf_board_hidden_cut_job_id
      )
      VALUES (
        $1, 'erp-cut-mdf-card', 1, $2, CURRENT_DATE, 'ERP', $3, 'МДФ',
        'parsed', 'pending', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
        '[]'::jsonb, 'erp-cut-mdf-card-v1', $4, $4, $5, $6,
-       'imported', 'forced_mdf_board_card', $7
+       'imported', 'forced_mdf_board_card', $7,
+       CASE WHEN $8::boolean THEN now() ELSE NULL END,
+       CASE WHEN $8::boolean THEN $4 ELSE NULL END,
+       CASE WHEN $8::boolean THEN $9 ELSE NULL END,
+       CASE WHEN $8::boolean THEN $5 ELSE NULL END
      )
      ON CONFLICT (external_packet_key) DO NOTHING
      RETURNING packet_id::text AS packet_id`,
@@ -6808,18 +6992,42 @@ async function createForcedMdfBoardPacket(
       input.cutJobId,
       cutResultId,
       storageKind,
+      initiallyHidden,
+      MDF_BATH_CARD_HIDDEN_REASON,
     ],
   );
   const existing = inserted.rows[0] ?? (await tx.query<{ packet_id: string }>(
-    `SELECT packet_id::text AS packet_id FROM cnc_telegram_packets WHERE external_packet_key = $1 FOR UPDATE`,
+    `SELECT packet_id::text AS packet_id
+     FROM cnc_telegram_packets
+     WHERE external_packet_key = $1
+     FOR UPDATE`,
     [externalPacketKey],
   )).rows[0];
   if (!existing) {
     throw new ApiError(500, 'CUT_JOB_MDF_BOARD_PACKET_INSERT_FAILED', 'Не удалось создать карточку МДФ-доски');
   }
-  if (!inserted.rows[0]) return;
+  let restored = false;
+  if (!inserted.rows[0]) {
+    if (input.cardKind === 'bath' && input.action === 'manual_create') {
+      const restoredPacket = await tx.query(
+        `UPDATE cnc_telegram_packets
+         SET mdf_board_hidden_at = NULL,
+             mdf_board_hidden_by = NULL,
+             mdf_board_hidden_reason = NULL,
+             mdf_board_hidden_cut_job_id = NULL,
+             workday = CURRENT_DATE,
+             updated_at = now()
+         WHERE packet_id = $1::uuid
+           AND mdf_board_hidden_at IS NOT NULL
+         RETURNING packet_id`,
+        [existing.packet_id],
+      );
+      restored = restoredPacket.rowCount === 1;
+    }
+    if (!restored) return existing.packet_id;
+  }
 
-  const items = await tx.query<{ order_id: string | number }>(
+  const items = inserted.rows[0] ? await tx.query<{ order_id: string | number }>(
     `INSERT INTO cnc_telegram_packet_items (
        packet_id, source_item_key, order_name, detail_number, width_mm,
        height_mm, quantity, source, confidence, match_order_id,
@@ -6848,14 +7056,35 @@ async function createForcedMdfBoardPacket(
        placement.detail_width_mm, placement.detail_height_mm
      RETURNING match_order_id AS order_id`,
     [existing.packet_id, cutResultId],
-  );
-  if (items.rows.length === 0) {
+  ) : null;
+  if (items && items.rows.length === 0) {
     throw new ApiError(422, 'CUT_RESULT_HAS_NO_MDF_CARD_ITEMS', 'В текущем результате нет активных деталей для карточки', {
       cutJobId: input.cutJobId,
       cutResultId,
     });
   }
-  const orderIds = [...new Set(items.rows.map((row) => toNum(row.order_id)))];
+  const orderIds = items
+    ? [...new Set(items.rows.map((row) => toNum(row.order_id)))]
+    : await loadMdfBoardPacketOrderIds(tx, existing.packet_id);
+  if (input.action === 'delete_tombstone') return existing.packet_id;
+
+  if (input.cardKind === 'bath') {
+    await recordMdfBathCardEvent(tx, {
+      event: input.action === 'auto_create'
+        ? MDF_BATH_CARD_EVENTS.autoCreated
+        : restored
+          ? MDF_BATH_CARD_EVENTS.restored
+          : MDF_BATH_CARD_EVENTS.created,
+      cutJobId: input.cutJobId,
+      cutResultId,
+      packetId: existing.packet_id,
+      actor: input.currentUser,
+      requestId: input.requestId,
+      metadata: { orderIds, restored, automatic: input.action === 'auto_create' },
+    });
+    return existing.packet_id;
+  }
+
   const eventKey = `${MDF_BOARD_CARD_CREATED_EVENT}:${input.cutJobId}:${cutResultId}:${input.cardKind}`;
   const auditId = await auditService.record(tx, {
     event: MDF_BOARD_CARD_CREATED_EVENT,
@@ -6895,6 +7124,66 @@ async function createForcedMdfBoardPacket(
       sourceIdempotencyKey: eventKey,
     });
   }
+  return existing.packet_id;
+}
+
+async function recordMdfBathCardEvent(
+  tx: TransactionClient,
+  input: {
+    event: (typeof MDF_BATH_CARD_EVENTS)[keyof typeof MDF_BATH_CARD_EVENTS];
+    cutJobId: number;
+    cutResultId: number;
+    packetId: string | null;
+    actor: CurrentUser;
+    requestId: string;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<void> {
+  const auditId = await auditService.record(tx, {
+    event: input.event,
+    entityType: input.packetId ? 'cnc_telegram_packet' : 'cut_result',
+    entityId: input.packetId ?? input.cutResultId,
+    actorUserId: input.actor.id,
+    actorUsername: input.actor.username ?? null,
+    actorRole: input.actor.role ?? null,
+    requestId: input.requestId,
+    source: MDF_BATH_CARD_SOURCE,
+    before: null,
+    after: {
+      cutJobId: input.cutJobId,
+      cutResultId: input.cutResultId,
+      packetId: input.packetId,
+    },
+    diff: { mdfBathCardEvent: input.event },
+    metadata: {
+      cutJobId: input.cutJobId,
+      cutResultId: input.cutResultId,
+      packetId: input.packetId,
+      ...(input.metadata ?? {}),
+    },
+    relatedEntities: [
+      { entityType: 'cut_job', entityId: input.cutJobId },
+      { entityType: 'cut_result', entityId: input.cutResultId },
+    ],
+  });
+  await tx.query(
+    `INSERT INTO outbox_events (event_type, aggregate_type, aggregate_id, payload_json, idempotency_key)
+     VALUES ($1, 'cut_job', $2, $3::jsonb, $4)
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      input.event,
+      String(input.cutJobId),
+      JSON.stringify({
+        cutJobId: input.cutJobId,
+        cutResultId: input.cutResultId,
+        packetId: input.packetId,
+        requestId: input.requestId,
+        auditId,
+        ...(input.metadata ?? {}),
+      }),
+      `${input.event}:${input.cutJobId}:${input.cutResultId}:${auditId}`,
+    ],
+  );
 }
 
 export function forcedMdfCardStorageKind(cardKind: 'machine_file' | 'bath'): 'machine_file' | 'bath_seed' {
@@ -7053,6 +7342,7 @@ async function loadMdfBoardStatuses(
       out.set(id, {
         state: 'unknown',
         cardKind: 'machine_file',
+        cutResultId: null,
         reason: 'Схема МДФ-доски недоступна: нельзя проверить связанные карточки.',
         activePacketCount: 0,
         hiddenPacketCount: 0,
@@ -7130,36 +7420,46 @@ async function loadMdfBoardStatuses(
     )
     SELECT
       j.cut_job_id,
+      j.current_cut_result_id,
       j.status,
       j.selection_criteria,
-      CASE
-        WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
-          THEN 'bath'
-        ELSE 'machine_file'
-      END AS card_kind,
+      job_kind.card_kind,
       CASE WHEN bath_target.workday IS NOT NULL
         THEN 'cut-result:' || j.current_cut_result_id::text
         ELSE NULL
       END AS card_id,
       bath_target.workday AS target_workday,
       CASE
-        WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+        WHEN job_kind.card_kind = 'bath'
           THEN CASE WHEN bath_target.workday IS NULL THEN 0 ELSE 1 END
         ELSE COALESCE(packet_summary.active_packet_count, 0)
       END::integer AS active_packet_count,
       CASE
-        WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+        WHEN job_kind.card_kind = 'bath'
           THEN COALESCE(hidden_bath.hidden_packet_count, 0)
         ELSE COALESCE(packet_summary.hidden_packet_count, 0)
       END::integer AS hidden_packet_count,
       COALESCE(packet_summary.manual_pending_packet_count, 0)::integer AS manual_pending_packet_count,
       CASE
-        WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+        WHEN job_kind.card_kind = 'bath'
           THEN '[]'::jsonb
         ELSE COALESCE(packet_summary.active_packets_json, '[]'::jsonb)
       END AS active_packets_json
     FROM cut_job j
+    LEFT JOIN cut_result current_result
+      ON current_result.cut_result_id = j.current_cut_result_id
+     AND current_result.cut_job_id = j.cut_job_id
     LEFT JOIN cut_param_profiles profile ON profile.cut_param_profile_id = j.param_profile_id
+    CROSS JOIN LATERAL (
+      SELECT CASE
+        WHEN COALESCE(
+          current_result.snapshot_job ->> 'isVacuum',
+          CASE WHEN COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+            THEN 'true' ELSE 'false' END
+        ) = 'true' THEN 'bath'
+        ELSE 'machine_file'
+      END AS card_kind
+    ) job_kind
     LEFT JOIN packet_summary ON packet_summary.cut_job_id = j.cut_job_id
     LEFT JOIN LATERAL (
       SELECT MAX(source.workday) AS workday
@@ -7231,7 +7531,14 @@ async function loadMdfBoardStatuses(
             )
           )
       ) source
-      WHERE COALESCE(profile.params ->> 'layout_mode', j.params ->> 'layout_mode') = 'vacuum_table'
+      WHERE job_kind.card_kind = 'bath'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM cnc_telegram_packets hidden_seed
+          WHERE hidden_seed.svg_cut_result_id = j.current_cut_result_id
+            AND hidden_seed.mdf_board_card_kind = 'bath_seed'
+            AND hidden_seed.mdf_board_hidden_at IS NOT NULL
+        )
     ) bath_target ON true
     LEFT JOIN LATERAL (
       SELECT COUNT(*)::integer AS hidden_packet_count
@@ -7256,6 +7563,7 @@ export function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatu
   const hiddenPacketCount = toNum(row.hidden_packet_count ?? 0);
   const packets = cutJobLinkedMdfPacketsFromJson(row.active_packets_json);
   const cardKind = row.card_kind;
+  const cutResultId = numOrNull(row.current_cut_result_id);
   const target = cardKind === 'bath'
     ? row.card_id && row.target_workday
       ? { kind: 'bath' as const, cardId: row.card_id, workday: mdfPacketWorkday(row.target_workday) }
@@ -7268,6 +7576,7 @@ export function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatu
     return {
       state: 'created',
       cardKind,
+      cutResultId,
       reason: activePacketCount === 1
         ? cardKind === 'bath'
           ? 'Карточка ванны создана и видна на МДФ-доске.'
@@ -7276,6 +7585,7 @@ export function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatu
       activePacketCount,
       hiddenPacketCount,
       canCreateCard: false,
+      canDeleteCard: cardKind === 'bath',
       packets,
       target,
     };
@@ -7285,12 +7595,14 @@ export function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatu
     return {
       state: 'hidden',
       cardKind,
+      cutResultId,
       reason: hiddenPacketCount === 1
         ? 'Связанная карточка была скрыта с МДФ-доски.'
         : `Связанные карточки скрыты с МДФ-доски: ${hiddenPacketCount}.`,
       activePacketCount,
       hiddenPacketCount,
-      canCreateCard: false,
+      canCreateCard: cardKind === 'bath' && row.status === 'ready',
+      canDeleteCard: false,
       packets,
       target: null,
     };
@@ -7300,10 +7612,12 @@ export function buildMdfBoardStatus(row: MdfBoardStatusRow): CutJobMdfBoardStatu
   return {
     state: 'not_created',
     cardKind,
+    cutResultId,
     reason: mdfBoardNotCreatedReason(source, row.status, cardKind),
     activePacketCount,
     hiddenPacketCount,
     canCreateCard: row.status === 'ready',
+    canDeleteCard: false,
     packets,
     target: null,
   };

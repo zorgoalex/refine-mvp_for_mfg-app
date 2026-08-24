@@ -36,6 +36,10 @@ export class UnavailableCutRepository implements CutRepositoryPort {
     return Promise.reject(unavailable());
   }
 
+  deleteMdfBoardCard() {
+    return Promise.reject(unavailable());
+  }
+
   getDeleteImpact() {
     return Promise.reject(unavailable());
   }

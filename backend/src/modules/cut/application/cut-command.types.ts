@@ -87,6 +87,14 @@ export interface ArchiveCutJobCommand {
 export interface CreateCutJobMdfBoardCardCommand {
   currentUser: CurrentUser;
   cutJobId: number;
+  expectedCutResultId: number;
+  requestId?: string;
+}
+
+export interface DeleteCutJobMdfBoardCardCommand {
+  currentUser: CurrentUser;
+  cutJobId: number;
+  expectedCutResultId: number;
   requestId?: string;
 }
 
@@ -387,6 +395,7 @@ export interface CutRepositoryPort {
   calculate(command: CalculateCutJobCommand): Promise<CutJobDto>;
   archive(command: ArchiveCutJobCommand): Promise<CutJobDto>;
   createMdfBoardCard(command: CreateCutJobMdfBoardCardCommand): Promise<CutJobDto>;
+  deleteMdfBoardCard(command: DeleteCutJobMdfBoardCardCommand): Promise<CutJobDto>;
   getDeleteImpact(query: GetCutJobDeleteImpactQuery): Promise<CutJobDeleteImpactDto>;
   setProfile(command: SetCutJobProfileCommand): Promise<CutJobDto>;
   setSheetMaterial(command: SetCutJobSheetMaterialCommand): Promise<CutJobDto>;

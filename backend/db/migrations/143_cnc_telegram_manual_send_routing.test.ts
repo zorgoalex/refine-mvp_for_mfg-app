@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./142_cnc_telegram_manual_send_routing.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./143_cnc_telegram_manual_send_routing.sql', import.meta.url), 'utf8');
 const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
-describe('142 CNC Telegram manual send routing migration', () => {
+describe('143 CNC Telegram manual send routing migration', () => {
   it('adds explicit destinations, quarantines legacy pending sends, and stores runtime evidence', () => {
     expect(sql).toContain('ADD COLUMN IF NOT EXISTS destination_chat_id TEXT');
     expect(sql).toContain('idx_cnc_manual_svg_telegram_send_destination_claim');
@@ -17,7 +17,7 @@ describe('142 CNC Telegram manual send routing migration', () => {
   });
 
   it('is classified by the migration runner probe map', () => {
-    expect(runner).toContain('142_cnc_telegram_manual_send_routing*) probe_all');
+    expect(runner).toContain('143_cnc_telegram_manual_send_routing*) probe_all');
     expect(runner).toContain('q_col cnc_manual_svg_telegram_send_requests destination_chat_id');
     expect(runner).toContain('q_idx idx_cnc_manual_svg_telegram_send_destination_claim');
     expect(runner).toContain('q_col cnc_telegram_worker_session_leases can_send_manual_svg_uploads');
