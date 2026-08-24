@@ -90,8 +90,17 @@ export const cutApi = {
     return httpClient.get<CutJobDeleteImpact>(apiRoutes.cutJobs.deleteImpact(validateCutJobId(cutJobId)));
   },
 
-  async createMdfBoardCard(cutJobId: number): Promise<CutJobDto> {
-    return httpClient.post<CutJobDto>(apiRoutes.cutJobs.mdfBoardCard(validateCutJobId(cutJobId)), {});
+  async createMdfBoardCard(cutJobId: number, expectedCutResultId: number): Promise<CutJobDto> {
+    return httpClient.post<CutJobDto>(apiRoutes.cutJobs.mdfBoardCard(validateCutJobId(cutJobId)), {
+      expectedCutResultId: validateCutJobId(expectedCutResultId),
+    });
+  },
+
+  async deleteMdfBoardCard(cutJobId: number, expectedCutResultId: number): Promise<CutJobDto> {
+    return httpClient.delete<CutJobDto>(apiRoutes.cutJobs.mdfBoardCard(validateCutJobId(cutJobId)), {
+      body: JSON.stringify({ expectedCutResultId: validateCutJobId(expectedCutResultId) }),
+      headers: { 'Content-Type': 'application/json' },
+    });
   },
 
   async archive(cutJobId: number, version: number, options: { deleteLinkedMdfPackets?: boolean } = {}): Promise<CutJobDto> {

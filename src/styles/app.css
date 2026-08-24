@@ -1676,13 +1676,14 @@ html {
 
 .cut-jobs-table .cut-job-mdf-board-cell {
   display: grid;
-  max-width: 132px;
+  max-width: 160px;
   justify-items: center;
   gap: 2px;
 }
 
 .cut-jobs-table .cut-job-mdf-board-cell__link,
-.cut-jobs-table .cut-job-mdf-board-cell__create {
+.cut-jobs-table .cut-job-mdf-board-cell__create,
+.cut-jobs-table .cut-job-mdf-board-cell__delete {
   display: inline-flex;
   min-height: 40px;
   align-items: center;
@@ -1691,7 +1692,8 @@ html {
 }
 
 .cut-jobs-table .cut-job-mdf-board-cell__link:active,
-.cut-jobs-table .cut-job-mdf-board-cell__create:active {
+.cut-jobs-table .cut-job-mdf-board-cell__create:active,
+.cut-jobs-table .cut-job-mdf-board-cell__delete:active {
   transform: scale(0.96);
 }
 

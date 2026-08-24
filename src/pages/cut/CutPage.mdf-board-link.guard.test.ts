@@ -15,9 +15,12 @@ describe('cut MDF-board card links', () => {
     expect(boardPage).toContain("scrollIntoView({ behavior: 'smooth'");
   });
 
-  it('offers forced creation in the list cell only for missing cards', () => {
-    expect(cutPage).toContain("state === 'not_created' && canCreate");
+  it('switches between create and delete actions for bath cards', () => {
+    expect(cutPage).toContain('{canCreate ? (');
     expect(cutPage).toContain('Создать карточку');
+    expect(cutPage).toContain("state === 'created' && canDelete");
+    expect(cutPage).toContain('Удалить карточку');
+    expect(cutPage).toContain('cutApi.deleteMdfBoardCard(targetJob.cutJobId, expectedCutResultId)');
     expect(cutPage).toContain("can('cut.manage')");
   });
 });

@@ -319,11 +319,14 @@ export interface CutJobMdfBoardTarget {
 export interface CutJobMdfBoardStatus {
   state: CutJobMdfBoardState;
   cardKind: CutJobMdfBoardCardKind;
+  cutResultId?: number | null;
   reason: string;
   activePacketCount: number;
   hiddenPacketCount: number;
   /** True when a single linked manual-SVG packet is missing the MDF-board marker and can be created safely. */
   canCreateCard?: boolean;
+  /** True only for a visible current-result bath card. */
+  canDeleteCard?: boolean;
   packets: CutJobLinkedMdfPacket[];
   target: CutJobMdfBoardTarget | null;
 }

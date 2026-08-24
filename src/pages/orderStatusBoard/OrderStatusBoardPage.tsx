@@ -3307,7 +3307,7 @@ export function buildCncOriginalCurrentColumns(
     }
   }
   for (const bath of response?.baths ?? []) {
-    if (bath.currentBoardVisibility !== 'archived' && bath.currentBoardColumn) {
+    if (bath.currentBoardVisibility === 'visible' && bath.currentBoardColumn) {
       byKey.get(bath.currentBoardColumn)?.baths.push(bath);
     }
   }
@@ -3335,6 +3335,10 @@ export function buildCncOriginalCurrentLocations(
   }
   for (const bath of response?.baths ?? []) {
     const key = cncManualMoveStorageKey('bath', bath.bathCardId);
+    if (bath.currentBoardVisibility === 'hidden') {
+      locations[key] = 'скрыта из стандартного вида';
+      continue;
+    }
     if (bath.currentBoardVisibility === 'archived' || bath.currentBoardColumn === null) {
       locations[key] = 'не отображается в стандартном виде';
       continue;

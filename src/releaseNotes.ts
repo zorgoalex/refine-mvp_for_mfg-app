@@ -30,6 +30,19 @@ export const REPOSITORY_LABELS: Record<ReleaseNoteRepository, string> = {
 export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
+    date: "2026-08-24",
+    title: "Раскрой: карточки ванн на МДФ-доске",
+    services: ["ERP", "Cutting"],
+    repositories: ["repo_erp"],
+    added: [
+      "После расчёта задания с профилем вакуумного стола карточка ванны автоматически появляется на МДФ-доске.",
+    ],
+    changed: [
+      "В колонке «МДФ-доска» карточку ванны можно удалить с доски и затем создать повторно.",
+    ],
+  },
+  {
+    version: APP_VERSION,
     date: "2026-08-23",
     title: "МДФ-доска: понятная история заказа",
     services: ["ERP", "Cutting"],
