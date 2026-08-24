@@ -181,12 +181,54 @@ describe('CncTelegramWorkerAuditService', () => {
         eligibility: expect.objectContaining({ claimableNow: true, stuck: true }),
       })],
     });
+    expect(payload).toMatchObject({
+      runtimeSnapshot: { sessions: [expect.objectContaining({ revisionMatchesBackend: true })] },
+    });
     expect(payload.scans).toEqual([{ scanId }]);
     expect(payload.messages).toEqual([expect.objectContaining({
       operations: [expect.objectContaining({
         responses: [{ responseId: 'response-1' }, { responseId: 'response-2' }],
       })],
     })]);
+  });
+
+  it('exports blocking reason codes sufficient to diagnose an unroutable manual send', async () => {
+    const service = createService(deniedAuditPort(), {
+      exportDetailed: vi.fn().mockResolvedValue({
+        scans: [], messages: [], runtimeSessions: [],
+        manualSvgTelegramSends: [{
+          requestId: 'send-broken', packetId: 'packet-broken',
+          packetSourceChatId: 'erp-manual-svg-upload', destinationChatId: null,
+          status: 'pending', attemptCount: 0, requestedAt: '2026-08-24T00:00:00.000Z',
+          svgCutImportStatus: 'pending', cutJobId: null, cutJobDisplayNumber: null,
+          hasMdfEvent: false, liveFileCount: 0, events: [], files: [],
+        }],
+      }),
+    });
+
+    const file = await service.exportDetailed(
+      user('auditor', ['audit.view']),
+      { dateFrom: '2026-08-24', dateTo: '2026-08-24' },
+    );
+    const payload = JSON.parse(file.content) as {
+      manualSvgTelegramSends: Array<{
+        routing: { packetSourceIsSynthetic: boolean; destinationChatId: string | null };
+        eligibility: { claimableNow: boolean; reasonCodes: string[] };
+      }>;
+    };
+
+    expect(payload.manualSvgTelegramSends[0]).toMatchObject({
+      routing: { packetSourceIsSynthetic: true, destinationChatId: null },
+      eligibility: { claimableNow: false },
+    });
+    expect(payload.manualSvgTelegramSends[0]?.eligibility.reasonCodes).toEqual([
+      'DESTINATION_CHAT_MISSING',
+      'SVG_IMPORT_NOT_READY',
+      'CUT_JOB_MISSING',
+      'CUT_JOB_DISPLAY_NUMBER_MISSING',
+      'MDF_EVENT_MISSING',
+      'NO_LIVE_FILES',
+    ]);
   });
 
   it('denies detailed export without audit.view before reading the repository', async () => {
@@ -284,6 +326,7 @@ function createService(
     get: vi.fn((key: keyof BackendEnv) => ({
       CNC_TELEGRAM_WORKER_USERNAME: 'cnc-bot',
       CNC_TELEGRAM_ALLOWED_CHAT_IDS: '-100123',
+      BACKEND_BUILD_SHA: 'a'.repeat(40),
     })[key]),
   } as unknown as ConfigService<BackendEnv, true>;
   return new CncTelegramWorkerAuditService(repository, config, deniedAudit);

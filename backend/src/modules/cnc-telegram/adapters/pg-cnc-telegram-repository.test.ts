@@ -78,6 +78,9 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('const { sourceFiles: _sourceFiles, ...payloadDto } = dto');
     expect(repositorySource).toContain('renderManualSvgScreenshot');
     expect(repositorySource).toContain('lockActiveManualSvgTelegramSend');
+    expect(repositorySource).toContain('const destinationChatId = input.command.telegramDestinationChatId?.trim()');
+    expect(repositorySource).toContain('CNC_TELEGRAM_MANUAL_SEND_DESTINATION_UNAVAILABLE');
+    expect(repositorySource).toContain('message_text, destination_chat_id');
   });
 
   it('skips Telegram SVG reverse import when source file already belongs to a cut job', () => {
@@ -150,6 +153,7 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('SET message_text=$2');
     expect(repositorySource).toContain('requested_by=$3::bigint');
     expect(repositorySource).toContain('requested_at=now()');
+    expect(repositorySource).toContain('destination_chat_id=$4');
     expect(repositorySource).toContain("requestAction: 'updated_pending'");
   });
 
