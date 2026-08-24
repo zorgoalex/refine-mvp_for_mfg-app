@@ -207,6 +207,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                     "tasks": [{
                         "requestId": "00000000-0000-4000-8000-000000000003",
                         "packetId": "00000000-0000-4000-8000-000000000011",
+                        "destinationChatId": "-100",
                         "cutJobId": 98,
                         "cutJobDisplayNumber": "104",
                         "messageText": "Фрезы для ХДФ: 8",
@@ -251,6 +252,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                     "capability": "cnc_manual_svg_telegram_send_v1",
                     "tasks": [{
                         "requestId": "00000000-0000-4000-8000-000000000005",
+                        "destinationChatId": "-100",
                         "cutJobId": 97,
                         "cutJobDisplayNumber": "102",
                         "messageText": "Черновой",
@@ -319,6 +321,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                     "tasks": [{
                         "requestId": "00000000-0000-4000-8000-000000000006",
                         "packetId": "00000000-0000-4000-8000-000000000011",
+                        "destinationChatId": "-100",
                         "cutJobId": 97,
                         "cutJobDisplayNumber": "102",
                         "messageText": "ХДФ!!!\nФрезы для ХДФ: 8",
@@ -379,6 +382,7 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
                     "capability": "cnc_manual_svg_telegram_send_v1",
                     "tasks": [{
                         "requestId": "00000000-0000-4000-8000-000000000004",
+                        "destinationChatId": "-100",
                         "messageText": "",
                         **item_lease_fields(),
                         "files": [payload],
@@ -395,6 +399,33 @@ class MediaRestoreTest(unittest.IsolatedAsyncioTestCase):
             worker.erp.fail_manual_svg_telegram_send.assert_awaited_once()
             self.assertEqual(client.sent_files, [])
             self.assertIn("SHA-256 mismatch", worker.erp.fail_manual_svg_telegram_send.await_args.args[1])
+
+    async def test_worker_rejects_manual_svg_destination_mismatch_without_sending(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            worker = object.__new__(CncTelegramWorker)
+            worker.config = SimpleNamespace(temp_dir=Path(root, "tmp"), media_dir=Path(root, "media"))
+            worker.erp = SimpleNamespace(
+                claim_manual_svg_telegram_sends=AsyncMock(return_value={
+                    "capability": "cnc_manual_svg_telegram_send_v1",
+                    "tasks": [{
+                        "requestId": "00000000-0000-4000-8000-000000000007",
+                        "destinationChatId": "-200",
+                        "messageText": "",
+                        **item_lease_fields(),
+                        "files": [manual_svg_send_file("svg", "safe.svg", b"<svg></svg>")],
+                    }],
+                }),
+                complete_manual_svg_telegram_send=AsyncMock(return_value={}),
+                fail_manual_svg_telegram_send=AsyncMock(return_value={}),
+            )
+            client = ManualSvgSendClient()
+
+            await worker.process_manual_svg_telegram_send_requests(client, object(), "-100")
+
+            worker.erp.complete_manual_svg_telegram_send.assert_not_awaited()
+            worker.erp.fail_manual_svg_telegram_send.assert_awaited_once()
+            self.assertEqual(client.sent_files, [])
+            self.assertIn("different Telegram chat", worker.erp.fail_manual_svg_telegram_send.await_args.args[1])
 
     async def test_manual_svg_poll_loop_checks_queue_until_stopped(self) -> None:
         worker = object.__new__(CncTelegramWorker)

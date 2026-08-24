@@ -10,6 +10,13 @@ const workerSessionLeaseSchema = z.object({
   chatId: z.string().trim().min(1).max(120),
   workerInstanceId: z.string().uuid(),
   imageRevision: z.string().trim().regex(/^[0-9a-f]{7,64}$/),
+  runtime: z.object({
+    stackEnv: z.string().trim().min(1).max(32),
+    workerRole: z.enum(['disabled', 'reader', 'writer']),
+    canSendManualSvgUploads: z.boolean(),
+    manualSvgSendPollIntervalSeconds: z.number().min(0.1).max(3600),
+    parserVersion: z.string().trim().min(1).max(160),
+  }).strict().optional(),
 }).strict();
 
 export function parseWorkerSessionLease(body: unknown): CncTelegramWorkerSessionLeaseDto {
@@ -19,7 +26,12 @@ export function parseWorkerSessionLease(body: unknown): CncTelegramWorkerSession
       issues: parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
     });
   }
-  return { sourceChatId: parsed.data.chatId, workerInstanceId: parsed.data.workerInstanceId, workerImageRevision: parsed.data.imageRevision };
+  return {
+    sourceChatId: parsed.data.chatId,
+    workerInstanceId: parsed.data.workerInstanceId,
+    workerImageRevision: parsed.data.imageRevision,
+    runtimeEvidence: parsed.data.runtime,
+  };
 }
 
 const workerSessionHeartbeatSchema = z.object({

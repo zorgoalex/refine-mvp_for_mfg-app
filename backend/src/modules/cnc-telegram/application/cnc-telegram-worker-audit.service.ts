@@ -96,11 +96,24 @@ export class CncTelegramWorkerAuditService {
     this.assertViewer(currentUser);
     const data = await this.repository.exportDetailed(query);
     const operations = data.messages.flatMap((message) => arrayField(message, 'operations'));
+    const exportedAt = new Date();
+    const backendBuildSha = this.config.get('BACKEND_BUILD_SHA', { infer: true }) ?? null;
+    const runtimeSessions = (data.runtimeSessions ?? []).map((session) => ({
+      ...session,
+      runtimeEvidenceComplete: hasCompleteRuntimeEvidence(session),
+      revisionMatchesBackend: backendBuildSha
+        ? stringField(session, 'workerImageRevision') === backendBuildSha
+        : null,
+    }));
+    const manualSvgTelegramSends = (data.manualSvgTelegramSends ?? []).map((request) => (
+      enrichManualSvgTelegramSend(request, runtimeSessions, exportedAt)
+    ));
+    const findings = manualSendFindings(manualSvgTelegramSends);
     const payload = {
       format: 'erp.cnc-telegram-worker-audit',
-      schemaVersion: 1,
+      schemaVersion: 2,
       detailLevel: 'full',
-      exportedAt: new Date().toISOString(),
+      exportedAt: exportedAt.toISOString(),
       exportedBy: {
         userId: currentUser.id,
         username: currentUser.username,
@@ -130,6 +143,11 @@ export class CncTelegramWorkerAuditService {
         operations: operations.length,
         steps: operations.reduce((total, operation) => total + arrayField(operation, 'steps').length, 0),
         responses: operations.reduce((total, operation) => total + arrayField(operation, 'responses').length, 0),
+        runtimeSessions: runtimeSessions.length,
+        manualSvgTelegramSends: manualSvgTelegramSends.length,
+        activeManualSvgTelegramSends: manualSvgTelegramSends.filter((request) => (
+          request.status === 'pending' || request.status === 'processing'
+        )).length,
       },
       includes: [
         'all_stored_scan_fields',
@@ -138,7 +156,17 @@ export class CncTelegramWorkerAuditService {
         'all_stored_operation_fields',
         'operation_steps',
         'operation_responses',
+        'current_worker_runtime_snapshot',
+        'manual_svg_telegram_send_queue',
+        'manual_svg_telegram_send_lifecycle',
+        'manual_svg_telegram_send_eligibility',
       ],
+      runtimeSnapshot: {
+        backendBuildSha,
+        sessions: runtimeSessions,
+      },
+      findings,
+      manualSvgTelegramSends,
       scans: data.scans,
       messages: data.messages,
     };
@@ -393,4 +421,124 @@ function arrayField(value: Record<string, unknown>, key: string): Record<string,
   return Array.isArray(field)
     ? field.filter((item): item is Record<string, unknown> => isRecord(item))
     : [];
+}
+
+function enrichManualSvgTelegramSend(
+  request: Record<string, unknown>,
+  runtimeSessions: Record<string, unknown>[],
+  exportedAt: Date,
+): Record<string, unknown> {
+  const status = stringField(request, 'status');
+  const destinationChatId = stringField(request, 'destinationChatId');
+  const activeSessions = runtimeSessions.filter((session) => session.active === true);
+  const matchingSession = activeSessions.find((session) => (
+    stringField(session, 'sourceChatId') === destinationChatId
+  ));
+  const blockingReasonCodes: string[] = [];
+
+  if (status !== 'pending') blockingReasonCodes.push('STATUS_NOT_PENDING');
+  if (numberField(request, 'attemptCount') >= 5) blockingReasonCodes.push('ATTEMPT_LIMIT_REACHED');
+  if (!destinationChatId) blockingReasonCodes.push('DESTINATION_CHAT_MISSING');
+  if (destinationChatId && !matchingSession) {
+    blockingReasonCodes.push(activeSessions.length > 0 ? 'DESTINATION_CHAT_MISMATCH' : 'NO_ACTIVE_WORKER');
+  }
+  if (matchingSession && !hasCompleteRuntimeEvidence(matchingSession)) {
+    blockingReasonCodes.push('WORKER_RUNTIME_EVIDENCE_INCOMPLETE');
+  } else if (matchingSession?.canSendManualSvgUploads !== true) {
+    if (matchingSession) blockingReasonCodes.push('WORKER_MANUAL_SEND_DISABLED');
+  }
+  if (stringField(request, 'svgCutImportStatus') !== 'imported') {
+    blockingReasonCodes.push('SVG_IMPORT_NOT_READY');
+  }
+  if (!stringField(request, 'cutJobId')) blockingReasonCodes.push('CUT_JOB_MISSING');
+  if (!String(request.cutJobDisplayNumber ?? '').trim()) blockingReasonCodes.push('CUT_JOB_DISPLAY_NUMBER_MISSING');
+  if (request.hasMdfEvent !== true) blockingReasonCodes.push('MDF_EVENT_MISSING');
+  if (numberField(request, 'liveFileCount') < 1) blockingReasonCodes.push('NO_LIVE_FILES');
+
+  const requestedAt = new Date(String(request.requestedAt ?? ''));
+  const ageSeconds = Number.isFinite(requestedAt.getTime())
+    ? Math.max(0, Math.floor((exportedAt.getTime() - requestedAt.getTime()) / 1000))
+    : null;
+  const pollSeconds = matchingSession
+    ? numberField(matchingSession, 'manualSvgSendPollIntervalSeconds')
+    : 0;
+  const stuckThresholdSeconds = Math.max(60, pollSeconds > 0 ? pollSeconds * 3 : 60);
+  const claimableNow = blockingReasonCodes.length === 0;
+  const stuck = claimableNow && ageSeconds !== null && ageSeconds > stuckThresholdSeconds;
+  const reasonCodes = [...blockingReasonCodes, ...(stuck ? ['CLAIMABLE_BACKLOG_NOT_CLAIMED'] : [])];
+
+  return {
+    ...request,
+    routing: {
+      packetSourceChatId: request.packetSourceChatId ?? null,
+      packetSourceIsSynthetic: request.packetSourceChatId === 'erp-manual-svg-upload',
+      destinationChatId: destinationChatId || null,
+      activeWorkerChatId: matchingSession?.sourceChatId ?? null,
+      destinationMatchesActiveWorker: Boolean(matchingSession),
+    },
+    eligibility: {
+      claimableNow,
+      stuck,
+      ageSeconds,
+      stuckThresholdSeconds,
+      reasonCodes,
+      checks: {
+        statusPending: status === 'pending',
+        attemptLimitAvailable: numberField(request, 'attemptCount') < 5,
+        destinationPresent: Boolean(destinationChatId),
+        activeWorkerPresent: Boolean(matchingSession),
+        workerRuntimeEvidenceComplete: matchingSession ? hasCompleteRuntimeEvidence(matchingSession) : false,
+        workerManualSendEnabled: matchingSession?.canSendManualSvgUploads === true,
+        svgImportReady: stringField(request, 'svgCutImportStatus') === 'imported',
+        cutJobPresent: Boolean(stringField(request, 'cutJobId')),
+        cutJobDisplayNumberPresent: Boolean(String(request.cutJobDisplayNumber ?? '').trim()),
+        mdfEventPresent: request.hasMdfEvent === true,
+        liveFilesPresent: numberField(request, 'liveFileCount') > 0,
+      },
+    },
+  };
+}
+
+function manualSendFindings(requests: Record<string, unknown>[]): Record<string, unknown> {
+  const pending = requests.filter((request) => request.status === 'pending');
+  const processing = requests.filter((request) => request.status === 'processing');
+  const unknown = requests.filter((request) => request.status === 'unknown');
+  const claimable = pending.filter((request) => isRecord(request.eligibility) && request.eligibility.claimableNow === true);
+  const stuck = pending.filter((request) => isRecord(request.eligibility) && request.eligibility.stuck === true);
+  const reasonCounts: Record<string, number> = {};
+  for (const request of pending) {
+    if (!isRecord(request.eligibility)) continue;
+    for (const reason of request.eligibility.reasonCodes as unknown[] ?? []) {
+      if (typeof reason === 'string') reasonCounts[reason] = (reasonCounts[reason] ?? 0) + 1;
+    }
+  }
+  return {
+    severity: stuck.length > 0 ? 'error' : pending.length > 0 || processing.length > 0 ? 'warning' : 'healthy',
+    pendingCount: pending.length,
+    processingCount: processing.length,
+    unknownCount: unknown.length,
+    claimablePendingCount: claimable.length,
+    stuckPendingCount: stuck.length,
+    reasonCounts,
+  };
+}
+
+function hasCompleteRuntimeEvidence(session: Record<string, unknown>): boolean {
+  return Boolean(
+    stringField(session, 'stackEnv')
+    && stringField(session, 'workerRole')
+    && typeof session.canSendManualSvgUploads === 'boolean'
+    && numberField(session, 'manualSvgSendPollIntervalSeconds') > 0
+    && stringField(session, 'parserVersion'),
+  );
+}
+
+function stringField(value: Record<string, unknown>, key: string): string {
+  const field = value[key];
+  return typeof field === 'string' ? field.trim() : field == null ? '' : String(field).trim();
+}
+
+function numberField(value: Record<string, unknown>, key: string): number {
+  const parsed = Number(value[key]);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

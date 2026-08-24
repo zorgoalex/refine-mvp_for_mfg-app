@@ -27,6 +27,7 @@ export interface CncTelegramServicePorts {
   deniedAudit?: CncTelegramDeniedAuditPort;
   permissions?: PermissionsService;
   backgroundIngestEnabled?: boolean;
+  manualSvgDestinationChatIds?: readonly string[];
 }
 
 export class CncTelegramService {
@@ -104,7 +105,24 @@ export class CncTelegramService {
         requiredPermissions: ['cut.manage'],
       });
     }
-    return this.ports.packets.manualSvgUpload(command);
+    if (command.dto.telegramSend?.enabled !== true) {
+      return this.ports.packets.manualSvgUpload(command);
+    }
+    const destinations = (this.ports.manualSvgDestinationChatIds ?? [])
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (destinations.length !== 1) {
+      throw new ApiError(
+        503,
+        'CNC_TELEGRAM_MANUAL_SEND_DESTINATION_UNAVAILABLE',
+        'Для ручной отправки SVG должен быть настроен ровно один Telegram-чат',
+        { configuredDestinationCount: destinations.length },
+      );
+    }
+    return this.ports.packets.manualSvgUpload({
+      ...command,
+      telegramDestinationChatId: destinations[0],
+    });
   }
 
   async listManualSvgCommentPresets(

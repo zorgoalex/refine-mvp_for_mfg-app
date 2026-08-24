@@ -45,6 +45,8 @@ describe('PgCncTelegramWorkerSessionRepository', () => {
     const update = queries.find(({ text }) => text.includes('UPDATE cnc_telegram_worker_session_leases'));
     expect(update?.text).toContain('lease_generation=lease_generation+1');
     expect(update?.text).toContain('claimed_at=now(), heartbeat_at=now()');
+    expect(update?.text).toContain('can_send_manual_svg_uploads=$7');
+    expect(update?.params.slice(4, 9)).toEqual(['prod', 'writer', true, 5, '2026-08-24']);
   });
 
   it('rejects a stale heartbeat before extending the lease', async () => {
@@ -69,6 +71,13 @@ function claimInput() {
     sourceChatId: '-100123',
     workerInstanceId,
     workerImageRevision: 'image-sha',
+    runtimeEvidence: {
+      stackEnv: 'prod',
+      workerRole: 'writer' as const,
+      canSendManualSvgUploads: true,
+      manualSvgSendPollIntervalSeconds: 5,
+      parserVersion: '2026-08-24',
+    },
   };
 }
 
@@ -82,6 +91,11 @@ function leaseRow(overrides: Record<string, unknown> = {}) {
     claimed_at: '2026-08-18T10:00:00Z',
     heartbeat_at: '2026-08-18T10:00:00Z',
     expires_at: '2026-08-18T10:01:30Z',
+    stack_env: 'prod',
+    worker_role: 'writer',
+    can_send_manual_svg_uploads: true,
+    manual_svg_send_poll_interval_seconds: 5,
+    parser_version: '2026-08-24',
     ...overrides,
   };
 }
