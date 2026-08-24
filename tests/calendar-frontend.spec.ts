@@ -64,6 +64,49 @@ test.describe('Calendar frontend', () => {
         await expect(page.getByText('Ошибка загрузки данных')).toBeVisible({ timeout: 30000 });
         await expect(page.getByText('Internal Server Error').first()).toBeVisible();
     });
+
+    test('shows merged cut and issued stages in every calendar view', async ({ page }) => {
+        test.setTimeout(90_000);
+        const db = createWorkflowMockDb();
+        seedCalendarFrontendOrder(db, formatLocalDate(new Date()));
+        db.production_statuses.push(
+            {
+                production_status_id: 4,
+                production_status_code: 'cut',
+                production_status_name: 'Распилено',
+                sort_order: 40,
+                color: 'orange',
+                is_active: true,
+            },
+            {
+                production_status_id: 5,
+                production_status_code: 'issued',
+                production_status_name: 'Выдан',
+                sort_order: 50,
+                color: 'green',
+                is_active: true,
+            },
+        );
+        db.order_details[0].production_status_id = 4;
+
+        await setupWorkflowMockApi(page, db, {
+            runtimeConfig: { backendOrdersRead: true },
+        });
+        await routeCalendarBackendOrders(page, db, [], ['drawn', 'cut', 'issued']);
+        await page.goto('/calendar', { waitUntil: 'domcontentloaded' });
+        await waitForCalendarHeading(page);
+
+        await expect(page.locator('.order-card__production-stages').first()).toContainText('Р');
+        await expect(page.locator('.order-card__production-stages').first()).toContainText('В');
+
+        await page.locator('.ant-segmented-item').filter({ hasText: 'Компактный' }).click();
+        await expect(page.locator('.order-card-compact__production-stages').first()).toContainText('Р');
+        await expect(page.locator('.order-card-compact__production-stages').first()).toContainText('В');
+
+        await page.locator('.ant-segmented-item').filter({ hasText: 'Краткий' }).click();
+        await expect(page.locator('.day-column-brief__order-item').first()).toContainText('Р');
+        await expect(page.locator('.day-column-brief__order-item').first()).toContainText('В');
+    });
 });
 
 test.describe('Calendar stage canary', () => {
@@ -171,6 +214,7 @@ async function routeCalendarBackendOrders(
     page: Page,
     db: WorkflowMockDb,
     requestUrls: string[],
+    passedProductionStatusCodes: string[] = ['new'],
 ) {
     await page.route(/\/api\/v1\/orders(?:\?.*)?$/, async (route: Route) => {
         if (route.request().method() !== 'GET') {
@@ -200,7 +244,7 @@ async function routeCalendarBackendOrders(
             partsCount: order.parts_count,
             totalArea: order.total_area,
             priority: order.priority,
-            passedProductionStatusCodes: ['new'],
+            passedProductionStatusCodes,
             version: order.version,
         }));
         await route.fulfill({

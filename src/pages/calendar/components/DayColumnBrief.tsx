@@ -5,6 +5,8 @@ import { CalendarOrder } from '../types/calendar';
 import { getDayName, formatDateKey } from '../utils/dateUtils';
 import { calculateTotalArea } from '../utils/groupOrdersByDate';
 import { getMillingDisplayValue, getMaterialsForCard, getMaterialTextColor } from '../utils/statusColors';
+import { ProductionStagesDisplay } from '../../../components/ProductionStagesDisplay';
+import type { ProductionWorkflowDisplay } from '../types/calendar';
 
 /**
  * Пропсы для DayColumnBrief
@@ -13,6 +15,7 @@ interface DayColumnBriefProps {
   date: Date;
   orders: CalendarOrder[];
   columnWidth: number;
+  productionWorkflowDisplay?: ProductionWorkflowDisplay;
 }
 
 /**
@@ -20,7 +23,7 @@ interface DayColumnBriefProps {
  * Верхняя строка: дата + общая площадь
  * Ниже список заказов построчно через тире
  */
-const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWidth }) => {
+const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWidth, productionWorkflowDisplay }) => {
   const navigate = useNavigate();
   const dayName = getDayName(date);
   const totalArea = calculateTotalArea(orders);
@@ -114,6 +117,19 @@ const DayColumnBrief: React.FC<DayColumnBriefProps> = ({ date, orders, columnWid
                 ) : null}
                 {' - '}
                 <span>{getMillingDisplayValue(order.order_details) || '—'}</span>
+                {(order.passedProductionCodes?.length ?? 0) > 0 && (
+                  <>
+                    {' - '}
+                    <ProductionStagesDisplay
+                      passedCodes={order.passedProductionCodes}
+                      displayOrderCodes={productionWorkflowDisplay?.displayOrderCodes}
+                      codeToLetter={productionWorkflowDisplay?.codeToLetter}
+                      codeToName={productionWorkflowDisplay?.codeToName}
+                      fontSize={11}
+                      passedColor="#fa8c16"
+                    />
+                  </>
+                )}
               </div>
             );
           })

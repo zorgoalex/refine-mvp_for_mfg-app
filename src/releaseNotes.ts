@@ -31,6 +31,17 @@ export const releaseNotes: ReleaseNoteEntry[] = [
   {
     version: APP_VERSION,
     date: "2026-08-24",
+    title: "Календарь: актуальные этапы производства",
+    services: ["ERP"],
+    repositories: ["repo_erp"],
+    fixed: [
+      "Производственные этапы заказа в календаре теперь совпадают со статусами обычных деталей; ХДФ-детали больше не изменяют общий статус заказа.",
+      "Этапы производства видны в стандартном, компактном и кратком режимах календаря.",
+    ],
+  },
+  {
+    version: APP_VERSION,
+    date: "2026-08-24",
     title: "Раскрой: карточки ванн на МДФ-доске",
     services: ["ERP", "Cutting"],
     repositories: ["repo_erp"],

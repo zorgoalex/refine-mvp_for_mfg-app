@@ -1478,7 +1478,9 @@ probe_file() {
                          'production.hdf.sheet_material_type_id'
                        );" \
                      "SELECT pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)
-                              LIKE '%order_hdf_details%';" ;;
+                              LIKE '%order_hdf_details%'
+                          OR obj_description('recalc_order_production_status(bigint)'::regprocedure)
+                              LIKE 'v142:%';" ;;
     126_workos_user_controls*) probe_all \
                      "$(q_col users workos_self_link_enabled)" \
                      "$(q_col users workos_self_unlink_enabled)" \
@@ -1687,6 +1689,39 @@ probe_file() {
                      "SELECT to_regprocedure('record_mdf_board_history_from_audit()') IS NOT NULL;" \
                      "SELECT to_regprocedure('record_mdf_board_history_from_audit_relation()') IS NOT NULL;" \
                      "SELECT obj_description('mdf_board_history_events'::regclass) LIKE 'mdf-board-history-v1:%';" ;;
+    142_order_production_status_exclude_hdf*) probe_all \
+                     "SELECT obj_description('recalc_order_production_status(bigint)'::regprocedure) LIKE 'v142:%';" \
+                     "SELECT pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)
+                              LIKE '%FROM order_details od%'
+                         AND pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)
+                              NOT LIKE '%order_hdf_details%'
+                         AND pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)
+                              LIKE '%erp.order_status_to_details_sync%'
+                         AND pg_get_functiondef('recalc_order_production_status(bigint)'::regprocedure)
+                              LIKE '%erp.detail_status_to_order_recalc%';" \
+                     "SELECT NOT EXISTS (
+                        SELECT 1
+                        FROM orders o
+                        JOIN LATERAL (
+                          SELECT ps.production_status_id
+                          FROM order_details od
+                          JOIN production_statuses ps
+                            ON ps.production_status_id = od.production_status_id
+                          WHERE od.order_id = o.order_id
+                            AND COALESCE(od.delete_flag, false) = false
+                            AND od.production_status_id IS NOT NULL
+                          ORDER BY ps.sort_order ASC, ps.production_status_id ASC
+                          LIMIT 1
+                        ) expected ON true
+                        WHERE COALESCE(o.delete_flag, false) = false
+                          AND o.production_status_id IS DISTINCT FROM expected.production_status_id
+                     );" \
+                     "SELECT NOT EXISTS (
+                        SELECT 1
+                        FROM production_statuses
+                        GROUP BY lower(btrim(production_status_name))
+                        HAVING count(DISTINCT production_status_code) > 1
+                     );" ;;
     *) return 2 ;;   # unknown file: no classification (guard test keeps this impossible)
   esac
 }
@@ -1698,7 +1733,7 @@ probe_file() {
 verify_applied_effect() {
   local f="$1"
   case "$f" in
-    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*)
+    073_*|074_*|087_*|088_*|089_*|091_*|094_*|095_*|096_*|097_*|098_*|099_*|100_*|101_*|102_*|103_*|104_*|105_*|106_*|107_*|108_*|109_*|110_*|111_*|112_*|113_*|114_*|115_*|116_*|117_*|118_*|119_*|120_*|121_*|122_*|123_*|124_*|125_*|126_*|127_*|128_*|129_*|130_*|131_*|132_*|133_*|134_*|135_*|136_*|137_*|138_*|139_*|140_*|141_*|142_*)
       probe_file "$f" || die "migration '$f' executed but its end-state probe is still PENDING; it was NOT recorded in schema_migrations. Repair the partial schema, then re-run."
       ;;
   esac
