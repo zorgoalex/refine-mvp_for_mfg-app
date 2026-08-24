@@ -2547,6 +2547,14 @@ async function enqueueManualSvgTelegramSendRequest(
   },
 ): Promise<{ requestId: string; status: ManualSvgFilePersistenceResult['telegramSendStatus'] } | null> {
   if (input.command.dto.telegramSend?.enabled !== true) return null;
+  const destinationChatId = input.command.telegramDestinationChatId?.trim();
+  if (!destinationChatId) {
+    throw new ApiError(
+      503,
+      'CNC_TELEGRAM_MANUAL_SEND_DESTINATION_UNAVAILABLE',
+      'Не настроен целевой Telegram-чат для ручной отправки SVG',
+    );
+  }
   if (input.files.length === 0) {
     throw new ApiError(422, 'MANUAL_SVG_TELEGRAM_FILES_REQUIRED', 'Для отправки в Telegram нужны файлы');
   }
@@ -2591,9 +2599,9 @@ async function enqueueManualSvgTelegramSendRequest(
   const inserted = await tx.query<{ request_id: string; status: ManualSvgFilePersistenceResult['telegramSendStatus']; inserted: boolean }>(
     `WITH inserted AS (
        INSERT INTO cnc_manual_svg_telegram_send_requests (
-         packet_id, send_idempotency_key, requested_by, message_text
+         packet_id, send_idempotency_key, requested_by, message_text, destination_chat_id
        )
-       VALUES ($1::uuid, $2, $3::bigint, $4)
+       VALUES ($1::uuid, $2, $3::bigint, $4, $5)
        ON CONFLICT (send_idempotency_key) DO NOTHING
        RETURNING request_id, status, true AS inserted
      ), existing AS (
@@ -2610,6 +2618,7 @@ async function enqueueManualSvgTelegramSendRequest(
       sendKey,
       Number(input.command.currentUser.id),
       manualSvgTelegramMessage(input.command.dto),
+      destinationChatId,
     ],
   );
   const row = inserted.rows[0];
@@ -2638,6 +2647,7 @@ async function refreshPendingManualSvgTelegramSendRequest(
     `UPDATE cnc_manual_svg_telegram_send_requests
      SET message_text=$2,
          requested_by=$3::bigint,
+         destination_chat_id=$4,
          requested_at=now(),
          updated_at=now()
      WHERE request_id=$1::uuid
@@ -2646,6 +2656,7 @@ async function refreshPendingManualSvgTelegramSendRequest(
       requestId,
       manualSvgTelegramMessage(input.command.dto),
       Number(input.command.currentUser.id),
+      input.command.telegramDestinationChatId,
     ],
   );
 }
@@ -2711,6 +2722,7 @@ async function writeManualSvgTelegramSendRequestedAudit(
       externalPacketKey: input.externalPacketKey,
       sourceVersion: input.packet.sourceVersion,
       telegramSendRequestId: input.telegramSendRequestId,
+      destinationChatId: input.command.telegramDestinationChatId,
       message,
       fileCount: files.length,
       files,

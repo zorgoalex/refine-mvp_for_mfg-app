@@ -93,6 +93,9 @@ import { PgMdfBoardHistoryRepository } from './adapters/pg-mdf-board-history-rep
           packets: repository,
           deniedAudit: repository,
           backgroundIngestEnabled: config.get('CNC_TELEGRAM_BACKGROUND_INGEST_ENABLED', { infer: true }),
+          manualSvgDestinationChatIds: (
+            config.get('CNC_TELEGRAM_ALLOWED_CHAT_IDS', { infer: true }) ?? ''
+          ).split(',').map((value) => value.trim()).filter(Boolean),
         });
       },
       inject: [DatabaseService, ConfigService],

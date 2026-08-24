@@ -18,6 +18,8 @@ const MAX_DETAILED_EXPORT_ROWS = 50_000;
 export interface WorkerAuditDetailedExportData {
   scans: Record<string, unknown>[];
   messages: Record<string, unknown>[];
+  runtimeSessions: Record<string, unknown>[];
+  manualSvgTelegramSends: Record<string, unknown>[];
 }
 
 export class PgCncTelegramWorkerAuditRepository {
@@ -454,7 +456,118 @@ export class PgCncTelegramWorkerAuditRepository {
       throw exportTooLarge('сканирований');
     }
 
-    return { scans: scans.rows, messages: messages.rows };
+    const runtimeSessions = await this.database.query<Record<string, unknown>>(`
+      SELECT
+        source_chat_id AS "sourceChatId",
+        worker_instance_id AS "workerInstanceId",
+        worker_image_revision AS "workerImageRevision",
+        claimed_at AS "claimedAt",
+        heartbeat_at AS "heartbeatAt",
+        expires_at AS "expiresAt",
+        expires_at > now() AS active,
+        stack_env AS "stackEnv",
+        worker_role AS "workerRole",
+        can_send_manual_svg_uploads AS "canSendManualSvgUploads",
+        manual_svg_send_poll_interval_seconds AS "manualSvgSendPollIntervalSeconds",
+        parser_version AS "parserVersion"
+      FROM cnc_telegram_worker_session_leases
+      ORDER BY source_chat_id
+    `);
+
+    const manualSvgTelegramSends = await this.database.query<Record<string, unknown>>(`
+      SELECT
+        request.request_id AS "requestId",
+        request.packet_id AS "packetId",
+        request.destination_chat_id AS "destinationChatId",
+        request.status,
+        request.attempt_count AS "attemptCount",
+        request.requested_at AS "requestedAt",
+        request.claimed_at AS "claimedAt",
+        request.finished_at AS "finishedAt",
+        request.sent_chat_id AS "sentChatId",
+        request.sent_message_ids_json AS "sentMessageIds",
+        request.last_error AS "lastError",
+        request.lease_generation AS "itemLeaseGeneration",
+        request.lease_worker_instance_id AS "itemLeaseWorkerInstanceId",
+        request.lease_expires_at AS "itemLeaseExpiresAt",
+        packet.source_chat_id AS "packetSourceChatId",
+        packet.source_version AS "packetSourceVersion",
+        packet.svg_cut_import_status AS "svgCutImportStatus",
+        packet.svg_cut_job_id::text AS "cutJobId",
+        svg_job.source_display_number AS "cutJobDisplayNumber",
+        EXISTS (
+          SELECT 1
+          FROM outbox_events mdf_card
+          WHERE mdf_card.idempotency_key =
+            'cnc-manual-svg:' || packet.packet_id::text ||
+            ':source-' || packet.source_version::text || ':mdf-card-created'
+        ) AS "hasMdfEvent",
+        COALESCE(files.total_count, 0) AS "totalFileCount",
+        COALESCE(files.live_count, 0) AS "liveFileCount",
+        COALESCE(files.expired_count, 0) AS "expiredFileCount",
+        files.earliest_expiry AS "earliestFileExpiry",
+        files.latest_expiry AS "latestFileExpiry",
+        COALESCE(files.items, '[]'::jsonb) AS files,
+        COALESCE(events.items, '[]'::jsonb) AS events
+      FROM cnc_manual_svg_telegram_send_requests request
+      JOIN cnc_telegram_packets packet ON packet.packet_id=request.packet_id
+      LEFT JOIN cut_job svg_job ON svg_job.cut_job_id=packet.svg_cut_job_id
+      LEFT JOIN LATERAL (
+        SELECT
+          count(*)::integer AS total_count,
+          count(*) FILTER (WHERE file.expires_at > now())::integer AS live_count,
+          count(*) FILTER (WHERE file.expires_at <= now())::integer AS expired_count,
+          min(file.expires_at) AS earliest_expiry,
+          max(file.expires_at) AS latest_expiry,
+          jsonb_agg(jsonb_build_object(
+            'fileId', file.file_id,
+            'kind', file.file_kind,
+            'fileName', file.original_file_name,
+            'contentType', file.content_type,
+            'sizeBytes', file.size_bytes,
+            'sha256', file.content_sha256,
+            'generated', file.generated,
+            'createdAt', file.created_at,
+            'expiresAt', file.expires_at,
+            'available', file.expires_at > now()
+          ) ORDER BY request_file.send_order) AS items
+        FROM cnc_manual_svg_telegram_send_request_files request_file
+        JOIN cnc_manual_svg_upload_files file ON file.file_id=request_file.file_id
+        WHERE request_file.request_id=request.request_id
+      ) files ON true
+      LEFT JOIN LATERAL (
+        SELECT jsonb_agg(jsonb_build_object(
+          'auditId', audit.audit_id,
+          'event', audit.event,
+          'requestId', audit.request_id,
+          'source', audit.source,
+          'before', audit.before_json,
+          'after', audit.after_json,
+          'diff', audit.diff_json,
+          'metadata', audit.metadata_json,
+          'createdAt', audit.created_at
+        ) ORDER BY audit.created_at, audit.audit_id) AS items
+        FROM audit_log audit
+        WHERE audit.entity_type='cnc_manual_svg_telegram_send_request'
+          AND audit.entity_id=request.request_id::text
+      ) events ON true
+      WHERE (
+        request.requested_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Almaty')
+        AND request.requested_at < ((($2::date + 1)::timestamp) AT TIME ZONE 'Asia/Almaty')
+      ) OR request.status IN ('pending', 'processing')
+      ORDER BY request.requested_at, request.request_id
+      LIMIT $3
+    `, [query.dateFrom, query.dateTo, MAX_DETAILED_EXPORT_ROWS + 1]);
+    if (manualSvgTelegramSends.rows.length > MAX_DETAILED_EXPORT_ROWS) {
+      throw exportTooLarge('заявок ручной отправки SVG');
+    }
+
+    return {
+      scans: scans.rows,
+      messages: messages.rows,
+      runtimeSessions: runtimeSessions.rows,
+      manualSvgTelegramSends: manualSvgTelegramSends.rows,
+    };
   }
 
   private async upsertScan(client: TransactionClient, dto: WorkerAuditBatchDto, writer: Writer): Promise<void> {

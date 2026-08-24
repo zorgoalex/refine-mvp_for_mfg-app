@@ -5,6 +5,15 @@ export interface CncTelegramWorkerSessionLeaseDto {
   sourceChatId: string;
   workerInstanceId: string;
   workerImageRevision: string;
+  runtimeEvidence?: CncTelegramWorkerRuntimeEvidence;
+}
+
+export interface CncTelegramWorkerRuntimeEvidence {
+  stackEnv: string;
+  workerRole: 'disabled' | 'reader' | 'writer';
+  canSendManualSvgUploads: boolean;
+  manualSvgSendPollIntervalSeconds: number;
+  parserVersion: string;
 }
 
 export interface CncTelegramWorkerSessionHeartbeatDto {
@@ -24,6 +33,7 @@ export interface CncTelegramWorkerSessionLeaseResponse {
   leaseGeneration: number;
   workerInstanceId: string;
   workerImageRevision: string;
+  runtimeEvidence: CncTelegramWorkerRuntimeEvidence | null;
   claimedAt: string;
   heartbeatAt: string;
   expiresAt: string;

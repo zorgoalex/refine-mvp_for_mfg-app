@@ -184,6 +184,15 @@ class CncTelegramWorker:
                     chat_id=configured_chat_id,
                     image_revision=self.config.worker_image_revision,
                     lease_ttl_seconds=self.config.session_lease_ttl_seconds,
+                    runtime_evidence={
+                        "stackEnv": getattr(self.config, "stack_env", "unknown"),
+                        "workerRole": getattr(self.config, "worker_role", "disabled"),
+                        "canSendManualSvgUploads": bool(getattr(self.config, "can_send_manual_svg_uploads", False)),
+                        "manualSvgSendPollIntervalSeconds": float(
+                            getattr(self.config, "manual_svg_send_poll_interval_seconds", 30.0),
+                        ),
+                        "parserVersion": getattr(self.config, "parser_version", "unknown"),
+                    },
                 )
                 return
             except ErpResponseError as exc:
@@ -651,6 +660,9 @@ class CncTelegramWorker:
             if item_lease is None:
                 raise SessionLeaseLost("backend manual send task has no fenced item lease")
             try:
+                destination_chat_id = str(task.get("destinationChatId") or "")
+                if destination_chat_id != chat_id:
+                    raise RuntimeError("manual SVG Telegram send task targets a different Telegram chat")
                 files = task.get("files") or []
                 if not isinstance(files, list) or not files:
                     raise RuntimeError("manual SVG Telegram send task has no files")

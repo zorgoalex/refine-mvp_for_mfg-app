@@ -127,7 +127,7 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
       messageType: 'svg',
       reasonCode: 'backend_ingest_failed',
       search: 'layout.svg',
-    })).resolves.toEqual({ scans: [], messages: [] });
+    })).resolves.toEqual({ scans: [], messages: [], runtimeSessions: [], manualSvgTelegramSends: [] });
 
     const messageIndex = database.sql.findIndex((sql) => sql.includes('FROM cnc_telegram_worker_message_logs m'));
     const messageSql = database.sql[messageIndex] ?? '';
@@ -148,6 +148,14 @@ describe('PgCncTelegramWorkerAuditRepository immutable replay guards', () => {
     const scanSql = database.sql.find((sql) => sql.includes('FROM cnc_telegram_worker_scans')) ?? '';
     expect(scanSql).toContain('writer_user_id::text AS "writerUserId"');
     expect(scanSql).toContain('created_at AS "createdAt"');
+    const runtimeSql = database.sql.find((sql) => sql.includes('FROM cnc_telegram_worker_session_leases')) ?? '';
+    expect(runtimeSql).toContain('can_send_manual_svg_uploads AS "canSendManualSvgUploads"');
+    expect(runtimeSql).not.toContain('lease_token');
+    const manualSendSql = database.sql.find((sql) => sql.includes('FROM cnc_manual_svg_telegram_send_requests request')) ?? '';
+    expect(manualSendSql).toContain('request.destination_chat_id AS "destinationChatId"');
+    expect(manualSendSql).toContain('request.status IN (\'pending\', \'processing\')');
+    expect(manualSendSql).toContain('file.content_sha256');
+    expect(manualSendSql).not.toContain('file.content_bytes');
     expect(scanSql).toContain('LIMIT $3');
   });
 

@@ -399,6 +399,7 @@ class ImportWorkerTest(unittest.TestCase):
                 worker.config.business_timezone = ZoneInfo("UTC")
                 task = {
                     "requestId": "00000000-0000-4000-8000-000000000010",
+                    "destinationChatId": "-100",
                     "cutJobDisplayNumber": "123",
                     "messageText": "",
                     "itemLeaseToken": "i" * 64,

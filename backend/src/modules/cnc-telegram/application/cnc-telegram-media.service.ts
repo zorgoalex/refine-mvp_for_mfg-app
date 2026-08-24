@@ -127,6 +127,14 @@ export class CncTelegramMediaService {
     this.assertWorker(input.currentUser);
     await this.assertSession(input.currentUser, input.lease);
     const sessionLease = this.requireLease(input.lease);
+    if (input.completion.sentChatId !== sessionLease.sourceChatId) {
+      throw new ApiError(
+        409,
+        'CNC_TELEGRAM_SEND_DESTINATION_MISMATCH',
+        'Telegram worker подтвердил отправку в другой чат',
+        { expectedChatId: sessionLease.sourceChatId, actualChatId: input.completion.sentChatId },
+      );
+    }
     return this.repository.completeManualSvgTelegramSend({
       currentUser: input.currentUser,
       requestId: input.requestId,

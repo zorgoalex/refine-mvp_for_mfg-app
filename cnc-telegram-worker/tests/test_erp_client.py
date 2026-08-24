@@ -206,11 +206,20 @@ class ErpClientTest(unittest.IsolatedAsyncioTestCase):
         with patch("cnc_telegram_worker.erp_client.httpx.AsyncClient", return_value=fake_http):
             lease = await client.claim_worker_session(
                 chat_id="-100", image_revision="image-abc", lease_ttl_seconds=90,
+                runtime_evidence={
+                    "stackEnv": "prod",
+                    "workerRole": "writer",
+                    "canSendManualSvgUploads": True,
+                    "manualSvgSendPollIntervalSeconds": 5.0,
+                    "parserVersion": "2026-08-24",
+                },
             )
             await client.heartbeat_worker_session()
             await client.claim_media_restores()
 
         self.assertEqual(lease, WorkerSessionLease("lease-1", 4, "2026-08-18T23:00:00Z"))
+        self.assertEqual(fake_http.requests[0][1]["json"]["runtime"]["workerRole"], "writer")
+        self.assertTrue(fake_http.requests[0][1]["json"]["runtime"]["canSendManualSvgUploads"])
         claim_headers = fake_http.requests[0][1]["headers"]
         heartbeat_headers = fake_http.requests[1][1]["headers"]
         queue_headers = fake_http.requests[2][1]["headers"]
