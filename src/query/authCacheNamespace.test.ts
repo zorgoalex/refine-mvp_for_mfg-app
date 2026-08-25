@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { authSession } from '../api/authSession';
 import { appQueryClient } from './appQueryClient';
 import { getAuthCacheNamespace } from './authCacheNamespace';
@@ -24,14 +24,13 @@ describe('auth cache namespace', () => {
   it('clears shared query cache before logout namespace becomes inaccessible', () => {
     authSession.setUser({ id: '7', username: 'a', role: 'admin', permissions: ['orders.view'] });
     appQueryClient.setQueryData(['private'], { order: 42 });
-    const clear = vi.spyOn(appQueryClient, 'clear');
+    appQueryClient.setQueryData(['auth', 'check'], { authenticated: true });
     authSession.clear();
-    expect(clear).toHaveBeenCalled();
     expect(appQueryClient.getQueryData(['private'])).toBeUndefined();
+    expect(appQueryClient.getQueryData(['auth', 'check'])).toEqual({ authenticated: true });
   });
 
   it('clears cache and changes namespace when backend policy scope changes', () => {
-    const clear = vi.spyOn(appQueryClient, 'clear');
     authSession.setUser({
       id: '7',
       username: 'a',
@@ -42,7 +41,6 @@ describe('auth cache namespace', () => {
     });
     appQueryClient.setQueryData(['private-order'], { order: 42 });
     const broadNamespace = getAuthCacheNamespace('backend');
-    clear.mockClear();
 
     authSession.setUser({
       id: '7',
@@ -53,7 +51,6 @@ describe('auth cache namespace', () => {
       policyScopes: policyWithOrderView('own'),
     });
 
-    expect(clear).toHaveBeenCalledTimes(1);
     expect(appQueryClient.getQueryData(['private-order'])).toBeUndefined();
     expect(getAuthCacheNamespace('backend')).not.toBe(broadNamespace);
   });
