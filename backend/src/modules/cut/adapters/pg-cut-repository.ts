@@ -6975,12 +6975,12 @@ async function createForcedMdfBoardPacket(
      VALUES (
        $1, 'erp-cut-mdf-card', 1, $2, CURRENT_DATE, 'ERP', $3, 'МДФ',
        'parsed', 'pending', '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
-       '[]'::jsonb, 'erp-cut-mdf-card-v1', $4, $4, $5, $6,
+       '[]'::jsonb, 'erp-cut-mdf-card-v1', $4::bigint, $4::bigint, $5::bigint, $6::bigint,
        'imported', 'forced_mdf_board_card', $7,
        CASE WHEN $8::boolean THEN now() ELSE NULL END,
-       CASE WHEN $8::boolean THEN $4 ELSE NULL END,
+       CASE WHEN $8::boolean THEN $4::bigint ELSE NULL END,
        CASE WHEN $8::boolean THEN $9 ELSE NULL END,
-       CASE WHEN $8::boolean THEN $5 ELSE NULL END
+       CASE WHEN $8::boolean THEN $5::bigint ELSE NULL END
      )
      ON CONFLICT (external_packet_key) DO NOTHING
      RETURNING packet_id::text AS packet_id`,

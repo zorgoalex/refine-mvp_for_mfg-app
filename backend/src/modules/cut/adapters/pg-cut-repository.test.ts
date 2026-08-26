@@ -54,6 +54,16 @@ describe('vacuum MDF bath-card lifecycle', () => {
     expect(repositorySource).toContain("action: 'delete_tombstone'");
     expect(repositorySource).toContain('hidden_seed.svg_cut_result_id = j.current_cut_result_id');
   });
+
+  it('binds reused actor and cut-job ids as bigint in the forced-card insert', () => {
+    const insertStart = repositorySource.indexOf('INSERT INTO cnc_telegram_packets (');
+    const insertEnd = repositorySource.indexOf('RETURNING packet_id::text AS packet_id', insertStart);
+    const forcedCardInsert = repositorySource.slice(insertStart, insertEnd);
+
+    expect(forcedCardInsert.match(/\$4::bigint/g)).toHaveLength(3);
+    expect(forcedCardInsert.match(/\$5::bigint/g)).toHaveLength(2);
+    expect(forcedCardInsert).toContain('$6::bigint');
+  });
 });
 
 describe('vacuum bath meter-guide render wiring', () => {
