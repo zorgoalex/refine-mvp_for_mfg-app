@@ -15,7 +15,6 @@ import {
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { cncTelegramApi } from '../../api/cncTelegramApi';
-import { cutConfigApi } from '../../api/cutConfigApi';
 import { cutApi } from '../../api/cutApi';
 import { ordersApi } from '../../api/ordersApi';
 import { isApiError, type ApiError } from '../../api/apiError';
@@ -29,13 +28,6 @@ import type { EligibleDetailDto } from '../../api/types/cutApi.types';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { parseSvgCutUploadFileNameHints } from './svgCutUploadFilename';
 import { parseSvgCutUploadFile, type ParsedSvgUpload } from './svgCutUploadParser';
-import { createStyledSvgUploadPreviewBlob } from './svgCutRenderPreview';
-import {
-  CUT_RENDER_STYLES_SETTING_KEY,
-  DEFAULT_CUT_RENDER_STYLES_SETTING,
-  parseCutRenderStylesSetting,
-  type CutRenderStylesSetting,
-} from '@shared/cut-render-style';
 
 interface CutSvgUploadModalProps {
   open: boolean;
@@ -136,7 +128,6 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     label: formatDefaultOrderOptionLabel(orderId, defaultOrderNames[index]),
   })), [defaultOrderIdsKey, defaultOrderNamesKey]);
   const [parsed, setParsed] = useState<ParsedSvgUpload | null>(null);
-  const [renderStylesSetting, setRenderStylesSetting] = useState<CutRenderStylesSetting | null>(null);
   const [svgPreview, setSvgPreview] = useState<SvgPreviewState | null>(null);
   const [svgPreviewExpanded, setSvgPreviewExpanded] = useState(false);
   const [minimized, setMinimized] = useState(false);
@@ -183,23 +174,6 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     cncTelegramApi.listManualSvgCommentPresets()
       .then(setPresets)
       .catch(() => setPresets([]));
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    cutConfigApi.get()
-      .then((config) => {
-        if (cancelled) return;
-        const row = config.settings.find((setting) => setting.key === CUT_RENDER_STYLES_SETTING_KEY);
-        setRenderStylesSetting(row ? parseCutRenderStylesSetting(row.value) : DEFAULT_CUT_RENDER_STYLES_SETTING);
-      })
-      .catch(() => {
-        if (!cancelled) setRenderStylesSetting(DEFAULT_CUT_RENDER_STYLES_SETTING);
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [open]);
 
   useEffect(() => {
@@ -262,12 +236,6 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
     revokeObjectUrl(svgPreviewUrlRef.current);
     svgPreviewUrlRef.current = null;
   }, []);
-
-  useEffect(() => {
-    if (!open || !parsed || !renderStylesSetting) return;
-    const next = createStyledSvgPreview(parsed, renderStylesSetting);
-    if (next) replaceSvgPreview(next);
-  }, [open, parsed, renderStylesSetting, replaceSvgPreview]);
 
   const matchSummary = useMemo(() => {
     if (informationalUpload) return null;
@@ -593,7 +561,6 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         fallbackOrderName: fileNameHints.orderNames.join('+') || defaultOrderNames[0] || null,
       });
       setParsed(result);
-      replaceSvgPreview(createStyledSvgPreview(result, renderStylesSetting) ?? createSvgPreview(file));
       setSvgSourceFile({ payload: sourceFile, selectedAt: Date.now() });
       if (fileNameHints.machineName) {
         setMachineName(fileNameHints.machineName);
@@ -1466,19 +1433,6 @@ function createSvgPreview(file: File): SvgPreviewState | null {
   return {
     url: URL.createObjectURL(file),
     fileName: file.name,
-  };
-}
-
-function createStyledSvgPreview(
-  parsed: ParsedSvgUpload,
-  renderStylesSetting?: CutRenderStylesSetting | null,
-): SvgPreviewState | null {
-  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
-  const blob = createStyledSvgUploadPreviewBlob(parsed, renderStylesSetting);
-  if (!blob) return null;
-  return {
-    url: URL.createObjectURL(blob),
-    fileName: parsed.fileName,
   };
 }
 

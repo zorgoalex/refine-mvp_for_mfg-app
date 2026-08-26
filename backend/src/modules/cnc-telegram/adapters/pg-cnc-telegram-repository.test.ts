@@ -1,13 +1,19 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { PNG } from 'pngjs';
 import { describe, expect, it, vi } from 'vitest';
 import type { CurrentUser } from '../../../permissions/current-user';
+import {
+  CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
+  resolveCutRenderStyle,
+} from '../../../shared/cut-render-style';
 import {
   cncWholeOrderIds,
   cncWholeOrderKeys,
   manualSvgProgramName,
   mergeCanonicalSourceFiles,
   PgCncTelegramRepository,
+  renderManualSvgScreenshot,
 } from './pg-cnc-telegram-repository';
 
 const repositorySource = readFileSync(new URL('./pg-cnc-telegram-repository.ts', import.meta.url), 'utf8');
@@ -89,6 +95,39 @@ describe('PgCncTelegramRepository', () => {
     expect(repositorySource).toContain('const destinationChatId = input.command.telegramDestinationChatId?.trim()');
     expect(repositorySource).toContain('CNC_TELEGRAM_MANUAL_SEND_DESTINATION_UNAVAILABLE');
     expect(repositorySource).toContain('message_text, destination_chat_id');
+  });
+
+  it('renders the Telegram screenshot from the exact uploaded SVG geometry', () => {
+    expect(repositorySource).toContain("svg: addCutJobHeadingToSvg(svg.raw.toString('utf8'), cutJobDisplayNumber)");
+    expect(repositorySource).not.toContain('buildManualSvgScreenshotSvg');
+    expect(repositorySource).not.toContain('manualSvgVisualLabelLines');
+
+    const source = [
+      '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">',
+      '<rect width="100" height="100" fill="#fff"/>',
+      '<rect x="10" y="10" width="80" height="80" fill="none" stroke="#000" stroke-width="1"/>',
+      '<path d="M50 20 L50 80" fill="none" stroke="#0000ff" stroke-width="2"/>',
+      '</svg>',
+    ].join('');
+    const screenshot = renderManualSvgScreenshot(
+      {
+        cutLayout: { sheet: { widthMm: 100, heightMm: 100 } },
+        generatedScreenshot: { contrast: 1 },
+      } as never,
+      {
+        fileName: 'milling.svg',
+        raw: Buffer.from(source),
+      } as never,
+      resolveCutRenderStyle(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW),
+      null,
+    );
+    const image = PNG.sync.read(screenshot.raw);
+
+    expect(countBluePixels(image)).toBeGreaterThan(100);
+    expect(screenshot.generated).toBe(true);
+    expect(screenshot.fileName).toBe('milling.png');
+    expect(screenshot.sizeBytes).toBe(screenshot.raw.length);
+    expect(screenshot.sha256).toBe(createHash('sha256').update(screenshot.raw).digest('hex'));
   });
 
   it('skips Telegram SVG reverse import when source file already belongs to a cut job', () => {
@@ -3664,6 +3703,17 @@ describe('PgCncTelegramRepository', () => {
     })).toEqual([]);
   });
 });
+
+function countBluePixels(image: PNG): number {
+  let count = 0;
+  for (let index = 0; index < image.data.length; index += 4) {
+    const red = image.data[index] ?? 255;
+    const green = image.data[index + 1] ?? 255;
+    const blue = image.data[index + 2] ?? 0;
+    if (red < 80 && green < 80 && blue > 160) count += 1;
+  }
+  return count;
+}
 
 function user(): CurrentUser {
   return {
