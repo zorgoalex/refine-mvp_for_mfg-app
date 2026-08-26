@@ -5,7 +5,7 @@ import {
   cutRenderSourceSvgCss,
   resolveCutRenderStyleFromSetting,
 } from '@shared/cut-render-style';
-import { buildStyledSvgUploadPreview } from './svgCutRenderPreview';
+import { buildRawSvgUploadPreview, buildStyledSvgUploadPreview } from './svgCutRenderPreview';
 import type { ParsedSvgUpload } from './svgCutUploadParser';
 
 describe('buildStyledSvgUploadPreview', () => {
@@ -94,6 +94,30 @@ describe('buildStyledSvgUploadPreview', () => {
     expect(rendered).toContain('font-size="28.8">2723</tspan>');
     expect(rendered).toContain('font-size="9.6"># 01</tspan>');
     expect(rendered).toContain('font-size="16.8">300*200</tspan>');
+  });
+});
+
+describe('buildRawSvgUploadPreview', () => {
+  it('preserves full source geometry and widens sub-pixel milling strokes', () => {
+    const source = [
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2070.2 2800.2">',
+      '<style>.milling{fill:none;stroke:#6ea7c8;stroke-width:0.0762}.outline{fill:none;stroke:#111827;stroke-width:12}</style>',
+      '<rect id="sheet" width="2070.2" height="2800.2" fill="#fff"/>',
+      '<path id="milling" class="milling" d="M10 10V2790"/>',
+      '<path id="outline" class="outline" d="M0 0H2070V2800H0Z" stroke-width="0.5mm"/>',
+      '<text x="100" y="100">2841</text>',
+      '</svg>',
+    ].join('');
+
+    const rendered = buildRawSvgUploadPreview(source, 700);
+
+    expect(rendered).toContain('stroke-width:12');
+    expect(rendered).toContain('stroke-width:8.001');
+    expect(rendered).toContain('id="milling"');
+    expect(rendered).toContain('id="outline"');
+    expect(rendered).toContain('stroke-width="0.5mm"');
+    expect(rendered).toContain('<text x="100" y="100">2841</text>');
+    expect(rendered).toContain('<rect id="sheet"');
   });
 });
 

@@ -67,6 +67,7 @@ describe('manual SVG cut upload UI guard', () => {
     expect(modal).toContain('printSvgPreview');
     expect(modal).toContain('Распечатать SVG');
     expect(modal).toContain('URL.createObjectURL');
+    expect(modal).toContain('createRawSvgUploadPreviewBlob');
     expect(modal).toContain('URL.revokeObjectURL');
     expect(modal).toContain("objectFit: 'contain'");
     expect(modal).toContain("flex: '0 0 320px'");
