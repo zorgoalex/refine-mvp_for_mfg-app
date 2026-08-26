@@ -9,6 +9,7 @@ import {
   cutRenderLabelStrokeForBackground,
   cutRenderOrderFillPalette,
   cutRenderPositionLine,
+  cutRenderRawSvgScreenshotMinStrokePx,
   cutRenderSourceSvgCss,
   resolveCutRenderStyleFromSetting,
   type CutRenderStyleRef,
@@ -16,6 +17,28 @@ import {
 } from '@shared/cut-render-style';
 import type { CncTelegramCutLayout } from '../../api/types/cncTelegramApi.types';
 import type { ParsedSvgUpload } from './svgCutUploadParser';
+
+export const RAW_SVG_UPLOAD_PREVIEW_TARGET_PX = 720;
+
+/**
+ * Keep the complete source SVG, including milling geometry, while making
+ * sub-pixel CNC strokes visible at the upload modal's screen scale.
+ */
+export function buildRawSvgUploadPreview(
+  svg: string,
+  targetPx = RAW_SVG_UPLOAD_PREVIEW_TARGET_PX,
+): string {
+  const longSide = rawSvgLongSideUserUnits(svg);
+  if (longSide === null || !Number.isFinite(targetPx) || targetPx <= 0) return svg;
+  const minStrokeWidth = longSide / targetPx
+    * cutRenderRawSvgScreenshotMinStrokePx(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW);
+  if (!Number.isFinite(minStrokeWidth) || minStrokeWidth <= 0) return svg;
+  return widenRawSvgPreviewStrokes(svg, minStrokeWidth);
+}
+
+export function createRawSvgUploadPreviewBlob(svg: string): Blob {
+  return new Blob([buildRawSvgUploadPreview(svg)], { type: 'image/svg+xml' });
+}
 
 export function createStyledSvgUploadPreviewBlob(
   parsed: ParsedSvgUpload,
@@ -181,4 +204,47 @@ function escapeXml(value: string): string {
 
 function num(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+}
+
+function rawSvgLongSideUserUnits(svg: string): number | null {
+  const viewBoxMatch = svg.match(/\bviewBox\s*=\s*(["'])([^"']+)\1/i);
+  if (viewBoxMatch?.[2]) {
+    const values = viewBoxMatch[2].trim().split(/[\s,]+/).map(Number);
+    const width = values[2] ?? 0;
+    const height = values[3] ?? 0;
+    if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+      return Math.max(width, height);
+    }
+  }
+  const width = rawSvgRootLength(svg, 'width');
+  const height = rawSvgRootLength(svg, 'height');
+  return width !== null && height !== null ? Math.max(width, height) : null;
+}
+
+function rawSvgRootLength(svg: string, attr: 'width' | 'height'): number | null {
+  const svgOpenMatch = svg.match(/<svg\b[^>]*>/i);
+  const attrMatch = svgOpenMatch?.[0].match(new RegExp(`\\b${attr}\\s*=\\s*(["'])([^"']+)\\1`, 'i'));
+  const lengthMatch = attrMatch?.[2]?.trim().match(/^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/);
+  if (!lengthMatch?.[0]) return null;
+  const value = Number(lengthMatch[0]);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function widenRawSvgPreviewStrokes(svg: string, minStrokeWidth: number): string {
+  const minimum = Number(minStrokeWidth.toFixed(3)).toString();
+  const svgNumber = '[-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?';
+  const unitlessBoundary = '(?![\\d.]|\\s*[a-zA-Z%])';
+  const cssStrokeWidth = new RegExp(`(\\bstroke-width\\s*:\\s*)(${svgNumber})${unitlessBoundary}`, 'gi');
+  const attrStrokeWidth = new RegExp(`(\\bstroke-width\\s*=\\s*)(["'])(${svgNumber})${unitlessBoundary}\\2`, 'gi');
+  return svg
+    .replace(cssStrokeWidth, (match, prefix: string, rawWidth: string) => {
+      const width = Number(rawWidth);
+      return Number.isFinite(width) && width > 0 && width < minStrokeWidth ? `${prefix}${minimum}` : match;
+    })
+    .replace(attrStrokeWidth, (match, prefix: string, quote: string, rawWidth: string) => {
+      const width = Number(rawWidth);
+      return Number.isFinite(width) && width > 0 && width < minStrokeWidth
+        ? `${prefix}${quote}${minimum}${quote}`
+        : match;
+    });
 }

@@ -28,6 +28,7 @@ import type { EligibleDetailDto } from '../../api/types/cutApi.types';
 import type { OrderListItemDto } from '../../api/types/orderApi.types';
 import { parseSvgCutUploadFileNameHints } from './svgCutUploadFilename';
 import { parseSvgCutUploadFile, type ParsedSvgUpload } from './svgCutUploadParser';
+import { createRawSvgUploadPreviewBlob } from './svgCutRenderPreview';
 
 interface CutSvgUploadModalProps {
   open: boolean;
@@ -561,6 +562,7 @@ export const CutSvgUploadModal: React.FC<CutSvgUploadModalProps> = ({
         fallbackOrderName: fileNameHints.orderNames.join('+') || defaultOrderNames[0] || null,
       });
       setParsed(result);
+      replaceSvgPreview(createEnhancedSvgPreview(await file.text(), file.name) ?? createSvgPreview(file));
       setSvgSourceFile({ payload: sourceFile, selectedAt: Date.now() });
       if (fileNameHints.machineName) {
         setMachineName(fileNameHints.machineName);
@@ -1433,6 +1435,14 @@ function createSvgPreview(file: File): SvgPreviewState | null {
   return {
     url: URL.createObjectURL(file),
     fileName: file.name,
+  };
+}
+
+function createEnhancedSvgPreview(svg: string, fileName: string): SvgPreviewState | null {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return null;
+  return {
+    url: URL.createObjectURL(createRawSvgUploadPreviewBlob(svg)),
+    fileName,
   };
 }
 
