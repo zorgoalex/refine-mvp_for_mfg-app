@@ -10,8 +10,6 @@ import {
   CUT_RENDER_STYLE_MDF_BOARD_PREVIEW,
   resolveCutRenderStyle,
   resolveCutRenderStyleFromSetting,
-  cutRenderNormalizeLabelLines,
-  cutRenderPieceSizeLine,
   type CutRenderStyleRule,
 } from '../../../shared/cut-render-style';
 import { freecutItemId, type FreecutPlacement, type SheetPlacementsJson } from '../../cut/application/cut-freecut-mapping';
@@ -33,9 +31,7 @@ import {
 } from '../../cut/render/sheet-svg';
 import {
   RENDER_PRESETS,
-  enhanceRawSvgScreenshotContrast,
   renderRawSvgPng,
-  renderSheetPng,
 } from '../../cut/render/sheet-png';
 import type {
   CncTelegramDeniedAuditPort,
@@ -2266,31 +2262,20 @@ function imageMagicMatchesContentType(raw: Buffer, contentType: string): boolean
   return false;
 }
 
-function renderManualSvgScreenshot(
+export function renderManualSvgScreenshot(
   dto: CncTelegramManualSvgUploadDto,
   svg: ManualSvgDecodedUploadFile,
   renderStyle: CutRenderStyleRule,
   cutJobDisplayNumber: string | number | null,
 ): ManualSvgDecodedUploadFile {
-  const styledSvg = buildManualSvgScreenshotSvg(dto, renderStyle, cutJobDisplayNumber);
-  const png = styledSvg && dto.cutLayout.sheet
-    ? enhanceRawSvgScreenshotContrast(
-        renderSheetPng({
-          svg: styledSvg,
-          targetPx: RENDER_PRESETS.screen,
-          sheetWidthMm: dto.cutLayout.sheet.widthMm,
-          sheetHeightMm: dto.cutLayout.sheet.heightMm,
-        }),
-        dto.generatedScreenshot?.contrast,
-      )
-    : renderRawSvgPng({
-        svg: addCutJobHeadingToSvg(svg.raw.toString('utf8'), cutJobDisplayNumber),
-        targetPx: RENDER_PRESETS.screen,
-        sheetWidthMm: dto.cutLayout.sheet?.widthMm ?? null,
-        sheetHeightMm: dto.cutLayout.sheet?.heightMm ?? null,
-        contrast: dto.generatedScreenshot?.contrast,
-        renderStyle,
-      });
+  const png = renderRawSvgPng({
+    svg: addCutJobHeadingToSvg(svg.raw.toString('utf8'), cutJobDisplayNumber),
+    targetPx: RENDER_PRESETS.screen,
+    sheetWidthMm: dto.cutLayout.sheet?.widthMm ?? null,
+    sheetHeightMm: dto.cutLayout.sheet?.heightMm ?? null,
+    contrast: dto.generatedScreenshot?.contrast,
+    renderStyle,
+  });
   const sha256 = createHash('sha256').update(png).digest('hex');
   return {
     kind: 'screenshot',
@@ -2303,107 +2288,6 @@ function renderManualSvgScreenshot(
   };
 }
 
-function buildManualSvgScreenshotSvg(
-  dto: CncTelegramManualSvgUploadDto,
-  renderStyle: CutRenderStyleRule,
-  cutJobDisplayNumber: string | number | null,
-): string | null {
-  const sheet = dto.cutLayout.sheet;
-  if (!sheet || dto.cutLayout.items.length === 0) return null;
-  const sourceByKey = new Map(dto.items.map((item) => [item.sourceItemKey, item]));
-  const nextInstance = new Map<string, number>();
-  const pieces: SheetPlacementsJson['pieces'] = dto.cutLayout.items.map((item, index) => {
-    const sourceItem = sourceByKey.get(manualSvgLayoutSourceKey(item, index));
-    const detailId = sourceItem?.matchDetailId ?? null;
-    const itemId = detailId ? freecutItemId(detailId) : `manual-svg-${index + 1}`;
-    const instance = (nextInstance.get(itemId) ?? 0) + 1;
-    nextInstance.set(itemId, instance);
-    const orderId = sourceItem?.matchOrderId ?? parseManualSvgNumericOrderName(item.orderName);
-    return {
-      item_id: itemId,
-      instance,
-      x_mm: round3(item.xMm),
-      y_mm: round3(item.yMm),
-      width_mm: round3(item.placedWidthMm),
-      height_mm: round3(item.placedHeightMm),
-      rotated: item.rotated === true,
-      source_svg: sourceSvgPlacementFragment(item),
-      label: {
-        orderId,
-        orderName: item.orderName,
-        detailId,
-        detailNumber: sourceItem?.detailNumber ?? item.detailNumber,
-        widthMm: sourceItem?.widthMm ?? item.widthMm,
-        heightMm: sourceItem?.heightMm ?? item.heightMm,
-        materialName: dto.materialName ?? null,
-        visualLines: item.visualLabel?.rawLines ?? null,
-      },
-    };
-  });
-  const placements: SheetPlacementsJson = {
-    trim_mm: { left: 0, right: 0, top: 0, bottom: 0 },
-    sheet_width_mm: sheet.widthMm,
-    sheet_height_mm: sheet.heightMm,
-    pieces,
-  };
-  const quantities = new Map<string, number>();
-  for (const piece of pieces) quantities.set(piece.item_id, (quantities.get(piece.item_id) ?? 0) + 1);
-  const fillForOrder = createOrderFillResolver(
-    pieces.map((piece) => (piece as { label?: { orderId: number | null } }).label?.orderId ?? null)
-      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)),
-    renderStyle,
-  );
-  const svg = buildSheetSvg({
-    sheet: placements,
-    fillFor: (piece) => fillForOrder((piece as { label?: { orderId: number | null } }).label?.orderId ?? null),
-    labelFor: (piece) => {
-      const label = (piece as {
-        label?: {
-          orderId: number | null;
-          orderName?: string | null;
-          detailId?: number | null;
-          detailNumber?: number | null;
-          widthMm?: number | null;
-          heightMm?: number | null;
-          materialName?: string | null;
-          visualLines?: string[] | null;
-        };
-      }).label;
-      const visualLines = manualSvgVisualLabelLines(
-        label?.visualLines ?? null,
-        label?.widthMm ?? null,
-        label?.heightMm ?? null,
-      );
-      if (visualLines.length > 0) return visualLines;
-      return composePieceLabelLines({
-        orderId: label?.orderId ?? null,
-        orderName: label?.orderName ?? null,
-        detailId: label?.detailId ?? null,
-        detailNumber: label?.detailNumber ?? null,
-        widthMm: label?.widthMm ?? null,
-        heightMm: label?.heightMm ?? null,
-        itemId: piece.item_id,
-        instance: piece.instance,
-        qty: quantities.get(piece.item_id) ?? 1,
-        materialName: label?.materialName ?? null,
-      });
-    },
-    renderStyle,
-  });
-  return addCutJobHeadingToSvg(svg, cutJobDisplayNumber);
-}
-
-function manualSvgVisualLabelLines(
-  rawLines: readonly string[] | null | undefined,
-  widthMm: number | null,
-  heightMm: number | null,
-): string[] {
-  const lines = cutRenderNormalizeLabelLines(rawLines ?? []);
-  if (lines.length === 0) return [];
-  if (lines.length >= 3) return lines;
-  return [...lines, cutRenderPieceSizeLine(widthMm, heightMm)];
-}
-
 async function loadManualSvgUploadRenderStyle(client: DatabaseClient): Promise<CutRenderStyleRule> {
   try {
     const result = await client.query<{ value: unknown | null }>(
@@ -2414,23 +2298,6 @@ async function loadManualSvgUploadRenderStyle(client: DatabaseClient): Promise<C
   } catch {
     return resolveCutRenderStyle(CUT_RENDER_STYLE_MDF_BOARD_PREVIEW);
   }
-}
-
-function manualSvgLayoutSourceKey(item: CncTelegramCutLayoutItemDto, index: number): string {
-  return [
-    item.orderName,
-    item.detailNumber,
-    item.widthMm,
-    item.heightMm,
-    item.sourceElementId ?? index,
-  ].join(':');
-}
-
-function parseManualSvgNumericOrderName(value: string): number | null {
-  const trimmed = value.trim();
-  if (!/^\d+$/.test(trimmed)) return null;
-  const parsed = Number(trimmed);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 async function linkManualSvgFileOrders(
