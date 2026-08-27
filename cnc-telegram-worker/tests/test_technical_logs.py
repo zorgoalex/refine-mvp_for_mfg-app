@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 import sqlite3
 import tempfile
 import threading
@@ -9,7 +10,7 @@ import unittest
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from cnc_telegram_worker.__main__ import run_with_technical_delivery
 from cnc_telegram_worker.erp_client import SessionLeaseLost
@@ -109,6 +110,36 @@ class TechnicalLogsTest(unittest.TestCase):
             self.assertTrue(stop_event.is_set())
             self.assertTrue(fatal_event.is_set())
 
+    def test_delivery_waits_until_session_lease_is_ready(self) -> None:
+        async def scenario(spool: TechnicalLogSpool) -> None:
+            sent = asyncio.Event()
+            ready = False
+            stop_event = asyncio.Event()
+
+            async def sender(_payload):
+                sent.set()
+
+            task = asyncio.create_task(deliver_technical_logs(
+                spool,
+                sender,
+                stop_event,
+                interval_seconds=0.01,
+                heartbeat_seconds=60,
+                ready=lambda: ready,
+            ))
+            await asyncio.sleep(0.03)
+            self.assertFalse(sent.is_set())
+            ready = True
+            await asyncio.wait_for(sent.wait(), timeout=1)
+            stop_event.set()
+            await task
+
+        with tempfile.TemporaryDirectory() as directory:
+            spool = TechnicalLogSpool(Path(directory, "spool.sqlite3"))
+            spool.capture("stderr", "wait for lease")
+            spool.close()
+            asyncio.run(scenario(spool))
+
     def test_run_with_technical_delivery_propagates_lease_loss(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             spool = TechnicalLogSpool(Path(directory, "spool.sqlite3"))
@@ -120,7 +151,12 @@ class TechnicalLogsTest(unittest.TestCase):
                 raise SessionLeaseLost("stale technical delivery")
 
             worker = SimpleNamespace(
-                erp=SimpleNamespace(technical_log_batch=sender),
+                erp=SimpleNamespace(
+                    technical_log_batch=sender,
+                    session_lease=object(),
+                    release_worker_session=AsyncMock(),
+                    set_session_lease=lambda _lease: None,
+                ),
                 config=SimpleNamespace(
                     technical_log_flush_interval_seconds=1,
                     technical_log_heartbeat_seconds=60,
@@ -133,6 +169,47 @@ class TechnicalLogsTest(unittest.TestCase):
 
             with self.assertRaises(SessionLeaseLost):
                 asyncio.run(run_with_technical_delivery(worker, capture, operation))
+
+    def test_sigterm_runs_cleanup_and_releases_session_lease(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            spool = TechnicalLogSpool(Path(directory, "spool.sqlite3"))
+            spool.capture("stdout", "flush before release")
+            spool.close()
+            capture = SimpleNamespace(spool=spool)
+            release = AsyncMock()
+            operation_stopped = asyncio.Event()
+
+            async def sender(_payload):
+                return {"accepted": 1}
+
+            worker = SimpleNamespace(
+                erp=SimpleNamespace(
+                    technical_log_batch=sender,
+                    session_lease=object(),
+                    release_worker_session=release,
+                    set_session_lease=lambda _lease: None,
+                ),
+                config=SimpleNamespace(
+                    technical_log_flush_interval_seconds=1,
+                    technical_log_heartbeat_seconds=60,
+                ),
+            )
+
+            async def operation(_fatal_event: asyncio.Event) -> None:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    operation_stopped.set()
+
+            async def scenario() -> None:
+                task = asyncio.create_task(run_with_technical_delivery(worker, capture, operation))
+                await asyncio.sleep(0.01)
+                signal.raise_signal(signal.SIGTERM)
+                await asyncio.wait_for(task, timeout=1)
+
+            asyncio.run(scenario())
+            self.assertTrue(operation_stopped.is_set())
+            release.assert_awaited_once()
 
     def test_recovers_after_transient_sqlite_writer_error_without_losing_line(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

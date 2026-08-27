@@ -47,6 +47,12 @@ describe('PgCncTelegramWorkerSessionRepository', () => {
     await expect(repository.claim(claimInput())).rejects.toMatchObject({
       statusCode: 409,
       code: 'CNC_TELEGRAM_SESSION_LEASE_BUSY',
+      details: {
+        workerInstanceId,
+        workerImageRevision: 'image-sha',
+        runtimeEvidence: { stackEnv: 'prod', workerRole: 'writer' },
+        expiresAt: '2026-08-18T10:01:30.000Z',
+      },
     });
     expect(queries.some((text) => text.includes('expires_at > now() AS lease_active'))).toBe(true);
     expect(queries.some((text) => text.includes('UPDATE cnc_telegram_worker_session_leases'))).toBe(false);
@@ -90,6 +96,32 @@ describe('PgCncTelegramWorkerSessionRepository', () => {
       code: 'CNC_TELEGRAM_SESSION_LEASE_STALE',
     });
     expect(database.query.mock.calls[0]?.[0]).toContain('expires_at > now()');
+  });
+
+  it('releases only the exact active fenced lease', async () => {
+    const database = { query: vi.fn(async () => ({ rows: [{ source_chat_id: '-100123' }] })) };
+    const repository = new PgCncTelegramWorkerSessionRepository(database as never);
+
+    await expect(repository.release({
+      sourceChatId: '-100123',
+      workerInstanceId,
+      leaseToken: 't'.repeat(64),
+      leaseGeneration: 2,
+    })).resolves.toBeUndefined();
+
+    expect(database.query.mock.calls[0]?.[0]).toContain('SET expires_at=now()');
+    expect(database.query.mock.calls[0]?.[0]).toContain('lease_token=$2 AND lease_generation=$3');
+    expect(database.query.mock.calls[0]?.[1]).toEqual(['-100123', 't'.repeat(64), 2, workerInstanceId]);
+  });
+
+  it('rejects release from a stale owner', async () => {
+    const repository = new PgCncTelegramWorkerSessionRepository({
+      query: vi.fn(async () => ({ rows: [] })),
+    } as never);
+
+    await expect(repository.release({
+      sourceChatId: '-100123', workerInstanceId, leaseToken: 'old'.repeat(20), leaseGeneration: 1,
+    })).rejects.toMatchObject({ code: 'CNC_TELEGRAM_SESSION_LEASE_STALE', statusCode: 409 });
   });
 
   it('maps incomplete legacy runtime evidence to null', async () => {

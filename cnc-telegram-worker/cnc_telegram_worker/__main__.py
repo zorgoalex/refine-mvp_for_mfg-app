@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import signal
 from datetime import date, datetime
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -92,6 +93,15 @@ async def run_with_technical_delivery(
 ) -> None:
     stop_event = asyncio.Event()
     fatal_event = asyncio.Event()
+    shutdown_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    installed_signals: list[signal.Signals] = []
+    for shutdown_signal in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(shutdown_signal, shutdown_event.set)
+            installed_signals.append(shutdown_signal)
+        except NotImplementedError:
+            pass
     delivery = asyncio.create_task(deliver_technical_logs(
         capture.spool,
         worker.erp.technical_log_batch,
@@ -99,14 +109,18 @@ async def run_with_technical_delivery(
         interval_seconds=worker.config.technical_log_flush_interval_seconds,
         heartbeat_seconds=worker.config.technical_log_heartbeat_seconds,
         fatal_event=fatal_event,
+        ready=lambda: getattr(worker.erp, "session_lease", None) is not None,
     ))
     operation_task = asyncio.create_task(operation(fatal_event))
+    shutdown_task = asyncio.create_task(shutdown_event.wait())
     try:
         done, _ = await asyncio.wait(
-            {delivery, operation_task},
+            {delivery, operation_task, shutdown_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if delivery in done:
+        if shutdown_task in done:
+            print("CNC Telegram worker shutdown requested", flush=True)
+        elif delivery in done:
             # A stale session lease from technical delivery must reach the
             # serve operation so it disconnects Telethon before we exit.
             delivery_error = delivery.exception()
@@ -118,19 +132,35 @@ async def run_with_technical_delivery(
         else:
             await operation_task
     finally:
-        try:
-            for _ in range(3):
-                if await flush_technical_logs_once(capture.spool, worker.erp.technical_log_batch) == 0:
-                    break
-        except SessionLeaseLost:
-            fatal_event.set()
-            raise
-        except Exception as exc:
-            capture.spool.internal_error(str(exc))
+        for shutdown_signal in installed_signals:
+            loop.remove_signal_handler(shutdown_signal)
         stop_event.set()
         if not operation_task.done():
             operation_task.cancel()
-        results = await asyncio.gather(delivery, operation_task, return_exceptions=True)
+        if not shutdown_task.done():
+            shutdown_task.cancel()
+        results = await asyncio.gather(delivery, operation_task, shutdown_task, return_exceptions=True)
+        try:
+            if getattr(worker.erp, "session_lease", None) is not None:
+                for _ in range(3):
+                    if await flush_technical_logs_once(capture.spool, worker.erp.technical_log_batch) == 0:
+                        break
+        except SessionLeaseLost:
+            fatal_event.set()
+        except Exception as exc:
+            capture.spool.internal_error(str(exc))
+        try:
+            release = getattr(worker.erp, "release_worker_session", None)
+            if release is not None and getattr(worker.erp, "session_lease", None) is not None:
+                await release()
+        except SessionLeaseLost:
+            fatal_event.set()
+        except Exception as exc:
+            print(f"CNC Telegram session lease release failed: {exc}", flush=True)
+        finally:
+            set_lease = getattr(worker.erp, "set_session_lease", None)
+            if set_lease is not None:
+                set_lease(None)
         for result in results:
             if isinstance(result, SessionLeaseLost):
                 raise result

@@ -42,6 +42,7 @@ export interface CncTelegramWorkerSessionLeaseResponse {
 export interface CncTelegramWorkerSessionLeaseRepositoryPort {
   claim(input: CncTelegramWorkerSessionLeaseDto): Promise<CncTelegramWorkerSessionLeaseResponse>;
   heartbeat(input: CncTelegramWorkerSessionHeartbeatDto & CncTelegramWorkerSessionLeaseContext): Promise<CncTelegramWorkerSessionLeaseResponse>;
+  release(input: CncTelegramWorkerSessionHeartbeatDto & CncTelegramWorkerSessionLeaseContext): Promise<void>;
   assertCurrent(input: CncTelegramWorkerSessionLeaseContext): Promise<void>;
   assertCurrentInTransaction(tx: TransactionClient, input: CncTelegramWorkerSessionLeaseContext): Promise<void>;
 }

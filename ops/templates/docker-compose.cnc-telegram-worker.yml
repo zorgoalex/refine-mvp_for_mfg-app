@@ -120,6 +120,7 @@ services:
 
   cnc-telegram-worker:
     profiles: !override ["cnc-telegram"]
+    stop_grace_period: 30s
     build:
       context: ${CNC_TELEGRAM_WORKER_BUILD_CONTEXT:?CNC_TELEGRAM_WORKER_BUILD_CONTEXT must identify the exact repository worker}
       dockerfile: Dockerfile

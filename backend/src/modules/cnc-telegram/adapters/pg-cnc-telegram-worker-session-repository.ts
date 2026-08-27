@@ -50,7 +50,12 @@ export class PgCncTelegramWorkerSessionRepository implements CncTelegramWorkerSe
       `, [input.sourceChatId]);
       const row = current.rows[0];
       if (row?.lease_active) {
-        throw new ApiError(409, 'CNC_TELEGRAM_SESSION_LEASE_BUSY', 'Telegram worker session lease is owned by another live worker');
+        throw new ApiError(
+          409,
+          'CNC_TELEGRAM_SESSION_LEASE_BUSY',
+          'Telegram worker session lease is owned by another live worker',
+          busyLeaseDetails(row),
+        );
       }
 
       const token = randomUUID() + randomUUID();
@@ -111,6 +116,17 @@ export class PgCncTelegramWorkerSessionRepository implements CncTelegramWorkerSe
     return mapLease(row);
   }
 
+  async release(input: CncTelegramWorkerSessionHeartbeatDto & CncTelegramWorkerSessionLeaseContext): Promise<void> {
+    const result = await this.database.query<Pick<LeaseRow, 'source_chat_id'>>(`
+      UPDATE cnc_telegram_worker_session_leases
+         SET expires_at=now(), updated_at=now()
+       WHERE source_chat_id=$1 AND lease_token=$2 AND lease_generation=$3
+         AND worker_instance_id=$4::uuid AND expires_at > now()
+   RETURNING source_chat_id
+    `, [input.sourceChatId, input.leaseToken, input.leaseGeneration, input.workerInstanceId]);
+    if (!result.rows[0]) throw staleLeaseError();
+  }
+
   async assertCurrent(input: CncTelegramWorkerSessionLeaseContext): Promise<void> {
     const result = await this.database.query<{ ok: boolean }>(`
       SELECT EXISTS (
@@ -164,6 +180,18 @@ function leaseParams(input: CncTelegramWorkerSessionLeaseDto, token: string): un
     runtime?.parserVersion ?? null,
     LEASE_SECONDS,
   ];
+}
+
+function busyLeaseDetails(row: LeaseRow): Record<string, unknown> {
+  return {
+    sourceChatId: row.source_chat_id,
+    workerInstanceId: row.worker_instance_id,
+    workerImageRevision: row.worker_image_revision,
+    runtimeEvidence: mapLease(row).runtimeEvidence,
+    claimedAt: new Date(row.claimed_at).toISOString(),
+    heartbeatAt: new Date(row.heartbeat_at).toISOString(),
+    expiresAt: new Date(row.expires_at).toISOString(),
+  };
 }
 
 function staleLeaseError(): ApiError {

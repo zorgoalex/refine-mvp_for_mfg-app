@@ -10964,6 +10964,19 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
 
+  /api/v1/cnc-telegram/worker-session/release:
+    post:
+      tags: [CncTelegramWorkerSession]
+      operationId: releaseCncTelegramWorkerSession
+      summary: Release the current Telegram worker session lease
+      security: [{ bearerAuth: [] }]
+      x-permission: cut.manage
+      responses:
+        '200': { description: Session lease released }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
   /api/v1/cnc-telegram/import-scans:
     post:
       tags: [CncTelegramImport]

@@ -4,8 +4,8 @@ import type { CncTelegramWorkerSessionService } from '../application/cnc-telegra
 import { CncTelegramWorkerSessionController } from './cnc-telegram-worker-session.controller';
 
 describe('CncTelegramWorkerSessionController kill switch', () => {
-  it.each(['claim', 'heartbeat'] as const)('blocks %s before a worker write when disabled', (method) => {
-    const service = { claim: vi.fn(), heartbeat: vi.fn() } as unknown as CncTelegramWorkerSessionService;
+  it.each(['claim', 'heartbeat', 'release'] as const)('blocks %s before a worker write when disabled', async (method) => {
+    const service = { claim: vi.fn(), heartbeat: vi.fn(), release: vi.fn() } as unknown as CncTelegramWorkerSessionService;
     const runtimeConfig = {
       getFeatureFlags: () => ({ cncTelegramEnabled: false, backgroundIngestEnabled: false }),
     } as never;
@@ -15,11 +15,17 @@ describe('CncTelegramWorkerSessionController kill switch', () => {
       requestId: 'request-write',
     } as RequestWithCurrentUser;
 
-    expect(() => (method === 'claim'
-      ? controller.claim(request, {})
-      : controller.heartbeat(request, undefined, undefined, undefined, undefined, {})))
-      .toThrowError(expect.objectContaining({ code: 'SERVICE_UNAVAILABLE', statusCode: 503 }));
+    if (method === 'release') {
+      await expect(controller.release(request, undefined, undefined, undefined, undefined, {}))
+        .rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE', statusCode: 503 });
+    } else {
+      expect(() => (method === 'claim'
+        ? controller.claim(request, {})
+        : controller.heartbeat(request, undefined, undefined, undefined, undefined, {})))
+        .toThrowError(expect.objectContaining({ code: 'SERVICE_UNAVAILABLE', statusCode: 503 }));
+    }
     expect(service.claim).not.toHaveBeenCalled();
     expect(service.heartbeat).not.toHaveBeenCalled();
+    expect(service.release).not.toHaveBeenCalled();
   });
 });
