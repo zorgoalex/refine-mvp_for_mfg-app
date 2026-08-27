@@ -10,6 +10,7 @@ import {
   Modal,
   Select,
   Space,
+  Spin,
   Switch,
   Table,
   Tag,
@@ -621,7 +622,6 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
       <Drawer
         width={720}
         open={selected !== null || detailLoading}
-        loading={detailLoading}
         onClose={() => setSelected(null)}
         title={selected?.title ?? 'Заявка Bitrix'}
         extra={selected ? (
@@ -635,7 +635,8 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
           </Button>
         ) : null}
       >
-        {selected && (
+        {detailLoading && <Spin />}
+        {!detailLoading && selected && (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={2}>
               <Descriptions.Item label="Состояние">
@@ -1198,7 +1199,14 @@ export const Bitrix24IncomingRequestsPage: React.FC = () => {
             <Typography.Text>Создать новый проект</Typography.Text>
           </Space>
           {!conversionCreateProject && (
-            <InputNumber min={1} precision={0} value={conversionProjectId} onChange={setConversionProjectId} placeholder="ID существующего проекта этого клиента" style={{ width: '100%' }} />
+            <InputNumber
+              min={1}
+              precision={0}
+              value={conversionProjectId}
+              onChange={(value) => setConversionProjectId(typeof value === 'number' ? value : null)}
+              placeholder="ID существующего проекта этого клиента"
+              style={{ width: '100%' }}
+            />
           )}
         </Space>
       </Modal>
