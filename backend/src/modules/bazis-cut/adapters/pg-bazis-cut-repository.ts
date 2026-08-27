@@ -231,7 +231,10 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
     }>(
       `WITH scoped_order AS (
          SELECT o.order_id FROM orders o
-         WHERE o.order_id=$1 AND o.delete_flag=false AND ${scope.predicate}
+         WHERE o.order_id=$1
+           AND o.delete_flag=false
+           AND o.order_kind = 'production_order'
+           AND ${scope.predicate}
        )
        SELECT scoped.order_id, od.detail_id,
          COALESCE(jsonb_agg(DISTINCT jsonb_build_object(
@@ -552,7 +555,7 @@ export class PgBazisCutRepository implements BazisCutRepositoryPort {
       `SELECT o.order_id FROM orders o
        WHERE o.order_id=$1
          AND o.delete_flag=false
-         AND o.order_kind='production_order'
+         AND o.order_kind = 'production_order'
          AND ${scope.predicate}`,
       params,
     );
