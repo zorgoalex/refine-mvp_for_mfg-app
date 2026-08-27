@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./096_order_kinds_bitrix_crm_requests.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./145_order_kinds_bitrix_crm_requests.sql', import.meta.url), 'utf8');
 const runner = readFileSync(new URL('../../../ops/apply-migrations.sh', import.meta.url), 'utf8');
 
-describe('096 order kinds and Bitrix CRM requests migration', () => {
+describe('145 order kinds and Bitrix CRM requests migration', () => {
   it('adds immutable order kind/source and contains legacy zero-detail debt', () => {
     expect(sql).toContain("order_kind TEXT NOT NULL DEFAULT 'production_order'");
     expect(sql).toContain("source_system TEXT NOT NULL DEFAULT 'erp'");
@@ -105,7 +105,7 @@ describe('096 order kinds and Bitrix CRM requests migration', () => {
   });
 
   it('has a strict migration-runner end-state probe', () => {
-    expect(runner).toContain('096_order_kinds_bitrix_crm_requests*) probe_all');
+    expect(runner).toContain('145_order_kinds_bitrix_crm_requests*) probe_all');
     expect(runner).toContain('q_col orders order_kind');
     expect(runner).toContain('q_col orders legacy_duplicate_name_exempt');
     expect(runner).toContain('q_tbl order_legacy_duplicate_name_registry');

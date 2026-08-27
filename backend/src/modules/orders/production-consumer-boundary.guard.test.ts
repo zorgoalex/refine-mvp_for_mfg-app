@@ -41,7 +41,7 @@ describe('production order consumer boundary', () => {
   });
 
   it('keeps Hasura ordinary reads on a production-only view', () => {
-    const migration = source('db/migrations/096_order_kinds_bitrix_crm_requests.sql');
+    const migration = source('db/migrations/145_order_kinds_bitrix_crm_requests.sql');
     expect(migration).toMatch(
       /CREATE OR REPLACE VIEW orders_view[\s\S]*WHERE ord\.delete_flag = false[\s\S]*ord\.order_kind = 'production_order'/,
     );

@@ -1,11 +1,11 @@
--- 096 Order kinds, Bitrix CRM-request orders, and hard aggregate boundaries.
+-- 145 Order kinds, Bitrix CRM-request orders, and hard aggregate boundaries.
 -- Compatible first: all existing orders remain production_order/erp.
 
 BEGIN;
 
 -- Technical backfills must not enqueue thousands of unchanged ERP orders for
 -- outbound Bitrix delivery. This transaction-local flag is consumed by the
--- CRM enqueue triggers installed by 095 and resets automatically on commit.
+-- CRM enqueue triggers installed by 144 and resets automatically on commit.
 SELECT set_config('app.crm_sync_origin', 'bitrix24', true);
 
 CREATE TEMP TABLE migration_096_state (
@@ -92,7 +92,7 @@ FROM order_legacy_duplicate_name_ledger ledger
 WHERE o.order_id = ledger.order_id
   AND (SELECT first_apply FROM migration_096_state);
 
--- On a replay, constraint triggers from a prior successful 096 already exist.
+-- On a replay, constraint triggers from a prior successful 145 already exist.
 -- Flush their events before ALTER TABLE statements touch the same relations.
 SET CONSTRAINTS ALL IMMEDIATE;
 SET CONSTRAINTS ALL DEFERRED;

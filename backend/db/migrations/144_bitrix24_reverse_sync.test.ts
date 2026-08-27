@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sql = readFileSync(new URL('./095_bitrix24_reverse_sync.sql', import.meta.url), 'utf8');
+const sql = readFileSync(new URL('./144_bitrix24_reverse_sync.sql', import.meta.url), 'utf8');
 
-describe('095 Bitrix24 reverse sync migration', () => {
+describe('144 Bitrix24 reverse sync migration', () => {
   it('adds source ownership without changing existing ERP mappings', () => {
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS source_system TEXT NOT NULL DEFAULT 'erp'");
     expect(sql).toContain("CHECK (source_system IN ('erp', 'bitrix24'))");

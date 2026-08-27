@@ -190,27 +190,27 @@ describeIntegration('Bitrix24 migration runner end-state guards', () => {
     const repaired087 = runApply(dir087);
     expect(repaired087.status, repaired087.output).toBe(0);
 
-    const dir095 = migrationOnlyDirectory('095_bitrix24_reverse_sync.sql');
-    temporaryDirectories.push(dir095);
+    const dir144 = migrationOnlyDirectory('144_bitrix24_reverse_sync.sql');
+    temporaryDirectories.push(dir144);
     await pool.query(`
       CREATE TABLE bitrix24_reconcile_cursor (
         scope TEXT PRIMARY KEY
       );
     `);
-    const failed095 = runApply(dir095);
-    expect(failed095.status).not.toBe(0);
-    expect(failed095.output).toContain('end-state probe is still PENDING');
-    expect(failed095.output).toContain('was NOT recorded in schema_migrations');
-    const ledger095 = await pool.query<{ count: string }>(
+    const failed144 = runApply(dir144);
+    expect(failed144.status).not.toBe(0);
+    expect(failed144.output).toContain('end-state probe is still PENDING');
+    expect(failed144.output).toContain('was NOT recorded in schema_migrations');
+    const ledger144 = await pool.query<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM schema_migrations
-        WHERE filename = '095_bitrix24_reverse_sync.sql'`,
+        WHERE filename = '144_bitrix24_reverse_sync.sql'`,
     );
-    expect(ledger095.rows[0].count).toBe('0');
+    expect(ledger144.rows[0].count).toBe('0');
 
     await pool.query('DROP TABLE bitrix24_reconcile_cursor');
-    const repaired095 = runApply(dir095);
-    expect(repaired095.status, repaired095.output).toBe(0);
+    const repaired144 = runApply(dir144);
+    expect(repaired144.status, repaired144.output).toBe(0);
 
     await pool.query(`
       INSERT INTO clients (client_id, client_name)
@@ -249,7 +249,7 @@ describeIntegration('Bitrix24 migration runner end-state guards', () => {
       '073_bitrix24_crm_sync.sql',
       '074_bitrix24_payment_delivery_guards.sql',
       '087_bitrix24_backfill_checkpoint.sql',
-      '095_bitrix24_reverse_sync.sql',
+      '144_bitrix24_reverse_sync.sql',
     ]);
   }, 120_000);
 });

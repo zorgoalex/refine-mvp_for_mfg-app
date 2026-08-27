@@ -125,8 +125,8 @@ npm --prefix backend run crm-sync:backfill -- --scope clients
 ## Bitrix24 Reverse Sync
 
 Reverse sync uses a server local application and OAuth. Keep it disabled until
-migrations `095_bitrix24_reverse_sync.sql` and
-`096_order_kinds_bitrix_crm_requests.sql` are applied and the installation
+migrations `144_bitrix24_reverse_sync.sql` and
+`145_order_kinds_bitrix_crm_requests.sql` are applied and the installation
 callback has successfully bound CRM events.
 
 ```env
